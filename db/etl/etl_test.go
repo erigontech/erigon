@@ -1692,3 +1692,59 @@ func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
 
 	require.True(t, probe.sawOwnChunks, "buffer was recycled before its providers were disposed")
 }
+
+// TestSortableBufferAllEmptyEntries: entries whose key and value are both
+// zero-length keep insertion order too. nil and empty stay distinguishable, so
+// the four combinations pin the order.
+func TestSortableBufferAllEmptyEntries(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024)
+
+	buf.Put(nil, nil)
+	buf.Put([]byte{}, []byte{})
+	buf.Put(nil, []byte{})
+	buf.Put([]byte{}, nil)
+	buf.Put([]byte{0x01}, []byte("normal"))
+
+	buf.Sort()
+
+	type nilness struct{ key, val bool }
+	got := make([]nilness, 4)
+	for i := range got {
+		k, v := buf.Get(i)
+		got[i] = nilness{k == nil, v == nil}
+	}
+	assert.Equal(t, []nilness{{true, true}, {false, false}, {true, false}, {false, true}}, got)
+
+	k, v := buf.Get(4)
+	assert.Equal(t, []byte{0x01}, k)
+	assert.Equal(t, []byte("normal"), v)
+}
+
+// TestSortableBufferChunkBoundary: an entry never straddles a chunk, whatever
+// per-entry bookkeeping the chunk itself holds. The sizes make the fill stop at
+// a different offset in the last chunk each time.
+func TestSortableBufferChunkBoundary(t *testing.T) {
+	const keyLen = 8
+	for _, valLen := range []int{0, 1, 7, 63, 64, 4095, 4096} {
+		t.Run(fmt.Sprintf("val%d", valLen), func(t *testing.T) {
+			buf := NewSortableBuffer(64 * 1024 * 1024)
+			count := 2*dataChunkSize/(keyLen+valLen+1) + 3
+
+			key := make([]byte, keyLen)
+			for i := range count {
+				binary.BigEndian.PutUint64(key, uint64(i))
+				buf.Put(key, bytes.Repeat([]byte{byte(i)}, valLen))
+			}
+			require.Greater(t, len(buf.chunks), 1, "test must cross a chunk boundary")
+
+			buf.Sort()
+			require.Equal(t, count, buf.Len())
+			for i := range count {
+				k, v := buf.Get(i)
+				binary.BigEndian.PutUint64(key, uint64(i))
+				require.Equal(t, key, k, "entry %d", i)
+				require.Equal(t, bytes.Repeat([]byte{byte(i)}, valLen), v, "entry %d", i)
+			}
+		})
+	}
+}
