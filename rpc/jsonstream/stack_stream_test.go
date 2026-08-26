@@ -1238,3 +1238,32 @@ func TestStackStreamResetClearsError(t *testing.T) {
 	require.NoError(t, s.Flush())
 	require.Equal(t, `"ok"`, out.String())
 }
+
+// TestLazyFieldStreamWritesFieldFirst pins the wrapper's one invariant: whatever
+// a caller writes first, the field name lands before it. A method that slips
+// through unensured puts the value's bytes at the enclosing object's level.
+func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
+	for name, first := range map[string]func(s Stream){
+		"WriteInt":         func(s Stream) { s.WriteInt(1) },
+		"WriteString":      func(s Stream) { s.WriteString("a") },
+		"WriteNil":         func(s Stream) { s.WriteNil() },
+		"WriteRaw":         func(s Stream) { s.WriteRaw("1") },
+		"WriteRawBytes":    func(s Stream) { s.WriteRawBytes([]byte("1")) },
+		"WriteArrayStart":  func(s Stream) { s.WriteArrayStart() },
+		"WriteObjectStart": func(s Stream) { s.WriteObjectStart() },
+		"WriteEmptyArray":  func(s Stream) { s.WriteEmptyArray() },
+		"WriteMore":        func(s Stream) { s.WriteMore() },
+		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			first(lazy)
+
+			require.True(t, lazy.Written(), "the field was never opened")
+			require.True(t, strings.HasPrefix(string(inner.Buffer()), `"result":`),
+				"buffer starts with %q", string(inner.Buffer()))
+		})
+	}
+}
