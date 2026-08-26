@@ -590,6 +590,11 @@ func (m *MemoryMutation) Commit() error {
 }
 
 func (m *MemoryMutation) Rollback() {
+	if m.memDb == nil {
+		// A non-owning view must leave the shared memory transaction and its backing transaction open.
+		m.statelessCursors = nil
+		return
+	}
 	m.memTx.Rollback()
 	m.memDb.Close()
 	m.statelessCursors = nil
@@ -1085,16 +1090,22 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 	return fmt.Errorf("unwind requires TemporalRwTx, got %T", m.db)
 }
 
-// NewReadView creates a lightweight read-only view of this overlay backed by
+// NewReadView creates a lightweight, non-owning view of this overlay backed by
 // the given tx for fallback reads. The view shares the in-memory data and the
 // parent's mutex, but uses the caller's tx for its own backing reads. Temporal
 // methods also use it when it implements kv.TemporalTx.
 //
-// The returned kv.TemporalTx only exposes read methods. Callers cannot write
-// to the overlay through this view. The caller must not Close the returned
-// view (it doesn't own the memDb).
+// The returned kv.TemporalTx interface exposes only read methods. Rollback and
+// Close leave the shared overlay and the caller's transaction open because the
+// view owns neither one.
 func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
+}
+
+// IsOverlayReadView reports whether this is a non-owning view that already pins
+// an overlay generation.
+func (m *MemoryMutation) IsOverlayReadView() bool {
+	return m != nil && m.memDb == nil
 }
 
 // newReadViewMut is the internal constructor that returns the full
@@ -1117,10 +1128,11 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	}
 }
 
-// OverlayTemporalReadView extends an overlay read view with kv.TemporalTx
-// support. It embeds a *MemoryMutation for all overlay-aware KV methods
-// (GetOne, Cursor, etc.) and delegates temporal methods (GetLatest, GetAsOf,
-// etc.) to its own independent temporal tx.
+// OverlayTemporalReadView combines overlay-aware table reads with temporal
+// reads from an independent transaction. GetAsOf and HistorySeek check the
+// overlay's DomainReader first; other temporal methods use temporalTx directly.
+// It embeds *MemoryMutation for table reads, so callers must not use its
+// promoted write methods.
 //
 // Use NewTemporalReadView to create one. The caller is responsible for rolling
 // back the underlying temporalTx when done.
@@ -1131,10 +1143,10 @@ type OverlayTemporalReadView struct {
 
 var _ kv.TemporalTx = (*OverlayTemporalReadView)(nil)
 
-// NewTemporalReadView creates a temporal read-only view that checks the overlay's
-// mem layer first, then falls back to temporalTx for DB reads. The temporalTx
-// must be a fresh, independently-opened transaction — it is NOT shared with the
-// overlay's internal backing tx.
+// NewTemporalReadView creates a non-owning temporal view intended for reads.
+// Table reads check the overlay first. Temporal reads use temporalTx, except
+// GetAsOf and HistorySeek, which first consult the overlay's DomainReader. The
+// temporalTx must be independent of the overlay's internal backing transaction.
 func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayTemporalReadView {
 	return &OverlayTemporalReadView{
 		MemoryMutation: m.newReadViewMut(temporalTx),
@@ -1142,26 +1154,11 @@ func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayT
 	}
 }
 
-// GetOne explicitly delegates to MemoryMutation.GetOne so that reads check
-// the in-memory overlay first. Without this, Go's method promotion creates an
-// ambiguity: both *MemoryMutation and the embedded temporalTx (kv.TemporalTx
-// → kv.Tx) promote GetOne. In practice the temporalTx promotion can win,
-// causing reads to bypass the overlay and hit the stale DB snapshot — which
-// breaks reorgs where canonical hashes were rewritten in the overlay.
-func (v *OverlayTemporalReadView) GetOne(table string, key []byte) ([]byte, error) {
-	return v.MemoryMutation.GetOne(table, key)
-}
-
-// Has explicitly delegates to MemoryMutation.Has for the same reason as GetOne.
-func (v *OverlayTemporalReadView) Has(table string, key []byte) (bool, error) {
-	return v.MemoryMutation.Has(table, key)
-}
-
 func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) error) error {
 	return f(v)
 }
 
-// Temporal methods — delegate to the independent temporal tx.
+// Temporal methods use the independent temporal transaction unless noted otherwise.
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k, opts)
@@ -1180,8 +1177,6 @@ func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 }
 
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	// Check DomainReader independently — this method shadows MemoryMutation.GetAsOf
-	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
 		if err != nil {
@@ -1203,8 +1198,6 @@ func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, from
 }
 
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
-	// Check DomainReader independently — this method shadows MemoryMutation.HistorySeek
-	// and falls through to v.temporalTx (not m.db), so the embedded check never fires.
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
 		if err != nil {
