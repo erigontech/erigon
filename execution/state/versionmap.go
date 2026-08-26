@@ -435,8 +435,11 @@ func floorCell[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) (int, *Wr
 // applySubFieldWrites layers the Balance/Nonce/Incarnation/CodeHash writes for
 // addr onto account, taking one entry lookup and one read lock where the
 // per-path ReadX primitives would take one of each. An Estimate cell counts the
-// same as a Done one — it holds the same latest in-block write, which finalize
-// reconstruction must consume rather than fall back to the pre-block DB value.
+// same as a Done one for the value — it holds the same latest in-block write,
+// which finalize reconstruction must consume rather than fall back to the
+// pre-block DB value — but never for the wipe, which honours no uncommitted
+// destruct and lets no uncommitted cell narrow its scan. Either would compose a
+// record out of two different states.
 func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, account *accounts.Account) {
 	if vm == nil {
 		return
@@ -447,18 +450,50 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	if _, cell := floorCell(e.Balance, txIdx); cell != nil {
+	if _, cell := floorCellBelowDestruct(e, e.Balance, txIdx); cell != nil {
 		account.Balance = cell.Value
 	}
-	if _, cell := floorCell(e.Nonce, txIdx); cell != nil {
-		account.Nonce = cell.Value
+	// Nonce and CodeHash are the two a destruct erases without leaving a cell of
+	// its own, so they need the scan; Balance and Incarnation are floored, per
+	// destructScanFloor.
+	_, nonceCell := floorCell(e.Nonce, txIdx)
+	if _, wiped := selfDestructWipesLocked(e, NoncePath, doneFloorIdx(e.Nonce, txIdx), txIdx); wiped {
+		account.Nonce = 0
+	} else if nonceCell != nil {
+		account.Nonce = nonceCell.Value
 	}
-	if _, cell := floorCell(e.Incarnation, txIdx); cell != nil {
+	if _, cell := floorCellBelowDestruct(e, e.Incarnation, txIdx); cell != nil {
 		account.Incarnation = cell.Value
 	}
-	if _, cell := floorCell(e.CodeHash, txIdx); cell != nil {
-		account.CodeHash = cell.Value
+	_, codeHashCell := floorCell(e.CodeHash, txIdx)
+	if _, wiped := selfDestructWipesLocked(e, CodeHashPath, doneFloorIdx(e.CodeHash, txIdx), txIdx); wiped {
+		account.CodeHash = accounts.EmptyCodeHash
+	} else if codeHashCell != nil {
+		account.CodeHash = codeHashCell.Value
 	}
+}
+
+// floorCellBelowDestruct is floorCell, except that a cell an uncommitted
+// destruct wrote is passed over for the one below it. Only a destruct writes
+// Balance and Incarnation at its own index, so that is how its siblings are
+// recognised — by index, since a later SelfDestruct cell does not settle the
+// one underneath it.
+func floorCellBelowDestruct[T any](e *AddressEntry, cells *btree.Map[int, *WriteCell[T]], txIdx int) (int, *WriteCell[T]) {
+	k, cell := floorCell(cells, txIdx)
+	for cell != nil && uncommittedDestructAtLocked(e, k) {
+		k, cell = floorCell(cells, k)
+	}
+	return k, cell
+}
+
+// uncommittedDestructAtLocked reports whether an in-flight incarnation's
+// destruct sits exactly at idx.
+func uncommittedDestructAtLocked(e *AddressEntry, idx int) bool {
+	if e.SelfDestruct == nil {
+		return false
+	}
+	cell, ok := e.SelfDestruct.Get(idx)
+	return ok && cell.Value && cell.flag == FlagEstimate
 }
 
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
@@ -635,6 +670,163 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 	return true, destroyedAt, false
 }
 
+// destructScanFloor is the lowest TxIndex a wipe scan covers for a value floored
+// at floor, or scanEverything when the value predates the block. CodeHash keeps
+// the destroying tx's own entry, matching read_paths.go, which applies the same
+// bump to Balance — no wipe scan here takes Balance, because a destruct either
+// writes it at its own index or (EIP-8246) means to keep the prior cell.
+// UnknownDep alone means no cell: -1 is the block-begin system tx's own index.
+func destructScanFloor(path AccountPath, floor int) int {
+	if floor == UnknownDep {
+		return scanEverything
+	}
+	if path == CodeHashPath {
+		return floor + 1
+	}
+	return floor
+}
+
+// scanEverything is the lower bound that admits every cell, including a
+// destruct the block-begin system tx recorded at TxIndex -1. Normalize's
+// EIP-161 pass can emit one there, so the other destruct scans, which start at
+// 0, are the ones that miss it.
+const scanEverything = -1
+
+// readFloorLive is readFloor plus the destruct check under one entry lookup and
+// read lock. wiped covers the pre-block value too, so a caller that gets neither
+// found nor wiped may fall through to the domain.
+func readFloorLive[T any](vm *VersionMap, addr accounts.Address, path AccountPath, txIdx int, sel func(*AddressEntry) *btree.Map[int, *WriteCell[T]]) (val T, found, wiped bool) {
+	if vm == nil {
+		return val, false, false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return val, false, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	cells := sel(e)
+	_, cell := floorCell(cells, txIdx)
+	if _, w := selfDestructWipesLocked(e, path, doneFloorIdx(cells, txIdx), txIdx); w {
+		return val, false, true
+	}
+	if cell == nil {
+		return val, false, false
+	}
+	return cell.Value, true, false
+}
+
+// doneFloorIdx is the index of the latest committed cell below txIdx, or
+// UnknownDep. Only a committed cell may narrow a destruct scan: an in-flight
+// one settles nothing, and the readers built on this record no read.
+func doneFloorIdx[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) int {
+	if cells == nil {
+		return UnknownDep
+	}
+	idx := UnknownDep
+	cells.Descend(txIdx-1, func(k int, v *WriteCell[T]) bool {
+		if v.flag != FlagDone {
+			return true
+		}
+		idx = k
+		return false
+	})
+	return idx
+}
+
+func (vm *VersionMap) readStorageLive(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, bool, bool) {
+	return readFloorLive(vm, addr, StoragePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
+		if e.Storage == nil {
+			return nil
+		}
+		return e.Storage[key]
+	})
+}
+
+func (vm *VersionMap) readCodeLive(addr accounts.Address, txIdx int) (accounts.Code, bool, bool) {
+	return readFloorLive(vm, addr, CodePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
+}
+
+// storageWipedAt reports whether an in-block destruct erased addr's pre-block
+// slots, and the TxIndex it sits at.
+func (vm *VersionMap) storageWipedAt(addr accounts.Address, txIdx int) (int, bool) {
+	if vm == nil {
+		return 0, false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return 0, false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return selfDestructWipesLocked(e, StoragePath, UnknownDep, txIdx)
+}
+
+// hasLiveSlot reports whether addr holds a non-zero slot visible at txIdx that a
+// destruct at wipedAt did not erase. With no key to floor on it weighs the
+// values: a zero write above the destruct leaves the account with no storage
+// just as an erased slot. Only committed cells count — the caller records no
+// read, so an in-flight incarnation's slot would settle the EIP-684 collision
+// check with nothing to re-check it.
+func (vm *VersionMap) hasLiveSlot(addr accounts.Address, wipedAt int, wiped bool, txIdx int) bool {
+	if vm == nil {
+		return false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, cells := range e.Storage {
+		live := false
+		cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
+			if v.flag != FlagDone {
+				return true
+			}
+			live = (!wiped || k > wipedAt) && !v.Value.IsZero()
+			return false
+		})
+		if live {
+			return true
+		}
+	}
+	return false
+}
+
+// selfDestructWipesLocked applies the per-path floor to the destruct scan and
+// reports the TxIndex the wiping destruct sits at.
+func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) (int, bool) {
+	ver, found := findDoneSelfDestructLocked(e, destructScanFloor(path, floor), txIdx, true)
+	return ver.TxIndex, found
+}
+
+// AnyEstimateAccountCell reports whether the account record addr reads at txIdx
+// rests on an in-flight incarnation. Wider than the record's own fields: a
+// destruct can be the sole writer of SelfDestruct and Incarnation.
+func (vm *VersionMap) AnyEstimateAccountCell(addr accounts.Address, txIdx int) bool {
+	if vm == nil {
+		return false
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return false
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return estimateFloor(e.Address, txIdx) || estimateFloor(e.Balance, txIdx) ||
+		estimateFloor(e.Nonce, txIdx) || estimateFloor(e.CodeHash, txIdx) ||
+		estimateFloor(e.Code, txIdx) || estimateFloor(e.CodeSize, txIdx) ||
+		estimateFloor(e.SelfDestruct, txIdx) || estimateFloor(e.Incarnation, txIdx)
+}
+
+// estimateFloor reports whether the cell a reader at txIdx would take is an
+// in-flight incarnation's. Caller must hold the address entry's read lock.
+func estimateFloor[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) bool {
+	_, cell := floorCell(cells, txIdx)
+	return cell != nil && cell.flag == FlagEstimate
+}
+
 // AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
 // TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
 // SelfDestructPath=true write that a later revival flipped back to false
@@ -741,7 +933,15 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	if e.SelfDestruct == nil {
+	return findDoneSelfDestructLocked(e, lo, hi, target)
+}
+
+// findDoneSelfDestructLocked is the destruct scan every consumer shares, for
+// callers already holding e.mu. Estimate cells do not count: a verdict drawn from
+// one is published before the round that retracts it, and the reconstruction
+// readers consume it there without recording a read.
+func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Version, bool) {
+	if e.SelfDestruct == nil || hi <= lo {
 		return Version{}, false
 	}
 	var ver Version
