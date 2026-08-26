@@ -1043,7 +1043,7 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
+	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, emt.Genesis.Hash(), emt.Genesis.Hash())
 	if err != nil {
 		return err
 	}
