@@ -4,7 +4,7 @@
  * Light bg: #FFFFFF, Dark bg: #0A0A0A
  * Fonts: Montserrat ExtraBold (headings), Nunito Sans (body),
  *        Quantify 700 (brand wordmark — navbar title + footer brand, see
- *        docusaurus-design-spec.md §7 Font Roles)
+ *        DESIGN-SPEC.md §7 Font Roles)
  */
 
 /* Quantify is licensed to Erigon and must remain self-hosted. */
@@ -458,6 +458,7 @@ details.alert.alert--info summary {
 
 :root {
   --footer-accent: #A34E0B;
+  --footer-accent-tint: rgba(163, 78, 11, 0.12);
   --footer-bg: #FFFFFF;
   --footer-fg: #000000;
   --footer-tagline: rgba(0, 0, 0, 0.55);
@@ -470,6 +471,7 @@ details.alert.alert--info summary {
 
 [data-theme='dark'] {
   --footer-accent: #EF7716;
+  --footer-accent-tint: rgba(239, 119, 22, 0.12);
   --footer-bg: #000000;
   --footer-fg: #FFFFFF;
   --footer-tagline: rgba(255, 255, 255, 0.55);
@@ -519,8 +521,8 @@ details.alert.alert--info summary {
 .footer-social:focus-visible {
   color: var(--footer-accent);
   border-color: var(--footer-accent);
-  /* Older browsers use the preceding rgba fallback. */
-  background-color: rgba(239, 119, 22, 0.12);
+  /* Older browsers use the preceding fallback. */
+  background-color: var(--footer-accent-tint);
   background-color: color-mix(in srgb, var(--footer-accent) 12%, transparent);
 }
 

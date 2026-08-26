@@ -68,7 +68,7 @@ export default function Footer(): React.ReactElement {
         flexWrap: 'wrap',
       }}>
         <a href="https://erigon.tech" target="_blank" rel="noopener noreferrer"
-          aria-label="Erigon home page" className="footer-brand">
+          aria-label="erigon.tech home page" className="footer-brand">
           <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
           <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
         </a>
