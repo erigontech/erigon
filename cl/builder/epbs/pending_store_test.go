@@ -286,9 +286,11 @@ func TestFilePendingPayloadStoreRejectsFilenameRecordIdentityMismatch(t *testing
 	}
 	require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
 	alias := key
-	alias.blockHash = common.HexToHash("0xcafe")
+	alias.slot--
 	require.NoError(t, os.Rename(store.path(key), store.path(alias)))
 
 	_, err := store.Load(t.Context(), key.slot)
 	require.ErrorContains(t, err, "does not match record identity")
+	_, err = os.Stat(store.path(alias))
+	require.NoError(t, err)
 }

@@ -140,6 +140,13 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 	}
 	records := make([]storedPendingPayload, 0, len(entries))
 	removedStale := false
+	removeStale := func(name string) {
+		if err := dir.RemoveFile(filepath.Join(s.dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Warn("ePBS builder: delete stale persisted pending payload failed", "file", name, "err", err)
+		} else {
+			removedStale = true
+		}
+	}
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -151,22 +158,15 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		if err != nil {
 			return nil, err
 		}
-		if slot < minSlot {
-			if err := dir.RemoveFile(filepath.Join(s.dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
-				log.Warn("ePBS builder: delete stale persisted pending payload failed", "file", entry.Name(), "err", err)
-			} else {
-				removedStale = true
-			}
-			continue
-		}
-		if len(records) >= maxPendingPayloadFiles {
-			return nil, fmt.Errorf("too many persisted pending payloads")
-		}
 		info, err := entry.Info()
 		if err != nil {
 			return nil, err
 		}
 		if info.Size() < 0 || info.Size() > maxPendingPayloadFileSize {
+			if slot < minSlot {
+				removeStale(entry.Name())
+				continue
+			}
 			return nil, fmt.Errorf("pending payload %s has invalid size %d", entry.Name(), info.Size())
 		}
 		data, err := os.ReadFile(filepath.Join(s.dir, entry.Name()))
@@ -175,6 +175,10 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		}
 		var record storedPendingPayload
 		if err := json.Unmarshal(data, &record); err != nil {
+			if slot < minSlot {
+				removeStale(entry.Name())
+				continue
+			}
 			return nil, fmt.Errorf("decode pending payload %s: %w", entry.Name(), err)
 		}
 		expectedName := filepath.Base(s.path(pendingPayloadKey{
@@ -182,6 +186,13 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		}))
 		if entry.Name() != expectedName {
 			return nil, fmt.Errorf("pending payload filename %q does not match record identity", entry.Name())
+		}
+		if record.Slot < minSlot {
+			removeStale(entry.Name())
+			continue
+		}
+		if len(records) >= maxPendingPayloadFiles {
+			return nil, fmt.Errorf("too many persisted pending payloads")
 		}
 		records = append(records, record)
 	}
