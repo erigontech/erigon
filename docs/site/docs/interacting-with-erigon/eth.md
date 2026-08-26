@@ -19,7 +19,9 @@ For API usage refer to the below official resources:
 * [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
 The sections below cover only the places where Erigon adds a method that is not in that
-standard set, or where its behaviour differs from it. Everything else follows the spec.
+standard set, or where its behaviour differs from it. They are not an exhaustive
+compliance statement: anything not listed here is expected to follow the spec, but a
+deviation that has not yet been documented may still exist.
 
 ### eth\_getProof
 
@@ -114,9 +116,12 @@ Both methods need commitment history, so start the node with:
 --prune.include-commitment-history
 ```
 
-Without it the call fails with `eth_getWitness requires commitment history`. If the
-requested block is older than the retained commitment history, it fails with
-`commitment history pruned`.
+Without it the call fails with an error starting with `eth_getWitness requires
+commitment history`; the message continues with a restart hint that names the
+`--prune.experimental.include-commitment-history` alias rather than the canonical flag
+above. If the requested block is older than the retained commitment history, the call
+fails with an error starting with `commitment history pruned`, followed by the retained
+range.
 
 ### eth\_fillTransaction
 

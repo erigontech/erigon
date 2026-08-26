@@ -69,10 +69,16 @@ then it should look something like:
 
 Beacon-chain withdrawals credit balances outside of any transaction, so by default no
 trace mentions them. `trace_block` and `trace_replayBlockTransactions` can be asked to
-include them by passing a trace-settings object as the last positional parameter:
+include them by passing a trace-settings object as the last positional parameter. It is
+positional, so the parameters before it have to be supplied even when they are not
+otherwise needed:
 
 ```js
-{ "IncludeWithdrawals": true }
+// trace_block(blockNumber, gasBailOut, traceSettings)
+["0x1194bf0", false, { "IncludeWithdrawals": true }]
+
+// trace_replayBlockTransactions(blockNumber, traceTypes, gasBailOut, traceSettings)
+["0x1194bf0", ["stateDiff"], false, { "IncludeWithdrawals": true }]
 ```
 
 The default is off — omit the object, or leave the field out, and withdrawals are not
