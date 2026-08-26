@@ -197,7 +197,7 @@ func newPayloadPreparationLoopHarness(
 	validatorParams := validator_params.NewValidatorParams()
 	validatorParams.SetFeeRecipient(0, common.Address{0x11})
 	headState := state.New(config)
-	headState.SetSlot(selectedSlot)
+	require.NoError(t, headState.SetSlot(selectedSlot))
 	headState.SetVersion(config.GetCurrentStateVersion(selectedSlot / config.SlotsPerEpoch))
 	headState.SetProposerLookahead(solid.NewUint64VectorSSZ(int((config.MinSeedLookahead + 1) * config.SlotsPerEpoch)))
 	syncedData.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).DoAndReturn(
@@ -318,7 +318,7 @@ func TestPayloadPreparationScratchReusesState(t *testing.T) {
 	scratch.resetForTargetSlot(10)
 	first, err := scratch.copyFrom(postState, postState.BeaconConfig())
 	require.NoError(t, err)
-	first.SetSlot(first.Slot() + 1)
+	require.NoError(t, first.SetSlot(first.Slot()+1))
 	scratch.resetForTargetSlot(10)
 	second, err := scratch.copyFrom(postState, postState.BeaconConfig())
 	require.NoError(t, err)
@@ -893,7 +893,7 @@ func TestExecutionPayloadSourceUsesPreForkParentForFirstGloasSlot(t *testing.T) 
 	config.InitializeForkSchedule()
 	baseState := state.New(&config)
 	preForkSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
-	baseState.SetSlot(preForkSlot + 2)
+	require.NoError(t, baseState.SetSlot(preForkSlot+2))
 	latestHeader := baseState.LatestBlockHeader()
 	latestHeader.Slot = preForkSlot
 	baseState.SetLatestBlockHeader(&latestHeader)
@@ -1142,8 +1142,8 @@ func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
 		require.ErrorContains(t, err, "invalid randao_reveal")
 	case <-time.After(2 * time.Second):
 		finishPreparation()
-		awaitErrorResult(t, result)
-		t.Fatal("request validation waited for payload preparation")
+		err := awaitErrorResult(t, result)
+		t.Fatalf("request validation waited for payload preparation: %v", err)
 	}
 }
 
@@ -1444,8 +1444,8 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	headState := state.New(&config)
 	require.NoError(t, postState.CopyInto(headState))
 	currentEpoch := headState.Slot() / config.SlotsPerEpoch
-	headState.SetRandaoMixAt(int(currentEpoch%config.EpochsPerHistoricalVector), common.Hash{0x51})
-	headState.SetRandaoMixAt(int(targetEpoch%config.EpochsPerHistoricalVector), common.Hash{0x52})
+	require.NoError(t, headState.SetRandaoMixAt(int(currentEpoch%config.EpochsPerHistoricalVector), common.Hash{0x51}))
+	require.NoError(t, headState.SetRandaoMixAt(int(targetEpoch%config.EpochsPerHistoricalVector), common.Hash{0x52}))
 	baseBlockRoot := common.Hash{0x41}
 	syncedData := synced_data.NewSyncedDataManager(&config, true)
 	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, baseBlockRoot))
@@ -1916,8 +1916,8 @@ func TestProductionUsesTargetSlotRandao(t *testing.T) {
 	wallClockEpoch := targetEpoch + 1
 	targetMix := common.Hash{0x11}
 	wallClockMix := common.Hash{0x22}
-	postState.SetRandaoMixAt(int(targetEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), targetMix)
-	postState.SetRandaoMixAt(int(wallClockEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), wallClockMix)
+	require.NoError(t, postState.SetRandaoMixAt(int(targetEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), targetMix))
+	require.NoError(t, postState.SetRandaoMixAt(int(wallClockEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), wallClockMix))
 
 	engine := newPayloadBuildEngine(t, ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -2366,9 +2366,9 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 
 	headState := state.New(&config)
 	require.NoError(t, postState.CopyInto(headState))
-	headState.SetSlot(targetSlot - 1)
+	require.NoError(t, headState.SetSlot(targetSlot-1))
 	for i := 0; i < headState.ValidatorLength(); i += 2 {
-		headState.SetEffectiveBalanceForValidatorAtIndex(i, 0)
+		require.NoError(t, headState.SetEffectiveBalanceForValidatorAtIndex(i, 0))
 		require.NoError(t, headState.SetValidatorBalance(i, config.MaxEffectiveBalanceElectra))
 	}
 
@@ -2376,7 +2376,7 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 	var oldProposer, newProposer uint64
 	found := false
 	for nonce := byte(0); ; nonce++ {
-		headState.SetRandaoMixAt(int(mixPosition), common.Hash{nonce})
+		require.NoError(t, headState.SetRandaoMixAt(int(mixPosition), common.Hash{nonce}))
 		var err error
 		oldProposer, err = headState.GetBeaconProposerIndexForSlot(targetSlot)
 		require.NoError(t, err)

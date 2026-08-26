@@ -27,10 +27,10 @@ import (
 func TestCopyIntoSetsPhase0VersionOnReusedDestination(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	source := New(&cfg)
-	source.SetSlot(3)
+	require.NoError(t, source.SetSlot(3))
 	destination := New(&cfg)
 	destination.SetVersion(clparams.GloasVersion)
-	destination.SetSlot(99)
+	require.NoError(t, destination.SetSlot(99))
 
 	require.NoError(t, source.CopyInto(destination))
 
