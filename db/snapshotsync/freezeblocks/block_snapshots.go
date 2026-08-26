@@ -174,11 +174,6 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 }
 
 func (br *BlockRetire) canRetire(ctx context.Context, curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool, err error) {
-	keep := br.config.MaxReorgDepth
-	if curBlockNum <= keep {
-		return
-	}
-	blockTo = curBlockNum - keep
 	var finalisedBlockNum uint64
 	err = br.db.View(ctx, func(tx kv.Tx) error {
 		finalisedBlockNum = rawdb.ReadForkchoiceFinalizedNum(tx)
@@ -187,8 +182,14 @@ func (br *BlockRetire) canRetire(ctx context.Context, curBlockNum uint64, blocks
 	if err != nil {
 		return 0, 0, false, err
 	}
-	if finalisedBlockNum > 0 && finalisedBlockNum < blockTo {
+	if finalisedBlockNum > 0 {
 		blockTo = finalisedBlockNum
+	} else {
+		keep := br.config.MaxReorgDepth
+		if curBlockNum <= keep {
+			return
+		}
+		blockTo = curBlockNum - keep
 	}
 	blockFrom = blocksInSnapshots + 1
 	blockFrom, blockTo, can = snapshotsync.CanRetire(blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
