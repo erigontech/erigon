@@ -195,9 +195,8 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 // is full when the two meet, so the index costs no allocation of its own and a
 // buffer's whole footprint is the chunks it holds.
 type dataChunk struct {
-	buf     []byte
-	dataEnd int32
-	entTop  int32
+	buf    []byte
+	entTop int32
 
 	// The merge reads these instead of chasing the index on every compare.
 	// ents drains from the front, so ents[0] is the chunk's current entry and
@@ -297,7 +296,7 @@ func (b *sortableBuffer) syncCur() {
 		return
 	}
 	c := &b.chunks[len(b.chunks)-1]
-	c.dataEnd, c.entTop = b.curEnd, b.curTop
+	c.entTop = b.curTop
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
