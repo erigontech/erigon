@@ -44,7 +44,8 @@ const (
 	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
+	entryLocSize    = 8 // sizeof(sortableBuffer.entries element): keyLen(4) + offset(4)
+	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
 // writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
@@ -159,16 +160,20 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// entryLoc stores the location of a key/value pair inside sortableBuffer.
-// offset packs the chunk index and the offset inside that chunk:
-// idx<<dataChunkBits | off. Key occupies chunk[off : off+keyLen], value follows
-// right after it. keyLen/valLen of -1 indicates nil.
-type entryLoc struct {
-	insertionOrder int32 // enables stable sort via unstable SortFunc
-	offset         int32
-	keyLen         int32
-	valLen         int32
+// entryLoc locates a key/value pair: keyLen in the high half, offset in the
+// low half. offset packs the chunk index with the offset inside that chunk,
+// idx<<dataChunkBits | off, and addresses valLen, then the key, then the value.
+// A length of -1 means nil.
+//
+// Offsets rise with insertion order, which is what lets Sort order duplicate
+// keys without a stable sort.
+type entryLoc uint64
+
+func makeEntryLoc(keyLen, offset int32) entryLoc {
+	return entryLoc(uint32(keyLen))<<32 | entryLoc(uint32(offset)) //nolint:gosec
 }
+func (e entryLoc) keyLen() int32 { return int32(uint32(e >> 32)) } //nolint:gosec
+func (e entryLoc) offset() int32 { return int32(uint32(e)) }       //nolint:gosec
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	if bufferOptimalSize.Bytes() > math.MaxInt32 {
@@ -210,38 +215,34 @@ func (b *sortableBuffer) nextChunk(n int) {
 	b.chunkBytes += len(b.cur)
 }
 
-// entryData returns e's bytes: the key, immediately followed by the value.
-func (b *sortableBuffer) entryData(e *entryLoc) []byte {
-	return b.chunks[e.offset>>dataChunkBits][e.offset&(dataChunkSize-1):]
+// entryData returns e's bytes: valLen, then the key, then the value.
+func (b *sortableBuffer) entryData(e entryLoc) []byte {
+	off := e.offset()
+	return b.chunks[off>>dataChunkBits][off&(dataChunkSize-1):]
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
-	e := entryLoc{
-		keyLen:         int32(len(k)),         //nolint:gosec
-		valLen:         int32(len(v)),         //nolint:gosec
-		insertionOrder: int32(len(b.entries)), //nolint:gosec
-	}
+	kLen, vLen := int32(len(k)), int32(len(v)) //nolint:gosec
 	if k == nil {
-		e.keyLen = -1
+		kLen = -1
 	}
 	if v == nil {
-		e.valLen = -1
+		vLen = -1
 	}
-	if n := len(k) + len(v); n > 0 {
-		off := b.curOff
-		if int(off)+n > len(b.cur) {
-			b.nextChunk(n)
-			off = 0
-		}
-		data := b.cur[off:]
-		copy(data, k)
-		copy(data[len(k):], v)
-		e.offset = b.curBase | off
-		b.curOff = off + int32(n) //nolint:gosec
+	n := entryHeaderSize + len(k) + len(v)
+	off := b.curOff
+	if int(off)+n > len(b.cur) {
+		b.nextChunk(n)
+		off = 0
 	}
-	b.entries = append(b.entries, e)
+	data := b.cur[off:]
+	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
+	copy(data[entryHeaderSize:], k)
+	copy(data[entryHeaderSize+len(k):], v)
+	b.entries = append(b.entries, makeEntryLoc(kLen, b.curBase|off))
+	b.curOff = off + int32(n) //nolint:gosec
 }
 
 // Size counts the stored bytes, the tail wasted by the chunk still filling, and
@@ -255,24 +256,17 @@ func (b *sortableBuffer) Len() int {
 }
 
 func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
-	e := &b.entries[i]
-	kLen, vLen := int(e.keyLen), int(e.valLen)
-	var key, val []byte
-	if kLen == 0 {
-		key = []byte{}
-	}
-	if vLen == 0 {
-		val = []byte{}
-	}
-	if kLen <= 0 && vLen <= 0 {
-		return key, val
-	}
+	e := b.entries[i]
 	data := b.entryData(e)
-	if kLen > 0 {
+	kLen := e.keyLen()
+	vLen := int32(binary.NativeEndian.Uint32(data)) //nolint:gosec
+	data = data[entryHeaderSize:]
+	var key, val []byte
+	if kLen >= 0 {
 		key = data[:kLen:kLen]
 		data = data[kLen:]
 	}
-	if vLen > 0 {
+	if vLen >= 0 {
 		val = data[:vLen:vLen]
 	}
 	return key, val
@@ -302,17 +296,18 @@ func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	chunks := b.chunks
 	key := func(e entryLoc) []byte {
-		if e.keyLen <= 0 {
+		kLen := e.keyLen()
+		if kLen <= 0 {
 			return nil
 		}
-		off := e.offset & (dataChunkSize - 1)
-		return chunks[e.offset>>dataChunkBits][off : off+e.keyLen]
+		off := e.offset()&(dataChunkSize-1) + entryHeaderSize
+		return chunks[e.offset()>>dataChunkBits][off : off+kLen]
 	}
 	cmp := func(a, b entryLoc) int {
 		if c := bytes.Compare(key(a), key(b)); c != 0 {
 			return c
 		}
-		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+		return int(a.offset() - b.offset()) // StableSort: offsets rise with insertion order
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
@@ -326,15 +321,14 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 
 func (b *sortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
-	for i := range b.entries {
-		e := &b.entries[i]
-		kLen, vLen := int(e.keyLen), int(e.valLen)
-		var data []byte
-		if kLen > 0 || vLen > 0 {
-			data = b.entryData(e)
-		}
+	for _, e := range b.entries {
+		data := b.entryData(e)
+		kLen32 := e.keyLen()
+		vLen32 := int32(binary.NativeEndian.Uint32(data)) //nolint:gosec
+		kLen, vLen := int(kLen32), int(vLen32)
+		data = data[entryHeaderSize:]
 		// write key
-		n := binary.PutVarint(numBuf[:], int64(e.keyLen))
+		n := binary.PutVarint(numBuf[:], int64(kLen32))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
@@ -345,7 +339,7 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			data = data[kLen:]
 		}
 		// write value
-		n = binary.PutVarint(numBuf[:], int64(e.valLen))
+		n = binary.PutVarint(numBuf[:], int64(vLen32))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
