@@ -240,9 +240,14 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	}
 }
 
-// processPending runs callbacks sequentially and must not be called concurrently.
+// processPending runs callbacks sequentially. Once it observes cancellation, it
+// stops before the next job; an already-started callback may finish. It must not
+// be called concurrently.
 func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 	q.jobs.Range(func(key, value any) bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		k := key.(K)
 		job := value.(*pendingJob[M])
 

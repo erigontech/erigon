@@ -253,6 +253,29 @@ func TestPendingJobQueueDoesNotProcessAfterContextCancellation(t *testing.T) {
 	require.Zero(t, processed)
 }
 
+func TestPendingJobQueueCancellationStopsCurrentScan(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	processed := 0
+	queue := &pendingJobQueue[int, string]{
+		pendingJobQueueOptions: pendingJobQueueOptions{
+			capacity: 2,
+			expiry:   time.Minute,
+		},
+		tryProcess: func(context.Context, int, string) pendingJobDecision {
+			processed++
+			cancel()
+			return pendingJobKeep
+		},
+		onExpired: func(int) {},
+	}
+	storePendingJob(t, queue, 1, "first", time.Now())
+	storePendingJob(t, queue, 2, "second", time.Now())
+
+	queue.processPending(ctx)
+
+	require.Equal(t, 1, processed)
+}
+
 func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 	processing := make(chan context.Context)
 	processingReleased := make(chan struct{})
