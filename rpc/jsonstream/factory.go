@@ -46,9 +46,12 @@ func flushIfFull(stream *jsoniter.Stream) {
 }
 
 func New(out io.Writer) Stream {
-	return NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, out, InitialBufferSize))
+	return NewSized(out, InitialBufferSize)
 }
 
-func Wrap(stream *jsoniter.Stream) Stream {
-	return NewStackStream(stream)
+// NewSized is New with an explicit initial buffer size. Building the
+// jsoniter.Stream here rather than taking one is what keeps the indention step
+// at zero, which writeObjectFieldFast relies on.
+func NewSized(out io.Writer, bufSize int) Stream {
+	return newStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize))
 }

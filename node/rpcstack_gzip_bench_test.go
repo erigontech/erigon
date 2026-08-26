@@ -21,8 +21,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream"
-	jsoniter "github.com/json-iterator/go"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +31,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const rpcEndpoint = "http://localhost:8545"
@@ -471,8 +471,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					}
 					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Set("Content-Type", "application/json")
-						st := jsoniter.NewStream(jsoniter.ConfigDefault, w, bufSize)
-						stream := jsonstream.Wrap(st)
+						stream := jsonstream.NewSized(w, bufSize)
 						stream.WriteArrayStart()
 						for i := range entries {
 							if i > 0 {

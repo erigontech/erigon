@@ -533,7 +533,7 @@ func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	cfg := &tracersConfig.TraceConfig{Tracer: &tracer, Timeout: &timeout}
 
 	var buf bytes.Buffer
-	s := jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	require.NoError(t, api.TraceBlockByNumber(m.Ctx, blockNum, cfg, s))
 	require.NoError(t, s.Flush())
 

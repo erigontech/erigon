@@ -90,8 +90,8 @@ func writeStringFast(stream *jsoniter.Stream, val string) {
 }
 
 // writeObjectFieldFast writes a field name and its colon. jsoniter follows the
-// colon with a space while indenting, which no stream this package builds ever
-// does -- every config here has an indention step of zero.
+// colon with a space while indenting, which no stream here ever does: NewSized
+// is the only way in and it fixes the config at a zero indention step.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
 	writeStringFast(stream, fieldName)
 	stream.WriteRaw(":")

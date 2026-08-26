@@ -45,9 +45,9 @@ type StackStream struct {
 	stack  []stackItem
 }
 
-// NewStackStream creates a new StackStream with the given jsoniter.Stream
+// newStackStream creates a new StackStream with the given jsoniter.Stream
 // The stack is pre-allocated with a capacity of InitialStackSize
-func NewStackStream(stream *jsoniter.Stream) *StackStream {
+func newStackStream(stream *jsoniter.Stream) *StackStream {
 	return &StackStream{
 		stream: stream,
 		stack:  make([]stackItem, 0, InitialStackSize),
