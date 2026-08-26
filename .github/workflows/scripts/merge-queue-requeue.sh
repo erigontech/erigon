@@ -117,6 +117,7 @@ annotations_of() {
 # Signatures of runner-infrastructure death. A failed job with none of these in
 # its annotations is treated as a real failure, so the PR stays evicted.
 infra_pattern='lost communication with the server|runner has received a shutdown signal|Could not resolve host|(proxy\.golang\.org|storage\.googleapis\.com).*(operation timed out|i/o timeout)'
+timeout_pattern='exceeded the maximum execution time'
 
 infra_only=1
 details=""
@@ -125,14 +126,19 @@ while IFS= read -r g; do
   job_id=$(jq -r '.id' <<<"$g")
   job_name=$(jq -r '.name' <<<"$g")
   kind=$(jq -r '.kind' <<<"$g")
-  if [ "$kind" = "lost-at-setup" ]; then
-    details="${details}- \`${job_name}\` — runner lost before the job started"$'\n'
-    continue
-  fi
   if ! anns=$(annotations_of "$job_id"); then
     echo "::notice::Could not read annotations of job '${job_name}'; treating its failure as real and not re-queuing."
     infra_only=0
     break
+  fi
+  if grep -qiE "$timeout_pattern" <<<"$anns"; then
+    echo "::notice::Job '${job_name}' timed out; not re-queuing."
+    infra_only=0
+    break
+  fi
+  if [ "$kind" = "lost-at-setup" ]; then
+    details="${details}- \`${job_name}\` — runner lost before the job started"$'\n'
+    continue
   fi
   match=$(grep -iE "$infra_pattern" <<<"$anns" | head -1) || true
   if [ -z "$match" ]; then
