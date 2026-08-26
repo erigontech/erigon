@@ -80,11 +80,6 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-func entriesIn(bufBytes datasize.ByteSize) int {
-	const etlAvgEntryBytes = 20
-	return int(bufBytes) / (etlAvgEntryBytes + entryLocSize)
-}
-
 var (
 	// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
 	// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
