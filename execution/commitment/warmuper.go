@@ -290,8 +290,7 @@ func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
 		return
 	}
+	// w.work is never closed: that would race a concurrent WarmKey send into a
+	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
-	if w.work != nil {
-		close(w.work)
-	}
 }

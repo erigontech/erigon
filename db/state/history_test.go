@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func testDbAndHistory(tb testing.TB, logger log.Logger) (kv.RwDB, *History) {
@@ -2464,6 +2465,63 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
+
+func TestMaxHistoryValLen(t *testing.T) {
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).
+		PageSize(ethconfig.DefaultChainDBPageSize).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{kv.TblAccountHistoryVals: kv.TableCfgItem{Flags: kv.DupSort}}
+		}).MustOpen()
+	defer db.Close()
+
+	// historyLargeValues=false stores txNum+value as one dupsort value
+	put := func(valLen int) error {
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.TblAccountHistoryVals, []byte("key"), make([]byte, 8+valLen))
+		})
+	}
+	require.NoError(t, put(maxHistoryValLen))
+	require.Error(t, put(maxHistoryValLen+1))
+}
+
+// BenchmarkHistoryRangePaged walks merged (page-compressed) history files, which is
+// where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
+// its files un-merged, so it never reaches that path.
+func BenchmarkHistoryRangePaged(b *testing.B) {
+	logger := log.New()
+	ctx := b.Context()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.beginForTests()
+	defer ic.Close()
+
+	paged := false
+	for _, f := range ic.files {
+		if f.src.decompressor.CompressedPageValuesCount() > 1 {
+			paged = true
+			break
+		}
+	}
+	require.True(b, paged, "bench must run against page-compressed .v files, else it does not touch PagedReader")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
 		require.NoError(b, err)
 		for it.HasNext() {
 			_, _, err := it.Next()

@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type History struct {
@@ -230,12 +231,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	histView, err := hist.OpenSequentialView(true)
+	histView, err := hist.OpenSequentialView()
 	if err != nil {
 		return err
 	}
 	defer histView.Close()
-	efHistView, err := efHist.OpenSequentialView(true)
+	efHistView, err := efHist.OpenSequentialView()
 	if err != nil {
 		return err
 	}
@@ -384,6 +385,10 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 	return nil
 }
 
+// mdbx keeps a dupsort value as a key of the nested tree, so it is capped by keysize_max(pageSize),
+// which is pageSize/2 - 26. Here that budget is shared with the 8-byte txNum prefix.
+const maxHistoryValLen = int(ethconfig.DefaultChainDBPageSize)/2 - 26 - 8
+
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
@@ -408,7 +413,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 }
 
 func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, false)
+	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -1193,7 +1198,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if ht.h.Disable {
+	if !ht.h.Enabled {
 		return nil, false, nil
 	}
 

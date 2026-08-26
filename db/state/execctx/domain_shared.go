@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -286,14 +287,14 @@ type SharedDomains struct {
 	visibleEnds domainVisibleEndMemo
 
 	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
-	// cache, reached via temporalGetter so an addr-keyed reader can serve a
+	// cache, reached via StateGetter so an addr-keyed reader can serve a
 	// code-by-hash read with the application's authoritative codehash.
 	codeStore *cache.CodeStore
 
-	// changesetMu serializes the parallel commitment calculator's swap of the
-	// global current-changeset-accumulator pointer against DomainPut/DomainDel:
-	// without it a block N+1 write can land in block N's changeset during the
-	// swap+compute+restore window, so a later unwind reads stale prev-values.
+	// changesetMu serializes the exec loop's install of a block's changeset
+	// accumulator against the calculator's swap of the commitment writer's
+	// diff. Writers other than commitment are never redirected, so DomainPut
+	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scope commitment-branch cache. It sits
@@ -311,11 +312,11 @@ type SharedDomains struct {
 	collector *kvmetrics.Collector
 
 	// reqMetrics is an optional request-scoped accumulator for callers that read
-	// through the plain AsGetter (nil per-read metrics) on a single goroutine —
+	// through the plain AsStateGetter (nil per-read metrics) on a single goroutine —
 	// e.g. an RPC handler that owns this SharedDomains for one request. Enabled
 	// via StartRequestMetrics(source) and flushed to the collector at Close.
 	// Single-owner (the request goroutine); never set on exec SDs, whose workers
-	// pass their own per-worker instance via AsGetterMetered.
+	// pass their own per-worker instance through AsStateGetter options.
 	reqMetrics *kvmetrics.DomainMetrics
 	reqSource  kvmetrics.Source
 
@@ -505,16 +506,9 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 // It sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
 //
-// Concurrency contract: the inner swap (set cs_N → apply → restore prev)
-// mutates the global accumulator pointer and per-domain diff fields that
-// the apply goroutine's DomainPut/DomainDel writes through. Calls from
-// inside the calculator's outer LockChangesetAccumulator window must hold
-// that same Mutex; calls from end-of-stage Flush are single-threaded
-// against apply but still need the lock for race-detector happens-before
-// against any concurrent reads via DomainPut. Caller passes
-// `lockHeld=true` when it already holds changesetMu (calc path);
-// `false` when FlushPendingUpdates should acquire it itself
-// (Flush / standalone callers).
+// The inner swap mutates the commitment writer's diff, which the exec loop
+// also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
+// unless lockHeld says the caller already holds it.
 func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(ctx, tx, false)
 }
@@ -535,11 +529,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	defer upd.Clear()
 
 	putBranch := func(prefix, data, prevData []byte) error {
-		// Use the unlocked variant — we either hold the lock externally
-		// (lockHeld=true) or inside this function (locked below). Using
-		// the public DomainPut would re-acquire and self-deadlock for
-		// commitment-domain writes if the lock is held externally.
-		return sd.domainPutNoLock(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
 
 	if !lockHeld {
@@ -571,7 +561,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// Apply deferred branch writes under the pending update's block
 		// changeset, then save it back. All accesses under changesetMu —
 		// see concurrency contract on the wrappers above.
-		defer sd.SwapChangesetAccumulatorLocked(cs)()
+		defer sd.SwapCommitmentDiffLocked(cs)()
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
 			return err
@@ -586,87 +576,13 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	return err
 }
 
-// domainPutNoLock is the lock-held variant of DomainPut for callers
-// (FlushPendingUpdates) that already hold changesetMu externally; it stays
-// correct even if the CommitmentDomain lock exemption in domainPut is removed.
-func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
-	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, true)
-}
-
-type temporalGetter struct {
-	sd *SharedDomains
-	tx kv.TemporalTx
-	// view binds the shared state cache to tx's read view once per getter,
-	// keeping the per-read path allocation-free.
-	view cache.ReadView
-	// m is an optional per-worker metrics instance to record reads into. nil
-	// (the AsGetter default) collects nothing — there is no process-wide
-	// accumulator, since AsGetter is used by many concurrent goroutines (RPC,
-	// engine) where a shared one would be raced/unbounded. Exec workers pass
-	// their own instance via AsGetterMetered and merge it at task end.
-	m *kvmetrics.DomainMetrics
-}
-
-func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, gt.m, gt.view)
-}
-
-// GetLatestContext is the context-aware read: it records into the per-worker,
-// lock-free accumulator carried by ctx (a nil ctx-value collects no metrics).
-// Concurrent workers (trie-warmup goroutines) pass their own accumulator via
-// ctx, so they neither share metrics state with the main goroutine nor take any
-// lock. Optional method — callers type-assert for it (mirrors the existing
-// AggregatorRoTx.MeteredGetLatest pattern).
-func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, kvmetrics.MetricsFromContext(ctx), gt.view)
-}
-
-// GetCodeSize returns the length of the code at addr without loading the
-// bytes. Returns (size, true, nil) on size-cache hit, (size, true, nil)
-// after a full-bytes load+populate, or (0, false, nil) when the account
-// has no code. Errors propagate normally.
-//
-// Callers (ReaderV3.ReadAccountCodeSize, etc.) type-assert on this method
-// so the existing kv.TemporalGetter interface is unchanged. txNum is the
-// caller's read txNum, used to stamp any cache entry it populates.
-func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
-	return gt.sd.getCodeSize(gt.tx, gt.view, addr, txNum)
-}
-
-// GetCode returns contract code via the content-addressed fast path (see
-// SD.GetCode): many addresses sharing one bytecode resolve to a single cached
-// copy with no per-address CodeDomain read. Read-only — callers
-// (ReaderV3.ReadAccountCode) type-assert this method; setters must not use it
-// (they resolve prevVal through GetLatest, which is addr-keyed). txNum is the
-// caller's read txNum, used to stamp any cache entry it populates.
-func (gt *temporalGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return gt.sd.getCode(gt.tx, gt.view, addr, txNum)
-}
-
-func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
-	return gt.sd.HasPrefix(name, prefix, gt.tx)
-}
-
-func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	return gt.tx.StepsInFiles(entitySet...)
-}
-
-func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
-}
-
-// AsGetterNoMetrics is an explicit-intent alias of AsGetter (collects no
-// metrics), for concurrent callers (RPC/engine) where that is deliberate.
-func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
-}
-
-// AsGetterMetered returns a getter that records reads into the caller's own
-// per-worker metrics instance m. m must be single-owner (one goroutine); the
-// caller hands it off via MergeMetrics at task end (a lock per task, not per
-// read) and allocates a fresh instance. Used by parallel-exec workers.
-func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, m: m, view: sd.cacheViewFor(tx)}
+// AsStateGetter returns an execution-aware getter with optimized code reads.
+func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter {
+	metrics := opts.Metrics()
+	if !dbg.KVReadLevelledMetrics {
+		metrics = nil
+	}
+	return &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx)}
 }
 
 // MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
@@ -695,7 +611,7 @@ func (sd *SharedDomains) Collector() *kvmetrics.Collector {
 	return sd.collector
 }
 
-// StartRequestMetrics enables request-scoped metering for plain AsGetter reads on
+// StartRequestMetrics enables request-scoped metering for plain AsStateGetter reads on
 // this SharedDomains, tagged with source. For single-goroutine owners (an RPC
 // handler). The accumulator is flushed to the collector at Close. No-op when read
 // metrics are off or there is no collector. Do NOT use on a SharedDomains shared
@@ -718,22 +634,20 @@ func (sd *SharedDomains) flushRequestMetrics() {
 	sd.reqMetrics = nil
 }
 
-// LockChangesetAccumulator and UnlockChangesetAccumulator bracket a
-// swap+use+restore sequence on the global accumulator pointer (see
-// changesetMu doc on the SharedDomains struct for the layering rationale).
-// Apply-side DomainPut/DomainDel take the same lock briefly so they
-// cannot record into a swapped accumulator that does not belong to the
-// block they are writing for.
+// LockChangesetAccumulator and UnlockChangesetAccumulator bracket the
+// calculator's swap+use+restore of the commitment writer's diff. It
+// serializes against the exec loop's per-block SetChangesetAccumulator;
+// apply-side DomainPut/DomainDel no longer take it, because the swap
+// leaves their writers alone (see SwapCommitmentDiffLocked).
 //
-// Holders MUST pair Lock with Unlock and MUST keep the critical section
-// short — currently the calculator's per-block ComputeCommitment runs
-// inside this lock, which serializes apply-side writes for the duration
-// of compute. That cost goes away once the post-hoc-from-sd-entries
-// derivation lands and this lock + the swap dance can both be deleted.
+// The calculator's per-block ComputeCommitment still runs inside this
+// lock, so the exec loop's accumulator install waits on it. That goes
+// away once the post-hoc-from-sd-entries derivation lands and this lock
+// + the swap dance can both be deleted.
 //
 // Inside the locked window callers must use the *Locked variants
-// (SwapChangesetAccumulatorLocked / DetachChangesetAccumulatorLocked) —
-// the public Set/Get acquire the same Mutex and would self-deadlock.
+// (SwapCommitmentDiffLocked / DetachChangesetAccumulatorLocked) — the
+// public Set/Get acquire the same Mutex and would self-deadlock.
 func (sd *SharedDomains) LockChangesetAccumulator()   { sd.changesetMu.Lock() }
 func (sd *SharedDomains) UnlockChangesetAccumulator() { sd.changesetMu.Unlock() }
 
@@ -757,7 +671,7 @@ func (sd *SharedDomains) setChangesetAccumulatorLocked(acc *changeset.StateChang
 // accumulator (the one DomainPut writes diff entries into). Returns nil if
 // none is installed. Locks changesetMu internally — must NOT be called
 // while already holding the lock (locked-window callers use
-// SwapChangesetAccumulatorLocked / DetachChangesetAccumulatorLocked).
+// SwapCommitmentDiffLocked / DetachChangesetAccumulatorLocked).
 func (sd *SharedDomains) GetChangesetAccumulator() *changeset.StateChangeSet {
 	sd.changesetMu.Lock()
 	defer sd.changesetMu.Unlock()
@@ -773,20 +687,30 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
-// SwapChangesetAccumulatorLocked installs the given changeset accumulator
-// and returns a func that restores the previous one. Callers must hold
-// changesetMu.
-func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
-	prev := sd.getChangesetAccumulatorLocked()
-	sd.setChangesetAccumulatorLocked(acc)
-	return func() { sd.setChangesetAccumulatorLocked(prev) }
+// commitmentDiffSwapper must be implemented by every mem batch behind
+// SharedDomains: the only alternative is redirecting all domain writers,
+// which is unsafe now that DomainPut takes no lock.
+type commitmentDiffSwapper interface {
+	SetCommitmentDiff(acc *changeset.StateChangeSet)
+	SetCommitmentDiffRaw(d *kv.DomainDiff)
+	CommitmentDiff() *kv.DomainDiff
+}
+
+// SwapCommitmentDiffLocked points the commitment writer's diff at acc and
+// returns a func restoring the previous one. Every other domain writer is left
+// alone, so apply-side writes need no lock. Callers must hold changesetMu.
+func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
+	h := sd.mem.(commitmentDiffSwapper)
+	prev := h.CommitmentDiff()
+	h.SetCommitmentDiff(acc)
+	return func() { h.SetCommitmentDiffRaw(prev) }
 }
 
 // DetachChangesetAccumulatorLocked installs a nil changeset accumulator and
 // returns a func that restores the previous one. Callers must hold
 // changesetMu.
 func (sd *SharedDomains) DetachChangesetAccumulatorLocked() (restore func()) {
-	return sd.SwapChangesetAccumulatorLocked(nil)
+	return sd.SwapCommitmentDiffLocked(nil)
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
@@ -934,10 +858,13 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
 	}
-	sd.bindStateCache(stateCache)
+	sd.BindStateCache(stateCache)
 }
 
-func (sd *SharedDomains) bindStateCache(stateCache *cache.StateCache) {
+// BindStateCache attaches a cache unconditionally, bypassing the USE_STATE_CACHE
+// check in SetStateCache. Tests use it so they always exercise the cache without
+// mutating the process-global flag, which would race t.Parallel tests.
+func (sd *SharedDomains) BindStateCache(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 	sd.cacheApplier = stateCache.Applier()
 	sd.cacheApplier.Initialize(sd.baseStateVersion)
@@ -1260,7 +1187,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix)
+				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 				if err != nil {
 					return nil, 0, false, err
 				}
@@ -1332,19 +1259,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	return nil
 }
 
-// TemporalDomain satisfaction. Collects no read metrics — see
-// temporalGetter.GetLatest for why there is no process-wide accumulator.
+// TemporalDomain satisfaction. Direct reads use request metrics when configured.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, nil, sd.cacheReader())
-}
-
-// GetLatestContext is the context-aware read for callers that read on behalf of
-// a concurrent worker: metrics go to the per-worker, lock-free accumulator
-// carried by ctx (nil ctx-value => no metrics). Lets a worker's reader meter
-// without any shared accumulator or lock. Mirrors temporalGetter.GetLatestContext
-// for readers that hold the SD directly (e.g. the committer's asOfStateReader).
-func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx), sd.cacheReader())
+	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
 }
 
 // servableUnderBound gates a value against an in-flight unwind's per-key
@@ -1381,56 +1298,42 @@ type getLatestOptions struct {
 	codeHash []byte
 }
 
-type getLatestOption func(*getLatestOptions)
-
-func withCodeHash(codeHash []byte) getLatestOption {
-	return func(opts *getLatestOptions) {
-		opts.codeHash = codeHash
-	}
+func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
+	opts.codeHash = codeHash
+	return opts
 }
 
-// getLatestMetered is the read implementation. wm is the caller's lock-free
+// getLatest is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
-func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *kvmetrics.DomainMetrics, view cache.ReadView, options ...getLatestOption) (v []byte, step kv.Step, err error) {
-	var opts getLatestOptions
-	for _, option := range options {
-		option(&opts)
-	}
+func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte, wm kv.GetLatestMetrics, start time.Time, stepBound kv.Step, view cache.ReadView, opts getLatestOptions) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
-	var start time.Time
 	if dbg.KVReadLevelledMetrics {
-		start = time.Now()
-		// Plain AsGetter reads (wm == nil) on a request-scoped SD fold into the
+		if start.IsZero() {
+			start = time.Now()
+		}
+		// Plain AsStateGetter reads (wm == nil) on a request-scoped SD fold into the
 		// request accumulator. Short-circuits for exec workers (wm != nil), which
 		// never touch reqMetrics — so no cross-goroutine access.
-		if wm == nil {
+		if wm == nil && sd.reqMetrics != nil {
 			wm = sd.reqMetrics
 		}
+	} else {
+		wm = nil
 	}
 	// Mem batches hold the current transaction's uncommitted state, so a hit
 	// needs no shared-cache fill. Parent hits also obey any bound from the child.
-	v, step, maxStep, ok := sd.latestFromMem(domain, k)
-	if ok {
-		if dbg.KVReadLevelledMetrics {
+	v, step, stagedMaxStep, ok := sd.latestFromMem(domain, k)
+	maxStep := min(stagedMaxStep, stepBound)
+	if ok && servableUnderBound(step, maxStep) {
+		if wm != nil {
 			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
 	}
-
-	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
-	}
-	// MeteredGetterWithTxN exposes the txN of the read so the
-	// BranchCache entry can be tagged; falls back to MeteredGetter
-	// when only the legacy interface is implemented (test stubs).
-	type MeteredGetterWithTxN interface {
-		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
-	}
-
 	// stateCache holds committed values shared across domain readers.
 	if sd.stateCache != nil {
 		v, cTxNum, ok := view.GetWithTxNum(domain, k)
@@ -1441,7 +1344,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		if ok && !servableUnderBound(cStep, maxStep) {
 			ok = false
 		}
-		if dbg.KVReadLevelledMetrics {
+		if wm != nil {
 			if ok {
 				wm.UpdateStateCacheHit(domain)
 			} else {
@@ -1458,17 +1361,14 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
 				// backing tx is the single source of truth for this key at this point.
 				var vDB []byte
-				var dbErr error
-				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-					vDB, _, _, dbErr = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
-				} else {
-					vDB, _, dbErr = tx.GetLatest(domain, k)
+				var err error
+				getOpts := kv.GetLatestOptions{}
+				if wm != nil {
+					getOpts = getOpts.WithMetrics(wm, start)
 				}
-				// A transient read error leaves vDB nil; comparing against it would
-				// panic "divergence" on an I/O fault even when the cache was correct.
-				// Surface the real error instead.
-				if dbErr != nil {
-					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", dbErr)
+				vDB, _, err = tx.GetLatest(domain, k, getOpts)
+				if err != nil {
+					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", err)
 				}
 				if !bytes.Equal(v, vDB) {
 					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
@@ -1482,7 +1382,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. Snapshot-isolated readers must disable it because
 	// concurrent commits can advance the cache beyond their transaction view.
-	if domain == kv.CommitmentDomain && sd.branchCache != nil {
+	useBranchCache := domain == kv.CommitmentDomain && sd.branchCache != nil
+	if useBranchCache {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
 			// StepSize (that double-division collapsed cStep to ~0, defeating the
@@ -1494,24 +1395,24 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 	}
 
-	var readTxN uint64
-	var txNKnown bool
-	switch aggTx := tx.AggTx().(type) {
-	case MeteredGetterWithTxN:
-		v, step, readTxN, _, err = aggTx.MeteredGetLatestWithTxN(domain, k, tx, maxStep, wm, start)
-		txNKnown = true
-	case MeteredGetter:
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
-	default:
-		v, step, err = tx.GetLatest(domain, k)
+	getOpts := kv.GetLatestOptions{}
+	if wm != nil {
+		getOpts = getOpts.WithMetrics(wm, start)
 	}
+	if maxStep != kv.NoStepBound {
+		getOpts = getOpts.WithMaxStep(maxStep)
+	}
+	if useBranchCache {
+		getOpts = getOpts.WithBranchCache()
+	}
+	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
 	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
-		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
+		readTxNum := step.LastTxNum(sd.StepSize())
 		fillView := view
 		if fillView.NeedsFrontier() {
 			// Frontier-less views retry on the miss path, where binding cost is
@@ -1524,13 +1425,6 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			fillView.Fill(domain, k, v, readTxNum)
 		}
 	}
-	// Only cache a branch when the read's txN is known: a txN=0 entry would
-	// be treated as immortal by UnwindTo, so skip the Put rather than insert
-	// an entry that can never be unwind-evicted.
-	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
-		sd.branchCache.Put(k, v, uint64(step), readTxN)
-	}
-
 	return v, step, nil
 }
 
@@ -1595,7 +1489,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		return size, true, nil
 	}
 
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
 	if err != nil {
 		return 0, false, err
 	}
@@ -1666,7 +1560,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
 	if err != nil {
 		return nil, false, err
 	}
@@ -1689,6 +1583,12 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 // committed account frontier that established the absence of code. The value
 // is passed in by the caller rather than read from sd.txNum, which the parallel
 // execution loop advances concurrently.
+// CodeHashForAddr resolves the code hash for addr as of txNum, reading through
+// the shared domains' cache view.
+func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum uint64) []byte {
+	return sd.codeHashForAddr(tx, sd.cacheReader(), addr, txNum)
+}
+
 func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) []byte {
 	if len(addr) == 0 {
 		return nil
@@ -1704,7 +1604,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if maxStep != kv.NoStepBound {
 		// A staged unwind bounds the committed lookup. Reuse the normal account
 		// path so every cache and database source observes the same bound.
-		v, _, err := sd.getLatestMetered(kv.AccountsDomain, tx, addr, nil, view)
+		v, _, err := sd.getLatest(kv.AccountsDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{})
 		if err != nil {
 			return nil
 		}
@@ -1732,7 +1632,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 				return accounts.DeserialiseV3CodeHash(v), false
 			}
 		}
-		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
+		v, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
 		if err != nil {
 			return nil, false
 		}
@@ -1852,14 +1752,10 @@ func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
-	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, false)
+	return sd.domainPut(domain, roTx, k, v, txNum, prevVal)
 }
 
-// domainPut is the shared body for DomainPut (lockHeld=false) and
-// domainPutNoLock (lockHeld=true). Factored so a new domain case or
-// pre-check is written once. See changesetMu doc on the SharedDomains
-// struct for the locking rationale.
-func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, lockHeld bool) error {
+func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -1891,18 +1787,6 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// sd.mem and is published to the cache only after a successful Commit;
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
-	// Serialize against the calculator's accumulator-swap window — see
-	// changesetMu doc on the SharedDomains struct. Skipped when the caller
-	// already holds changesetMu (lockHeld=true, the FlushPendingUpdates
-	// path), and currently also for CommitmentDomain — those writes
-	// originate exclusively from the calculator's compute, which holds
-	// changesetMu via LockChangesetAccumulator (re-acquiring would
-	// self-deadlock). All other domains are written by the apply goroutine
-	// and need to serialize against the swap.
-	if !lockHeld && domain != kv.CommitmentDomain {
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
-	}
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
@@ -1947,12 +1831,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 
 	// As in DomainPut, a deletion reaches the shared state cache only after a
-	// successful Commit. Serialize against the calculator's swap window for
-	// non-commitment domains; CommitmentDomain is skipped as described there.
-	if domain != kv.CommitmentDomain {
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
-	}
+	// successful Commit.
 	return sd.mem.DomainDel(domain, ks, txNum, prevVal)
 }
 

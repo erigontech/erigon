@@ -11,10 +11,10 @@ import (
 	"slices"
 	"unsafe"
 
-	"github.com/erigontech/erigon/common/dir"
-
 	"github.com/FastFilter/xorfilter"
-	"github.com/edsrzf/mmap-go"
+
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 const bufSize = 4096
@@ -72,11 +72,12 @@ func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 		return nil, err
 	}
 	sz := int(st.Size())
-	m, err := mmap.MapRegion(w.tmpFile, sz, mmap.RDONLY, 0, 0)
+	m, err := mmap.OpenRo(w.tmpFile, sz)
 	if err != nil {
 		return nil, fmt.Errorf("%s %w", w.tmpFilePath, err)
 	}
 	defer m.Unmap()
+	_ = mmap.MadviseSequential(m) // the whole temp file is read front-to-back below
 
 	keysHashes := castToArrU64(m[:sz])
 
@@ -276,7 +277,7 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 		return 0, fmt.Errorf("WriterSharded: no keys added")
 	}
 
-	m, err := mmap.MapRegion(w.tmpFile, sz, mmap.RDWR, 0, 0)
+	m, err := mmap.OpenRw(w.tmpFile, sz)
 	if err != nil {
 		return 0, fmt.Errorf("%s %w", w.tmpFilePath, err)
 	}

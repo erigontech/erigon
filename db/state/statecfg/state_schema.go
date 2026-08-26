@@ -216,6 +216,7 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryData, ValuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -236,6 +237,7 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.StorageHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryData, ValuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -257,6 +259,7 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.CodeHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryData, ValuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -283,6 +286,7 @@ var Schema = SchemaGen{
 			HistoryDisabled:   true,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryData, ValuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -304,6 +308,7 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
+				Enabled:      true,
 				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryData, ValuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -328,7 +333,7 @@ var Schema = SchemaGen{
 			HistoryValuesOnCompressedPage: 16,
 
 			IiCfg: InvIdxCfg{
-				Disable:      true, // disable everything by default
+				Enabled:      false, // rcache domain is opt-in via EnableHistoricalRCache
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryData, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
@@ -337,6 +342,7 @@ var Schema = SchemaGen{
 	},
 
 	LogAddrIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileLogAddressIdx, KeysTable: kv.TblLogAddressKeys, ValuesTable: kv.TblLogAddressIdx,
 
 		Compression: seg.CompressNone,
@@ -344,6 +350,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	LogTopicIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileLogTopicsIdx, KeysTable: kv.TblLogTopicsKeys, ValuesTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
@@ -351,6 +358,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	TracesFromIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileTracesFromIdx, KeysTable: kv.TblTracesFromKeys, ValuesTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
@@ -358,6 +366,7 @@ var Schema = SchemaGen{
 		Accessors:   AccessorHashMap,
 	},
 	TracesToIdx: InvIdxCfg{
+		Enabled:      true,
 		FilenameBase: kv.FileTracesToIdx, KeysTable: kv.TblTracesToKeys, ValuesTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
@@ -449,7 +458,7 @@ var HistoryCompressCfg = seg.Cfg{
 
 func EnableHistoricalRCache() {
 	cfg := Schema.RCacheDomain
-	cfg.Hist.IiCfg.Disable = false
+	cfg.Hist.IiCfg.Enabled = true
 	cfg.Hist.HistoryDisabled = false
 	cfg.Hist.SnapshotsDisabled = false
 	Schema.RCacheDomain = cfg

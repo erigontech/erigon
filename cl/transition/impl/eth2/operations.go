@@ -131,7 +131,7 @@ func (imp *impl) ProcessAttesterSlashing(
 
 	valid, err := state.IsValidIndexedAttestation(s, att1)
 	if err != nil {
-		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
+		return fmt.Errorf("error calculating indexed attestation 1 validity: %w", err)
 	}
 	if !valid {
 		return errors.New("invalid indexed attestation 1")
@@ -139,7 +139,7 @@ func (imp *impl) ProcessAttesterSlashing(
 
 	valid, err = state.IsValidIndexedAttestation(s, att2)
 	if err != nil {
-		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
+		return fmt.Errorf("error calculating indexed attestation 2 validity: %w", err)
 	}
 	if !valid {
 		return errors.New("invalid indexed attestation 2")
@@ -158,7 +158,7 @@ func (imp *impl) ProcessAttesterSlashing(
 		if validator.IsSlashable(currentEpoch) {
 			pr, err := s.SlashValidator(ind, nil)
 			if err != nil {
-				return fmt.Errorf("unable to slash validator: %d: %s", ind, err)
+				return fmt.Errorf("unable to slash validator: %d: %w", ind, err)
 			}
 			if imp.BlockRewardsCollector != nil {
 				imp.BlockRewardsCollector.AttesterSlashings += pr
@@ -216,11 +216,12 @@ func (imp *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit
 		}
 		// Append validator
 		if s.Version() >= clparams.ElectraVersion {
-			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0)
+			if err := statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, 0); err != nil {
+				return err
+			}
 		} else {
 			// Append validator and done
-			statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
-			return nil
+			return statechange.AddValidatorToRegistry(s, publicKey, deposit.Data.WithdrawalCredentials, amount)
 		}
 	}
 	if s.Version() >= clparams.ElectraVersion {
@@ -548,7 +549,7 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 		// Verify that the bid signature is valid
 		valid, err := verifyExecutionPayloadBidSignature(s, signedBid)
 		if err != nil {
-			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %v", err)
+			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %w", err)
 		}
 		if !valid {
 			return errors.New("processExecutionPayloadBid: invalid bid signature")
@@ -1150,8 +1151,7 @@ func (imp *impl) ProcessBlsToExecutionChange(
 	copy(credentials[12:], change.To[:])
 
 	// Update the state with the modified validator.
-	s.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
-	return nil
+	return s.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
 }
 
 func (imp *impl) ProcessAttestations(
@@ -1567,7 +1567,7 @@ func (imp *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex 
 	}
 	propInd, err := s.GetBeaconProposerIndex()
 	if err != nil {
-		return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
+		return fmt.Errorf("error in GetBeaconProposerIndex: %w", err)
 	}
 	if proposerIndex != propInd {
 		return fmt.Errorf(
@@ -1579,7 +1579,7 @@ func (imp *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex 
 	blockHeader := s.LatestBlockHeader()
 	latestRoot, err := (&blockHeader).HashSSZ()
 	if err != nil {
-		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
+		return fmt.Errorf("unable to hash tree root of latest block header: %w", err)
 	}
 	if parentRoot != latestRoot {
 		stateRoot, _ := s.HashSSZ()
@@ -1622,12 +1622,13 @@ func (imp *impl) ProcessRandao(s abstract.BeaconState, randao [96]byte, proposer
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
 	}
-	s.SetRandaoMixAt(int(epoch%s.BeaconConfig().EpochsPerHistoricalVector), mix)
-	return nil
+	return s.SetRandaoMixAt(int(epoch%s.BeaconConfig().EpochsPerHistoricalVector), mix)
 }
 
 func (imp *impl) ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error {
-	state.AddEth1DataVote(eth1Data)
+	if err := state.AddEth1DataVote(eth1Data); err != nil {
+		return err
+	}
 	newVotes := state.Eth1DataVotes()
 
 	// Count how many times body.Eth1Data appears in the votes.
@@ -1655,7 +1656,7 @@ func (imp *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	for i := sSlot; i < slot; i++ {
 		err := transitionSlot(s)
 		if err != nil {
-			return fmt.Errorf("unable to process slot transition: %v", err)
+			return fmt.Errorf("unable to process slot transition: %w", err)
 		}
 
 		if (sSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
@@ -1673,7 +1674,9 @@ func (imp *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 		}
 
 		sSlot += 1
-		s.SetSlot(sSlot)
+		if err := s.SetSlot(sSlot); err != nil {
+			return err
+		}
 		if sSlot%beaconConfig.SlotsPerEpoch != 0 {
 			continue
 		}
@@ -1934,8 +1937,12 @@ func (imp *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidati
 	}
 
 	// Initiate source validator exit and append pending consolidation
-	s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance()))
-	s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay)
+	if err := s.SetExitEpochForValidatorAtIndex(int(sourceIndex), computeConsolidationEpochAndUpdateChurn(s, sourceValidator.EffectiveBalance())); err != nil {
+		return err
+	}
+	if err := s.SetWithdrawableEpochForValidatorAtIndex(int(sourceIndex), sourceValidator.ExitEpoch()+s.BeaconConfig().MinValidatorWithdrawabilityDelay); err != nil {
+		return err
+	}
 
 	s.AppendPendingConsolidation(&solid.PendingConsolidation{
 		SourceIndex: sourceIndex,
@@ -1990,7 +1997,9 @@ func switchToCompoundingValidator(s abstract.BeaconState, vindex uint64) error {
 	newWc := common.Hash{}
 	copy(newWc[:], wc[:])
 	newWc[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
-	s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc)
+	if err := s.SetWithdrawalCredentialForValidatorAtIndex(int(vindex), newWc); err != nil {
+		return err
+	}
 	return state.QueueExcessActiveBalance(s, vindex, &validator)
 }
 

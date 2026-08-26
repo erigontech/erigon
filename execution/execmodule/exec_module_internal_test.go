@@ -98,8 +98,8 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {
 	expectedErr := errors.New("canonicality read failed")
 	e := &ExecModule{
-		bacgroundCtx: t.Context(),
-		blockReader:  headerNumberErrorReader{err: expectedErr},
+		backgroundCtx: t.Context(),
+		blockReader:   headerNumberErrorReader{err: expectedErr},
 	}
 	header := &types.Header{Number: *uint256.NewInt(0)}
 

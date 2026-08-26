@@ -1100,8 +1100,8 @@ func BenchmarkLogJSON(b *testing.B) {
 	})
 
 	erigonLog := &ErigonLog{
-		Log:       *log,
-		Timestamp: hexutil.Uint64(1700000000),
+		Log:            *log,
+		BlockTimestamp: hexutil.Uint64(1700000000),
 	}
 	b.Run("ErigonLog/Single", func(b *testing.B) {
 		b.ReportAllocs()
@@ -1148,7 +1148,7 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 		}
 	})
 
-	erigonLog := &ErigonLog{Log: *log, Timestamp: hexutil.Uint64(1700000000)}
+	erigonLog := &ErigonLog{Log: *log, BlockTimestamp: hexutil.Uint64(1700000000)}
 	erigonEncoded, err := json.Marshal(erigonLog)
 	require.NoError(b, err)
 	var erigonSink ErigonLog
