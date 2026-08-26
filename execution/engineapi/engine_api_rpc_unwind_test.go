@@ -176,12 +176,31 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		require.NotEmpty(t, awaitAsync(t, delayedCode))
 		require.NotZero(t, awaitAsync(t, delayedNonce))
 
-		// The first read may refill StateCache; the second proves that any refill
-		// remains canonical after delayed old-view reads finish.
+		cacheProbeHead, err := eat.MockCl.BuildNewPayload(ctx)
+		require.NoError(t, err)
+		status, err = eat.MockCl.InsertNewPayload(ctx, cacheProbeHead)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, status.Status)
+
+		cacheProbeOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
+		cacheProbeCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
+		advanceToCacheProbe := startAsync(&asyncCalls, func() (struct{}, error) {
+			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, cacheProbeHead)
+		})
+		cacheProbeOverlay.wait(t)
+
+		// This fresh overlay has no writes for these keys, so reads exercise the
+		// shared StateCache instead of the replacement overlay or database fallback.
 		for range 2 {
 			assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, storageRefillAddress, storageSlot))
 			assertContractRPCStateAbsent(t, readContractRPCState(ctx, t, rpcClient, removedAccountAddress, storageSlot))
 		}
+
+		cacheProbeOverlay.release()
+		cacheProbeCleared.wait(t)
+		cacheProbeCleared.release()
+		awaitAsync(t, advanceToCacheProbe)
+		assertCanonicalHead(ctx, t, eat, cacheProbeHead)
 	})
 }
 
