@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -841,6 +843,30 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 
 	assert.Equal(t, `["hello",123]`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
+
+	// Test using WriteRawBytes: it must clear the pending field, or ClosePending
+	// appends a placeholder null right after the value just written.
+	ss.Reset(nil)
+	ss.WriteObjectStart()
+	ss.WriteObjectField("result")
+	ss.WriteRawBytes([]byte(`{"gas":21000}`))
+	assert.Equal(t, 1, ss.Depth())
+	assert.NoError(t, ss.ClosePending(0))
+
+	assert.Equal(t, `{"result":{"gas":21000}}`, string(ss.Buffer()))
+	assert.True(t, ss.IsComplete())
+
+	// Same for a pending comma inside an array.
+	ss.Reset(nil)
+	ss.WriteArrayStart()
+	ss.WriteRawBytes([]byte(`1`))
+	ss.WriteMore()
+	ss.WriteRawBytes([]byte(`2`))
+	assert.Equal(t, 1, ss.Depth())
+	assert.NoError(t, ss.ClosePending(0))
+
+	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
+	assert.True(t, ss.IsComplete())
 }
 
 // TestStackStream_IncompleteStructuresWithFlush tests flushing with various incomplete structures
@@ -1064,4 +1090,65 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+var errWriterGone = errors.New("client gone")
+
+type goneWriter struct{}
+
+func (goneWriter) Write([]byte) (int, error) { return 0, errWriterGone }
+
+// TestFlushErrorDoesNotBuffer pins that a disconnected client cannot make a
+// response accumulate. jsoniter's Flush returns early on a latched error without
+// truncating, so ignoring it would restore the unbounded growth this bounds.
+func TestFlushErrorDoesNotBuffer(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+
+	chunk := strings.Repeat("x", 4096)
+	for range 2000 {
+		s.WriteRaw(chunk)
+	}
+
+	require.Less(t, len(s.stream.Buffer()), 2*FlushThreshold,
+		"buffer grew to %d after the writer failed", len(s.stream.Buffer()))
+	require.Error(t, s.Error(), "the failure must still be reported")
+}
+
+// discardCounter accepts everything and records how much a response produced.
+type discardCounter struct{ n int64 }
+
+func (w *discardCounter) Write(p []byte) (int, error) { w.n += int64(len(p)); return len(p), nil }
+
+// TestBufferBoundedForEveryWriter pins the bound on the writers other than
+// WriteRaw and WriteString. A response made of numbers (trace gas, pc, depth) or
+// of already-encoded bytes has to stream just like a string-heavy one.
+func TestBufferBoundedForEveryWriter(t *testing.T) {
+	rawValue := []byte(`{"pc":1024,"op":"SSTORE","gas":"0x5208"}`)
+	for name, writeValue := range map[string]func(s *StackStream, i int){
+		"WriteInt":      func(s *StackStream, i int) { s.WriteInt(i) },
+		"WriteUint64":   func(s *StackStream, i int) { s.WriteUint64(uint64(i)) },
+		"WriteRawBytes": func(s *StackStream, i int) { s.WriteRawBytes(rawValue) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out discardCounter
+			s := New(&out).(*StackStream)
+			s.WriteArrayStart()
+
+			peak := 0
+			for i := range 200_000 {
+				if i > 0 {
+					s.WriteMore()
+				}
+				writeValue(s, i)
+				if n := len(s.Buffer()); n > peak {
+					peak = n
+				}
+			}
+			s.WriteArrayEnd()
+			require.NoError(t, s.Flush())
+
+			require.Greater(t, out.n, int64(1<<20), "the response must dwarf the buffer to mean anything")
+			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %dMB response", peak, out.n>>20)
+		})
+	}
 }

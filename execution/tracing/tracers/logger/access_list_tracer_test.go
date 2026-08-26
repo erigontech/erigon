@@ -76,6 +76,130 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 	}
 }
 
+// TestTracer_AccessList_Equal pins the cases equal() must reject now that it walks
+// only the receiver: a superset on either side, and same-sized sets with different
+// members, at both the address and the slot level.
+func TestTracer_AccessList_Equal(t *testing.T) {
+	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
+
+	build := func(fill func(accessList)) accessList {
+		al := newAccessList()
+		fill(al)
+		return al
+	}
+
+	oneAddrTwoSlots := func(al accessList) {
+		al.addSlot(addr, slot1)
+		al.addSlot(addr, slot2)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		a, b  func(accessList)
+		equal bool
+	}{
+		{"empty", func(accessList) {}, func(accessList) {}, true},
+		{"same slots inserted in a different order",
+			oneAddrTwoSlots,
+			func(al accessList) { al.addSlot(addr, slot2); al.addSlot(addr, slot1) },
+			true},
+		{"other has an extra address",
+			oneAddrTwoSlots,
+			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
+			false},
+		{"receiver has an extra address",
+			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
+			oneAddrTwoSlots,
+			false},
+		{"same address count, different addresses",
+			func(al accessList) { al.addAddress(addr) },
+			func(al accessList) { al.addAddress(addr2) },
+			false},
+		{"same slot count, different slots",
+			oneAddrTwoSlots,
+			func(al accessList) { al.addSlot(addr, slot1); al.addSlot(addr, slot3) },
+			false},
+		{"other has an extra slot",
+			func(al accessList) { al.addSlot(addr, slot1) },
+			oneAddrTwoSlots,
+			false},
+		{"address-only vs address with a slot",
+			func(al accessList) { al.addAddress(addr) },
+			func(al accessList) { al.addSlot(addr, slot1) },
+			false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := build(tc.a), build(tc.b)
+			require.Equal(t, tc.equal, a.equal(b))
+			require.Equal(t, tc.equal, b.equal(a), "equal must be symmetric")
+		})
+	}
+}
+
+// TestTracer_AccessList_LazySlotMap pins that an address touched only as an address
+// carries no slot map, and that promoting it to a slot-carrying entry keeps its order.
+func TestTracer_AccessList_LazySlotMap(t *testing.T) {
+	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
+
+	al := newAccessList()
+	al.addAddress(addr)
+	al.addAddress(addr2)
+	require.Nil(t, al[addr].slots)
+	require.Nil(t, al[addr2].slots)
+
+	al.addSlot(addr, slot1)
+	al.addSlot(addr, slot2)
+	require.Len(t, al[addr].slots, 2)
+	require.Nil(t, al[addr2].slots)
+
+	require.Equal(t, types.AccessList{
+		{Address: addr, StorageKeys: []common.Hash{slot1, slot2}},
+		{Address: addr2, StorageKeys: []common.Hash{}},
+	}, al.accessList())
+}
+
+// TestTracer_AccessList_SlotFirstAddress covers addSlot on an address the list has
+// never seen: it must take the next order slot rather than a zero one.
+func TestTracer_AccessList_SlotFirstAddress(t *testing.T) {
+	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
+
+	al := newAccessList()
+	al.addAddress(addr)
+	al.addSlot(addr2, slot1)
+
+	require.Equal(t, types.AccessList{
+		{Address: addr, StorageKeys: []common.Hash{}},
+		{Address: addr2, StorageKeys: []common.Hash{slot1}},
+	}, al.accessList())
+}
+
+// TestAccessListTracerLazyAddressSets pins that a fresh tracer leaves both
+// contract-address sets nil, and that markCreated/markUsedBeforeCreation
+// allocate them independently on first write.
+func TestAccessListTracerLazyAddressSets(t *testing.T) {
+	tracer := NewAccessListTracer(nil, nil, nil)
+	require.Nil(t, tracer.createdContracts)
+	require.False(t, tracer.UsedBeforeCreation(addr))
+
+	tracer.markUsedBeforeCreation(addr)
+	require.True(t, tracer.UsedBeforeCreation(addr))
+	require.Nil(t, tracer.createdContracts)
+
+	tracer.markCreated(addr)
+	require.Contains(t, tracer.CreatedContracts(), addr)
+}
+
+// TestAccessListTracerCreatedContractsWritable pins that CreatedContracts always
+// returns a writable map, even before any CREATE: callers writing through the
+// returned set must not panic on a nil map.
+func TestAccessListTracerCreatedContractsWritable(t *testing.T) {
+	tracer := NewAccessListTracer(nil, nil, nil)
+	got := tracer.CreatedContracts()
+	require.NotNil(t, got)
+	got[addr] = struct{}{}
+	require.Contains(t, tracer.createdContracts, addr)
+}
+
 // TestAccessListTracerSeedNew pins that seeding directly from the accumulated maps
 // is observationally the same as the types.AccessList round-trip it replaces, and
 // that the two tracers share nothing.
