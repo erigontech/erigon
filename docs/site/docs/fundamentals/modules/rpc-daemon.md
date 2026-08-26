@@ -103,10 +103,10 @@ Flags:
       --rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)
       --rpc.slow duration                           Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call
       --rpc.streaming.disable                       Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)
-      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses per subscription to filter logs by.
+      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses accepted per log subscription.
       --rpc.subscription.filters.maxheaders int     Maximum number of block headers to store per subscription.
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
-      --rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
+      --rpc.subscription.filters.maxtopics int      Maximum number of topic alternatives accepted across all positions per log subscription.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
@@ -124,4 +124,3 @@ Flags:
       --ws.api.subscribelogs.channelsize int        Size of the channel used for websocket logs subscriptions (default 8192)
       --ws.compression                              Enable Websocket compression (RFC 7692)
 ```
-

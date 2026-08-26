@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1781,9 +1782,17 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 		binary.BigEndian.PutUint64(k, uint64(i))
 		return k
 	}
+	lruLen := func() int {
+		g := c.data.Load()
+		sum := 0
+		for i := range g.shards {
+			sum += g.shards[i].Len()
+		}
+		return sum
+	}
 	check := func(phase string) {
 		t.Helper()
-		require.Equal(t, c.data.Load().lru.Len(), c.Len(), "entry counter drifted after %s", phase)
+		require.Equal(t, lruLen(), c.Len(), "entry counter drifted after %s", phase)
 	}
 
 	for i := range 500 {
@@ -1809,11 +1818,11 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 	}
 	check("stale drops")
 
-	before := c.data.Load()
 	for i := 500; i < 4000; i++ {
 		c.Put(key(i), []byte("v"), 30)
 	}
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+	g := c.data.Load()
+	require.Greater(t, slices.Max(g.curCap), g.startCapPerShard, "no shard grew")
 	check("grow")
 
 	c.Clear()

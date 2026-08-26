@@ -573,6 +573,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
+	doms.SetDisableInlineTouchKey(true) // as parallel exec does: the calculator owns Updates
 	return db, tx, doms
 }
 

@@ -44,6 +44,25 @@ import (
 // onEvict byte counters remain approximate across grow windows: a write lost in
 // a retired generation is counted but never evicted, and a removal a racing
 // copy undid subtracts twice.
+// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
+// freelru's own Len locks every shard, which serialises readers against each
+// other on a path that only wanted a number.
+type lruGen[V any] struct {
+	lru *freelru.ShardedLRU[uint64, V]
+	n   atomic.Int64
+}
+
+func (g *lruGen[V]) len() int { return int(g.n.Load()) }
+
+// add inserts a key the LRU does not already hold -- Put removes first, so it
+// always does -- and the count rises by one; a capacity eviction inside freelru
+// fires OnEvict, which takes it back down.
+func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
+	evicted = g.lru.Add(h, v)
+	g.n.Add(1)
+	return evicted
+}
+
 type growLRU[V any] struct {
 	cur      atomic.Pointer[lruGen[V]]
 	onEvict  func(uint64, V)
