@@ -482,7 +482,7 @@ var (
 	}
 	RpcLogQueryLimit = cli.IntFlag{
 		Name:  "rpc.logs.querylimit",
-		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs and eth_getFilterLogs filter criteria (<=0 = unlimited)",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs, eth_newFilter, and eth_getFilterLogs filter criteria (<=0 = unlimited)",
 		Value: 1_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{

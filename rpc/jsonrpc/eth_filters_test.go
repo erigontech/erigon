@@ -249,27 +249,18 @@ func TestGetFilterLogsReturnsInvalidParamsWhenStoredRangeExceedsLimit(t *testing
 	require.Equal(t, errExceedBlockRange+": 1", rpcErr.Error())
 }
 
-func TestGetFilterLogsAppliesLogQueryLimitAtPollTime(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	mining := txpoolproto.NewMiningClient(conn)
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+func TestNewFilterAppliesLogQueryLimitAtCreation(t *testing.T) {
+	filterManager := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, log.New(), nil)
+	api := &APIImpl{BaseAPI: &BaseAPI{filters: filterManager, logQueryLimit: 1}}
 
 	tests := []struct {
-		name       string
-		criteria   filters.FilterCriteria
-		filterConf rpchelper.FiltersConfig
+		name     string
+		criteria filters.FilterCriteria
 	}{
 		{
 			name: "addresses",
 			criteria: filters.FilterCriteria{
 				Addresses: common.Addresses{{1}, {2}},
-			},
-			filterConf: rpchelper.FiltersConfig{
-				RpcSubscriptionFiltersMaxAddresses: 2,
 			},
 		},
 		{
@@ -277,34 +268,19 @@ func TestGetFilterLogsAppliesLogQueryLimitAtPollTime(t *testing.T) {
 			criteria: filters.FilterCriteria{
 				Topics: [][]common.Hash{{{1}, {2}}},
 			},
-			filterConf: rpchelper.FiltersConfig{
-				RpcSubscriptionFiltersMaxTopics: 2,
-			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			test.filterConf.RpcSubscriptionFiltersTimeout = rpchelper.DefaultFilterTimeout
-			ff := rpchelper.New(ctx, test.filterConf, nil, nil, mining, func() {}, m.Log, nil)
-			base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{
-				Dirs:          m.Dirs,
-				LogQueryLimit: 1,
-			})
-			api := newEthApiForTest(base, m.DB, nil, nil)
-			test.criteria.FromBlock = big.NewInt(10)
-			test.criteria.ToBlock = big.NewInt(10)
-
-			filterID, err := api.NewFilter(ctx, test.criteria)
-			require.NoError(t, err)
-			t.Cleanup(func() {
-				_, _ = api.UninstallFilter(ctx, filterID)
-			})
-
-			_, err = api.GetLogs(ctx, test.criteria)
+			filterID, err := api.NewFilter(t.Context(), test.criteria)
+			if err == nil {
+				_, _ = api.UninstallFilter(t.Context(), filterID)
+			}
 			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
-
-			_, err = api.GetFilterLogs(ctx, filterID)
-			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
+			require.Empty(t, filterID)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
 		})
 	}
 }
@@ -343,14 +319,11 @@ func TestGetFilterLogsDoesNotKeepFilterAlive(t *testing.T) {
 }
 
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
-	m := execmoduletester.New(t)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	mining := txpoolproto.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, log.New(), nil)
 
 	// generate some random topics
-	topics := make([][]common.Hash, 0)
-	for range 10 {
+	topics := make([][]common.Hash, 0, filters.MaxTopicPositions)
+	for range filters.MaxTopicPositions {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
@@ -358,7 +331,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 
 	// generate some addresses
-	addresses := make([]common.Address, 0)
+	addresses := make([]common.Address, 0, 10)
 	for range 10 {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
@@ -371,21 +344,30 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 
 	ids := make([]rpchelper.LogsSubID, 1000)
+	errs := make([]error, len(ids))
+	unsubscribed := make([]bool, len(ids))
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
 	for i := range 1000 {
 		idx := i
 		wg.Go(func() {
-			_, id, _ := ff.SubscribeLogs(32, crit, "")
-			defer func() {
-				time.Sleep(100 * time.Nanosecond)
-				ff.UnsubscribeLogs(id)
-			}()
+			_, id, err := ff.SubscribeLogs(32, crit, rpchelper.ProtocolWS)
 			ids[idx] = id
+			errs[idx] = err
+			if err != nil {
+				return
+			}
+			time.Sleep(100 * time.Nanosecond)
+			unsubscribed[idx] = ff.UnsubscribeLogs(id)
 		})
 	}
 	wg.Wait()
+	for i := range ids {
+		require.NoError(t, errs[i])
+		require.NotEmpty(t, ids[i])
+		require.True(t, unsubscribed[i])
+	}
 }
 
 func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {

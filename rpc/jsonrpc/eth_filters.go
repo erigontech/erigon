@@ -63,6 +63,12 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
+	if err := crit.ValidateTopicPositions(); err != nil {
+		return "", err
+	}
+	if err := validateLogQueryLimit(crit, api.logQueryLimit); err != nil {
+		return "", err
+	}
 	logs, id, err := api.filters.SubscribeLogs(256, crit, rpchelper.ProtocolHTTP)
 	if err != nil {
 		return "", err

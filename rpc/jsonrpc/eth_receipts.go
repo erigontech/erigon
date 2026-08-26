@@ -83,21 +83,19 @@ func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (ty
 	return api.receiptsGenerator.GetCachedReceipts(ctx, hash)
 }
 
-// exceedsLogQueryLimit reports whether the filter has more addresses, or more
-// alternatives in one topic position, than limit allows (<=0 = unlimited).
-func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
+func validateLogQueryLimit(crit filters.FilterCriteria, limit int) error {
 	if limit <= 0 {
-		return false
+		return nil
 	}
 	if len(crit.Addresses) > limit {
-		return true
+		return &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, limit), Code: rpc.ErrCodeInvalidParams}
 	}
 	for _, topics := range crit.Topics {
 		if len(topics) > limit {
-			return true
+			return &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, limit), Code: rpc.ErrCodeInvalidParams}
 		}
 	}
-	return false
+	return nil
 }
 
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
@@ -190,8 +188,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 	defer tx.Rollback()
 
-	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
-		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
+	if err := validateLogQueryLimit(crit, api.logQueryLimit); err != nil {
+		return nil, err
 	}
 
 	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {
