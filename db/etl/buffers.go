@@ -82,7 +82,7 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 
 // etlAvgEntryBytes is what one entry's key+value averages, so a buffer's byte
 // budget divided by it is how many entries it can hold.
-var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 512)
+var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 256)
 
 func entriesIn(bufBytes datasize.ByteSize) int { return int(bufBytes) / etlAvgEntryBytes }
 
