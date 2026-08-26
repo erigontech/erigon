@@ -6,11 +6,8 @@ participants:
     cl_image: test/erigon:current
     cl_log_level: "debug"
     use_separate_vc: true
-    vc_type: lighthouse
-    # Keep lighthouse v7.0.1 here: v8 submits attestations only as Electra
-    # SingleAttestation, which caplin's pre-Electra pool endpoint rejects on
-    # this Deneb network (the pinned ethereum-package can't do Electra genesis).
-    vc_image: sigp/lighthouse:v7.0.1
+    vc_type: lodestar
+    vc_image: chainsafe/lodestar:v1.46.0
 network_params:
   preset: "minimal"
   deneb_fork_epoch: 0

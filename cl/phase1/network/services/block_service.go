@@ -314,20 +314,18 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 			return err
 		}
 	}
-	var finalizedCheckpoint solid.Checkpoint
+	finalizedCheckpoint := b.forkchoiceStore.FinalizedCheckpoint()
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
-		finalizedStartSlot, ok := safeMultiplyUint64(headState.FinalizedCheckpoint().Epoch, b.beaconCfg.SlotsPerEpoch)
+		finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, b.beaconCfg.SlotsPerEpoch)
 		if !ok {
 			return errors.New("finalized checkpoint slot is not representable")
 		}
 		if msg.Block.Slot <= finalizedStartSlot {
 			return fmt.Errorf("%w: block slot %d is not after finalized slot %d", ErrIgnore, msg.Block.Slot, finalizedStartSlot)
 		}
-		finalizedCheckpoint = headState.FinalizedCheckpoint()
-
 		if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
 			return err
 		} else if !ok {

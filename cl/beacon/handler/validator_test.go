@@ -28,8 +28,11 @@ import (
 
 	mockaggregation "github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -216,6 +219,55 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 
 		t.True(t.gomockCtrl.Satisfied(), "mock expectations were not met")
 	}
+}
+
+func (t *validatorTestSuite) TestGetEthV2ValidatorAggregateAttestationUsesPreElectraPool() {
+	clock := eth_clock.NewMockEthereumClock(t.gomockCtrl)
+	t.apiHandler.ethClock = clock
+	t.apiHandler.beaconChainCfg = &clparams.BeaconChainConfig{SlotsPerEpoch: 8}
+
+	dataRoot := common.HexToHash("0x123")
+	attestation := &solid.Attestation{Data: &solid.AttestationData{Slot: 1}}
+	clock.EXPECT().StateVersionByEpoch(uint64(0)).Return(clparams.DenebVersion)
+	t.mockAggrPool.EXPECT().GetAggregatationByRoot(dataRoot).Return(attestation)
+
+	req := httptest.NewRequestWithContext(t.T().Context(), http.MethodGet, "/eth/v2/validator/aggregate_attestation?attestation_data_root="+dataRoot.String()+"&slot=1&committee_index=0", nil)
+	response, err := t.apiHandler.GetEthV2ValidatorAggregateAttestation(httptest.NewRecorder(), req)
+	t.Require().NoError(err)
+	t.Require().Same(attestation, response.Data)
+}
+
+func (t *validatorTestSuite) TestGetEthV2ValidatorAggregateAttestationRejectsPreElectraCommitteeMismatch() {
+	clock := eth_clock.NewMockEthereumClock(t.gomockCtrl)
+	t.apiHandler.ethClock = clock
+	t.apiHandler.beaconChainCfg = &clparams.BeaconChainConfig{SlotsPerEpoch: 8}
+
+	dataRoot := common.HexToHash("0x123")
+	attestation := &solid.Attestation{Data: &solid.AttestationData{Slot: 1, CommitteeIndex: 0}}
+	clock.EXPECT().StateVersionByEpoch(uint64(0)).Return(clparams.DenebVersion)
+	t.mockAggrPool.EXPECT().GetAggregatationByRoot(dataRoot).Return(attestation)
+
+	req := httptest.NewRequestWithContext(t.T().Context(), http.MethodGet, "/eth/v2/validator/aggregate_attestation?attestation_data_root="+dataRoot.String()+"&slot=1&committee_index=3", nil)
+	_, err := t.apiHandler.GetEthV2ValidatorAggregateAttestation(httptest.NewRecorder(), req)
+	var endpointErr *beaconhttp.EndpointError
+	t.Require().ErrorAs(err, &endpointErr)
+	t.Require().Equal(http.StatusBadRequest, endpointErr.Code)
+}
+
+func (t *validatorTestSuite) TestGetEthV2ValidatorAggregateAttestationUsesCommitteePoolAfterElectra() {
+	clock := eth_clock.NewMockEthereumClock(t.gomockCtrl)
+	t.apiHandler.ethClock = clock
+	t.apiHandler.beaconChainCfg = &clparams.BeaconChainConfig{SlotsPerEpoch: 8}
+
+	dataRoot := common.HexToHash("0x123")
+	attestation := &solid.Attestation{Data: &solid.AttestationData{Slot: 8}}
+	clock.EXPECT().StateVersionByEpoch(uint64(1)).Return(clparams.ElectraVersion)
+	t.mockAggrPool.EXPECT().GetAggregatationByRootAndCommittee(dataRoot, uint64(3)).Return(attestation)
+
+	req := httptest.NewRequestWithContext(t.T().Context(), http.MethodGet, "/eth/v2/validator/aggregate_attestation?attestation_data_root="+dataRoot.String()+"&slot=8&committee_index=3", nil)
+	response, err := t.apiHandler.GetEthV2ValidatorAggregateAttestation(httptest.NewRecorder(), req)
+	t.Require().NoError(err)
+	t.Require().Same(attestation, response.Data)
 }
 
 func TestValidator(t *testing.T) {
