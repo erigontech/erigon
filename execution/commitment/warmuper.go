@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -115,6 +116,11 @@ func (w *Warmuper) Start() {
 				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
+			readBranch := trieCtx.Branch
+			if b, ok := trieCtx.(BorrowedBranchReader); ok {
+				readBranch = b.BranchBorrowed
+			}
+
 			for {
 				select {
 				case <-w.ctx.Done():
@@ -123,7 +129,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.warmupKey(readBranch, item.hashedKey, item.startDepth)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -141,13 +147,15 @@ func (w *Warmuper) Start() {
 	})
 }
 
-func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
+// warmupKey descends one key, parsing each branch and dropping it before the next
+// read, which is what lets the caller pass a borrowing reader.
+func (w *Warmuper) warmupKey(readBranch func([]byte) ([]byte, kv.Step, error), hashedKey []byte, startDepth int) {
 	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
-		branchData, _, err := trieCtx.Branch(prefix)
+		branchData, _, err := readBranch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)

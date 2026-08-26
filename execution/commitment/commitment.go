@@ -121,6 +121,14 @@ type PatriciaContext interface {
 	Storage(plainKey []byte) (*Update, error)
 }
 
+// BorrowedBranchReader reads branch bytes without copying them. The returned
+// slice aliases storage the context reuses, so it is only valid until that
+// context's next read. Implement it only where that is true, and use it only
+// from callers that are done with the bytes before reading again.
+type BorrowedBranchReader interface {
+	BranchBorrowed(prefix []byte) ([]byte, kv.Step, error)
+}
+
 type TrieVariant string
 
 const (

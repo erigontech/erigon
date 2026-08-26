@@ -954,7 +954,7 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.branch(pref)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -963,10 +963,25 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// underlying state cache / getter aliases shared storage that another goroutine
 	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
 	// boundary so all downstream consumers are safe.
+	return bytes.Clone(enc), step, nil
+}
+
+// BranchBorrowed returns the branch bytes uncopied. The slice aliases the mdbx
+// page or the file getter's buffer and this context's next read invalidates it,
+// so it suits only callers that finish with it before reading again.
+func (sdc *TrieContext) BranchBorrowed(pref []byte) ([]byte, kv.Step, error) {
+	return sdc.branch(pref)
+}
+
+func (sdc *TrieContext) branch(pref []byte) ([]byte, kv.Step, error) {
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	return bytes.Clone(enc), step, nil
+	return enc, step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
