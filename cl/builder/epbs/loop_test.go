@@ -292,6 +292,33 @@ func TestBuilderLoopDuplicateHeadKeepsReusedPayload(t *testing.T) {
 	require.Equal(t, 2, exec.assembleCalls)
 }
 
+func TestBuilderLoopBoundsSpeculativeBuildsAcrossSameSlotHeads(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	sc := testSlotContext()
+	for i := uint64(0); i <= maxSpeculativeBuildsPerSlot; i++ {
+		sc.Parent.BlockRoot = common.BigToHash(new(big.Int).SetUint64(i + 1))
+		sc.Parent.ExecutionHash = common.BigToHash(new(big.Int).SetUint64(i + 1_000))
+		require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	}
+
+	require.Len(t, loop.speculativePayloads, maxSpeculativeBuildsPerSlot)
+	require.Len(t, loop.specBuild.builds, maxSpeculativeBuildsPerSlot)
+}
+
+func TestBuilderLoopDoesNotBidAfterAbsoluteDeadline(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	sc.BidDeadline = time.Now().Add(-time.Millisecond)
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Empty(t, submitter.submittedBids)
+	require.Empty(t, loop.pendingPayloads)
+}
+
 func TestBuilderLoopAcceptsClampedProposerGasTarget(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	sc := testSlotContext()
@@ -793,6 +820,25 @@ func TestBuildDataColumnSidecars_InvalidBlob(t *testing.T) {
 	require.Contains(t, err.Error(), "blob 0")
 }
 
+func TestPendingPayloadCachesCellAndProofDerivationAcrossRevealRetries(t *testing.T) {
+	previous := computeCellsAndKZGProofs
+	calls := 0
+	computeCellsAndKZGProofs = func([]byte) ([]cltypes.Cell, []cltypes.KZGProof, error) {
+		calls++
+		return make([]cltypes.Cell, 128), make([]cltypes.KZGProof, 128), nil
+	}
+	t.Cleanup(func() { computeCellsAndKZGProofs = previous })
+	pending := &pendingPayload{assembled: &eladapter.AssembledPayload{BlobsBundle: &eladapter.BlobsBundle{
+		Blobs: [][]byte{{1}},
+	}}}
+
+	_, err := pending.buildDataColumnSidecars(100, common.HexToHash("0xbeef"))
+	require.NoError(t, err)
+	_, err = pending.buildDataColumnSidecars(100, common.HexToHash("0xbeef"))
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+}
+
 func TestBuilderLoop_BidWonReveal_WrongBuilder(t *testing.T) {
 	// If a different builder wins, we must NOT reveal our payload.
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
@@ -1192,12 +1238,8 @@ func TestBuilderLoop_EnvelopeUsesConstructor(t *testing.T) {
 	// We can verify it's a proper BLS signature (non-zero)
 	require.NotEqual(t, common.Bytes96{}, env.Signature)
 
-	fmt.Printf("DomainBeaconBuilder: %x\n", loop.beaconCfg.DomainBeaconBuilder)
 }
 
-// TestBuilderLoop_FastPath_FeeRecipientMismatch verifies BUG 1 fix:
-// when a speculative build exists but the fee recipient doesn't match proposer
-// preferences, the builder falls through to the rebuild path.
 func TestBuilderLoop_FastPath_FeeRecipientMismatch(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	ctx := context.Background()
@@ -1287,8 +1329,11 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 		"bid gas_limit must follow the parent-relative proposer target")
 }
 
-// TestPreferencesWatcher_EarlyArrival verifies BUG 3 fix:
-// preferences arriving BEFORE WaitForPreferences is called are not lost.
+func TestPayloadGasLimitMatchesConsensusTargetAtProtocolMinimum(t *testing.T) {
+	require.True(t, payloadGasLimitMatchesTarget(4_997, 5_000, 0))
+	require.False(t, payloadGasLimitMatchesTarget(5_000, 5_000, 0))
+}
+
 func TestPreferencesWatcher_EarlyArrival(t *testing.T) {
 	w := NewPreferencesWatcher()
 	prefs := &cltypes.SignedProposerPreferences{
@@ -1327,9 +1372,6 @@ func TestPreferencesWatcher_EarlyArrival_WrongSlot(t *testing.T) {
 	require.Contains(t, err.Error(), "timeout")
 }
 
-// TestBuilderLoop_OnBidWon_BeaconBlockRootDistinctFromParent verifies BUG 2 fix:
-// the envelope's BeaconBlockRoot is set to the containing block root, NOT the
-// parent block root used for pending payload lookup.
 func TestBuilderLoop_OnBidWon_BeaconBlockRootDistinctFromParent(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	ctx := context.Background()
@@ -1388,12 +1430,14 @@ func TestBuilderLoop_MultiMarket(t *testing.T) {
 		Slot:          99,
 		BlockRoot:     common.HexToHash("0xaaaa"),
 		ExecutionHash: common.HexToHash("0xaa01"),
+		GasLimit:      30_000_000,
 		ShouldExtend:  true,
 	}
 	parentB := ParentInfo{
 		Slot:          98,
 		BlockRoot:     common.HexToHash("0xbbbb"),
 		ExecutionHash: common.HexToHash("0xbb02"),
+		GasLimit:      30_000_000,
 		ShouldExtend:  false,
 	}
 

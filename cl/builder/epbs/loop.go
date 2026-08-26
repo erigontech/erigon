@@ -15,19 +15,20 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 const (
-	preferencesTimeout = 4 * time.Second // wait up to 4s into the slot for preferences
-	weiPerGwei         = 1_000_000_000   // consensus layer uses Gwei; EL blockValue is in wei
+	preferencesTimeout          = 4 * time.Second // wait up to 4s into the slot for preferences
+	weiPerGwei                  = 1_000_000_000   // consensus layer uses Gwei; EL blockValue is in wei
+	maxSpeculativeBuildsPerSlot = 128
 )
 
 // pendingPayload is a completed build result waiting for a bid-won reveal.
@@ -41,6 +42,10 @@ type pendingPayload struct {
 	reveals             map[common.Hash]revealState
 	bidValue            uint64
 	reservationReleased bool
+	columnCellsMu       sync.Mutex
+	columnCells         []peerdasutils.CellsAndKZGProofs
+	columnCellsErr      error
+	columnCellsReady    bool
 }
 
 type revealState uint8
@@ -64,6 +69,7 @@ type SlotContext struct {
 	BuilderIndex  uint64
 	BuilderStatus BalanceStatus
 	BuilderFound  bool
+	BidDeadline   time.Time
 }
 
 // BuilderLoop is the slot-driven build-bid-reveal core loop for the ePBS builder.
@@ -146,10 +152,33 @@ func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 	}
 
 	key := speculativeKey{slot: sc.Slot, parentBlockHash: sc.Parent.ExecutionHash, parentBlockRoot: sc.Parent.BlockRoot}
+	var discarded []uint64
 	l.mu.Lock()
+	if _, replacing := l.speculativePayloads[key]; !replacing {
+		trackedForSlot := 0
+		for trackedKey := range l.speculativePayloads {
+			if trackedKey.slot == key.slot {
+				trackedForSlot++
+			}
+		}
+		if trackedForSlot >= maxSpeculativeBuildsPerSlot {
+			for trackedKey, trackedPayloadID := range l.speculativePayloads {
+				if trackedKey.slot == key.slot {
+					delete(l.speculativePayloads, trackedKey)
+					discarded = append(discarded, trackedPayloadID)
+					break
+				}
+			}
+		}
+	}
 	previousPayloadID, replaced := l.speculativePayloads[key]
 	l.speculativePayloads[key] = payloadId
 	l.mu.Unlock()
+	for _, discardedPayloadID := range discarded {
+		if discardedPayloadID != payloadId {
+			l.specBuild.Discard(discardedPayloadID)
+		}
+	}
 	if replaced && previousPayloadID != payloadId {
 		l.specBuild.Discard(previousPayloadID)
 	}
@@ -166,6 +195,14 @@ func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
 	l.releaseReservationsBeforeSlot(sc.Slot)
 	if sc.Slot > 1 {
 		l.pruneBeforeSlot(sc.Slot - 1)
+	}
+	if !sc.BidDeadline.IsZero() {
+		if !time.Now().Before(sc.BidDeadline) {
+			return nil
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, sc.BidDeadline)
+		defer cancel()
 	}
 	prefs, err := l.prefsWatch.WaitForPreferences(ctx, sc.Slot, sc.DependentRoot, preferencesTimeout)
 	if err != nil {
@@ -609,7 +646,7 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		return fmt.Errorf("epbs/loop: sign envelope: %w", err)
 	}
 
-	columnSidecars, err := buildDataColumnSidecars(pending.assembled.BlobsBundle, slot, beaconBlockRoot)
+	columnSidecars, err := pending.buildDataColumnSidecars(slot, beaconBlockRoot)
 	if err != nil {
 		return fmt.Errorf("epbs/loop: data column sidecars: %w", err)
 	}
@@ -769,6 +806,8 @@ func payloadWithdrawalsMatch(payload *solid.ListSSZ[*cltypes.Withdrawal], expect
 	return true
 }
 
+var computeCellsAndKZGProofs = peerdasutils.ComputeCellsAndKZGProofs
+
 func buildDataColumnSidecars(blobsBundle *eladapter.BlobsBundle, slot uint64, beaconBlockRoot common.Hash) ([]*cltypes.DataColumnSidecar, error) {
 	if blobsBundle == nil || len(blobsBundle.Blobs) == 0 {
 		return nil, nil
@@ -776,7 +815,7 @@ func buildDataColumnSidecars(blobsBundle *eladapter.BlobsBundle, slot uint64, be
 
 	cellsAndProofsPerBlob := make([]peerdasutils.CellsAndKZGProofs, 0, len(blobsBundle.Blobs))
 	for i, blob := range blobsBundle.Blobs {
-		cells, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob)
+		cells, proofs, err := computeCellsAndKZGProofs(blob)
 		if err != nil {
 			return nil, fmt.Errorf("blob %d: %w", i, err)
 		}
@@ -787,6 +826,30 @@ func buildDataColumnSidecars(blobsBundle *eladapter.BlobsBundle, slot uint64, be
 	}
 
 	return peerdasutils.GetDataColumnSidecarsGloas(slot, beaconBlockRoot, cellsAndProofsPerBlob)
+}
+
+func (p *pendingPayload) buildDataColumnSidecars(slot uint64, beaconBlockRoot common.Hash) ([]*cltypes.DataColumnSidecar, error) {
+	if p == nil || p.assembled == nil || p.assembled.BlobsBundle == nil || len(p.assembled.BlobsBundle.Blobs) == 0 {
+		return nil, nil
+	}
+	p.columnCellsMu.Lock()
+	defer p.columnCellsMu.Unlock()
+	if !p.columnCellsReady {
+		p.columnCells = make([]peerdasutils.CellsAndKZGProofs, 0, len(p.assembled.BlobsBundle.Blobs))
+		for i, blob := range p.assembled.BlobsBundle.Blobs {
+			cells, proofs, err := computeCellsAndKZGProofs(blob)
+			if err != nil {
+				p.columnCellsErr = fmt.Errorf("blob %d: %w", i, err)
+				break
+			}
+			p.columnCells = append(p.columnCells, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
+		}
+		p.columnCellsReady = true
+	}
+	if p.columnCellsErr != nil {
+		return nil, p.columnCellsErr
+	}
+	return peerdasutils.GetDataColumnSidecarsGloas(slot, beaconBlockRoot, p.columnCells)
 }
 
 // buildParams constructs EL builder.Parameters from a SlotContext.
@@ -839,7 +902,7 @@ func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.
 }
 
 func payloadGasLimitMatchesTarget(payloadGasLimit, parentGasLimit, targetGasLimit uint64) bool {
-	return payloadGasLimit == misc.CalcGasLimit(parentGasLimit, targetGasLimit)
+	return clservices.IsGasLimitTargetCompatible(parentGasLimit, payloadGasLimit, targetGasLimit)
 }
 
 // decodeAndHashRequests decodes a RequestsBundle into ExecutionRequests and computes

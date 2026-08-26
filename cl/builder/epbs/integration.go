@@ -378,11 +378,7 @@ func buildSlotContext(
 	if err != nil {
 		return SlotContext{}, err
 	}
-	builderState, err := builderStateForParent(parentState, fc, parent, builderPubkey)
-	if err != nil {
-		return SlotContext{}, err
-	}
-	builderIndex, builderStatus, builderFound := builderStatusForPubkey(builderState, builderPubkey)
+	builderIndex, builderStatus, builderFound := builderStatusForPubkey(parentState, builderPubkey)
 	return SlotContext{
 		Slot: slot,
 		Parent: ParentInfo{
@@ -394,41 +390,15 @@ func buildSlotContext(
 		},
 		DependentRoot: dependentRoot,
 		Timestamp:     timestamp,
+		BidDeadline: time.Unix(int64(timestamp), 0).Add(
+			time.Duration(beaconCfg.SecondsPerSlot) * time.Second * time.Duration(beaconCfg.PayloadDueBps) / 10_000,
+		),
 		PrevRandao:    parentState.GetRandaoMixes(epoch),
 		Withdrawals:   withdrawals,
 		BuilderIndex:  builderIndex,
 		BuilderStatus: builderStatus,
 		BuilderFound:  builderFound,
 	}, nil
-}
-
-func builderStateForParent(baseState *state.CachingBeaconState, fc slotContextForkChoice, parent forkchoice.ParentCandidate, builderPubkey common.Bytes48) (*state.CachingBeaconState, error) {
-	stateCopy, err := baseState.Copy()
-	if err != nil {
-		return nil, fmt.Errorf("copy target parent state: %w", err)
-	}
-	if stateCopy.Version() < clparams.GloasVersion {
-		return stateCopy, nil
-	}
-	if parent.ShouldExtend {
-		envelope, err := fc.ReadEnvelopeFromDisk(parent.BlockRoot)
-		if err != nil {
-			return nil, fmt.Errorf("read FULL parent envelope: %w", err)
-		}
-		if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-			return nil, fmt.Errorf("FULL parent %x missing envelope execution requests", parent.BlockRoot)
-		}
-		if err := (&eth2.Impl{}).ApplyParentExecutionPayload(stateCopy, envelope.Message.ExecutionRequests); err != nil {
-			return nil, fmt.Errorf("apply FULL parent execution payload: %w", err)
-		}
-	}
-	if _, _, found := builderStatusForPubkey(stateCopy, builderPubkey); !found {
-		return stateCopy, nil
-	}
-	if err := (&eth2.Impl{}).ProcessWithdrawals(stateCopy, nil); err != nil {
-		return nil, fmt.Errorf("process target parent withdrawals: %w", err)
-	}
-	return stateCopy, nil
 }
 
 type slotContextForkChoice interface {

@@ -31,6 +31,7 @@ type slotContextForkChoiceStub struct {
 	requestedRoot  common.Hash
 	dependentRoot  common.Hash
 	parentGasLimit uint64
+	envelope       *cltypes.SignedExecutionPayloadEnvelope
 }
 
 func (s *slotContextForkChoiceStub) GetExecutionPayloadGasLimit(common.Hash) (uint64, bool) {
@@ -52,8 +53,8 @@ func (s *slotContextForkChoiceStub) Ancestor(common.Hash, uint64) forkchoice.For
 	return forkchoice.ForkChoiceNode{Root: s.dependentRoot}
 }
 
-func (*slotContextForkChoiceStub) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	return nil, nil
+func (s *slotContextForkChoiceStub) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return s.envelope, nil
 }
 
 func TestBuildSlotContextUsesAndAdvancesParentState(t *testing.T) {
@@ -125,7 +126,7 @@ func TestBuildSlotContextAppliesEpochRandaoReset(t *testing.T) {
 	require.Equal(t, wantRandao, sc.PrevRandao)
 }
 
-func TestBuildSlotContextUsesTargetParentBuilderBalance(t *testing.T) {
+func TestBuildSlotContextUsesGossipValidationBuilderBalance(t *testing.T) {
 	cfg := testBeaconCfg()
 	cfg.SlotsPerEpoch = 8
 	cfg.MinSeedLookahead = 1
@@ -159,6 +160,41 @@ func TestBuildSlotContextUsesTargetParentBuilderBalance(t *testing.T) {
 	require.True(t, sc.BuilderFound)
 	require.Equal(t, uint64(0), sc.BuilderIndex)
 	require.Equal(t, uint64(40), sc.BuilderStatus.Balance)
+}
+
+func TestBuildSlotContextDoesNotApplyFullParentRequestsToGossipEligibility(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.SlotsPerEpoch = 8
+	cfg.MinSeedLookahead = 1
+	cfg.GloasForkEpoch = 3
+	cfg.InitializeForkSchedule()
+	parentState, _, err := devgenesis.BuildGenesisState("slot-context-full-parent", 64, cfg, 0, common.Hash{})
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(parentState, 24))
+	pubkey := common.Bytes48{1}
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey: pubkey, Balance: cfg.MinDepositAmount + 100, Version: cfg.PayloadBuilderVersion,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	parentState.SetBuilders(builders)
+	parentState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{Slot: 24})
+	requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	requests.BuilderDeposits.Append(&solid.BuilderDepositRequest{
+		PubKey: pubkey, WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)}, Amount: 25,
+	})
+	fc := &slotContextForkChoiceStub{
+		state: parentState, dependentRoot: common.HexToHash("0xbbbb"),
+		envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: requests,
+		}},
+	}
+
+	sc, err := buildSlotContext(fc, cfg, 25, 123, forkchoice.ParentCandidate{
+		Slot: 24, BlockRoot: common.HexToHash("0xaaaa"), ShouldExtend: true,
+	}, pubkey)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), sc.BuilderStatus.Balance)
 }
 
 func TestBuildSlotContextDoesNotUseNonPayloadBuilderVersion(t *testing.T) {

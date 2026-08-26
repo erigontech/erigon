@@ -106,10 +106,7 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	return nil
 }
 
-// BroadcastPayload publishes the signed execution payload envelope on the
-// execution_payload gossip topic and processes it through forkchoice so the
-// local node transitions the block from PENDING to FULL status.
-// Pattern follows broadcastSelfBuildEnvelope in block_production.go.
+// BroadcastPayload publishes the envelope and advances the local block to FULL.
 func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, columnSidecars []*cltypes.DataColumnSidecar) error {
 	if envelope == nil || envelope.Message == nil {
 		return fmt.Errorf("epbs/submitter: nil envelope")

@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 type PendingPayloadStore interface {
@@ -138,6 +139,7 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		return nil, err
 	}
 	records := make([]storedPendingPayload, 0, len(entries))
+	removedStale := false
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -150,6 +152,11 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 			return nil, err
 		}
 		if slot < minSlot {
+			if err := dir.RemoveFile(filepath.Join(s.dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Warn("ePBS builder: delete stale persisted pending payload failed", "file", entry.Name(), "err", err)
+			} else {
+				removedStale = true
+			}
 			continue
 		}
 		if len(records) >= maxPendingPayloadFiles {
@@ -170,7 +177,18 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		if err := json.Unmarshal(data, &record); err != nil {
 			return nil, fmt.Errorf("decode pending payload %s: %w", entry.Name(), err)
 		}
+		expectedName := filepath.Base(s.path(pendingPayloadKey{
+			slot: record.Slot, parentBlockRoot: record.ParentBlockRoot, blockHash: record.BlockHash,
+		}))
+		if entry.Name() != expectedName {
+			return nil, fmt.Errorf("pending payload filename %q does not match record identity", entry.Name())
+		}
 		records = append(records, record)
+	}
+	if removedStale {
+		if err := s.syncDir(s.dir); err != nil {
+			log.Warn("ePBS builder: sync stale pending payload cleanup failed", "err", err)
+		}
 	}
 	return records, nil
 }

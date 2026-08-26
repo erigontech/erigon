@@ -264,4 +264,7 @@ func TestBuilderLoopRestoreIgnoresExpiredFilesBeforeCapacityCheck(t *testing.T) 
 	require.NoError(t, restarted.restorePendingPayloads(t.Context(), currentSlot))
 	require.Contains(t, restarted.pendingPayloads, currentKey)
 	require.Len(t, restarted.pendingPayloads, 1)
+	entries, err := os.ReadDir(store.dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
 }

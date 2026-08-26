@@ -61,7 +61,6 @@ func (a *Adapter) GetPayload(ctx context.Context, payloadId uint64) (*AssembledP
 }
 
 // convertResult converts an AssembledBlockResult into CL-compatible types.
-// Mirrors the logic in execmodule/chainreader/chain_reader.go:GetAssembledBlock.
 func convertResult(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig, result *execmodule.AssembledBlockResult) (*AssembledPayload, error) {
 	br := result.Block
 	block := br.Block
