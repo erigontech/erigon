@@ -296,6 +296,15 @@ func (s SnapType) FileName(version Version, from uint64, to uint64) string {
 		version = s.versions.Current
 	}
 
+	// Auto-select naming per endpoint alignment (mirrors
+	// FileInfo.As and IdxFileName{,s}). Non-1000-aligned endpoints
+	// signal a block-side v4 file (mode-C/D emit or retire tail)
+	// whose on-disk name uses the raw-block v4 form so DirtySegment
+	// .Open resolves the correct path.
+	if from%Erigon2MinSegmentSize != 0 || to%Erigon2MinSegmentSize != 0 {
+		return SegmentFileNameV4(version, from, to, s.enum)
+	}
+
 	return SegmentFileName(version, from, to, s.enum)
 }
 

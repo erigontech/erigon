@@ -86,6 +86,46 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 	}
 }
 
+// createTestSegmentFileV4 mirrors createTestSegmentFile but emits the
+// v4 raw-block file naming (%07d-%07d) — used by tests pinning the
+// block-side two-v4-then-merge lifecycle where mode-C unwind and
+// retire tail produce raw-block .seg/.idx pairs. Uses each index's
+// Version.Current to match what SnapType.IdxFileNames looks up at
+// load time.
+func createTestSegmentFileV4(t *testing.T, from, to uint64, name snaptype.Enum, dir string, segVer snaptype.Version, logger log.Logger) {
+	compressCfg := seg.DefaultCfg
+	compressCfg.MinPatternScore = 100
+	segName := snaptype.SegmentFileNameV4(segVer, from, to, name)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, segName), dir, compressCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+	c.DisableFsync()
+	require.NoError(t, c.AddWord([]byte{1}))
+	require.NoError(t, c.Compress())
+
+	// Idx name uses each index's current version — matches
+	// SnapType.IdxFileNames' lookup on the read side.
+	segType, ok := snaptype.ParseFileType(name.String())
+	require.True(t, ok, "unknown snap type %s", name.String())
+	for i, idxDef := range segType.Indexes() {
+		idxPath := filepath.Join(dir, snaptype.IdxFileNameV4(idxDef.Version.Current, from, to, idxDef.Name))
+		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   1,
+			BucketSize: 10,
+			TmpDir:     dir,
+			IndexFile:  idxPath,
+			LeafSize:   8,
+		}, logger)
+		require.NoError(t, err)
+		idx.DisableFsync()
+		// One key per idx — use a distinct byte per index-position so
+		// multi-index types (transactions has 2) don't collide.
+		require.NoError(t, idx.AddKey([]byte{byte(i + 1)}, 0))
+		require.NoError(t, idx.Build(t.Context()))
+		idx.Close()
+	}
+}
+
 func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
@@ -255,6 +295,68 @@ type noGapsTestRange struct{ from, to uint64 }
 
 func (r noGapsTestRange) GetRange() (uint64, uint64) { return r.from, r.to }
 func (r noGapsTestRange) GetGrouping() string        { return "" }
+
+// TestBlockV4Pair_VisibleAndResolvable pins the read path for a
+// block v4 pair on disk: after OpenFolder, both pair members must
+// appear in the visible set (no gap culling, no subset culling),
+// SegmentsMax must reflect the highest block in v4 #2's To-1, and
+// ViewSingleFile at the target block must resolve to v4 #1 while
+// blocks past the cut resolve to v4 #2.
+func TestBlockV4Pair_VisibleAndResolvable(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	ver := version.V1_0
+
+	// Legacy 1000-aligned baseline: chunk [3_490_000, 3_491_000)
+	// covers everything before the v4 pair.
+	for _, typ := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
+		createTestSegmentFile(t, 3_490_000, 3_491_000, typ, dir, ver, logger)
+	}
+	// v4 pair tiling chunk [3_491_000, 3_492_000):
+	//   v4 #1 [3_491_000, 3_491_691) — unwind emission at target 3_491_690.
+	//   v4 #2 [3_491_691, 3_492_000) — retire tail.
+	for _, typ := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
+		createTestSegmentFileV4(t, 3_491_000, 3_491_691, typ, dir, ver, logger)
+		createTestSegmentFileV4(t, 3_491_691, 3_492_000, typ, dir, ver, logger)
+	}
+
+	cfg := ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}
+	s := NewBaseRoSnapshots(cfg, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(t, s.OpenFolder())
+
+	// Visibility: three segments per type (baseline + v4 pair).
+	require.Len(t, s.visible.Load().segments[snaptype2.Enums.Headers], 3,
+		"baseline aligned + v4 #1 + v4 #2 all visible")
+	require.Len(t, s.visible.Load().segments[snaptype2.Enums.Bodies], 3)
+	require.Len(t, s.visible.Load().segments[snaptype2.Enums.Transactions], 3)
+
+	// SegmentsMax = last visible To - 1 = 3_491_999.
+	require.Equal(t, uint64(3_491_999), s.SegmentsMax(),
+		"max block available is v4 #2.To - 1")
+
+	// ViewSingleFile routing: target block 3_491_690 must land in v4 #1
+	// (its [3_491_000, 3_491_691) range); a block past the cut lands
+	// in v4 #2.
+	seg1, ok, release := s.ViewSingleFile(snaptype2.Headers, 3_491_690)
+	require.True(t, ok, "target 3_491_690 must resolve via v4 #1")
+	require.Equal(t, uint64(3_491_000), seg1.From())
+	require.Equal(t, uint64(3_491_691), seg1.To())
+	release()
+
+	seg2, ok, release := s.ViewSingleFile(snaptype2.Headers, 3_491_800)
+	require.True(t, ok, "block 3_491_800 past cut must resolve via v4 #2")
+	require.Equal(t, uint64(3_491_691), seg2.From())
+	require.Equal(t, uint64(3_492_000), seg2.To())
+	release()
+
+	// Baseline block still resolves via the aligned pre-v4 segment.
+	seg0, ok, release := s.ViewSingleFile(snaptype2.Headers, 3_490_500)
+	require.True(t, ok)
+	require.Equal(t, uint64(3_490_000), seg0.From())
+	require.Equal(t, uint64(3_491_000), seg0.To())
+	release()
+}
 
 // TestNoGaps_V4Pair pins that abutting v4 pair members do not report
 // as a gap — the visibility computation must retain both consecutive

@@ -295,7 +295,11 @@ func buildStraddleAccessor(ctx context.Context, newFI snaptype.FileInfo, chainCf
 // Pre-conditions:
 //   - oldFI must be Headers (snaptype2.Enums.Headers)
 //   - oldFI.From ≤ newToBlock < oldFI.To (strict straddle)
-//   - newToBlock is a multiple of Erigon2MinSegmentSize (1000)
+//
+// newToBlock does NOT need to be Erigon2MinSegmentSize-aligned — a
+// non-aligned newToBlock is exactly the v4 #1 case (mode-C/D unwind
+// at a mid-chunk target). FileInfo.As auto-selects the raw-block
+// v4 naming so the rebuilt file is discoverable and mergeable.
 //
 // Returns the new file's snaptype.FileInfo. The new file is written
 // at its FINAL path (not a .tmp suffix) — atomicity with the mode-B
