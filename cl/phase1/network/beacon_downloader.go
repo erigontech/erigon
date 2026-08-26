@@ -152,7 +152,6 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		}
 		log.Debug("[ForwardBeaconDownloader] fetched blocks from beacon API",
 			"fromSlot", httpStart, "count", len(blocks))
-		f.httpPreferred.Store(true)
 		atomicResp.Store(peerAndBlocks{
 			peerId:                 "http-fallback",
 			blocks:                 blocks,
@@ -421,13 +420,19 @@ Process:
 		return
 	}
 
-	var highestSlotProcessed uint64
-	var err error
-	if highestSlotProcessed, err = f.process(f.highestSlotProcessed, processBlocks, envelopes); err != nil {
+	previousHighestSlotProcessed := f.highestSlotProcessed
+	highestSlotProcessed, err := f.process(previousHighestSlotProcessed, processBlocks, envelopes)
+	if err != nil {
+		if resp.fromHTTP {
+			f.httpPreferred.Store(false)
+		}
 		if pid != "http-fallback" {
 			f.rpc.BanPeer(pid)
 		}
 		return
+	}
+	if resp.fromHTTP {
+		f.httpPreferred.Store(highestSlotProcessed > previousHighestSlotProcessed)
 	}
 	if highestSlotProcessed > f.highestSlotProcessed {
 		f.highestSlotProcessed = highestSlotProcessed

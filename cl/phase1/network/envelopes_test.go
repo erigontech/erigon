@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,6 +47,18 @@ type blockedRangeEnvelopeSentinel struct {
 	laterByRoot   chan struct{}
 	byRangeOnce   sync.Once
 	laterRootOnce sync.Once
+}
+
+type immediateEnvelopeSentinel struct {
+	sentinelproto.SentinelClient
+	empty bool
+}
+
+func (s *immediateEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	if s.empty {
+		return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
+	}
+	return nil, errors.New("request failed")
 }
 
 func (s *blockedRangeEnvelopeSentinel) SendRequest(ctx context.Context, req *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
@@ -129,6 +142,42 @@ func TestRequestEnvelopesFranticallyReturnsCallerCancellation(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 	case <-time.After(time.Second):
 		t.Fatal("caller cancellation did not stop the blocked envelope request")
+	}
+}
+
+func TestRequestEnvelopesFranticallyInterruptsRetryDelay(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	previousRetryInterval := requestEnvelopeRetryInterval
+	requestEnvelopeBatchExpiration = 20 * time.Millisecond
+	requestEnvelopeRetryInterval = time.Second
+	t.Cleanup(func() {
+		requestEnvelopeBatchExpiration = previousExpiration
+		requestEnvelopeRetryInterval = previousRetryInterval
+	})
+
+	for _, tc := range []struct {
+		name  string
+		empty bool
+	}{
+		{name: "request_error"},
+		{name: "empty_response", empty: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			rpcClient, _ := newContextBlockingBeaconRPC(ctx, &immediateEnvelopeSentinel{empty: tc.empty})
+			done := make(chan error, 1)
+			go func() {
+				_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}})
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("batch expiration did not interrupt the retry delay")
+			}
+		})
 	}
 }
 

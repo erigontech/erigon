@@ -100,15 +100,24 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 				continue
 			}
 			byRootAttempts++
-			time.Sleep(requestEnvelopeRetryInterval)
+			waitForEnvelopeRetry(requestCtx)
 			continue
 		}
 		if len(needed) > 0 {
 			byRootAttempts++
-			time.Sleep(requestEnvelopeRetryInterval)
+			waitForEnvelopeRetry(requestCtx)
 		}
 	}
 	return received, nil
+}
+
+func waitForEnvelopeRetry(ctx context.Context) {
+	timer := time.NewTimer(requestEnvelopeRetryInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {
