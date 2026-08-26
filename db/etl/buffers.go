@@ -253,7 +253,6 @@ type sortableBuffer struct {
 	curBuf []byte
 	curEnd int32 // data grows up to here
 	curTop int32 // the index grows down to here
-	free   int32 // bytes between the two
 	n      int
 
 	chunks []dataChunk
@@ -290,7 +289,6 @@ func (b *sortableBuffer) nextChunk(n int32) {
 	b.chunks = append(b.chunks, dataChunk{buf: buf, entTop: int32(len(buf))}) //nolint:gosec
 	b.curBuf, b.curEnd, b.curTop = buf, 0, int32(len(buf))                    //nolint:gosec
 	b.chunkBytes += len(buf)
-	b.free = int32(len(buf)) //nolint:gosec
 }
 
 // syncCur puts the chunk being filled back into chunks, where the readers look.
@@ -317,21 +315,22 @@ func (b *sortableBuffer) Put(k, v []byte) {
 		vLen = -1
 	}
 	n := entryHeaderSize + lk + lv
-	if n+entryLocSize > int(b.free) {
-		b.nextChunk(int32(n)) //nolint:gosec
-	}
 	off := int(b.curEnd)
+	if off+n+entryLocSize > int(b.curTop) {
+		b.nextChunk(int32(n)) //nolint:gosec
+		off = 0
+	}
 	// Sliced to exactly n, so the two copies below take the length from the
 	// destination and the compiler drops the min against the source.
 	data := b.curBuf[off : off+n : off+n]
 	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
-	copy(data[entryHeaderSize:entryHeaderSize+lk], k)
-	copy(data[entryHeaderSize+lk:], v)
-	b.curEnd = int32(off + n) //nolint:gosec
 	b.curTop -= entryLocSize
 	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(kLen, int32(off)))) //nolint:gosec
-	b.free -= int32(n) + entryLocSize                                                          //nolint:gosec
+	b.curEnd = int32(off + n)                                                                  //nolint:gosec
 	b.n++
+	// Last, so nothing has to stay live across the copies.
+	copy(data[entryHeaderSize:entryHeaderSize+lk], k)
+	copy(data[entryHeaderSize+lk:], v)
 }
 
 //go:noinline
@@ -341,7 +340,7 @@ func panicKeyTooLong(n int) {
 
 // Size counts the bytes of every chunk taken, minus what is still free in the
 // one being filled. The entry index lives inside the chunks, so it is counted.
-func (b *sortableBuffer) Size() int { return b.chunkBytes - int(b.free) }
+func (b *sortableBuffer) Size() int { return b.chunkBytes - int(b.curTop-b.curEnd) }
 
 func (b *sortableBuffer) Len() int { return b.n }
 
@@ -418,7 +417,7 @@ func (b *sortableBuffer) Reset() {
 	b.chunks, b.heap, b.starts = b.chunks[:0], b.heap[:0], b.starts[:0]
 	b.curBuf, b.curEnd, b.curTop = nil, 0, 0
 	b.concat = false
-	b.free, b.n, b.at, b.atChunk, b.chunkBytes = 0, 0, 0, 0, 0
+	b.n, b.at, b.atChunk, b.chunkBytes = 0, 0, 0, 0
 	b.sortedN = -1
 }
 
