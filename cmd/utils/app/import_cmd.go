@@ -200,14 +200,6 @@ func (s *chainImportSession) finalizeHead() error {
 	})
 }
 
-func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
-	importSession, err := newChainImportSession(ethereum, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	return importSession.finish(importSession.importFile(fn))
-}
-
 func (s *chainImportSession) importFile(fn string) error {
 	ethereum, chainDB, logger := s.ethereum, s.chainDB, s.logger
 	// Watch for Ctrl-C while the import is running.
@@ -334,14 +326,6 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservice
 	}
 
 	return nil
-}
-
-func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
-	if len(chain.Blocks) == 0 {
-		return nil
-	}
-	tipHash := chain.TopBlock.Hash()
-	return insertChain(ethereum, chain, setHead, tipHash, tipHash)
 }
 
 func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool, safeHash, finalizedHash common.Hash) error {
