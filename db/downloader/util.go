@@ -132,7 +132,8 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
-		res = append(res, filepath.Join(subDir, name))
+		// Torrent names are slash-separated everywhere; filepath.Join yields backslashes on Windows.
+		res = append(res, path.Join(subDir, name))
 	}
 	return res, nil
 }
