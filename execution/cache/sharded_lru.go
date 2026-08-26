@@ -122,11 +122,12 @@ func (s *shardedLRU[V]) Remove(h uint64) {
 	s.mus[i].Unlock()
 }
 
-// Replace overwrites a key already in the cache. The removal is what fires
-// onEvict for the old value -- freelru.Add swaps a present key in place and
-// skips the callback -- and holding the shard lock across the pair keeps the
-// key visible to readers throughout. The entry count cannot rise, so no grow
-// is attempted here.
+// Replace overwrites a key. The removal is what fires onEvict for the old value
+// -- freelru.Add swaps a present key in place and skips the callback -- and the
+// shard lock spans the pair, so the gap where the key is absent is never
+// observed. A caller that looked the key up released the shard in between, so
+// this can still insert; the shard stays within curCap either way, and growing
+// on the count it added is left to the next Add.
 func (s *shardedLRU[V]) Replace(h uint64, v V) (evicted bool) {
 	i := s.idx(h)
 	s.mus[i].Lock()
