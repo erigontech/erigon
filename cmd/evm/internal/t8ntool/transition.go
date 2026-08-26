@@ -283,7 +283,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, nil)
 
 	var missingBlockHash bool
 	getHash := func(num uint64) (common.Hash, error) {

@@ -17,13 +17,13 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 )
 
 // OnPayloadAttestationMessage processes a payload attestation message and updates
@@ -33,75 +33,53 @@ import (
 // Caller should handle errors appropriately based on isFromBlock context.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) OnPayloadAttestationMessage(
+	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
 	isFromBlock bool,
 ) error {
-	if msg.Data == nil {
+	if msg == nil || msg.Data == nil {
 		return errors.New("nil payload attestation data")
 	}
 
 	data := msg.Data
 	blockRoot := data.BeaconBlockRoot
 
-	blockState, err := f.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil {
-		return err
-	}
-	if blockState == nil {
-		return fmt.Errorf("%w: block state not found for root %v", ErrIgnore, blockRoot)
-	}
-
-	// Get the PTC for the attestation slot
-	ptc, err := blockState.GetPTC(data.Slot)
-	if err != nil {
-		return err
-	}
-
-	// PTC votes can only change the vote for their assigned beacon block
-	if data.Slot != blockState.Slot() {
-		return fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, data.Slot, blockState.Slot())
-	}
-
-	// [REJECT] Check that the attester is from the PTC
-	var ptcIndices []int
-	for i, idx := range ptc {
-		if idx == msg.ValidatorIndex {
-			ptcIndices = append(ptcIndices, i)
-		}
-	}
-	if len(ptcIndices) == 0 {
-		return fmt.Errorf("validator %d is not in PTC for slot %d", msg.ValidatorIndex, data.Slot)
-	}
-
-	// Verify the signature and check that it's for the current slot if coming from wire
 	if !isFromBlock {
-		// [IGNORE] Check that the attestation is for the current slot.
-		// Use ethClock.GetCurrentSlot() (wall-clock based) instead of f.Slot()
-		// (forkchoice-store time based) because f.Slot() depends on f.time which
-		// is only updated by OnTick and can be stale or uninitialized, causing
-		// uint64 underflow and an absurdly large slot number.
+		// Wall-clock time is authoritative for gossip because store time can lag OnTick.
 		currentSlot := f.ethClock.GetCurrentSlot()
 		if data.Slot != currentSlot {
 			return fmt.Errorf("%w: attestation slot %d is not current slot %d", ErrIgnore, data.Slot, currentSlot)
 		}
-		// [REJECT] Verify the signature
-		indexedAttestation := &cltypes.IndexedPayloadAttestation{
-			AttestingIndices: solid.NewRawUint64List(1, []uint64{msg.ValidatorIndex}),
-			Data:             data,
-			Signature:        msg.Signature,
-		}
-		valid, err := state.IsValidIndexedPayloadAttestation(blockState, indexedAttestation)
-		if err != nil {
+	}
+
+	validationContext, err := f.payloadAttestationValidationContext(ctx, blockRoot, data.Slot)
+	if err != nil {
+		return err
+	}
+	ptcIndices, err := validationContext.ptcPositions(msg)
+	if err != nil {
+		return err
+	}
+
+	// Verify the signature if coming from wire.
+	if !isFromBlock {
+		if err := validationContext.validateSignature(msg); err != nil {
 			return err
-		}
-		if !valid {
-			return errors.New("invalid payload attestation signature")
 		}
 	}
 
-	// Atomically update PTC vote arrays under mutex to prevent concurrent
-	// Load→modify→Store from losing votes. See also applyPayloadAttestationVote.
+	return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, isFromBlock)
+}
+
+func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
+	validatorIndex uint64,
+	ptcIndices []int,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	isFromBlock bool,
+) error {
 	f.ptcVoteMu.Lock()
+	defer f.ptcVoteMu.Unlock()
 
 	var timelinessVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
@@ -111,14 +89,24 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
+	if !isFromBlock {
+		if f.payloadAttestationSeen != nil && data.Slot < f.payloadAttestationSeenSlot {
+			return fmt.Errorf("%w: payload attestation validation completed after a newer slot", ErrIgnore)
+		}
+		if f.payloadAttestationSeen == nil || f.payloadAttestationSeenSlot < data.Slot {
+			f.payloadAttestationSeenSlot = data.Slot
+			f.payloadAttestationSeen = make(map[uint64]struct{}, clparams.PtcSize)
+		}
+		if _, seen := f.payloadAttestationSeen[validatorIndex]; seen {
+			return fmt.Errorf("%w: already processed a valid payload attestation", ErrIgnore)
+		}
+		f.payloadAttestationSeen[validatorIndex] = struct{}{}
+	}
 	for _, idx := range ptcIndices {
 		timelinessVotes[idx] = boolToVote(data.PayloadPresent)
 		dataAvailabilityVotes[idx] = boolToVote(data.BlobDataAvailable)
 	}
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
-
-	f.ptcVoteMu.Unlock()
-
 	return nil
 }

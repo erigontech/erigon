@@ -18,12 +18,14 @@ package validator_params
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 )
 
 type ValidatorParams struct {
 	feeRecipients sync.Map
+	generation    atomic.Uint64
 }
 
 func NewValidatorParams() *ValidatorParams {
@@ -31,7 +33,18 @@ func NewValidatorParams() *ValidatorParams {
 }
 
 func (vp *ValidatorParams) SetFeeRecipient(validatorIndex uint64, feeRecipient common.Address) {
-	vp.feeRecipients.Store(validatorIndex, feeRecipient)
+	// Validator clients re-register unchanged on a schedule, so only a real change counts: a
+	// generation that moved on every call would be useless to anyone caching a lookup.
+	if previous, loaded := vp.feeRecipients.Swap(validatorIndex, feeRecipient); !loaded || previous.(common.Address) != feeRecipient {
+		vp.generation.Add(1)
+	}
+}
+
+// Generation changes whenever a registration is added or its fee recipient changes, and is zero
+// until the first one arrives. A consumer caching a lookup can compare it to find out whether a
+// later registration could have changed the answer.
+func (vp *ValidatorParams) Generation() uint64 {
+	return vp.generation.Load()
 }
 
 func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Address, bool) {

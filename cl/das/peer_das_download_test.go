@@ -136,7 +136,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		rpc:            rpcClient,
 		beaconConfig:   &cfg,
 		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
 		gloasDataCache: gloasDataCache,
 	}
 	req := &downloadRequest{
@@ -146,8 +146,8 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		},
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
