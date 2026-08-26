@@ -89,7 +89,7 @@ var (
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			mxBufNew.Inc()
-			return NewSortableBuffer(etlSmallBufRAM)
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(int(etlSmallBufRAM/512), int(etlSmallBufRAM)) // SortableBuffer does Prealloc only metadata slices - not buffers itself
 		},
 	})
 )
