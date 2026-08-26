@@ -40,7 +40,7 @@ var (
 	chaindata                    string
 	databaseVerbosity            int
 	referenceChaindata           string
-	block, pruneTo, unwind       uint64
+	block, unwind                uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
@@ -50,7 +50,6 @@ var (
 	migration                    string
 	integrityFast, integritySlow bool
 	file                         string
-	HeimdallURL                  string
 	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
@@ -113,10 +112,6 @@ func withBlock(cmd *cobra.Command) {
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withPruneTo(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
-}
-
 func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
@@ -203,10 +198,6 @@ func withChain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chain"))
 }
 
-func withHeimdall(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
-}
-
 func withWorkers(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&syncCfg.ExecWorkerCount, "exec.workers", ethconfig.Defaults.Sync.ExecWorkerCount, "")
 }
@@ -229,13 +220,12 @@ func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
 		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
-// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, unwind.
 func withStageBase(cmd *cobra.Command) {
 	withConfig(cmd)
 	withDataDir(cmd)
 	withChain(cmd)
 	withChaosMonkey(cmd)
-	withHeimdall(cmd)
 	withUnwind(cmd)
 }
 

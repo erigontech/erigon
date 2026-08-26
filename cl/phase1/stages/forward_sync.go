@@ -119,7 +119,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
 				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
-				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); fceErr != nil {
+				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, shouldValidateForwardSyncPayload(cfg, shouldInsert)); fceErr != nil {
 					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
 				} else if shouldInsert {
 					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
@@ -174,6 +174,10 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 	}
 	return
+}
+
+func shouldValidateForwardSyncPayload(cfg *Cfg, shouldInsert bool) bool {
+	return !shouldInsert && canValidateGloasPayloads(cfg)
 }
 
 // forwardSyncProgress returns the slots still to sync and the observed sync rate
@@ -424,7 +428,7 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	if err := cfg.forkChoice.StoreAnchorEnvelope(anchorRoot, env); err != nil {
 		return fmt.Errorf("failed to store anchor envelope: %w", err)
 	}
-	if err := validateAnchorPayloadIfLocalEL(ctx, cfg, anchorRoot, bid, env); err != nil {
+	if err := validateAnchorPayloadWithExecutionClient(ctx, cfg, anchorRoot, bid, env); err != nil {
 		return err
 	}
 
@@ -433,8 +437,8 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 	return nil
 }
 
-func validateAnchorPayloadIfLocalEL(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if !canRetryGloasPayloads(cfg) {
+func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if !canValidateGloasPayloads(cfg) {
 		return nil
 	}
 	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
@@ -498,7 +502,7 @@ func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *
 		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
 	}
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
-	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash)
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
 	if err != nil {
 		return fmt.Errorf("payload header: %w", err)
 	}
@@ -558,7 +562,7 @@ func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.Exe
 	if err != nil {
 		return execution_client.PayloadStatusNone, err
 	}
-	return cfg.executionClient.NewPayload(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
+	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
 }
 
 func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {

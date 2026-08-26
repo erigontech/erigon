@@ -63,6 +63,7 @@ const MaxTxTTL = 60 * time.Second
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
+// 7.1.0 - Add maximum-step and branch-cache options to GetLatest
 // 8.0.0 - LargeValues domain layout: bareKey -> invStep+seqID (DupSort) + seqID -> value (plain)
 var KvServiceAPIVersion = &typesproto.VersionReply{Major: 8, Minor: 0, Patch: 0}
 
@@ -72,7 +73,6 @@ type KvServer struct {
 	kv                 kv.TemporalRoDB
 	stateChangeStreams *StateChangePubSub
 	blockSnapshots     Snapshots
-	borSnapshots       Snapshots
 	historySnapshots   Snapshots
 	ctx                context.Context
 
@@ -96,7 +96,7 @@ type Snapshots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
+func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
 	return &KvServer{
 		trace:              false,
 		rangeStep:          1024,
@@ -104,7 +104,6 @@ func NewKvServer(ctx context.Context, db kv.TemporalRoDB, snapshots Snapshots, b
 		stateChangeStreams: newStateChangeStreams(),
 		ctx:                ctx,
 		blockSnapshots:     snapshots,
-		borSnapshots:       borSnapshots,
 		historySnapshots:   historySnapshots,
 		txs:                map[uint64]*threadSafeTx{},
 		txsMapLock:         &sync.RWMutex{},
@@ -459,9 +458,6 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 	}
 
 	blockFiles := s.blockSnapshots.Files()
-	if s.borSnapshots != nil && !reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
-		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
-	}
 
 	reply = &remoteproto.SnapshotsReply{BlocksFiles: blockFiles}
 	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
@@ -542,7 +538,14 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		if req.Latest {
-			reply.V, _, err = tx.GetLatest(domainName, req.K)
+			opts := kv.GetLatestOptions{}
+			if req.MaxStep != nil {
+				opts = opts.WithMaxStep(kv.Step(req.GetMaxStep()))
+			}
+			if req.BranchCache {
+				opts = opts.WithBranchCache()
+			}
+			reply.V, _, err = tx.GetLatest(domainName, req.K, opts)
 			if err != nil {
 				return err
 			}

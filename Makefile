@@ -274,10 +274,10 @@ test-fixtures-zkevm:
 test-fixtures-legacy:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
 
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
-# against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.yml (single source of truth shared with
-# .github/workflows/test-eest-spec.yml's load-matrix job and
+# EEST spec tests: run cmd/evm runners (statetest, transactiontest, blocktest,
+# enginextest, zkevmtest) against EEST fixtures. The shard list, workers, and
+# failure budgets live in tools/eest-spec-shards.yml (single source of truth
+# shared with .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
 # "-race" dispatch through the race-instrumented evm.race binary so race
 # coverage works without polluting the non-race shards. Each shard provisions
@@ -481,6 +481,10 @@ check-kurtosis:
 		exit 1; \
 	fi; \
 
+## test-kurtosis-setup:             test the bounded Kurtosis CI setup
+test-kurtosis-setup:
+	@bash .github/actions/setup-kurtosis/setup.test.sh
+
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
@@ -597,8 +601,6 @@ grpc: protoc-all $(PROTO_PATH)
 		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
 		--go_opt=Mremote/ethbackend.proto=./remoteproto \
 		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
-		--go_opt=Mremote/bor.proto=./remoteproto \
-		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
 		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go_opt=Mexecution/execution.proto=./executionproto \
@@ -608,7 +610,7 @@ grpc: protoc-all $(PROTO_PATH)
 		--go_opt=Mtxpool/mining.proto=./txpoolproto \
 		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
-		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
+		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
 		txpool/txpool.proto txpool/mining.proto
 
