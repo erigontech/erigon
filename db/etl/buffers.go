@@ -30,7 +30,6 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -89,8 +88,6 @@ var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			mxBufNew.Inc()
-			log.Warn("[dbg] NewSortableBuffer")
 			// Sortable Buffer now pre-allocs only metadata arrays not internal buffers for data-holding (they are-preallocated and have own sync.Pool)
 			return NewSortableBuffer(etlSmallBufRAM).Prealloc(512, int(etlSmallBufRAM))
 		},
@@ -101,8 +98,7 @@ var (
 	etlLargeBufRAM       = BufferOptimalSize
 	LargeSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			mxBufNew.Inc()
-			return NewSortableBuffer(etlLargeBufRAM) //.Prealloc(entriesIn(etlLargeBufRAM), int(etlLargeBufRAM))
+			return NewSortableBuffer(etlLargeBufRAM)
 		},
 	})
 )
@@ -133,14 +129,13 @@ var dataChunks = sync.Pool{New: func() any {
 	return &c
 }}
 
-func getDataChunk() *[]byte { return dataChunks.Get().(*[]byte) }
+func getDataChunk() []byte { return *dataChunks.Get().(*[]byte) }
 
-func putDataChunk(c *[]byte) {
-	if len(*c) != dataChunkSize { // private chunk of an oversized entry
-		log.Warn("[etl] dropping oversized buffer chunk", "size", len(*c), "chunkSize", dataChunkSize)
+func putDataChunk(c []byte) {
+	if len(c) != dataChunkSize { // private chunk of an oversized entry
 		return
 	}
-	dataChunks.Put(c)
+	dataChunks.Put(&c)
 }
 
 type Buffer interface {
@@ -197,11 +192,8 @@ type sortableBuffer struct {
 	// slice keeps Put from re-allocating and copying everything collected so
 	// far. All chunks are dataChunkSize, except the private chunk an entry
 	// larger than that gets. cur is the chunk being filled.
-	chunks []*[]byte
-	// cur is the chunk being filled; curChunk is the pool's own pointer to it,
-	// handed straight back on Reset so recycling allocates nothing.
+	chunks      [][]byte
 	cur         []byte
-	curChunk    *[]byte
 	curBase     int32 // packed location of cur's first byte: curIdx<<dataChunkBits
 	curOff      int32
 	chunkBytes  int
@@ -215,13 +207,11 @@ func (b *sortableBuffer) nextChunk(n int) {
 		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))
 	}
 	if n > dataChunkSize {
-		private := make([]byte, n)
-		b.curChunk = &private
+		b.cur = make([]byte, n)
 	} else {
-		b.curChunk = getDataChunk()
+		b.cur = getDataChunk()
 	}
-	b.cur = *b.curChunk
-	b.chunks = append(b.chunks, b.curChunk)
+	b.chunks = append(b.chunks, b.cur)
 	b.curBase = int32(len(b.chunks)-1) << dataChunkBits //nolint:gosec
 	b.curOff = 0
 	b.chunkBytes += len(b.cur)
@@ -230,7 +220,7 @@ func (b *sortableBuffer) nextChunk(n int) {
 // entryData returns e's bytes: valLen, then the key, then the value.
 func (b *sortableBuffer) entryData(e entryLoc) []byte {
 	off := e.offset()
-	return (*b.chunks[off>>dataChunkBits])[off&(dataChunkSize-1):]
+	return b.chunks[off>>dataChunkBits][off&(dataChunkSize-1):]
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -256,10 +246,6 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
 	copy(data[entryHeaderSize:], k)
 	copy(data[entryHeaderSize+len(k):], v)
-	if len(b.entries) == cap(b.entries) {
-		log.Warn("[dbg] entries grow", "len(b.entries)", len(b.entries))
-		mxEntriesGrow.Inc()
-	}
 	b.entries = append(b.entries, makeEntryLoc(kLen, b.curBase|off))
 	b.curOff = off + int32(n) //nolint:gosec
 }
@@ -311,7 +297,7 @@ func (b *sortableBuffer) Reset() {
 		b.chunks[i] = nil
 	}
 	b.chunks = b.chunks[:0]
-	b.cur, b.curChunk, b.curBase, b.curOff = nil, nil, 0, 0
+	b.cur, b.curBase, b.curOff = nil, 0, 0
 	b.chunkBytes = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
