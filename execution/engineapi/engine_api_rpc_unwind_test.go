@@ -46,6 +46,7 @@ const (
 	rpcTransitionTimeout       = time.Minute
 	rpcClientTimeout           = 10 * rpcTransitionTimeout
 	stateChurnSeed       int64 = 0
+	delayedRPCUserAgent        = "erigon-rpc-unwind-delayed"
 )
 
 func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
@@ -96,15 +97,23 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		_, removedAccountAddress, _, _ := buildChurnChain(ctx, t, eat, 0, nil)
 		storageSlot := stateChurnStorageSlot(0)
 		expectedStorage := common.BigToHash(new(big.Int).SetUint64(stateChurnPokeValue(uint64(seed), 0)))
+		require.NotZero(t, expectedStorage)
 
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		t.Cleanup(transport.CloseIdleConnections)
+		transport := http.DefaultTransport
+		if defaultTransport, ok := transport.(*http.Transport); ok {
+			transport = defaultTransport.Clone()
+		}
+		httpClient := &http.Client{Transport: transport, Timeout: rpcClientTimeout}
+		t.Cleanup(httpClient.CloseIdleConnections)
 		rpcClient, err := rpc.DialHTTPWithClient(
 			eat.JsonRpcUrl,
-			&http.Client{Transport: transport, Timeout: rpcClientTimeout},
+			httpClient,
 			logger,
 		)
 		require.NoError(t, err)
+		delayedRPCClient, err := rpc.DialHTTPWithClient(eat.JsonRpcUrl, httpClient, logger)
+		require.NoError(t, err)
+		delayedRPCClient.SetHeader("User-Agent", delayedRPCUserAgent)
 
 		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, storageRefillAddress, storageSlot), expectedStorage)
 		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, publicationBoundaryAddress, storageSlot), expectedStorage)
@@ -129,15 +138,17 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 
 		// These requests stay bound to the old head across the reorg. Their MVCC
 		// reads may finish later, but they must not refill canonical cache entries.
-		preUnwindViews := transitions.hold(t, execmodule.StateTransitionRPCViewBound, 3)
+		preUnwindViews := transitions.holdMatching(t, execmodule.StateTransitionRPCViewBound, 3, func(ctx context.Context) bool {
+			return rpc.PeerInfoFromContext(ctx).HTTP.UserAgent == delayedRPCUserAgent
+		})
 		delayedStorage := startAsync(&asyncCalls, func() (common.Hash, error) {
-			return readRPCStorage(ctx, rpcClient, storageRefillAddress, storageSlot)
+			return readRPCStorage(ctx, delayedRPCClient, storageRefillAddress, storageSlot)
 		})
 		delayedCode := startAsync(&asyncCalls, func() (hexutil.Bytes, error) {
-			return readRPCCode(ctx, rpcClient, removedAccountAddress)
+			return readRPCCode(ctx, delayedRPCClient, removedAccountAddress)
 		})
 		delayedNonce := startAsync(&asyncCalls, func() (hexutil.Uint64, error) {
-			return readRPCNonce(ctx, rpcClient, removedAccountAddress)
+			return readRPCNonce(ctx, delayedRPCClient, removedAccountAddress)
 		})
 		preUnwindViews.wait(t)
 		oldHeadOverlay.release()
@@ -313,6 +324,32 @@ func awaitAsync[T any](t *testing.T, result <-chan asyncResult[T]) T {
 	}
 }
 
+func TestStateTransitionControllerFiltersObservations(t *testing.T) {
+	type matchKey struct{}
+
+	transitions := newStateTransitionController()
+	hold := transitions.holdMatching(t, execmodule.StateTransitionRPCViewBound, 1, func(ctx context.Context) bool {
+		matched, _ := ctx.Value(matchKey{}).(bool)
+		return matched
+	})
+
+	transitions.observe(t.Context(), execmodule.StateTransitionRPCViewBound)
+	select {
+	case <-hold.reached:
+		t.Fatal("unmatched observation reached the hold")
+	default:
+	}
+
+	matchedCtx, cancel := context.WithCancel(context.WithValue(t.Context(), matchKey{}, true))
+	cancel()
+	transitions.observe(matchedCtx, execmodule.StateTransitionRPCViewBound)
+	select {
+	case <-hold.reached:
+	default:
+		t.Fatal("matched observation did not reach the hold")
+	}
+}
+
 // stateTransitionController turns inline lifecycle callbacks into
 // deterministic barriers.
 type stateTransitionController struct {
@@ -330,6 +367,16 @@ func (c *stateTransitionController) hold(
 	count int,
 ) *stateTransitionHold {
 	t.Helper()
+	return c.holdMatching(t, point, count, nil)
+}
+
+func (c *stateTransitionController) holdMatching(
+	t *testing.T,
+	point execmodule.StateTransitionPoint,
+	count int,
+	matches func(context.Context) bool,
+) *stateTransitionHold {
+	t.Helper()
 	if count < 1 {
 		t.Fatal("transition hold count must be positive")
 	}
@@ -338,6 +385,7 @@ func (c *stateTransitionController) hold(
 		remaining: count,
 		reached:   make(chan struct{}),
 		proceed:   make(chan struct{}),
+		matches:   matches,
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -352,7 +400,7 @@ func (c *stateTransitionController) hold(
 func (c *stateTransitionController) observe(ctx context.Context, point execmodule.StateTransitionPoint) {
 	c.mu.Lock()
 	hold := c.holds[point]
-	if hold == nil {
+	if hold == nil || hold.matches != nil && !hold.matches(ctx) {
 		c.mu.Unlock()
 		return
 	}
@@ -375,6 +423,7 @@ type stateTransitionHold struct {
 	remaining int
 	reached   chan struct{}
 	proceed   chan struct{}
+	matches   func(context.Context) bool
 	once      sync.Once
 }
 
