@@ -80,11 +80,10 @@ func TestProduceBeaconBodyToleratesNilBlobsBundleBeforeDeneb(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	require.True(t, h.beaconChainCfg.GetCurrentStateVersion(targetSlot/h.beaconChainCfg.SlotsPerEpoch).Before(clparams.DenebVersion))
 
-	_, _, err = h.produceBeaconBody(
+	body, _, err := h.produceBeaconBody(
 		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
 		common.Bytes96{}, common.Hash{},
 	)
-	if err != nil {
-		require.NotContains(t, err.Error(), "no blobs bundle")
-	}
+	require.NoError(t, err)
+	require.NotNil(t, body)
 }
