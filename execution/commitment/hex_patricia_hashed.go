@@ -234,7 +234,7 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 }
 
 // Metrics exposes the trie's counters so a caller applying its deferred writes
-// can account them against the round that produced them.
+// can carry them into this trie's log and CSV totals.
 func (hph *HexPatriciaHashed) Metrics() *Metrics { return hph.metrics }
 
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs

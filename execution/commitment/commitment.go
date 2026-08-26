@@ -280,8 +280,9 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
-	// Metrics is the trie's, carried so the caller-owned apply still counts
-	// against the round that produced these writes.
+	// Metrics is the producing trie's, carried so the later apply still reaches
+	// that trie's log and CSV counters. The Prometheus counters do not depend on
+	// it — publishBranchWrites bills those where the write lands.
 	Metrics *Metrics
 }
 

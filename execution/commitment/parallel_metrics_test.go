@@ -168,3 +168,34 @@ func TestRoundCountersDoNotAccumulateAcrossRounds(t *testing.T) {
 	assert.Less(t, second.Metrics.AddressKeys, first.Metrics.AddressKeys*2,
 		"traversals are per-round; a pooled worker must not carry its last round in")
 }
+
+// A branch write must reach the Prometheus counter exactly once. Billing it both
+// where it lands and again from the round's snapshot is invisible in the trie's
+// own MetricValues, so this reads the published counter instead.
+func TestBranchWritesArePublishedOnce(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	beforePuts := mxBranchPuts.GetValueUint64()
+	beforeBytes := mxWriteBytes.GetValueUint64()
+
+	var got *CommitProgress
+	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	require.Positive(t, got.Metrics.UpdateBranch, "the round wrote branches at all")
+	assert.EqualValues(t, got.Metrics.UpdateBranch, mxBranchPuts.GetValueUint64()-beforePuts,
+		"commitment_branch_writes_total counts each write once")
+	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
+		"commitment_branch_write_bytes_total counts each write once")
+}
