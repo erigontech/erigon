@@ -62,6 +62,37 @@ type Dirs struct {
 	Log string
 }
 
+// All returns every real directory a Dirs can point into (excluding
+// RelativeDataDir, which is an alternate form of DataDir, not its own dir).
+// A check that must see every mount point should walk this instead of
+// naming fields, so it doesn't go stale as fields are added here. Unlike
+// New()'s dir.MustExist list, not every returned path is guaranteed to
+// exist on disk; callers must tolerate a path that hasn't been created yet.
+func (d Dirs) All() []string {
+	return []string{
+		d.DataDir,
+		d.Chaindata,
+		d.Tmp,
+		d.Snap,
+		d.SnapIdx,
+		d.SnapHistory,
+		d.SnapDomain,
+		d.SnapAccessors,
+		d.SnapCaplin,
+		d.Downloader,
+		d.TxPool,
+		d.Nodes,
+		d.CaplinBlobs,
+		d.CaplinColumnData,
+		d.CaplinIndexing,
+		d.CaplinLatest,
+		d.CaplinGenesis,
+		d.CaplinHistory,
+		d.Migrations,
+		d.Log,
+	}
+}
+
 func New(datadir string) Dirs {
 	dirs := Open(datadir)
 
