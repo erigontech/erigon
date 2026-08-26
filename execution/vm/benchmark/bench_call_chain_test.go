@@ -244,12 +244,10 @@ func deployDeFiContracts(b testing.TB, statedb *state.IntraBlockState) {
 	deployContract(b, statedb, addrRouter, routerCode)
 }
 
-// BenchmarkDeepStacks recurses into itself until gas runs out. Every frame
-// pushes 8 or 512 zeros onto the 1024-slot stack; CALL consumes seven operands,
-// so 3 or 507 items stay live while the child frame runs. Ported from
-// go-ethereum's BenchmarkLargeDeepStacks and BenchmarkShortDeepStacks. It
-// measures CallContext acquisition at depth, where every context carries a
-// 32 KB Stack.
+// BenchmarkDeepStacks recurses into itself until gas runs out, measuring
+// CallContext acquisition at depth, where every context carries a 32 KB Stack.
+// CALL consumes seven operands, so 3 or 507 of the pushed items stay live while
+// the child frame runs.
 func BenchmarkDeepStacks(b *testing.B) {
 	for _, pushes := range []int{8, 512} {
 		b.Run(fmt.Sprintf("pushes-%d", pushes), func(b *testing.B) {
@@ -279,9 +277,8 @@ func BenchmarkDeepStacks(b *testing.B) {
 
 // BenchmarkDeepCallsWithMemory runs a STATICCALL chain where every frame
 // expands memory before calling the next, so all frames hold memory at once.
-// The two shallow cases match mainnet call trees, where a DeFi router or
-// aggregator nests under twenty frames and each ABI-encodes a few KB; the
-// deep case is a stress shape, not one observed on mainnet.
+// The shallow cases are shaped after mainnet router and aggregator call trees;
+// the deep one is a stress shape, not one observed on mainnet.
 func BenchmarkDeepCallsWithMemory(b *testing.B) {
 	for _, tc := range []struct {
 		name  string
