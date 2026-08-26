@@ -39,14 +39,16 @@ func storePendingJob[K comparable, M any](
 	key K,
 	msg M,
 	creationTime time.Time,
-) {
+) *pendingJob[M] {
 	t.Helper()
-	_, loaded := queue.jobs.LoadOrStore(key, &pendingJob[M]{
+	job := &pendingJob[M]{
 		msg:          msg,
 		creationTime: creationTime,
-	})
+	}
+	_, loaded := queue.jobs.LoadOrStore(key, job)
 	require.False(t, loaded)
 	queue.count.Add(1)
+	return job
 }
 
 func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
@@ -354,6 +356,75 @@ func TestPendingJobQueueConcurrentEnqueueResults(t *testing.T) {
 	require.Equal(t, int32(100)-capacity, full.Load())
 	require.Zero(t, unexpected.Load())
 	require.Equal(t, capacity, queue.count.Load())
+}
+
+func TestPendingJobQueueConcurrentEnqueueRemoveKeepsCountBounded(t *testing.T) {
+	const (
+		workers  = 32
+		attempts = 10_000
+	)
+	queue := newTestPendingJobQueue(t)
+	held := storePendingJob(t, queue, 0, "held", time.Now())
+
+	start := make(chan struct{})
+	continueAfterRemove := make(chan struct{})
+	observerReady := make(chan struct{})
+	var stopObserver atomic.Bool
+	var overCapacity atomic.Bool
+	var observerWG sync.WaitGroup
+	observerWG.Go(func() {
+		close(observerReady)
+		for !stopObserver.Load() {
+			if queue.count.Load() > queue.capacity {
+				overCapacity.Store(true)
+			}
+		}
+	})
+	<-observerReady
+
+	var firstAttempts sync.WaitGroup
+	firstAttempts.Add(workers)
+	var successfulEnqueues atomic.Int32
+	var unexpectedResults atomic.Int32
+	var workersWG sync.WaitGroup
+	for worker := range workers {
+		workersWG.Go(func() {
+			<-start
+			if queue.enqueueKey(worker+1, "message") != pendingJobQueueFull {
+				unexpectedResults.Add(1)
+			}
+			firstAttempts.Done()
+			<-continueAfterRemove
+
+			for attempt := range attempts {
+				key := workers + 1 + worker*attempts + attempt
+				switch queue.enqueueKey(key, "message") {
+				case pendingJobQueueFull:
+				case pendingJobEnqueued:
+					successfulEnqueues.Add(1)
+					job, loaded := queue.jobs.Load(key)
+					if !loaded || !queue.remove(key, job.(*pendingJob[string])) {
+						unexpectedResults.Add(1)
+					}
+				default:
+					unexpectedResults.Add(1)
+				}
+			}
+		})
+	}
+	close(start)
+	firstAttempts.Wait()
+	removed := queue.remove(0, held)
+	close(continueAfterRemove)
+	workersWG.Wait()
+	stopObserver.Store(true)
+	observerWG.Wait()
+
+	require.True(t, removed)
+	require.False(t, overCapacity.Load())
+	require.NotZero(t, successfulEnqueues.Load())
+	require.Zero(t, unexpectedResults.Load())
+	require.Zero(t, queue.count.Load())
 }
 
 func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {

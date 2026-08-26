@@ -164,12 +164,16 @@ func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
-	if q.count.Add(1) > q.capacity {
-		q.count.Add(-1)
-		q.fullCounter.Inc()
-		return false
+	for {
+		count := q.count.Load()
+		if count >= q.capacity {
+			q.fullCounter.Inc()
+			return false
+		}
+		if q.count.CompareAndSwap(count, count+1) {
+			return true
+		}
 	}
-	return true
 }
 
 func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueResult {
