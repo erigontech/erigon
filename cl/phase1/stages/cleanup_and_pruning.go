@@ -27,8 +27,8 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 
-	// Block pruning cuts against the stage's observed head; hot sidecar retention
-	// cuts against wall-clock progress so a stalled stage does not retain data forever.
+	// Sidecar retention cuts against wall-clock, not the stage head, so a stalled
+	// stage does not retain data forever.
 	currentSlot := cfg.ethClock.GetCurrentSlot()
 	pruneBlobDistance := uint64(128600)
 	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.BlobPruningDisabled {

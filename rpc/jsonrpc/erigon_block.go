@@ -91,6 +91,8 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, err
 	}
 	defer tx.Rollback()
+	// Use one overlay view for the timestamp search and block assembly so the
+	// head, bounds, and lookups cannot switch generations.
 	overlayTx := api.filters.WithOverlay(tx)
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
@@ -102,7 +104,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
-	firstHeader, err := api.headerByNumber(ctx, 0, tx)
+	firstHeader, err := api.headerByNumber(ctx, 0, overlayTx)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return currentHeader.Time >= uintTimestamp
 	})
 
-	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), overlayTx)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +156,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	for resultingHeader.Time > uintTimestamp {
-		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, tx)
+		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, overlayTx)
 		if err != nil {
 			return nil, err
 		}

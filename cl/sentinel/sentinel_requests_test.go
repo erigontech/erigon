@@ -228,7 +228,9 @@ func testSentinelBlocksByRange(t *testing.T) {
 		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
-		r.ReadByte()
+		if _, err := r.ReadByte(); err != nil && err != io.EOF {
+			noErr(err)
+		}
 	}
 	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := range blocks {
@@ -310,7 +312,9 @@ func testSentinelBlocksByRoots(t *testing.T) {
 		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
-		r.ReadByte()
+		if _, err := r.ReadByte(); err != nil && err != io.EOF {
+			noErr(err)
+		}
 	}
 	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := 0; i < len(responsePacket); i++ {
