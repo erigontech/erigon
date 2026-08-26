@@ -80,7 +80,8 @@ func TestValidatorSetTest(t *testing.T) {
 		vset.Append(NewValidatorFromParameters(
 			pk, wk, uint64(1), true, uint64(1), uint64(1), uint64(1), uint64(1),
 		))
-		vset.HashSSZ()
+		_, err := vset.HashSSZ()
+		require.NoError(t, err)
 	}
 	firstHash, err := vset.HashSSZ()
 	require.NoError(t, err)

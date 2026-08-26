@@ -161,11 +161,14 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, err := api.resolveCommittedBlockNumber(ctx, tx, blockNrOrHash)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return StorageRangeResult{}, nil
 		}
+		return StorageRangeResult{}, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return StorageRangeResult{}, err
 	}
 
@@ -238,29 +241,20 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	}
 	defer tx.Rollback()
 
-	var blockNumber uint64
-
 	if number, ok := blockNrOrHash.Number(); ok {
-		if number == rpc.PendingBlockNumber {
+		switch number {
+		case rpc.PendingBlockNumber:
 			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
+		case rpc.LatestBlockNumber:
+			blockNrOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 		}
-		if number == rpc.LatestBlockNumber {
-			var err error
-
-			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-			if err != nil {
-				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
-			}
-		} else {
-			blockNumber = uint64(number)
-		}
-
-	} else if _, ok := blockNrOrHash.Hash(); ok {
-		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-		if err2 != nil {
-			return state.IteratorDump{}, err2
-		}
-		blockNumber = bn
+	}
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	if err != nil {
+		return state.IteratorDump{}, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return state.IteratorDump{}, err
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
@@ -588,36 +582,42 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	}
 	defer tx.Rollback()
 
-	header, err := api.headerByHash(ctx, blockHash, tx)
+	// Committed view: the canonical-hash check and the GetAsOf reads below all
+	// go through this plain tx.
+	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
-		return &AccountResult{}, err
+		return nil, err
 	}
-	if header == nil {
+	if blockNumber == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("canonical hash not found %d", header.Number.Uint64())
+		return nil, fmt.Errorf("canonical hash not found %d", *blockNumber)
 	}
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
 	}
+	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
+		return nil, err
+	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, header.Number.Uint64())
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	ttx := tx
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], minTxNum+txIndex+1)
+	asOfTxNum := minTxNum + txIndex + 1
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -634,7 +634,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -649,21 +649,27 @@ type AccountResult struct {
 	CodeHash common.Hash    `json:"codeHash"`
 }
 
-// GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
+// GetRawHeader implements debug_getRawHeader and returns an RLP-encoded header for a block number or hash.
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if api.pendingBlock() != nil {
+			return nil, nil
+		}
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
 		}
 		return nil, err
 	}
-	header, err := api._blockReader.Header(ctx, tx, h, n)
+	header, err := api._blockReader.Header(ctx, overlayTx, h, n)
 	if err != nil {
 		return nil, err
 	}
@@ -675,12 +681,18 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 
 // Implements debug_getRawBlock - Returns an RLP-encoded block
 func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if api.pendingBlock() != nil {
+			return nil, nil
+		}
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -688,12 +700,12 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, n)
+	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, n)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, h, n)
+	block, err := api.blockWithSenders(ctx, overlayTx, h, n)
 	if err != nil {
 		return nil, err
 	}
@@ -711,7 +723,8 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -719,19 +732,19 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, overlayTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if block == nil {
 		return nil, nil
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, err := api.getReceipts(ctx, overlayTx, block)
 	if err != nil {
 		return nil, err
 	}
@@ -792,7 +805,8 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, overlayTx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -801,17 +815,17 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, overlayTx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
