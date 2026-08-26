@@ -106,6 +106,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	return decodeAndReadNoForkDigest(r, val, version, nil)
 }
 
+// DecodeAndReadNoForkDigestExact decodes a payload with an exact uncompressed size and no trailing data.
 func DecodeAndReadNoForkDigestExact(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize uint64) error {
 	return decodeAndReadNoForkDigest(r, val, version, &expectedSize)
 }
@@ -128,7 +129,7 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	var maxCompressedSize uint64
 	if expectedSize != nil {
 		maxCompressedSize = 32 + encodedLn + encodedLn/6
-		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize}
+		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize + 1}
 		compressedInput = compressedReader
 	}
 	sr := snappypool.Reader(compressedInput)
@@ -145,11 +146,13 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		compressedBytes := compressedReader.read
 		var extra [1]byte
 		_, err := io.ReadFull(sr, extra[:])
-		if errors.Is(err, errCompressedPayloadLimit) {
-			if compressedReader.read != compressedBytes {
-				return errors.New("payload contains trailing bytes")
-			}
-		} else if !errors.Is(err, io.EOF) || compressedReader.read != compressedBytes {
+		if compressedReader.read > maxCompressedSize {
+			return errCompressedPayloadLimit
+		}
+		if err != nil && !errors.Is(err, io.EOF) {
+			return fmt.Errorf("unable to verify payload end: %w", err)
+		}
+		if err == nil || compressedReader.read != compressedBytes {
 			return errors.New("payload contains trailing bytes")
 		}
 	}

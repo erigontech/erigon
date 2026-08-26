@@ -18,6 +18,7 @@ package ssz_snappy
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,19 @@ var snappyStreamIdentifier = []byte{0xff, 0x06, 0x00, 0x00, 's', 'N', 'a', 'P', 
 type countingReader struct {
 	r     *bytes.Reader
 	bytes int
+}
+
+type terminalErrorReader struct {
+	r   *bytes.Reader
+	err error
+}
+
+func (r *terminalErrorReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if n == 0 {
+		return 0, r.err
+	}
+	return n, err
 }
 
 func (r *countingReader) Read(p []byte) (int, error) {
@@ -68,7 +82,7 @@ func TestDecodeAndReadNoForkDigestExactBoundsCompressedInput(t *testing.T) {
 	reader := &countingReader{r: bytes.NewReader(encoded.Bytes())}
 	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
 	require.Error(t, err)
-	require.LessOrEqual(t, reader.bytes, 1+32+8+8/6)
+	require.LessOrEqual(t, reader.bytes, 1+32+8+8/6+1)
 }
 
 func TestDecodeAndReadNoForkDigestExactCompressedLimitIsInclusive(t *testing.T) {
@@ -94,6 +108,16 @@ func TestDecodeAndReadNoForkDigestExactCompressedLimitIsInclusive(t *testing.T) 
 
 	overMax := append(append([]byte{}, exactMax...), 0)
 	reader := &countingReader{r: bytes.NewReader(overMax)}
-	require.NoError(t, DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize))
-	require.LessOrEqual(t, reader.bytes, 1+maxCompressedSize)
+	require.ErrorIs(t, DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize), errCompressedPayloadLimit)
+	require.LessOrEqual(t, reader.bytes, 1+maxCompressedSize+1)
+}
+
+func TestDecodeAndReadNoForkDigestExactPreservesTerminalReadError(t *testing.T) {
+	var encoded bytes.Buffer
+	require.NoError(t, EncodeAndWrite(&encoded, &cltypes.Ping{Id: 1}))
+
+	terminalErr := errors.New("terminal read error")
+	reader := &terminalErrorReader{r: bytes.NewReader(encoded.Bytes()), err: terminalErr}
+	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
+	require.ErrorIs(t, err, terminalErr)
 }
