@@ -107,7 +107,7 @@ var (
 	LargeSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			mxBufNew.Inc()
-			return NewSortableBuffer(etlLargeBufRAM).Prealloc(entriesIn(etlLargeBufRAM), int(etlLargeBufRAM))
+			return NewSortableBuffer(etlLargeBufRAM) //.Prealloc(entriesIn(etlLargeBufRAM), int(etlLargeBufRAM))
 		},
 	})
 )
