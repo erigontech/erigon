@@ -377,7 +377,6 @@ func TestPBinLeafValueRoutesByZone(t *testing.T) {
 func TestPBinLeafCellHashChecksZoneLength(t *testing.T) {
 	t.Parallel()
 
-	var h pbinHasher
 	u := Update{Flags: StorageUpdate, StorageLen: pbinValueLength}
 
 	for _, tc := range []struct {
@@ -390,6 +389,8 @@ func TestPBinLeafCellHashChecksZoneLength(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			// pbinHasher carries a scratch buffer, so a parallel subtest needs its own.
+			var h pbinHasher
 			c := pbinCell{kind: pbinNodeLeaf, prefix: pbinPathFromBytes(tc.key), Update: u}
 			var path pbinBitpath
 			_, err := h.cellHash(&c, &path)
