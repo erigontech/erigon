@@ -516,7 +516,7 @@ func (b *sortableBuffer) advance() {
 		c.loadKey()
 	}
 	if len(b.heap) > 0 {
-		b.siftDown(0)
+		b.siftRoot()
 	}
 	b.at++
 }
@@ -533,6 +533,34 @@ func (b *sortableBuffer) less(x, y int32) bool {
 		return r < 0
 	}
 	return x < y
+}
+
+// siftRoot restores the heap after the root's entry moved on. It sinks the hole
+// to a leaf taking the smaller child, then climbs back until the old root fits,
+// which costs one compare a level instead of siftDown's two. The run that just
+// won usually holds a larger key now, so the hole nearly always reaches a leaf.
+func (b *sortableBuffer) siftRoot() {
+	x, i := b.heap[0], 0
+	for {
+		l := 2*i + 1
+		if l >= len(b.heap) {
+			break
+		}
+		if r := l + 1; r < len(b.heap) && b.less(b.heap[r], b.heap[l]) {
+			l = r
+		}
+		b.heap[i] = b.heap[l]
+		i = l
+	}
+	for i > 0 {
+		p := (i - 1) / 2
+		if b.less(b.heap[p], x) {
+			break
+		}
+		b.heap[i] = b.heap[p]
+		i = p
+	}
+	b.heap[i] = x
 }
 
 func (b *sortableBuffer) siftDown(i int) {
