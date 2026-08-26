@@ -632,11 +632,7 @@ func (r *BlockReader) verifyFrozenIdentity(ctx context.Context, tx kv.Getter, ha
 	if hash == emptyHash {
 		return true, nil
 	}
-	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
-	if err != nil {
-		return false, err
-	}
-	return ok && canonicalHash == hash, nil
+	return r.IsCanonical(ctx, tx, hash, blockHeight)
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
