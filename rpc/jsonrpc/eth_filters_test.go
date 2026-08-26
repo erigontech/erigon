@@ -97,6 +97,16 @@ func TestLogFilterEndpointsRejectTooManyTopicPositions(t *testing.T) {
 	}
 }
 
+func TestGetLogsAppliesLogQueryLimitBeforeOpeningTransaction(t *testing.T) {
+	api := &APIImpl{BaseAPI: &BaseAPI{logQueryLimit: 1}}
+	_, err := api.GetLogs(t.Context(), filters.FilterCriteria{Addresses: make(common.Addresses, 2)})
+
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.EqualError(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
+}
+
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)

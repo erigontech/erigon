@@ -179,6 +179,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if err := crit.ValidateTopicPositions(); err != nil {
 		return nil, err
 	}
+	if err := validateLogQueryLimit(crit, api.logQueryLimit); err != nil {
+		return nil, err
+	}
 
 	logs := types.RPCLogs{}
 
@@ -187,10 +190,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return logs, beginErr
 	}
 	defer tx.Rollback()
-
-	if err := validateLogQueryLimit(crit, api.logQueryLimit); err != nil {
-		return nil, err
-	}
 
 	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {
 		return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
