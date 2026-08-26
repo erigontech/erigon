@@ -80,11 +80,8 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// etlAvgEntryBytes is deliberately under the average seen: bigger entries
-// flush before they reach the predicted count, smaller ones re-grow past it.
-var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 20)
-
 func entriesIn(bufBytes datasize.ByteSize) int {
+	const etlAvgEntryBytes = 20
 	return int(bufBytes) / (etlAvgEntryBytes + entryLocSize)
 }
 
@@ -96,7 +93,8 @@ var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			return NewSortableBuffer(etlSmallBufRAM).Prealloc(entriesIn(etlSmallBufRAM), int(etlSmallBufRAM))
+			// Sortable Buffer now pre-allocs only metadata arrays not internal buffers for data-holding (they are-preallocated and have own sync.Pool)
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(entriesIn(etlSmallBufRAM)/16, int(etlSmallBufRAM))
 		},
 	})
 )
@@ -105,7 +103,7 @@ var (
 	etlLargeBufRAM       = BufferOptimalSize
 	LargeSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			return NewSortableBuffer(etlLargeBufRAM).Prealloc(entriesIn(etlLargeBufRAM), int(etlLargeBufRAM))
+			return NewSortableBuffer(etlLargeBufRAM)
 		},
 	})
 )
