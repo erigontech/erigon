@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/cl/utils/threading"
 )
 
 func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint64, validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.ParticipationBitList) [][]bool {
@@ -32,13 +31,11 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 		flagsUnslashedIndiciesSet[i] = make([]bool, validatorSet.Length())
 	}
 
-	// IsUnslashedParticipatingIndex has no fallible operation, so this loop cannot error.
-	_ = threading.ParallellForLoop(1, 0, validatorSet.Length(), func(validatorIndex int) error {
+	for validatorIndex := range validatorSet.Length() {
 		for i := range weights {
 			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochParticipation, previousEpoch, uint64(validatorIndex), i)
 		}
-		return nil
-	})
+	}
 
 	return flagsUnslashedIndiciesSet
 }

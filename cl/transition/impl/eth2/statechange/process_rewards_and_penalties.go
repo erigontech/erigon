@@ -55,7 +55,7 @@ func getFlagsTotalBalances(s abstract.BeaconState, flagsUnslashedIndiciesSet [][
 				}
 				effectiveBalance, err := s.ValidatorEffectiveBalance(validatorIndex)
 				if err != nil {
-					panic(fmt.Sprintf("failed to get validator effective balance: %v", err))
+					return fmt.Errorf("failed to get validator effective balance: %w", err)
 				}
 				for weight := range weights {
 					if flagsUnslashedIndiciesSet[weight][validatorIndex] {

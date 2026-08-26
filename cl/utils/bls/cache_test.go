@@ -58,7 +58,9 @@ func BenchmarkAggregateSigCached(b *testing.B) {
 				convertHexToPublicKey("b53d21a4cfd562c469cc81514d4ce5a6b577d8403d32a394dc265dd190b47fa9f829fdd7963afdf972e5e77854051f6f"),
 			},
 		)
-		require.NoError(b, err)
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 	bls.SetEnabledCaching(false)
 }
@@ -88,6 +90,8 @@ func BenchmarkAggregateSigNonCached(b *testing.B) {
 				convertHexToPublicKey("b53d21a4cfd562c469cc81514d4ce5a6b577d8403d32a394dc265dd190b47fa9f829fdd7963afdf972e5e77854051f6f"),
 			},
 		)
-		require.NoError(b, err)
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }

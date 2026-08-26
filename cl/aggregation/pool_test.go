@@ -113,7 +113,6 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 	t.Require().NoError(cBits2.SetBitAt(10, true))
 	expectedCommitteeBits := solid.NewBitVector(64)
 	t.Require().NoError(expectedCommitteeBits.SetBitAt(10, true))
-	t.Require().NoError(expectedCommitteeBits.SetBitAt(10, true))
 	expected := &solid.Attestation{
 		AggregationBits: solid.BitlistFromBytes([]byte{0b00001101}, 2048*64),
 		Data:            attData1,
@@ -317,9 +316,8 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			defer cancel()
 			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 			for i := range tc.atts {
-				// Some testcases intentionally add a subset attestation
-				// (e.g. "skip att1_1"), which AddAttestation rejects with
-				// ErrIsSuperset by design; only the final merged state matters here.
+				// Subset attestations are rejected by design; only the merged
+				// result matters here.
 				_ = pool.AddAttestation(tc.atts[i])
 			}
 			att := pool.GetAggregatationByRoot(tc.hashRoot)

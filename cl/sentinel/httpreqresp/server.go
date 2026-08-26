@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -277,8 +278,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		topic = string(stream.Protocol())
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
 		if err := stream.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			http.Error(w, "Set Write Deadline: "+err.Error(), http.StatusBadRequest)
-			return
+			log.Trace("[httpreqresp] failed to set write deadline", "err", err)
 		}
 		var bytesWritten int64
 		// When multiple protocols are offered, the request body matches the
@@ -307,8 +307,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		code := make([]byte, 1)
 		// we have 5 seconds to read the next byte. this is the 5 TTFB_TIMEOUT in the spec
 		if err := stream.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			http.Error(w, "Set Read Deadline: "+err.Error(), http.StatusBadRequest)
-			return
+			log.Trace("[httpreqresp] failed to set read deadline", "err", err)
 		}
 		n, err := io.ReadFull(stream, code)
 		synthesizedEmptySuccess := false
@@ -339,8 +338,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
 		// this is technically incorrect, and more aggressive than the network might like.
 		if err := stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks))); err != nil {
-			http.Error(w, "Set Read Deadline: "+err.Error(), http.StatusBadRequest)
-			return
+			log.Trace("[httpreqresp] failed to set read deadline", "err", err)
 		}
 		// Stream the response through a per-topic size cap instead of buffering it: a compliant
 		// response passes through untouched, a flood is bounded at the cap and the caller sees

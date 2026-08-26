@@ -670,9 +670,7 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltyp
 				log.Warn("failed to initialize download request", "err", err)
 				return
 			}
-			if err := d.runDownload(ctx, req, false); err != nil {
-				log.Warn("failed to run download", "err", err)
-			}
+			d.runDownload(ctx, req, false)
 		})
 	}
 	wg.Wait()
@@ -728,16 +726,14 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 				log.Warn("failed to initialize download request", "err", err)
 				return
 			}
-			if err := d.runDownload(ctx, req, true); err != nil {
-				log.Warn("failed to run download", "err", err)
-			}
+			d.runDownload(ctx, req, true)
 		})
 	}
 	wg.Wait()
 	return nil
 }
 
-func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
+func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) {
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
@@ -745,7 +741,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		err       error
 	}
 	if req.remainingEntriesCount() == 0 {
-		return nil
+		return
 	}
 
 	stopChan := make(chan struct{})
@@ -928,8 +924,6 @@ mainloop:
 			}
 		}
 	}
-
-	return nil
 }
 
 // resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and

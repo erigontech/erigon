@@ -64,6 +64,20 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 	}
 }
 
+// dropPeer disconnects pid and forgets it, so the same failing peer is not
+// picked again for the next request.
+func (s *SentinelServer) dropPeer(pid peer.ID) {
+	s.sentinel.Peers().RemovePeer(pid)
+	s.sentinel.Host().Peerstore().RemovePeer(pid)
+	s.closePeer(pid)
+}
+
+func (s *SentinelServer) closePeer(pid peer.ID) {
+	if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
+		s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
+	}
+}
+
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
 	active, _, _ := s.sentinel.GetPeersCount()
 	if active < gracePeerCount {
@@ -76,9 +90,7 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sen
 	}
 	s.sentinel.Peers().SetBanStatus(pid, true)
 	s.sentinel.Host().Peerstore().RemovePeer(pid)
-	if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-		s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-	}
+	s.closePeer(pid)
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
@@ -125,11 +137,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		//	return nil, errorMessage
 		//}
 		if shouldBanOnFail {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-				s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-			}
+			s.dropPeer(pid)
 		}
 		return nil, errorMessage
 	}
@@ -145,20 +153,12 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		errorMessage, err := responseCode.ErrorMessage(resp)
 		if err != nil {
 			if shouldBanOnFail {
-				s.sentinel.Peers().RemovePeer(pid)
-				s.sentinel.Host().Peerstore().RemovePeer(pid)
-				if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-					s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-				}
+				s.dropPeer(pid)
 			}
 			return nil, err
 		}
 		if shouldBanOnFail && responseCode != httpreqresp.ResponseCodeResourceUnavailable {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-				s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-			}
+			s.dropPeer(pid)
 		}
 		return nil, &PeerResponseError{
 			Code:    responseCode,
@@ -172,11 +172,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
 		// drop the peer as the status path above would.
 		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-				s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-			}
+			s.dropPeer(pid)
 		}
 		return nil, err
 	}
@@ -204,11 +200,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.Req
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "protocols not supported") {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-				s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-			}
+			s.dropPeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
@@ -230,11 +222,7 @@ func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *senti
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "protocols not supported") {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			if err := s.sentinel.Host().Network().ClosePeer(pid); err != nil {
-				s.logger.Trace("[sentinel] failed to close peer", "peer", pid, "err", err)
-			}
+			s.dropPeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err, "topic", req.Topic)
