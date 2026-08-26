@@ -419,7 +419,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	}
 	engine := api.engine()
 
-	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	// Execute all transactions in picked blocks
 
 	count := uint64(^uint(0)) // this just makes it easier to use below
@@ -459,7 +459,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteMore()
 		}
 		stream.WriteRawBytes(b)
-		if err := stream.Flush(); err != nil { // client can use the result of 1 trace before the range ends
+		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
 		nExported++
@@ -623,7 +623,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 			continue
 		}
-		if txIndex == -1 { //is system tx
+		if txIndex == -1 { // is system tx
 			continue
 		}
 		txIndexU64 := uint64(txIndex)
@@ -633,7 +633,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			return err
 		}
 		if !ok {
-			continue //guess block doesn't have transactions
+			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)

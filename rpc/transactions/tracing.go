@@ -57,7 +57,8 @@ type BlockGetter interface {
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
-	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	txIndex int,
+) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	var reader state.StateReader
 	if stateCache != nil {
 		cacheView, err := stateCache.View(ctx, dbtx)
@@ -221,13 +222,12 @@ func ExecuteTraceTx(
 	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
-	var refunds = true
+	refunds := true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
-
 	}
 
 	result, err := execCb(evm, refunds)
@@ -260,7 +260,7 @@ func ExecuteTraceTx(
 		}
 
 		stream.WriteRawBytes(r)
-		if err := stream.Flush(); err != nil { // client can use the result of 1 txn tracing before the rest is traced
+		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}
 	}
