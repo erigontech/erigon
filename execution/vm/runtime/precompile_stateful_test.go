@@ -48,11 +48,12 @@ func (r *recordingStatefulPrecompile) RequiredGas([]byte) uint64        { return
 func (r *recordingStatefulPrecompile) Run(input []byte) ([]byte, error) { return nil, nil }
 func (r *recordingStatefulPrecompile) Name() string                     { return "RECORDING" }
 
-func (r *recordingStatefulPrecompile) RunStateful(input []byte, gas mdgas.MdGas, ctx *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
+func (r *recordingStatefulPrecompile) RunStateful(input []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
 	r.calls = append(r.calls, ctx)
-	remaining := gas
-	remaining.Execution -= 111
-	return []byte{0x2a}, remaining, nil
+	if !gas.ChargeExecution(111) {
+		return nil, vm.ErrOutOfGas
+	}
+	return []byte{0x2a}, nil
 }
 
 func newStatefulTestConfig(t *testing.T, chainID uint64) *Config {
@@ -111,10 +112,10 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	const chainID = 900401
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x88}))
 	rec := &recordingStatefulPrecompile{}
-	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: rec}
 	})
-	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
@@ -151,10 +152,10 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 	const chainID = 900402
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x89}))
 	rec := &recordingStatefulPrecompile{}
-	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: rec}
 	})
-	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
@@ -182,13 +183,18 @@ func (r *reenteringStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
 func (r *reenteringStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
 func (r *reenteringStatefulPrecompile) Name() string               { return "REENTER" }
 
-func (r *reenteringStatefulPrecompile) RunStateful(input []byte, gas mdgas.MdGas, ctx *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
+func (r *reenteringStatefulPrecompile) RunStateful(input []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
 	r.calls++
 	if r.calls > 1100 {
-		return nil, gas, nil
+		return nil, nil
 	}
-	_, remaining, _, err := ctx.Evm.Call(ctx.Caller, r.self, input, gas, uint256.Int{}, false)
-	return nil, remaining, err
+	handed := gas.Remaining()
+	if !gas.ChargeExecution(handed.Execution) {
+		return nil, vm.ErrOutOfGas
+	}
+	_, leftover, _, err := ctx.Evm.Call(ctx.Caller, r.self, input, handed, uint256.Int{}, false)
+	gas.RefundExecution(leftover.Execution)
+	return nil, err
 }
 
 // TestStatefulPrecompileReentryHitsDepthLimit pins that a stateful precompile
@@ -197,10 +203,10 @@ func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	const chainID = 900403
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8a}))
 	rec := &reenteringStatefulPrecompile{self: precompileAddr}
-	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: rec}
 	})
-	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
@@ -216,10 +222,11 @@ func (stateGasStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
 func (stateGasStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
 func (stateGasStatefulPrecompile) Name() string               { return "STATEGAS" }
 
-func (stateGasStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, _ *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
-	gas.Execution -= 100
-	gas.State -= 40
-	return nil, gas, nil
+func (stateGasStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeExecution(100) || !gas.ChargeState(40) {
+		return nil, vm.ErrOutOfGas
+	}
+	return nil, nil
 }
 
 // TestStatefulPrecompileStateGasAttribution pins that State-dimension gas a
@@ -228,10 +235,10 @@ func (stateGasStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, _ *vm.P
 func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	const chainID = 900404
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8b}))
-	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: stateGasStatefulPrecompile{}}
 	})
-	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
@@ -252,9 +259,14 @@ func (nestedCallStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
 func (nestedCallStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
 func (nestedCallStatefulPrecompile) Name() string               { return "NESTED" }
 
-func (p nestedCallStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, ctx *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
-	_, remaining, _, err := ctx.Evm.Call(ctx.Caller, p.target, nil, gas, uint256.Int{}, false)
-	return nil, remaining, err
+func (p nestedCallStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	handed := gas.Remaining()
+	if !gas.ChargeExecution(handed.Execution) {
+		return nil, vm.ErrOutOfGas
+	}
+	_, leftover, _, err := ctx.Evm.Call(ctx.Caller, p.target, nil, handed, uint256.Int{}, false)
+	gas.RefundExecution(leftover.Execution)
+	return nil, err
 }
 
 // TestStatefulPrecompileStaticContextInherited pins that a nested call made
@@ -264,10 +276,10 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	const chainID = 900405
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8c}))
 	storeAddr := accounts.InternAddress(common.HexToAddress("0x5570"))
-	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: nestedCallStatefulPrecompile{target: storeAddr}}
 	})
-	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
@@ -278,31 +290,115 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	require.ErrorIs(t, err, vm.ErrWriteProtection)
 }
 
-type gasMintingStatefulPrecompile struct{}
+// spillingStatefulPrecompile charges more state gas than the frame's EIP-8037
+// reservoir holds, so the excess spills into execution gas.
+type spillingStatefulPrecompile struct{ execution, state uint64 }
 
-func (gasMintingStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (gasMintingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (gasMintingStatefulPrecompile) Name() string               { return "MINT" }
+func (spillingStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (spillingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (spillingStatefulPrecompile) Name() string               { return "SPILL" }
 
-func (gasMintingStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, _ *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
-	gas.Execution += 1_000_000
-	return nil, gas, nil
+func (p spillingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeExecution(p.execution) || !gas.ChargeState(p.state) {
+		return nil, vm.ErrOutOfGas
+	}
+	return nil, nil
 }
 
-// TestStatefulPrecompileCannotMintGas pins that a stateful precompile
-// returning more gas than it was given fails the call instead of corrupting
-// frame accounting.
-func TestStatefulPrecompileCannotMintGas(t *testing.T) {
-	const chainID = 900406
-	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8d}))
-	vm.RegisterPrecompiles(chainID, func(*chain.Rules) vm.PrecompiledContracts {
-		return vm.PrecompiledContracts{precompileAddr: gasMintingStatefulPrecompile{}}
+// TestStatefulPrecompileStateGasSpill pins the attribution when a state charge
+// outruns the reservoir: the whole charge counts as State usage and the part
+// that came out of execution gas is reported as spill, rather than the charge
+// being read back off the reservoir alone.
+func TestStatefulPrecompileStateGasSpill(t *testing.T) {
+	const chainID = 900407
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8e}))
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: spillingStatefulPrecompile{state: 40}}
 	})
-	t.Cleanup(func() { vm.UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
-	require.Error(t, err)
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 10}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(9_970), remaining.Execution, "the 30 gas the reservoir could not cover comes out of execution gas")
+	require.Equal(t, uint64(0), remaining.State)
+	require.Equal(t, int64(40), gasUsed.State, "the whole charge is State usage, not just the reservoir's share")
+	require.Equal(t, uint64(30), gasUsed.StateSpill)
+	require.Equal(t, uint64(0), gasUsed.Execution, "spilled state gas must not be reported as execution usage")
+}
+
+// revertingSpillPrecompile spills state gas and then reverts.
+type revertingSpillPrecompile struct{}
+
+func (revertingSpillPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (revertingSpillPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (revertingSpillPrecompile) Name() string               { return "REVERTSPILL" }
+
+func (revertingSpillPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeExecution(100) || !gas.ChargeState(40) {
+		return nil, vm.ErrOutOfGas
+	}
+	return nil, vm.ErrExecutionReverted
+}
+
+// TestStatefulPrecompileSpillRestoredOnRevert pins that handleFrameRevert can
+// see the spill. EIP-8037 returns state gas to the parent on revert, so the 30
+// that spilled into execution gas comes back while the 100 charged as
+// execution gas stays spent.
+func TestStatefulPrecompileSpillRestoredOnRevert(t *testing.T) {
+	const chainID = 900408
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: revertingSpillPrecompile{}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 10}, uint256.Int{}, false)
+	require.ErrorIs(t, err, vm.ErrExecutionReverted)
+	require.Equal(t, uint64(9_900), remaining.Execution, "the 30 spilled into execution gas is restored, the 100 charged to it is not")
+	require.Equal(t, uint64(10), remaining.State, "the reservoir is restored to what the frame was handed")
+}
+
+// clearingStatefulPrecompile refunds more state gas than it charged, the way a
+// frame that clears state an ancestor created does.
+type clearingStatefulPrecompile struct{}
+
+func (clearingStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (clearingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (clearingStatefulPrecompile) Name() string               { return "CLEAR" }
+
+func (clearingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeState(40) {
+		return nil, vm.ErrOutOfGas
+	}
+	gas.RefundState(100)
+	return nil, nil
+}
+
+// TestStatefulPrecompileNetStateRefundSucceeds pins that ending a frame with
+// more state gas than it was handed is a valid result, not gas minting. State
+// usage is signed for exactly this case, and the frame's execution usage still
+// derives correctly from it.
+func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
+	const chainID = 900409
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x90}))
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: clearingStatefulPrecompile{}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 50}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10_000), remaining.Execution)
+	require.Equal(t, uint64(110), remaining.State, "50 handed, 40 charged, 100 refunded")
+	require.Equal(t, int64(-60), gasUsed.State)
+	require.Equal(t, uint64(0), gasUsed.Execution, "a net state refund must not inflate execution usage")
 }

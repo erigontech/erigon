@@ -52,10 +52,10 @@ func TestRegisteredProviderScopedToChainID(t *testing.T) {
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x99}))
 	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
 
-	RegisterPrecompiles(registeredChainID, func(*chain.Rules) PrecompiledContracts {
+	RegisterPrecompiles(uint256.NewInt(registeredChainID), func(*chain.Rules) PrecompiledContracts {
 		return PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}}
 	})
-	t.Cleanup(func() { UnregisterPrecompiles(registeredChainID) })
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(registeredChainID)) })
 
 	registered := Precompiles(rulesForChain(registeredChainID, 0))
 	other := Precompiles(rulesForChain(otherChainID, 0))
@@ -74,13 +74,13 @@ func TestRegisteredProviderVersionGating(t *testing.T) {
 	const chainID = 900201
 	addrV30 := accounts.InternAddress(common.BytesToAddress([]byte{0x77}))
 
-	RegisterPrecompiles(chainID, func(rules *chain.Rules) PrecompiledContracts {
+	RegisterPrecompiles(uint256.NewInt(chainID), func(rules *chain.Rules) PrecompiledContracts {
 		if rules.L2Version >= 30 {
 			return PrecompiledContracts{addrV30: stubPrecompile{"V30"}}
 		}
 		return PrecompiledContracts{}
 	})
-	t.Cleanup(func() { UnregisterPrecompiles(chainID) })
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	_, ok := Precompiles(rulesForChain(chainID, 0))[addrV30]
 	require.False(t, ok, "precompile must be absent below its activation version")
@@ -95,16 +95,38 @@ func TestRegisteredProviderVersionGating(t *testing.T) {
 
 func TestRegisterPrecompilesPanics(t *testing.T) {
 	const chainID = 900301
-	RegisterPrecompiles(chainID, func(*chain.Rules) PrecompiledContracts { return nil })
-	t.Cleanup(func() { UnregisterPrecompiles(chainID) })
+	RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) PrecompiledContracts { return nil })
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	require.Panics(t, func() {
-		RegisterPrecompiles(chainID, func(*chain.Rules) PrecompiledContracts { return nil })
+		RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) PrecompiledContracts { return nil })
 	}, "duplicate chainID registration must panic")
 
 	require.Panics(t, func() {
-		RegisterPrecompiles(900302, nil)
+		RegisterPrecompiles(uint256.NewInt(900302), nil)
 	}, "nil PrecompilesFunc must panic")
+}
+
+// TestRegisteredProviderWideChainID pins that the registry keys on the whole
+// 256-bit chain ID. Truncating to 64 bits aliased 2^64+1 onto chain 1, which
+// would hand one chain's precompiles to another in a multi-chain embed.
+func TestRegisteredProviderWideChainID(t *testing.T) {
+	wide := new(uint256.Int).AddUint64(new(uint256.Int).Lsh(uint256.NewInt(1), 64), 1) // 2^64 + 1
+	narrow := uint256.NewInt(1)
+	wideAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x66}))
+
+	RegisterPrecompiles(wide, func(*chain.Rules) PrecompiledContracts {
+		return PrecompiledContracts{wideAddr: stubPrecompile{"WIDE"}}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(wide) })
+
+	wideRules := &chain.Rules{ChainID: wide, IsCancun: true}
+	narrowRules := &chain.Rules{ChainID: narrow, IsCancun: true}
+
+	_, ok := Precompiles(wideRules)[wideAddr]
+	require.True(t, ok, "the registering chain must see its own precompile")
+	_, ok = Precompiles(narrowRules)[wideAddr]
+	require.False(t, ok, "chain 1 must not inherit the provider registered for 2^64+1")
 }
 
 func TestPrecompilesNilChainID(t *testing.T) {

@@ -485,18 +485,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				ReadOnly: evm.readOnly || typ == STATICCALL,
 				Evm:      evm,
 			}
-			entryGas := gasRemaining
+			// Charging through the handle keeps gasUsed.State and
+			// gasUsed.StateSpill in step with gasRemaining, so the accounting
+			// defer and handleFrameRevert below both read the real figures.
+			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed}
 			func() {
 				defer evm.enterFrame(ctx.ReadOnly)()
-				ret, gasRemaining, err = sp.RunStateful(input, gasRemaining, ctx)
+				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
-			if gasRemaining.Execution > entryGas.Execution || gasRemaining.State > entryGas.State {
-				ret, gasRemaining = nil, mdgas.MdGas{}
-				err = fmt.Errorf("stateful precompile %s returned more gas than supplied", sp.Name())
-			}
-			// Attribute the precompile's State-dimension spend so the frame
-			// accounting defer and the EIP-8037 revert restore both see it.
-			gasUsed.State = int64(entryGas.State) - int64(gasRemaining.State)
 		} else {
 			ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
 		}
