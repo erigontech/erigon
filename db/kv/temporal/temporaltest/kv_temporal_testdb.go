@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -71,8 +70,7 @@ func WithReorgBlockDepth(reorgBlockDepth uint64) Option {
 // nolint:thelper
 func NewTestDB(tb testing.TB, dirs datadir.Dirs, opts ...Option) kv.TemporalRwDB {
 	config := options{
-		stepSize:        config3.DefaultStepSize,
-		reorgBlockDepth: dbg.MaxReorgDepth,
+		stepSize: config3.DefaultStepSize,
 	}
 	for _, opt := range opts {
 		opt(&config)

@@ -492,6 +492,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.StateStream = true
 	cfg.BatchSize = 5 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
+	cfg.Sync.ParallelStateFlushing = false
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {

@@ -309,9 +309,15 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
 	var parentTd, currentHeadTd *uint256.Int
+	var genesisHash common.Hash
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
+		var err error
+		genesisHash, err = rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return fmt.Errorf("read genesis hash: %w", err)
+		}
 		if firstBlock.NumberU64() > 0 {
 			td, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
 			if readErr != nil {
@@ -398,7 +404,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
-	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, genesisHash, genesisHash)
 	if err != nil {
 		return err
 	}
