@@ -623,6 +623,22 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 	return h, true, nil
 }
 
+// verifyFrozenIdentity reports whether hash is the canonical hash at blockHeight,
+// for callers that decode a snapshot body without a header to compare against
+// directly. Frozen segments are indexed by height only and hold canonical data
+// once retired, so a non-zero hash must be checked before a positional read is
+// trusted to answer it. A zero hash carries no identity constraint.
+func (r *BlockReader) verifyFrozenIdentity(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
+	if hash == emptyHash {
+		return true, nil
+	}
+	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	return ok && canonicalHash == hash, nil
+}
+
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
 	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
 	//maxBlockNumInFiles := r.sn.BlocksAvailable()
@@ -649,6 +665,12 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
+	}
+	if h != nil && hash != emptyHash && h.Hash() != hash {
+		// Segments are indexed by height only and hold canonical data once
+		// retired, so a non-canonical hash at this height must not resolve
+		// to the canonical sibling decoded above.
+		return nil, nil
 	}
 	return h, nil
 }
@@ -678,6 +700,17 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		if dbgLogs {
 			log.Info(dbgPrefix + "found in db=false")
 		}
+	}
+
+	matches, err := r.verifyFrozenIdentity(ctx, tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		if dbgLogs {
+			log.Info(dbgPrefix + "requested hash is not canonical at this height")
+		}
+		return nil, nil
 	}
 
 	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
@@ -754,6 +787,14 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 		}
 		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
+	}
+
+	matches, err := r.verifyFrozenIdentity(ctx, tx, hash, blockHeight)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !matches {
+		return
 	}
 
 	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
@@ -862,9 +903,17 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			log.Info(dbgPrefix + "got nil header from file")
 		}
 		return
-	} else {
-		hash = h.Hash()
 	}
+	if hash != emptyHash && h.Hash() != hash {
+		// Segments are indexed by height only and hold canonical data once
+		// retired, so a non-canonical hash at this height must not resolve
+		// to the canonical sibling decoded above.
+		if dbgLogs {
+			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match canonical header %x at this height", h.Hash()))
+		}
+		return
+	}
+	hash = h.Hash()
 	release()
 
 	var b *types.Body
