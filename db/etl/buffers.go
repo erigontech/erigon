@@ -244,8 +244,8 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.entries = append(b.entries, e)
 }
 
-// Size counts the stored bytes, the tail wasted by the chunk still filling, and
-// entryLocSize bytes of metadata per entry.
+// Size counts the stored bytes, the tails wasted by the chunks already filled,
+// and entryLocSize bytes of metadata per entry.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
@@ -278,6 +278,9 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	return key, val
 }
 
+// Prealloc sizes the entries slice. predictDataSize only reserves room in the
+// chunks slice for the chunk pointers; the chunks themselves are still taken
+// one at a time, which is what keeps an idle buffer from holding its peak.
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	if cap(b.entries) < predictKeysAmount {
 		b.entries = make([]entryLoc, 0, predictKeysAmount)
@@ -301,18 +304,22 @@ func (b *sortableBuffer) Reset() {
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	chunks := b.chunks
-	key := func(e entryLoc) []byte {
-		if e.keyLen <= 0 {
-			return nil
+	// Key extraction stays inside cmp: pdqsortCmpFunc calls the comparator
+	// indirectly, so a separate closure never inlines and costs a call per key.
+	cmp := func(x, y entryLoc) int {
+		var xk, yk []byte
+		if x.keyLen > 0 {
+			off := x.offset & (dataChunkSize - 1)
+			xk = chunks[x.offset>>dataChunkBits][off : off+x.keyLen]
 		}
-		off := e.offset & (dataChunkSize - 1)
-		return chunks[e.offset>>dataChunkBits][off : off+e.keyLen]
-	}
-	cmp := func(a, b entryLoc) int {
-		if c := bytes.Compare(key(a), key(b)); c != 0 {
+		if y.keyLen > 0 {
+			off := y.offset & (dataChunkSize - 1)
+			yk = chunks[y.offset>>dataChunkBits][off : off+y.keyLen]
+		}
+		if c := bytes.Compare(xk, yk); c != 0 {
 			return c
 		}
-		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+		return int(x.insertionOrder - y.insertionOrder) // StableSort: preserve insertion order for duplicate keys
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
