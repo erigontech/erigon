@@ -311,7 +311,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		}
 		n, err := io.ReadFull(stream, code)
 		synthesizedEmptySuccess := false
-		if errors.Is(err, io.EOF) && n == 0 && communication.IsMultiChunkProtocol(topic) {
+		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) { //nolint:errorlint // intentional bare sentinel check
 			synthesizedEmptySuccess = true
 		} else if err != nil {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
