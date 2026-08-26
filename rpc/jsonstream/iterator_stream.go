@@ -49,6 +49,7 @@ func (s *JsoniterStream) WriteRawBytes(content []byte) {
 
 func (s *JsoniterStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
+	flushIfFull(s.stream)
 }
 
 func (s *JsoniterStream) WriteNil() {
@@ -117,6 +118,7 @@ func (s *JsoniterStream) WriteFloat64(val float64) {
 
 func (s *JsoniterStream) WriteString(val string) {
 	s.stream.WriteString(val)
+	flushIfFull(s.stream)
 }
 
 func (s *JsoniterStream) WriteObjectStart() {
@@ -145,10 +147,6 @@ func (s *JsoniterStream) WriteObjectField(fieldName string) {
 
 func (s *JsoniterStream) Flush() error {
 	return s.stream.Flush()
-}
-
-func (s *JsoniterStream) Error() error {
-	return s.stream.Error
 }
 
 func (s *JsoniterStream) BufferAsString() (string, error) {

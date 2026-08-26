@@ -260,9 +260,7 @@ func ExecuteTraceTx(
 		}
 
 		stream.WriteRawBytes(r)
-		// Hand each traced result over as it is produced: a multi-call trace must
-		// not be held whole, and a client that stopped reading has to surface here.
-		if err := stream.Flush(); err != nil {
+		if err := stream.Flush(); err != nil { // client can use the result of 1 txn tracing before the rest is traced
 			return err
 		}
 	}
