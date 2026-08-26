@@ -73,9 +73,10 @@ type MetricValues struct {
 	LoadDepths   [10]uint64
 	Unfolds      uint64
 	Folds        uint64
-	// RoundKeys counts distinct keys handed to the trie, summed over rounds.
-	// AddressKeys/StorageKeys count cell traversals instead, which the parallel
-	// engine inflates by re-walking subtrees on mount+replay.
+	// RoundKeys is the distinct key count of one round — Process resets the
+	// counters on both engines, so nothing here spans rounds. AddressKeys and
+	// StorageKeys count cell traversals instead, which the parallel engine
+	// inflates by re-walking subtrees on mount+replay.
 	RoundKeys        uint64
 	BranchReadBytes  uint64
 	BranchWriteBytes uint64

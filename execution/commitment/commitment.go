@@ -377,30 +377,21 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// Returns the number of updates written. putBranch must copy prefix and data rather than
-// retain them: they are pooled and reused for a later, unrelated update. prevData is
-// cloned per update and carries no such constraint.
-// ApplyDeferredBranchUpdates applies the queued branch writes and, when m is
-// non-nil, accounts them. Accounting lives here because this is the one place
-// every deferred path passes through — including the caller-owned one, which
-// applies from SharedDomains long after the trie's round has ended.
+// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
+// were written. Writes are published to the branch-write counters as they land,
+// not against a round: the caller-owned path applies from SharedDomains after the
+// producing round has already closed, so there is no round left to bill. m, when
+// non-nil, additionally carries them into that trie's log and CSV counters.
+//
+// putBranch must copy prefix and data rather than retain them: they are pooled and
+// reused for a later, unrelated update. prevData is cloned per update and carries
+// no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 	m *Metrics,
 ) (n int, err error) {
-	if m != nil {
-		defer func() {
-			m.updateBranch.Add(uint64(n))
-			// encoded is filled by the merge above, so this only reads after it.
-			var bytesOut int
-			for _, upd := range deferred {
-				bytesOut += len(upd.encoded)
-			}
-			m.AddBranchWrite(bytesOut)
-		}()
-	}
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -412,20 +403,24 @@ func ApplyDeferredBranchUpdates(
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
 
-		var written int
+		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
+			bytesOut += len(upd.encoded)
 		}
 		mxTrieBranchesUpdated.AddInt(written)
+		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -457,17 +452,20 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
-	var written int
+	var written, bytesOut int
 	for _, upd := range deferred {
 		if upd.encoded == nil {
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+			publishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
+		bytesOut += len(upd.encoded)
 	}
 	mxTrieBranchesUpdated.AddInt(written)
+	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -515,10 +513,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-		be.metrics.AddBranchWrite(len(updateCopy))
-	}
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	mxTrieBranchesUpdated.Inc()
 	return nil
 }

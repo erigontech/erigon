@@ -162,6 +162,9 @@ func TestRoundCountersDoNotAccumulateAcrossRounds(t *testing.T) {
 	assert.EqualValues(t, len(keys), first.Metrics.RoundKeys)
 	assert.EqualValues(t, len(keys), second.Metrics.RoundKeys,
 		"the second round reports its own key count, not the running total")
-	assert.LessOrEqual(t, second.Metrics.AddressKeys, first.Metrics.AddressKeys*2,
+	// Strictly less than 2x: with the pooled reset removed a worker enters the
+	// second round holding the first's traversals and adds its own, landing on
+	// exactly 2x — which an inclusive bound would admit.
+	assert.Less(t, second.Metrics.AddressKeys, first.Metrics.AddressKeys*2,
 		"traversals are per-round; a pooled worker must not carry its last round in")
 }

@@ -67,9 +67,26 @@ func addVec(v *metrics.CounterVec, kind string, n uint64) {
 	}
 }
 
-// observeRound publishes one finished round. Called from Trie.Process on both
-// engines, after the final fold and the deferred apply, so the counts include
-// the work those do.
+// publishBranchWrites bills n branch writes of bytesOut bytes. Called where the
+// write lands rather than at a round boundary, because deferred writes can be
+// applied after their round has closed. m, when non-nil, also gets them for the
+// trie's own log and CSV counters.
+func publishBranchWrites(n, bytesOut int, m *Metrics) {
+	if n <= 0 {
+		return
+	}
+	mxBranchPuts.AddInt(n)
+	if bytesOut > 0 {
+		mxWriteBytes.AddInt(bytesOut)
+	}
+	if m != nil {
+		m.updateBranch.Add(uint64(n))
+		m.AddBranchWrite(bytesOut)
+	}
+}
+
+// observeRound publishes one finished round. Branch writes are not published
+// here — publishBranchWrites bills those where they land.
 func observeRound(m *Metrics, start time.Time) {
 	mxRounds.Inc()
 	mxRoundDuration.ObserveDuration(start)
