@@ -175,3 +175,21 @@ func TestScanRangeForGapsSkipsSlotsItCannotRead(t *testing.T) {
 
 	require.Equal(t, []uint64{200, 202}, got)
 }
+
+// The drain must not wait on the column walk to hand it work: a scan of the whole
+// frontier-to-head range takes ~19s where the walk needs days, so an empty gap set is a
+// reason to scan, not to idle.
+func TestBlobGapsAreSeededByAScanWhenEmpty(t *testing.T) {
+	b := &BlobHistoryDownloader{logger: log.New()}
+
+	require.Zero(t, len(b.BlobGapSlots()))
+
+	b.recordBlobGaps(scanRangeForGaps(10, 14, func(slot uint64) (int, int, error) {
+		if slot == 11 || slot == 13 {
+			return 0, 1, nil
+		}
+		return 0, 0, nil
+	}))
+
+	require.Equal(t, []uint64{11, 13}, b.BlobGapSlots())
+}

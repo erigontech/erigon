@@ -74,7 +74,13 @@ func (b *BlobHistoryDownloader) repairBlobGapsFromRemote() {
 	defer b.endRepair()
 	slots := b.BlobGapSlots()
 	if len(slots) == 0 {
-		return
+		// The column walk hands over gaps at its own pace - days, on an archive node -
+		// so an empty set means scan, not idle.
+		b.seedBlobGapsFromStore()
+		slots = b.BlobGapSlots()
+		if len(slots) == 0 {
+			return
+		}
 	}
 
 	filled, attempted := drainBlobGaps(slots, maxBlobRepairsPerPass, b.repairBlobGap)
@@ -166,4 +172,43 @@ func (b *BlobHistoryDownloader) repairLoop() {
 			b.repairBlobGapsFromRemote()
 		}
 	}
+}
+
+// seedBlobGapsFromStore populates the gap set by reading the store directly, between the
+// frozen frontier and the head the downloader is walking from.
+func (b *BlobHistoryDownloader) seedBlobGapsFromStore() {
+	from, to := b.sn.FrozenBlobs(), b.headSlot.Load()
+	if from == 0 || to <= from {
+		return
+	}
+	tx, err := b.indiciesDB.BeginRo(b.ctx)
+	if err != nil {
+		b.logger.Debug("[BlobRepair] scan: begin tx", "err", err)
+		return
+	}
+	defer tx.Rollback()
+
+	started := time.Now()
+	gaps := scanRangeForGaps(from, to, func(slot uint64) (int, int, error) {
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+		if err != nil || blockRoot == (common.Hash{}) {
+			return 0, 0, errors.New("no canonical root")
+		}
+		block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, slot)
+		if err != nil || block == nil {
+			return 0, 0, errors.New("no block")
+		}
+		want := 0
+		if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
+			want = c.Len()
+		}
+		stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
+		if err != nil {
+			return 0, 0, err
+		}
+		return int(stored), want, nil
+	})
+	b.recordBlobGaps(gaps)
+	b.logger.Info("[BlobRepair] Scanned the blob store for gaps",
+		"from", from, "to", to, "gaps", len(gaps), "took", time.Since(started))
 }
