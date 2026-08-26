@@ -695,17 +695,28 @@ var errShortenedKeyFound = errors.New("shortened key found")
 
 // A malformed branch reports true: treat as referenced, never under-report.
 func (branchData BranchData) HasShortenedKeys() bool {
+	_, _, shortened := branchData.CountPlainKeys()
+	return shortened
+}
+
+// CountPlainKeys tallies the branch's plain account and storage keys. The tally stops at the first
+// shortened key, so it is complete only when shortened is false.
+func (branchData BranchData) CountPlainKeys() (accounts, storages uint64, shortened bool) {
 	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) != length.Addr+length.Hash {
 				return nil, errShortenedKeyFound
 			}
-		} else if len(key) != length.Addr {
+			storages++
+			return nil, nil
+		}
+		if len(key) != length.Addr {
 			return nil, errShortenedKeyFound
 		}
+		accounts++
 		return nil, nil
 	})
-	return err != nil
+	return accounts, storages, err != nil
 }
 
 // If fn returns nil, the original key is kept.
