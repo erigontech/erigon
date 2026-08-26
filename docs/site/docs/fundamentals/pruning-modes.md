@@ -42,14 +42,14 @@ regardless of the state-history window, add `--prune.receipts.distance=keep-all`
 :::note[Breaking change in v3.5]
 **`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
 
-`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge), or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge) — the named `keep-post-merge` alias parses only on v3.6 and later; on a v3.5 binary pass the equivalent numeric sentinel `--prune.distance.blocks=18446744073709551615` — or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 :::
 
 :::note[New in v3.6]
 **Pruned nodes now reclaim disk from old snapshot files.** Frozen state-history (`.v`) and inverted-index (`.ef`) files
-that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted, and a fresh sync skips
-downloading them in the first place. Before v3.6 these files were retained indefinitely regardless of `--prune.mode`,
-so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still holds the retired
+that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted (a fresh sync already
+skipped downloading them, in v3.5 too). Before v3.6, files already on disk were retained indefinitely regardless of
+`--prune.mode`, so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still holds the retired
 files. The commitment-history and receipt-cache domains are retired against their own windows
 (`--prune.commitment-history.distance`, `--prune.receipts.distance`) rather than the general state-history window.
 :::

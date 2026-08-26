@@ -1806,17 +1806,35 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
-except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
-alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
-working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
-receipts additionally extend receipts and logs availability from the state-history window back to genesis.
+As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
+default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
+`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
+datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency.
+
+`--prune.include-receipts` on its own does **not** extend receipts and logs back to genesis: the receipt cache follows
+the node's state-history window. On an [Archive node](#archive-node) that window is unbounded, so the cache covers the
+whole chain. On a [Full](#full-node), [Minimal](#minimal-node) or [Historical Blocks](#blocks-node) node it is the
+mode's state-history window (262,144 blocks for full and blocks, 100,000 for minimal). To keep the cache in full
+regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
+`--prune.receipts.distance=N` keeps it for the latest `N` blocks instead. Either form requires
+`--prune.include-receipts`.
 :::
 
 :::note[Breaking change in v3.5]
 **`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
 
-`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge), or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge) — the named `keep-post-merge` alias parses only on v3.6 and later; on a v3.5 binary pass the equivalent numeric sentinel `--prune.distance.blocks=18446744073709551615` — or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+:::
+
+:::note[New in v3.6]
+**Pruned nodes now reclaim disk from old snapshot files.** Frozen state-history (`.v`) and inverted-index (`.ef`) files
+that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted (a fresh sync already
+skipped downloading them, in v3.5 too). Before v3.6, files already on disk were retained indefinitely regardless of
+`--prune.mode`, so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still holds the retired
+files. The commitment-history and receipt-cache domains are retired against their own windows
+(`--prune.commitment-history.distance`, `--prune.receipts.distance`) rather than the general state-history window.
 :::
 
 ## Archive node
@@ -1833,7 +1851,7 @@ We strongly recommend running a Full Node whenever possible, as its reduced disk
 
 ## Minimal node
 
-The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps only recent blocks and the **latest state** — it does not retain state history, so historical state queries are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
+The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps blocks and state history only for the last **100,000 blocks** (~14 days) — a deliberately sub-EIP-8252 window — so historical state queries outside that window are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
 
 ## Blocks node
 
