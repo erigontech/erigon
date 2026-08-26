@@ -7704,7 +7704,7 @@ Since v3.6, Caplin primes the execution layer one slot before a slot this node i
 
 * The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
 * A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
-* Caplin is driving the in-process execution layer. Passing `--caplin.use-engine-api` switches Caplin onto the Engine API instead, and payload preparation is silently skipped in that mode.
+* Caplin is driving the in-process execution layer. Passing `--caplin.use-engine-api` switches Caplin onto the Engine API and **disables the Beacon API entirely** — Erigon logs `Beacon API is automatically disabled` if you also passed `--beacon.api`. Staking through Caplin is not possible in that mode: there is no `validator` namespace, so block production and duties are unavailable, not just payload preparation.
 
 Preparation looks at most one slot ahead, and it does not alter execution-layer fork choice — it only starts the builder early. To confirm it is running, look for these lines in the Erigon log:
 
@@ -7717,13 +7717,13 @@ Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids
 
 ### 3.2. Fork-Choice Head Published Before the Head-State Copy
 
-Since v3.6, Caplin publishes the head chosen by fork choice as soon as it is selected, rather than after the head beacon state has been copied. Beacon API endpoints that only need the head block identity — such as `/eth/v1/beacon/blocks/head` and the debug fork-choice endpoint — therefore reflect a new head sooner. Endpoints that read the head *state* are unchanged, and a node that is still syncing continues to return `503`. There is no flag for this.
+Since v3.6, Caplin publishes the head chosen by fork choice as soon as it is selected, rather than after the head beacon state has been copied. Beacon API endpoints that only need the head block identity — such as `/eth/v1/beacon/blocks/head` and `/eth/v2/debug/beacon/heads` — therefore reflect a new head sooner. Endpoints that read the head *state* are unchanged, and a node that is still syncing continues to return `503`. There is no flag for this.
 
 ### 3.3. Default Block Graffiti
 
 Since v3.6, when the validator client does not supply a graffiti, Caplin fills it with the execution and consensus client pair that produced the block, following the [Engine API client-identification standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md). The value is a two-letter execution client code and the first four hex characters of its commit, followed by Caplin's own code `CN` and the first four hex characters of the Erigon commit — for example `EGa53eCNa53e` when Caplin is paired with Erigon. If the execution client does not answer `engine_getClientVersionV1`, or has not answered it yet, the graffiti carries the consensus half only (`CN` plus commit).
 
-There is no CLI flag for graffiti. The only way to override it is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on `GET /eth/v3/validator/blocks/{slot}` has its value used verbatim instead of the default. The parameter is read as a 32-byte hex value, as the Beacon API specification requires. Note that a validator client which sets graffiti by default — including its own client string — overrides Caplin's default; to get the client-pair graffiti, leave the validator client's graffiti unset.
+There is no CLI flag for graffiti. The only way to override it is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on the validator block-production endpoints (`GET /eth/v2`, `/eth/v3` or `/eth/v4` `/validator/blocks/{slot}`) has its value used instead of the default. The parameter is read as a 32-byte hex value, as the Beacon API specification requires. It is not validated: a malformed or empty value is not rejected and does not fall back to the default — it silently produces an all-zero graffiti. A shorter hex value is left-padded with zeros, and a longer one is cropped from the left. Note that a validator client which sets graffiti by default — including its own client string — overrides Caplin's default; to get the client-pair graffiti, leave the validator client's graffiti unset.
 
 ---
 
