@@ -45,7 +45,6 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 
 	// Create writer size
 	wr := bufio.NewWriterSize(w, 10+len(enc))
-	defer wr.Flush()
 	// Write length of packet
 	if _, err := wr.Write(prefix); err != nil {
 		return err
@@ -55,13 +54,17 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	}
 	// start using streamed snappy compression
 	sw := snappypool.Writer(wr)
-	defer func() {
-		sw.Flush()
-		snappypool.PutWriter(sw)
-	}()
+	defer snappypool.PutWriter(sw)
 	// Marshall and snap it
-	_, err = sw.Write(enc)
-	return err
+	if _, err := sw.Write(enc); err != nil {
+		return err
+	}
+	// The buffered writes above only reach w on these flushes, so their errors
+	// are the ones that report a failed send.
+	if err := sw.Flush(); err != nil {
+		return err
+	}
+	return wr.Flush()
 }
 
 func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {

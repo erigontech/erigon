@@ -19,6 +19,7 @@ package sentinel
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -228,7 +229,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
-		if _, err := r.ReadByte(); err != nil && err != io.EOF {
+		if _, err := r.ReadByte(); err != nil && !errors.Is(err, io.EOF) {
 			noErr(err)
 		}
 	}
@@ -312,7 +313,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
-		if _, err := r.ReadByte(); err != nil && err != io.EOF {
+		if _, err := r.ReadByte(); err != nil && !errors.Is(err, io.EOF) {
 			noErr(err)
 		}
 	}

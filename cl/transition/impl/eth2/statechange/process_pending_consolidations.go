@@ -33,6 +33,11 @@ func ProcessPendingConsolidations(s abstract.BeaconState) error {
 			return true
 		}
 		sourceEffectiveBalance := min(vBalance, sourceValidator.EffectiveBalance())
+		// Resolve the target before touching the source: a failure between the
+		// two mutations would drain the source without crediting the target.
+		if _, applyErr = s.ValidatorBalance(int(c.TargetIndex)); applyErr != nil {
+			return false
+		}
 		// Move active balance to target. Excess balance is withdrawable.
 		if applyErr = state.DecreaseBalance(s, c.SourceIndex, sourceEffectiveBalance); applyErr != nil {
 			return false
