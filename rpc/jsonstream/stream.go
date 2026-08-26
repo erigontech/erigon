@@ -27,10 +27,8 @@ type Stream interface {
 
 	Buffer() []byte
 	Reset(out io.Writer)
-	// WriteRawBytes writes already-encoded JSON, like WriteRaw does for a string.
-	// Nothing is escaped or validated. The bytes only reach the buffer, handed over
-	// once it passes FlushThreshold, so an HTTP writer does not commit a status
-	// before the handler picks one for a response that fits.
+	// WriteRawBytes, WriteRaw accepting already-encoded JSON
+	// Nothing is escaped or validated
 	WriteRawBytes(content []byte)
 	WriteRaw(content string)
 	Flush() error
