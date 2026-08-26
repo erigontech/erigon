@@ -97,7 +97,7 @@ var (
 			mxBufNew.Inc()
 			log.Warn("[dbg] NewSortableBuffer")
 			// Sortable Buffer now pre-allocs only metadata arrays not internal buffers for data-holding (they are-preallocated and have own sync.Pool)
-			return NewSortableBuffer(etlSmallBufRAM) //.Prealloc(512, int(etlSmallBufRAM)/8)
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(512, int(etlSmallBufRAM))
 		},
 	})
 )
