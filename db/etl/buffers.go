@@ -124,6 +124,11 @@ const (
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
+	// maxKeyLen keeps a key inside one pooled chunk, alongside its header. Only
+	// a value may outgrow a chunk. It also keeps len(k) well clear of the int32
+	// the key length is stored as, where a wrap would read back as nil.
+	maxKeyLen = dataChunkSize - entryHeaderSize
+
 	// The chunk index takes what is left of a positive int32, so one buffer
 	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
 	// panics past that. NewSortableBuffer's MaxInt32 bound on optimalSize
@@ -238,6 +243,9 @@ func (b *sortableBuffer) entryData(e entryLoc) []byte {
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
+	if len(k) > maxKeyLen {
+		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
+	}
 	kLen, vLen := int32(len(k)), int32(len(v)) //nolint:gosec
 	if k == nil {
 		kLen = -1
@@ -260,7 +268,8 @@ func (b *sortableBuffer) Put(k, v []byte) {
 }
 
 // Size counts the stored bytes, the tail wasted by the chunk still filling, and
-// entryLocSize bytes of metadata per entry.
+// entryLocSize bytes per entry for the entries slice. An entry's other
+// entryHeaderSize bytes are already inside the chunk bytes.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
@@ -314,14 +323,15 @@ func (b *sortableBuffer) Sort() {
 		if kLen <= 0 {
 			return nil
 		}
-		off := e.offset()&(dataChunkSize-1) + entryHeaderSize
-		return chunks[e.offset()>>dataChunkBits][off : off+kLen]
+		at := e.offset()
+		off := at&(dataChunkSize-1) + entryHeaderSize
+		return chunks[at>>dataChunkBits][off : off+kLen]
 	}
-	cmp := func(a, b entryLoc) int {
-		if c := bytes.Compare(key(a), key(b)); c != 0 {
+	cmp := func(x, y entryLoc) int {
+		if c := bytes.Compare(key(x), key(y)); c != 0 {
 			return c
 		}
-		return int(a.offset() - b.offset()) // StableSort: offsets rise with insertion order
+		return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
