@@ -210,6 +210,27 @@ func (i *FilesItem) IsRawTxN(stepSize uint64) bool {
 	return i.startTxNum%stepSize != 0 || i.endTxNum%stepSize != 0
 }
 
+// V4OneEndTxNForStep returns the endTxN of the v4 #1 file for this
+// step, or (0, false) when no v4 #1 exists. Used by retire's dest-path
+// helpers to construct the complementary v4 #2 path — the v4 #2 tail
+// starts at the v4 #1's non-aligned endTxN and reaches to stepEnd.
+//
+// v4 #1: startTxNum == step*stepSize AND endTxNum % stepSize != 0
+func (df *DirtyFiles) V4OneEndTxNForStep(stepSize uint64, step kv.Step) (uint64, bool) {
+	targetStart := uint64(step) * stepSize
+	var endTxN uint64
+	var found bool
+	df.Scan(func(item *FilesItem) bool {
+		if item.startTxNum == targetStart && item.endTxNum%stepSize != 0 {
+			endTxN = item.endTxNum
+			found = true
+			return false
+		}
+		return true
+	})
+	return endTxN, found
+}
+
 // V4PairForStep returns (v4 #1, v4 #2) when both exist in dirtyFiles
 // and together tile the step's txN range [step*stepSize,
 // (step+1)*stepSize) with no gap and no overlap. The merge scheduler

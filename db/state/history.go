@@ -129,6 +129,21 @@ func (h *History) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*F
 	return RetireSubsumedV4ItemsInRange(h.dirtyFiles, h.stepSize, h.FilenameBase, h.logger, rangeStart, rangeEnd)
 }
 
+// historyRetireDestPaths returns the (.v, .ef) paths retire's collate
+// should write for this step, plus isV4Tail indicating whether the
+// paths are v4 #2 form (raw-txN, non-aligned start) or standard
+// step-aligned. Under the universal two-v4-then-merge lifecycle,
+// retire produces the v4 #2 tail file [v4#1.endTxN, stepEnd) when a
+// v4 #1 already occupies [step*ss, v4#1.endTxN); background merge
+// composes the pair into a standard step-aligned file later.
+func (h *History) historyRetireDestPaths(step kv.Step) (vPath, efPath string, isV4Tail bool) {
+	if endTxN, ok := h.dirtyFiles.V4OneEndTxNForStep(h.stepSize, step); ok {
+		stepEnd := (uint64(step) + 1) * h.stepSize
+		return h.vNewFilePathV4(endTxN, stepEnd), h.efNewFilePathV4(endTxN, stepEnd), true
+	}
+	return h.vNewFilePath(step, step+1), h.efNewFilePath(step, step+1), false
+}
+
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }
@@ -546,6 +561,7 @@ type HistoryCollation struct {
 	efHistoryComp *seg.Writer
 	historyPath   string
 	efHistoryPath string
+	isV4Tail      bool
 	efBaseTxNum   uint64
 }
 
@@ -570,10 +586,9 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		txKey     [8]byte
 		err       error
 
-		historyPath   = h.vNewFilePath(step, step+1)
-		efHistoryPath = h.efNewFilePath(step, step+1)
-		startAt       = time.Now()
-		closeComp     = true
+		historyPath, efHistoryPath, isV4Tail = h.historyRetireDestPaths(step)
+		startAt                              = time.Now()
+		closeComp                            = true
 	)
 	defer func() {
 		mxCollateTookHistory.ObserveDuration(startAt)
@@ -765,6 +780,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		efBaseTxNum:   uint64(step) * h.stepSize,
 		historyPath:   historyPath,
 		historyComp:   historyWriter,
+		isV4Tail:      isV4Tail,
 	}, nil
 }
 
@@ -876,19 +892,16 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 	collation.Close()
 
-	// Compose any pre-existing mode-C paired v4 .v/.ef files anchored at
-	// this step's start into the just-finalized MDBX-only outputs.
-	// No-op when h.v4FilesForStep(step) returns empty. Must happen before
-	// the Decompressor.Open calls below so accessors index the merged
-	// content, not the MDBX-only tail.
-	// TEMP-INSTR-2026-08-23 [dbg-buildfiles-v4] wire trace: confirms
-	// History.buildFiles fires for this step during retire — pair with
-	// [dbg-merge-v4] entry to determine whether v4 was found in dirtyFiles.
-	h.logger.Warn("[dbg-buildfiles-v4] pre-merge",
-		"filenameBase", h.FilenameBase, "step", step,
-		"historyPath", collation.historyPath, "efHistoryPath", collation.efHistoryPath)
-	if err = h.mergeV4IntoStepFile(ctx, step, collation.historyPath, collation.efHistoryPath); err != nil {
-		return HistoryFiles{}, fmt.Errorf("merge %s v4 into step file: %w", h.FilenameBase, err)
+	// Under the two-v4-then-merge lifecycle, if retire's collate wrote
+	// to v4 #2 paths (raw-txN tail), the pre-existing v4 #1 stays as
+	// its own file and the background merge scheduler consolidates the
+	// pair later. Skip the inline compose — it would rename our v4 #2
+	// output to .mdbx-only and try to merge with v4 #1, producing a
+	// range-mismatched output.
+	if !collation.isV4Tail {
+		if err = h.mergeV4IntoStepFile(ctx, step, collation.historyPath, collation.efHistoryPath); err != nil {
+			return HistoryFiles{}, fmt.Errorf("merge %s v4 into step file: %w", h.FilenameBase, err)
+		}
 	}
 
 	efHistoryDecomp, err = seg.NewDecompressor(collation.efHistoryPath)

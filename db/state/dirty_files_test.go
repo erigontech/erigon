@@ -316,6 +316,35 @@ func TestFilesItem_IsRawTxN_TwoEdges(t *testing.T) {
 		"both-non-aligned [3100, 3900) must classify as v4")
 }
 
+// TestDirtyFiles_V4OneEndTxNForStep_LocatesUnwindTail pins the primitive
+// retire's dest-path helpers use to construct the complementary v4 #2
+// path. Given a v4 #1 [step*ss, cut) in dirtyFiles, must return cut.
+func TestDirtyFiles_V4OneEndTxNForStep_LocatesUnwindTail(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+	df := newDirtyFiles()
+
+	df.Set(&FilesItem{startTxNum: 3000, endTxNum: 3512}) // v4 #1
+	df.Set(&FilesItem{startTxNum: 2000, endTxNum: 3000}) // aligned neighbor
+
+	endTxN, ok := df.V4OneEndTxNForStep(stepSize, kv.Step(3))
+	require.True(t, ok, "v4 #1 present at step 3 must be found")
+	require.Equal(t, uint64(3512), endTxN, "endTxN of v4 #1 must be returned so v4 #2 tail can start there")
+}
+
+// TestDirtyFiles_V4OneEndTxNForStep_NoneReturnsFalse pins the absence
+// path: standard step-aligned files must not be misclassified as v4 #1.
+func TestDirtyFiles_V4OneEndTxNForStep_NoneReturnsFalse(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+	df := newDirtyFiles()
+
+	df.Set(&FilesItem{startTxNum: 3000, endTxNum: 4000}) // aligned, not v4
+
+	_, ok := df.V4OneEndTxNForStep(stepSize, kv.Step(3))
+	require.False(t, ok, "aligned file must not match v4 #1")
+}
+
 // TestDirtyFiles_V4PairForStep_TilesStep pins the merge-scheduler's
 // pair-detection primitive: a v4 #1 [step*ss, cut) and v4 #2 [cut,
 // (step+1)*ss) together tile the step and must be returned as a

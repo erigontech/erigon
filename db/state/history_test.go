@@ -2531,3 +2531,39 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 		it.Close()
 	}
 }
+
+// TestHistoryRetireDestPaths_StandardAlignedWhenNoV4One pins the no-v4
+// baseline: without a v4 #1 for the step, retire's dest paths must be
+// the standard step-aligned form.
+func TestHistoryRetireDestPaths_StandardAlignedWhenNoV4One(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	vPath, efPath, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	require.False(t, isV4Tail, "no v4 #1 present — must use step-aligned paths")
+	require.Contains(t, vPath, ".3-4.v", "step-aligned .v path shape")
+	require.Contains(t, efPath, ".3-4.ef", "step-aligned .ef path shape")
+}
+
+// TestHistoryRetireDestPaths_ChoosesV4TailWhenV4OneExists pins the
+// core wiring: when a v4 #1 for step S exists in dirtyFiles, retire's
+// dest paths must be the v4 #2 tail form (raw-txN, non-aligned start
+// at v4 #1's endTxN).
+func TestHistoryRetireDestPaths_ChoosesV4TailWhenV4OneExists(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	// Inject a v4 #1 covering [step*ss, cut). Step 3 with ss=16 →
+	// [48, 51), cut = 51.
+	stepStart := uint64(3) * h.stepSize
+	stepEnd := uint64(4) * h.stepSize
+	cut := stepStart + 3
+	h.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
+
+	vPath, efPath, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	require.True(t, isV4Tail, "v4 #1 present at step 3 — must switch to v4 #2 form")
+	require.Contains(t, vPath, fmt.Sprintf(".%d-%d.v", cut, stepEnd),
+		"v4 #2 .v path must span [v4 #1.endTxN, stepEnd)")
+	require.Contains(t, efPath, fmt.Sprintf(".%d-%d.ef", cut, stepEnd),
+		"v4 #2 .ef path must span [v4 #1.endTxN, stepEnd)")
+}
