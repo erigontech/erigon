@@ -90,13 +90,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cl/rpc\
-          |cl/sentinel\
-          |cl/sentinel/communication/ssz_snappy\
-          |cl/sentinel/handlers\
-          |cl/sentinel/httpreqresp\
-          |cl/sentinel/service\
-          |cl/spectest/consensus_tests\
+          cl/spectest/consensus_tests\
           |cl/transition/impl/eth2\
           |cl/transition/impl/eth2/statechange\
           |cl/utils/bls\

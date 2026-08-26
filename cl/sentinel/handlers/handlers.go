@@ -190,9 +190,15 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 
 		streamDeadline := time.Now().Add(5 * time.Second)
-		s.SetReadDeadline(streamDeadline)
-		s.SetWriteDeadline(streamDeadline)
-		s.SetDeadline(streamDeadline)
+		if err := s.SetReadDeadline(streamDeadline); err != nil {
+			log.Trace("failed to set read deadline", "err", err)
+		}
+		if err := s.SetWriteDeadline(streamDeadline); err != nil {
+			log.Trace("failed to set write deadline", "err", err)
+		}
+		if err := s.SetDeadline(streamDeadline); err != nil {
+			log.Trace("failed to set deadline", "err", err)
+		}
 
 		if err := fn(s); err != nil {
 			if errors.Is(err, ErrResourceUnavailable) {

@@ -47,8 +47,12 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	wr := bufio.NewWriterSize(w, 10+len(enc))
 	defer wr.Flush()
 	// Write length of packet
-	wr.Write(prefix)
-	wr.Write(lengthBuf[:vin])
+	if _, err := wr.Write(prefix); err != nil {
+		return err
+	}
+	if _, err := wr.Write(lengthBuf[:vin]); err != nil {
+		return err
+	}
 	// start using streamed snappy compression
 	sw := snappypool.Writer(wr)
 	defer func() {

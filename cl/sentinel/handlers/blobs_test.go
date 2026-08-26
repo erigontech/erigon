@@ -175,7 +175,9 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && !errors.Is(err, io.EOF) {
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
@@ -301,7 +303,9 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			return
 		}
 		require.Equal(t, sidecars[i], sidecar)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && !errors.Is(err, io.EOF) {
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))

@@ -75,7 +75,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	var blockRoots []common.Hash
 	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
@@ -157,7 +157,9 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && !errors.Is(err, io.EOF) {
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
