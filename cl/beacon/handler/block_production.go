@@ -696,7 +696,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		"proposerIndex", block.ProposerIndex,
 		"slot", targetSlot,
 		"state_root", block.StateRoot,
-		"execution_value", block.GetExecutionValue().Uint64(),
+		"execution_value", block.GetExecutionValue().String(),
 		"version", block.Version(),
 		"blinded", block.IsBlinded(),
 		"took", time.Since(start),
@@ -718,7 +718,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		resp = newBeaconResponse(block.ToExecution())
 	}
 	resp = resp.WithVersion(block.Version()).With("execution_payload_blinded", block.IsBlinded()).
-		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
+		With("execution_payload_value", block.GetExecutionValue().String()).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10))
 
 	executionPayloadIncluded := false
@@ -771,7 +771,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.Version(),
 		block.IsBlinded(),
 		executionPayloadIncluded,
-		block.GetExecutionValue().Uint64(),
+		block.GetExecutionValue(),
 		consensusValue,
 	)
 
@@ -794,7 +794,7 @@ func (a *ApiHandler) produceBlock(
 	// produce beacon body
 	var (
 		beaconBody     *cltypes.BeaconBody
-		localExecValue uint64
+		localExecValue *big.Int
 		localErr       error
 		blobs          []*cltypes.Blob
 		kzgProofs      []common.Bytes48
@@ -887,30 +887,33 @@ func (a *ApiHandler) produceBlock(
 				ParentBlockHash: selfBid.ParentBlockHash,
 				ParentBlockRoot: selfBid.ParentBlockRoot,
 			}
-			if externalBid, found := a.epbsPool.HighestBids.Get(bidKey); found &&
-				externalBid != nil && externalBid.Message != nil &&
-				externalBid.Message.Value > localExecValue {
-				log.Info("GLOAS: selected external builder bid over self-build",
-					"slot", targetSlot,
-					"builderIndex", externalBid.Message.BuilderIndex,
-					"bidValue", externalBid.Message.Value,
-					"localValue", localExecValue)
-				beaconBody.SignedExecutionPayloadBid = externalBid
-				localExecValue = externalBid.Message.Value
+			if externalBid, found := a.epbsPool.HighestBids.Get(bidKey); found {
+				selectedValueWei, selected := selectHigherGloasBidValue(
+					localExecValue, externalBid,
+				)
+				if selected {
+					log.Info("GLOAS: selected external builder bid over self-build",
+						"slot", targetSlot,
+						"builderIndex", externalBid.Message.BuilderIndex,
+						"bidValueWei", selectedValueWei,
+						"localValueWei", localExecValue)
+					beaconBody.SignedExecutionPayloadBid = externalBid
+					localExecValue = selectedValueWei
+				}
 			}
 		}
 
 		block.BeaconBody = beaconBody
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
-		block.ExecutionValue = new(big.Int).SetUint64(localExecValue)
+		block.ExecutionValue = new(big.Int).Set(localExecValue)
 		return block, nil
 	}
 
 	// determine whether to use local execution node or builder
 	// if exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100), then return a full (unblinded) block containing the execution node payload.
 	// otherwise, return a blinded block containing the builder payload header.
-	execValue := new(big.Int).SetUint64(localExecValue)
+	execValue := new(big.Int).Set(localExecValue)
 	builderValue := builderHeader.BlockValue()
 	boostFactorBig := new(big.Int).SetUint64(boostFactor)
 	useLocalExec := new(big.Int).Mul(execValue, big.NewInt(100)).Cmp(new(big.Int).Mul(builderValue, boostFactorBig)) >= 0
@@ -943,6 +946,23 @@ func (a *ApiHandler) produceBlock(
 		block.ExecutionValue = builderValue
 	}
 	return block, nil
+}
+
+func selectHigherGloasBidValue(
+	localValueWei *big.Int,
+	externalBid *cltypes.SignedExecutionPayloadBid,
+) (*big.Int, bool) {
+	if externalBid == nil || externalBid.Message == nil {
+		return localValueWei, false
+	}
+	externalValueWei := new(big.Int).Mul(
+		new(big.Int).SetUint64(externalBid.Message.Value),
+		big.NewInt(common.GWei),
+	)
+	if externalValueWei.Cmp(localValueWei) <= 0 {
+		return localValueWei, false
+	}
+	return externalValueWei, true
 }
 
 func (a *ApiHandler) getBuilderPayload(
@@ -1028,9 +1048,9 @@ func (a *ApiHandler) produceBeaconBody(
 	targetSlot uint64,
 	randaoReveal common.Bytes96,
 	graffiti common.Hash,
-) (*cltypes.BeaconBody, uint64, error) {
+) (*cltypes.BeaconBody, *big.Int, error) {
 	if targetSlot <= baseBlockSlot {
-		return nil, 0, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"target slot %d must be greater than base block slot %d",
 			targetSlot,
 			baseBlockSlot,
@@ -1072,18 +1092,18 @@ func (a *ApiHandler) produceBeaconBody(
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
 				if err != nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: failed to copy state for FULL payload: %w", err)
+					return nil, nil, fmt.Errorf("produceBeaconBody: failed to copy state for FULL payload: %w", err)
 				}
 				envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
 				if err != nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: failed to read envelope for FULL payload: %w", err)
+					return nil, nil, fmt.Errorf("produceBeaconBody: failed to read envelope for FULL payload: %w", err)
 				}
 				if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: head is FULL but envelope/requests missing for root %x", baseBlockRoot)
+					return nil, nil, fmt.Errorf("produceBeaconBody: head is FULL but envelope/requests missing for root %x", baseBlockRoot)
 				}
 				stfMachine := &eth2.Impl{}
 				if err := stfMachine.ApplyParentExecutionPayload(stateCopy, envelope.Message.ExecutionRequests); err != nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: failed to apply parent execution payload: %w", err)
+					return nil, nil, fmt.Errorf("produceBeaconBody: failed to apply parent execution payload: %w", err)
 				}
 				gloasWithdrawalsState = stateCopy
 				// Populate the block body's ParentExecutionRequests so
@@ -1107,7 +1127,7 @@ func (a *ApiHandler) produceBeaconBody(
 	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	var targetGasLimit *hexutil.Uint64
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
@@ -1127,7 +1147,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 	}
 	var executionPayload *cltypes.Eth1Block
-	var executionValue uint64
+	executionValue := new(big.Int)
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever
 	// two steps fail together.
 	var executionErr, syncAggregateErr error
@@ -1188,9 +1208,9 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 		// Determine block value
 		if blockValue == nil {
-			executionValue = 0
+			executionValue.SetUint64(0)
 		} else {
-			executionValue = blockValue.Uint64()
+			executionValue.Set(blockValue)
 		}
 
 		if stateVersion.Before(clparams.FuluVersion) {
@@ -1375,13 +1395,13 @@ func (a *ApiHandler) produceBeaconBody(
 	}
 	wg.Wait()
 	if executionErr != nil {
-		return nil, 0, executionErr
+		return nil, nil, executionErr
 	}
 	if syncAggregateErr != nil {
-		return nil, 0, syncAggregateErr
+		return nil, nil, syncAggregateErr
 	}
 	if executionPayload == nil {
-		return nil, 0, errors.New("failed to produce execution payload")
+		return nil, nil, errors.New("failed to produce execution payload")
 	}
 
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
@@ -1538,9 +1558,10 @@ func (a *ApiHandler) setupHeaderReponseForBlockProduction(
 	consensusVersion clparams.StateVersion,
 	blinded bool,
 	executionPayloadIncluded bool,
-	executionBlockValue, consensusBlockValue uint64,
+	executionBlockValue *big.Int,
+	consensusBlockValue uint64,
 ) {
-	w.Header().Set("Eth-Execution-Payload-Value", strconv.FormatUint(executionBlockValue, 10))
+	w.Header().Set("Eth-Execution-Payload-Value", executionBlockValue.String())
 	w.Header().Set("Eth-Consensus-Block-Value", strconv.FormatUint(consensusBlockValue, 10))
 	w.Header().Set("Eth-Consensus-Version", clparams.ClVersionToString(consensusVersion))
 	w.Header().Set("Eth-Execution-Payload-Blinded", strconv.FormatBool(blinded))
@@ -1956,8 +1977,10 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		isGloas := blk.Version() >= clparams.GloasVersion
 
 		if isGloas {
-			// [New in Gloas:EIP7732] Get from signed_execution_payload_bid
-			if bid := blk.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
+			// External builders publish their payload data. Only a self-built bid has
+			// blob data in the proposer's local cache.
+			if bid := blk.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil &&
+				bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
 				kzgCommitments = &bid.Message.BlobKzgCommitments
 			}
 		} else {

@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -58,6 +59,16 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+type notifyingUpdateFailingDB struct {
+	kv.RwDB
+	called chan struct{}
+}
+
+func (db notifyingUpdateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
+	close(db.called)
+	return errors.New("stop after persistence")
+}
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
@@ -527,7 +538,7 @@ func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T)
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, 123, 456)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, big.NewInt(123), 456)
 
 	require.Equal(t, "gloas", rr.Header().Get("Eth-Consensus-Version"))
 	require.Equal(t, "123", rr.Header().Get("Eth-Execution-Payload-Value"))
@@ -540,9 +551,77 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, big.NewInt(123), 456)
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
+	t.Run("higher bid", func(t *testing.T) {
+		localValueWei := new(big.Int).Mul(big.NewInt(2), big.NewInt(common.GWei))
+		externalBid := &cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{Value: 3},
+		}
+
+		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
+
+		require.True(t, selected)
+		require.Equal(t, "3000000000", selectedValueWei.String())
+	})
+
+	t.Run("equal bid", func(t *testing.T) {
+		localValueWei := new(big.Int).Mul(big.NewInt(2), big.NewInt(common.GWei))
+		externalBid := &cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{Value: 2},
+		}
+
+		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
+
+		require.False(t, selected)
+		require.Same(t, localValueWei, selectedValueWei)
+	})
+
+	t.Run("maximum bid", func(t *testing.T) {
+		externalBid := &cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{Value: ^uint64(0)},
+		}
+		wantWei := new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(common.GWei))
+
+		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid)
+
+		require.True(t, selected)
+		require.Equal(t, wantWei, selectedValueWei)
+	})
+}
+
+func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+	valueWei := new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(common.GWei))
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, valueWei, 0)
+
+	require.Equal(t, valueWei.String(), rr.Header().Get("Eth-Execution-Payload-Value"))
+}
+
+func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	db := notifyingUpdateFailingDB{RwDB: h.indiciesDB, called: make(chan struct{})}
+	h.indiciesDB = db
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	require.NotNil(t, bid)
+	require.NotNil(t, bid.Message)
+	bid.Message.BuilderIndex = 1
+	bid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0x01})
+
+	require.NoError(t, h.broadcastBlock(t.Context(), block))
+
+	select {
+	case <-db.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("block persistence did not start")
+	}
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
@@ -652,7 +731,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, beaconBody)
-	require.NotZero(t, execValue)
+	require.Positive(t, execValue.Sign())
 
 	// --- Verify execution requests were decoded by Caplin ---
 
