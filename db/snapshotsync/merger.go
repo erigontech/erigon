@@ -40,6 +40,34 @@ func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	cfg := m.snCfg
+
+	// v4-pair positive detection: a v4 pair is two adjacent ranges
+	// whose union tiles a min-segment-size chunk with a non-aligned
+	// internal boundary — the two-v4-then-merge lifecycle output on
+	// the block side. Both sub-files must exist (v4 #1 from unwind,
+	// v4 #2 from retire's tail); together they consolidate into the
+	// standard 1000-aligned .seg via the same merger pipeline that
+	// handles wider consolidation.
+	for i := 0; i+1 < len(currentRanges); i++ {
+		a := currentRanges[i]
+		b := currentRanges[i+1]
+		if a.To() != b.From() {
+			continue
+		}
+		if a.From()%snaptype.Erigon2MinSegmentSize != 0 || b.To()%snaptype.Erigon2MinSegmentSize != 0 {
+			continue
+		}
+		if a.To()%snaptype.Erigon2MinSegmentSize == 0 {
+			// Internal boundary is aligned — not a v4 pair. Legacy
+			// wider-merge algorithm below handles this case.
+			continue
+		}
+		if b.To()-a.From() != snaptype.Erigon2MinSegmentSize {
+			continue
+		}
+		toMerge = append(toMerge, NewRange(a.From(), b.To()))
+	}
+
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())

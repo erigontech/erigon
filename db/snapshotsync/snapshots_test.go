@@ -196,6 +196,80 @@ func TestFindMergeRange(t *testing.T) {
 
 }
 
+// TestFindMergeRanges_V4Pair_ProducesAlignedRange pins the v4-pair
+// positive detection on the block side. Two ranges [3491000, 3491691)
+// and [3491691, 3492000) together tile the aligned chunk [3491000,
+// 3492000); the merger must propose that aligned range so the two
+// v4 sub-files consolidate into the standard 1000-aligned .seg.
+// The internal boundary (3491691) is non-1000-aligned — that's the
+// v4-pair signature.
+func TestFindMergeRanges_V4Pair_ProducesAlignedRange(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	ranges := []Range{
+		NewRange(3_491_000, 3_491_691), // v4 #1 (unwind section)
+		NewRange(3_491_691, 3_492_000), // v4 #2 (retire tail)
+	}
+	found := merger.FindMergeRanges(ranges, 3_492_000)
+
+	require.Len(t, found, 1, "one aligned merge candidate expected")
+	require.Equal(t, uint64(3_491_000), found[0].From(), "aligned merge starts at chunk From")
+	require.Equal(t, uint64(3_492_000), found[0].To(), "aligned merge ends at chunk To")
+}
+
+// TestFindMergeRanges_V4Pair_LoneV4NotFired: only v4 #1 present
+// (retire hasn't emitted the tail yet). The single non-aligned range
+// must NOT trigger a merge — no complementary partner exists.
+func TestFindMergeRanges_V4Pair_LoneV4NotFired(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	ranges := []Range{
+		NewRange(3_491_000, 3_491_691), // v4 #1 alone
+	}
+	found := merger.FindMergeRanges(ranges, 3_492_000)
+
+	require.Empty(t, found, "lone v4 #1 must not fire a merge")
+}
+
+// TestFindMergeRanges_V4Pair_MismatchedBoundaryRejected: v4 #1 ends
+// at 3491691 and v4 #2 starts at 3491692 — 1-block gap. Must NOT be
+// merged; the union would leave a hole.
+func TestFindMergeRanges_V4Pair_MismatchedBoundaryRejected(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	ranges := []Range{
+		NewRange(3_491_000, 3_491_691),
+		NewRange(3_491_692, 3_492_000), // 1-block gap from previous To
+	}
+	found := merger.FindMergeRanges(ranges, 3_492_000)
+
+	require.Empty(t, found, "gap between v4 #1 end and v4 #2 start must reject merge")
+}
+
+// noGapsTestRange is a minimal SortedRange for pinning NoGaps
+// behaviour against synthesized inputs.
+type noGapsTestRange struct{ from, to uint64 }
+
+func (r noGapsTestRange) GetRange() (uint64, uint64) { return r.from, r.to }
+func (r noGapsTestRange) GetGrouping() string        { return "" }
+
+// TestNoGaps_V4Pair pins that abutting v4 pair members do not report
+// as a gap — the visibility computation must retain both consecutive
+// ranges. The v4 lifecycle relies on this: (v4 #1, v4 #2) both stay
+// visible until the background merger consolidates them.
+func TestNoGaps_V4Pair(t *testing.T) {
+	ranges := []noGapsTestRange{
+		{3_491_000, 3_491_691}, // v4 #1
+		{3_491_691, 3_492_000}, // v4 #2
+	}
+	out, missing := NoGaps(ranges)
+	require.Empty(t, missing, "abutting v4 pair must report no missing ranges")
+	require.Len(t, out, 2, "both v4 pair members retained (no gap between them)")
+}
+
 func TestMergeSnapshots(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
