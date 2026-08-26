@@ -480,7 +480,6 @@ func validateExecutionRequestsLimits(cfg *clparams.BeaconChainConfig, requests *
 		count int
 		limit uint64
 	}{
-		{"deposit requests", requests.Deposits.Len(), cfg.MaxDepositRequestsPerPayload},
 		{"withdrawal requests", requests.Withdrawals.Len(), cfg.MaxWithdrawalRequestsPerPayload},
 		{"consolidation requests", requests.Consolidations.Len(), cfg.MaxConsolidationRequestsPerPayload},
 		{"builder deposit requests", requests.BuilderDeposits.Len(), cfg.MaxBuilderDepositRequestsPerPayload},

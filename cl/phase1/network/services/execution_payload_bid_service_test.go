@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
-	"sync"
 	"testing"
 	"time"
 
@@ -83,7 +82,6 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		},
 		seenCache:            newSeenBidStore(),
 		validationStateCache: validationStateCache,
-		pendingCond:          sync.NewCond(&sync.Mutex{}),
 	}
 
 	return service, mockSyncedData, ethClockMock, fcMock, epbsPool
@@ -472,7 +470,6 @@ func TestExecutionPayloadBidServiceRejectsNonZeroExecutionPaymentWithMissingStat
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "execution_payment must be 0")
-	require.Equal(t, int32(0), service.pendingCount.Load())
 }
 
 func TestExecutionPayloadBidServiceRejectsTooManyBlobCommitmentsWithMissingStateBeforeQueue(t *testing.T) {
@@ -493,7 +490,6 @@ func TestExecutionPayloadBidServiceRejectsTooManyBlobCommitmentsWithMissingState
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "too many blob_kzg_commitments")
-	require.Equal(t, int32(0), service.pendingCount.Load())
 }
 
 func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *testing.T) {
@@ -516,8 +512,6 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.NotErrorIs(t, err, ErrBidQueued)
-	require.Equal(t, int32(0), service.pendingCount.Load())
 
 	addPreferencesToPool(epbsPool, 100)
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
@@ -525,7 +519,6 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
-	require.Equal(t, int32(0), service.pendingCount.Load())
 	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
@@ -544,8 +537,6 @@ func TestExecutionPayloadBidServiceMissingParentStateIsNotQueued(t *testing.T) {
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.NotErrorIs(t, err, ErrBidQueued)
-	require.Zero(t, service.pendingCount.Load())
 	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.False(t, found)
 }
@@ -979,7 +970,6 @@ func TestExecutionPayloadBidServiceRejectsLowerBidBeforeStateFetch(t *testing.T)
 	require.True(t, errors.Is(err, ErrIgnore))
 	require.Contains(t, err.Error(), "not higher than existing")
 	require.Zero(t, service.validationStateCache.Len())
-	require.Equal(t, int32(0), service.pendingCount.Load())
 }
 
 func TestExecutionPayloadBidServiceSameBuilderDistinctCompatibleParents(t *testing.T) {
@@ -1055,27 +1045,7 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 	require.Equal(t, msg, stored)
 }
 
-func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-
-	// Fill the queue to the cap
-	service.pendingCount.Store(maxPendingBids)
-
-	msg := newTestSignedExecutionPayloadBid(100, 999, 1000)
-
-	require.False(t, service.queuePendingBid(msg))
-
-	// Should still be at cap — new item was rejected
-	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
-	key := pendingBidKeyFor(msg)
-	_, exists := service.pendingBids.Load(key)
-	require.False(t, exists)
-}
-
-func TestExecutionPayloadBidServiceDoesNotQueueWhenPreferencesAreMissing(t *testing.T) {
+func TestExecutionPayloadBidServiceRejectsWhenPreferencesAreMissing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	service, _, ethClock, _, _ := setupExecutionPayloadBidService(t, ctrl)
@@ -1084,32 +1054,10 @@ func TestExecutionPayloadBidServiceDoesNotQueueWhenPreferencesAreMissing(t *test
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.NotErrorIs(t, err, ErrBidQueued)
 	require.Contains(t, err.Error(), "proposer preferences not available")
-	require.Zero(t, service.pendingCount.Load())
 }
 
-func TestExecutionPayloadBidServicePendingQueueKeepsBoundedSignatureVariants(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	first := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	second := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	second.Signature[0] = 1
-
-	require.True(t, service.queuePendingBid(first))
-	require.False(t, service.queuePendingBid(first))
-	require.True(t, service.queuePendingBid(second))
-
-	require.Equal(t, int32(2), service.pendingCount.Load())
-	stored, firstExists := service.pendingBids.Load(pendingBidKeyFor(first))
-	require.True(t, firstExists)
-	require.Same(t, first, stored.(*pendingBidJob).msg)
-	require.NotEqual(t, pendingBidKeyFor(first), pendingBidKeyFor(second))
-}
-
-func TestExecutionPayloadBidServiceInvalidSignaturesCannotFillPendingTuple(t *testing.T) {
+func TestExecutionPayloadBidServiceRejectsInvalidSignatureVariantsBeforeValidBid(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -1119,18 +1067,16 @@ func TestExecutionPayloadBidServiceInvalidSignaturesCannotFillPendingTuple(t *te
 	fc.Headers[valid.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{Slot: 99}
 	fc.ExecutionPayloadStatusMap[valid.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
 	addPreferencesToPool(epbsPool, 100)
-	ethClock.EXPECT().GetCurrentSlot().Return(uint64(100)).Times(maxPendingBidsPerTuple + 2)
+	const invalidVariants = 5
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(100)).Times(invalidVariants + 1)
 
-	for i := range maxPendingBidsPerTuple + 1 {
+	for i := range invalidVariants {
 		invalid := newTestSignedExecutionPayloadBid(100, 1, 1000)
 		invalid.Signature[0] = byte(i + 1)
 		err := service.ProcessMessage(context.Background(), nil, invalid)
 		require.ErrorContains(t, err, "invalid builder signature")
-		require.NotErrorIs(t, err, ErrBidQueued)
 	}
-	require.Zero(t, service.pendingCount.Load())
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, valid))
-	require.Zero(t, service.pendingCount.Load())
 
 	stored, ok := epbsPool.HighestBids.Get(pool.HighestBidKey{
 		Slot:            valid.Message.Slot,
@@ -1139,30 +1085,6 @@ func TestExecutionPayloadBidServiceInvalidSignaturesCannotFillPendingTuple(t *te
 	})
 	require.True(t, ok)
 	require.Equal(t, valid.Signature, stored.Signature)
-	require.Zero(t, service.pendingCount.Load())
-}
-
-func TestExecutionPayloadBidServiceDeletePendingBidDoesNotRemoveOtherSameBuilderSlot(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	first := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	second := newTestSignedExecutionPayloadBid(100, 1, 2000)
-	second.Message.ParentBlockRoot = common.HexToHash("0xcccc")
-
-	service.queuePendingBid(first)
-	firstKey := pendingBidKeyFor(first)
-	firstJob, exists := service.pendingBids.Load(firstKey)
-	require.True(t, exists)
-
-	service.queuePendingBid(second)
-	require.True(t, service.deletePendingBid(firstKey, firstJob.(*pendingBidJob)))
-	require.Equal(t, int32(1), service.pendingCount.Load())
-
-	current, exists := service.pendingBids.Load(pendingBidKeyFor(second))
-	require.True(t, exists)
-	require.Same(t, second, current.(*pendingBidJob).msg)
 }
 
 func TestExecutionPayloadBidServiceRejectsNonAdvancingKnownParentBeforeQueue(t *testing.T) {
@@ -1176,34 +1098,6 @@ func TestExecutionPayloadBidServiceRejectsNonAdvancingKnownParentBeforeQueue(t *
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.NotErrorIs(t, err, ErrBidQueued)
-	require.Zero(t, service.pendingCount.Load())
-}
-
-func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-
-	service.pendingCount.Store(maxPendingBids - 5)
-
-	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Go(func() {
-			msg := newTestSignedExecutionPayloadBid(uint64(10000+i), uint64(i), 1000)
-			service.queuePendingBid(msg)
-		})
-	}
-	wg.Wait()
-
-	require.Equal(t, int32(maxPendingBids), service.pendingCount.Load())
-	stored := 0
-	service.pendingBids.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Equal(t, 5, stored)
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {

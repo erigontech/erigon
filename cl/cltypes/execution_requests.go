@@ -19,6 +19,8 @@ var (
 	_ ssz2.SizedObjectSSZ        = (*ExecutionRequests)(nil)
 )
 
+const gloasDepositRequestsResourceLimit = int(clparams.MaxChunkSize) / solid.SizeDepositRequest
+
 // ExecutionRequests groups execution-layer requests carried by a payload.
 // Electra defines deposits, withdrawals, and consolidations; Gloas adds builder
 // deposits and exits.
@@ -59,7 +61,7 @@ func (e *ExecutionRequests) ensureLists() {
 	}
 	progressive := e.effectiveVersion() >= clparams.GloasVersion
 	if e.Deposits == nil && progressive {
-		e.Deposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
+		e.Deposits = newGloasDepositRequests()
 	} else if e.Deposits == nil {
 		e.Deposits = solid.NewStaticListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
 	}
@@ -83,6 +85,10 @@ func (e *ExecutionRequests) ensureLists() {
 	} else if e.BuilderExits == nil {
 		e.BuilderExits = solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	}
+}
+
+func newGloasDepositRequests() *solid.ListSSZ[*solid.DepositRequest] {
+	return solid.NewStaticProgressiveListSSZWithResourceLimit[*solid.DepositRequest](gloasDepositRequestsResourceLimit, solid.SizeDepositRequest)
 }
 
 func (e *ExecutionRequests) EncodingSizeSSZ() int {
@@ -225,7 +231,7 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	newBuilderDeposits := solid.NewStaticListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)
 	newBuilderExits := solid.NewStaticListSSZ[*solid.BuilderExitRequest](int(e.cfg.MaxBuilderExitRequestsPerPayload), solid.SizeBuilderExitRequest)
 	if e.effectiveVersion() >= clparams.GloasVersion {
-		newDeposits = solid.NewStaticProgressiveListSSZ[*solid.DepositRequest](int(e.cfg.MaxDepositRequestsPerPayload), solid.SizeDepositRequest)
+		newDeposits = newGloasDepositRequests()
 		newWithdrawals = solid.NewStaticProgressiveListSSZ[*solid.WithdrawalRequest](int(e.cfg.MaxWithdrawalRequestsPerPayload), solid.SizeWithdrawalRequest)
 		newConsolidations = solid.NewStaticProgressiveListSSZ[*solid.ConsolidationRequest](int(e.cfg.MaxConsolidationRequestsPerPayload), solid.SizeConsolidationRequest)
 		newBuilderDeposits = solid.NewStaticProgressiveListSSZ[*solid.BuilderDepositRequest](int(e.cfg.MaxBuilderDepositRequestsPerPayload), solid.SizeBuilderDepositRequest)

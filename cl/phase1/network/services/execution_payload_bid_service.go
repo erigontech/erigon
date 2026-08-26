@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -92,18 +91,6 @@ func newSeenBidKey(bid *cltypes.ExecutionPayloadBid) seenBidKey {
 	}
 }
 
-// pendingBidKey tracks bids waiting for proposer preferences.
-type pendingBidKey struct {
-	seenBidKey
-	messageRoot common.Hash
-}
-
-// pendingBidJob represents a pending bid waiting for proposer preferences to arrive.
-type pendingBidJob struct {
-	msg          *cltypes.SignedExecutionPayloadBid
-	creationTime time.Time
-}
-
 type bidValidationStateKey struct {
 	parentBlockRoot common.Hash
 	slot            uint64
@@ -119,8 +106,6 @@ type bidValidationStateEntry struct {
 var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", ErrIgnore)
 
 const (
-	maxPendingBids              = 1024
-	maxPendingBidsPerTuple      = 4
 	bidValidationStateCacheSize = 4
 	bidValidationStateTTLSlots  = 2
 	gloasMaximumClockDisparity  = 500 * time.Millisecond
@@ -139,13 +124,6 @@ type executionPayloadBidService struct {
 	bidStoreMu           sync.Mutex
 	validationStateMu    sync.Mutex
 	validationStateCache *lru.CacheWithTTL[bidValidationStateKey, *bidValidationStateEntry]
-
-	// Pending bids waiting for proposer preferences
-	pendingBids  sync.Map // pendingBidKey -> *pendingBidJob
-	pendingMu    sync.Mutex
-	pendingByKey map[seenBidKey]int
-	pendingCount atomic.Int32
-	pendingCond  *sync.Cond
 }
 
 // NewExecutionPayloadBidService creates a new execution payload bid gossip service.
@@ -174,8 +152,6 @@ func NewExecutionPayloadBidService(
 		now:                  time.Now,
 		seenCache:            newSeenBidStore(),
 		validationStateCache: validationStateCache,
-		pendingCond:          sync.NewCond(&sync.Mutex{}),
-		pendingByKey:         make(map[seenBidKey]int),
 	}
 	return s
 }
@@ -629,65 +605,4 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 		return nil, fmt.Errorf("builder %d has unsupported version %d", builderIndex, builder.Version)
 	}
 	return builder, nil
-}
-
-// queuePendingBid adds a bid to the pending queue for later processing when preferences arrive.
-func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) bool {
-	key := pendingBidKeyFor(msg)
-	job := &pendingBidJob{
-		msg:          msg,
-		creationTime: time.Now(),
-	}
-
-	s.pendingMu.Lock()
-	if s.pendingByKey == nil {
-		s.pendingByKey = make(map[seenBidKey]int)
-	}
-	if _, loaded := s.pendingBids.Load(key); loaded {
-		s.pendingMu.Unlock()
-		return false
-	}
-	if s.pendingCount.Load() >= maxPendingBids {
-		s.pendingMu.Unlock()
-		return false
-	}
-	tuple := key.seenBidKey
-	if s.pendingByKey[tuple] >= maxPendingBidsPerTuple {
-		s.pendingMu.Unlock()
-		return false
-	}
-	s.pendingBids.Store(key, job)
-	s.pendingByKey[tuple]++
-	s.pendingCount.Add(1)
-	s.pendingMu.Unlock()
-
-	s.signalPendingBids()
-	return true
-}
-
-func (s *executionPayloadBidService) deletePendingBid(key pendingBidKey, job *pendingBidJob) bool {
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	current, ok := s.pendingBids.Load(key)
-	if !ok || current != job {
-		return false
-	}
-	s.pendingBids.Delete(key)
-	s.pendingByKey[key.seenBidKey]--
-	if s.pendingByKey[key.seenBidKey] == 0 {
-		delete(s.pendingByKey, key.seenBidKey)
-	}
-	s.pendingCount.Add(-1)
-	return true
-}
-
-func (s *executionPayloadBidService) signalPendingBids() {
-	s.pendingCond.L.Lock()
-	s.pendingCond.Signal()
-	s.pendingCond.L.Unlock()
-}
-
-func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {
-	root, _ := msg.HashSSZ()
-	return pendingBidKey{seenBidKey: newSeenBidKey(msg.Message), messageRoot: common.Hash(root)}
 }
