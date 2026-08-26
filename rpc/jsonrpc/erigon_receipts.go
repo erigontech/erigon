@@ -118,6 +118,10 @@ func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
+	if err := crit.ValidateTopicPositions(); err != nil {
+		return nil, err
+	}
+
 	var begin, end uint64
 	erigonLogs := types.ErigonLogs{}
 
@@ -143,9 +147,6 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		}
 	}
 
-	if len(crit.Topics) > maxTopics {
-		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
-	}
 	if end < begin {
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("invalid block range: end (%d) < begin (%d)", end, begin), Code: rpc.ErrCodeInvalidParams}
 	}
