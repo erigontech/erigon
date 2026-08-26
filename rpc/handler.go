@@ -110,9 +110,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
-				if _, err := stream.Write(data); err != nil {
-					stream.WriteNil()
-				}
+				stream.WriteRawBytes(data)
 			} else {
 				stream.WriteString(derr.Error())
 			}
@@ -246,7 +244,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				out.WriteMore()
 			}
 			wrote = true
-			_, _ = out.Write(answer)
+			out.WriteRawBytes(answer)
 		}
 		out.WriteArrayEnd()
 		if wrote {
@@ -292,7 +290,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		if needWriteStream {
 			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
 		} else {
-			stream.Write([]byte("\n"))
+			stream.WriteRaw("\n")
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -652,7 +650,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteMore()
 	if msg.ID != nil {
 		stream.WriteObjectField("id")
-		stream.Write(msg.ID)
+		stream.WriteRawBytes(msg.ID)
 		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
@@ -664,6 +662,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 			stream.WriteMore()
 		}
 		HandleError(err, stream)
+	} else if !rs.Written() {
+		// A response carries exactly one of result and error, so a callback that
+		// succeeded without writing still owes a result.
+		rs.WriteNil()
 	}
 	stream.WriteObjectEnd()
 	return nil
@@ -679,7 +681,7 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 			buf, err = json.Marshal(msg.errorResponse(err))
 		}
 		if err == nil {
-			_, _ = stream.Write(buf)
+			stream.WriteRawBytes(buf)
 		}
 		return
 	}
@@ -688,10 +690,10 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	stream.WriteString(msg.Version)
 	stream.WriteMore()
 	stream.WriteObjectField("id")
-	_, _ = stream.Write(msg.ID)
+	stream.WriteRawBytes(msg.ID)
 	stream.WriteMore()
 	stream.WriteObjectField("result")
-	_, _ = stream.Write(msg.Result)
+	stream.WriteRawBytes(msg.Result)
 	stream.WriteObjectEnd()
 }
 

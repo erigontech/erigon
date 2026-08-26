@@ -9,6 +9,7 @@ import (
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -106,6 +107,12 @@ type commitmentCalculator struct {
 	// roTx is a persistent read-only transaction for domain reads.
 	// Opened at start, lives for the calculator's lifetime.
 	roTx kv.TemporalTx
+
+	// commitProgress holds the most recent CommitProgress the trie reported,
+	// and firstCommitAtNs the wall time of the first round. The parallel
+	// executor reads both to log commitment stats on its own ticker.
+	commitProgress  atomic.Pointer[commitment.CommitProgress]
+	firstCommitAtNs atomic.Int64
 
 	// lastTarget tracks the most recent block boundary so that
 	// computeAndPublish knows which block to compute for.
@@ -216,6 +223,15 @@ func newCommitmentCalculator(
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
+	// This calculator folds block N while the exec loop already writes N+1 into
+	// sd.mem; both settings below are what keep that read-safe.
+	if !doms.InMemHistoryReads() {
+		return nil, errors.New("commitmentCalculator: in-mem history reads must be enabled")
+	}
+	if !doms.InlineTouchKeyDisabled() {
+		return nil, errors.New("commitmentCalculator: inline TouchKey must be disabled")
+	}
+
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
@@ -268,6 +284,34 @@ func newCommitmentCalculator(
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
 	}, nil
+}
+
+// onCommitProgress is handed to ComputeCommitment so the trie's counters
+// reach the executor. Called from the calculator goroutine.
+func (cc *commitmentCalculator) onCommitProgress(p *commitment.CommitProgress) {
+	if p == nil {
+		return
+	}
+	cc.commitProgress.Store(p)
+	cc.firstCommitAtNs.CompareAndSwap(0, time.Now().UnixNano())
+}
+
+// LastCommitProgress returns the most recent round's counters, or the zero
+// value if no round has completed.
+func (cc *commitmentCalculator) LastCommitProgress() commitment.CommitProgress {
+	if p := cc.commitProgress.Load(); p != nil {
+		return *p
+	}
+	return commitment.CommitProgress{}
+}
+
+// FirstCommitAt reports when the first round ran; zero if none has.
+func (cc *commitmentCalculator) FirstCommitAt() time.Time {
+	ns := cc.firstCommitAtNs.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
 
 func (cc *commitmentCalculator) Start(ctx context.Context) {
@@ -846,7 +890,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	defer cc.doms.UnlockChangesetAccumulator()
 	defer cc.doms.DetachChangesetAccumulatorLocked()()
 
-	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -968,7 +1012,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	defer cc.doms.UnlockChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
 	if cs == nil {
-		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress)
 	}
 	// LOAD-BEARING swap under the outer lock (already taken above). The
 	// swap below mutates the global current-accumulator pointer; the
@@ -980,8 +1024,8 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	//
 	// Inside the lock we must use the *Locked variants — the public
 	// counterparts re-acquire the same Mutex and would self-deadlock.
-	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
-	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	defer cc.doms.SwapCommitmentDiffLocked(cs)()
+	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
@@ -1050,6 +1094,3 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	}
 	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
 }
-
-// Keep imports used.
-var _ = commitment.CommitProgress{}

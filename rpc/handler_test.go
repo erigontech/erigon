@@ -59,6 +59,12 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			params:   []byte("[6]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 6"}}`,
 		},
+		// JSON-RPC wants exactly one of result and error, so a callback that
+		// succeeds without writing still owes a result.
+		"no_error_no_stream_write": {
+			params:   []byte("[7]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":null}`,
+		},
 	}
 
 	for name, testParams := range tests {

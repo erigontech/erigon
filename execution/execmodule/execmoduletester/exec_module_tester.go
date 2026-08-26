@@ -597,7 +597,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock, nil)
+	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
@@ -655,7 +655,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.BlockReader,
 		statusDataProvider,
 		false,
-		false, /* enableWitProtocol */
 		logger,
 	)
 	if err != nil {

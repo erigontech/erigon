@@ -135,7 +135,9 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetVersion(slotData.Version)
 	ret.SetGenesisTime(r.genesisState.GenesisTime())
 	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
-	ret.SetSlot(slot)
+	if err := ret.SetSlot(slot); err != nil {
+		return nil, fmt.Errorf("failed to set slot: %w", err)
+	}
 	ret.SetFork(slotData.Fork)
 	// History
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
@@ -261,8 +263,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if nextSyncCommittee == nil {
 		nextSyncCommittee = r.genesisState.NextSyncCommittee()
 	}
-	ret.SetCurrentSyncCommittee(currentSyncCommittee)
-	ret.SetNextSyncCommittee(nextSyncCommittee)
+	if err := ret.SetCurrentSyncCommittee(currentSyncCommittee); err != nil {
+		return nil, fmt.Errorf("failed to set current sync committee: %w", err)
+	}
+	if err := ret.SetNextSyncCommittee(nextSyncCommittee); err != nil {
+		return nil, fmt.Errorf("failed to set next sync committee: %w", err)
+	}
 	// Execution
 	if ret.Version() < clparams.BellatrixVersion {
 		return ret, nil
