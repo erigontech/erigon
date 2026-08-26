@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
@@ -76,7 +77,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	require.NoError(t, err)
 
 	statedb := state.NewWithVersionMap(
-		state.NewReaderV3(domains.AsStateGetter(tx)),
+		state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})),
 		state.NewVersionMap(nil),
 	)
 	statedb.SetNoMaterialize(noMaterialize)

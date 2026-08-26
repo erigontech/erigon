@@ -240,12 +240,13 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 	tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
-	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger,
+) error {
 	var currentInc uint64
 
-	//TODO: why we don't call accumulator.ChangeCode???
+	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//TODO: This is broken - becuase it does not handle the way value changes
+		// TODO: This is broken - becuase it does not handle the way value changes
 		// for previous steps are represented - they will pass nil values here
 		// which will look like a delete (12/11/25 - I've not fixed this as it has
 		// been here for a while and I'm not sure what if anything receives these
@@ -396,7 +397,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return err
 	}
 
-	var to = prevStageProgress
+	to := prevStageProgress
 	if toBlock > 0 {
 		to = min(prevStageProgress, toBlock)
 	}
@@ -648,7 +649,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// generated changeset is pruned 96 blocks later, defeating the point.
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		// Some chains produce blocks with 400 chunks of diff = 3mb
 		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
 			pruneChangeSetsStartTime := time.Now()
 			if err := rawdb.PruneTable(
