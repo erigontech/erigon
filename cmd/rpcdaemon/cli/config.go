@@ -711,13 +711,17 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	} else {
 		logger.Info("RPC admission control enabled", "max_concurrent_requests", rpcConcurrencyLimit, "db.read.concurrency", cfg.DBReadConcurrency)
 	}
-	mux := http.NewServeMux()
-	mux.Handle("/", srv)
+
+	var target http.Handler = srv
+
 	if cfg.SSZQLEnabled {
+		mux := http.NewServeMux()
+		mux.Handle("/", srv)
 		mux.Handle("POST /eth/{version}/execution/{blockID}/query", sszql.SSZQueryHandler())
 		mux.Handle("POST /eth/{version}/execution/{blockID}/query/{$}", sszql.SSZQueryHandler())
+		target = mux
 	}
-	httpHandler := node.NewHTTPHandlerStack(mux, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
+	httpHandler := node.NewHTTPHandlerStack(target, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
