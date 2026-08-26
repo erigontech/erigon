@@ -235,11 +235,11 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 
 // growLRU's generation swap is not fenced against writers (see its doc
 // comment): a grow can copy a key into the new generation while a same-key
-// refresh (putContentLocked's stale-entry path) is in flight. Replace resolves
-// g.cur once so both halves land on the same generation; split across the swap,
-// the removal would hit the retired generation and the insert would replace the
-// copy in place without firing OnEvict, double-counting the key.
-func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
+// refresh (putContentLocked's stale-entry path) is in flight. Put resolves
+// g.cur once so its removal and its store land on the same generation; split
+// across the swap, the removal would hit the retired generation and the store
+// would replace the copy in place without firing OnEvict, double-counting it.
+func TestGrowLRU_GrowRacePutDoesNotDoubleCount(t *testing.T) {
 	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
 	defer g.Close()
 
@@ -275,36 +275,75 @@ func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
 	require.Equal(t, gen1.lru.Len(), gen1.len(), "the retired generation's own counter must stay exact")
 }
 
-// CodeCache drives three growLRU layers through putContentLocked, which removes
-// a stale entry before re-adding it; concurrent puts of distinct code must still
-// leave each layer's counter equal to its LRU's real length.
+// CodeCache drives all three growLRU layers through putContentLocked, whose
+// stale path displaces the resident entry. The key space repeats so puts land on
+// resident keys, an unwinder makes those repeats stale so the displacing path
+// runs, and the code budget leaves room above the start capacity so the grow
+// gates fire. Each layer's counter must still equal its LRU's real length.
 func TestCodeCache_GrowLRULenCounterUnderConcurrency(t *testing.T) {
-	cc := closeOnCleanup(t, NewCodeCache(8*datasize.MB, 8*datasize.MB))
+	// 64MB over avgCodeEntryBytes puts the two code layers' ceiling well above
+	// genericCacheStartCapacity; at 8MB it lands below and they never grow.
+	cc := closeOnCleanup(t, NewCodeCache(64*datasize.MB, 8*datasize.MB))
+	// Floor 0, so every later Unwind turns the whole resident set stale on its
+	// epoch bump alone.
+	cc.Unwind(0)
 
 	const workers = 8
 	const perWorker = 3000
+	const keySpace = 4096
+
+	var unwinder sync.WaitGroup
+	done := make(chan struct{})
+	unwinder.Go(func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			cc.Unwind(0)
+			runtime.Gosched()
+		}
+	})
+
 	var wg sync.WaitGroup
 	for w := range workers {
 		wg.Go(func() {
 			addr := make([]byte, 20)
 			code := make([]byte, 40)
+			codeHash := make([]byte, 32)
 			for i := range perWorker {
-				binary.BigEndian.PutUint64(addr[12:], uint64(w*perWorker+i))
-				binary.BigEndian.PutUint64(code, uint64(w*perWorker+i))
-				cc.Put(addr, code, uint64(i))
+				k := uint64(w*perWorker+i) % keySpace
+				binary.BigEndian.PutUint64(addr[12:], k)
+				binary.BigEndian.PutUint64(code, k)
+				binary.BigEndian.PutUint64(codeHash, k)
+				cc.PutWithCodeHash(addr, code, codeHash, uint64(i))
 			}
 		})
 	}
 	wg.Wait()
+	close(done)
+	unwinder.Wait()
 
-	require.Equal(t, cc.hashToCode.cur.Load().lru.Len(), cc.hashToCode.Len(), "hashToCode counter drifted")
-	require.Equal(t, cc.codeHashToCode.cur.Load().lru.Len(), cc.codeHashToCode.Len(), "codeHashToCode counter drifted")
-	require.Equal(t, cc.codeSizeByCodeHash.cur.Load().lru.Len(), cc.codeSizeByCodeHash.Len(), "codeSizeByCodeHash counter drifted")
+	for _, layer := range []struct {
+		name string
+		lru  *growLRU[codeEntry]
+	}{
+		{"hashToCode", cc.hashToCode},
+		{"codeHashToCode", cc.codeHashToCode},
+	} {
+		require.Equal(t, layer.lru.cur.Load().lru.Len(), layer.lru.Len(), "%s counter drifted", layer.name)
+		require.Greater(t, layer.lru.curCap.Load(), layer.lru.startCap, "%s never grew", layer.name)
+	}
+	require.Equal(t, cc.codeSizeByCodeHash.cur.Load().lru.Len(), cc.codeSizeByCodeHash.Len(),
+		"codeSizeByCodeHash counter drifted")
+	require.Greater(t, cc.codeSizeByCodeHash.curCap.Load(), cc.codeSizeByCodeHash.startCap,
+		"codeSizeByCodeHash never grew")
 }
 
 // Parallel adds while the LRU is still below its ceiling — the window where
 // every add runs the grow check.
-func BenchmarkGrowLRUParallelAddGrow(b *testing.B) {
+func BenchmarkGrowLRUParallelPutGrow(b *testing.B) {
 	g := newGrowLRU[uint64](256*datasize.MB, 48, nil)
 	defer g.Close()
 	var seq atomic.Uint64
@@ -337,11 +376,7 @@ func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
 				h := key(uint64(w)*20000 + i)
 				stripe := &stripes[uint8(h)]
 				stripe.Lock()
-				if _, ok := g.Get(h); ok {
-					g.Put(h, i)
-				} else {
-					g.Put(h, i)
-				}
+				g.Put(h, i)
 				stripe.Unlock()
 			}
 		})
