@@ -771,10 +771,9 @@ func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client,
 	panic(err)
 }
 
-// The listener that flakeyListener exists to provide -- one that breaks
-// connections mid-test -- can also break the one the setup dial is handshaking
-// on. That is not what the cancel tests are about, so the dial retries instead
-// of failing the whole package.
+// TestHTTPTestClientDialSurvivesKilledConn checks that httpTestClient returns a
+// usable client when the listener kills the connection the setup dial is
+// handshaking on.
 func TestHTTPTestClientDialSurvivesKilledConn(t *testing.T) {
 	logger := log.New()
 	server := newTestServer(logger)
@@ -822,7 +821,9 @@ func (l *flakeyListener) Accept() (net.Conn, error) {
 		return c, nil
 	}
 	if l.maxKillTimeout > 0 {
-		timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
+		// Floored like upstream go-ethereum: an unfloored rand fires at t=0 often
+		// enough that the kill lands on the handshake rather than on the test.
+		timeout := max(10*time.Millisecond, time.Duration(rand.Int63n(int64(l.maxKillTimeout))))
 		time.AfterFunc(timeout, func() {
 			log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
 			c.Close()
