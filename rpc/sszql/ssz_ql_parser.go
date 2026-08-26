@@ -1,6 +1,8 @@
 package sszql
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/erigontech/erigon/rpc"
@@ -51,6 +53,10 @@ func parseAliases(aliases []Alias, res *SSZQLResponse, blockID rpc.BlockNumberOr
 	m := make(map[string]string)
 
 	for _, alias := range aliases {
+		if _, dup := m[alias.Alias]; dup {
+			return nil, fmt.Errorf("%w: %q", errors.New("duplicate alias"), alias.Alias)
+		}
+
 		resolvedPath, err := resolvePath(alias.Path, alias.Anchor, blockID)
 		if err != nil {
 			return nil, err
