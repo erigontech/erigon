@@ -515,6 +515,7 @@ func TestConvertPBinRecordFilesSamplesOnlyLegacyBranches(t *testing.T) {
 func rewritePBinFile(t *testing.T, fixture pbinOutputFixture, keys, values [][]byte) {
 	t.Helper()
 	config := fixture.output.Cfg(kv.CommitmentDomain)
+	fixture.output.CloseMappedFilesForTest()
 	require.NoError(t, dir.RemoveFile(fixture.outputPath))
 	comp, err := seg.NewCompressor(t.Context(), "pbin test rewrite", fixture.outputPath, fixture.output.Dirs().Tmp, config.CompressCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)

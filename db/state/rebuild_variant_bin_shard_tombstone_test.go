@@ -123,7 +123,7 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 		return false, []byte{byte(i + 1), byte(i + 2), 0xAA}
 	})
 	require.NoError(t, agg.BuildFiles(range1TxCount))
-	agg, db = reopenShardTombstoneAgg(t, rawDB, dirs)
+	agg, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	writeShardTombstoneRange(t, db, range1TxCount, range2TxCount, 2, func(i int) (drop bool, val []byte) {
 		if i >= shardTombstoneAccounts/2 {
@@ -132,14 +132,14 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 		return false, []byte{byte(i + 1), byte(i + 2), 0xBB}
 	})
 	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount))
-	agg, db = reopenShardTombstoneAgg(t, rawDB, dirs)
+	agg, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	// Collation holds a step back until a write in the next one proves it closed
 	// (`step+1 records visible`, aggregator.go). Without this, range 2's own last
 	// step never seals into a file and the range never forms.
 	writeShardTombstoneGuard(t, db, range1TxCount+range2TxCount)
 	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount+shardTombstoneStepSize))
-	_, db = reopenShardTombstoneAgg(t, rawDB, dirs)
+	_, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	return db, dirs
 }
@@ -219,8 +219,11 @@ func writeShardTombstoneRange(t *testing.T, db kv.TemporalRwDB, rangeFrom, range
 // reopenShardTombstoneAgg drops the commitment domain file BuildFiles seals even
 // with commitment writes discarded, and reopens against the trimmed folder: a
 // resumed rebuild takes any file covering a range as that range already done.
-func reopenShardTombstoneAgg(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs) (*state.Aggregator, kv.TemporalRwDB) {
+func reopenShardTombstoneAgg(t *testing.T, prev *state.Aggregator, rawDB kv.RwDB, dirs datadir.Dirs) (*state.Aggregator, kv.TemporalRwDB) {
 	t.Helper()
+	// The files about to go are mapped by the aggregator that sealed them, and
+	// Windows refuses to unlink a mapped file.
+	prev.CloseMappedFilesForTest()
 	paths, err := dir.ListFiles(dirs.SnapDomain)
 	require.NoError(t, err)
 	for _, p := range paths {
