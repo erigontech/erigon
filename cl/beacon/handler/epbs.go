@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -202,6 +201,9 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	}
 
 	// Must be GLOAS epoch
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
@@ -471,6 +473,10 @@ func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {
 // Accepts application/json or application/octet-stream (SSZ).
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		return
+	}
 	var req []*cltypes.PayloadAttestationMessage
 
 	contentType, err := requestContentType(r)
@@ -500,7 +506,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		req = make([]*cltypes.PayloadAttestationMessage, 0, count)
 		for i := range count {
 			msg := &cltypes.PayloadAttestationMessage{}
-			if err := msg.DecodeSSZ(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
+			if err := msg.DecodeSSZStrict(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
 				beaconhttp.NewEndpointError(http.StatusBadRequest,
 					fmt.Errorf("failed to decode SSZ PayloadAttestationMessage at index %d: %w", i, err)).WriteTo(w)
 				return
@@ -508,8 +514,18 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			req = append(req, msg)
 		}
 	case "application/json":
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&req); err != nil {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize))
+		if err := decoder.Decode(&req); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data")).WriteTo(w)
+			return
+		}
+		if uint64(len(req)) > a.beaconChainCfg.PtcSize {
+			beaconhttp.NewEndpointError(http.StatusBadRequest,
+				fmt.Errorf("payload attestation count %d exceeds %d", len(req), a.beaconChainCfg.PtcSize)).WriteTo(w)
 			return
 		}
 	default:
@@ -616,7 +632,7 @@ func (a *ApiHandler) GetEthV1BeaconPoolProposerPreferences(w http.ResponseWriter
 // Accepts application/json or application/octet-stream (SSZ).
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolProposerPreferences(w http.ResponseWriter, r *http.Request) {
-	reqs, ok := decodeProposerPreferencesRequest(w, r)
+	reqs, ok := decodeProposerPreferencesRequest(w, r, false)
 	if !ok {
 		return
 	}
@@ -627,14 +643,18 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerPreferences(w http.ResponseWrite
 // POST /eth/v1/validator/proposer_preferences
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter, r *http.Request) {
-	reqs, ok := decodeProposerPreferencesRequest(w, r)
+	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		return
+	}
+	reqs, ok := decodeProposerPreferencesRequest(w, r, true)
 	if !ok {
 		return
 	}
 	a.postProposerPreferences(w, r, reqs)
 }
 
-func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([]*cltypes.SignedProposerPreferences, bool) {
+func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, canonical bool) ([]*cltypes.SignedProposerPreferences, bool) {
 	contentType, err := requestContentType(r)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
@@ -674,7 +694,16 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([
 		}
 		var reqs []*cltypes.SignedProposerPreferences
 		if err := json.Unmarshal(body, &reqs); err == nil {
+			if len(reqs) > maxProposerPreferencesRequestItems {
+				beaconhttp.NewEndpointError(http.StatusBadRequest,
+					fmt.Errorf("proposer preferences count %d exceeds %d", len(reqs), maxProposerPreferencesRequestItems)).WriteTo(w)
+				return nil, false
+			}
 			return reqs, true
+		}
+		if canonical {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("proposer preferences request must be a JSON array")).WriteTo(w)
+			return nil, false
 		}
 		req := &cltypes.SignedProposerPreferences{}
 		if err := json.Unmarshal(body, req); err != nil {
@@ -694,17 +723,17 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty proposer preferences request")).WriteTo(w)
 		return
 	}
+	failures := make([]poolingFailure, 0)
 	for i, req := range reqs {
 		if req == nil || req.Message == nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest,
-				fmt.Errorf("missing message in signed proposer preferences at index %d", i)).WriteTo(w)
-			return
+			failures = append(failures, poolingFailure{Index: i, Message: "missing message in signed proposer preferences"})
+			continue
 		}
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-				return
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
 			}
 		}
 
@@ -726,7 +755,10 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
-
+	if len(failures) != 0 {
+		a.writePoolingFailures(w, failures)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -781,12 +813,19 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 // The envelope is processed through forkchoice and broadcast on gossip.
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWriter, r *http.Request) {
+	a.postEthV1BeaconExecutionPayloadEnvelope(w, r, true)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelopeLegacy(w http.ResponseWriter, r *http.Request) {
+	a.postEthV1BeaconExecutionPayloadEnvelope(w, r, false)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWriter, r *http.Request, canonical bool) {
 	contentType, err := requestContentType(r)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
 		return
 	}
-	canonical := strings.Contains(r.URL.Path, "/execution_payload_envelopes")
 	blobDataIncluded := false
 	validation := BlockPublishingValidationGossip
 	if canonical {
@@ -1083,7 +1122,15 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 // POST /eth/v1/beacon/execution_payload_bid
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request) {
-	if strings.Contains(r.URL.Path, "/execution_payload_bids") && r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+	a.postEthV1BeaconExecutionPayloadBid(w, r, true)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadBidLegacy(w http.ResponseWriter, r *http.Request) {
+	a.postEthV1BeaconExecutionPayloadBid(w, r, false)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request, canonical bool) {
+	if canonical && r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 		return
 	}
@@ -1127,11 +1174,8 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 	// Validate via the bid service (checks signature, slot timing, proposer preferences, etc.)
 	if a.executionPayloadBidService != nil {
 		if err := a.executionPayloadBidService.ProcessMessage(r.Context(), nil, req); err != nil {
-			if !errors.Is(err, clservices.ErrBidQueued) {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-				return
-			}
-			a.logger.Debug("[Beacon REST] queued execution payload bid", "err", err)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
 		}
 	}
 
@@ -1172,11 +1216,33 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 			fmt.Errorf("invalid builder_index: %w", err))
 	}
 
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	// Must be GLOAS epoch
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bids not available before GLOAS fork"))
+	}
+	currentSlot := a.ethClock.GetCurrentSlot()
+	if slot < currentSlot || slot-currentSlot > 1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
+	}
+	registered := false
+	if a.syncedData != nil {
+		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+			builders := headState.GetBuilders()
+			registered = builders != nil && builderIndex < uint64(builders.Len()) && builders.Get(int(builderIndex)) != nil
+			return nil
+		}); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+		}
+	}
+	if !registered {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("builder index %d is not registered", builderIndex))
 	}
 
 	if a.epbsPool == nil {

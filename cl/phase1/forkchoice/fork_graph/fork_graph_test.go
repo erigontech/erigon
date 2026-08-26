@@ -76,6 +76,19 @@ type partialWriteFs struct {
 	fail bool
 }
 
+type countingStatFs struct {
+	afero.Fs
+	mu    sync.Mutex
+	stats int
+}
+
+func (fs *countingStatFs) Stat(name string) (os.FileInfo, error) {
+	fs.mu.Lock()
+	fs.stats++
+	fs.mu.Unlock()
+	return fs.Fs.Stat(name)
+}
+
 type blockingRenameFs struct {
 	afero.Fs
 	target  string
@@ -187,6 +200,24 @@ func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
 	require.True(t, f.HasEnvelope(root))
 	_, err = f.ReadEnvelopeFromDisk(root)
 	require.NoError(t, err)
+}
+
+func TestHasEnvelopeCachesMissAndDumpInvalidatesMiss(t *testing.T) {
+	fs := &countingStatFs{Fs: afero.NewMemMapFs()}
+	cfg := clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	root := common.Hash{1}
+	f.headers.Store(root, &cltypes.BeaconBlockHeader{Slot: 1})
+
+	require.False(t, f.HasEnvelope(root))
+	require.False(t, f.HasEnvelope(root))
+	fs.mu.Lock()
+	require.Equal(t, 1, fs.stats)
+	fs.mu.Unlock()
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+	require.True(t, f.HasEnvelope(root))
 }
 
 func TestDumpEnvelopeBeforePruneDoesNotSurvivePrune(t *testing.T) {
@@ -332,7 +363,7 @@ func TestHasBlockChildAtOrAfterUsesValidatedChildren(t *testing.T) {
 	require.True(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
 	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 65))
 	require.False(t, f.HasBlockChildAtOrAfter(common.Hash{3}, 64))
-	f.removeValidatedChild(parentRoot, common.Hash{2})
+	f.removeValidatedChildren(map[common.Hash][]common.Hash{parentRoot: {{2}}})
 	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
 }
 
@@ -347,6 +378,22 @@ func TestHasBlockEquivocation(t *testing.T) {
 	require.True(t, f.HasBlockEquivocation(64, 9, common.Hash{2}))
 	require.False(t, f.HasBlockEquivocation(64, 9, root))
 	require.False(t, f.HasBlockEquivocation(64, 8, common.Hash{2}))
+}
+
+func TestHasBlockEquivocationUsesPruneBoundary(t *testing.T) {
+	f := &forkGraphDisk{}
+	retained := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	retained.Block.Slot = 64
+	retained.Block.ProposerIndex = 9
+	pruned := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	pruned.Block.Slot = 63
+	pruned.Block.ProposerIndex = 9
+	f.blocks.Store(common.Hash{1}, retained)
+	f.blocks.Store(common.Hash{2}, pruned)
+	f.lowestAvailableBlock.Store(65)
+
+	require.True(t, f.HasBlockEquivocation(64, 9, common.Hash{3}))
+	require.False(t, f.HasBlockEquivocation(63, 9, common.Hash{3}))
 }
 
 func TestRemoveValidatedChildrenBulkKeepsSameSlotSurvivor(t *testing.T) {

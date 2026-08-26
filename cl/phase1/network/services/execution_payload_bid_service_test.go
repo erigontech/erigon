@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"math"
 	"sync"
@@ -870,8 +871,8 @@ func TestExecutionPayloadBidServiceStoreValidBidDoesNotOverwriteHigherBid(t *tes
 	high := newTestSignedExecutionPayloadBid(100, 1, 2000)
 	low := newTestSignedExecutionPayloadBid(100, 2, 500)
 
-	require.NoError(t, service.storeValidBid(high))
-	err := service.storeValidBid(low)
+	require.NoError(t, service.storeValidBidAt(high, time.Time{}))
+	err := service.storeValidBidAt(low, time.Time{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
 
@@ -1232,6 +1233,24 @@ func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
 
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestExecutionPayloadBidServiceDecodeGossipMessageRejectsNonCanonicalOffsets(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	encoded, err := newTestSignedExecutionPayloadBid(100, 1, 1000).EncodeSSZ(nil)
+	require.NoError(t, err)
+	const signedFixedSize = 100
+	const bidFixedSize = 224
+	const commitmentsOffsetPosition = 188
+	nonCanonical := append([]byte(nil), encoded[:signedFixedSize+bidFixedSize]...)
+	nonCanonical = append(nonCanonical, make([]byte, 4)...)
+	nonCanonical = append(nonCanonical, encoded[signedFixedSize+bidFixedSize:]...)
+	offset := signedFixedSize + commitmentsOffsetPosition
+	binary.LittleEndian.PutUint32(nonCanonical[offset:], binary.LittleEndian.Uint32(encoded[offset:])+4)
+
+	_, err = service.DecodeGossipMessage("peer123", nonCanonical, clparams.GloasVersion)
 	require.Error(t, err)
 }
 

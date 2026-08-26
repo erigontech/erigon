@@ -111,7 +111,7 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 	obj := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(s.beaconCfg),
 	}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := obj.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -126,6 +126,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 
 	envelope := signedEnvelope.Message
+	if err := validateEnvelopeLimits(s.beaconCfg, envelope); err != nil {
+		return err
+	}
 	beaconBlockRoot := envelope.BeaconBlockRoot
 	builderIndex := envelope.BuilderIndex
 
@@ -210,6 +213,22 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
 
+	return nil
+}
+
+func validateEnvelopeLimits(cfg *clparams.BeaconChainConfig, envelope *cltypes.ExecutionPayloadEnvelope) error {
+	if cfg == nil || envelope == nil || envelope.Payload == nil {
+		return errors.New("missing execution payload envelope fields")
+	}
+	if err := validateExecutionRequestsLimits(cfg, envelope.ExecutionRequests); err != nil {
+		return err
+	}
+	if envelope.Payload.Withdrawals == nil {
+		return errors.New("missing payload withdrawals")
+	}
+	if uint64(envelope.Payload.Withdrawals.Len()) > cfg.MaxWithdrawalsPerPayload {
+		return fmt.Errorf("payload withdrawals count %d exceeds limit %d", envelope.Payload.Withdrawals.Len(), cfg.MaxWithdrawalsPerPayload)
+	}
 	return nil
 }
 

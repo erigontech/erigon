@@ -504,10 +504,52 @@ func TestDynamicBuilderCallsShareBoundedAdmission(t *testing.T) {
 			_ = client.SubmitBuilderPreferences(t.Context(), "https://builder.example", common.Bytes48{}, request)
 		})
 	}
-	require.Eventually(t, func() bool { return maximum.Load() == defaultBuilderCallLimit }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return maximum.Load() == defaultPreferenceCallLimit }, time.Second, time.Millisecond)
 	close(release)
 	wg.Wait()
-	require.EqualValues(t, defaultBuilderCallLimit, maximum.Load())
+	require.EqualValues(t, defaultPreferenceCallLimit, maximum.Load())
+}
+
+func TestBuilderPreferencesAdmissionReservesCriticalCapacity(t *testing.T) {
+	preferenceStarted := make(chan struct{}, 1)
+	releasePreference := make(chan struct{})
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/builder_preferences/") {
+			preferenceStarted <- struct{}{}
+			select {
+			case <-releasePreference:
+				return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+		}
+		return builderTestResponse(r, http.StatusNoContent, "", nil), nil
+	}))
+	client.admission = semaphore.NewWeighted(2)
+	client.preferencesAdmission = semaphore.NewWeighted(1)
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- client.SubmitBuilderPreferences(t.Context(), "https://builder.example", common.Bytes48{}, request)
+	}()
+	<-preferenceStarted
+	secondContext, cancelSecond := context.WithCancel(t.Context())
+	defer cancelSecond()
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- client.SubmitBuilderPreferences(secondContext, "https://builder.example", common.Bytes48{1}, request)
+	}()
+
+	criticalContext, cancelCritical := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancelCritical()
+	bid, err := client.RequestExecutionPayloadBid(criticalContext, "https://builder.example", 12, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), 100*time.Millisecond)
+	require.NoError(t, err)
+	require.Nil(t, bid)
+
+	cancelSecond()
+	require.ErrorIs(t, <-secondDone, context.Canceled)
+	close(releasePreference)
+	require.NoError(t, <-firstDone)
 }
 
 func TestDynamicBuilderAdmissionCancellationDoesNotLeakPermit(t *testing.T) {

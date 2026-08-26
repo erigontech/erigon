@@ -83,7 +83,7 @@ func (f *operationFeed) SendDataColumnSidecar(value *DataColumnSidecarData) int 
 func (f *operationFeed) SendPayloadAttestationMessage(value *PayloadAttestationMessageData) int {
 	return f.feed.TrySend(&EventStream{
 		Event: OpPayloadAttestationMessage,
-		Data:  value,
+		Data:  &VersionedPayloadAttestationMessage{Version: "gloas", Data: value},
 	})
 }
 
@@ -91,7 +91,7 @@ func (f *operationFeed) SendPayloadAttestationMessage(value *PayloadAttestationM
 func (f *operationFeed) SendExecutionPayloadBid(value *SignedExecutionPayloadBidData) int {
 	return f.feed.TrySend(&EventStream{
 		Event: OpExecutionPayloadBid,
-		Data:  value,
+		Data:  &VersionedSignedExecutionPayloadBid{Version: "gloas", Data: value},
 	})
 }
 

@@ -51,6 +51,7 @@ const (
 	builderPreferencesTimeout  = time.Second
 	builderBeaconBlockTimeout  = time.Second
 	defaultBuilderCallLimit    = 32
+	defaultPreferenceCallLimit = 24
 )
 
 type BuilderTargetPolicy struct {
@@ -59,14 +60,16 @@ type BuilderTargetPolicy struct {
 
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
-	httpClient    *http.Client
-	url           *url.URL
-	beaconConfig  *clparams.BeaconChainConfig
-	lookupIP      func(context.Context, string) ([]net.IPAddr, error)
-	targetPolicy  BuilderTargetPolicy
-	transport     http.RoundTripper
-	admission     *semaphore.Weighted
-	admissionOnce sync.Once
+	httpClient               *http.Client
+	url                      *url.URL
+	beaconConfig             *clparams.BeaconChainConfig
+	lookupIP                 func(context.Context, string) ([]net.IPAddr, error)
+	targetPolicy             BuilderTargetPolicy
+	transport                http.RoundTripper
+	admission                *semaphore.Weighted
+	admissionOnce            sync.Once
+	preferencesAdmission     *semaphore.Weighted
+	preferencesAdmissionOnce sync.Once
 }
 
 func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig) *builderClient {
@@ -91,12 +94,13 @@ func newBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainCon
 		}
 	}
 	c := &builderClient{
-		httpClient:   &http.Client{},
-		url:          u,
-		beaconConfig: beaconConfig,
-		targetPolicy: policy,
-		transport:    newPinnedBuilderTransport(nil),
-		admission:    semaphore.NewWeighted(defaultBuilderCallLimit),
+		httpClient:           &http.Client{},
+		url:                  u,
+		beaconConfig:         beaconConfig,
+		targetPolicy:         policy,
+		transport:            newPinnedBuilderTransport(nil),
+		admission:            semaphore.NewWeighted(defaultBuilderCallLimit),
+		preferencesAdmission: semaphore.NewWeighted(defaultPreferenceCallLimit),
 	}
 	if checkStatus {
 		if err := c.GetStatus(context.Background()); err != nil {
@@ -255,10 +259,16 @@ func (b *builderClient) SubmitBuilderPreferences(ctx context.Context, builderURL
 	}
 	requestContext, cancel := context.WithTimeout(ctx, builderPreferencesTimeout)
 	defer cancel()
-	if err := b.builderAdmission().Acquire(requestContext, 1); err != nil {
+	preferencesAdmission := b.builderPreferencesAdmission()
+	if err := preferencesAdmission.Acquire(requestContext, 1); err != nil {
 		return err
 	}
-	defer b.builderAdmission().Release(1)
+	defer preferencesAdmission.Release(1)
+	admission := b.builderAdmission()
+	if err := admission.Acquire(requestContext, 1); err != nil {
+		return err
+	}
+	defer admission.Release(1)
 	target, err := b.builderEndpoint(requestContext, b.targetPolicy, builderURL, "eth", "v1", "builder", "builder_preferences", proposerPubkey.Hex())
 	if err != nil {
 		return err
@@ -473,6 +483,15 @@ func (b *builderClient) builderAdmission() *semaphore.Weighted {
 		}
 	})
 	return b.admission
+}
+
+func (b *builderClient) builderPreferencesAdmission() *semaphore.Weighted {
+	b.preferencesAdmissionOnce.Do(func() {
+		if b.preferencesAdmission == nil {
+			b.preferencesAdmission = semaphore.NewWeighted(defaultPreferenceCallLimit)
+		}
+	})
+	return b.preferencesAdmission
 }
 
 type pinnedBuilderTargetKey struct{}

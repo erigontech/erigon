@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"testing"
@@ -52,11 +53,29 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 		envelope.Payload.SlotNumber = slot
 		envelope.Payload.Extra = solid.NewExtraData()
 		envelope.Payload.Transactions = &solid.TransactionsSSZ{}
+		envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	}
 	return &cltypes.SignedExecutionPayloadEnvelope{
 		Message:   envelope,
 		Signature: common.Bytes96{},
 	}
+}
+
+func TestExecutionPayloadServiceDecodeRejectsNonCanonicalOffsets(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	encoded, err := newTestSignedEnvelope(100, common.Hash{1}, 1).EncodeSSZ(nil)
+	require.NoError(t, err)
+	const signedFixedSize = 100
+	const envelopeFixedSize = 80
+	nonCanonical := append([]byte(nil), encoded[:signedFixedSize+envelopeFixedSize]...)
+	nonCanonical = append(nonCanonical, make([]byte, 4)...)
+	nonCanonical = append(nonCanonical, encoded[signedFixedSize+envelopeFixedSize:]...)
+	for offset := signedFixedSize; offset < signedFixedSize+8; offset += 4 {
+		binary.LittleEndian.PutUint32(nonCanonical[offset:], binary.LittleEndian.Uint32(encoded[offset:])+4)
+	}
+
+	_, err = service.DecodeGossipMessage("peer123", nonCanonical, clparams.GloasVersion)
+	require.Error(t, err)
 }
 
 func TestExecutionPayloadServiceNilEnvelope(t *testing.T) {
@@ -588,4 +607,29 @@ func TestExecutionPayloadServiceNames(t *testing.T) {
 
 	require.True(t, impl.IsMyGossipMessage("execution_payload"))
 	require.False(t, impl.IsMyGossipMessage("beacon_block"))
+}
+
+func TestValidateEnvelopeLimitsRejectsOversizedRequestsAndWithdrawals(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxDepositRequestsPerPayload = 1
+	cfg.MaxWithdrawalsPerPayload = 1
+	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+	envelope.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
+	envelope.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
+	require.Error(t, validateEnvelopeLimits(&cfg, envelope))
+
+	envelope = cltypes.NewExecutionPayloadEnvelope(&cfg)
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](16, 44)
+	envelope.Payload.Withdrawals.Append(&cltypes.Withdrawal{})
+	envelope.Payload.Withdrawals.Append(&cltypes.Withdrawal{})
+	require.Error(t, validateEnvelopeLimits(&cfg, envelope))
+}
+
+func TestValidateEnvelopeLimitsRequiresWithdrawalsList(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
+	require.ErrorContains(t, validateEnvelopeLimits(&cfg, envelope), "missing payload withdrawals")
+
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	require.NoError(t, validateEnvelopeLimits(&cfg, envelope))
 }

@@ -186,7 +186,7 @@ func (s *executionPayloadBidService) Names() []string {
 
 func (s *executionPayloadBidService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedExecutionPayloadBid, error) {
 	msg := &cltypes.SignedExecutionPayloadBid{}
-	if err := msg.DecodeSSZ(data, int(version)); err != nil {
+	if err := msg.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return msg, nil
@@ -211,16 +211,16 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		"parentBlockHash", bid.ParentBlockHash)
 
 	now := s.now()
+	// [IGNORE] bid.slot is the current or next slot
+	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, slot, gloasMaximumClockDisparity) {
+		return fmt.Errorf("%w: bid slot %d is not current or next slot", ErrIgnore, slot)
+	}
 	s.epbsPool.HighestBids.PruneSlots(func(entrySlot uint64) bool {
 		return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
 	})
 	s.epbsPool.ProposerPreferences.PruneSlots(func(entrySlot uint64) bool {
 		return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
 	})
-	// [IGNORE] bid.slot is the current or next slot
-	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, slot, gloasMaximumClockDisparity) {
-		return fmt.Errorf("%w: bid slot %d is not current or next slot", ErrIgnore, slot)
-	}
 
 	seenKey := newSeenBidKey(bid)
 	if s.seenCache.Contains(seenKey) {
@@ -447,10 +447,6 @@ func (s *executionPayloadBidService) validateBidAuthentication(msg *cltypes.Sign
 	}
 
 	return nil
-}
-
-func (s *executionPayloadBidService) storeValidBid(msg *cltypes.SignedExecutionPayloadBid) error {
-	return s.storeValidBidAt(msg, time.Time{})
 }
 
 func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutionPayloadBid, now time.Time) error {

@@ -385,9 +385,9 @@ func (a *ApiHandler) init() {
 					// [New in Gloas:EIP7732]
 					r.Get("/execution_payload_envelope/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
 					r.Get("/execution_payload_envelopes/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
-					r.Post("/execution_payload_envelope", a.PostEthV1BeaconExecutionPayloadEnvelope)
+					r.Post("/execution_payload_envelope", a.postEthV1BeaconExecutionPayloadEnvelopeLegacy)
 					r.Post("/execution_payload_envelopes", a.PostEthV1BeaconExecutionPayloadEnvelope)
-					r.Post("/execution_payload_bid", a.PostEthV1BeaconExecutionPayloadBid)
+					r.Post("/execution_payload_bid", a.postEthV1BeaconExecutionPayloadBidLegacy)
 					r.Post("/execution_payload_bids", a.PostEthV1BeaconExecutionPayloadBid)
 					r.Route("/states", func(r chi.Router) {
 						r.Route("/{state_id}", func(r chi.Router) {

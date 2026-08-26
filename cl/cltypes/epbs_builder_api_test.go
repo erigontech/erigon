@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -155,6 +156,25 @@ func TestBuilderConfigAndPreferencesLimits(t *testing.T) {
 	require.NoError(t, decodedPrefs.DecodeSSZ(encoded, 0))
 	require.Equal(t, prefs, &decodedPrefs)
 	require.Error(t, json.Unmarshal([]byte(`{"preferences":null,"auth":null}`), &decodedPrefs))
+}
+
+func TestBuilderConfigStructuralSSZDecodeIsolatesSemanticEntryErrors(t *testing.T) {
+	entries := []*rawBuilderEntry{
+		{entry: &BuilderEntry{URL: "ftp:////builder.example", Auth: &SignedBuilderRequestAuth{Message: &BuilderRequestAuth{Data: []byte("auth"), Slot: 12}}}},
+		{entry: &BuilderEntry{URL: "https://empty-auth.example", Auth: &SignedBuilderRequestAuth{Message: &BuilderRequestAuth{Slot: 12}}}},
+		{entry: &BuilderEntry{URL: "https://builder.example", Auth: validSignedBuilderRequestAuth()}},
+	}
+	encoded, err := ssz2.MarshalSSZ(nil, uint64(0), uint64(100), &rawBuilderEntryList{values: &entries})
+	require.NoError(t, err)
+
+	var strict BuilderConfig
+	require.Error(t, strict.DecodeSSZStrict(encoded, 0))
+	var structural BuilderConfig
+	require.NoError(t, structural.DecodeSSZStrictStructural(encoded, 0))
+	require.Len(t, structural.Builders, 3)
+	require.Error(t, structural.Builders[0].Validate())
+	require.Error(t, structural.Builders[1].Validate())
+	require.NoError(t, structural.Builders[2].Validate())
 }
 
 func TestBuilderPreferencesEntryRejectsEmptyURL(t *testing.T) {
