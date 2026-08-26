@@ -49,7 +49,8 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(blockB, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(blockC, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
-	graph := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
 	_, status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
 	require.Equal(t, Success, status)
@@ -68,6 +69,24 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.Equal(t, PreValidated, status)
 }
 
+// TestNewForkGraphDiskReturnsErrorOnDumpFailure pins that a failure to
+// persist the anchor state to disk is returned as an error instead of
+// panicking during startup.
+func TestNewForkGraphDiskReturnsErrorOnDumpFailure(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+
+	// A read-only filesystem rejects the O_CREATE|O_TRUNC|O_RDWR open that
+	// DumpBeaconStateOnDisk issues, simulating a disk-full or permission error.
+	failingFs := afero.NewReadOnlyFs(afero.NewMemMapFs())
+
+	require.NotPanics(t, func() {
+		graph, err := NewForkGraphDisk(anchorState, nil, failingFs, beacon_router_configuration.RouterConfiguration{})
+		require.Error(t, err)
+		require.Nil(t, graph)
+	})
+}
+
 func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -84,7 +103,7 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			anchorState := state.New(&clparams.MainnetBeaconConfig)
 			anchorState.SetVersion(clparams.GloasVersion)
-			anchorState.SetSlot(tc.stateSlot)
+			require.NoError(t, anchorState.SetSlot(tc.stateSlot))
 			header := &cltypes.BeaconBlockHeader{Slot: tc.headerSlot, Root: tc.headerRoot}
 			anchorState.SetLatestBlockHeader(header)
 			expectedStateRoot, err := anchorState.HashSSZ()
@@ -98,7 +117,9 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 			anchorRoot, err := anchorState.BlockRoot()
 			require.NoError(t, err)
 
-			graph := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}).(*forkGraphDisk)
+			forkGraph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			graph := forkGraph.(*forkGraphDisk)
 
 			require.Equal(t, common.Hash(expectedStateRoot), anchorState.PeekPreviousStateRoot())
 			require.Equal(t, header.Root, anchorState.LatestBlockHeader().Root)
