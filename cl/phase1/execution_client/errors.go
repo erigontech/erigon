@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+// ErrInvalidGetPayloadResponse reports an invalid GetPayload response.
 var ErrInvalidGetPayloadResponse = errors.New("invalid GetPayload response")
 
 // IsUnknownPayloadError reports an unknown-payload result from local or remote execution clients.
