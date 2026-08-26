@@ -1464,6 +1464,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if err != nil {
 		return err
 	}
+	hph.metrics.AddBranchRead(len(branchData))
 
 	// depthsToTxNum is used for per-file metrics; step is no longer available
 	// from the cache-or-DB helper (cache never had a meaningful step anyway).
@@ -2483,6 +2484,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
+	hph.metrics.AddRoundKeys(updatesCount)
+	defer ObserveRound(time.Now())
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)

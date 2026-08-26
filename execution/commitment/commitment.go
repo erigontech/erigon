@@ -372,6 +372,11 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(uint64(written))
+		var bytesOut int
+		for _, upd := range be.deferred {
+			bytesOut += len(upd.encoded)
+		}
+		be.metrics.AddBranchWrite(bytesOut)
 	}
 	return nil
 }
@@ -502,6 +507,7 @@ func (be *BranchEncoder) CollectUpdate(
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
+		be.metrics.AddBranchWrite(len(updateCopy))
 	}
 	mxTrieBranchesUpdated.Inc()
 	return nil

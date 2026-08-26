@@ -104,3 +104,29 @@ func TestMetricsResetClearsEveryCounter(t *testing.T) {
 	assert.Zero(t, v.Unfolds)
 	assert.Zero(t, v.SpentFolding)
 }
+
+func TestRoundKeysAreDistinctNotTraversals(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	var got *CommitProgress
+	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	m := got.Metrics
+	assert.EqualValues(t, len(keys), m.RoundKeys,
+		"RoundKeys is the distinct key count handed to the trie")
+	assert.GreaterOrEqual(t, m.AddressKeys+m.StorageKeys, m.RoundKeys,
+		"traversals count cell visits, so they never undercount distinct keys")
+	assert.Positive(t, m.BranchWriteBytes, "branch write bytes are counted")
+}

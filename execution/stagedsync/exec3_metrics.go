@@ -106,19 +106,26 @@ var (
 	mxExecCodeDomainFileReads         = metrics.NewGauge(`exec_domain_file_read_rate{domain="code"}`)
 	mxExecCodeDomainFileReadDuration  = metrics.NewGauge(`exec_domain_file_read_dur{domain="code"}`)
 
-	mxCommitmentTransactions            = metrics.NewGauge(`commit_txns`)
-	mxCommitmentBlocks                  = metrics.NewGauge("commit_blocks")
-	mxCommitmentBlockDuration           = metrics.NewGauge("commit_block_dur")
-	mxCommitmentReadRate                = metrics.NewGauge("commit_read_rate")
-	mxCommitmentAccountReadRate         = metrics.NewGauge("commit_account_read_rate")
-	mxCommitmentStorageReadRate         = metrics.NewGauge("commit_storage_read_rate")
-	mxCommitmentBranchReadRate          = metrics.NewGauge("commit_branch_read_rate")
-	mxCommitmentBranchWriteRate         = metrics.NewGauge("commit_branch_write_rate")
-	mxCommitmentKeyRate                 = metrics.NewGauge("commit_key_rate")
-	mxCommitmentAccountKeyRate          = metrics.NewGauge("commit_account_key_rate")
-	mxCommitmentStorageKeyRate          = metrics.NewGauge("commit_storage_key_rate")
-	mxCommitmentFoldRate                = metrics.NewGauge("commit_fold_rate")
-	mxCommitmentUnfoldRate              = metrics.NewGauge("commit_unfold_rate")
+	// Commitment counters. rate() belongs in the query, so these are monotonic
+	// totals rather than gauges holding a pre-divided rate over the log interval.
+	mxCommitmentBlocks     = metrics.GetOrCreateCounter("commitment_blocks_total")
+	mxCommitmentTxns       = metrics.GetOrCreateCounter("commitment_txns_total")
+	mxCommitmentKeys       = metrics.GetOrCreateCounter("commitment_keys_total")
+	mxCommitmentFolds      = metrics.GetOrCreateCounter("commitment_folds_total")
+	mxCommitmentUnfolds    = metrics.GetOrCreateCounter("commitment_unfolds_total")
+	mxCommitmentBranchPuts = metrics.GetOrCreateCounter("commitment_branch_writes_total")
+	mxCommitmentReadBytes  = metrics.GetOrCreateCounter("commitment_branch_read_bytes_total")
+	mxCommitmentWriteBytes = metrics.GetOrCreateCounter("commitment_branch_write_bytes_total")
+
+	// kind=address|storage. Traversals, not distinct keys: the parallel engine
+	// re-walks subtrees on mount+replay, so this exceeds commitment_keys_total.
+	mxCommitmentTraversals = metrics.GetOrCreateCounterVec("commitment_key_traversals_total",
+		[]string{"kind"}, "cell traversals during commitment, by key kind")
+
+	// kind=account|storage|branch
+	mxCommitmentReads                   = metrics.GetOrCreateCounterVec("commitment_reads_total", []string{"kind"}, "PatriciaContext reads during commitment")
+	mxCommitmentCacheHits               = metrics.GetOrCreateCounterVec("commitment_cache_hits_total", []string{"kind"}, "commitment cache hits")
+	mxCommitmentCacheMisses             = metrics.GetOrCreateCounterVec("commitment_cache_misses_total", []string{"kind"}, "commitment cache misses")
 	mxCommitmentDomainReads             = metrics.NewGauge(`exec_domain_read_rate{domain="commitment"}`)
 	mxCommitmentDomainReadDuration      = metrics.NewGauge(`exec_domain_read_dur{domain="commitment"}`)
 	mxCommitmentDomainCacheReads        = metrics.NewGauge(`exec_domain_cache_read_rate{domain="commitment"}`)
@@ -216,9 +223,6 @@ func resetCommitmentGauges(ctx context.Context) {
 	} else {
 		commitResetTask.Timer = time.NewTimer(resetDelay)
 		commitResetTask.ctx = ctx
-		commitResetTask.gauges = []metrics.Gauge{
-			mxCommitmentTransactions, mxCommitmentBlocks, mxCommitmentBlockDuration,
-		}
 		commitResetTask.run(ctx)
 	}
 }
@@ -248,9 +252,8 @@ func resetDomainGauges(ctx context.Context) {
 			mxExecDomainPutKeySize, mxExecDomainPutValueSize, mxExecAccountDomainPutRate, mxExecAccountDomainPutSize,
 			mxExecAccountDomainPutKeySize, mxExecAccountDomainPutValueSize, mxExecStorageDomainPutRate, mxExecStorageDomainPutSize,
 			mxExecStorageDomainPutKeySize, mxExecStorageDomainPutValueSize, mxExecCodeDomainPutRate, mxExecCodeDomainPutSize,
-			mxExecCodeDomainPutKeySize, mxExecCodeDomainPutValueSize, mxCommitmentReadRate, mxCommitmentAccountReadRate,
-			mxCommitmentStorageReadRate, mxCommitmentBranchReadRate, mxCommitmentBranchWriteRate, mxCommitmentKeyRate,
-			mxCommitmentAccountKeyRate, mxCommitmentStorageKeyRate, mxCommitmentFoldRate, mxCommitmentUnfoldRate, mxCommitmentDomainReads,
+			mxExecCodeDomainPutKeySize,
+			mxCommitmentDomainReads,
 			mxCommitmentDomainReadDuration, mxCommitmentDomainCacheReads, mxCommitmentDomainCacheReadDuration, mxCommitmentDomainDbReads,
 			mxCommitmentDomainDbReadDuration, mxCommitmentDomainFileReads, mxCommitmentDomainFileReadDuration, mxCommitmentDomainPutRate,
 			mxCommitmentDomainPutSize, mxCommitmentDomainPutKeySize, mxCommitmentDomainPutValueSize,
@@ -498,6 +501,16 @@ type Progress struct {
 	prevCommitmentStorageReadCount uint64
 	prevBranchReadCount            uint64
 	prevBranchWriteCount           uint64
+	prevBranchReadBytes            uint64
+	prevBranchWriteBytes           uint64
+	prevFoldCount                  uint64
+	prevUnfoldCount                uint64
+	prevCacheAccountHits           uint64
+	prevCacheStorageHits           uint64
+	prevCacheBranchHits            uint64
+	prevMissAccount                uint64
+	prevMissStorage                uint64
+	prevMissBranch                 uint64
 	commitThreshold                uint64
 	prevDomainMetrics              *kvmetrics.DomainMetrics
 	logPrefix                      string
@@ -776,7 +789,6 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 	lastProgress.Metrics.RLock()
 	accountKeyCount := lastProgress.Metrics.AddressKeys
 	storageKeyCount := lastProgress.Metrics.StorageKeys
-	keyCount := accountKeyCount + storageKeyCount
 	accountReadCount := lastProgress.Metrics.LoadAccount
 	storageReadCount := lastProgress.Metrics.LoadStorage
 	branchReadCount := lastProgress.Metrics.LoadBranch
@@ -787,34 +799,69 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, stepsInDb floa
 	missBranchCount := lastProgress.Metrics.MissBranch
 	missAccountCount := lastProgress.Metrics.MissAccount
 	missStorageCount := lastProgress.Metrics.MissStorage
+	roundKeyCount := lastProgress.Metrics.RoundKeys
+	branchReadBytes := lastProgress.Metrics.BranchReadBytes
+	branchWriteBytes := lastProgress.Metrics.BranchWriteBytes
+	foldCount := lastProgress.Metrics.Folds
+	unfoldCount := lastProgress.Metrics.Unfolds
 	lastProgress.Metrics.RUnlock()
 
-	curKeyCount := int64(keyCount - p.prevCommitmentKeyCount)
 	curAccountKeyCount := int64(accountKeyCount - p.prevCommitmentAccountKeyCount)
 	curStorageKeyCount := int64(storageKeyCount - p.prevCommitmentStorageKeyCount)
-
-	mxCommitmentKeyRate.Set(float64(curKeyCount) / interval.Seconds())
-	mxCommitmentAccountKeyRate.Set(float64(curAccountKeyCount) / interval.Seconds())
-	mxCommitmentStorageKeyRate.Set(float64(curStorageKeyCount) / interval.Seconds())
-
 	curAccountReadCount := int64(accountReadCount - p.prevCommitmentAccountReadCount)
 	curStorageReadCount := int64(storageReadCount - p.prevCommitmentStorageReadCount)
 	curBranchReadCount := int64(branchReadCount - p.prevBranchReadCount)
 	curBranchWriteCount := int64(branchWriteCount - p.prevBranchWriteCount)
 
-	curReadCount := curAccountReadCount + curStorageReadCount + curBranchReadCount
-	curReadRate := uint64(float64(curReadCount) / interval.Seconds())
-	curBranchWriteRate := uint64(float64(curBranchWriteCount) / interval.Seconds())
+	// The trie's counters are cumulative; Prometheus wants the increment.
+	addCounter := func(c metrics.Counter, delta int64) {
+		if delta > 0 {
+			c.AddUint64(uint64(delta))
+		}
+	}
+	addVec := func(v *metrics.CounterVec, kind string, delta int64) {
+		if delta > 0 {
+			v.WithLabelValues(kind).Add(float64(delta))
+		}
+	}
 
-	mxCommitmentReadRate.SetUint64(curReadRate)
-	mxCommitmentAccountReadRate.Set(float64(curAccountReadCount) / interval.Seconds())
-	mxCommitmentStorageReadRate.Set(float64(curStorageReadCount) / interval.Seconds())
-	mxCommitmentBranchReadRate.Set(float64(curBranchReadCount) / interval.Seconds())
-	mxCommitmentBranchWriteRate.SetUint64(curBranchWriteRate)
+	addCounter(mxCommitmentKeys, int64(roundKeyCount-p.prevCommitmentKeyCount))
+	addVec(mxCommitmentTraversals, "address", curAccountKeyCount)
+	addVec(mxCommitmentTraversals, "storage", curStorageKeyCount)
+	addVec(mxCommitmentReads, "account", curAccountReadCount)
+	addVec(mxCommitmentReads, "storage", curStorageReadCount)
+	addVec(mxCommitmentReads, "branch", curBranchReadCount)
+	addCounter(mxCommitmentBranchPuts, curBranchWriteCount)
+	addCounter(mxCommitmentReadBytes, int64(branchReadBytes-p.prevBranchReadBytes))
+	addCounter(mxCommitmentWriteBytes, int64(branchWriteBytes-p.prevBranchWriteBytes))
+	addCounter(mxCommitmentFolds, int64(foldCount-p.prevFoldCount))
+	addCounter(mxCommitmentUnfolds, int64(unfoldCount-p.prevUnfoldCount))
+	addVec(mxCommitmentCacheHits, "account", int64(cacheAccountHits-p.prevCacheAccountHits))
+	addVec(mxCommitmentCacheHits, "storage", int64(cacheStorageHits-p.prevCacheStorageHits))
+	addVec(mxCommitmentCacheHits, "branch", int64(cacheBranchHits-p.prevCacheBranchHits))
+	addVec(mxCommitmentCacheMisses, "account", int64(missAccountCount-p.prevMissAccount))
+	addVec(mxCommitmentCacheMisses, "storage", int64(missStorageCount-p.prevMissStorage))
+	addVec(mxCommitmentCacheMisses, "branch", int64(missBranchCount-p.prevMissBranch))
+	addCounter(mxCommitmentBlocks, committedDiffBlocks)
+	addCounter(mxCommitmentTxns, int64(te.lastCommittedTxNum.Load()-p.prevCommittedTxNum))
 
-	mxCommitmentTransactions.Set(float64(committedTxSec))
-	mxCommitmentBlocks.Set(float64(committedDiffBlocks))
-	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
+	p.prevCommitmentKeyCount = roundKeyCount
+	p.prevCommitmentAccountKeyCount = accountKeyCount
+	p.prevCommitmentStorageKeyCount = storageKeyCount
+	p.prevCommitmentAccountReadCount = accountReadCount
+	p.prevCommitmentStorageReadCount = storageReadCount
+	p.prevBranchReadCount = branchReadCount
+	p.prevBranchWriteCount = branchWriteCount
+	p.prevBranchReadBytes = branchReadBytes
+	p.prevBranchWriteBytes = branchWriteBytes
+	p.prevFoldCount = foldCount
+	p.prevUnfoldCount = unfoldCount
+	p.prevCacheAccountHits = cacheAccountHits
+	p.prevCacheStorageHits = cacheStorageHits
+	p.prevCacheBranchHits = cacheBranchHits
+	p.prevMissAccount = missAccountCount
+	p.prevMissStorage = missStorageCount
+	p.prevMissBranch = missBranchCount
 
 	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
 	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount

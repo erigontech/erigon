@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type ParallelPatriciaHashed struct {
@@ -232,6 +233,9 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
+	defer ObserveRound(time.Now())
+	p.metrics.AddRoundKeys(updates.Size())
+
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
 		pu.deferredMu.Lock()
@@ -325,6 +329,13 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 	}
 	if p.metrics != nil {
 		p.metrics.updateBranch.Add(uint64(n))
+		// encoded is filled by the merge inside the apply, so this only sums
+		// after it returns; the pool recycles these on the deferred cleanup.
+		var bytesOut int
+		for _, upd := range deferred {
+			bytesOut += len(upd.encoded)
+		}
+		p.metrics.AddBranchWrite(bytesOut)
 	}
 	return nil
 }
