@@ -137,8 +137,13 @@ func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 	before := s.shards[i].Len()
 	evicted = s.shards[i].Add(h, v)
 	// freelru replaces a present key in place, returning false and firing no
-	// OnEvict, so the live count follows the shard's own length.
+	// OnEvict, so the live count follows the shard's own length -- except at
+	// capacity, where the insert both evicts and stores: the length does not
+	// move but OnEvict has already decremented, so the replacement is counted.
 	delta := s.shards[i].Len() - before
+	if evicted {
+		delta++
+	}
 	s.mus[i].Unlock()
 	if delta != 0 {
 		s.n.Add(int64(delta))
@@ -160,7 +165,7 @@ func (s *shardedLRU[V]) growStep(i uint64) (newCap, reserved uint32, ok bool) {
 	return newCap, reserved, true
 }
 
-// growLocked rebuilds shard i one step larger. Only that shard's readers and
+// migrateLocked rebuilds shard i one step larger. Only that shard's readers and
 // writers wait, and only for its own entries -- Keys() is oldest-first, so
 // insertion order alone carries the recency across.
 func (s *shardedLRU[V]) migrateLocked(i uint64, next *freelru.LRU[uint64, V], newCap uint32) {

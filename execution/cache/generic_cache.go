@@ -71,12 +71,14 @@ type GenericCache[T any] struct {
 
 	// Each shard starts at startCap/shards slots and grows ×genericCacheGrowFactor
 	// toward maxCap/shards on demand, so a cache with a small working set costs
-	// a few KB regardless of its configured budget. resizeMu guards reservedBytes.
+	// a few KB regardless of its configured budget. reservedBytes is atomic: it
+	// is adjusted from the grow path, which runs with a put stripe held, and
+	// Clear takes resizeMu before every stripe -- a lock here would invert that.
 	startCap      uint32
 	maxCap        uint32
 	avgEntryBytes int64 // per-domain byte estimate; maps slot count ↔ envelope bytes
 	resizeMu      sync.Mutex
-	reservedBytes int64
+	reservedBytes atomic.Int64
 
 	shardCount uint32
 
@@ -157,8 +159,8 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	c.data.Store(c.newShards(start, maxCap, c.shardCount))
 	// The initial slot array is small; take it unconditionally so no cache is
 	// born unable to hold anything.
-	c.reservedBytes = int64(start) * c.avgEntryBytes
-	cachebudget.Global.Take(c.reservedBytes)
+	c.reservedBytes.Store(int64(start) * c.avgEntryBytes)
+	cachebudget.Global.Take(c.reservedBytes.Load())
 	return c
 }
 
@@ -192,9 +194,7 @@ func (c *GenericCache[T]) fundGrow(slots uint32) bool {
 	if !cachebudget.Global.Reserve(delta) {
 		return false
 	}
-	c.resizeMu.Lock()
-	c.reservedBytes += delta
-	c.resizeMu.Unlock()
+	c.reservedBytes.Add(delta)
 	return true
 }
 
@@ -205,9 +205,7 @@ func (c *GenericCache[T]) refundGrow(slots uint32) {
 	}
 	delta := int64(slots) * c.avgEntryBytes
 	cachebudget.Global.Release(delta)
-	c.resizeMu.Lock()
-	c.reservedBytes -= delta
-	c.resizeMu.Unlock()
+	c.reservedBytes.Add(-delta)
 }
 
 // newShards builds the shard array with this cache's evict callback wired.
@@ -431,8 +429,7 @@ func (c *GenericCache[T]) Clear() {
 	c.resizeMu.Lock()
 	defer c.resizeMu.Unlock()
 	if c.enveloped {
-		cachebudget.Global.Release(c.reservedBytes - int64(c.startCap)*c.avgEntryBytes)
-		c.reservedBytes = int64(c.startCap) * c.avgEntryBytes
+		cachebudget.Global.Release(c.reservedBytes.Swap(int64(c.startCap)*c.avgEntryBytes) - int64(c.startCap)*c.avgEntryBytes)
 	}
 	next := c.newShards(c.startCap, c.maxCap, c.shardCount) // allocate before excluding writers
 	for i := range c.putStripes {
@@ -455,8 +452,7 @@ func (c *GenericCache[T]) Clear() {
 func (c *GenericCache[T]) Close() {
 	if c.enveloped && c.closed.CompareAndSwap(false, true) {
 		c.resizeMu.Lock()
-		reserved := c.reservedBytes
-		c.reservedBytes = 0
+		reserved := c.reservedBytes.Swap(0)
 		c.resizeMu.Unlock()
 		cachebudget.Global.Release(reserved)
 	}

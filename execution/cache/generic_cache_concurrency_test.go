@@ -163,6 +163,8 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 
 		var candidates [][]byte
 		stop := make(chan struct{})
+		writing := make(chan struct{})
+		var once sync.Once
 		var wg sync.WaitGroup
 		wg.Go(func() {
 			for j := range 1 << 20 {
@@ -176,8 +178,10 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 				binary.BigEndian.PutUint64(k[1:], uint64(j))
 				c.Put(k, fresh, 10)
 				candidates = append(candidates, k)
+				once.Do(func() { close(writing) })
 			}
 		})
+		<-writing // the race under test needs the writer actually running
 
 		for i := range 4096 {
 			binary.BigEndian.PutUint64(key, uint64(1_000_000+i))
@@ -186,6 +190,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		close(stop)
 		wg.Wait()
 		require.Positive(t, grewAt(), "round %d: no shard grew, the race under test never happened", round)
+		require.NotEmpty(t, candidates, "round %d: writer never ran, the assertions below prove nothing", round)
 
 		for _, k := range candidates {
 			c.PutIfAbsent(k, stale, 5)
@@ -477,9 +482,9 @@ func BenchmarkGenericCacheParallelMixed(b *testing.B) {
 	b.ReportMetric(100*float64(hits)/float64(hits+misses), "hit%")
 }
 
-// Filling a cache from cold to a large working set. On the jump-grow lineage
-// this pays the migration copies; with slab-allocated elements there is nothing
-// to migrate. Uses only the public put path, so it runs unchanged on both.
+// Filling a cache from cold to a large working set. On main this pays whole-
+// cache migration copies; here each shard migrates on its own. Uses only the
+// public put path, so it runs unchanged on both.
 func BenchmarkGenericCacheFill(b *testing.B) {
 	const keys = 1 << 20
 	val := make([]byte, 32)
@@ -494,9 +499,9 @@ func BenchmarkGenericCacheFill(b *testing.B) {
 	}
 }
 
-// The longest a single put is held up while filling a cache from cold: on the
-// jump-grow lineage that is a migration copy, with slab-allocated elements it
-// is one slab allocation.
+// The longest a single put is held up while filling a cache from cold: on main
+// that is a whole-cache migration behind every put stripe, here it is one
+// shard's migration behind that shard's mutex.
 func BenchmarkGenericCacheWorstPut(b *testing.B) {
 	const keys = 1 << 20
 	val := make([]byte, 32)
