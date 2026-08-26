@@ -50,6 +50,7 @@ type stubTemporalGetter struct {
 }
 
 type sharedCodeTemporalGetter struct {
+	kv.TemporalTx
 	account      []byte
 	code         []byte
 	accountReads int
@@ -110,6 +111,11 @@ func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte) ([]byte
 		return s.code, 0, nil
 	}
 	return nil, 0, nil
+}
+
+func (s *sharedCodeTemporalGetter) GetLatestValSize(domain kv.Domain, key []byte) (int, bool, error) {
+	value, _, err := s.GetLatest(domain, key)
+	return len(value), len(value) > 0, err
 }
 
 func (s *sharedCodeTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
@@ -269,7 +275,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 	source := &sharedCodeTemporalGetter{account: accounts.SerialiseV3(&account), code: code}
 	address := accounts.InternAddress(common.Address{19: 1})
 	accountChanges := &types.AccountChanges{Address: address, StorageReads: make([]accounts.StorageKey, 65)}
-	reader := state.NewReaderV3(source)
+	reader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(source))
 	require.NoError(t, warmBALStateTask(reader, accountChanges, balWarmupTask{slotFrom: 64, slotTo: 65}, balCodeWarmupAll, nil))
 	require.Zero(t, source.accountReads)
 	require.Zero(t, source.codeReads)

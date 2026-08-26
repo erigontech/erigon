@@ -979,20 +979,13 @@ func (c *AuRa) Seal(chain rules.ChainHeaderReader, block *types.BlockWithReceipt
 	//		log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 	//	}
 	//}()
-	//
 	//return nil
-}
-
-func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64, call rules.Call) (common.Address, error) {
-	//c, err := validators.defaultCaller(blockHash)
-	//if err != nil {
-	//	return common.Address{}, err
-	//}
-	return validators.getWithCaller(blockHash, uint(step), call)
 }
 
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
+//
+//nolint:unused
 func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, h *types.Header, call rules.SystemCall) (ValidatorSet, uint64, error) {
 	if c.cfg.ImmediateTransitions {
 		return c.cfg.Validators, h.Number.Uint64(), nil

@@ -53,7 +53,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	}
 	validationErr := payloadStatus.ValidationError
 	if validationErr != nil {
-		return fmt.Errorf("engine payload status error: %s", validationErr.Error())
+		return fmt.Errorf("engine payload status error: %w", validationErr.Error())
 	}
 	return nil
 }

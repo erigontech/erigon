@@ -38,7 +38,7 @@ func TestRemoteSealer(t *testing.T) {
 	defer ethash.Close()
 
 	api := &API{ethash}
-	if _, err := api.GetWork(); err != errNoMiningWork {
+	if _, err := api.GetWork(); !errors.Is(err, errNoMiningWork) {
 		t.Error("expect to return an error indicate there is no mining work")
 	}
 	header := &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(100)}
@@ -111,7 +111,7 @@ func TestClosedRemoteSealer(t *testing.T) {
 	_ = ethash.Close()
 
 	api := &API{ethash}
-	if _, err := api.GetWork(); err != errEthashStopped {
+	if _, err := api.GetWork(); !errors.Is(err, errEthashStopped) {
 		t.Error("expect to return an error to indicate ethash is stopped")
 	}
 

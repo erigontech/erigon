@@ -757,7 +757,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// loop in a terminal mustDeliver send on a full applyResults and
 						// wedge pe.wait. No cancel: mirror the blockResult.Err path.
 						appliedBlocks[blockNum] = struct{}{}
-						fail.consider(blockNum, blockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, blockNum, err))
+						fail.consider(blockNum, blockHash, true, fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, blockNum, err))
 						finalized = true
 						continue
 					}
@@ -1433,7 +1433,8 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
 func wrapAsExecAbort(origErr error, depTxIndex int) error {
-	if _, ok := origErr.(protocol.ErrExecAbortError); ok {
+	var abortErr protocol.ErrExecAbortError
+	if errors.As(origErr, &abortErr) {
 		return origErr
 	}
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
@@ -2525,7 +2526,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
-		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
+		var execErr protocol.ErrExecAbortError
+		if errors.As(res.Err, &execErr) {
 			if res.Version().Incarnation > len(be.tasks) {
 				// Parallel scheduler exhausted retries for this tx. Surface
 				// through blockResult.Err for the same reason as the other
@@ -2755,7 +2757,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.IsHistoric() {
 					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx), be.blockStateCache)
 				}
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
@@ -2875,7 +2877,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						// BlockStateCache write buffer. This ensures the
 						// system TX sees all accumulated state from prior
 						// TXs in the block, not stale sd.mem values.
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetterNoMetrics(applyTx), be.blockStateCache)
 					}
 				}
 
@@ -3128,7 +3130,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// the pre-block balance and stomped tx 28's in-block update.
 				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetterNoMetrics(applyTx), be.blockStateCache)
+				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetterNoMetrics(applyTx), be.blockStateCache)
 			}
 			pe.RUnlock()
 
@@ -3158,20 +3160,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				syscallIBS := ibs
 
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
-					if err != nil {
-						return nil, err
-					}
-					lastResult.Logs = append(lastResult.Logs, syscallIBS.GetRawLogs(tt.TxIndex)...)
-					return ret, err
+					return protocol.SysCallContract(contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.number(), err)), nil
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.number(), err)), nil
 				}
+
+				lastResult.Logs = append(lastResult.Logs, syscallIBS.GetRawLogs(tt.TxIndex)...)
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 

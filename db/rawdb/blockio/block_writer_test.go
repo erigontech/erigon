@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // TruncateBodies runs inside the caller's open write tx (see ResetBlocks). It
@@ -37,7 +37,7 @@ import (
 func TestTruncateBodiesInsideOpenWriteTx(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
 		for i := byte(1); i <= 5; i++ {

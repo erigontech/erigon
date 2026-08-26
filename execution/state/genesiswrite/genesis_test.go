@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -57,7 +56,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 
 	t.Parallel()
 	logger := log.New()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
 		spec, err := chainspec.ChainSpecByName(network)
 		require.NoError(t, err)
@@ -121,7 +120,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	}
 	t.Parallel()
 	logger := log.New()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

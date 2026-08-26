@@ -19,16 +19,19 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"math/big"
 	"strconv"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -41,6 +44,8 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -49,6 +54,16 @@ const (
 	overlayRaceChainSize = 5
 	overlayRaceBaseFee   = 424242
 )
+
+func insertOverlayRaceChain(t *testing.T, m *execmoduletester.ExecModuleTester) *blockgen.ChainPack {
+	t.Helper()
+	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	return c
+}
 
 // newOverlayAheadTestAPI builds overlayRaceChainSize committed MDBX blocks,
 // then publishes a fabricated block one past them (overlayRaceChainSize+1)
@@ -67,11 +82,7 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	cfg.LondonBlock = common.NewUint64(0)
 	m = execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
 
-	c, err := m.GenerateChain(overlayRaceChainSize, func(i int, gen *blockgen.BlockGen) {
-		gen.SetCoinbase(common.Address{1})
-	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(c))
+	c := insertOverlayRaceChain(t, m)
 
 	ctx := m.Ctx
 	overlayRoTx, err := m.DB.BeginTemporalRo(ctx)
@@ -105,9 +116,9 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 
 	events := shards.NewEvents()
 	events.PublishOverlay(doms)
-	filters := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base = newBaseApiWithFiltersForTest(filters, stateCache, m)
+	base = newBaseApiWithFiltersForTest(ff, stateCache, m)
 
 	return base, m, overlayHeader
 }
@@ -232,6 +243,107 @@ func TestTxPoolContent_UsesOverlayHead(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
+}
+
+// TestGetLogs_UsesCommittedFromTag pins that eth_getLogs resolves a "latest"
+// fromBlock on the committed view: with the overlay head published ahead of
+// MDBX, the tag must not resolve past the executed head and fail the request.
+func TestGetLogs_UsesCommittedFromTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	_, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(int64(rpc.LatestBlockNumber))})
+	require.NoError(t, err)
+}
+
+// TestGetLogs_UsesCommittedToTag is the toBlock counterpart of
+// TestGetLogs_UsesCommittedFromTag.
+func TestGetLogs_UsesCommittedToTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	_, err := api.GetLogs(m.Ctx, filters.FilterCriteria{
+		FromBlock: big.NewInt(1),
+		ToBlock:   big.NewInt(int64(rpc.LatestBlockNumber)),
+	})
+	require.NoError(t, err)
+}
+
+// TestTraceFilter_UsesCommittedFromTag pins that trace_filter resolves a
+// "latest" fromBlock on the committed view: with the overlay head published
+// ahead of MDBX, the tag must not resolve past a numeric toBlock at the
+// executed head.
+func TestTraceFilter_UsesCommittedFromTag(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+
+	from := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize))
+	err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from, ToBlock: &to}, new(bool), nil, stream)
+	require.NoError(t, err)
+}
+
+// newHeaderAheadTester commits overlayRaceChainSize executed blocks, then
+// writes a canonical header one past execution progress directly to the DB.
+// This reproduces the window where the headers stage is ahead of execution,
+// so a block number resolves while its data is not yet available.
+func newHeaderAheadTester(t *testing.T) (m *execmoduletester.ExecModuleTester, aheadHash common.Hash) {
+	t.Helper()
+	m = execmoduletester.New(t)
+	c := insertOverlayRaceChain(t, m)
+
+	aheadNumber := uint64(overlayRaceChainSize) + 1
+	header := &types.Header{
+		ParentHash: c.TopBlock.Hash(),
+		Number:     *uint256.NewInt(aheadNumber),
+		Difficulty: *uint256.NewInt(0),
+		Time:       c.TopBlock.Time() + 10,
+		GasLimit:   30_000_000,
+	}
+	aheadHash = header.Hash()
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return err
+		}
+		return rawdb.WriteCanonicalHash(tx, aheadHash, aheadNumber)
+	}))
+	return m, aheadHash
+}
+
+// TestTraceFilter_FutureToBlockErrors pins that an explicit toBlock past the
+// executed head errors instead of silently clamping the scan to the last
+// available txnum, which would make an omitted head block look empty.
+func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
+	t.Parallel()
+	m, _ := newHeaderAheadTester(t)
+	api := newTraceApiForTest(m)
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+
+	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
+	require.ErrorContains(t, err, "not executed")
+}
+
+// TestGetModifiedAccountsByHash_FutureStartBlockErrors pins that ByHash rejects
+// a not-yet-executed start block like its ByNumber twin, instead of returning
+// a silent result from a clamped txnum range.
+func TestGetModifiedAccountsByHash_FutureStartBlockErrors(t *testing.T) {
+	t.Parallel()
+	m, aheadHash := newHeaderAheadTester(t)
+	api := newDebugApiForTest(m)
+
+	_, err := api.GetModifiedAccountsByHash(m.Ctx, aheadHash, nil)
+	require.ErrorContains(t, err, "later than the latest block")
 }
 
 // TestTxPoolContentFrom_UsesOverlayHead pins that txpool_contentFrom reads the

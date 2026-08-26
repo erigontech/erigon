@@ -746,9 +746,8 @@ func (d *Downloader) VerifyData(
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
-		// Caplin beacon-state snapshots have no registered global snaptype, so
-		// ParseFileName leaves ff.Type nil but populates CaplinTypeString; they are
-		// still seedable by name.
+		// An unregistered caplin table name leaves ff.Type nil but populates
+		// CaplinTypeString; those stay seedable by name.
 		if !isStateFile && ff.Type == nil && ff.CaplinTypeString == "" {
 			return fmt.Errorf("nil ptr after parsing file: %s", name)
 		}

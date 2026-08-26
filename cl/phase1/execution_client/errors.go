@@ -14,13 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawtemporaldb
+package execution_client
 
-import "encoding/binary"
+import (
+	"errors"
 
-// ReceiptValueForTest is the value encoding, for assertions in tests.
-func ReceiptValueForTest(v uint64) []byte {
-	var buf [binary.MaxVarintLen64]byte
-	i := binary.PutUvarint(buf[:], v)
-	return buf[:i]
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/rpc"
+)
+
+// IsUnknownPayloadError reports an unknown-payload result from local or remote execution clients.
+func IsUnknownPayloadError(err error) bool {
+	if errors.Is(err, chainreader.ErrUnknownPayload) {
+		return true
+	}
+	var rpcErr rpc.Error
+	return errors.As(err, &rpcErr) && rpcErr.ErrorCode() == engine_helpers.UnknownPayloadErr.Code
 }

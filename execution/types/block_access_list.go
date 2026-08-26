@@ -461,12 +461,6 @@ func sortByIndex[T interface{ GetIndex() uint32 }](changes []T) {
 	})
 }
 
-func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
-	slices.SortFunc(items, func(a, b T) int {
-		return bytes.Compare(a.GetBytes(), b.GetBytes())
-	})
-}
-
 func sortHashes(hashes []accounts.StorageKey) {
 	slices.SortFunc(hashes, func(a, b accounts.StorageKey) int {
 		return a.Cmp(b)

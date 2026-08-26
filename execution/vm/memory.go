@@ -44,17 +44,6 @@ func NewMemory() *Memory {
 	return m
 }
 
-// Free returns the memory to the pool.
-func (m *Memory) free() {
-	// To reduce peak allocation, return only smaller memory instances to the pool.
-	const maxBufferSize = 16 << 10
-	if cap(m.store) <= maxBufferSize {
-		m.store = m.store[:0]
-		m.lastGasCost = 0
-		memoryPool.Put(m)
-	}
-}
-
 // Set sets offset + size to value
 func (m *Memory) Set(offset, size uint64, value []byte) {
 	// It's possible the offset is greater than 0 and size equals 0. This is because

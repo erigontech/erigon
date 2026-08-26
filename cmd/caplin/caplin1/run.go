@@ -207,7 +207,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		genesisDb = genesisdb.NewGenesisDB(beaconConfig, dirs.CaplinGenesis)
 		stateBytes, err := os.ReadFile(config.CustomGenesisStatePath)
 		if err != nil {
-			return fmt.Errorf("could not read provided genesis state file: %s", err)
+			return fmt.Errorf("could not read provided genesis state file: %w", err)
 		}
 		genesisState = state.New(beaconConfig)
 
@@ -227,14 +227,14 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 
 		if err := genesisState.DecodeSSZ(stateBytes, int(actualVersion)); err != nil {
-			return fmt.Errorf("could not decode genesis state (detected version %s): %s", actualVersion, err)
+			return fmt.Errorf("could not decode genesis state (detected version %s): %w", actualVersion, err)
 		}
 
 		// If the genesis SSZ is at an older fork version than expected, apply sequential upgrades.
 		if actualVersion < targetVersion {
 			log.Info("[Caplin] Upgrading genesis state to target fork", "from", actualVersion, "to", targetVersion)
 			if err := upgradeGenesisState(genesisState, actualVersion, targetVersion); err != nil {
-				return fmt.Errorf("could not upgrade genesis state from %s to %s: %s", actualVersion, targetVersion, err)
+				return fmt.Errorf("could not upgrade genesis state from %s to %s: %w", actualVersion, targetVersion, err)
 			}
 		}
 	} else {

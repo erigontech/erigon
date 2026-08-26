@@ -7,6 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # Callers grant actions/pull-requests write and reusable jobs inherit it,
+    # so pin this one down before the build step gets a token.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -95,6 +99,17 @@ jobs:
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site
 
+      # Release selection (src/releases.js) orders by semantic version because
+      # the GitHub API orders by publish date; the unit tests pin that so a
+      # back-port cannot silently regress the version in the install snippets.
+      - run: npm test
+        if: steps.guard.outputs.present == 'true'
+        working-directory: docs/site
+
       - run: npm run build
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site
+        env:
+          # Version resolution fails the build rather than publishing a
+          # placeholder, so it must not run against the anonymous rate limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

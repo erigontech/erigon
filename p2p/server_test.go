@@ -293,7 +293,7 @@ func TestServerAtCap(t *testing.T) {
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
 		t.Error("unexpected error @ checkpointPostHandshake:", err)
 	}
-	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); !errors.Is(err, DiscTooManyPeers) {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -315,7 +315,7 @@ func TestServerAtCap(t *testing.T) {
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
 		t.Error("unexpected error @ checkpointPostHandshake:", err)
 	}
-	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); !errors.Is(err, DiscTooManyPeers) {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -655,7 +655,7 @@ func TestServerInboundThrottle(t *testing.T) {
 	go func() {
 		conn.SetDeadline(time.Now().Add(timeout))
 		buf := make([]byte, 10)
-		if n, err := conn.Read(buf); err != io.EOF || n != 0 {
+		if n, err := conn.Read(buf); !errors.Is(err, io.EOF) || n != 0 {
 			t.Errorf("expected io.EOF and n == 0, got error %q and n == %d", err, n)
 		}
 		connClosed <- struct{}{}

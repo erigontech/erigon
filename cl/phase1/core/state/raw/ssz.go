@@ -191,7 +191,7 @@ func (b *BeaconState) getSchema() []any {
 func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < int(b.baseOffsetSSZ()) {
-		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[BeaconState] err: %w", ssz.ErrLowBufferSize)
 	}
 	if version >= int(clparams.BellatrixVersion) {
 		b.latestExecutionPayloadHeader = cltypes.NewEth1Header(clparams.StateVersion(version))

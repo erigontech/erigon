@@ -38,24 +38,14 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
 type dataWithTxNum struct {
 	data  []byte
 	txNum uint64
-	dir   iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
-
-	getCacheSize int
 
 	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
 	// queries from in-flight state (needed for RPC reads during live chain-tip execution).

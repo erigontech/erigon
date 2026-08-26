@@ -857,7 +857,7 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // PruneBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+// doesn't delete Receipts, Canonical markers, TotalDifficulty
 // Returns false if there is nothing to prune
 func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int, err error) {
 	c, err := tx.Cursor(kv.Headers)
@@ -961,7 +961,7 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 
 // TruncateBlocks - delete block >= blockFrom
 // does decrement sequences of kv.EthTx
-// doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
+// doesn't delete Receipts, Canonical markers, TotalDifficulty
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	if blockFrom < 1 { //protect genesis
 		blockFrom = 1

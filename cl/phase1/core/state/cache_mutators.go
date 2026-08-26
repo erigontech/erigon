@@ -72,7 +72,7 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	}
 	proposerInd, err := b.GetBeaconProposerIndex()
 	if err != nil {
-		return 0, fmt.Errorf("unable to get beacon proposer index: %v", err)
+		return 0, fmt.Errorf("unable to get beacon proposer index: %w", err)
 	}
 	if whistleblowerInd == nil {
 		whistleblowerInd = new(uint64)
