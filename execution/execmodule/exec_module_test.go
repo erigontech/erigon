@@ -425,7 +425,7 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
@@ -507,7 +507,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
@@ -1585,7 +1585,9 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, stored, 2)
 	for i, pb := range stored {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "stored block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "stored block %d", i+1)
 	}
 	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
@@ -1605,14 +1607,18 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, byHash, 2)
 	for i, pb := range byHash {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byHash block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byHash block %d", i+1)
 	}
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
 	require.NoError(t, err)
 	require.Len(t, byRange, 2)
 	for i, pb := range byRange {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byRange block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byRange block %d", i+1)
 	}
 }
 
@@ -2348,7 +2354,7 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	// and the fee burned), and the record is balance-only — nonce, code hash
 	// and storage cleared.
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:], kv.GetLatestOptions{})
 		if err != nil {
 			return err
 		}
@@ -2363,6 +2369,46 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	invalidBAL := types.BlockAccessList{
+		{Address: accounts.InternAddress(common.Address{2})},
+		{Address: accounts.InternAddress(common.Address{1})},
+	}
+	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
+	require.NoError(t, err)
+	balHash := crypto.Keccak256Hash(encoded)
+	header.BlockAccessListHash = &balHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(invalidBAL))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+}
+
+func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	wrongHash := common.Hash{1}
+	header.BlockAccessListHash = &wrongHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+	require.ErrorContains(t, err, "block access list hash mismatch")
 }
 
 // TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
@@ -2460,7 +2506,7 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		require.Eventually(t, func() bool {
 			var funded bool
 			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:], kv.GetLatestOptions{})
 				if err != nil {
 					return err
 				}
@@ -2521,7 +2567,7 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	}, chainPack.Blocks[5].BlockAccessList())
+	}, chainPack.Blocks[5].BlockAccessListSidecar())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
@@ -2864,7 +2910,7 @@ func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
 	fakeHeader := m.Genesis.Header()
 	fakeHeader.Extra = []byte("not the genesis")
-	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	fakeBlock := types.NewBlockWithHeader(fakeHeader, nil)
 	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
 	insRes, err := m.InsertBlocks(ctx, []*types.Block{fakeBlock})
 	require.NoError(t, err)
@@ -2955,7 +3001,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var phoenix accounts.Account
@@ -2965,7 +3011,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 		require.True(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero())
 		readSlot := func(owner common.Address, slot int64) []byte {
 			h := common.BigToHash(big.NewInt(slot))
-			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...), kv.GetLatestOptions{})
 			require.NoError(t, err)
 			return v
 		}
@@ -3058,7 +3104,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 	fillerFee := chainPack.Receipts[1][1].GasUsed * tip
 	totalFees := (chainPack.Receipts[1][1].GasUsed + chainPack.Receipts[1][2].GasUsed) * tip
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var phoenix accounts.Account
@@ -3068,7 +3114,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 		require.True(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero())
 		readSlot := func(owner common.Address, slot int64) []byte {
 			h := common.BigToHash(big.NewInt(slot))
-			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...), kv.GetLatestOptions{})
 			require.NoError(t, err)
 			return v
 		}
@@ -3140,14 +3186,14 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, sysAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, sysAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc, "AuRa must retain the empty SystemAddress")
 		var sys accounts.Account
 		require.NoError(t, accounts.DeserialiseV3(&sys, enc))
 		require.True(t, sys.Balance.IsZero())
 		require.Equal(t, uint64(0), sys.Nonce)
-		obsEnc, _, err := tx.GetLatest(kv.AccountsDomain, observerAddr[:])
+		obsEnc, _, err := tx.GetLatest(kv.AccountsDomain, observerAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, obsEnc)
 		var obs accounts.Account
@@ -3229,7 +3275,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, victimAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, victimAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var victim accounts.Account
@@ -3239,7 +3285,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 		require.True(t, victim.CodeHash.IsEmpty() || victim.CodeHash.IsZero())
 		readSlot := func(owner common.Address, slot int64) []byte {
 			h := common.BigToHash(big.NewInt(slot))
-			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...), kv.GetLatestOptions{})
 			require.NoError(t, err)
 			return v
 		}
@@ -3330,14 +3376,14 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var phoenix accounts.Account
 		require.NoError(t, accounts.DeserialiseV3(&phoenix, enc))
 		require.False(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero(), "the recreated phoenix must carry code")
 		h := common.BigToHash(big.NewInt(0))
-		v, _, err := tx.GetLatest(kv.StorageDomain, append(phoenixAddr[:], h[:]...))
+		v, _, err := tx.GetLatest(kv.StorageDomain, append(phoenixAddr[:], h[:]...), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.Equal(t, []byte{0x01}, v, "the recreated phoenix's counter must restart from the wiped zero")
 		return nil
