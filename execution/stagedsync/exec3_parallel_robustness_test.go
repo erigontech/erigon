@@ -1272,9 +1272,12 @@ func TestWaitProcessedWithoutCommitStreamReturns(t *testing.T) {
 	}
 }
 
-// TestWaitProcessedBarrier drives a live COMMITMENT_AFTER_EXEC barrier: the
-// waiter for block N must stay parked until the calculator marks N processed,
-// and must not be released by an earlier block's mark.
+// TestWaitProcessedBarrier covers the exec side of the COMMITMENT_AFTER_EXEC
+// barrier as an isolated markProcessed/WaitProcessed pair: the waiter for block
+// N must stay parked until N is marked processed, and must not be released by an
+// earlier block's mark. The calculator side — the guarded call in
+// handleMessage's *blockResult arm — is pinned by
+// TestHandleMessage_MarksProcessedUnderFlag.
 func TestWaitProcessedBarrier(t *testing.T) {
 	newCalc := func() *commitmentCalculator {
 		return &commitmentCalculator{
