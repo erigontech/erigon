@@ -155,7 +155,7 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	t.Helper()
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	t.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	t.Helper()
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	t.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)

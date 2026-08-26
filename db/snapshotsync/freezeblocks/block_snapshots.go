@@ -173,16 +173,26 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 	return br.blockReader.Snapshots().(*blocksnapshots.RoSnapshots)
 }
 
-func (br *BlockRetire) canRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
-	//
-	// TODO(milen): finalisedHash check
-	//
+func (br *BlockRetire) canRetire(ctx context.Context, curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool, err error) {
 	keep := br.config.MaxReorgDepth
 	if curBlockNum <= keep {
 		return
 	}
+	blockTo = curBlockNum - keep
+	var finalisedBlockNum uint64
+	err = br.db.View(ctx, func(tx kv.Tx) error {
+		finalisedBlockNum = rawdb.ReadForkchoiceFinalizedNum(tx)
+		return nil
+	})
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if finalisedBlockNum > 0 && finalisedBlockNum < blockTo {
+		blockTo = finalisedBlockNum
+	}
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
+	blockFrom, blockTo, can = snapshotsync.CanRetire(blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
+	return blockFrom, blockTo, can, nil
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -248,7 +258,10 @@ func (br *BlockRetire) buildFiles(
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := br.canRetire(maxBlockNum, minBlockNum, snaptype.Unknown)
+	blockFrom, blockTo, ok, err := br.canRetire(ctx, maxBlockNum, minBlockNum, snaptype.Unknown)
+	if err != nil {
+		return false, err
+	}
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err

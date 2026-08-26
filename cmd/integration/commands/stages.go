@@ -744,13 +744,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		return agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
+		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
 				return err
 			}
 			return stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
 		}, logger)
+		return err
 	}
 
 	if chainTipMode {

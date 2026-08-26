@@ -22,7 +22,6 @@ package blockgen
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 
@@ -495,11 +494,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
 		// so that EIP-4788 can store it during initialization.
 		if config.IsCancun(b.header.Time) {
-			var beaconBlockRoot common.Hash
-			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-				return nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
-			}
-			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+			beaconBlockRoot := b.header.Hash().U256()
+			beaconBlockRoot.AddUint64(&beaconBlockRoot, 1)
+			parentBeaconBlockRoot := common.U256ToHash(beaconBlockRoot)
+			b.header.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 		}
 		if b.engine != nil {
 			// Set tx context for system init call (txIndex -1)
