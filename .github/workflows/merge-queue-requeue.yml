@@ -23,6 +23,10 @@ on:
         description: Pull request GraphQL node ID
         required: true
         type: string
+      expected_head_oid:
+        description: Pull request head commit tested by CI Gate
+        required: true
+        type: string
       run_id:
         description: Failed CI Gate run ID
         required: true
@@ -68,6 +72,7 @@ jobs:
           ENQUEUE_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           PR_NODE_ID: ${{ github.event.pull_request.node_id || inputs.pr_node_id }}
+          EXPECTED_HEAD_OID: ${{ github.event.pull_request.head.sha || inputs.expected_head_oid }}
           DEQUEUE_REASON: ${{ github.event.reason || inputs.dequeue_reason }}
           MQ_RUN_ID: ${{ inputs.run_id }}
         run: bash .github/workflows/scripts/merge-queue-requeue.sh

@@ -7,10 +7,10 @@
 # Exit 1 = operational error (bad input, enqueue mutation failed).
 #
 # Inputs (env): PR_NUMBER; PR_NODE_ID (resolved via the API when empty);
-# DEQUEUE_REASON (optional, from the event payload); GH_TOKEN for API reads and
-# comments; ENQUEUE_TOKEN for enqueuePullRequest; GITHUB_REPOSITORY for the
-# API; MAX_REQUEUES (default 3 per rolling 24 h); MQ_RUN_ID to classify a
-# specific gate run instead of looking one up;
+# EXPECTED_HEAD_OID; DEQUEUE_REASON (optional, from the event payload);
+# GH_TOKEN for API reads and comments; ENQUEUE_TOKEN for enqueuePullRequest;
+# GITHUB_REPOSITORY for the API; MAX_REQUEUES (default 3 per rolling 24 h);
+# MQ_RUN_ID to classify a specific gate run instead of looking one up;
 # MQ_DRY_RUN=1 to log mutations without performing them.
 # Test seam: MQ_NO_FETCH=1 reads MQ_RUNS_JSON, MQ_JOBS_JSON,
 # MQ_ANNOTATIONS_JSON ({"<job id>": ["<message>"]}), MQ_COMMENTS_JSON,
@@ -30,6 +30,10 @@ if grep -qiE 'manual|conflict|already[ _]?merged|branch[ _]?protect|queue[ _]?cl
   <<<"${DEQUEUE_REASON:-}"; then
   echo "::notice::Dequeue reason '${DEQUEUE_REASON}' is not a CI failure; not re-queuing PR #${PR_NUMBER}."
   exit 0
+fi
+if ! [[ "${EXPECTED_HEAD_OID:-}" =~ ^[[:xdigit:]]{40,64}$ ]]; then
+  echo "::error::EXPECTED_HEAD_OID must be a Git object ID, got '${EXPECTED_HEAD_OID:-}'"
+  exit 1
 fi
 
 dry_run() { [ -n "${MQ_NO_FETCH:-}" ] || [ -n "${MQ_DRY_RUN:-}" ]; }
@@ -154,7 +158,7 @@ else
     -F number="$PR_NUMBER" \
     -f query='query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) { id state mergeQueueEntry { position } }
+        pullRequest(number: $number) { id state headRefOid mergeQueueEntry { position } }
       }
     }' --jq '.data.repository.pullRequest') || pr_state=""
 fi
@@ -168,6 +172,15 @@ if [ "$(jq -r '.state' <<<"$pr_state")" != "OPEN" ]; then
 fi
 if [ "$(jq -r '.mergeQueueEntry' <<<"$pr_state")" != "null" ]; then
   echo "::notice::PR #${PR_NUMBER} is already back in the merge queue; nothing to do."
+  exit 0
+fi
+current_head_oid=$(jq -r '.headRefOid // empty' <<<"$pr_state")
+if [ -z "$current_head_oid" ]; then
+  echo "::warning::Could not read the head commit of PR #${PR_NUMBER}; not re-queuing."
+  exit 0
+fi
+if [ "$current_head_oid" != "$EXPECTED_HEAD_OID" ]; then
+  echo "::notice::PR #${PR_NUMBER} head changed from ${EXPECTED_HEAD_OID} to ${current_head_oid}; not re-queuing."
   exit 0
 fi
 if [ -z "${PR_NODE_ID:-}" ]; then
@@ -247,8 +260,9 @@ else
   # shellcheck disable=SC2016
   GH_TOKEN="$ENQUEUE_TOKEN" gh api graphql \
     -F id="$PR_NODE_ID" \
-    -f query='mutation($id: ID!) {
-      enqueuePullRequest(input: {pullRequestId: $id}) {
+    -F expectedHeadOid="$EXPECTED_HEAD_OID" \
+    -f query='mutation($id: ID!, $expectedHeadOid: GitObjectID!) {
+      enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $expectedHeadOid}) {
         mergeQueueEntry { position }
       }
     }' >/dev/null || {
