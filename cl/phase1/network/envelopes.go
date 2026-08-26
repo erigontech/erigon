@@ -27,7 +27,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var requestEnvelopeBatchExpiration = 30 * time.Second
+var (
+	requestEnvelopeBatchExpiration = 30 * time.Second
+	requestEnvelopeAttemptTimeout  = 21 * time.Second
+	requestEnvelopeRetryInterval   = 300 * time.Millisecond
+)
 
 // RequestEnvelopesFrantically requests execution payload envelopes from the network for the given beacon block roots.
 // It first tries by-root, then falls back to by-range using the slot range of fullBlocks.
@@ -68,14 +72,19 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		// protocol but return EOF, wasting the entire 30s timeout budget.
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
-			requestEnvelopesByRange(requestCtx, r, fullBlocks, requestedRoots, received)
+			rangeCtx, cancelRange := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
+			requestEnvelopesByRange(rangeCtx, r, fullBlocks, requestedRoots, received)
+			cancelRange()
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
 			}
 		}
 
-		responses, err := requestEnvelopesByRoot(requestCtx, r, needed)
+		attemptCtx, cancelAttempt := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
+		responses, err := requestEnvelopesByRoot(attemptCtx, r, needed)
+		attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && requestCtx.Err() == nil
+		cancelAttempt()
 		acceptEnvelopeResponses(responses, requestedRoots, received)
 		needed = filterReceived(needed, received)
 		if len(needed) == 0 {
@@ -86,13 +95,17 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		}
 		if err != nil {
 			log.Trace("RequestEnvelopesFrantically: by-root error", "err", err)
+			if attemptTimedOut {
+				byRootAttempts = 3
+				continue
+			}
 			byRootAttempts++
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(requestEnvelopeRetryInterval)
 			continue
 		}
 		if len(needed) > 0 {
 			byRootAttempts++
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(requestEnvelopeRetryInterval)
 		}
 	}
 	return received, nil

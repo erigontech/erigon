@@ -18,6 +18,8 @@ package network
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,6 +29,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -74,6 +77,20 @@ type contextBlockingSentinel struct {
 	canceled chan struct{}
 	start    sync.Once
 	stop     sync.Once
+}
+
+type emptyAfterFallbackStartsSentinel struct {
+	sentinelproto.SentinelClient
+	fallbackStarted <-chan struct{}
+}
+
+func (s *emptyAfterFallbackStartsSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	select {
+	case <-s.fallbackStarted:
+		return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func newContextBlockingSentinel() *contextBlockingSentinel {
@@ -171,6 +188,274 @@ func TestForwardRequestMoreBoundsActiveProbes(t *testing.T) {
 	}
 	require.LessOrEqual(t, sentinel.maximum.Load(), int32(2))
 	require.Zero(t, sentinel.active.Load())
+}
+
+func TestForwardRequestMoreStartsHTTPFallbackWhileProbesAreSlow(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	previousFallbackDelay := forwardBeaconFallbackDelay
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = 200 * time.Millisecond
+	forwardBeaconFallbackDelay = 20 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+		forwardBeaconFallbackDelay = previousFallbackDelay
+	})
+
+	fallbackStarted := make(chan struct{})
+	var fallbackOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fallbackOnce.Do(func() { close(fallbackStarted) })
+		http.NotFound(w, nil)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newCountingBlockingSentinel()
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
+	downloader.SetHTTPFallbackURL(server.URL)
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-fallbackStarted:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("slow P2P probes prevented the HTTP fallback from starting")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RequestMore did not finish after its request window")
+	}
+}
+
+func TestForwardRequestMoreDoesNotApplyStaleHTTPFallbackAfterP2PProgress(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	previousFallbackDelay := forwardBeaconFallbackDelay
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = 100 * time.Millisecond
+	forwardBeaconFallbackDelay = 5 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+		forwardBeaconFallbackDelay = previousFallbackDelay
+	})
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = 11
+	encodedBlock, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	fallbackStarted := make(chan struct{})
+	releaseFallback := make(chan struct{})
+	var fallbackOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackOnce.Do(func() { close(fallbackStarted) })
+		<-releaseFallback
+		if r.URL.Path != "/eth/v2/beacon/blocks/11" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Eth-Consensus-Version", "phase0")
+		_, _ = w.Write(encodedBlock)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := &emptyAfterFallbackStartsSentinel{fallbackStarted: fallbackStarted}
+	rpcClient, rpcCfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, rpcCfg)
+	downloader.SetHighestProcessedSlot(10)
+	downloader.SetHTTPFallbackURL(server.URL)
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return highest, nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+	select {
+	case <-fallbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP fallback did not start")
+	}
+	require.Eventually(t, func() bool {
+		return downloader.GetHighestProcessedSlot() > 10
+	}, time.Second, time.Millisecond, "empty P2P response did not advance the cursor")
+	close(releaseFallback)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RequestMore did not finish")
+	}
+	require.Zero(t, processCalls.Load(), "stale HTTP result was processed after P2P advanced the cursor")
+}
+
+func TestForwardRequestMoreBoundsPreferredHTTPFallback(t *testing.T) {
+	previousTimeout := forwardBeaconRequestTimeout
+	forwardBeaconRequestTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestTimeout = previousTimeout })
+
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("preferred HTTP fallback exceeded the request window")
+	}
+}
+
+func TestForwardRequestMoreRejectsStalePreferredHTTPFallback(t *testing.T) {
+	previousTimeout := forwardBeaconRequestTimeout
+	forwardBeaconRequestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { forwardBeaconRequestTimeout = previousTimeout })
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = 11
+	encodedBlock, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	fallbackStarted := make(chan struct{})
+	releaseFallback := make(chan struct{})
+	var fallbackOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackOnce.Do(func() { close(fallbackStarted) })
+		<-releaseFallback
+		if r.URL.Path != "/eth/v2/beacon/blocks/11" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Eth-Consensus-Version", "phase0")
+		_, _ = w.Write(encodedBlock)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, rpcCfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, rpcCfg)
+	downloader.SetHighestProcessedSlot(10)
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return highest, nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+	select {
+	case <-fallbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("preferred HTTP fallback did not start")
+	}
+	downloader.SetHighestProcessedSlot(20)
+	close(releaseFallback)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RequestMore did not finish")
+	}
+	require.Zero(t, processCalls.Load(), "stale preferred HTTP result was processed after the frontier advanced")
+}
+
+func TestForwardRequestMoreRechecksHTTPFrontierBeforeProcessing(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	previousFallbackDelay := forwardBeaconFallbackDelay
+	previousResponsePoll := forwardBeaconResponsePoll
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = 300 * time.Millisecond
+	forwardBeaconFallbackDelay = 5 * time.Millisecond
+	forwardBeaconResponsePoll = 100 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+		forwardBeaconFallbackDelay = previousFallbackDelay
+		forwardBeaconResponsePoll = previousResponsePoll
+	})
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = 11
+	encodedBlock, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/eth/v2/beacon/blocks/11" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Eth-Consensus-Version", "phase0")
+		_, _ = w.Write(encodedBlock)
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, rpcCfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, rpcCfg)
+	downloader.SetHighestProcessedSlot(10)
+	downloader.SetHTTPFallbackURL(server.URL)
+	var processCalls atomic.Int32
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processCalls.Add(1)
+		return highest, nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+	require.Eventually(t, downloader.httpPreferred.Load, time.Second, time.Millisecond, "HTTP response was not committed")
+	downloader.SetHighestProcessedSlot(20)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RequestMore did not finish")
+	}
+	require.Zero(t, processCalls.Load(), "HTTP response was not revalidated before processing")
 }
 
 func TestForwardRequestMoreSynchronizesConcurrentProgressUpdates(t *testing.T) {

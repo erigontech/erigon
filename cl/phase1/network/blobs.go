@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -265,52 +264,12 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 	}
 }
 
-// RequestBlobsFrantically requests blobs from the network frantically.
+// RequestBlobsFrantically requests blobs until a peer returns a non-empty response.
 func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	var atomicResp atomic.Value
-
-	atomicResp.Store(&PeerAndSidecars{})
-	timer := time.NewTimer(requestBlobBatchExpiration)
-	defer timer.Stop()
-	reqInterval := time.NewTicker(100 * time.Millisecond)
-	defer reqInterval.Stop()
-Loop:
-	for {
-		select {
-		case <-reqInterval.C:
-			go func() {
-				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
-					return
-				}
-				// this is so we do not get stuck on a side-fork
-				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
-				if err != nil {
-					log.Trace("RequestBlobsFrantically: error", "err", err, "peer", pid)
-					return
-				}
-				if responses == nil {
-					log.Trace("RequestBlobsFrantically: response is nil", "peer", pid)
-					return
-				}
-				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
-					return
-				}
-				atomicResp.Store(&PeerAndSidecars{
-					Peer:      pid,
-					Responses: responses,
-				})
-			}()
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-timer.C:
-			log.Trace("RequestBlobsFrantically: timeout")
-			return nil, ErrTimeout
-		default:
-			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
-				break Loop
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	return atomicResp.Load().(*PeerAndSidecars), nil
+	return requestBlobsForBackfill(ctx, r, func() *solid.ListSSZ[*cltypes.BlobIdentifier] {
+		return req
+	}, func(_ context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
+		complete := len(candidate.Responses) > 0
+		return complete, complete, nil
+	})
 }

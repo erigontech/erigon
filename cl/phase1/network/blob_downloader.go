@@ -529,7 +529,7 @@ func (b *BlobHistoryDownloader) peersAvailable() bool {
 		return false
 	}
 	if peers == 0 {
-		b.logger.Warn("[BlobHistoryDownloader] Skipping iteration because no peers are available")
+		b.logger.Debug("[BlobHistoryDownloader] Skipping iteration because no peers are available")
 		return false
 	}
 	return true
