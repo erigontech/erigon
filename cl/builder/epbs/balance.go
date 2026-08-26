@@ -12,7 +12,10 @@ import (
 	log "github.com/erigontech/erigon/common/log/v3"
 )
 
-var ErrBuilderIndexMismatch = errors.New("builder index does not match signing key")
+var (
+	ErrBuilderIndexMismatch   = errors.New("builder index does not match signing key")
+	ErrBuilderVersionMismatch = errors.New("builder version is not supported for payload bids")
+)
 
 const (
 	balanceCheckInterval = 32 * 12 * time.Second // ~1 epoch
@@ -46,6 +49,9 @@ func builderStatusAtIndex(s *state.CachingBeaconState, builderIndex uint64, pubk
 	builder := builders.Get(int(builderIndex))
 	if builder == nil || builder.Pubkey != pubkey {
 		return status, ErrBuilderIndexMismatch
+	}
+	if builder.Version != s.BeaconConfig().PayloadBuilderVersion {
+		return status, ErrBuilderVersionMismatch
 	}
 	status.Active = state.IsActiveBuilder(s, builderIndex)
 	pending := state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex)

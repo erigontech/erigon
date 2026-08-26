@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -19,26 +20,27 @@ import (
 type PendingPayloadStore interface {
 	Save(context.Context, pendingPayloadKey, *pendingPayload, common.Bytes48) error
 	Delete(context.Context, pendingPayloadKey) error
-	Load(context.Context) ([]storedPendingPayload, error)
+	Load(context.Context, uint64) ([]storedPendingPayload, error)
 }
 
 var ErrPendingPayloadMayExist = errors.New("pending payload durability is uncertain")
 
 type storedPendingPayload struct {
-	Slot               uint64
-	ParentBlockHash    common.Hash
-	ParentBlockRoot    common.Hash
-	BlockHash          common.Hash
-	BuilderIndex       uint64
-	BuilderPubkey      common.Bytes48
-	BidValue           uint64
-	Parent             ParentInfo
-	Version            clparams.StateVersion
-	ExecutionPayload   []byte
-	ExecutionRequests  []byte
-	BlobKzgCommitments [][]byte
-	BlobKzgProofs      [][]byte
-	Blobs              [][]byte
+	Slot                  uint64
+	ParentBlockHash       common.Hash
+	ParentBlockRoot       common.Hash
+	BlockHash             common.Hash
+	BuilderIndex          uint64
+	BuilderPubkey         common.Bytes48
+	BidValue              uint64
+	Parent                ParentInfo
+	Version               clparams.StateVersion
+	ExecutionPayload      []byte
+	ExecutionRequests     []byte
+	ExecutionRequestsRoot common.Hash
+	BlobKzgCommitments    [][]byte
+	BlobKzgProofs         [][]byte
+	Blobs                 [][]byte
 }
 
 type filePendingPayloadStore struct {
@@ -127,7 +129,7 @@ func syncPendingDirectory(path string) error {
 	return directory.Sync()
 }
 
-func (s *filePendingPayloadStore) Load(ctx context.Context) ([]storedPendingPayload, error) {
+func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]storedPendingPayload, error) {
 	entries, err := os.ReadDir(s.dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -141,6 +143,13 @@ func (s *filePendingPayloadStore) Load(ctx context.Context) ([]storedPendingPayl
 			return nil, err
 		}
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		slot, err := pendingPayloadSlotFromName(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if slot < minSlot {
 			continue
 		}
 		if len(records) >= maxPendingPayloadFiles {
@@ -166,12 +175,24 @@ func (s *filePendingPayloadStore) Load(ctx context.Context) ([]storedPendingPayl
 	return records, nil
 }
 
+func pendingPayloadSlotFromName(name string) (uint64, error) {
+	const slotWidth = 20
+	if len(name) <= slotWidth || name[slotWidth] != '-' {
+		return 0, fmt.Errorf("invalid pending payload filename %q", name)
+	}
+	slot, err := strconv.ParseUint(name[:slotWidth], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid pending payload filename %q: %w", name, err)
+	}
+	return slot, nil
+}
+
 func (s *filePendingPayloadStore) path(key pendingPayloadKey) string {
 	return filepath.Join(s.dir, fmt.Sprintf("%020d-%x-%x.json", key.slot, key.parentBlockRoot, key.blockHash))
 }
 
 func encodeStoredPendingPayload(key pendingPayloadKey, pending *pendingPayload, pubkey common.Bytes48) (storedPendingPayload, error) {
-	if pending == nil || pending.assembled == nil || pending.assembled.Eth1Block == nil {
+	if pending == nil || pending.assembled == nil || pending.assembled.Eth1Block == nil || pending.execReqs == nil {
 		return storedPendingPayload{}, errors.New("pending payload is incomplete")
 	}
 	payload, err := pending.assembled.Eth1Block.EncodeSSZ(nil)
@@ -185,11 +206,15 @@ func encodeStoredPendingPayload(key pendingPayloadKey, pending *pendingPayload, 
 			return storedPendingPayload{}, err
 		}
 	}
+	requestsRoot, err := pending.execReqs.HashSSZ()
+	if err != nil {
+		return storedPendingPayload{}, err
+	}
 	record := storedPendingPayload{
 		Slot: pending.slot, ParentBlockHash: key.parentBlockHash, ParentBlockRoot: key.parentBlockRoot,
 		BlockHash: key.blockHash, BuilderIndex: pending.builderIndex, BuilderPubkey: pubkey,
 		BidValue: pending.bidValue, Parent: pending.parent, Version: pending.assembled.Eth1Block.Version(),
-		ExecutionPayload: payload, ExecutionRequests: requests,
+		ExecutionPayload: payload, ExecutionRequests: requests, ExecutionRequestsRoot: requestsRoot,
 	}
 	if bundle := pending.assembled.BlobsBundle; bundle != nil {
 		record.BlobKzgCommitments = bundle.Commitments
@@ -207,7 +232,7 @@ func decodeStoredPendingPayload(record storedPendingPayload, beaconCfg *clparams
 	if beaconCfg == nil {
 		return key, nil, errors.New("beacon config is required")
 	}
-	if record.Version < clparams.GloasVersion || record.BidValue == 0 || len(record.ExecutionPayload) == 0 || len(record.ExecutionRequests) == 0 {
+	if record.Version < clparams.GloasVersion || len(record.ExecutionPayload) == 0 || len(record.ExecutionRequests) == 0 {
 		return key, nil, errors.New("stored pending payload metadata is invalid")
 	}
 	if record.Parent.BlockRoot != record.ParentBlockRoot || record.Parent.ExecutionHash != record.ParentBlockHash {
@@ -223,6 +248,13 @@ func decodeStoredPendingPayload(record storedPendingPayload, beaconCfg *clparams
 	requests := cltypes.NewExecutionRequestsWithVersion(beaconCfg, record.Version)
 	if err := requests.DecodeSSZStrict(record.ExecutionRequests, int(record.Version)); err != nil {
 		return key, nil, err
+	}
+	requestsRoot, err := requests.HashSSZ()
+	if err != nil {
+		return key, nil, err
+	}
+	if requestsRoot != record.ExecutionRequestsRoot {
+		return key, nil, errors.New("stored execution requests root mismatch")
 	}
 	var bundle *eladapter.BlobsBundle
 	if len(record.Blobs) > 0 || len(record.BlobKzgCommitments) > 0 || len(record.BlobKzgProofs) > 0 {

@@ -150,7 +150,7 @@ func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 	previousPayloadID, replaced := l.speculativePayloads[key]
 	l.speculativePayloads[key] = payloadId
 	l.mu.Unlock()
-	if replaced {
+	if replaced && previousPayloadID != payloadId {
 		l.specBuild.Discard(previousPayloadID)
 	}
 
@@ -203,17 +203,7 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 	for _, removed := range removed {
 		if l.pendingStore != nil {
 			if err := l.pendingStore.Delete(context.Background(), removed.key); err != nil {
-				l.mu.Lock()
-				restored := false
-				if l.pendingPayloads[removed.key] == nil {
-					l.pendingPayloads[removed.key] = removed.pending
-					restored = true
-				}
-				l.mu.Unlock()
 				log.Warn("ePBS builder: delete persisted pending payload failed", "slot", removed.key.slot, "err", err)
-				if restored {
-					continue
-				}
 			}
 		}
 		if !removed.pending.reservationReleased {
@@ -303,31 +293,50 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 		}
 		defer l.specBuild.Discard(newPayloadId)
 
-		// Poll for result (simple blocking wait with timeout)
-		deadline := time.After(time.Duration(l.beaconCfg.SecondsPerSlot/4) * time.Second)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
+		buildWindow := time.Duration(l.beaconCfg.SecondsPerSlot) * time.Second / 4
+		if buildWindow <= 0 {
+			return nil
+		}
+		buildTimer := time.NewTimer(buildWindow)
+		select {
+		case <-buildTimer.C:
+		case <-ctx.Done():
+			buildTimer.Stop()
+			return ctx.Err()
+		}
 
+		collectionCtx, cancelCollection := context.WithTimeout(ctx, buildWindow)
+		defer cancelCollection()
+		retry := time.NewTicker(100 * time.Millisecond)
+		defer retry.Stop()
 		for {
-			select {
-			case <-deadline:
-				log.Warn("ePBS builder: rebuild timed out", "slot", slot)
-				return nil
-			case <-ticker.C:
-				result, err := l.specBuild.GetResult(ctx, newPayloadId)
-				if err != nil {
-					return fmt.Errorf("epbs/loop: rebuild GetResult: %w", err)
-				}
-				if result != nil {
-					if err := validatePayloadForSlot(result, sc); err != nil {
-						return fmt.Errorf("epbs/loop: invalid rebuilt payload: %w", err)
+			result, err := l.specBuild.GetResult(collectionCtx, newPayloadId)
+			if err != nil {
+				if collectionCtx.Err() != nil {
+					if ctx.Err() != nil {
+						return ctx.Err()
 					}
-					assembled = result
-					usedPayloadId = newPayloadId
-					goto buildDone
+					log.Warn("ePBS builder: rebuild collection timed out", "slot", slot)
+					return nil
 				}
-			case <-ctx.Done():
-				return ctx.Err()
+				return fmt.Errorf("epbs/loop: rebuild GetResult: %w", err)
+			}
+			if result != nil {
+				if err := validatePayloadForSlot(result, sc); err != nil {
+					return fmt.Errorf("epbs/loop: invalid rebuilt payload: %w", err)
+				}
+				assembled = result
+				usedPayloadId = newPayloadId
+				goto buildDone
+			}
+			select {
+			case <-retry.C:
+			case <-collectionCtx.Done():
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				log.Warn("ePBS builder: rebuild collection timed out", "slot", slot)
+				return nil
 			}
 		}
 	}
@@ -503,7 +512,7 @@ func (l *BuilderLoop) restorePreviousPending(key pendingPayloadKey, current, pre
 }
 
 func (l *BuilderLoop) restorePendingPayloads(ctx context.Context, currentSlot uint64) error {
-	records, err := l.pendingStore.Load(ctx)
+	records, err := l.pendingStore.Load(ctx, currentSlot)
 	if err != nil {
 		return err
 	}

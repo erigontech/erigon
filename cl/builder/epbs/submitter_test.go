@@ -44,9 +44,24 @@ type blockingColumnStorage struct {
 	started chan struct{}
 }
 
-func (s *blockingColumnStorage) WriteColumnSidecars(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+type cancelCleanupColumnStorage struct {
+	started chan struct{}
+	cleanup chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingColumnStorage) WriteColumnSidecars(ctx context.Context, _ common.Hash, _ int64, _ *cltypes.DataColumnSidecar) error {
 	s.started <- struct{}{}
-	select {}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (s *cancelCleanupColumnStorage) WriteColumnSidecars(ctx context.Context, _ common.Hash, _ int64, _ *cltypes.DataColumnSidecar) error {
+	close(s.started)
+	<-ctx.Done()
+	close(s.cleanup)
+	<-s.release
+	return ctx.Err()
 }
 
 func (s *testColumnStorage) WriteColumnSidecars(_ context.Context, _ common.Hash, columnIndex int64, _ *cltypes.DataColumnSidecar) error {
@@ -164,6 +179,30 @@ func TestCaplinBidSubmitterColumnStorageCancellationDoesNotBlockCaller(t *testin
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("column storage blocked reveal cancellation")
 	}
+}
+
+func TestCaplinBidSubmitterCancellationWaitsForColumnStorageHandoff(t *testing.T) {
+	storage := &cancelCleanupColumnStorage{
+		started: make(chan struct{}), cleanup: make(chan struct{}), release: make(chan struct{}),
+	}
+	submitter := NewCaplinBidSubmitter(nil, &testGossipPublisher{}, testEnvelopeProcessor{}, storage)
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	column := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- submitter.BroadcastPayload(ctx, envelope, []*cltypes.DataColumnSidecar{column}) }()
+	<-storage.started
+	cancel()
+	<-storage.cleanup
+	select {
+	case <-done:
+		t.Fatal("column storage work outlived the canceled broadcast")
+	default:
+	}
+	close(storage.release)
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestCaplinBidSubmitterBoundsBlockedColumnWrites(t *testing.T) {

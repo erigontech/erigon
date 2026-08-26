@@ -135,6 +135,20 @@ func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
 	require.Len(t, events, 0)
 }
 
+func TestDataColumnStorageDoesNotWriteAfterCancellation(t *testing.T) {
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	root := common.HexToHash("0x1234567890abcdef")
+	const slot = uint64(1000)
+	const index = int64(1)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.ErrorIs(t, storage.WriteColumnSidecars(ctx, root, index, createTestDataColumnSidecar(slot, index)), context.Canceled)
+	exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, index)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
 func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
 	t.Run("saved index scan", func(t *testing.T) {
 		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}

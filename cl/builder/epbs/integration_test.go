@@ -82,6 +82,27 @@ func TestBuildSlotContextUsesAndAdvancesParentState(t *testing.T) {
 	require.Equal(t, wantRandao, sc.PrevRandao)
 }
 
+func TestBuildSlotContextUsesGenesisDependentRootInEarlyEpoch(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.SlotsPerEpoch = 8
+	cfg.MinSeedLookahead = 1
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	parentState := state.New(cfg)
+	parentState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, parentState.SetSlot(0))
+	parentState.SetPayloadExpectedWithdrawals(solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44))
+	parentRoot := common.HexToHash("0xaaaa")
+	dependentRoot := common.HexToHash("0xbbbb")
+	fc := &slotContextForkChoiceStub{state: parentState, dependentRoot: dependentRoot}
+
+	sc, err := buildSlotContext(fc, cfg, 1, 123, forkchoice.ParentCandidate{
+		Slot: 0, BlockRoot: parentRoot, ExecutionHash: common.HexToHash("0xcccc"),
+	}, common.Bytes48{})
+	require.NoError(t, err)
+	require.Equal(t, dependentRoot, sc.DependentRoot)
+}
+
 func TestBuildSlotContextAppliesEpochRandaoReset(t *testing.T) {
 	cfg := testBeaconCfg()
 	cfg.SlotsPerEpoch = 8
@@ -138,6 +159,32 @@ func TestBuildSlotContextUsesTargetParentBuilderBalance(t *testing.T) {
 	require.True(t, sc.BuilderFound)
 	require.Equal(t, uint64(0), sc.BuilderIndex)
 	require.Equal(t, uint64(40), sc.BuilderStatus.Balance)
+}
+
+func TestBuildSlotContextDoesNotUseNonPayloadBuilderVersion(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.SlotsPerEpoch = 8
+	cfg.GloasForkEpoch = 3
+	cfg.InitializeForkSchedule()
+	parentState, _, err := devgenesis.BuildGenesisState("slot-context-builder-version", 64, cfg, 0, common.Hash{})
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(parentState, 24))
+	pubkey := common.Bytes48{1}
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey: pubkey, Balance: cfg.MinDepositAmount + 100,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+		Version:           cfg.PayloadBuilderVersion + 1,
+	})
+	parentState.SetBuilders(builders)
+	parentState.SetLatestBlockHash(common.HexToHash("0x01"))
+	fc := &slotContextForkChoiceStub{state: parentState, dependentRoot: common.HexToHash("0xbbbb")}
+
+	sc, err := buildSlotContext(fc, cfg, 25, 123, forkchoice.ParentCandidate{
+		Slot: 24, BlockRoot: common.HexToHash("0xaaaa"),
+	}, pubkey)
+	require.NoError(t, err)
+	require.False(t, sc.BuilderFound)
 }
 
 func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {

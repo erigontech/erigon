@@ -107,7 +107,7 @@ func (m *BuilderManager) ReserveBidWithStatus(status BalanceStatus, value uint64
 }
 
 func (m *BuilderManager) reserveBidWithStatus(status BalanceStatus, value uint64) bool {
-	if value == 0 || !status.Active || m.reservedBidValue > status.Balance {
+	if !status.Active || m.reservedBidValue > status.Balance {
 		return false
 	}
 	if value > status.Balance-m.reservedBidValue {

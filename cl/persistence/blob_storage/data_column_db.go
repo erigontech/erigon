@@ -43,6 +43,9 @@ func NewDataColumnStore(fs afero.Fs, beaconChainConfig *clparams.BeaconChainConf
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Get slot from sidecar - version-aware handling
 	// For Fulu: slot is in SignedBlockHeader.Header.Slot
 	// For GLOAS: slot is directly in Slot field
@@ -63,6 +66,9 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	lock := s.forSlot(slot)
 	lock.Lock()
 	defer lock.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !s.startWrite(slot) {
 		return nil
 	}

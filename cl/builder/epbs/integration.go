@@ -362,10 +362,10 @@ func buildSlotContext(
 	}
 
 	epoch := slot / beaconCfg.SlotsPerEpoch
-	if epoch <= beaconCfg.MinSeedLookahead {
-		return SlotContext{}, fmt.Errorf("cannot compute proposer dependent root for epoch %d", epoch)
+	dependentSlot := uint64(0)
+	if epoch > beaconCfg.MinSeedLookahead {
+		dependentSlot = (epoch-beaconCfg.MinSeedLookahead)*beaconCfg.SlotsPerEpoch - 1
 	}
-	dependentSlot := (epoch-beaconCfg.MinSeedLookahead)*beaconCfg.SlotsPerEpoch - 1
 	dependentRoot := fc.Ancestor(parent.BlockRoot, dependentSlot).Root
 	if dependentRoot == (common.Hash{}) {
 		return SlotContext{}, fmt.Errorf("proposer dependent root unavailable for parent %s", parent.BlockRoot)

@@ -195,18 +195,8 @@ func (s *CaplinBidSubmitter) writeColumnSidecar(ctx context.Context, root common
 		return ctx.Err()
 	case s.columnWrites <- struct{}{}:
 	}
-	result := make(chan error, 1)
-	go func() {
-		err := s.columnStorage.WriteColumnSidecars(ctx, root, index, column)
-		<-s.columnWrites
-		result <- err
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-result:
-		return err
-	}
+	defer func() { <-s.columnWrites }()
+	return s.columnStorage.WriteColumnSidecars(ctx, root, index, column)
 }
 
 func (s *CaplinBidSubmitter) discardPayloadBroadcast(root common.Hash) {

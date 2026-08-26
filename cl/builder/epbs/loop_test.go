@@ -26,6 +26,9 @@ import (
 type mockPayloadAssembler struct {
 	mu                   sync.Mutex
 	nextId               uint64
+	assembleCalls        int
+	reusePayloadID       bool
+	getPayloadCalled     chan struct{}
 	results              map[uint64]*eladapter.AssembledPayload
 	busy                 bool
 	err                  error
@@ -47,7 +50,10 @@ func (m *mockPayloadAssembler) AssemblePayload(_ context.Context, params *builde
 	if m.busy {
 		return 0, fmt.Errorf("eladapter: execution module busy")
 	}
-	m.nextId++
+	m.assembleCalls++
+	if !m.reusePayloadID || m.nextId == 0 {
+		m.nextId++
+	}
 	if result := m.results[m.nextId]; result != nil && result.Eth1Block != nil {
 		result.Eth1Block.ParentHash = params.ParentHash
 		result.Eth1Block.Time = params.Timestamp
@@ -66,6 +72,12 @@ func (m *mockPayloadAssembler) AssemblePayload(_ context.Context, params *builde
 func (m *mockPayloadAssembler) GetPayload(_ context.Context, payloadID uint64) (*eladapter.AssembledPayload, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.getPayloadCalled != nil {
+		select {
+		case m.getPayloadCalled <- struct{}{}:
+		default:
+		}
+	}
 	result, ok := m.results[payloadID]
 	if !ok {
 		return nil, nil
@@ -264,6 +276,22 @@ func TestBuilderLoop_FastPath(t *testing.T) {
 	require.NotEqual(t, common.Bytes96{}, bid.Signature)
 }
 
+func TestBuilderLoopDuplicateHeadKeepsReusedPayload(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	exec.reusePayloadID = true
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	sc := testSlotContext()
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Len(t, submitter.submittedBids, 1)
+	require.Equal(t, 2, exec.assembleCalls)
+}
+
 func TestBuilderLoopAcceptsClampedProposerGasTarget(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	sc := testSlotContext()
@@ -369,6 +397,21 @@ func TestBuilderLoopUsesTargetParentBuilderBalance(t *testing.T) {
 	require.Empty(t, submitter.submittedBids)
 }
 
+func TestBuilderLoopSubmitsZeroValueBidWhenConfigured(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	loop.strategy = &FixedMarginStrategy{Margin: 0}
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Len(t, submitter.submittedBids, 1)
+	require.Zero(t, submitter.submittedBids[0].Message.Value)
+}
+
 func TestBuilderLoopRebuildTimeoutDiscardsBuild(t *testing.T) {
 	loop, _, _, _ := setupBuilderLoop(t)
 	loop.beaconCfg.SecondsPerSlot = 0
@@ -379,6 +422,29 @@ func TestBuilderLoopRebuildTimeoutDiscardsBuild(t *testing.T) {
 
 	require.NoError(t, loop.buildAndBid(t.Context(), sc, prefs))
 	require.Empty(t, loop.specBuild.builds)
+}
+
+func TestBuilderLoopRebuildDoesNotStopBeforeBuildWindow(t *testing.T) {
+	loop, exec, _, _ := setupBuilderLoop(t)
+	loop.beaconCfg.SecondsPerSlot = 4
+	exec.getPayloadCalled = make(chan struct{}, 1)
+	sc := testSlotContext()
+	prefs := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot,
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- loop.buildAndBid(ctx, sc, prefs)
+	}()
+
+	select {
+	case <-exec.getPayloadCalled:
+		t.Fatal("rebuild was stopped before its build window elapsed")
+	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
 }
 
 func TestBuilderLoop_SkipPath_NoPreferences(t *testing.T) {

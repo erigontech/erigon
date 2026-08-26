@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
@@ -55,6 +56,46 @@ func TestDecodeStoredPendingPayloadRejectsBlobCommitmentMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "KZG")
 }
 
+func TestDecodeStoredPendingPayloadRejectsExecutionRequestsRootMismatch(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	key := pendingPayloadKey{
+		slot: 100, parentBlockHash: common.HexToHash("0xdead"),
+		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: common.HexToHash("0xb10c"),
+	}
+	pending := &pendingPayload{
+		slot: 100, builderIndex: 42, bidValue: 1, parent: testParentInfo(),
+		assembled: makeTestPayload(t, big.NewInt(1)),
+		execReqs:  cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion),
+	}
+	record, err := encodeStoredPendingPayload(key, pending, loop.manager.Pubkey())
+	require.NoError(t, err)
+	altered := cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion)
+	altered.BuilderDeposits.Append(&solid.BuilderDepositRequest{Amount: 123})
+	record.ExecutionRequests, err = altered.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	_, _, err = decodeStoredPendingPayload(record, loop.beaconCfg)
+	require.ErrorContains(t, err, "execution requests root")
+}
+
+func TestDecodeStoredPendingPayloadAcceptsZeroValueBid(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	key := pendingPayloadKey{
+		slot: 100, parentBlockHash: common.HexToHash("0xdead"),
+		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: common.HexToHash("0xb10c"),
+	}
+	pending := &pendingPayload{
+		slot: 100, builderIndex: 42, parent: testParentInfo(), assembled: makeTestPayload(t, big.NewInt(1)),
+		execReqs: cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion),
+	}
+	record, err := encodeStoredPendingPayload(key, pending, loop.manager.Pubkey())
+	require.NoError(t, err)
+
+	_, restored, err := decodeStoredPendingPayload(record, loop.beaconCfg)
+	require.NoError(t, err)
+	require.Zero(t, restored.bidValue)
+}
+
 func TestFilePendingPayloadStoreSyncsDirectoryAfterSaveAndDelete(t *testing.T) {
 	loop, _, _, _ := setupBuilderLoop(t)
 	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
@@ -81,12 +122,13 @@ func TestFilePendingPayloadStoreSyncsDirectoryAfterSaveAndDelete(t *testing.T) {
 	require.True(t, deleteSynced)
 }
 func (failingPendingPayloadStore) Delete(context.Context, pendingPayloadKey) error { return nil }
-func (failingPendingPayloadStore) Load(context.Context) ([]storedPendingPayload, error) {
+func (failingPendingPayloadStore) Load(context.Context, uint64) ([]storedPendingPayload, error) {
 	return nil, nil
 }
 
 type rollbackFailingPendingPayloadStore struct {
-	saves int
+	saves   int
+	deletes int
 }
 
 func (s *rollbackFailingPendingPayloadStore) Save(context.Context, pendingPayloadKey, *pendingPayload, common.Bytes48) error {
@@ -94,11 +136,12 @@ func (s *rollbackFailingPendingPayloadStore) Save(context.Context, pendingPayloa
 	return nil
 }
 
-func (*rollbackFailingPendingPayloadStore) Delete(context.Context, pendingPayloadKey) error {
+func (s *rollbackFailingPendingPayloadStore) Delete(context.Context, pendingPayloadKey) error {
+	s.deletes++
 	return errors.New("rollback unavailable")
 }
 
-func (*rollbackFailingPendingPayloadStore) Load(context.Context) ([]storedPendingPayload, error) {
+func (*rollbackFailingPendingPayloadStore) Load(context.Context, uint64) ([]storedPendingPayload, error) {
 	return nil, nil
 }
 
@@ -136,17 +179,20 @@ func TestBuilderLoopRetainsOwnershipWhenDurableRollbackFails(t *testing.T) {
 	require.NotZero(t, loop.manager.reservedBidValue)
 }
 
-func TestBuilderLoopKeepsReservationWhenDurablePruneFails(t *testing.T) {
+func TestBuilderLoopDoesNotRetryExpiredPendingDeletionForever(t *testing.T) {
 	loop, _, _, _ := setupBuilderLoop(t)
-	loop.pendingStore = &rollbackFailingPendingPayloadStore{}
+	store := &rollbackFailingPendingPayloadStore{}
+	loop.pendingStore = store
 	const bidValue = uint64(10)
 	require.True(t, loop.manager.ReserveBidWithStatus(BalanceStatus{Active: true, Balance: bidValue}, bidValue))
 	key := pendingPayloadKey{slot: 1, blockHash: common.HexToHash("0xb10c")}
 	loop.pendingPayloads[key] = &pendingPayload{slot: 1, bidValue: bidValue}
 
 	loop.pruneBeforeSlot(2)
-	require.Contains(t, loop.pendingPayloads, key)
-	require.Equal(t, bidValue, loop.manager.reservedBidValue)
+	loop.pruneBeforeSlot(3)
+	require.Equal(t, 1, store.deletes)
+	require.NotContains(t, loop.pendingPayloads, key)
+	require.Zero(t, loop.manager.reservedBidValue)
 }
 
 func TestBuilderLoopRestoresPublishedPendingPayloadAfterRestart(t *testing.T) {
@@ -182,7 +228,40 @@ func TestBuilderLoopRestoresPublishedPendingPayloadAfterRestart(t *testing.T) {
 	scheduler.Wait()
 	require.Len(t, submitter.broadcasts, 1)
 	restarted.pruneBeforeSlot(sc.Slot + 1)
-	records, err := store.Load(t.Context())
+	records, err := store.Load(t.Context(), 0)
 	require.NoError(t, err)
 	require.Empty(t, records)
+}
+
+func TestBuilderLoopRestoreIgnoresExpiredFilesBeforeCapacityCheck(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
+	store.syncDir = func(string) error { return nil }
+	save := func(slot uint64) pendingPayloadKey {
+		blockHash := common.BigToHash(new(big.Int).SetUint64(slot + 1))
+		key := pendingPayloadKey{
+			slot: slot, parentBlockHash: common.HexToHash("0xdead"),
+			parentBlockRoot: common.HexToHash("0xbeef"), blockHash: blockHash,
+		}
+		payload := makeTestPayload(t, big.NewInt(1))
+		payload.Eth1Block.SlotNumber = slot
+		payload.Eth1Block.BlockHash = blockHash
+		pending := &pendingPayload{
+			slot: slot, builderIndex: 42, bidValue: 1, parent: testParentInfo(), assembled: payload,
+			execReqs: cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion),
+		}
+		require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
+		return key
+	}
+	for slot := uint64(1); slot <= maxPendingPayloadFiles+1; slot++ {
+		save(slot)
+	}
+	const currentSlot = uint64(1_000)
+	currentKey := save(currentSlot)
+
+	restarted, _, _, _ := setupBuilderLoop(t)
+	restarted.pendingStore = store
+	require.NoError(t, restarted.restorePendingPayloads(t.Context(), currentSlot))
+	require.Contains(t, restarted.pendingPayloads, currentKey)
+	require.Len(t, restarted.pendingPayloads, 1)
 }
