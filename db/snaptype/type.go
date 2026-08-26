@@ -308,6 +308,17 @@ func (s SnapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
+// FileInfoV4 mirrors FileInfo but emits the 7-digit raw-block v4
+// naming (%07d-%07d). Used by block-side unwind emit and retire tail
+// emission under the two-v4-then-merge lifecycle. The returned
+// FileInfo's From/To are the raw block coordinates supplied by the
+// caller — parsed back through ParseFileName's dual-mode literal
+// branch.
+func (s SnapType) FileInfoV4(dir string, from uint64, to uint64) FileInfo {
+	f, _, _ := ParseFileName(dir, SegmentFileNameV4(s.versions.Current, from, to, s.enum))
+	return f
+}
+
 func (s SnapType) FileInfoByMask(dir string, from uint64, to uint64) FileInfo {
 	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileMask(from, to)))
 	if err != nil {

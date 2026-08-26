@@ -58,6 +58,21 @@ func IdxFileMask(from, to uint64, fType string) string {
 	return FileMask(from, to, fType) + ".idx"
 }
 
+// FileNameV4 builds a v4 block-snapshot file name using literal
+// %07d-%07d raw block coordinates (no division by 1_000). The
+// 7-digit padding guarantees both endpoints are literally > 6 chars,
+// forcing ParseFileName's dual-mode branch into raw-block
+// interpretation regardless of magnitude.
+func FileNameV4(version Version, from, to uint64, fileType string) string {
+	return fmt.Sprintf("%s-%07d-%07d-%s", version.String(), from, to, fileType)
+}
+func SegmentFileNameV4(version Version, from, to uint64, t Enum) string {
+	return FileNameV4(version, from, to, t.String()) + ".seg"
+}
+func IdxFileNameV4(version Version, from, to uint64, fType string) string {
+	return FileNameV4(version, from, to, fType) + ".idx"
+}
+
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	for i := range in {
 		f := &in[i]
@@ -447,6 +462,18 @@ func (f FileInfo) Name() string { return f.name }
 func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
 func (f FileInfo) Base() string { return path.Base(f.Path) }
 func (f FileInfo) Len() uint64  { return f.To - f.From }
+
+// IsRawBlock reports whether this FileInfo sits on a raw-block
+// boundary (either endpoint non-aligned to Erigon2MinSegmentSize).
+// Sentinel for the block-side v4 file classes emitted under the
+// two-v4-then-merge lifecycle: v4 #1 has aligned From and mid-chunk
+// To (unwind emission at target+1); v4 #2 has mid-chunk From and
+// aligned To (retire tail after forward exec catches up). Both must
+// classify as v4 so the merge scheduler and read-side treat them
+// uniformly.
+func (f FileInfo) IsRawBlock() bool {
+	return f.From%Erigon2MinSegmentSize != 0 || f.To%Erigon2MinSegmentSize != 0
+}
 
 func (f FileInfo) GetRange() (from, to uint64) { return f.From, f.To }
 func (f FileInfo) GetType() Type               { return f.Type }

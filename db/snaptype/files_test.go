@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/version"
 )
 
 type vanishedDirEntry struct{ name string }
@@ -188,4 +190,61 @@ func TestParseFileName_StateFilesUnchanged(t *testing.T) {
 	require.Equal(t, "accounts", info.TypeString)
 	require.Equal(t, uint64(2519), info.From, "state-file from is the literal step number")
 	require.Equal(t, uint64(2520), info.To, "state-file to is the literal step number")
+}
+
+// TestFileNameV4_FormatIs7Digit pins the block-side v4 naming: v4
+// files always use %07d-%07d, guaranteeing both endpoints are literal
+// block coordinates regardless of magnitude. That forces
+// ParseFileName's dual-mode branch into raw-block interpretation
+// (>6-char literal) even for legacy-scale (< 1M) block numbers.
+func TestFileNameV4_FormatIs7Digit(t *testing.T) {
+	v := version.V1_1
+	name := FileNameV4(v, 3_491_000, 3_491_691, "headers")
+	require.Equal(t, "v1.1-3491000-3491691-headers", name,
+		"v4 name uses %%07d-%%07d with raw block numbers")
+
+	// Small (devnet-scale) values also get padded to 7 chars so they
+	// still fall in the literal branch.
+	name = FileNameV4(v, 500, 691, "headers")
+	require.Equal(t, "v1.1-0000500-0000691-headers", name,
+		"v4 name always pads to 7 chars regardless of magnitude")
+}
+
+// TestParseFileName_V4Literal_RoundTrip pins the round-trip: a v4-
+// named file emitted by FileNameV4 must parse back to its raw block
+// coordinates via ParseFileName. Guards against future dual-mode
+// tweaks that would silently regress the v4 read path.
+func TestParseFileName_V4Literal_RoundTrip(t *testing.T) {
+	cases := []struct {
+		from, to uint64
+	}{
+		{3_491_000, 3_491_691}, // v4 #1 (unwind section)
+		{3_491_691, 3_492_000}, // v4 #2 (retire tail)
+		{500, 691},             // devnet-scale
+		{0, 1},                 // tightest possible non-empty
+	}
+	for _, tc := range cases {
+		name := FileNameV4(version.V1_1, tc.from, tc.to, "headers") + ".seg"
+		info, _, ok := ParseFileName("snapshots", name)
+		require.True(t, ok, "v4 name %q must parse", name)
+		require.Equal(t, tc.from, info.From, "%q: from round-trips", name)
+		require.Equal(t, tc.to, info.To, "%q: to round-trips", name)
+		require.Equal(t, "headers", info.TypeString)
+	}
+}
+
+// TestFileInfo_IsRawBlock_TwoEdges pins the block-side sentinel
+// predicate: a FileInfo whose From or To is not 1000-aligned is a v4
+// file. Block v4 pair members both trip the predicate — v4 #1 has an
+// aligned From but non-aligned To; v4 #2 has non-aligned From but
+// aligned To. Standard 1000-aligned files must NOT trip it.
+func TestFileInfo_IsRawBlock_TwoEdges(t *testing.T) {
+	require.False(t, FileInfo{From: 3_491_000, To: 3_492_000}.IsRawBlock(),
+		"aligned [3491000, 3492000) is standard, not v4")
+	require.True(t, FileInfo{From: 3_491_000, To: 3_491_691}.IsRawBlock(),
+		"v4 #1 (non-aligned To) must trip predicate")
+	require.True(t, FileInfo{From: 3_491_691, To: 3_492_000}.IsRawBlock(),
+		"v4 #2 (non-aligned From) must trip predicate")
+	require.True(t, FileInfo{From: 3_491_100, To: 3_491_691}.IsRawBlock(),
+		"both edges non-aligned still v4")
 }
