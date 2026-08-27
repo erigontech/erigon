@@ -55,7 +55,8 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 	// Pre-compute PTC per unique blockRoot to avoid redundant state lookups
 	// for every attesting validator (PtcSize can be 512).
 	type cachedPTC struct {
-		ptc []uint64
+		ptc       []uint64
+		positions map[uint64][]int
 	}
 	ptcCache := make(map[common.Hash]*cachedPTC)
 
@@ -80,7 +81,19 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			if err != nil {
 				continue
 			}
-			cached = &cachedPTC{ptc: ptc}
+			ptcSize := f.beaconCfg.PtcSize
+			if ptcSize == 0 {
+				ptcSize = clparams.MaxPtcSize
+			}
+			ptcSize = min(ptcSize, clparams.MaxPtcSize)
+			if uint64(len(ptc)) > ptcSize {
+				ptc = ptc[:int(ptcSize)]
+			}
+			positions := make(map[uint64][]int, len(ptc))
+			for position, validatorIndex := range ptc {
+				positions[validatorIndex] = append(positions[validatorIndex], position)
+			}
+			cached = &cachedPTC{ptc: ptc, positions: positions}
 			ptcCache[blockRoot] = cached
 		}
 
@@ -88,18 +101,25 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			continue
 		}
 
-		for j := range cached.ptc {
-			if payloadAttestation.AggregationBits.GetBitAt(j) {
-				f.applyPayloadAttestationVote(j, data, blockRoot)
+		selectedValidators := make(map[uint64]struct{}, len(cached.ptc))
+		for position, validatorIndex := range cached.ptc {
+			if payloadAttestation.AggregationBits.GetBitAt(position) {
+				selectedValidators[validatorIndex] = struct{}{}
 			}
 		}
+		if len(selectedValidators) == 0 {
+			continue
+		}
+		ptcIndices := make([]int, 0, len(cached.ptc))
+		for validatorIndex := range selectedValidators {
+			ptcIndices = append(ptcIndices, cached.positions[validatorIndex]...)
+		}
+		f.applyPayloadAttestationVotes(ptcIndices, data, blockRoot)
 	}
 }
 
-// applyPayloadAttestationVote updates PTC vote tracking for a single PTC position.
-// ptcIndex is the position in the PTC (the aggregation bit index).
-func (f *ForkChoiceStore) applyPayloadAttestationVote(
-	ptcIndex int,
+func (f *ForkChoiceStore) applyPayloadAttestationVotes(
+	ptcIndices []int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
 ) {
@@ -115,8 +135,10 @@ func (f *ForkChoiceStore) applyPayloadAttestationVote(
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
-	timelinessVotes[ptcIndex] = boolToVote(data.PayloadPresent)
-	dataAvailabilityVotes[ptcIndex] = boolToVote(data.BlobDataAvailable)
+	for _, ptcIndex := range ptcIndices {
+		timelinessVotes[ptcIndex] = boolToVote(data.PayloadPresent)
+		dataAvailabilityVotes[ptcIndex] = boolToVote(data.BlobDataAvailable)
+	}
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 
