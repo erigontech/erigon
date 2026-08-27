@@ -191,11 +191,10 @@ type CodeCache struct {
 // putContentLocked is the shared insert path for the content-addressed code layers
 // (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a freelru.ShardedLRU
 // of per-key-immutable entries carrying a (txNum, epoch) stamp: a live entry is
-// kept (its bytes/size are invariant for a given key), a stale one is displaced
-// by Put (its OnEvict decrements counter), and once the entry-count cap is
-// reached freelru evicts the coldest entry (whose OnEvict decrements counter)
-// rather than freezing. counter tracks resident
-// bytes as a stat; the hard bound is the LRU's entry cap. stamp/valCost are
+// kept (its bytes/size are invariant for a given key), and whatever Put displaces
+// — a stale entry, or the coldest one once the cap is reached — decrements
+// counter through OnEvict. counter tracks resident bytes as a stat; the hard
+// bound is the LRU's entry cap. stamp/valCost are
 // non-capturing so passing them allocates nothing on the put path. The caller
 // holds the key's put stripe.
 func putContentLocked[T any](
@@ -214,8 +213,6 @@ func putContentLocked[T any](
 		}
 	}
 	counter.Add(keyCost + valCost(newEntry))
-	// Put covers both a fresh key and a stale one: whatever it displaces is
-	// evicted, and its OnEvict takes counter back down.
 	lru.Put(h, newEntry)
 }
 

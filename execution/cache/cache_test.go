@@ -1830,10 +1830,9 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 	check("clear")
 }
 
-// TestGrowLRU_PutOfPresentKeyKeepsCount pins that storing a key the generation
-// already holds does not raise the entry count. freelru replaces such a key in
-// place and fires no OnEvict, so a count raised on the way in never comes back
-// down and the grow gate trips on entries that are not there.
+// Storing a key the generation already holds must not raise the count: freelru
+// replaces it in place and fires no OnEvict, so the rise never comes back down
+// and the grow gate trips on entries that are not there.
 func TestGrowLRU_PutOfPresentKeyKeepsCount(t *testing.T) {
 	t.Run("same key twice", func(t *testing.T) {
 		g := newGrowLRU[int](1*datasize.MB, 8, nil)
