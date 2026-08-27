@@ -36,7 +36,9 @@ whole chain. On a [Full](#full-node), [Minimal](#minimal-node) or [Historical Bl
 mode's state-history window (262,144 blocks for full and blocks, 100,000 for minimal). To keep the cache in full
 regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
 `--prune.receipts.distance=N` keeps it for the latest `N` blocks instead. Either form requires
-`--prune.include-receipts`.
+`--prune.include-receipts`. Note that this retains the receipt *cache* only — it does not keep the
+log address and topic indexes a filtered `eth_getLogs` needs. See
+[Historical Blocks Node](#blocks-node).
 :::
 
 :::note[Breaking change in v3.5]
@@ -78,8 +80,18 @@ The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and
 back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
-paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
-(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts** by block
+(`eth_getBlockReceipts` back to genesis), add
 `--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
 follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
 within that same window.
+
+`keep-all` does **not** extend filtered `eth_getLogs` back to genesis. It retains the receipt-cache domain only; the
+log address and topic indexes that a filtered query needs are standalone inverted indexes, retired against the general
+state-history cutoff (`AggregatorRoTx.Retire` applies `RetireCutoffs.Default` to them, and only `RCacheDomain` carries
+the `keep-all` override). An address- or topic-filtered `eth_getLogs` can therefore miss matches older than 262,144
+blocks even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
+read path: with neither `address` nor `topics` set, `applyFiltersV3` consults no bitmap and falls back to a plain
+`stream.Range` over the retained cache, so an unfiltered range query is unaffected. For those older ranges, either query
+by block with `eth_getBlockReceipts` and filter client-side, or use an [Archive node](#archive-node), whose unbounded
+state-history window keeps the log indexes too.
