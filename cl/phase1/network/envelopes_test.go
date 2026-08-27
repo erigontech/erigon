@@ -199,12 +199,15 @@ func TestRequestEnvelopesFranticallyReservesTimeForRangeFallback(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	sentinel := &slowEnvelopeSentinel{byRange: make(chan struct{})}
-	rpcClient, _ := newContextBlockingBeaconRPC(ctx, sentinel)
-	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}}
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, block)
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, block)
 		done <- err
 	}()
 
@@ -235,12 +238,15 @@ func TestRequestEnvelopesFranticallyBoundsRangeFallbackAttempt(t *testing.T) {
 		byRange:     make(chan struct{}),
 		laterByRoot: make(chan struct{}),
 	}
-	rpcClient, _ := newContextBlockingBeaconRPC(ctx, sentinel)
-	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}}
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}}, block)
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{root}, block)
 		done <- err
 	}()
 
@@ -320,6 +326,51 @@ func TestRequestEnvelopesByRootRetainsValidatedPrefixOnError(t *testing.T) {
 	require.Error(t, err)
 	require.Len(t, envelopes, 1)
 	require.Equal(t, requestedRoot, envelopes[0].Message.BeaconBlockRoot)
+}
+
+func TestEnvelopeRequestSlotRangeUsesRequestedRootsIndependentOfOrder(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	low := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	low.Block.Slot = 37
+	high := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	high.Block.Slot = 99
+	unsolicited := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	unsolicited.Block.Slot = 100
+	lowRoot, err := low.Block.HashSSZ()
+	require.NoError(t, err)
+	highRoot, err := high.Block.HashSSZ()
+	require.NoError(t, err)
+
+	requested := map[common.Hash]struct{}{lowRoot: {}, highRoot: {}}
+	for _, blocks := range [][]*cltypes.SignedBeaconBlock{{low, high}, {high, low}} {
+		start, count, ok := envelopeRequestSlotRange(blocks, requested)
+		require.True(t, ok)
+		require.Equal(t, uint64(37), start)
+		require.Equal(t, uint64(63), count)
+	}
+
+	start, count, ok := envelopeRequestSlotRange([]*cltypes.SignedBeaconBlock{unsolicited, low}, map[common.Hash]struct{}{lowRoot: {}})
+	require.True(t, ok)
+	require.Equal(t, uint64(37), start)
+	require.Equal(t, uint64(1), count)
+}
+
+func TestEnvelopeRequestSlotRangeRejectsOverflow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	low := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	low.Block.Slot = 0
+	high := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	high.Block.Slot = ^uint64(0)
+	lowRoot, err := low.Block.HashSSZ()
+	require.NoError(t, err)
+	highRoot, err := high.Block.HashSSZ()
+	require.NoError(t, err)
+
+	_, _, ok := envelopeRequestSlotRange(
+		[]*cltypes.SignedBeaconBlock{high, low},
+		map[common.Hash]struct{}{lowRoot: {}, highRoot: {}},
+	)
+	require.False(t, ok)
 }
 
 func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Hash, *cltypes.SignedBeaconBlock) {

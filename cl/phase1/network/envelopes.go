@@ -200,12 +200,10 @@ func requestEnvelopesByRangeWithValidator(
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	validate envelopeCandidateValidator,
 ) {
-	if len(blocks) == 0 {
+	startSlot, count, ok := envelopeRequestSlotRange(blocks, requestedRoots)
+	if !ok {
 		return
 	}
-	startSlot := blocks[0].Block.Slot
-	endSlot := blocks[len(blocks)-1].Block.Slot
-	count := endSlot - startSlot + 1
 	log.Debug("envelope fetch: falling back to by-range", "startSlot", startSlot, "count", count)
 
 	maxCount := r.MaxRequestPayloads()
@@ -213,7 +211,10 @@ func requestEnvelopesByRangeWithValidator(
 		log.Debug("envelope fetch: by-range disabled, MAX_REQUEST_PAYLOADS is zero")
 		return
 	}
-	for offset := uint64(0); offset < count; offset += maxCount {
+	for offset := uint64(0); offset < count; {
+		if ctx.Err() != nil || len(received) == len(requestedRoots) {
+			return
+		}
 		chunkCount := min(maxCount, count-offset)
 		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot+offset, chunkCount)
 		acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate)
@@ -221,7 +222,37 @@ func requestEnvelopesByRangeWithValidator(
 			log.Debug("envelope fetch: by-range error", "err", err)
 			return
 		}
+		offset += chunkCount
 	}
+}
+
+func envelopeRequestSlotRange(blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}) (uint64, uint64, bool) {
+	var minSlot, maxSlot uint64
+	found := false
+	for _, block := range blocks {
+		if block == nil || block.Block == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		if _, ok := requestedRoots[root]; !ok {
+			continue
+		}
+		slot := block.Block.Slot
+		if !found || slot < minSlot {
+			minSlot = slot
+		}
+		if !found || slot > maxSlot {
+			maxSlot = slot
+		}
+		found = true
+	}
+	if !found || maxSlot-minSlot == ^uint64(0) {
+		return 0, 0, false
+	}
+	return minSlot, maxSlot - minSlot + 1, true
 }
 
 func newEnvelopeCommitmentValidator(beaconCfg *clparams.BeaconChainConfig, blocks []*cltypes.SignedBeaconBlock) envelopeCandidateValidator {
