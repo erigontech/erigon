@@ -64,7 +64,8 @@ const MaxTxTTL = 60 * time.Second
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 1, Patch: 0}
+// 8.0.0 - LargeValues domain layout: bareKey -> invStep+seqID (DupSort) + seqID -> value (plain)
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 8, Minor: 0, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.

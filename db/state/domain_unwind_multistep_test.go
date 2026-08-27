@@ -130,7 +130,7 @@ func TestDomain_MultiStepUnwindMatchesGroundTruth(t *testing.T) {
 			merged = changeset.MergeDiffSets(merged, blockDiffs[b])
 		}
 	}
-	require.NoError(t, udt.unwind(ctx, tx, target/stepSize, target, merged))
+	require.NoError(t, udt.unwind(ctx, tx, target/stepSize, target, uint64(udt.FirstStepNotInFiles()), merged))
 	udt.Close()
 
 	rdt := d.beginForTests()

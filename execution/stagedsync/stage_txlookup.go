@@ -278,7 +278,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	// txFrom stays 0: this table is keyed by txn hash, so it is not sorted by txNum.
 	// The scan cannot seek to a floor nor stop at a ceiling — it walks every key and
 	// tests it — so a floor above 0 skips rows without skipping any work.
-	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", 0, txTo, 1,
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", 0, txTo, 0, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
