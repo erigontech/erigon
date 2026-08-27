@@ -141,6 +141,9 @@ func (f *blockingBlobRemoveFs) Remove(path string) error {
 }
 
 func TestBlobStoreWriterWaitingForSlotDoesNotBlockPrune(t *testing.T) {
+	previousProcs := runtime.GOMAXPROCS(1)
+	defer runtime.GOMAXPROCS(previousProcs)
+
 	db := setupTestDB(t)
 	defer db.Close()
 	fs := &blockingBlobRemoveFs{
@@ -172,13 +175,7 @@ func TestBlobStoreWriterWaitingForSlotDoesNotBlockPrune(t *testing.T) {
 		writerDone <- storage.WriteBlobSidecars(writerCtx, lateRoot, []*cltypes.BlobSidecar{testSidecar(slot, 0, 2)})
 	}()
 	<-writerStarted
-	for range 10_000 {
-		if !bs.pruneMutex.TryLock() {
-			break
-		}
-		bs.pruneMutex.Unlock()
-		runtime.Gosched()
-	}
+	runtime.Gosched()
 	select {
 	case err := <-writerDone:
 		t.Fatalf("writer completed instead of waiting for the remove-held slot lock: %v", err)
