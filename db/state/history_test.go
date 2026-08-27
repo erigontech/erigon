@@ -2673,6 +2673,66 @@ func TestHistoryStreamsKeepInvariant2(t *testing.T) {
 	})
 }
 
+// BenchmarkHistorySeekInFiles measures a point lookup against merged (page-compressed)
+// history files. The `warm` arm reuses one HistoryRoTx, so ht.blockCompressionBuf is
+// reused across seeks; `coldTx` opens a fresh HistoryRoTx per seek, which is what an
+// rpcdaemon request does and what leaves the page-decode buffer cold every time.
+func BenchmarkHistorySeekInFiles(b *testing.B) {
+	logger := log.New()
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	ht := h.beginForTests()
+	defer ht.Close()
+
+	requirePagedHistoryFiles(b, ht)
+
+	keys := make([][]byte, 0, 31)
+	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, keyNum)
+		k[0] = 1
+		keys = append(keys, k)
+	}
+
+	seek := func(b *testing.B, ht *HistoryRoTx, i int) {
+		_, _, err := ht.historySeekInFiles(keys[i%len(keys)], uint64(i)%txs+1)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("warm", func(b *testing.B) {
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			seek(b, ht, i)
+			i++
+		}
+	})
+
+	b.Run("coldBuf", func(b *testing.B) {
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			ht.blockCompressionBuf = nil
+			seek(b, ht, i)
+			i++
+		}
+	})
+
+	b.Run("coldTx", func(b *testing.B) {
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			fresh := h.beginForTests()
+			seek(b, fresh, i)
+			fresh.Close()
+			i++
+		}
+	})
+}
+
 // BenchmarkHistoryRangePaged walks merged (page-compressed) history files, which is
 // where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
 // its files un-merged, so it never reaches that path.

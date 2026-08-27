@@ -244,10 +244,10 @@ func deployDeFiContracts(b testing.TB, statedb *state.IntraBlockState) {
 	deployContract(b, statedb, addrRouter, routerCode)
 }
 
-// BenchmarkDeepStacks recurses into itself until gas runs out, with a nearly
-// full stack in every frame. Ported from go-ethereum's BenchmarkLargeDeepStacks
-// and BenchmarkShortDeepStacks. It measures CallContext acquisition at depth,
-// where every context carries a 32 KB Stack.
+// BenchmarkDeepStacks recurses into itself until gas runs out, measuring
+// CallContext acquisition at depth, where every context carries a 32 KB Stack.
+// CALL consumes seven operands, so 3 or 507 of the pushed items stay live while
+// the child frame runs.
 func BenchmarkDeepStacks(b *testing.B) {
 	for _, pushes := range []int{8, 512} {
 		b.Run(fmt.Sprintf("pushes-%d", pushes), func(b *testing.B) {
@@ -277,9 +277,8 @@ func BenchmarkDeepStacks(b *testing.B) {
 
 // BenchmarkDeepCallsWithMemory runs a STATICCALL chain where every frame
 // expands memory before calling the next, so all frames hold memory at once.
-// The two shallow cases match mainnet call trees, where a DeFi router or
-// aggregator nests under twenty frames and each ABI-encodes a few KB; the
-// deep case is a stress shape that mainnet gas costs do not reach.
+// The shallow cases are shaped after mainnet router and aggregator call trees;
+// the deep one is a stress shape, not one observed on mainnet.
 func BenchmarkDeepCallsWithMemory(b *testing.B) {
 	for _, tc := range []struct {
 		name  string
@@ -371,12 +370,9 @@ func memChainCode(next *common.Address, words int) []byte {
 }
 
 // requireChainReachesLeaf proves the memChainCode chain rooted at entry reaches
-// leaf through wantDepth nested frames. Every intermediate frame drops its
-// STATICCALL's success value and stops regardless, so a chain that breaks or
-// short-circuits still completes the top-level call and burns gas. A call into
-// an undeployed address enters a frame but exits empty, so the leaf's own
-// 32-byte return distinguishes it; STATICCALL forbids state writes, which rules
-// out a storage marker.
+// leaf through wantDepth nested frames. Intermediate frames drop their
+// STATICCALL result, so a broken chain still completes the top-level call; only
+// the leaf's own 32-byte return tells it apart from an empty frame.
 func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry, leaf accounts.Address, wantDepth int, gasLimit uint64) {
 	b.Helper()
 	leafDepth, leafOutputLen := -1, -1
@@ -406,43 +402,5 @@ func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry
 	}
 	if leafDepth != wantDepth {
 		b.Fatalf("call chain reached the leaf at %s at depth %d, want %d", leaf, leafDepth, wantDepth)
-	}
-}
-
-// BenchmarkCallReturnData measures calls whose callee returns data. The other
-// call benchmarks use leaves that STOP, so they never exercise the RETURN copy
-// or what the caller does with the returned bytes.
-func BenchmarkCallReturnData(b *testing.B) {
-	const callsPerOp = 200
-	rawLeaf := common.HexToAddress("0x7001")
-	leaf := accounts.InternAddress(rawLeaf)
-
-	for _, retSize := range []int{32, 1024} {
-		for _, op := range []vm.OpCode{vm.CALL, vm.STATICCALL} {
-			b.Run(fmt.Sprintf("%s/ret-%d", op, retSize), func(b *testing.B) {
-				b.ReportAllocs()
-				vmenv := benchConfig(b, 1_000_000_000)
-				statedb := vmenv.IntraBlockState()
-
-				leafCode := program.New().Push(42).Push(0).Op(vm.MSTORE).Return(0, retSize).Bytes()
-				deployContract(b, statedb, leaf, leafCode)
-
-				p := program.New()
-				for range callsPerOp {
-					if op == vm.CALL {
-						p.Call(nil, rawLeaf, 0, 0, 0, 0, retSize)
-					} else {
-						p.StaticCall(nil, rawLeaf, 0, 0, 0, retSize)
-					}
-					p.Op(vm.POP)
-				}
-				deployContract(b, statedb, addrContract, p.Op(vm.STOP).Bytes())
-
-				callComplete(b, vmenv, addrContract, nil)
-				for b.Loop() {
-					callComplete(b, vmenv, addrContract, nil)
-				}
-			})
-		}
 	}
 }
