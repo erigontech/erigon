@@ -33,7 +33,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
 	"unsafe"
+
+	"github.com/erigontech/erigon/common/race"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
@@ -2149,5 +2152,95 @@ func TestMergerMatchesReferenceSort(t *testing.T) {
 	for i := range want {
 		require.Equal(t, want[i].key, got[i].key, "entry %d", i)
 		require.Equal(t, want[i].value, got[i].value, "entry %d value (insertion order)", i)
+	}
+}
+
+// TestSortableBufferReadIsAllocFree: reading a sorted buffer walks a merge, so
+// it must not allocate per entry - the whole point of holding the index inside
+// the chunks. Sort's own state is allocated once per buffer, so warm it first.
+func TestSortableBufferReadIsAllocFree(t *testing.T) {
+	if race.Enabled {
+		t.Skip("the race detector allocates inside sync.Pool")
+	}
+	const count = 50_000
+	buf := NewSortableBuffer(256 * datasize.MB)
+	defer buf.Reset()
+
+	key := make([]byte, 32)
+	val := make([]byte, 64)
+	for i := range count {
+		x := uint64(i) * 6364136223846793005 //nolint:gosec
+		binary.BigEndian.PutUint64(key, x)
+		binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+		buf.Put(key, val)
+	}
+	require.Greater(t, len(buf.chunks), 2, "the read must cross chunks")
+	buf.Sort()
+	require.False(t, buf.mrg.concat, "random keys must go through the heap")
+
+	got := 0
+	n := testing.AllocsPerRun(3, func() {
+		buf.Sort()
+		got = 0
+		for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
+			got++
+		}
+	})
+	require.Equal(t, count, got)
+	require.Zero(t, n, "Sort and a full read must not allocate")
+}
+
+// TestMapBufferSortIsIdempotent: sortAndFlush calls Sort and then Write, and
+// Write sorts too. Flattening the map and re-sorting it on the second call
+// would do every flush's work twice.
+func TestMapBufferSortIsIdempotent(t *testing.T) {
+	for _, bt := range allBufferTypes {
+		if bt.name == "sortable" {
+			continue // its Sort only rewinds; the map-backed ones rebuild
+		}
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			for _, k := range []string{"c", "a", "b"} {
+				buf.Put([]byte(k), []byte(k))
+			}
+			buf.Sort()
+
+			// A rebuild would drop this, since it comes from the map.
+			switch b := buf.(type) {
+			case *appendSortableBuffer:
+				b.sortedBuf[0].value = []byte("marker")
+			case *oldestEntrySortableBuffer:
+				b.sortedBuf[0].value = []byte("marker")
+			}
+			buf.Sort()
+
+			_, v, ok := buf.Next()
+			require.True(t, ok)
+			require.Equal(t, "marker", string(v), "Sort re-flattened an unchanged map")
+		})
+	}
+}
+
+// TestMapBufferPreallocClearsState: Prealloc replaces the entry map, so the run
+// flattened out of the old one, the read cursor and Size must go with it.
+func TestMapBufferPreallocClearsState(t *testing.T) {
+	for _, bt := range allBufferTypes {
+		if bt.name == "sortable" {
+			continue // its Prealloc only reserves chunk headers, it drops nothing
+		}
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			for _, k := range []string{"a", "b", "c", "d"} {
+				buf.Put([]byte(k), []byte(k))
+			}
+			buf.Sort()
+			buf.Prealloc(2, 2) // cap(sortedBuf) still covers it, so it survives
+
+			require.Zero(t, buf.Len())
+			require.Empty(t, drainBuffer(buf), "read the wiped map, not the old run")
+			if s, ok := buf.(interface{ Size() int }); ok {
+				require.Zero(t, s.Size())
+			}
+		})
 	}
 }
