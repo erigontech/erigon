@@ -86,6 +86,12 @@ func TestHandshakeSequenceSerializesPerPeerAndReachesTheBan(t *testing.T) {
 
 	resume := make(chan struct{})
 	entered := make(chan struct{})
+	// Unblock the paused handshake unconditionally: an assertion below reaching FailNow
+	// before the explicit close would otherwise leave its goroutine parked forever.
+	var once sync.Once
+	release := func() { once.Do(func() { close(resume) }) }
+	t.Cleanup(release)
+
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		// First event for peer A: holds the slot until released.
@@ -113,7 +119,7 @@ func TestHandshakeSequenceSerializesPerPeerAndReachesTheBan(t *testing.T) {
 	}, noop, noop))
 	require.Equal(t, 1, validatedB)
 
-	close(resume)
+	release()
 	wg.Wait()
 
 	// Two more failures reach the pool's three-strike ban.

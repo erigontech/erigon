@@ -22,10 +22,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
-// handshakeGate admits one status handshake per peer at a time. Connection events are
-// handled on their own goroutine, so without this a burst of events for one peer starts a
-// handshake for each, and the three-strike ban cannot intervene because every attempt
-// completes before any of them raises the failure count to its threshold.
+// handshakeGate admits one status handshake per peer at a time, so a burst of connection
+// events cannot outrun the pool's failure count before it reaches the ban threshold.
 type handshakeGate struct {
 	mu       sync.Mutex
 	inflight map[peer.ID]struct{}
@@ -35,9 +33,8 @@ func newHandshakeGate() *handshakeGate {
 	return &handshakeGate{inflight: make(map[peer.ID]struct{})}
 }
 
-// tryAcquire reports whether the caller may handshake this peer. A false return means
-// another attempt is already running and this event should be dropped, not queued: the
-// peer is about to be judged by the attempt already in flight.
+// tryAcquire reports whether the caller may handshake this peer. A false return means the
+// event should be dropped, not queued: the attempt in flight will judge the peer.
 func (g *handshakeGate) tryAcquire(pid peer.ID) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()

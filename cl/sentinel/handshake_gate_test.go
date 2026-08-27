@@ -25,10 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Every connection event is handled on its own goroutine, so a burst of events for one
-// peer produced a burst of concurrent handshakes. The three-strike ban could not stop it:
-// all of them completed before any pushed the counter to 3. Measured on a gnosis node at
-// 101 attempts against a single peer in two minutes, until libp2p's own dialer refused.
+// A burst of events for one peer must not become a burst of concurrent handshakes: the
+// three-strike ban cannot stop them if they all complete before the counter reaches 3.
 func TestHandshakeGateAdmitsOneAttemptPerPeerAtATime(t *testing.T) {
 	g := newHandshakeGate()
 	pid := peer.ID("peer-a")
