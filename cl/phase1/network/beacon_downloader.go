@@ -48,6 +48,8 @@ type ProcessFn func(
 	newHighestSlotProcessed uint64,
 	err error)
 
+var ErrUnattributableProcess = errors.New("unattributable process error")
+
 type ForwardBeaconDownloader struct {
 	ctx                   context.Context
 	highestSlotProcessed  uint64
@@ -420,7 +422,7 @@ Process:
 		if resp.fromHTTP {
 			f.httpPreferred.Store(false)
 		}
-		if pid != "http-fallback" {
+		if shouldBanProcessPeer(pid, err) {
 			f.rpc.BanPeer(pid)
 		}
 		return
@@ -432,6 +434,10 @@ Process:
 		f.highestSlotProcessed = highestSlotProcessed
 		f.highestSlotUpdateTime = time.Now()
 	}
+}
+
+func shouldBanProcessPeer(pid string, err error) bool {
+	return pid != "http-fallback" && !errors.Is(err, ErrUnattributableProcess)
 }
 
 // anyGloasBlock returns true if any block in the list is GLOAS version or later.
