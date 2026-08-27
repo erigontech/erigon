@@ -119,7 +119,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
 				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
-					return
+					return highestBlockProcessed, nil
 				}
 			}
 			// Dump state periodically for restart checkpoints.
