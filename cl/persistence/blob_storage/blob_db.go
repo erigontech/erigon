@@ -83,12 +83,13 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 				return errors.New("blob sidecars span multiple slots")
 			}
 		}
+		lock := bs.forSlot(slot)
+		lock.Lock()
 		if !bs.startWrite(slot) {
+			lock.Unlock()
 			return nil
 		}
 		defer bs.finishWrite()
-		lock := bs.forSlot(slot)
-		lock.Lock()
 		err := func() error {
 			defer lock.Unlock()
 			for _, blobSidecar := range blobSidecars {

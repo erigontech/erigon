@@ -18,6 +18,7 @@ package blob_storage
 
 import (
 	"context"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -121,6 +122,93 @@ func TestBlobStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
 	_, found, err = bs.ReadBlobSidecars(t.Context(), 500, boundaryRoot)
 	require.NoError(t, err)
 	require.True(t, found, "the floor itself remains writable")
+}
+
+type blockingBlobRemoveFs struct {
+	afero.Fs
+	path    string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *blockingBlobRemoveFs) Remove(path string) error {
+	if path == f.path {
+		f.once.Do(func() { close(f.entered) })
+		<-f.release
+	}
+	return f.Fs.Remove(path)
+}
+
+func TestBlobStoreWriterWaitingForSlotDoesNotBlockPrune(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	fs := &blockingBlobRemoveFs{
+		Fs:      afero.NewMemMapFs(),
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	storage := NewBlobStore(db, fs)
+	bs := storage.(*BlobStore)
+	const slot = 2*subdivisionSlot + 1
+	oldRoot, lateRoot := common.Hash{1}, common.Hash{2}
+	releaseRemove := sync.OnceFunc(func() { close(fs.release) })
+	defer releaseRemove()
+
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), oldRoot, []*cltypes.BlobSidecar{testSidecar(slot, 0, 1)}))
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	_, fs.path = bs.path(slot, oldRoot, 0)
+
+	removeDone := make(chan error, 1)
+	go func() { removeDone <- storage.RemoveBlobSidecars(context.Background(), slot, oldRoot) }()
+	<-fs.entered
+
+	writerCtx, cancelWriter := context.WithCancel(t.Context())
+	t.Cleanup(cancelWriter)
+	writerStarted := make(chan struct{})
+	writerDone := make(chan error, 1)
+	go func() {
+		close(writerStarted)
+		writerDone <- storage.WriteBlobSidecars(writerCtx, lateRoot, []*cltypes.BlobSidecar{testSidecar(slot, 0, 2)})
+	}()
+	<-writerStarted
+	for range 10_000 {
+		if !bs.pruneMutex.TryLock() {
+			break
+		}
+		bs.pruneMutex.Unlock()
+		runtime.Gosched()
+	}
+	select {
+	case err := <-writerDone:
+		t.Fatalf("writer completed instead of waiting for the remove-held slot lock: %v", err)
+	default:
+	}
+	cancelWriter()
+
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- storage.PruneBelow(slot + 1) }()
+	select {
+	case err := <-pruneDone:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("a writer waiting for a slot lock blocked prune-floor advancement")
+	}
+	select {
+	case err := <-removeDone:
+		t.Fatalf("remove completed before its filesystem gate was released: %v", err)
+	default:
+	}
+
+	releaseRemove()
+	require.NoError(t, <-removeDone)
+	require.NoError(t, <-writerDone)
+	count, err := storage.KzgCommitmentsCount(t.Context(), lateRoot)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	exists, err := storage.BlobSidecarExists(t.Context(), slot, lateRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
 }
 
 func TestBlobStoreRejectsMixedSlotBatchAcrossPruneFloor(t *testing.T) {
