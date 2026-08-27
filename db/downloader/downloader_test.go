@@ -707,7 +707,7 @@ func TestGoSeedBoundsConcurrency(t *testing.T) {
 	closeRelease := sync.OnceFunc(func() { close(release) })
 	defer closeRelease()
 	for range n {
-		batch.goSeed(func() {
+		batch.goSeed(func() error {
 			c := current.Add(1)
 			for {
 				p := peak.Load()
@@ -717,6 +717,7 @@ func TestGoSeedBoundsConcurrency(t *testing.T) {
 			}
 			<-release
 			current.Add(-1)
+			return nil
 		})
 	}
 
@@ -744,9 +745,10 @@ func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
 	closeRelease := sync.OnceFunc(func() { close(release) })
 	defer closeRelease()
 	for range n {
-		batch.goSeed(func() {
+		batch.goSeed(func() error {
 			started.Add(1)
 			<-release
+			return nil
 		})
 	}
 
@@ -770,6 +772,31 @@ func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
 		"every task that never seeded must be counted, or the warn under-reports")
 }
 
+// A cancel landing after a task has started seeds nothing either, and only the task's own outcome
+// shows it: a ctx check taken before the call races the cancel and misses the drop.
+func TestGoSeedCountsCancelAfterStart(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(1)}}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+
+	started, release := make(chan struct{}), make(chan struct{})
+	batch.goSeed(func() error {
+		close(started)
+		<-release
+		// The wrapped cause the real seed path returns when it bails after the cancel.
+		return fmt.Errorf("building metainfo: %w", context.Cause(batch.seedCtx))
+	})
+
+	<-started
+	batch.seedCancel(errors.New("caller went away"))
+	close(release)
+	batch.all.Wait()
+
+	require.EqualValues(1, batch.seedDropped.Load(),
+		"a cancel arriving after the task started must still count as a drop")
+}
+
 // goSeed waits on seedCtx, not the batch's own cancellation, so cancelling the batch alone must
 // not drop seed work still queued behind a full semaphore — it must all eventually run.
 func TestGoSeedRunsAllOnSuccess(t *testing.T) {
@@ -786,10 +813,11 @@ func TestGoSeedRunsAllOnSuccess(t *testing.T) {
 	closeRelease := sync.OnceFunc(func() { close(release) })
 	defer closeRelease()
 	for range n {
-		batch.goSeed(func() {
+		batch.goSeed(func() error {
 			started.Add(1)
 			<-release
 			ran.Add(1)
+			return nil
 		})
 	}
 
@@ -923,9 +951,9 @@ func TestKeptLocalSeedingSurvivesTorrentClosed(t *testing.T) {
 	// gated the same way so it stays queued until end()'s cancel-or-not decision has been made.
 	gate := make(chan struct{})
 	for _, name := range names {
-		batch.goSeed(func() {
+		batch.goSeed(func() error {
 			<-gate
-			d.seedKeptSnapshot(batch.seedCtx, name)
+			return d.seedKeptSnapshot(batch.seedCtx, name)
 		})
 	}
 
@@ -1035,7 +1063,7 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 	_, batch.cancel = context.WithCancelCause(d.ctx)
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 	for _, name := range names {
-		batch.goSeed(func() { d.seedKeptSnapshot(batch.seedCtx, name) })
+		batch.goSeed(func() error { return d.seedKeptSnapshot(batch.seedCtx, name) })
 	}
 
 	ctx, cancel := context.WithCancelCause(t.Context())

@@ -1198,11 +1198,14 @@ func (d *Downloader) prepareLocalDataForDownload(
 }
 
 // seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
-// none is on disk. Must run without d.lock: deriving it hashes the whole file.
-func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) {
-	if err := d.AddNewSeedableFile(ctx, name); err != nil && ctx.Err() == nil {
+// none is on disk. Must run without d.lock: deriving it hashes the whole file. A ctx-caused
+// failure is returned but not logged; the batch counts those into one drop total.
+func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
+	err := d.AddNewSeedableFile(ctx, name)
+	if err != nil && ctx.Err() == nil {
 		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
 	}
+	return err
 }
 
 func (d *Downloader) snapshotDataExists(name string) (bool, error) {
