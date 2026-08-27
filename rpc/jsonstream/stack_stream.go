@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -28,7 +29,7 @@ import (
 const InitialStackSize = 16
 
 // stackItem represents the type of item on the stack
-type stackItem int
+type stackItem int8
 
 const (
 	ItemObject stackItem = iota
@@ -61,13 +62,10 @@ func (s *StackStream) Buffer() []byte {
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
+	// jsoniter latches the error on the stream, so a reused one would fail every
+	// later Flush without draining.
+	s.stream.Error = nil
 	s.stack = s.stack[:0]
-}
-
-// Write raw bytes to the stream
-func (s *StackStream) Write(content []byte) (int, error) {
-	s.popCommaOrField()
-	return s.stream.Write(content)
 }
 
 // WriteRawBytes writes already-encoded JSON held as bytes.
@@ -193,6 +191,7 @@ func (s *StackStream) WriteObjectStart() {
 
 // WriteObjectEnd writes the end of an object and removes it from the stack
 func (s *StackStream) WriteObjectEnd() {
+	s.closeInside(ItemObject)
 	s.stream.WriteObjectEnd()
 	s.pop(ItemObject)
 }
@@ -206,6 +205,7 @@ func (s *StackStream) WriteArrayStart() {
 
 // WriteArrayEnd writes the end of an array and removes it from the stack
 func (s *StackStream) WriteArrayEnd() {
+	s.closeInside(ItemArray)
 	s.stream.WriteArrayEnd()
 	s.pop(ItemArray)
 }
@@ -226,11 +226,6 @@ func (s *StackStream) WriteObjectField(fieldName string) {
 // Flush flushes the underlying stream
 func (s *StackStream) Flush() error {
 	return s.stream.Flush()
-}
-
-// Error returns any error from the underlying stream
-func (s *StackStream) Error() error {
-	return s.stream.Error
 }
 
 // BufferAsString returns the content as a string after flushing any incomplete structures
@@ -320,6 +315,18 @@ func (s *StackStream) Depth() int { return len(s.stack) }
 // push adds an item to the stack
 func (s *StackStream) push(item stackItem) {
 	s.stack = append(s.stack, item)
+}
+
+// closeInside completes whatever the caller left open inside the innermost
+// container of this kind, so ending it yields valid JSON rather than a dangling
+// comma or field. It does nothing once that container is already the top.
+func (s *StackStream) closeInside(kind stackItem) {
+	for i, item := range slices.Backward(s.stack) {
+		if item == kind {
+			_ = s.ClosePending(uint(i + 1))
+			return
+		}
+	}
 }
 
 // pop removes the specified item from the top of the stack, if present

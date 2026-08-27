@@ -40,23 +40,43 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` is an Erigon extension that retrieves multiple storage slots for a given account in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
 
 **Parameters**
 
-| Parameter    | Type             | Description                                          |
-| ------------ | ---------------- | ---------------------------------------------------- |
-| address      | STRING           | The account address to query storage for             |
-| storageKeys  | ARRAY of STRING  | List of 32-byte storage slot keys (hex-encoded)      |
-| blockNumber  | STRING or NUMBER | Block number or tag (`"latest"`, `"earliest"`, etc.) |
+| Parameter   | Type             | Description                                                                                       |
+| ----------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| requests    | OBJECT           | Maps each account address to an array of 32-byte storage slot keys (hex-encoded)                   |
+| blockNumber | STRING or NUMBER | Optional. Block number, block hash or tag (`"latest"`, `"earliest"`, etc.). Defaults to `"latest"` |
 
 **Example**
 
 ```bash
-curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":[{"0xdAC17F958D2ee523a2206206994597C13D831ec7":["0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000000000000000000000000000000000000000000002"],"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48":["0x0000000000000000000000000000000000000000000000000000000000000002"]},"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
-
 
 **Returns**
 
-An object mapping each requested storage key to its 32-byte value.
+An object mapping each requested address to an array of 32-byte values, in the same order as the slot keys requested for that address. Slots that were never written return zero.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "0xdac17f958d2ee523a2206206994597c13d831ec7": [
+      "0x000000000000000000000000c6cde7c39eb2f0f0095f41570af89efc2c1ea828",
+      "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": [
+      "0x0000000000000000000000000a06be16275b95a7d2567fbdae118b36c7da78f9"
+    ]
+  }
+}
+```
+
+**Limits**
+
+* A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
+* An empty `requests` object returns error code `-32602` with the message `empty request`.
+* When `blockNumber` is a block hash, the block must be canonical.
