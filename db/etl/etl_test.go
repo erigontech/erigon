@@ -1837,18 +1837,18 @@ func TestSortableBufferChunkBoundary(t *testing.T) {
 func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
-	require.Panics(t, func() { buf.Put(make([]byte, MaxKeyLen+1), []byte("v")) })
+	require.Panics(t, func() { buf.Put(make([]byte, maxKeyLen+1), []byte("v")) })
 
-	// MaxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
-	buf.Put(make([]byte, MaxKeyLen), []byte("v"))
+	// maxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
+	buf.Put(make([]byte, maxKeyLen), []byte("v"))
 	buf.Put([]byte{0x01}, make([]byte, dataChunkSize+7))
 	buf.Put(nil, nil)
 	require.Equal(t, 3, buf.Len())
 
-	// Sorted: the nil key, then the all-zero key of MaxKeyLen, then 0x01.
+	// Sorted: the nil key, then the all-zero key of maxKeyLen, then 0x01.
 	buf.Sort()
 	got := drainBuffer(buf)
-	require.Len(t, got[1].key, MaxKeyLen)
+	require.Len(t, got[1].key, maxKeyLen)
 	require.Nil(t, got[0].key)
 }
 
@@ -2280,13 +2280,13 @@ func TestBufferSortDoesNotRewind(t *testing.T) {
 	}
 }
 
-// TestCollectRejectsOversizedKey: Put panics past MaxKeyLen, but Collect sits
+// TestCollectRejectsOversizedKey: Put panics past maxKeyLen, but Collect sits
 // under Load and the stage loop, which return errors.
 func TestCollectRejectsOversizedKey(t *testing.T) {
 	c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1*datasize.MB), log.New())
 	defer c.Close()
-	require.NoError(t, c.Collect(make([]byte, MaxKeyLen), []byte("v")))
-	err := c.Collect(make([]byte, MaxKeyLen+1), []byte("v"))
+	require.NoError(t, c.Collect(make([]byte, maxKeyLen), []byte("v")))
+	err := c.Collect(make([]byte, maxKeyLen+1), []byte("v"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds")
 }

@@ -96,8 +96,8 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	// sortableBuffer.Put panics past this, and Collect sits under enough
 	// error-returning callers that a long key should fail the stage instead.
-	if len(k) > MaxKeyLen {
-		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
+	if len(k) > maxKeyLen {
+		return errKeyTooLong(c.logPrefix, len(k))
 	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
@@ -111,6 +111,14 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 }
 
 // Collect does copy `k` and `v`
+// errKeyTooLong is out of line so that building it does not cost the caller
+// its inlining budget on a path that never runs.
+//
+//go:noinline
+func errKeyTooLong(logPrefix string, n int) error {
+	return fmt.Errorf("%s: key of %d bytes exceeds %d", logPrefix, n, maxKeyLen)
+}
+
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
