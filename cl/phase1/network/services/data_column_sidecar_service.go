@@ -317,6 +317,12 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		}
 	}
 
+	// [REJECT] The sidecar is for the correct subnet. This check must precede
+	// queueing because the pending key identifies content, not its source subnet.
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
+		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
+	}
+
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
 	// Only checks recent blocks in forkChoice memory - older blocks don't need sidecar validation.
 	// If not yet seen, queue for deferred validation.
@@ -347,11 +353,6 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar, bid.blob_kzg_commitments)
 	if !verifyDataColumnSidecarWithCommitments(msg, kzgCommitments) {
 		return errors.New("invalid data column sidecar")
-	}
-
-	// [REJECT] The sidecar is for the correct subnet
-	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
-		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
 	// [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar, bid.blob_kzg_commitments)

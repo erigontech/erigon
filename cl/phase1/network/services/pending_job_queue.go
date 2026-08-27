@@ -131,16 +131,6 @@ func (q *pendingJobQueue[K, M]) stopAndWait() {
 	q.loopWG.Wait()
 }
 
-func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult {
-	if _, ok := q.jobs.Load(key); ok {
-		return pendingJobDuplicate
-	}
-	if !q.reserve() {
-		return pendingJobQueueFull
-	}
-	return q.storeReserved(key, msg)
-}
-
 // enqueueLazy reserves capacity before building the key so a full queue skips
 // potentially expensive work. A duplicate arriving at capacity is therefore
 // reported as full because detecting it would require building the key. Storage

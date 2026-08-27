@@ -31,9 +31,32 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func captureServiceLogs(t *testing.T) *bytes.Buffer {
+type serviceLogCapture struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (c *serviceLogCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buffer.Write(p)
+}
+
+func (c *serviceLogCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buffer.String()
+}
+
+func (c *serviceLogCapture) Bytes() []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return bytes.Clone(c.buffer.Bytes())
+}
+
+func captureServiceLogs(t *testing.T) *serviceLogCapture {
 	t.Helper()
-	var output bytes.Buffer
+	var output serviceLogCapture
 	logger := log.Root()
 	previousHandler := logger.GetHandler()
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
@@ -64,6 +87,14 @@ func storePendingJob[K comparable, M any](
 	require.False(t, loaded)
 	queue.count.Add(1)
 	return job
+}
+
+func enqueueTestPendingJob[K comparable, M any](queue *pendingJobQueue[K, M], key K, msg M) pendingJobEnqueueResult {
+	result, err := queue.enqueueLazy(msg, func() (K, error) { return key, nil })
+	if err != nil {
+		panic(err)
+	}
+	return result
 }
 
 func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
@@ -277,7 +308,7 @@ func TestPendingJobQueueCancellationStopsCurrentScan(t *testing.T) {
 }
 
 func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
-	processing := make(chan context.Context)
+	processing := make(chan context.Context, 1)
 	processingReleased := make(chan struct{})
 	var releaseOnce sync.Once
 	releaseProcessing := func() {
@@ -304,7 +335,7 @@ func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 		releaseProcessing()
 		queue.stopAndWait()
 	}()
-	require.Equal(t, pendingJobEnqueued, queue.enqueueKey(1, "message"))
+	require.Equal(t, pendingJobEnqueued, enqueueTestPendingJob(queue, 1, "message"))
 
 	var processingCtx context.Context
 	select {
@@ -337,11 +368,16 @@ func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 	}
 }
 
-func TestPendingJobQueueEnqueueKeyDeduplicates(t *testing.T) {
-	queue := newTestPendingJobQueue(t)
+func TestPendingJobQueueEnqueueDeduplicates(t *testing.T) {
+	queue := newTestPendingJobQueueWithOptions(canceledPendingQueueContext(t), pendingJobQueueOptions{
+		name:          t.Name(),
+		capacity:      2,
+		expiry:        time.Minute,
+		checkInterval: time.Millisecond,
+	})
 
-	firstResult := queue.enqueueKey(1, "original")
-	duplicateResult := queue.enqueueKey(1, "duplicate")
+	firstResult := enqueueTestPendingJob(queue, 1, "original")
+	duplicateResult := enqueueTestPendingJob(queue, 1, "duplicate")
 
 	require.Equal(t, pendingJobEnqueued, firstResult)
 	require.Equal(t, pendingJobDuplicate, duplicateResult)
@@ -396,7 +432,7 @@ func TestPendingJobQueueCountsFullRejection(t *testing.T) {
 	queue.count.Store(queue.capacity)
 	before := queue.fullCounter.GetValueUint64()
 
-	result := queue.enqueueKey(1, "message")
+	result := enqueueTestPendingJob(queue, 1, "message")
 
 	require.Equal(t, pendingJobQueueFull, result)
 	require.Equal(t, before+1, queue.fullCounter.GetValueUint64())
@@ -417,7 +453,7 @@ func TestPendingJobQueueConcurrentEnqueueResults(t *testing.T) {
 
 	for key := range 100 {
 		wg.Go(func() {
-			switch queue.enqueueKey(key, "message") {
+			switch enqueueTestPendingJob(queue, key, "message") {
 			case pendingJobEnqueued:
 				enqueued.Add(1)
 			case pendingJobQueueFull:
@@ -455,7 +491,7 @@ func TestPendingJobQueueConcurrentEnqueueRemoveKeepsCountBounded(t *testing.T) {
 	for worker := range workers {
 		workersWG.Go(func() {
 			<-start
-			if queue.enqueueKey(worker+1, "message") != pendingJobQueueFull {
+			if enqueueTestPendingJob(queue, worker+1, "message") != pendingJobQueueFull {
 				unexpectedResults.Add(1)
 			}
 			firstAttempts.Done()
@@ -463,7 +499,7 @@ func TestPendingJobQueueConcurrentEnqueueRemoveKeepsCountBounded(t *testing.T) {
 
 			for attempt := range attempts {
 				key := workers + 1 + worker*attempts + attempt
-				switch queue.enqueueKey(key, "message") {
+				switch enqueueTestPendingJob(queue, key, "message") {
 				case pendingJobQueueFull:
 				case pendingJobEnqueued:
 					successfulEnqueues.Add(1)
@@ -511,12 +547,12 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 			afterRemoveCalled = true
 			_, exists := queue.jobs.Load(key)
 			require.False(t, exists)
-			_ = queue.enqueueKey(key, "replacement")
+			_ = enqueueTestPendingJob(queue, key, "replacement")
 		},
 		func(int) {},
 	)
 
-	_ = queue.enqueueKey(1, "original")
+	_ = enqueueTestPendingJob(queue, 1, "original")
 
 	queue.processPending(t.Context())
 

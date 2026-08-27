@@ -37,7 +37,8 @@ import (
 func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_services.ForkChoiceStorageMock) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service.(*executionPayloadService).pending.stopAndWait()
 	return service, forkchoiceMock
 }
 

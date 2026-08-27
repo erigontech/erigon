@@ -67,8 +67,9 @@ func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *sy
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := NewBlockService(t.Context(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
-	return blockService, syncedDataManager, ethClock, forkchoiceMock
+	serviceAPI := NewBlockService(canceledPendingQueueContext(t), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
+	serviceAPI.(*blockService).blocksScheduledForLaterExecution.stopAndWait()
+	return serviceAPI, syncedDataManager, ethClock, forkchoiceMock
 }
 
 func setupPendingGloasBlock(t *testing.T, ctrl *gomock.Controller) (*blockService, *cltypes.SignedBeaconBlock, *blockProcessingErrorStore, *mock_services.ForkChoiceStorageMock) {
@@ -123,6 +124,33 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
+func TestBlockServiceQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, pre, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	serviceAPI, syncedData, ethClock, forkchoiceStore := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	require.NoError(t, syncedData.OnHeadState(pre))
+	require.Less(t, syncedData.HeadSlot(), block.Block.Slot)
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(block.Block.Slot).Return(true)
+	forkchoiceStore.FinalizedCheckpointVal = pre.FinalizedCheckpoint()
+	forkchoiceStore.Headers[block.Block.ParentRoot] = &cltypes.BeaconBlockHeader{Slot: block.Block.Slot - 1}
+	forkchoiceStore.SlotVal = block.Block.Slot - 1
+	processingStore := &blockProcessingErrorStore{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               errors.New("must not process a block before its slot"),
+	}
+	service.forkchoiceStore = processingStore
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+
+	require.NoError(t, err)
+	require.Zero(t, processingStore.calls)
+	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+}
+
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -131,7 +159,6 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 
 	blockServiceAPI, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	blockService := blockServiceAPI.(*blockService)
-	blockService.blocksScheduledForLaterExecution = blockService.newPendingBlockQueue(canceledPendingQueueContext(t))
 	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -218,7 +245,6 @@ func TestBlockServicePendingQueueCap(t *testing.T) {
 	blocks, _, _ := tests.GetBellatrixRandom()
 	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
 	service := serviceAPI.(*blockService)
-	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
 	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.capacity)
 	service.blocksScheduledForLaterExecution.count.Store(maxPendingBlocks)
 	output := captureServiceLogs(t)
@@ -241,7 +267,6 @@ func TestBlockServicePendingQueueDeduplicates(t *testing.T) {
 	blocks, _, _ := tests.GetBellatrixRandom()
 	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
 	service := serviceAPI.(*blockService)
-	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
 
 	service.scheduleBlockForLaterProcessing(blocks[0])
 	root, err := blocks[0].Block.HashSSZ()
@@ -339,9 +364,10 @@ func TestBlockServicePendingQueueWaitsForGloasParentPayloadStatus(t *testing.T) 
 	require.Zero(t, processingStore.calls)
 
 	forkchoiceStore.ExecutionPayloadStatusMap[parentBlockHash] = execution_client.PayloadStatusValidated
+	processingStore.err = forkchoice.ErrNewPayloadNoStatus
 	decision = service.tryProcessPendingBlock(t.Context(), common.Hash{}, block)
 
-	require.Equal(t, pendingJobRemove, decision)
+	require.Equal(t, pendingJobKeep, decision)
 	require.Equal(t, 1, processingStore.calls)
 }
 

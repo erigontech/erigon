@@ -172,6 +172,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
+	if b.forkchoiceStore.Slot() < msg.Block.Slot {
+		b.scheduleBlockForLaterProcessing(msg)
+		return nil
+	}
 	// Fork choice performs the remaining block validation.
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
