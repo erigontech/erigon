@@ -234,6 +234,11 @@ func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
 // calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
 // barrier: it serializes block-end handling against exec, not the mid-block
 // step-edge computes.
+//
+// A stopped calculator returns nil even when blockNum was never handled. That is
+// only safe because the sole caller is the exec loop, whose own defer closes
+// cc.in and so cannot still be waiting; a second caller would need to tell that
+// case apart.
 func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
 	if cc.in == nil {
 		// Exec-only (DISCARD_COMMITMENT): loop() never runs, so nothing ever
@@ -565,6 +570,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		delete(cc.pending, blockNum)
 		delete(cc.computedAhead, blockNum)
 		delete(cc.balRoots, blockNum)
+		if dbg.CommitmentAfterExec {
+			// Before the compute-ahead: that work is block n+1's, and overlapping
+			// it with exec is the whole point of computing ahead. Holding the
+			// barrier through it would serialize what the flag exists to measure.
+			cc.markProcessed(blockNum)
+		}
 		cc.maybeComputeAhead(ctx, blockNum+1)
 		if dbg.CommitmentAfterExec {
 			cc.markProcessed(blockNum)
