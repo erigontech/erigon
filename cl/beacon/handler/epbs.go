@@ -938,6 +938,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
+		if err := signedEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if !ok || block == nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("beacon block is unavailable for envelope validation")).WriteTo(w)

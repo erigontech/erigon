@@ -537,6 +537,55 @@ func TestPostExecutionPayloadEnvelopeRejectsInvalidEnvelopeBeforeBlobColumns(t *
 	}
 }
 
+func TestPostExecutionPayloadEnvelopeRejectsUnpersistableEnvelopeBeforeBlobColumns(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	ctrl := gomock.NewController(t)
+	handler.columnStorage = blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blob := new(cltypes.Blob)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
+	require.NoError(t, err)
+	commitmentValue := cltypes.KZGCommitment(commitment)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
+	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+	envelope := contents.SignedExecutionPayloadEnvelope.Message
+	envelope.Payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
+	require.NoError(t, envelope.Payload.BlockAccessList.DecodeSSZ(make([]byte, int(clparams.MaxChunkSize)+1024), int(clparams.GloasVersion)))
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(handler.beaconChainCfg, envelope.ExecutionRequests))
+	envelope.Payload.BlockHash, err = envelope.Payload.ComputeBlockHash(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = envelope.Payload.BlockHash
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.BeaconBlockRoot = root
+	fcu.Blocks[root] = block
+	proofValue := cltypes.KZGProof(proof)
+	contents.KZGProofs.Append(&proofValue)
+	contents.Blobs.Append(blob)
+	require.Greater(t, contents.SignedExecutionPayloadEnvelope.EncodingSizeSSZ(), int(clparams.MaxChunkSize))
+	body, err := json.Marshal(contents)
+	require.NoError(t, err)
+	require.LessOrEqual(t, int64(len(body)), maxExecutionPayloadEnvelopeRequestSize)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "encoding size")
+	require.False(t, fcu.OnExecutionPayloadCheckBlobData)
+}
+
 func TestDataColumnSidecarsGloasUseProgressiveColumnLists(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
