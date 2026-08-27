@@ -381,7 +381,13 @@ Process:
 				}
 			} else {
 				var envErr error
-				envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, processBlocks...)
+				envelopes, envErr = requestEnvelopesFranticallyWithValidator(
+					ctx,
+					f.rpc,
+					fullRoots,
+					newEnvelopeCommitmentValidator(f.beaconCfg, processBlocks),
+					processBlocks...,
+				)
 				if envErr != nil {
 					log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
 				}

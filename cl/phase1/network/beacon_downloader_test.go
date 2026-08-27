@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -874,4 +876,246 @@ func TestForwardRequestMoreSynchronizesConcurrentProgressUpdates(t *testing.T) {
 	close(stopUpdates)
 	<-updatesDone
 	require.Positive(t, downloader.GetHighestProcessedSlot())
+}
+
+type forwardEnvelopeSentinel struct {
+	sentinelproto.SentinelClient
+	blockResponse     []byte
+	envelopeResponses [][]byte
+	envelopeRequests  atomic.Int32
+	rangeRequests     atomic.Int32
+}
+
+func (s *forwardEnvelopeSentinel) SendRequest(_ context.Context, request *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	response := s.blockResponse
+	if strings.Contains(request.Topic, communication.BeaconBlocksByRangeProtocolV2) {
+		return &sentinelproto.ResponseData{
+			Data: response,
+			Peer: &sentinelproto.Peer{Pid: "forward-envelope-peer"},
+		}, nil
+	}
+	if request.Topic == communication.ExecutionPayloadEnvelopesByRangeProtocolV1 {
+		s.rangeRequests.Add(1)
+	}
+	responseIndex := min(int(s.envelopeRequests.Add(1)-1), len(s.envelopeResponses)-1)
+	response = s.envelopeResponses[responseIndex]
+	return &sentinelproto.ResponseData{
+		Data: response,
+		Peer: &sentinelproto.Peer{Pid: "forward-envelope-peer"},
+	}, nil
+}
+
+func (s *forwardEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
+func TestForwardBeaconDownloaderValidatesP2PEnvelopeBeforeHTTPFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		mutateP2P                 func(*cltypes.SignedExecutionPayloadEnvelope)
+		differentFeeRecipient     bool
+		requestEnvelopeExpiration time.Duration
+		wantHTTPRequests          int32
+	}{
+		{
+			name: "invalid commitment falls back to HTTP",
+			mutateP2P: func(envelope *cltypes.SignedExecutionPayloadEnvelope) {
+				envelope.Message.Payload.GasUsed++
+			},
+			requestEnvelopeExpiration: time.Millisecond,
+			wantHTTPRequests:          1,
+		},
+		{
+			name:             "valid commitment keeps P2P envelope",
+			wantHTTPRequests: 0,
+		},
+		{
+			name:                  "valid differing fee recipient keeps P2P envelope",
+			differentFeeRecipient: true,
+			wantHTTPRequests:      0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.requestEnvelopeExpiration > 0 {
+				previousExpiration := requestEnvelopeBatchExpiration
+				requestEnvelopeBatchExpiration = tc.requestEnvelopeExpiration
+				defer func() { requestEnvelopeBatchExpiration = previousExpiration }()
+			}
+			cfg := clparams.MainnetBeaconConfig
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = 0
+			cfg.ElectraForkEpoch = 0
+			cfg.FuluForkEpoch = 0
+			cfg.GloasForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+			gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+			require.NoError(t, err)
+
+			block := makeGloasBlock(9, hash(1), hash(2))
+			validEnvelope, root := makeGloasEnvelopeForBlock(t, block)
+			if tc.differentFeeRecipient {
+				validEnvelope.Message.Payload.FeeRecipient = common.HexToAddress("0x25")
+				requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(&cfg, validEnvelope.Message.ExecutionRequests))
+				validEnvelope.Message.Payload.BlockHash, err = validEnvelope.Message.Payload.ComputeBlockHash(&validEnvelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+				require.NoError(t, err)
+				block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = validEnvelope.Message.Payload.BlockHash
+				root, err = block.Block.HashSSZ()
+				require.NoError(t, err)
+				validEnvelope.Message.BeaconBlockRoot = root
+				require.NotEqual(t, block.Block.Body.GetSignedExecutionPayloadBid().Message.FeeRecipient, validEnvelope.Message.Payload.FeeRecipient)
+			}
+			lookahead := makeGloasBlock(10, hash(3), validEnvelope.Message.Payload.BlockHash)
+			linkGloasChild(t, block, lookahead)
+
+			p2pEnvelope := validEnvelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+			if tc.mutateP2P != nil {
+				tc.mutateP2P(p2pEnvelope)
+			}
+			blockResponse := encodeForwardResponses(t, gloasDigest, block, lookahead)
+			envelopeResponse := encodeForwardResponses(t, gloasDigest, p2pEnvelope)
+			sentinel := &forwardEnvelopeSentinel{
+				blockResponse:     blockResponse,
+				envelopeResponses: [][]byte{envelopeResponse},
+			}
+			client := rpc.NewBeaconRpcP2P(context.Background(), sentinel, &cfg, clock, nil)
+
+			encodedHTTPEnvelope, err := validEnvelope.EncodeSSZ(nil)
+			require.NoError(t, err)
+			var httpRequests atomic.Int32
+			var requestedRoot atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				httpRequests.Add(1)
+				requestedRoot.Store(strings.Contains(request.URL.Path, common.Bytes2Hex(root[:])))
+				_, _ = w.Write(encodedHTTPEnvelope)
+			}))
+			defer server.Close()
+
+			downloader := NewForwardBeaconDownloader(context.Background(), client, &cfg)
+			downloader.SetHTTPFallbackURL(server.URL)
+			processed := false
+			downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+				processed = true
+				require.Len(t, blocks, 1)
+				require.Contains(t, envelopes, root)
+				require.NoError(t, cltypes.ValidateExecutionPayloadEnvelopeCommitments(&cfg, block, envelopes[root]))
+				return blocks[0].Block.Slot, nil
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			downloader.RequestMore(ctx)
+
+			require.True(t, processed)
+			require.Equal(t, tc.wantHTTPRequests, httpRequests.Load())
+			if tc.wantHTTPRequests > 0 {
+				require.True(t, requestedRoot.Load())
+			}
+		})
+	}
+}
+
+func TestForwardBeaconDownloaderKeepsInvalidP2PEnvelopesPending(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		responseValidity     [][]bool
+		wantEnvelopeRequests int32
+		wantRangeRequests    int32
+	}{
+		{
+			name:                 "invalid first response retries for valid envelope",
+			responseValidity:     [][]bool{{false}, {true}},
+			wantEnvelopeRequests: 2,
+		},
+		{
+			name:                 "valid then invalid duplicate retains valid envelope",
+			responseValidity:     [][]bool{{true, false}},
+			wantEnvelopeRequests: 1,
+		},
+		{
+			name:                 "invalid then valid duplicate retains valid envelope",
+			responseValidity:     [][]bool{{false, true}},
+			wantEnvelopeRequests: 1,
+		},
+		{
+			name:                 "invalid range response remains pending for valid by-root envelope",
+			responseValidity:     [][]bool{{false}, {false}, {false}, {false}, {true}},
+			wantEnvelopeRequests: 5,
+			wantRangeRequests:    1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.AltairForkEpoch = 0
+			cfg.BellatrixForkEpoch = 0
+			cfg.CapellaForkEpoch = 0
+			cfg.DenebForkEpoch = 0
+			cfg.ElectraForkEpoch = 0
+			cfg.FuluForkEpoch = 0
+			cfg.GloasForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+			gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+			require.NoError(t, err)
+
+			block := makeGloasBlock(9, hash(1), hash(2))
+			validEnvelope, root := makeGloasEnvelopeForBlock(t, block)
+			invalidEnvelope := validEnvelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+			invalidEnvelope.Message.Payload.GasUsed++
+			lookahead := makeGloasBlock(10, hash(3), validEnvelope.Message.Payload.BlockHash)
+			linkGloasChild(t, block, lookahead)
+
+			envelopeResponses := make([][]byte, len(tc.responseValidity))
+			for i, validity := range tc.responseValidity {
+				values := make([]forwardResponseValue, len(validity))
+				for j, valid := range validity {
+					values[j] = invalidEnvelope
+					if valid {
+						values[j] = validEnvelope
+					}
+				}
+				envelopeResponses[i] = encodeForwardResponses(t, gloasDigest, values...)
+			}
+			sentinel := &forwardEnvelopeSentinel{
+				blockResponse:     encodeForwardResponses(t, gloasDigest, block, lookahead),
+				envelopeResponses: envelopeResponses,
+			}
+			client := rpc.NewBeaconRpcP2P(context.Background(), sentinel, &cfg, clock, nil)
+			downloader := NewForwardBeaconDownloader(context.Background(), client, &cfg)
+
+			var processedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+			downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+				processedEnvelope = envelopes[root]
+				return blocks[0].Block.Slot, nil
+			})
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			downloader.RequestMore(ctx)
+
+			require.Equal(t, tc.wantEnvelopeRequests, sentinel.envelopeRequests.Load())
+			require.Equal(t, tc.wantRangeRequests, sentinel.rangeRequests.Load())
+			require.NotNil(t, processedEnvelope)
+			require.NoError(t, cltypes.ValidateExecutionPayloadEnvelopeCommitments(&cfg, block, processedEnvelope))
+		})
+	}
+}
+
+type forwardResponseValue interface {
+	EncodeSSZ([]byte) ([]byte, error)
+	EncodingSizeSSZ() int
+}
+
+func encodeForwardResponses(t *testing.T, forkDigest common.Bytes4, values ...forwardResponseValue) []byte {
+	t.Helper()
+	var response bytes.Buffer
+	for i, value := range values {
+		if i > 0 {
+			require.NoError(t, response.WriteByte(0))
+		}
+		require.NoError(t, ssz_snappy.EncodeAndWrite(&response, value, forkDigest[:]...))
+	}
+	return response.Bytes()
 }

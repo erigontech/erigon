@@ -89,6 +89,19 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 	block, envelope := makePair(t)
 	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
 
+	block, envelope = makePair(t)
+	envelope.Message.Payload.FeeRecipient = common.HexToAddress("0x25")
+	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(&clparams.MainnetBeaconConfig, envelope.Message.ExecutionRequests))
+	var err error
+	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = envelope.Message.Payload.BlockHash
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = blockRoot
+	require.NotEqual(t, block.Block.Body.GetSignedExecutionPayloadBid().Message.FeeRecipient, envelope.Message.Payload.FeeRecipient)
+	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+
 	mutations := []struct {
 		name   string
 		mutate func(*SignedExecutionPayloadEnvelope)
@@ -100,7 +113,7 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 		{"parent block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.ParentHash[0]++ }},
 		{"block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.BlockHash[0]++ }},
 		{"prev randao", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.PrevRandao[0]++ }},
-		{"fee recipient", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.FeeRecipient[0]++ }},
+		{"fee recipient without matching block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.FeeRecipient[0]++ }},
 		{"gas limit", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.GasLimit++ }},
 		{"derived block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.GasUsed++ }},
 		{"execution requests", func(e *SignedExecutionPayloadEnvelope) {

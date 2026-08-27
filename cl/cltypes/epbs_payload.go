@@ -574,9 +574,6 @@ func ValidateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChain
 	if envelope.Payload.PrevRandao != bid.PrevRandao {
 		return fmt.Errorf("envelope payload prev randao %x does not match bid prev randao %x", envelope.Payload.PrevRandao, bid.PrevRandao)
 	}
-	if envelope.Payload.FeeRecipient != bid.FeeRecipient {
-		return fmt.Errorf("envelope payload fee recipient %x does not match bid fee recipient %x", envelope.Payload.FeeRecipient, bid.FeeRecipient)
-	}
 	if envelope.Payload.GasLimit != bid.GasLimit {
 		return fmt.Errorf("envelope payload gas limit %d does not match bid gas limit %d", envelope.Payload.GasLimit, bid.GasLimit)
 	}
