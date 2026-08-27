@@ -27,6 +27,24 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
+// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
+// freelru's own Len locks every shard, which serialises readers on a path that
+// only wanted a number.
+type lruGen[V any] struct {
+	lru *freelru.ShardedLRU[uint64, V]
+	n   atomic.Int64
+}
+
+func (g *lruGen[V]) len() int { return int(g.n.Load()) }
+
+// add requires a key the LRU does not hold — Put removes first — so the count
+// can rise unconditionally; a capacity eviction fires OnEvict, which lowers it.
+func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
+	evicted = g.lru.Add(h, v)
+	g.n.Add(1)
+	return evicted
+}
+
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
 // toward a byte-budget ceiling as it fills, funding each step from the shared
 // cachebudget envelope. It exists so a cache with a small working set never
@@ -38,31 +56,8 @@ import (
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
 // drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. Each generation's entry count stays exact
-// for that generation — every mutation resolves one generation and decrements
-// the one it acted on — which is what the grow gates rely on. The caller's
-// onEvict byte counters remain approximate across grow windows: a write lost in
-// a retired generation is counted but never evicted, and a removal a racing
-// copy undid subtracts twice.
-// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
-// freelru's own Len locks every shard, which serialises readers against each
-// other on a path that only wanted a number.
-type lruGen[V any] struct {
-	lru *freelru.ShardedLRU[uint64, V]
-	n   atomic.Int64
-}
-
-func (g *lruGen[V]) len() int { return int(g.n.Load()) }
-
-// add inserts a key the LRU does not already hold -- Put removes first, so it
-// always does -- and the count rises by one; a capacity eviction inside freelru
-// fires OnEvict, which takes it back down.
-func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
-	evicted = g.lru.Add(h, v)
-	g.n.Add(1)
-	return evicted
-}
-
+// need GenericCache's fenced swap. Each generation's own entry count is exact;
+// the caller's onEvict byte counters stay approximate across grow windows.
 type growLRU[V any] struct {
 	cur      atomic.Pointer[lruGen[V]]
 	onEvict  func(uint64, V)
@@ -110,13 +105,10 @@ func (g *growLRU[V]) newShards(capacity uint32) *lruGen[V] {
 
 func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key) }
 
-// Put stores a key, growing first when the generation is full. Both the removal
-// and the store resolve one generation, and the removal is not redundant on a
-// caller that just missed: an unfenced grow can copy the key into the next
-// generation, a read-path Remove can drop it from the still-current old one, and
-// the publish can land between that miss and this load. freelru would then
-// replace the copy in place without firing OnEvict, leaving the count and the
-// caller's byte counter carrying an entry that is no longer there.
+// Put stores a key, growing first when the generation is full. The Remove is not
+// redundant after a caller's miss: an unfenced grow can leave the key present in
+// the generation this Put lands on, and freelru's Add would replace it in place
+// without firing OnEvict, stranding the count and the caller's byte counter.
 func (g *growLRU[V]) Put(key uint64, value V) {
 	gen := g.cur.Load()
 	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
