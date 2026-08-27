@@ -5019,7 +5019,9 @@ without a full state database.
 :::info
 `eth_getTxWitness` currently only bounds-checks `txIndex` — an index past the end of the
 block is an error, but the witness it returns is the same whole-block witness
-`eth_getWitness` produces.
+`eth_getWitness` produces. At the genesis block not even that check runs: both methods
+share one implementation that returns the empty witness as soon as the block number
+resolves to `0`, so any `txIndex` is accepted there.
 :::
 
 **Returns**
@@ -5030,14 +5032,17 @@ self-verified. The genesis block returns an empty witness.
 
 **Requirements**
 
-Both methods need commitment history, so start the node with:
+Both methods need commitment history for any block above genesis, so start the node with:
 
 ```text
 --prune.include-commitment-history
 ```
 
-Without it the call fails with an error starting with `eth_getWitness requires
-commitment history`; the message continues with a restart hint that names the
+The genesis block is the one exception: the empty witness is returned before the
+commitment-history check, so `eth_getWitness` and `eth_getTxWitness` succeed at block `0`
+on a node without commitment history. For every other block, without it the call fails
+with an error starting with `eth_getWitness requires commitment history`; the message
+continues with a restart hint that names the
 `--prune.experimental.include-commitment-history` alias rather than the canonical flag
 above. If the requested block is older than the retained commitment history, the call
 fails with an error starting with `commitment history pruned`, followed by the retained
@@ -5084,9 +5089,16 @@ Accepted everywhere a block is selected:
 * a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
 * a bare, unquoted JSON integer — `3`
 * the named tags `"earliest"`, `"latest"`, `"safe"`, `"finalized"`, `"pending"`
-* `null`, which means `latest` — except in the few methods whose block-or-hash
-  parameter is required (`eth_getBlockReceipts`, `eth_getBlockAccessList`,
-  `eth_simulateV1`, `eth_getWitness`, `eth_getTxWitness`), which reject it
+* `null`, but only where the selector is optional: it leaves the parameter unset, and
+  the method's own default applies — `latest` for most, though the default is
+  per-method. A **required** block-or-hash parameter rejects top-level `null`:
+  `BlockNumberOrHash.UnmarshalJSON` decodes `null` into an empty struct and then fails
+  with `at least one of BlockNumber or BlockHash is needed if a dictionary is provided`
+  (`rpc/types.go`). That is a property of the type, not a list of special-cased methods
+  — it holds for every method whose selector is a required `BlockNumberOrHash`,
+  including `eth_getBlockReceipts`, `eth_getBlockAccessList`, `eth_simulateV1`,
+  `eth_getWitness`, `eth_getTxWitness`, `eth_getBlockByHash` and
+  `trace_replayBlockTransactions`
 
 Rejected everywhere:
 
@@ -5101,11 +5113,24 @@ and are now rejected with `hex string without 0x prefix`, returned as an
 integer `3`, or a named tag.
 :::
 
-Two further forms are accepted only by methods whose parameter is a plain block number,
-such as `eth_getBlockByNumber`, `eth_getBlockTransactionCountByNumber` and `trace_block`:
-the Erigon-specific tag `"latestExecuted"`, and the string `"null"`, which means `latest`.
+Two further forms exist: the Erigon-specific tag `"latestExecuted"`, and the string
+`"null"`, which means `latest`. Both are parsed by `BlockNumber.UnmarshalJSON`, so they are
+accepted unconditionally by methods whose parameter is a plain block number — such as
+`eth_getBlockByNumber`, `eth_getBlockTransactionCountByNumber` and `trace_block`.
+
 Methods taking a block-number-or-hash selector — `eth_call`, `eth_getBalance`,
-`eth_getProof` and the rest — reject both.
+`eth_getProof` and the rest — reject both **as top-level strings** only.
+`BlockNumberOrHash.UnmarshalJSON` tries the object form first, and that path decodes the
+`blockNumber` field through `BlockNumber`, which does accept them. So on those
+block-number-or-hash methods the object-wrapped forms work:
+
+```json
+{"blockNumber": "latestExecuted"}
+{"blockNumber": "null"}
+```
+
+while the bare strings `"latestExecuted"` and `"null"` fail on those same methods, because
+the top-level string switch does not list them.
 
 ### Filter lifetime
 
@@ -6072,7 +6097,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- |
 | `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
 | `trace_callMany` | `Array` — one per input call |
-| `trace_replayBlockTransactions` | `Array` — one per transaction; each entry adds `transactionHash` |
+| `trace_replayBlockTransactions` | `Array` — one per transaction; each entry adds `transactionHash`. One extra trailing entry when withdrawals are requested — see [trace_replayBlockTransactions](#trace_replayblocktransactions) |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array` (flat list across all call frames) |
 | `trace_get` | `TraceEntry` (single call frame at the requested position) |
 
@@ -6381,7 +6406,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: an integer block number, a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Boolean` - Optional. `gasBailOut`.
 4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
@@ -6395,7 +6420,15 @@ params: [
 
 #### Returns
 
-`Array` — one entry per transaction in the block. Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
+`Array` — by default one entry per transaction in the block (see below for the one exception). Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
+
+The one-entry-per-transaction mapping does not hold when withdrawals are requested.
+With `"stateDiff"` in the trace types and `"IncludeWithdrawals": true` in the trace
+settings, a block that has withdrawals gets **one extra entry appended** after the
+last transaction — an empty `trace` and a `stateDiff` carrying only the withdrawal
+balance changes, with no `transactionHash`. Consumers that index results positionally
+against the block's transaction list must skip that trailing entry. See [Beacon-chain
+withdrawals](#beacon-chain-withdrawals).
 
 #### Example
 

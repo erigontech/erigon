@@ -123,7 +123,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- |
 | `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
 | `trace_callMany` | `Array<Object>` — one per input call |
-| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash` |
+| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash`. One extra trailing entry when withdrawals are requested — see [trace_replayBlockTransactions](#trace_replayblocktransactions) |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
 | `trace_get` | `TraceEntry` (single call frame at the requested position) |
 
@@ -436,7 +436,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: an integer block number, a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Boolean` - Optional. `gasBailOut`.
 4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
@@ -450,7 +450,15 @@ params: [
 
 #### Returns
 
-`Array<Object>` — one entry per transaction in the block. Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
+`Array<Object>` — by default one entry per transaction in the block (see below for the one exception). Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
+
+The one-entry-per-transaction mapping does not hold when withdrawals are requested.
+With `"stateDiff"` in the trace types and `"IncludeWithdrawals": true` in the trace
+settings, a block that has withdrawals gets **one extra entry appended** after the
+last transaction — an empty `trace` and a `stateDiff` carrying only the withdrawal
+balance changes, with no `transactionHash`. Consumers that index results positionally
+against the block's transaction list must skip that trailing entry. See [Beacon-chain
+withdrawals](#beacon-chain-withdrawals).
 
 #### Example
 
