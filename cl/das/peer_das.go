@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
 	"sync"
 	"time"
 
@@ -1014,7 +1015,14 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 					sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 					if err != nil {
 						log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
-						d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
+						if ctx.Err() != nil {
+							return
+						}
+						if errors.Is(err, os.ErrNotExist) {
+							d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
+						} else {
+							retryScheduled = d.delayBlobRecovery(toRecover)
+						}
 						return
 					}
 					if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -115,6 +116,17 @@ type transientSavedColumnIndexStorage struct {
 	once   sync.Once
 }
 
+type transientColumnSidecarReadStorage struct {
+	blob_storage.DataColumnStorage
+	columnIndex   int64
+	readErr       error
+	targetReads   atomic.Int32
+	targetRemoves atomic.Int32
+	onFail        func()
+	failed        chan struct{}
+	once          sync.Once
+}
+
 type blockingBlobWriteStorage struct {
 	blob_storage.BlobStorage
 	entered chan struct{}
@@ -163,6 +175,26 @@ func (s *transientSavedColumnIndexStorage) GetSavedColumnIndex(ctx context.Conte
 		return nil, errors.New("transient saved-column read failure")
 	}
 	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+}
+
+func (s *transientColumnSidecarReadStorage) ReadColumnSidecarByColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (*cltypes.DataColumnSidecar, error) {
+	if columnIndex == s.columnIndex && s.targetReads.Add(1) == 1 {
+		if s.onFail != nil {
+			s.onFail()
+		}
+		s.once.Do(func() { close(s.failed) })
+		return nil, s.readErr
+	}
+	return s.DataColumnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, columnIndex)
+}
+
+func (s *transientColumnSidecarReadStorage) RemoveColumnSidecars(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndices ...int64) error {
+	for _, columnIndex := range columnIndices {
+		if columnIndex == s.columnIndex {
+			s.targetRemoves.Add(1)
+		}
+	}
+	return s.DataColumnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, columnIndices...)
 }
 
 type blockHashCountingBlock struct {
@@ -744,6 +776,230 @@ func TestDownloadColumnsAndRecoverBlobsDoesNotRetryCanceledInitialRecoveryRead(t
 	_, owned := d.recoveryRequests[root]
 	d.recoveringMutex.Unlock()
 	require.False(t, owned)
+	stored, found, err := blobStorage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, stored)
+}
+
+func TestDownloadColumnsAndRecoverBlobsRetriesTransientColumnReadWithoutRemoving(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+	state.SetLocalNodeID(enode.NewLocalNode(nodeDB, key))
+	custodyColumns, err := state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.NotEmpty(t, custodyColumns)
+	var targetColumn uint64
+	for column := range custodyColumns {
+		targetColumn = column
+		break
+	}
+
+	columnFS := afero.NewMemMapFs()
+	baseColumnStorage := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(targetColumn), columns[targetColumn]))
+	seeded := 1
+	for column, sidecar := range columns {
+		if uint64(column) == targetColumn {
+			continue
+		}
+		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(column), sidecar))
+		seeded++
+		if seeded == int((cfg.NumberOfColumns+1)/2) {
+			break
+		}
+	}
+	require.Equal(t, int((cfg.NumberOfColumns+1)/2), seeded)
+	columnStorage := &transientColumnSidecarReadStorage{
+		DataColumnStorage: baseColumnStorage,
+		columnIndex:       int64(targetColumn),
+		readErr:           errors.New("transient column-sidecar read failure"),
+		failed:            make(chan struct{}),
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobFS := afero.NewMemMapFs()
+	baseBlobStorage := blob_storage.NewBlobStore(db, blobFS)
+	blobStorage := &writeNotifyingBlobStorage{BlobStorage: baseBlobStorage, written: make(chan struct{})}
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             state,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-workerDone
+	})
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	select {
+	case <-columnStorage.failed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("worker did not reach the transient column-sidecar read failure")
+	}
+	select {
+	case <-blobStorage.written:
+	case <-time.After(30 * time.Second):
+		t.Fatal("transient column-sidecar read lost the sole recovery owner")
+	}
+	require.Eventually(t, func() bool {
+		d.recoveringMutex.Lock()
+		defer d.recoveringMutex.Unlock()
+		_, owned := d.recoveryRequests[root]
+		return !owned
+	}, 30*time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(2), columnStorage.targetReads.Load())
+	require.Zero(t, columnStorage.targetRemoves.Load())
+	_, err = baseColumnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, int64(targetColumn))
+	require.NoError(t, err)
+	fresh := blob_storage.NewBlobStore(db, blobFS)
+	stored, found, err := fresh.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, stored, len(sidecars))
+}
+
+func TestDownloadColumnsAndRecoverBlobsRemovesMissingColumnAndReleasesOwner(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluData(t, &cfg)
+
+	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for column := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(column), columns[column]))
+	}
+	columnStorage := &transientColumnSidecarReadStorage{
+		DataColumnStorage: baseColumnStorage,
+		columnIndex:       0,
+		readErr:           os.ErrNotExist,
+		failed:            make(chan struct{}),
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobStorage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-workerDone
+	})
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	select {
+	case <-columnStorage.failed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("worker did not reach the missing column-sidecar read")
+	}
+	require.Eventually(t, func() bool {
+		d.recoveringMutex.Lock()
+		_, owned := d.recoveryRequests[root]
+		d.recoveringMutex.Unlock()
+		return !owned && columnStorage.targetRemoves.Load() == 1
+	}, 30*time.Second, 10*time.Millisecond)
+	require.Equal(t, int32(1), columnStorage.targetReads.Load())
+	_, err := baseColumnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, 0)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	saved, err := baseColumnStorage.GetSavedColumnIndex(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.Len(t, saved, int((cfg.NumberOfColumns+1)/2)-1)
+	stored, found, err := blobStorage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, stored)
+}
+
+func TestDownloadColumnsAndRecoverBlobsDoesNotRetryCanceledColumnRead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluData(t, &cfg)
+
+	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for column := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(column), columns[column]))
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	columnStorage := &transientColumnSidecarReadStorage{
+		DataColumnStorage: baseColumnStorage,
+		columnIndex:       0,
+		readErr:           errors.New("transient column-sidecar read failure"),
+		onFail:            cancel,
+		failed:            make(chan struct{}),
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobStorage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	select {
+	case <-columnStorage.failed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("worker did not reach the canceled column-sidecar read")
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("worker did not stop after cancellation")
+	}
+	require.Equal(t, int32(1), columnStorage.targetReads.Load())
+	require.Zero(t, columnStorage.targetRemoves.Load())
+	d.recoveringMutex.Lock()
+	_, owned := d.recoveryRequests[root]
+	d.recoveringMutex.Unlock()
+	require.False(t, owned)
+	d.recoveryRetryMutex.Lock()
+	_, delayed := d.recoveryRetries[root]
+	d.recoveryRetryMutex.Unlock()
+	require.False(t, delayed)
+	_, err := baseColumnStorage.ReadColumnSidecarByColumnIndex(t.Context(), block.Block.Slot, root, 0)
+	require.NoError(t, err)
 	stored, found, err := blobStorage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
 	require.False(t, found)
