@@ -152,6 +152,8 @@ type BaseAPI struct {
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 	_preMergeData             atomic.Pointer[preMergeVerdict]
 	_preMergeDataTTL          time.Duration
+	_preMergeProbeMu          sync.Mutex
+	_preMergeProbeInFlight    *preMergeProbe
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -462,6 +464,16 @@ type preMergeVerdict struct {
 	at    time.Time
 }
 
+// preMergeProbe is a probe other callers can wait on rather than repeat. Its result is
+// readable once done is closed.
+type preMergeProbe struct {
+	done  chan struct{}
+	holds bool
+	err   error
+}
+
+var errPreMergeProbeAbandoned = errors.New("pre-merge block data probe did not complete")
+
 const defaultPreMergeDataTTL = 30 * time.Second
 
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
@@ -522,19 +534,65 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // available block answers on its own: expiry keeps pre-merge headers and bodies, and
 // the transaction segment spanning the merge point reaches below it. Only a readable
 // transaction of an early block does. The answer is availability rather than policy, so
-// it is cached for a short TTL in both directions instead of being settled once.
+// it is cached for a short TTL in both directions instead of being settled once. One
+// probe answers every caller waiting on it: each one costs several backend reads under
+// an open read transaction, so refreshing the TTL must not fan out with the load.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
-	if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
-		return v.holds, nil
+	for {
+		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
+			return v.holds, nil
+		}
+		probe, leader := api.joinPreMergeProbe()
+		if leader {
+			return api.runPreMergeProbe(ctx, tx, mergeHeight, probe)
+		}
+		select {
+		case <-probe.done:
+			if probe.err == nil {
+				return probe.holds, nil
+			}
+			// The probe reads through the transaction of the caller that ran it, so its
+			// failure is about that caller rather than about the datadir: ask again here.
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
 	}
-	holds, decided, err := api.probePreMergeBlockData(ctx, tx, mergeHeight)
-	if err != nil {
-		return false, err
-	}
-	if decided {
+}
+
+// runPreMergeProbe answers the callers waiting on probe. A probe that dies without a
+// result must still release them, and with an error rather than its zero verdict, so
+// that the next caller asks again instead of taking an answer nobody produced.
+func (api *BaseAPI) runPreMergeProbe(ctx context.Context, tx kv.Tx, mergeHeight uint64, probe *preMergeProbe) (bool, error) {
+	holds, decided := false, false
+	err := errPreMergeProbeAbandoned
+	defer func() { api.finishPreMergeProbe(probe, holds, err) }()
+
+	holds, decided, err = api.probePreMergeBlockData(ctx, tx, mergeHeight)
+	if err == nil && decided {
 		api._preMergeData.Store(&preMergeVerdict{holds: holds, at: time.Now()})
 	}
-	return holds, nil
+	return holds, err
+}
+
+// joinPreMergeProbe registers this caller as the one running the probe, or hands back
+// the probe already in flight. The lock covers that bookkeeping alone, never the probe.
+func (api *BaseAPI) joinPreMergeProbe() (*preMergeProbe, bool) {
+	api._preMergeProbeMu.Lock()
+	defer api._preMergeProbeMu.Unlock()
+	if probe := api._preMergeProbeInFlight; probe != nil {
+		return probe, false
+	}
+	probe := &preMergeProbe{done: make(chan struct{})}
+	api._preMergeProbeInFlight = probe
+	return probe, true
+}
+
+func (api *BaseAPI) finishPreMergeProbe(probe *preMergeProbe, holds bool, err error) {
+	api._preMergeProbeMu.Lock()
+	api._preMergeProbeInFlight = nil
+	api._preMergeProbeMu.Unlock()
+	probe.holds, probe.err = holds, err
+	close(probe.done)
 }
 
 // probePreMergeBlockData answers holdsPreMergeBlockData from what is on disk. It reports
