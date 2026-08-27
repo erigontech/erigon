@@ -112,9 +112,10 @@ const (
 
 	// What is left of entryLoc's uint32 once the offset has dataChunkBits,
 	// less one for the bias. Sort slices a key out of its chunk, so only a
-	// value may outgrow one.
+	// value may outgrow one. Exported because Put panics past it, so callers
+	// that size their own keys have to check against it.
 	keyLenBits = 32 - dataChunkBits
-	maxKeyLen  = 1<<keyLenBits - 2
+	MaxKeyLen  = 1<<keyLenBits - 2
 )
 
 // dataChunks are shared by all sortableBuffer instances: a buffer takes chunks as
@@ -296,7 +297,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	off := int(b.curEnd)
 	// One test for both, so the fast path holds no call and Put keeps its
 	// arguments in registers.
-	if lk > maxKeyLen || off+n+entryLocSize > int(b.curTop) {
+	if lk > MaxKeyLen || off+n+entryLocSize > int(b.curTop) {
 		b.putSlow(k, v)
 		return
 	}
@@ -325,8 +326,8 @@ func (b *sortableBuffer) Put(k, v []byte) {
 //
 //go:noinline
 func (b *sortableBuffer) putSlow(k, v []byte) {
-	if len(k) > maxKeyLen {
-		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
+	if len(k) > MaxKeyLen {
+		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), MaxKeyLen))
 	}
 	b.nextChunk(entryHeaderSize + len(k) + len(v))
 	b.Put(k, v)

@@ -1827,18 +1827,18 @@ func TestSortableBufferChunkBoundary(t *testing.T) {
 func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
-	require.Panics(t, func() { buf.Put(make([]byte, maxKeyLen+1), []byte("v")) })
+	require.Panics(t, func() { buf.Put(make([]byte, MaxKeyLen+1), []byte("v")) })
 
-	// maxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
-	buf.Put(make([]byte, maxKeyLen), []byte("v"))
+	// MaxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
+	buf.Put(make([]byte, MaxKeyLen), []byte("v"))
 	buf.Put([]byte{0x01}, make([]byte, dataChunkSize+7))
 	buf.Put(nil, nil)
 	require.Equal(t, 3, buf.Len())
 
-	// Sorted: the nil key, then the all-zero key of maxKeyLen, then 0x01.
+	// Sorted: the nil key, then the all-zero key of MaxKeyLen, then 0x01.
 	buf.Sort()
 	got := drainBuffer(buf)
-	require.Len(t, got[1].key, maxKeyLen)
+	require.Len(t, got[1].key, MaxKeyLen)
 	require.Nil(t, got[0].key)
 }
 
