@@ -557,19 +557,6 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
 
-		// ConnectWithPeer refuses banned peers, but it only covers dials we initiate;
-		// connection events reach here either way.
-		if s.peers.BanStatus(peerId) {
-			s.closePeer(peerId)
-			return
-		}
-		// One handshake per peer at a time: a burst of events would otherwise start one
-		// each, all completing before the failure count could reach the ban threshold.
-		if !s.handshakeGate.tryAcquire(peerId) {
-			return
-		}
-		defer s.handshakeGate.release(peerId)
-
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
 		peerHelpsSubnets := false
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
@@ -596,31 +583,57 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			return
 		}
 
-		valid, err := s.handshaker.ValidatePeer(s.ctx, peerId)
-		if err != nil {
-			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
-			// The peer may still work for gossip even if status exchange failed.
-			log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
-		}
-
-		if !valid && err == nil {
-			// Handshake succeeded but fork digest mismatched — peer is on a different fork.
-			// Must disconnect to avoid receiving incompatible blocks.
-			log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
-			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.closePeer(peerId)
-			s.peers.RemovePeer(peerId)
-			return
-		}
-
-		if !valid {
-			// Handshake had a transport error AND returned invalid — keep anyway.
-			s.peers.RecordHandshakeFailure(peerId)
-		} else {
-			// we were able to successfully connect, so add this peer to our pool
-			s.peers.AddPeer(peerId)
-
-			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
-		}
+		s.exchangeStatus(peerId,
+			func() (bool, error) { return s.handshaker.ValidatePeer(s.ctx, peerId) },
+			s.closePeer,
+			func(id peer.ID) {
+				s.p2p.Host().Peerstore().RemovePeer(id)
+				s.closePeer(id)
+				s.peers.RemovePeer(id)
+			})
 	}()
+}
+
+// exchangeStatus runs one status handshake for peerId and reports whether the peer was kept.
+//
+// Only one handshake per peer runs at a time: a burst of connection events would otherwise
+// start one each, all completing before the failure count could reach the pool's ban
+// threshold. The ban is read inside that serialized section, because a handshake that
+// completed while this event waited may have installed it — and ConnectWithPeer only
+// refuses banned peers on dials we initiate, not on events that arrive anyway.
+func (s *Sentinel) exchangeStatus(peerId peer.ID, validate func() (bool, error), closePeer, dropPeer func(peer.ID)) bool {
+	if !s.handshakeGate.tryAcquire(peerId) {
+		return false
+	}
+	defer s.handshakeGate.release(peerId)
+
+	if s.peers.BanStatus(peerId) {
+		closePeer(peerId)
+		return false
+	}
+
+	valid, err := validate()
+	if err != nil {
+		// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
+		// The peer may still work for gossip even if status exchange failed.
+		log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+	}
+
+	if !valid && err == nil {
+		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+		// Must disconnect to avoid receiving incompatible blocks.
+		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
+		dropPeer(peerId)
+		return false
+	}
+
+	if !valid {
+		// Handshake had a transport error AND returned invalid — keep anyway.
+		s.peers.RecordHandshakeFailure(peerId)
+		return true
+	}
+	// we were able to successfully connect, so add this peer to our pool
+	s.peers.AddPeer(peerId)
+	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
+	return true
 }
