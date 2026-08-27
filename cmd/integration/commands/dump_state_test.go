@@ -708,39 +708,3 @@ func TestWithExperimentalCommitmentFollowsErigonDefault(t *testing.T) {
 	require.True(t, statecfg.ExperimentalParallelCommitment,
 		"integration ignored erigon's default and would run the sequential trie")
 }
-
-// TestExecCommandsExposeParallelCommitment pins the flag on every integration
-// command that computes commitment. Without it the flag is unknown on stage_exec,
-// so integration can only ever run the sequential trie.
-func TestExecCommandsExposeParallelCommitment(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cmd  *cobra.Command
-	}{
-		{name: "stage_exec", cmd: cmdStageExec},
-		{name: "state_stages", cmd: stateStages},
-		{name: "loop_exec", cmd: loopExecCmd},
-		{name: "commitment_rebuild", cmd: cmdCommitmentRebuild},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.NotNil(t, tc.cmd.Flags().Lookup(utils.ExperimentalParallelCommitmentFlag.Name),
-				"command cannot select the parallel trie")
-		})
-	}
-}
-
-// TestWithExperimentalCommitmentFollowsErigonDefault pins integration's default to
-// erigon's own flag default, so flipping it in one place cannot leave the two
-// binaries computing commitment with different tries.
-func TestWithExperimentalCommitmentFollowsErigonDefault(t *testing.T) {
-	defer func(v bool) { utils.ExperimentalParallelCommitmentFlag.Value = v }(utils.ExperimentalParallelCommitmentFlag.Value)
-	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
-
-	utils.ExperimentalParallelCommitmentFlag.Value = true
-	statecfg.ExperimentalParallelCommitment = false
-
-	withExperimentalCommitment(&cobra.Command{Use: "probe"})
-
-	require.True(t, statecfg.ExperimentalParallelCommitment,
-		"integration ignored erigon's default and would run the sequential trie")
-}
