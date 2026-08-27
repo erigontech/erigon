@@ -327,6 +327,33 @@ func TestTrackedSkippedFullBlockCapacityDrainResumesAfterPartialRecovery(t *test
 	require.Equal(t, byte(1), tracker.pending[0].Root[0])
 }
 
+func TestTrackedSkippedFullBlockCapacityDrainChecksPastUnavailableBatch(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	for i := range tracker.pending {
+		tracker.pending[i].Root[0] = byte(i + 1)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts := 0
+
+	completed := relieveTrackedHistoryBackfill(ctx, tracker, 0,
+		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			attempts++
+			if pending[0].Root[0] == 1 {
+				if attempts > 1 {
+					cancel()
+				}
+				return pending
+			}
+			return nil
+		})
+
+	require.True(t, completed)
+	require.Equal(t, 2, attempts)
+	require.Len(t, tracker.pending, 56)
+	require.Equal(t, byte(1), tracker.pending[0].Root[0])
+}
+
 func TestTrackedSkippedFullBlockRecoveryStreamsLongHistoryWithinBound(t *testing.T) {
 	tracker := &skippedFullBlockTrackerStub{}
 	for admitted := 0; admitted < 256; {

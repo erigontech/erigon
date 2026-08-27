@@ -478,13 +478,21 @@ func relieveTrackedHistoryBackfill(
 			return false
 		}
 		pending := tracker.SkippedFullBlocks()
-		batchSize := min(skippedEnvelopeRecoveryBatchSize, len(pending))
-		failed := recoverEnvelopes(ctx, pending[:batchSize])
-		markTrackedHistoryRecovery(tracker, pending[:batchSize], failed)
+		madeProgress := false
+		for start := 0; start < len(pending) && tracker.SkippedFullBlocksAtCapacity(); start += skippedEnvelopeRecoveryBatchSize {
+			if err := ctx.Err(); err != nil {
+				return false
+			}
+			end := min(start+skippedEnvelopeRecoveryBatchSize, len(pending))
+			batch := pending[start:end]
+			failed := recoverEnvelopes(ctx, batch)
+			markTrackedHistoryRecovery(tracker, batch, failed)
+			madeProgress = madeProgress || len(failed) < len(batch)
+		}
 		if !tracker.SkippedFullBlocksAtCapacity() {
 			return true
 		}
-		if len(failed) < batchSize || retryInterval <= 0 {
+		if madeProgress || retryInterval <= 0 {
 			continue
 		}
 		retryTimer := time.NewTimer(retryInterval)
