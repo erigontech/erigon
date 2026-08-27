@@ -65,6 +65,27 @@ type switchableProbeSentinel struct {
 	calls    atomic.Int32
 }
 
+type emptyThenBlockSentinel struct {
+	sentinelproto.SentinelClient
+	response      []byte
+	emptyReturned chan struct{}
+	allowBlock    chan struct{}
+	calls         atomic.Int32
+}
+
+func (s *emptyThenBlockSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	if s.calls.Add(1) == 1 {
+		close(s.emptyReturned)
+		return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
+	}
+	select {
+	case <-s.allowBlock:
+		return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: "block-peer"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (s *switchableProbeSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.calls.Add(1)
 	if !s.healthy.Load() {
@@ -203,6 +224,57 @@ func TestForwardRequestMoreCancelsOutstandingRequestsWhenBatchExpires(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("batch expiration returned without canceling the outstanding request")
 	}
+}
+
+func TestForwardRequestMoreEmptyResponseKeepsUnknownRange(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = time.Second
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+	})
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = 11
+	digest, err := clock.ComputeForkDigest(cfg.GenesisEpoch)
+	require.NoError(t, err)
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+
+	sentinel := &emptyThenBlockSentinel{
+		response:      response.Bytes(),
+		emptyReturned: make(chan struct{}),
+		allowBlock:    make(chan struct{}),
+	}
+	rpcClient, rpcCfg := newContextBlockingBeaconRPC(t.Context(), sentinel)
+	downloader := NewForwardBeaconDownloader(t.Context(), rpcClient, rpcCfg)
+	downloader.SetHighestProcessedSlot(10)
+	processed := make(chan struct{}, 1)
+	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed <- struct{}{}
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(t.Context())
+		close(done)
+	}()
+	<-sentinel.emptyReturned
+	require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
+	close(sentinel.allowBlock)
+	select {
+	case <-processed:
+	case <-time.After(time.Second):
+		t.Fatal("valid response for the unknown range was not processed")
+	}
+	<-done
+	require.Equal(t, uint64(11), downloader.GetHighestProcessedSlot())
 }
 
 func TestForwardRequestMoreBoundsActiveProbes(t *testing.T) {
@@ -420,7 +492,7 @@ func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
 	require.Equal(t, uint64(1), downloader.GetHighestProcessedSlot())
 }
 
-func TestForwardRequestMoreDoesNotApplyStaleHTTPFallbackAfterP2PProgress(t *testing.T) {
+func TestForwardRequestMoreEmptyP2PDoesNotInvalidateHTTPFallback(t *testing.T) {
 	previousInterval := forwardBeaconRequestInterval
 	previousTimeout := forwardBeaconRequestTimeout
 	previousFallbackDelay := forwardBeaconFallbackDelay
@@ -443,6 +515,8 @@ func TestForwardRequestMoreDoesNotApplyStaleHTTPFallbackAfterP2PProgress(t *test
 	fallbackStarted := make(chan struct{})
 	releaseFallback := make(chan struct{})
 	var fallbackOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFallback) }) }
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackOnce.Do(func() { close(fallbackStarted) })
 		<-releaseFallback
@@ -453,7 +527,10 @@ func TestForwardRequestMoreDoesNotApplyStaleHTTPFallbackAfterP2PProgress(t *test
 		w.Header().Set("Eth-Consensus-Version", "phase0")
 		_, _ = w.Write(encodedBlock)
 	}))
-	t.Cleanup(server.Close)
+	t.Cleanup(func() {
+		release()
+		server.Close()
+	})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -478,16 +555,14 @@ func TestForwardRequestMoreDoesNotApplyStaleHTTPFallbackAfterP2PProgress(t *test
 	case <-time.After(time.Second):
 		t.Fatal("HTTP fallback did not start")
 	}
-	require.Eventually(t, func() bool {
-		return downloader.GetHighestProcessedSlot() > 10
-	}, time.Second, time.Millisecond, "empty P2P response did not advance the cursor")
-	close(releaseFallback)
+	require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot(), "empty P2P response advanced the cursor")
+	release()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("RequestMore did not finish")
 	}
-	require.Zero(t, processCalls.Load(), "stale HTTP result was processed after P2P advanced the cursor")
+	require.Equal(t, int32(1), processCalls.Load(), "valid HTTP fallback was discarded after an empty P2P response")
 }
 
 func TestForwardRequestMoreBoundsPreferredHTTPFallback(t *testing.T) {

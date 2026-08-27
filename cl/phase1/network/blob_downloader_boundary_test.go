@@ -82,9 +82,14 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	downloader := newBoundaryDownloader(t, 20, 0, 0, reader)
 	downloader.sn = snapshot
 	downloader.addRetrySlot(1)
+	notified := false
+	downloader.SetNotifyBlobBackfilled(func() { notified = true })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{1, 20, 19, 18, 17, 16, 15}, reader.slots)
+	require.Empty(t, downloader.retryRanges)
+	require.True(t, downloader.backfillCompleted.Load())
+	require.True(t, notified)
 }
 
 func TestBlobHistoryDownloaderRunsWithSinglePeer(t *testing.T) {
@@ -268,13 +273,17 @@ func TestBlobHistoryDownloaderCancellationDuringRetryStopsBeforeRecentScan(t *te
 	downloader := newBoundaryDownloader(t, head, 0, recentFloor, reader)
 	downloader.ctx = ctx
 	downloader.addRetrySlot(retrySlot)
+	notified := false
+	downloader.SetNotifyBlobBackfilled(func() { notified = true })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{retrySlot}, reader.slots)
 	require.Equal(t, []blobRetryRange{{start: retrySlot, end: retrySlot, cursor: retrySlot}}, downloader.retryRanges)
+	require.False(t, downloader.backfillCompleted.Load())
+	require.False(t, notified)
 }
 
-func TestBlobHistoryDownloaderFailedRecoveryContinuesScanAndNotifies(t *testing.T) {
+func TestBlobHistoryDownloaderFailedRecoveryContinuesScanWithoutNotifying(t *testing.T) {
 	const (
 		head   = uint64(100)
 		target = uint64(80)
@@ -298,8 +307,9 @@ func TestBlobHistoryDownloaderFailedRecoveryContinuesScanAndNotifies(t *testing.
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, target, reader.slots[len(reader.slots)-1])
-	require.True(t, notified)
-	require.True(t, downloader.backfillCompleted.Load())
+	require.False(t, notified)
+	require.False(t, downloader.backfillCompleted.Load())
+	require.NotEmpty(t, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderNonArchiveSecondPassScansRecentRange(t *testing.T) {

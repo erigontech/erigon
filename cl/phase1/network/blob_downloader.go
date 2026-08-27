@@ -341,7 +341,13 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 	b.nextBackfillTargetSlot = max(b.denebStartSlot, startSlot-min(startSlot, b.beaconCfg.SlotsPerEpoch*2))
 
-	b.backfillCompleted.Store(true)
+	if len(b.retryRanges) != 0 {
+		b.backfillCompleted.Store(false)
+		return nil
+	}
+	if !b.backfillCompleted.CompareAndSwap(false, true) {
+		return nil
+	}
 
 	b.mu.RLock()
 	notify := b.notifyBlobBackfilled

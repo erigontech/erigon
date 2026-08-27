@@ -929,9 +929,9 @@ func (d *peerdas) clearDelayedBlobRecoveries() {
 
 func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 	d.recoveringMutex.Lock()
-	defer d.recoveringMutex.Unlock()
 	d.initBlobRecoveryOwnershipLocked()
 	if request.slot < d.recoveryPruneFloor {
+		d.recoveringMutex.Unlock()
 		return nil
 	}
 	if _, ok := d.isRecovering[request.blockRoot]; ok {
@@ -940,6 +940,7 @@ func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 			d.recoveryRequests[request.blockRoot] = request
 			d.recoveryGenerations[request.blockRoot]++
 		}
+		d.recoveringMutex.Unlock()
 		return nil
 	}
 	d.isRecovering[request.blockRoot] = false
@@ -948,10 +949,12 @@ func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 	d.trackBlobRecoverySlotLocked(request)
 	select {
 	case d.recoverBlobsQueue <- request:
+		d.recoveringMutex.Unlock()
 		return nil
 	default:
-		d.removeBlobRecoveryOwnershipLocked(request.blockRoot)
-		return errors.New("failed to schedule recover: capacity reached")
+		d.recoveringMutex.Unlock()
+		d.delayBlobRecovery(request)
+		return nil
 	}
 }
 
@@ -1156,6 +1159,10 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 		if err := d.blobStorage.WriteBlobSidecars(ctx, blockRoot, blobSidecars); err != nil {
 			log.Warn("[blobsRecover] failed to write blob sidecars", "err", err, "slot", slot, "blockRoot", blockRoot)
+			if ctx.Err() == nil {
+				d.cacheBlobRecoveryResult(blockRoot, result)
+				return d.delayBlobRecovery(toRecover)
+			}
 			return
 		}
 		d.removeBlobRecoveryResult(blockRoot)
@@ -1188,11 +1195,15 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			}
 			if !exist {
 				blobSize := anyColumnSidecar.Column.Len()
-				sidecar := cltypes.NewDataColumnSidecar()
+				version := d.beaconConfig.GetCurrentStateVersion(slot / d.beaconConfig.SlotsPerEpoch)
+				sidecar := cltypes.NewDataColumnSidecarWithVersion(version)
 				sidecar.Index = columnIndex
-				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
 				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
-				if !isGloas {
+				if isGloas {
+					sidecar.Slot = slot
+					sidecar.BeaconBlockRoot = blockRoot
+				} else {
+					sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
 					sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
 					sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
 				}

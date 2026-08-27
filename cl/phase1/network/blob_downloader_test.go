@@ -180,26 +180,49 @@ func TestBlobHistoryDownloaderMixedBatchCancellationDoesNotStartFulu(t *testing.
 	require.False(t, downloader.processBatch([]*cltypes.SignedBeaconBlock{deneb, fulu}))
 }
 
-func TestBlobHistoryDownloaderIncompleteFuluRecoveryDoesNotBlockScanCompletion(t *testing.T) {
+func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetry(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	peerDas := mock_services.NewMockPeerDas(ctrl)
-	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil)
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
 
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	var countReads atomic.Int32
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, common.Hash) (uint32, error) {
+			if countReads.Add(1) >= 4 {
+				return 1, nil
+			}
+			return 0, nil
+		},
+	).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, gomock.Any()).Return(
+		[]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil,
+	).AnyTimes()
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	downloader.columnBackfillTimeout = 20 * time.Millisecond
-	notified := false
-	downloader.SetNotifyBlobBackfilled(func() { notified = true })
+	downloader.verifyBlobSidecars = func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error {
+		return nil
+	}
+	var notified atomic.Int32
+	downloader.SetNotifyBlobBackfilled(func() { notified.Add(1) })
 
 	require.NoError(t, downloader.downloadOnce(false))
-	require.True(t, notified)
+	require.Zero(t, notified.Load())
+	require.False(t, downloader.backfillCompleted.Load())
+	require.NotEmpty(t, downloader.retryRanges)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, int32(1), notified.Load())
 	require.True(t, downloader.backfillCompleted.Load())
+	require.Empty(t, downloader.retryRanges)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, int32(1), notified.Load())
 }
 
 func TestBlobHistoryDownloaderCompletedFuluRecoveryMeetsDurablePostcondition(t *testing.T) {

@@ -299,20 +299,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						return
 					}
 					if len(responses) == 0 {
-						// Empty response: no blocks in this slot range.
-						// Advance past the requested range so we don't get stuck requesting the same empty range.
-						f.mu.Lock()
-						if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-							f.mu.Unlock()
-							return
+						failures := int(consecutiveFailures.Add(1))
+						if failures >= 5 && f.httpFallbackURL != "" {
+							startHTTPFallback()
 						}
-						newSlot := reqSlot + count
-						if newSlot > f.highestSlotProcessed {
-							log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", newSlot, "peer", peerId)
-							f.highestSlotProcessed = newSlot
-							f.highestSlotUpdateTime = time.Now()
-						}
-						f.mu.Unlock()
+						backoff := min(baseInterval*time.Duration(1<<uint(min(failures, 4))), 5*time.Second)
+						reqInterval.Reset(backoff)
 						return
 					}
 					// Success: reset backoff
