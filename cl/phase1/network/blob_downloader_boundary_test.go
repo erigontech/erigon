@@ -581,6 +581,55 @@ func TestBlobHistoryDownloaderRetryRangeCompressesContiguousSlots(t *testing.T) 
 	require.Equal(t, []blobRetryRange{{start: 0, end: 20, cursor: 0}}, downloader.retryRanges)
 }
 
+func TestBlobHistoryDownloaderResolveRetrySlotClearsVacatedRange(t *testing.T) {
+	newRange := func(slot uint64) blobRetryRange {
+		intervals := newBlobRetryIntervalTree()
+		intervals.ReplaceOrInsert(blobRetryInterval{start: slot, end: slot, cursor: slot})
+		return blobRetryRange{start: slot, end: slot, cursor: slot, intervals: intervals, work: 1}
+	}
+
+	downloader := &BlobHistoryDownloader{retryRanges: make([]blobRetryRange, 3, 4)}
+	downloader.retryRanges[0] = newRange(1)
+	downloader.retryRanges[1] = newRange(2)
+	downloader.retryRanges[2] = newRange(3)
+
+	downloader.resolveRetrySlot(2)
+
+	require.Equal(t, []uint64{1, 3}, []uint64{downloader.retryRanges[0].start, downloader.retryRanges[1].start})
+	for _, released := range downloader.retryRanges[len(downloader.retryRanges):cap(downloader.retryRanges)] {
+		require.Equal(t, blobRetryRange{}, released)
+	}
+
+	empty := &BlobHistoryDownloader{}
+	empty.resolveRetrySlot(1)
+	empty.trimRetryRanges(1)
+	require.Nil(t, empty.retryRanges)
+}
+
+func TestBlobHistoryDownloaderTrimRetryRangesClearsVacatedRanges(t *testing.T) {
+	newRange := func(slots ...uint64) blobRetryRange {
+		intervals := newBlobRetryIntervalTree()
+		for _, slot := range slots {
+			intervals.ReplaceOrInsert(blobRetryInterval{start: slot, end: slot, cursor: slot})
+		}
+		return blobRetryRange{start: slots[0], end: slots[len(slots)-1], cursor: slots[0], intervals: intervals, work: uint64(len(slots))}
+	}
+
+	downloader := &BlobHistoryDownloader{retryRanges: make([]blobRetryRange, 3, 4)}
+	downloader.retryRanges[0] = newRange(1)
+	downloader.retryRanges[1] = newRange(2, 5)
+	downloader.retryRanges[2] = newRange(8)
+
+	downloader.trimRetryRanges(4)
+
+	require.Equal(t, []uint64{5, 8}, []uint64{downloader.retryRanges[0].start, downloader.retryRanges[1].start})
+	require.True(t, downloader.retryRanges[0].contains(5))
+	require.False(t, downloader.retryRanges[0].contains(2))
+	for _, released := range downloader.retryRanges[len(downloader.retryRanges):cap(downloader.retryRanges)] {
+		require.Equal(t, blobRetryRange{}, released)
+	}
+}
+
 func TestBlobHistoryDownloaderResolvedRetrySlotsAreRemovedAroundReadFailure(t *testing.T) {
 	reader := &boundaryBlockReader{errors: map[uint64]error{2: errors.New("retry read failed")}}
 	downloader := newBoundaryDownloader(t, 2, 0, 2, reader)

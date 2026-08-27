@@ -624,7 +624,10 @@ func (b *BlobHistoryDownloader) resolveRetrySlot(slot uint64) {
 			continue
 		}
 		if retryRange.remove(slot) {
-			b.retryRanges = append(b.retryRanges[:i], b.retryRanges[i+1:]...)
+			last := len(b.retryRanges) - 1
+			copy(b.retryRanges[i:], b.retryRanges[i+1:])
+			b.retryRanges[last] = blobRetryRange{}
+			b.retryRanges = b.retryRanges[:last]
 		}
 		return
 	}
@@ -723,6 +726,7 @@ func (b *BlobHistoryDownloader) trimRetryRanges(firstUnfrozenSlot uint64) {
 		}
 		kept = append(kept, retryRange)
 	}
+	clear(b.retryRanges[len(kept):])
 	b.retryRanges = kept
 }
 
