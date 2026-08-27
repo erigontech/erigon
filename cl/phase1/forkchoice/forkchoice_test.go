@@ -64,8 +64,69 @@ func (g *embeddedPtcVoteForkGraph) HasEnvelope(root common.Hash) bool {
 	return g.envelopes[root]
 }
 
-func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotes(t *testing.T) {
+func TestOnBlockFromForwardSyncExpandsEmbeddedPtcVotesForDuplicateValidator(t *testing.T) {
+	committee := make([]uint64, clparams.MaxPtcSize)
+	for i := range committee {
+		committee[i] = uint64(i + 1)
+	}
+	committee[clparams.MaxPtcSize/2] = committee[0]
+	selectedPositions := make([]int, clparams.MaxPtcSize/2)
+	for i := range selectedPositions {
+		selectedPositions[i] = i
+	}
+
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions)
+	require.True(t, store.payloadTimeliness(anchorRoot, false))
+	require.True(t, store.payloadDataAvailability(anchorRoot, false))
+	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
+	head, err := store.GetHeadNode()
+	require.NoError(t, err)
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+}
+
+func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotesForUniqueValidators(t *testing.T) {
+	committee := make([]uint64, clparams.MaxPtcSize)
+	for i := range committee {
+		committee[i] = uint64(i + 1)
+	}
+	selectedPositions := make([]int, clparams.MaxPtcSize/2+1)
+	for i := range selectedPositions {
+		selectedPositions[i] = i
+	}
+
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions)
+	require.True(t, store.payloadTimeliness(anchorRoot, false))
+	require.True(t, store.payloadDataAvailability(anchorRoot, false))
+	head, err := store.GetHeadNode()
+	require.NoError(t, err)
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+}
+
+func TestOnBlockFromForwardSyncUsesMaxPtcSizeForZeroConfig(t *testing.T) {
+	committee := make([]uint64, clparams.MaxPtcSize)
+	for i := range committee {
+		committee[i] = uint64(i + 1)
+	}
+
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)})
+	votes := store.payloadTimelinessVoteValue(anchorRoot)
+	require.Equal(t, int8(-1), votes[clparams.MaxPtcSize-1])
+	require.Equal(t, int8(1), votes[clparams.MaxPtcSize-2])
+}
+
+func runEmbeddedPtcVoteBlock(
+	t *testing.T,
+	configuredPtcSize uint64,
+	committee []uint64,
+	selectedPositions []int,
+) (*ForkChoiceStore, common.Hash, *cltypes.SignedBeaconBlock) {
+	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
+	cfg.PtcSize = configuredPtcSize
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
 	cfg.CapellaForkEpoch = 0
@@ -78,7 +139,16 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotes(t *testing.T) {
 	anchor := state.New(&cfg)
 	anchor.SetVersion(clparams.GloasVersion)
 	require.NoError(t, anchor.SetSlot(1))
-	anchor.SetPtcWindow(solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize)))
+	ptcSize := configuredPtcSize
+	if ptcSize == 0 {
+		ptcSize = clparams.MaxPtcSize
+	}
+	ptcWindow := solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(ptcSize))
+	ptc := ptcWindow.Get(int(cfg.SlotsPerEpoch + anchor.Slot()%cfg.SlotsPerEpoch))
+	for i, validatorIndex := range committee {
+		ptc.Set(i, validatorIndex)
+	}
+	anchor.SetPtcWindow(ptcWindow)
 	anchorRoot, err := anchor.BlockRoot()
 	require.NoError(t, err)
 
@@ -118,9 +188,9 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotes(t *testing.T) {
 	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
 	child.Block.Slot = 2
 	child.Block.ParentRoot = anchorRoot
-	votes := solid.NewBitVector(int(cfg.PtcSize))
-	for i := range int(cfg.PtcSize/2 + 1) {
-		require.NoError(t, votes.SetBitAt(i, true))
+	votes := solid.NewBitVector(int(ptcSize))
+	for _, position := range selectedPositions {
+		require.NoError(t, votes.SetBitAt(position, true))
 	}
 	child.Block.Body.PayloadAttestations.Append(&cltypes.PayloadAttestation{
 		AggregationBits: votes,
@@ -133,14 +203,7 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotes(t *testing.T) {
 	})
 
 	require.NoError(t, store.OnBlock(context.Background(), child, false, false, false))
-	require.True(t, store.payloadTimeliness(anchorRoot, false))
-	require.True(t, store.payloadDataAvailability(anchorRoot, false))
-	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
-	head, err := store.GetHeadNode()
-	require.NoError(t, err)
-	childRoot, err := child.Block.HashSSZ()
-	require.NoError(t, err)
-	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+	return store, anchorRoot, child
 }
 
 type headerOnlyAnchorForkGraph struct {
