@@ -266,6 +266,7 @@ func TestForwardRequestMoreEmptyResponseKeepsUnknownRange(t *testing.T) {
 		close(done)
 	}()
 	<-sentinel.emptyReturned
+	require.Eventually(t, func() bool { return sentinel.calls.Load() >= 3 }, time.Second, time.Millisecond)
 	require.Equal(t, uint64(10), downloader.GetHighestProcessedSlot())
 	close(sentinel.allowBlock)
 	select {

@@ -121,8 +121,8 @@ type BlobHistoryDownloader struct {
 	backfillCompleted atomic.Bool
 	logger            log.Logger
 
-	// notifyBlobBackfilled is called when blob backfilling is complete
-	notifyBlobBackfilled func()
+	// notifyBlobBackfilled is called when blob backfilling completeness changes.
+	notifyBlobBackfilled func(bool)
 
 	mu sync.RWMutex
 }
@@ -168,11 +168,23 @@ func (b *BlobHistoryDownloader) SetHeadSlot(slot uint64) {
 	b.headSlot.Store(slot)
 }
 
-// SetNotifyBlobBackfilled sets the callback for when blob backfilling is complete
-func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify func()) {
+// SetNotifyBlobBackfilled sets the callback for blob backfilling completeness changes.
+func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify func(bool)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.notifyBlobBackfilled = notify
+}
+
+func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
+	if b.backfillCompleted.Swap(completed) == completed {
+		return
+	}
+	b.mu.RLock()
+	notify := b.notifyBlobBackfilled
+	b.mu.RUnlock()
+	if notify != nil {
+		notify(completed)
+	}
 }
 
 // HeadSlot returns the current head slot
@@ -342,20 +354,10 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	b.nextBackfillTargetSlot = max(b.denebStartSlot, startSlot-min(startSlot, b.beaconCfg.SlotsPerEpoch*2))
 
 	if len(b.retryRanges) != 0 {
-		b.backfillCompleted.Store(false)
+		b.setBackfillCompleted(false)
 		return nil
 	}
-	if !b.backfillCompleted.CompareAndSwap(false, true) {
-		return nil
-	}
-
-	b.mu.RLock()
-	notify := b.notifyBlobBackfilled
-	b.mu.RUnlock()
-	if notify != nil {
-		notify()
-	}
-
+	b.setBackfillCompleted(true)
 	return nil
 }
 
@@ -446,6 +448,7 @@ func (b *BlobHistoryDownloader) retryBlock(block *cltypes.SignedBeaconBlock) (bo
 }
 
 func (b *BlobHistoryDownloader) addRetrySlot(slot uint64) {
+	b.setBackfillCompleted(false)
 	shard := slot >> blobRetryShardShift
 	index := sort.Search(len(b.retryRanges), func(i int) bool {
 		return b.retryRanges[i].start>>blobRetryShardShift >= shard

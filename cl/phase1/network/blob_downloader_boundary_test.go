@@ -83,7 +83,7 @@ func TestBlobHistoryDownloaderRefreshesFrozenBoundaryAfterRetry(t *testing.T) {
 	downloader.sn = snapshot
 	downloader.addRetrySlot(1)
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func() { notified = true })
+	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{1, 20, 19, 18, 17, 16, 15}, reader.slots)
@@ -124,13 +124,67 @@ func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	downloader.rpc = peers
 	downloader.blobStorage = blobStorage
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func() { notified = true })
+	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots)
 	require.Zero(t, peers.requests)
 	require.False(t, notified)
 	require.Zero(t, downloader.nextBackfillTargetSlot)
+}
+
+func TestBlobHistoryDownloaderNewRetryRevokesPriorCompletionBeforeCancellationReturn(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, []cltypes.ColumnSyncableSignedBlock) error {
+			cancel()
+			return context.Canceled
+		},
+	)
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = 20
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
+	downloader.ctx = ctx
+	downloader.blobStorage = blobStorage
+	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+	downloader.backfillCompleted.Store(true)
+	var downstreamComplete atomic.Bool
+	var transitions atomic.Int32
+	downstreamComplete.Store(true)
+	downloader.SetNotifyBlobBackfilled(func(completed bool) {
+		downstreamComplete.Store(completed)
+		transitions.Add(1)
+	})
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.NotEmpty(t, downloader.retryRanges)
+	require.False(t, downloader.backfillCompleted.Load())
+	require.False(t, downstreamComplete.Load())
+	require.Equal(t, int32(1), transitions.Load())
+	downloader.addRetrySlot(block.GetSlot())
+	require.Equal(t, int32(1), transitions.Load(), "duplicate retry emitted another false transition")
+}
+
+func TestBlobHistoryDownloaderCompletionCallbackCanReplaceItself(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	done := make(chan struct{})
+	downloader.SetNotifyBlobBackfilled(func(bool) {
+		downloader.SetNotifyBlobBackfilled(nil)
+		close(done)
+	})
+
+	go downloader.setBackfillCompleted(true)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("completion callback ran while the callback lock was held")
+	}
 }
 
 func TestBlobHistoryDownloaderRetryRechecksPeersBeforeDenebRequest(t *testing.T) {
@@ -274,7 +328,7 @@ func TestBlobHistoryDownloaderCancellationDuringRetryStopsBeforeRecentScan(t *te
 	downloader.ctx = ctx
 	downloader.addRetrySlot(retrySlot)
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func() { notified = true })
+	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, []uint64{retrySlot}, reader.slots)
@@ -303,7 +357,7 @@ func TestBlobHistoryDownloaderFailedRecoveryContinuesScanWithoutNotifying(t *tes
 	downloader.blobStorage = blobStorage
 	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
 	notified := false
-	downloader.SetNotifyBlobBackfilled(func() { notified = true })
+	downloader.SetNotifyBlobBackfilled(func(completed bool) { notified = completed })
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Equal(t, target, reader.slots[len(reader.slots)-1])
