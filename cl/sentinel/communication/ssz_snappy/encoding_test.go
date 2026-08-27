@@ -19,6 +19,8 @@ package ssz_snappy
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -82,10 +84,10 @@ func TestDecodeAndReadNoForkDigestExactBoundsCompressedInput(t *testing.T) {
 	reader := &countingReader{r: bytes.NewReader(encoded.Bytes())}
 	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
 	require.Error(t, err)
-	require.LessOrEqual(t, reader.bytes, 1+32+8+8/6+1)
+	require.LessOrEqual(t, reader.bytes, 1+32+8+8/6)
 }
 
-func TestDecodeAndReadNoForkDigestExactCompressedLimitIsInclusive(t *testing.T) {
+func TestDecodeAndReadNoForkDigestExactFailsClosedAtCompressedLimit(t *testing.T) {
 	const payloadSize = 8
 	const maxCompressedSize = 32 + payloadSize + payloadSize/6
 
@@ -93,6 +95,9 @@ func TestDecodeAndReadNoForkDigestExactCompressedLimitIsInclusive(t *testing.T) 
 	require.NoError(t, EncodeAndWrite(&encoded, &cltypes.Ping{Id: 1}))
 	prefix, body := encoded.Bytes()[:1], encoded.Bytes()[1:]
 	require.Less(t, len(body), maxCompressedSize)
+	var ping cltypes.Ping
+	require.NoError(t, DecodeAndReadNoForkDigestExact(bytes.NewReader(encoded.Bytes()), &ping, clparams.Phase0Version, payloadSize))
+	require.Equal(t, uint64(1), ping.Id)
 
 	padding := make([]byte, maxCompressedSize-len(body))
 	padding[0] = 0x80
@@ -101,15 +106,13 @@ func TestDecodeAndReadNoForkDigestExactCompressedLimitIsInclusive(t *testing.T) 
 	require.Len(t, exactMax, 1+maxCompressedSize)
 
 	exactMaxReader := &countingReader{r: bytes.NewReader(exactMax)}
-	var ping cltypes.Ping
-	require.NoError(t, DecodeAndReadNoForkDigestExact(exactMaxReader, &ping, clparams.Phase0Version, payloadSize))
-	require.Equal(t, uint64(1), ping.Id)
+	require.ErrorIs(t, DecodeAndReadNoForkDigestExact(exactMaxReader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize), errCompressedPayloadLimit)
 	require.LessOrEqual(t, exactMaxReader.bytes, 1+maxCompressedSize)
 
 	overMax := append(append([]byte{}, exactMax...), 0)
 	reader := &countingReader{r: bytes.NewReader(overMax)}
 	require.ErrorIs(t, DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, payloadSize), errCompressedPayloadLimit)
-	require.LessOrEqual(t, reader.bytes, 1+maxCompressedSize+1)
+	require.LessOrEqual(t, reader.bytes, 1+maxCompressedSize)
 }
 
 func TestDecodeAndReadNoForkDigestExactPreservesTerminalReadError(t *testing.T) {
@@ -117,6 +120,16 @@ func TestDecodeAndReadNoForkDigestExactPreservesTerminalReadError(t *testing.T) 
 	require.NoError(t, EncodeAndWrite(&encoded, &cltypes.Ping{Id: 1}))
 
 	terminalErr := errors.New("terminal read error")
+	reader := &terminalErrorReader{r: bytes.NewReader(encoded.Bytes()), err: terminalErr}
+	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
+	require.ErrorIs(t, err, terminalErr)
+}
+
+func TestDecodeAndReadNoForkDigestExactRejectsWrappedEOF(t *testing.T) {
+	var encoded bytes.Buffer
+	require.NoError(t, EncodeAndWrite(&encoded, &cltypes.Ping{Id: 1}))
+
+	terminalErr := fmt.Errorf("transport failed: %w", io.EOF)
 	reader := &terminalErrorReader{r: bytes.NewReader(encoded.Bytes()), err: terminalErr}
 	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
 	require.ErrorIs(t, err, terminalErr)

@@ -129,7 +129,7 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	var maxCompressedSize uint64
 	if expectedSize != nil {
 		maxCompressedSize = 32 + encodedLn + encodedLn/6
-		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize + 1}
+		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize}
 		compressedInput = compressedReader
 	}
 	sr := snappypool.Reader(compressedInput)
@@ -140,16 +140,16 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 	if expectedSize != nil {
-		if compressedReader.read > maxCompressedSize {
+		if compressedReader.read >= maxCompressedSize {
 			return errCompressedPayloadLimit
 		}
 		compressedBytes := compressedReader.read
 		var extra [1]byte
 		_, err := io.ReadFull(sr, extra[:])
-		if compressedReader.read > maxCompressedSize {
+		if compressedReader.read >= maxCompressedSize {
 			return errCompressedPayloadLimit
 		}
-		if err != nil && !errors.Is(err, io.EOF) {
+		if err != nil && err != io.EOF { //nolint:errorlint // Only bare EOF proves clean stream termination.
 			return fmt.Errorf("unable to verify payload end: %w", err)
 		}
 		if err == nil || compressedReader.read != compressedBytes {
