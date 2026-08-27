@@ -7,6 +7,10 @@ import (
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 )
 
+type PublishedBlockJob interface {
+	Wait(context.Context) error
+}
+
 //go:generate mockgen -typed=true -destination=./mock_services/block_service_mock.go -package=mock_services . BlockService
 type BlockService interface {
 	serviceinterface.Service[*cltypes.SignedBeaconBlock]
@@ -14,7 +18,7 @@ type BlockService interface {
 	CommitGossipReservation(*cltypes.SignedBeaconBlock)
 	ReleaseGossipReservation(*cltypes.SignedBeaconBlock)
 	ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock)
-	SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error)
+	SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) PublishedBlockJob
 }
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_sidecars_service_mock.go -package=mock_services . BlobSidecarsService

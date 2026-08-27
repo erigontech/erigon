@@ -1054,6 +1054,19 @@ func TestGetExecutionPayloadEnvelopeFinalityBoundaryMatrix(t *testing.T) {
 	}
 }
 
+func TestGetExecutionPayloadEnvelopeRejectsZeroSlotsPerEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.HexToHash("0x1234")
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 64, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	handler.beaconChainCfg.SlotsPerEpoch = 0
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	require.NotPanics(t, func() { handler.ServeHTTP(recorder, request) })
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+}
+
 func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMode(t *testing.T) {
 	for _, test := range []struct {
 		validation string

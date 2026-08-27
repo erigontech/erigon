@@ -146,6 +146,13 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	log.Trace("Received execution payload via gossip",
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
+	if envelope.Payload == nil {
+		return errors.New("nil execution payload")
+	}
+	finalizedSlot := s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
+	if envelope.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Payload.SlotNumber, finalizedSlot)
+	}
 
 	// [IGNORE] The envelope's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue payload for processing once the block is retrieved.
@@ -172,15 +179,6 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 	if s.seenEnvelopesCache.Contains(seenKey) {
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
-	}
-
-	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
-	finalizedSlot := s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
-	if envelope.Payload == nil {
-		return errors.New("nil execution payload")
-	}
-	if envelope.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Payload.SlotNumber, finalizedSlot)
 	}
 
 	// Process the execution payload through forkchoice
@@ -329,9 +327,8 @@ func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context,
 	if !ok || block == nil {
 		return nil, false // Block still not here, keep waiting
 	}
-	s.releasePendingEnvelopeBytes(job.ownedBytes)
-
 	return func() {
+		s.releasePendingEnvelopeBytes(job.ownedBytes)
 		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
 			log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
 		}

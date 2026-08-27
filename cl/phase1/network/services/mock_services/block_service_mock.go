@@ -15,6 +15,7 @@ import (
 
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	services "github.com/erigontech/erigon/cl/phase1/network/services"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -267,9 +268,11 @@ func (c *MockBlockServiceScheduleBlockForLaterProcessingCall) DoAndReturn(f func
 }
 
 // SchedulePublishedBlockForLaterProcessing mocks base method.
-func (m *MockBlockService) SchedulePublishedBlockForLaterProcessing(arg0 *cltypes.SignedBeaconBlock, arg1 func(context.Context) error) {
+func (m *MockBlockService) SchedulePublishedBlockForLaterProcessing(arg0 *cltypes.SignedBeaconBlock, arg1 func(context.Context) error) services.PublishedBlockJob {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "SchedulePublishedBlockForLaterProcessing", arg0, arg1)
+	ret := m.ctrl.Call(m, "SchedulePublishedBlockForLaterProcessing", arg0, arg1)
+	ret0, _ := ret[0].(services.PublishedBlockJob)
+	return ret0
 }
 
 // SchedulePublishedBlockForLaterProcessing indicates an expected call of SchedulePublishedBlockForLaterProcessing.
@@ -285,19 +288,19 @@ type MockBlockServiceSchedulePublishedBlockForLaterProcessingCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) Return() *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
-	c.Call = c.Call.Return()
+func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) Return(arg0 services.PublishedBlockJob) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) Do(f func(*cltypes.SignedBeaconBlock, func(context.Context) error)) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) Do(f func(*cltypes.SignedBeaconBlock, func(context.Context) error) services.PublishedBlockJob) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock, func(context.Context) error)) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock, func(context.Context) error) services.PublishedBlockJob) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

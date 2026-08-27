@@ -143,6 +143,7 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
+	ValidateBlockForPublishing(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) error
 	// [New in Gloas:EIP7732] OnExecutionPayload processes an execution payload envelope from the builder.
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL

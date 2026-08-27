@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -86,12 +87,111 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+var ErrBlockInvalid = errors.New("beacon block is permanently invalid")
+
+var errBlockAtFinalizedHorizon = errors.New("beacon block is at or below the finalized horizon")
+
+func invalidBlockError(err error) error {
+	return fmt.Errorf("%w: %w", ErrBlockInvalid, err)
+}
+
+func invalidKzgCommitmentsError(err error) error {
+	return invalidBlockError(fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err))
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	return f.onBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability, false)
 }
 
 func (f *ForkChoiceStore) OnBlockWithEquivocationCheck(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	return f.onBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability, true)
+}
+
+func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return invalidBlockError(errors.New("missing beacon block"))
+	}
+	f.mu.RLock()
+	knownRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		f.mu.RUnlock()
+		return invalidBlockError(err)
+	}
+	if _, known := f.forkGraph.GetHeader(knownRoot); known {
+		stored, ok := f.forkGraph.GetBlock(knownRoot)
+		if !ok || stored == nil || stored.Block == nil || stored.Version() != block.Version() || stored.Signature != block.Signature {
+			f.mu.RUnlock()
+			return invalidBlockError(errors.New("published block does not match the validated block for its root"))
+		}
+		if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, knownRoot) {
+			f.mu.RUnlock()
+			return invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
+		}
+		f.mu.RUnlock()
+		return nil
+	}
+	blockRoot, _, err := f.validateBlockAdmissionLocked(block, rejectEquivocation)
+	if err != nil {
+		f.mu.RUnlock()
+		if errors.Is(err, errBlockAtFinalizedHorizon) {
+			return invalidBlockError(err)
+		}
+		return err
+	}
+	if _, known := f.forkGraph.GetHeader(blockRoot); known {
+		f.mu.RUnlock()
+		return nil
+	}
+	parentState, err := f.forkGraph.GetState(block.Block.ParentRoot, true)
+	f.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if parentState == nil {
+		return ErrMissingSegment
+	}
+	if err := transition.TransitionState(parentState, block, nil, true); err != nil {
+		return invalidBlockError(err)
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) (common.Hash, clparams.StateVersion, error) {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return common.Hash{}, 0, invalidBlockError(err)
+	}
+	root := common.Hash(blockRoot)
+	if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, root) {
+		return common.Hash{}, 0, invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
+	}
+	if f.Slot() < block.Block.Slot {
+		return common.Hash{}, 0, invalidBlockError(errors.New("block is too early compared to current_slot"))
+	}
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
+	if block.Block.Slot <= finalizedSlot {
+		return common.Hash{}, 0, errBlockAtFinalizedHorizon
+	}
+	if ancestorNode := f.getAncestor(ForkChoiceNode{Root: block.Block.ParentRoot, PayloadStatus: cltypes.PayloadStatusPending}, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
+		return common.Hash{}, 0, invalidBlockError(ErrNotFinalizedDescendant)
+	}
+	if !f.beaconCfg.ForkSchemaMatchesSlot(block.Block.Slot, block.Version()) {
+		return common.Hash{}, 0, invalidBlockError(ErrForkSchemaSlotMismatch)
+	}
+	blockVersion := f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(block.Block.Slot))
+	if blockVersion >= clparams.GloasVersion {
+		if err := f.validateParentPayloadPath(block.Block); err != nil {
+			if errors.Is(err, ErrParentEnvelopePending) {
+				return common.Hash{}, 0, err
+			}
+			return common.Hash{}, 0, invalidBlockError(err)
+		}
+	}
+	return root, blockVersion, nil
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
@@ -104,52 +204,34 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 	}()
 	start := time.Now()
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return invalidBlockError(errors.New("missing beacon block"))
 	}
-	if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, blockRoot) {
-		return errors.New("block conflicts with a previously validated proposal")
+	knownRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return invalidBlockError(err)
 	}
 	if block.Version() >= clparams.GloasVersion {
-		if _, ok := f.forkGraph.GetHeader(blockRoot); ok {
+		if _, known := f.forkGraph.GetHeader(knownRoot); known {
+			if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, knownRoot) {
+				return invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
+			}
 			return nil
 		}
 	}
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
-	// Use the store's current slot (set via OnTick) to validate the block is not from the future.
-	// The spec says: assert get_current_slot(store) >= block.slot
-	if f.Slot() < block.Block.Slot {
-		return errors.New("block is too early compared to current_slot")
-	}
-
-	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-	// After checkpoint sync, the anchor block may sit inside (not at the start of)
-	// the finalized epoch. The fork graph only contains the anchor and its descendants,
-	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
-	// so the descendant check stays within the fork graph's horizon.
-	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
-		finalizedSlot = anchorSlot
-	}
-	if block.Block.Slot <= finalizedSlot {
+	blockRoot, blockVersion, err := f.validateBlockAdmissionLocked(block, rejectEquivocation)
+	if errors.Is(err, errBlockAtFinalizedHorizon) {
 		return nil
 	}
-	// Check block is a descendant of the finalized block at the checkpoint finalized slot
-	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
-		return ErrNotFinalizedDescendant
+	if err != nil {
+		return err
 	}
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
-
-	if !f.beaconCfg.ForkSchemaMatchesSlot(block.Block.Slot, block.Version()) {
-		return ErrForkSchemaSlotMismatch
-	}
 
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
-	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
@@ -160,11 +242,6 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			return err
 		}
 		headBeforeBlock = head.Root
-	}
-	if isGloas {
-		if err := f.validateParentPayloadPath(block.Block); err != nil {
-			return err
-		}
 	}
 
 	// Pre-GLOAS execution payload processing.
@@ -239,7 +316,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
 			if block.Version() >= clparams.DenebVersion {
 				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
-					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
+					return invalidKzgCommitmentsError(err)
 				}
 			}
 			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
@@ -267,7 +344,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
 				}
-				return errors.New("block is invalid")
+				return invalidBlockError(errors.New("execution payload is invalid"))
 			case execution_client.PayloadStatusValidated:
 				log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
 				// remove from optimistic candidate
@@ -300,6 +377,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	lastProcessedState, status, err := f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
 	if err != nil {
+		if status == fork_graph.InvalidBlock {
+			return invalidBlockError(err)
+		}
 		return err
 	}
 	monitor.ObserveFullBlockProcessingTime(startStateProcess)

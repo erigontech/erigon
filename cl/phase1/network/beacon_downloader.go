@@ -63,11 +63,14 @@ type ForwardBeaconDownloader struct {
 	beaconCfg             *clparams.BeaconChainConfig
 	httpFallbackURL       string      // beacon API base URL for HTTP fallback when P2P fails
 	httpPreferred         atomic.Bool // set after first HTTP fallback success; skips P2P probing
+	onRequestComplete     func(response *peerAndBlocks, empty bool)
 
 	mu                 sync.Mutex
 	gloasLookahead     *cltypes.SignedBeaconBlock
 	gloasNextUnscanned uint64
 }
+
+const forwardRequestRetryInterval = 300 * time.Millisecond
 
 // SetCurrentSlotSampler limits range requests to slots that can already exist.
 func (f *ForwardBeaconDownloader) SetCurrentSlotSampler(currentSlot func() uint64) {
@@ -167,6 +170,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	count := uint64(32)
 	requestStart, _ := f.nextRequestStart(true)
 	if f.capAtCurrentSlot(requestStart, 1) == 0 {
+		waitForForwardRequestRetry(ctx)
 		return
 	}
 	var atomicResp atomic.Value
@@ -199,6 +203,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		httpStart, hadGloasPending := f.nextRequestStart(false)
 		httpCount := capRequestCount(httpStart, count+10)
 		httpCount = f.capAtCurrentSlot(httpStart, httpCount)
+		if httpCount == 0 {
+			waitForForwardRequestRetry(ctx)
+			return
+		}
 		highestSlotProcessed, _, _ := f.progressSnapshot()
 		httpBlocks, httpErr := fetchBlocksFromBeaconAPI(requestCtx, f.httpFallbackURL, httpStart, httpCount, f.beaconCfg)
 		switch {
@@ -220,47 +228,22 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 			return
 		}
 	}
+	if f.requestBlocksByRange == nil {
+		waitForForwardRequestRetry(ctx)
+		return
+	}
 
 	{
 		probeCtx, cancelProbes := context.WithCancel(requestCtx)
 		var probeWG sync.WaitGroup
 		probeSlots := make(chan struct{}, maxConcurrentForwardBeaconRequests)
 		var httpFallbackRunning atomic.Bool
+		noRequestableRange := make(chan struct{}, 1)
 		stopProbes := func() {
 			cancelProbes()
 			probeWG.Wait()
 		}
 		defer stopProbes()
-		startHTTPFallback := func() {
-			if f.httpFallbackURL == "" || !httpFallbackRunning.CompareAndSwap(false, true) {
-				return
-			}
-			probeWG.Go(func() {
-				latestHighestSlotProcessed, _, _ := f.progressSnapshot()
-				httpStart, hadGloasPending := f.nextRequestStart(false)
-				httpCount := capRequestCount(httpStart, count+10)
-				httpCount = f.capAtCurrentSlot(httpStart, httpCount)
-				httpBlocks, httpErr := fetchBlocksFromBeaconAPI(probeCtx, f.httpFallbackURL, httpStart, httpCount, f.beaconCfg)
-				if probeCtx.Err() != nil {
-					return
-				}
-				if httpErr == nil && len(httpBlocks) > 0 {
-					if commitHTTPBlocks(latestHighestSlotProcessed, httpStart, httpCount, hadGloasPending, httpBlocks) {
-						return
-					}
-				} else if httpErr == nil && hadGloasPending {
-					f.recordEmptyRange(httpStart, httpCount, true, "http-fallback")
-				}
-				httpFallbackRunning.Store(false)
-				if httpErr != nil {
-					log.Debug("[ForwardBeaconDownloader] HTTP fallback also failed", "err", httpErr)
-				}
-			})
-		}
-
-		// Start with a base interval; backoff increases it on repeated failures.
-		baseInterval := forwardBeaconRequestInterval
-		var consecutiveFailures atomic.Int32
 		var requestsMu sync.Mutex
 		inFlightRequests := 0
 		responseAccepted := false
@@ -280,7 +263,6 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		}
 		completeRequest := func(response *peerAndBlocks, empty *emptyRangeResult) {
 			requestsMu.Lock()
-			defer requestsMu.Unlock()
 			if response != nil && !responseAccepted {
 				responseAccepted = true
 				atomicResp.Store(*response)
@@ -295,7 +277,74 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				}
 				pendingEmpty = nil
 			}
+			requestsMu.Unlock()
+			if f.onRequestComplete != nil {
+				f.onRequestComplete(response, empty != nil)
+			}
 		}
+		startHTTPFallback := func() {
+			if f.httpFallbackURL == "" || !httpFallbackRunning.CompareAndSwap(false, true) {
+				return
+			}
+			if !beginRequest() {
+				httpFallbackRunning.Store(false)
+				return
+			}
+			probeWG.Go(func() {
+				var acceptedResponse *peerAndBlocks
+				var emptyResponse *emptyRangeResult
+				defer func() {
+					httpFallbackRunning.Store(false)
+					completeRequest(acceptedResponse, emptyResponse)
+				}()
+
+				latestHighestSlotProcessed, _, _ := f.progressSnapshot()
+				httpStart, hadGloasPending := f.nextRequestStart(false)
+				httpCount := capRequestCount(httpStart, count+10)
+				httpCount = f.capAtCurrentSlot(httpStart, httpCount)
+				if httpCount == 0 {
+					select {
+					case noRequestableRange <- struct{}{}:
+					default:
+					}
+					return
+				}
+				httpBlocks, httpErr := fetchBlocksFromBeaconAPI(probeCtx, f.httpFallbackURL, httpStart, httpCount, f.beaconCfg)
+				if probeCtx.Err() != nil {
+					return
+				}
+				if httpErr == nil && len(httpBlocks) > 0 {
+					currentHighestSlotProcessed, _, _ := f.progressSnapshot()
+					if currentHighestSlotProcessed == latestHighestSlotProcessed {
+						response := peerAndBlocks{
+							peerId:                 "http-fallback",
+							blocks:                 httpBlocks,
+							httpSampledHighestSlot: latestHighestSlotProcessed,
+							fromHTTP:               true,
+							rangeStart:             httpStart,
+							rangeCount:             httpCount,
+							hadGloasPending:        hadGloasPending,
+						}
+						acceptedResponse = &response
+					}
+					return
+				}
+				if httpErr == nil && hadGloasPending {
+					emptyResponse = &emptyRangeResult{
+						lastSlot: lastSlotInRange(httpStart, httpCount),
+						apply:    func() { f.recordEmptyRange(httpStart, httpCount, true, "http-fallback") },
+					}
+					return
+				}
+				if httpErr != nil {
+					log.Debug("[ForwardBeaconDownloader] HTTP fallback also failed", "err", httpErr)
+				}
+			})
+		}
+
+		// Start with a base interval; backoff increases it on repeated failures.
+		baseInterval := forwardBeaconRequestInterval
+		var consecutiveFailures atomic.Int32
 		reqInterval := time.NewTicker(baseInterval)
 		defer reqInterval.Stop()
 		var fallbackTimer *time.Timer
@@ -341,6 +390,13 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed)
 					}
 					reqCount = f.capAtCurrentSlot(reqSlot, reqCount)
+					if reqCount == 0 {
+						select {
+						case noRequestableRange <- struct{}{}:
+						default:
+						}
+						return
+					}
 
 					// leave a warning if we are stuck for more than 90 seconds
 					if time.Since(highestSlotUpdateTime) > 90*time.Second {
@@ -410,6 +466,9 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					}
 					acceptedResponse = &response
 				})
+			case <-noRequestableRange:
+				waitForForwardRequestRetry(ctx)
+				return
 			case <-requestCtx.Done():
 				// No blocks received in time — return to let stale detection run.
 				stopProbes()
@@ -465,26 +524,14 @@ Process:
 		return
 	}
 
-	// For GLOAS blocks, fetch envelopes only for FULL blocks (whose payload was delivered).
-	// EMPTY blocks never have envelopes on the network, so requesting them causes a 30s stall.
-	// We determine FULL/EMPTY by comparing consecutive blocks' bids:
-	// block[i+1].bid.ParentBlockHash == block[i].bid.BlockHash → block[i] is FULL.
-	//
-	// We requested count+1 blocks so the extra lookahead block lets us determine the
-	// last batch block's FULL/EMPTY status accurately. Use all blocks for determination,
-	// then trim to `count` before processing.
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	var nextGloasLookahead *cltypes.SignedBeaconBlock
 	nextGloasCursor := nextSlotAfterRange(resp.rangeStart, resp.rangeCount)
 	if hasGloasBlocks {
-		// Always keep at least 1 block as lookahead so the last processed
-		// block's FULL/EMPTY status is determined from the actual next block
-		// rather than guessed as EMPTY.  Without this, a FULL block at the
-		// batch boundary has its envelope skipped, and the next batch's first
-		// block fails with ErrParentEnvelopePending.
+		// A Gloas block needs its successor to determine whether its envelope exists.
 		processCount := min(int(count), len(processBlocks)-1)
 		nextGloasLookahead = processBlocks[processCount]
-		if processCount+1 < len(processBlocks) {
+		if pid != "http-fallback" || processCount+1 < len(processBlocks) {
 			nextGloasCursor = saturatingIncrement(nextGloasLookahead.Block.Slot)
 		}
 		fullRoots := determineFullGloasRoots(processBlocks, processCount)
@@ -540,6 +587,9 @@ Process:
 		f.httpPreferred.Store(false)
 		return
 	}
+	if f.process == nil {
+		return
+	}
 
 	previousHighestSlotProcessed := f.highestSlotProcessed
 	highestSlotProcessed, err := f.process(previousHighestSlotProcessed, processBlocks, envelopes)
@@ -588,6 +638,15 @@ Process:
 		f.gloasNextUnscanned = max(f.gloasNextUnscanned, nextGloasCursor, saturatingIncrement(nextGloasLookahead.Block.Slot))
 	} else {
 		f.clearGloasScan()
+	}
+}
+
+func waitForForwardRequestRetry(ctx context.Context) {
+	timer := time.NewTimer(forwardRequestRetryInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
 	}
 }
 
@@ -858,19 +917,27 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	client := &http.Client{Timeout: 10 * time.Second}
 	sem := make(chan struct{}, 8) // limit concurrent requests
 	var wg sync.WaitGroup
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	for i := range count {
 		slot := startSlot + i
 		idx := i
 		wg.Go(func() {
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-requestCtx.Done():
+				results[idx].err = requestCtx.Err()
+				return
+			}
 			defer func() { <-sem }()
 
 			results[idx].slot = slot
 			reqURL := fmt.Sprintf("%s/eth/v2/beacon/blocks/%d", baseURL, slot)
-			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+			req, err := http.NewRequestWithContext(requestCtx, "GET", reqURL, nil)
 			if err != nil {
 				results[idx].err = err
+				cancel()
 				return
 			}
 			req.Header.Set("Accept", "application/octet-stream")
@@ -878,12 +945,13 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 			resp, err := client.Do(req)
 			if err != nil {
 				results[idx].err = fmt.Errorf("HTTP block fetch slot %d: %w", slot, err)
+				cancel()
 				return
 			}
-			body, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			body, readErr := readBeaconAPIResponseBody(resp)
 			if readErr != nil {
 				results[idx].err = fmt.Errorf("HTTP block read slot %d: %w", slot, readErr)
+				cancel()
 				return
 			}
 			if resp.StatusCode == http.StatusNotFound {
@@ -891,13 +959,35 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 			}
 			if resp.StatusCode != http.StatusOK {
 				results[idx].err = fmt.Errorf("HTTP block fetch slot %d: status %d", slot, resp.StatusCode)
+				cancel()
 				return
 			}
 
-			version := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+			version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+			if err != nil {
+				results[idx].err = fmt.Errorf("HTTP block version slot %d: %w", slot, err)
+				cancel()
+				return
+			}
+			if err := validateHTTPBlockVersion(beaconCfg, slot, version); err != nil {
+				results[idx].err = err
+				cancel()
+				return
+			}
 			block := cltypes.NewSignedBeaconBlock(beaconCfg, version)
-			if err := block.DecodeSSZ(body, int(version)); err != nil {
+			if err := block.DecodeSSZStrict(body, int(version)); err != nil {
 				results[idx].err = fmt.Errorf("HTTP block decode slot %d: %w", slot, err)
+				cancel()
+				return
+			}
+			if block.Block == nil {
+				results[idx].err = fmt.Errorf("HTTP block slot %d has no message", slot)
+				cancel()
+				return
+			}
+			if block.Block.Slot != slot {
+				results[idx].err = fmt.Errorf("HTTP block slot mismatch: requested %d, received %d", slot, block.Block.Slot)
+				cancel()
 				return
 			}
 			results[idx].block = block
@@ -917,28 +1007,35 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 	return blocks, nil
 }
 
-// httpConsensusVersion maps the Eth-Consensus-Version header to a StateVersion.
-func httpConsensusVersion(header string) clparams.StateVersion {
-	switch strings.ToLower(header) {
-	case "phase0":
-		return clparams.Phase0Version
-	case "altair":
-		return clparams.AltairVersion
-	case "bellatrix":
-		return clparams.BellatrixVersion
-	case "capella":
-		return clparams.CapellaVersion
-	case "deneb":
-		return clparams.DenebVersion
-	case "electra":
-		return clparams.ElectraVersion
-	case "fulu":
-		return clparams.FuluVersion
-	case "gloas", "glamsterdam":
-		return clparams.GloasVersion
-	default:
-		return clparams.GloasVersion
+func readBeaconAPIResponseBody(resp *http.Response) ([]byte, error) {
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(clparams.MaxChunkSize)+1))
+	if err != nil {
+		return nil, err
 	}
+	if uint64(len(body)) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("response body exceeds %d bytes", clparams.MaxChunkSize)
+	}
+	return body, nil
+}
+
+func httpConsensusVersion(header string) (clparams.StateVersion, error) {
+	header = strings.ToLower(strings.TrimSpace(header))
+	if header == "" {
+		return 0, errors.New("missing Eth-Consensus-Version header")
+	}
+	return clparams.StringToClVersion(header)
+}
+
+func validateHTTPBlockVersion(beaconCfg *clparams.BeaconChainConfig, slot uint64, version clparams.StateVersion) error {
+	if beaconCfg == nil || beaconCfg.SlotsPerEpoch == 0 {
+		return errors.New("invalid beacon chain config")
+	}
+	expected := beaconCfg.GetCurrentStateVersion(slot / beaconCfg.SlotsPerEpoch)
+	if version != expected {
+		return fmt.Errorf("HTTP block version mismatch at slot %d: expected %s, received %s", slot, expected, version)
+	}
+	return nil
 }
 
 // fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API
@@ -1002,7 +1099,7 @@ func fetchEnvelopesFromBeaconAPI(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", baseURL, slot)
+			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/0x%x", baseURL, root)
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -1013,17 +1110,23 @@ func fetchEnvelopesFromBeaconAPI(
 			if err != nil {
 				return
 			}
-			body, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			body, err := readBeaconAPIResponseBody(resp)
 			if err != nil || resp.StatusCode != http.StatusOK {
+				return
+			}
+			version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+			if err != nil || version != clparams.GloasVersion || validateHTTPBlockVersion(beaconCfg, slot, version) != nil {
 				return
 			}
 
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{
 				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
 			}
-			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
-				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+			if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
+				return
+			}
+			if envelope.Message == nil || envelope.Message.BeaconBlockRoot != common.Hash(root) {
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}

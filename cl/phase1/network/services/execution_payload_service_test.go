@@ -355,6 +355,19 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 	require.Contains(t, err.Error(), "envelope slot 50 < finalized slot 64")
 }
 
+func TestExecutionPayloadServiceRejectsFinalizedUnknownBlockBeforeQueue(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
+	envelope := newTestSignedEnvelope(63, common.HexToHash("0x1234"), 1)
+
+	err := service.ProcessMessage(context.Background(), nil, envelope)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "envelope slot 63 < finalized slot 64")
+	impl := service.(*executionPayloadService)
+	require.Zero(t, impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
+}
+
 func TestExecutionPayloadServiceUsesFinalizedEpochStartBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
