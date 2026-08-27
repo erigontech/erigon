@@ -157,12 +157,21 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
 		return nil, "", filteredReq, err
 	}
+	requestedColumnCount := uint64(0)
+	filteredReq.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+		requestedColumnCount += uint64(id.Columns.Length())
+		return true
+	})
 
 	data := buffer.Bytes()
-	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), uint64(filteredReq.Len())*b.beaconConfig.NumberOfColumns)
+	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), requestedColumnCount)
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
 		return nil, pid, filteredReq, err
+	}
+	if uint64(len(responsePacket)) > requestedColumnCount {
+		b.BanPeer(pid)
+		return nil, pid, filteredReq, fmt.Errorf("response count %d exceeds requested column count %d", len(responsePacket), requestedColumnCount)
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}

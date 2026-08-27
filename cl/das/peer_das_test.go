@@ -106,6 +106,15 @@ type savedColumnReadCountingStorage struct {
 	reads atomic.Int32
 }
 
+type transientSavedColumnIndexStorage struct {
+	blob_storage.DataColumnStorage
+	calls  atomic.Int32
+	failAt int32
+	failed chan struct{}
+	onFail func()
+	once   sync.Once
+}
+
 type blockingBlobWriteStorage struct {
 	blob_storage.BlobStorage
 	entered chan struct{}
@@ -142,6 +151,17 @@ func (s *postPruneColumnWriteStorage) WriteColumnSidecars(ctx context.Context, b
 
 func (s *savedColumnReadCountingStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
 	s.reads.Add(1)
+	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+}
+
+func (s *transientSavedColumnIndexStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
+	if s.calls.Add(1) == s.failAt {
+		if s.onFail != nil {
+			s.onFail()
+		}
+		s.once.Do(func() { close(s.failed) })
+		return nil, errors.New("transient saved-column read failure")
+	}
 	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
 }
 
@@ -602,6 +622,132 @@ func TestDownloadColumnsAndRecoverBlobsOverwritesInvalidBlobStorageWithExpectedC
 	assertDownloadColumnsOverwritesBlobStorage(t, func(sidecars []*cltypes.BlobSidecar) []*cltypes.BlobSidecar {
 		return []*cltypes.BlobSidecar{sidecars[0], sidecars[0]}
 	})
+}
+
+func TestDownloadColumnsAndRecoverBlobsRetriesTransientInitialRecoveryRead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
+
+	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+	columnStorage := &transientSavedColumnIndexStorage{
+		DataColumnStorage: baseColumnStorage,
+		failAt:            3,
+		failed:            make(chan struct{}),
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobFS := afero.NewMemMapFs()
+	baseBlobStorage := blob_storage.NewBlobStore(db, blobFS)
+	blobStorage := &writeNotifyingBlobStorage{BlobStorage: baseBlobStorage, written: make(chan struct{})}
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-workerDone
+	})
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	select {
+	case <-columnStorage.failed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("worker did not reach the transient saved-column read failure")
+	}
+	d.recoveringMutex.Lock()
+	_, ownerRetained := d.recoveryRequests[root]
+	d.recoveringMutex.Unlock()
+	require.True(t, ownerRetained, "transient recovery read must retain exact ownership")
+
+	select {
+	case <-blobStorage.written:
+	case <-time.After(30 * time.Second):
+		t.Fatal("transient saved-column read lost the sole recovery owner")
+	}
+	require.Eventually(t, func() bool {
+		d.recoveringMutex.Lock()
+		defer d.recoveringMutex.Unlock()
+		_, owned := d.recoveryRequests[root]
+		return !owned
+	}, 30*time.Second, 10*time.Millisecond)
+	fresh := blob_storage.NewBlobStore(db, blobFS)
+	stored, found, err := fresh.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, stored, len(sidecars))
+}
+
+func TestDownloadColumnsAndRecoverBlobsDoesNotRetryCanceledInitialRecoveryRead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluData(t, &cfg)
+
+	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	columnStorage := &transientSavedColumnIndexStorage{
+		DataColumnStorage: baseColumnStorage,
+		failAt:            3,
+		failed:            make(chan struct{}),
+		onFail:            cancel,
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobStorage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	select {
+	case <-columnStorage.failed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("worker did not reach the canceled saved-column read")
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("canceled recovery worker did not stop")
+	}
+	require.Equal(t, int32(3), columnStorage.calls.Load())
+	d.recoveringMutex.Lock()
+	_, owned := d.recoveryRequests[root]
+	d.recoveringMutex.Unlock()
+	require.False(t, owned)
+	stored, found, err := blobStorage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, stored)
 }
 
 func TestBlobRecoveryRetriesTransientFinalWrite(t *testing.T) {

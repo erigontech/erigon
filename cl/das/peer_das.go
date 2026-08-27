@@ -973,6 +973,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
 				if err != nil {
 					log.Warn("[blobsRecover] failed to get saved column index", "err", err)
+					if ctx.Err() == nil {
+						retryScheduled = d.delayBlobRecovery(toRecover)
+					}
 					return
 				}
 				if ctx.Err() != nil {

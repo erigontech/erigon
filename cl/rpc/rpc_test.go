@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -33,12 +34,31 @@ type contextRecordingSentinel struct {
 
 type emptyColumnResponseSentinel struct {
 	sentinelproto.SentinelClient
-	calls int
+	calls            int
+	maxResponseBytes []uint64
+	response         []byte
+	bannedPeer       string
+}
+
+func (s *emptyColumnResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.Peer, _ ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	s.bannedPeer = peer.Pid
+	return &sentinelproto.EmptyMessage{}, nil
 }
 
 func (s *emptyColumnResponseSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	s.calls++
-	return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
+	s.maxResponseBytes = append(s.maxResponseBytes, req.MaxResponseBytes)
+	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
+}
+
+type rawSSZBytes []byte
+
+func (r rawSSZBytes) EncodeSSZ(dst []byte) ([]byte, error) {
+	return append(dst, r...), nil
+}
+
+func (r rawSSZBytes) EncodingSizeSSZ() int {
+	return len(r)
 }
 
 func (s *contextRecordingSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
@@ -118,6 +138,7 @@ func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *tes
 	require.Empty(t, sidecars)
 	require.Equal(t, "partial-peer", pid)
 	require.Equal(t, 1, snapshot.Len())
+	require.Equal(t, []uint64{communication.MaxWireResponseBytes(client.columnSidecarRawBytes(), 1)}, sentinel.maxResponseBytes)
 	snapshot.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, _ int) bool {
 		require.Equal(t, root, common.Hash(item.BlockRoot))
 		require.Equal(t, 1, item.Columns.Length())
@@ -130,6 +151,112 @@ func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *tes
 	require.Empty(t, sidecars)
 	require.Equal(t, "partial-peer", pid)
 	require.Equal(t, 2, sentinel.calls)
+}
+
+func TestColumnSidecarsRequestRejectsOverCardinalityBeforeSidecarDecode(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+	valid := cltypes.NewDataColumnSidecarWithVersion(clparams.FuluVersion)
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, valid, digest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZBytes{0xff}, digest[:]...))
+
+	sentinel := &emptyColumnResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{
+		sentinel:     sentinel,
+		beaconConfig: &cfg,
+		ethClock:     clock,
+		columnDataPeers: &columnDataPeers{
+			beaconConfig: &cfg,
+			peersQueue: []peerData{{
+				pid:  "cap-ignoring-peer",
+				mask: map[uint64]bool{0: true},
+			}},
+		},
+	}
+	request := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	identifier := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: common.HexToHash("0x1234"),
+		Columns:   solid.NewUint64ListSSZ(int(cfg.NumberOfColumns)),
+	}
+	identifier.Columns.Append(0)
+	request.Append(identifier)
+
+	sidecars, pid, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+	require.ErrorContains(t, err, "response count 2 exceeds requested column count 1")
+	require.Nil(t, sidecars)
+	require.Equal(t, "cap-ignoring-peer", pid)
+	require.Equal(t, 1, snapshot.Len())
+	require.Equal(t, "cap-ignoring-peer", sentinel.bannedPeer)
+}
+
+func TestColumnSidecarsSparseMultiRootCapPreservesFilteredOrderAndWrapper(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	}
+	sentinel := &emptyColumnResponseSentinel{}
+	client := &BeaconRpcP2P{
+		sentinel:     sentinel,
+		beaconConfig: &cfg,
+		columnDataPeers: &columnDataPeers{
+			beaconConfig: &cfg,
+			peersQueue: []peerData{{
+				pid:  "sparse-peer",
+				mask: map[uint64]bool{1: true, 7: true},
+			}},
+		},
+	}
+	request := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](2)
+	rootA := common.HexToHash("0xa")
+	rootB := common.HexToHash("0xb")
+	for _, item := range []struct {
+		root    common.Hash
+		columns []uint64
+	}{
+		{root: rootB, columns: []uint64{9, 7}},
+		{root: rootA, columns: []uint64{7, 1, 3}},
+	} {
+		identifier := &cltypes.DataColumnsByRootIdentifier{
+			BlockRoot: item.root,
+			Columns:   solid.NewUint64ListSSZ(int(cfg.NumberOfColumns)),
+		}
+		for _, column := range item.columns {
+			identifier.Columns.Append(column)
+		}
+		request.Append(identifier)
+	}
+
+	_, _, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, 2, snapshot.Len())
+	require.Equal(t, rootB, common.Hash(snapshot.Get(0).BlockRoot))
+	require.Equal(t, rootA, common.Hash(snapshot.Get(1).BlockRoot))
+	filtered := make(map[common.Hash][]uint64)
+	snapshot.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+		columns := make([]uint64, item.Columns.Length())
+		item.Columns.Range(func(i int, column uint64, _ int) bool {
+			columns[i] = column
+			return true
+		})
+		filtered[item.BlockRoot] = columns
+		return true
+	})
+	require.Equal(t, []uint64{7, 1}, filtered[rootA])
+	require.Equal(t, []uint64{7}, filtered[rootB])
+	wantCap := communication.MaxWireResponseBytes(client.columnSidecarRawBytes(), 3)
+	require.Equal(t, []uint64{wantCap}, sentinel.maxResponseBytes)
+
+	_, _, err = client.SendColumnSidecarsByRootIdentifierReq(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{wantCap, wantCap}, sentinel.maxResponseBytes)
 }
 
 func (s *blockResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
