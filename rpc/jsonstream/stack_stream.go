@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -320,8 +321,8 @@ func (s *StackStream) push(item stackItem) {
 // container of this kind, so ending it yields valid JSON rather than a dangling
 // comma or field. It does nothing once that container is already the top.
 func (s *StackStream) closeInside(kind stackItem) {
-	for i := len(s.stack) - 1; i >= 0; i-- {
-		if s.stack[i] == kind {
+	for i, item := range slices.Backward(s.stack) {
+		if item == kind {
 			_ = s.ClosePending(uint(i + 1))
 			return
 		}

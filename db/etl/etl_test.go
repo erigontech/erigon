@@ -1591,7 +1591,7 @@ func TestSortableBufferChunks(t *testing.T) {
 	require.Equal(t, entries, buf.Len())
 	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
 	for i, c := range buf.chunks {
-		require.Equal(t, dataChunkSize, cap(*c.buf), "chunk %d", i)
+		require.Equal(t, dataChunkSize, cap(c.buf), "chunk %d", i)
 	}
 
 	for i := range entries {

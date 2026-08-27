@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -285,4 +286,50 @@ func TestRecordFeeMerge_RetractsHalfOfVanishedCredit(t *testing.T) {
 	require.NotNil(t, findBalance(rebuilt, s.burntAddr), "the half that still applies stays recorded")
 	_, _, ok = r.vm.ReadSelfDestruct(s.coinbase, version.TxIndex+1)
 	require.False(t, ok, "a delete the round no longer emits must not stay in the version map")
+}
+
+// TestBlockResult_HandsSupersededToApplyLoop pins the handoff the other tests
+// in this file short-circuit by draining be.superseded themselves: the exec
+// loop must pass the collected sets to the block result and drop its own
+// reference, and the apply loop's release is what frees them.
+func TestBlockResult_HandsSupersededToApplyLoop(t *testing.T) {
+	t.Parallel()
+
+	addr := feeMergeTestAddr("0x2222222222222222222222222222222222222222")
+
+	t.Run("invalid block result still carries them", func(t *testing.T) {
+		t.Parallel()
+
+		be := feeMergeTestExecutor(t)
+		stale := feeMergeTestWrites(t, addr, 1)
+		be.superseded = append(be.superseded, stale)
+
+		res := be.invalidBlockResult(errors.New("invalid block"))
+
+		require.Equal(t, supersededWrites{stale}, res.superseded,
+			"a rejected block must still hand its superseded sets to the apply loop")
+		require.False(t, stale.Released(), "the exec loop hands the set over, it does not release it")
+		require.Nil(t, be.superseded, "the executor must drop the reference it handed off")
+
+		res.superseded.release() // what the apply loop does, whatever the verdict
+		require.True(t, stale.Released())
+	})
+
+	t.Run("a set collected after the handoff stays with the executor", func(t *testing.T) {
+		t.Parallel()
+
+		be := feeMergeTestExecutor(t)
+		handed := feeMergeTestWrites(t, addr, 1)
+		be.superseded = append(be.superseded, handed)
+
+		taken := be.takeSuperseded()
+		later := feeMergeTestWrites(t, addr, 2)
+		be.superseded = append(be.superseded, later)
+
+		require.Equal(t, supersededWrites{handed}, taken,
+			"appending after the handoff must not reach the slice already in flight")
+		taken.release()
+		require.True(t, handed.Released())
+		require.False(t, later.Released(), "a set collected after the handoff has no reader releasing it yet")
+	})
 }

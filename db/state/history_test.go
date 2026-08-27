@@ -2689,15 +2689,7 @@ func BenchmarkHistoryRangePaged(b *testing.B) {
 
 	ic := h.beginForTests()
 	defer ic.Close()
-
-	paged := false
-	for _, f := range ic.files {
-		if f.src.decompressor.CompressedPageValuesCount() > 1 {
-			paged = true
-			break
-		}
-	}
-	require.True(b, paged, "bench must run against page-compressed .v files, else it does not touch PagedReader")
+	requirePagedHistoryFiles(b, ic)
 
 	b.ResetTimer()
 	b.ReportAllocs()

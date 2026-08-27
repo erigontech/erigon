@@ -384,9 +384,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	var uncommittedGas int64
 	var hasLoggedExecution bool
 	var hasLoggedCommittments atomic.Bool
-	var commitStart time.Time
-
-	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
 		defer func() {
@@ -838,6 +835,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					hasLoggedExecution = true
 					lastExecutedLog = time.Now()
 					pe.LogExecution()
+					if !calculator.FirstCommitAt().IsZero() {
+						hasLoggedCommittments.Store(true)
+						pe.LogCommitments(0, stepsInDb, calculator.LastCommitProgress())
+					}
 					agg := pe.cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 					if agg.HasBackgroundFilesBuild() {
 						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", agg.BackgroundProgress())
@@ -865,8 +866,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
 
-	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(0, stepsInDb, lastProgress)
+	if !hasLoggedCommittments.Load() && !calculator.FirstCommitAt().IsZero() {
+		pe.LogCommitments(0, stepsInDb, calculator.LastCommitProgress())
 	}
 
 	if execErr != nil {
@@ -1832,6 +1833,15 @@ func (s supersededWrites) release() {
 	}
 }
 
+// takeSuperseded hands the collected sets to a block result and clears the
+// executor's slice, so the same sets cannot also reach a later result. The apply
+// loop pools them, and a second handoff would release them twice.
+func (be *blockExecutor) takeSuperseded() supersededWrites {
+	s := be.superseded
+	be.superseded = nil
+	return s
+}
+
 type txResult struct {
 	blockNum              uint64
 	blockHash             common.Hash
@@ -2573,7 +2583,7 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	return &blockResult{
 		Block:      be.block,
 		Err:        err,
-		superseded: be.superseded,
+		superseded: be.takeSuperseded(),
 	}
 }
 
@@ -3567,7 +3577,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			AllDeps:          allDeps,
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
-			superseded:       be.superseded,
+			superseded:       be.takeSuperseded(),
 		}
 		return be.result, nil
 	}

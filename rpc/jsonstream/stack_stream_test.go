@@ -1151,31 +1151,6 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 	}
 }
 
-// TestStackStreamBoundsBuffer pins that every writer drains, not just the string
-// ones. WriteRawBytes carries the largest payloads a response has, so a bound
-// that skipped it would not be a bound.
-func TestStackStreamBoundsBuffer(t *testing.T) {
-	for name, write := range map[string]func(s *StackStream, i int){
-		"raw bytes": func(s *StackStream, _ int) { s.WriteRawBytes(bytes.Repeat([]byte("x"), 4096)) },
-		"numbers":   func(s *StackStream, i int) { s.WriteInt64(int64(i)); s.WriteMore() },
-	} {
-		t.Run(name, func(t *testing.T) {
-			var out bytes.Buffer
-			s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &out, InitialBufferSize))
-
-			peak := 0
-			for i := range 100_000 {
-				write(s, i)
-				peak = max(peak, len(s.Buffer()))
-			}
-			require.NoError(t, s.Flush())
-
-			require.Greater(t, out.Len(), FlushThreshold, "the response must outgrow the buffer to mean anything")
-			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %d byte response", peak, out.Len())
-		})
-	}
-}
-
 // TestStackStreamEndClosesWhatIsOpen pins the point of the stack tracking: a
 // container end repairs whatever the caller left open inside it, so a handler
 // that stops early still yields a parseable response.
@@ -1237,4 +1212,55 @@ func TestStackStreamResetClearsError(t *testing.T) {
 
 	require.NoError(t, s.Flush())
 	require.Equal(t, `"ok"`, out.String())
+}
+
+// TestLazyFieldStreamWritesFieldFirst pins the wrapper's one invariant: whatever
+// value a caller writes first, the field name lands before it and the object
+// still parses. A method that slips through unensured puts the value's bytes at
+// the enclosing object's level.
+func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
+	for name, first := range map[string]func(s Stream){
+		"WriteInt":         func(s Stream) { s.WriteInt(1) },
+		"WriteString":      func(s Stream) { s.WriteString("a") },
+		"WriteNil":         func(s Stream) { s.WriteNil() },
+		"WriteRaw":         func(s Stream) { s.WriteRaw("1") },
+		"WriteRawBytes":    func(s Stream) { s.WriteRawBytes([]byte("1")) },
+		"WriteArrayStart":  func(s Stream) { s.WriteArrayStart() },
+		"WriteObjectStart": func(s Stream) { s.WriteObjectStart() },
+		"WriteEmptyArray":  func(s Stream) { s.WriteEmptyArray() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			first(lazy)
+
+			require.True(t, lazy.Written(), "the field was never opened")
+			require.True(t, strings.HasPrefix(string(inner.Buffer()), `{"result":`),
+				"buffer starts with %q", string(inner.Buffer()))
+			require.NoError(t, inner.ClosePending(0))
+			require.NoError(t, json.Unmarshal(inner.Buffer(), new(any)), "produced %q", string(inner.Buffer()))
+		})
+	}
+}
+
+// A separator and a field name carry no value, so the wrapper leaves them alone:
+// opening the field for one emits `"result":` with nothing able to follow it.
+func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
+	for name, write := range map[string]func(s Stream){
+		"WriteMore":        func(s Stream) { s.WriteMore() },
+		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			write(lazy)
+
+			require.False(t, lazy.Written(), "the field was opened for a write with no value")
+			require.NotContains(t, string(inner.Buffer()), `"result":`)
+		})
+	}
 }
