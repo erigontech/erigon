@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
-	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
@@ -67,13 +66,11 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-type notifyingUpdateFailingDB struct {
+type updateFailingDB struct {
 	kv.RwDB
-	called chan struct{}
 }
 
-func (db notifyingUpdateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
-	close(db.called)
+func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 	return errors.New("stop after persistence")
 }
 
@@ -650,8 +647,8 @@ func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
 	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
 	expectedState, err := fixture.productionState.Copy()
 	require.NoError(t, err)
-	expectedMachine := &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}
-	require.NoError(t, machine.ProcessBlock(expectedMachine, expectedState, fixture.block.ToGeneric()))
+	_, err = processBlockForProduction(expectedState, fixture.block)
+	require.NoError(t, err)
 	expectedRoot, err := expectedState.HashSSZ()
 	require.NoError(t, err)
 	logs := captureProductionLogs(t)
@@ -695,6 +692,28 @@ func TestProcessProducedBlockSelectsExternalBidWithoutMutatingBaseState(t *testi
 	require.NoError(t, err)
 	require.Equal(t, originalRoot, afterRoot)
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
+}
+
+func TestProcessProducedBlockRejectsBlindedGloasBlock(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	block := &cltypes.BlindOrExecutionBeaconBlock{
+		BlindedBeaconBody: cltypes.NewBlindedBeaconBody(fixture.block.Cfg, clparams.GloasVersion),
+		Cfg:               fixture.block.Cfg,
+	}
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, block, 100)
+
+	require.ErrorContains(t, err, "cannot process blinded Gloas block")
+}
+
+func TestProcessProducedBlockRejectsNilBlock(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, nil, 100)
+
+	require.ErrorContains(t, err, "cannot process nil block")
 }
 
 func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
@@ -933,11 +952,36 @@ func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
 	require.Equal(t, wantValueWei, block.ExecutionValue.String())
 }
 
+func TestProduceBlockUsesLocalPayloadWithoutBuilderClient(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	require.True(t, h.routerCfg.Builder)
+	require.Nil(t, h.builderClient)
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, h.beaconChainCfg)
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	valueWei := big.NewInt(1)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(payload, &engine_types.BlobsBundle{}, nil, valueWei, nil).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	h.engine = engine
+
+	block, err := h.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+
+	require.NoError(t, err)
+	require.False(t, block.IsBlinded())
+	require.Equal(t, valueWei, block.ExecutionValue)
+}
+
 func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	logs := captureAllProductionLogs(t)
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	db := notifyingUpdateFailingDB{RwDB: h.indiciesDB, called: make(chan struct{})}
-	h.indiciesDB = db
+	h.indiciesDB = updateFailingDB{RwDB: h.indiciesDB}
 	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	require.NotNil(t, bid)
@@ -947,11 +991,10 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 
 	require.NoError(t, h.broadcastBlock(t.Context(), block))
 
-	select {
-	case <-db.called:
-	case <-time.After(5 * time.Second):
-		t.Fatal("block persistence did not start")
-	}
+	// The persistence error is logged at the end of the background store goroutine.
+	require.Eventually(t, func() bool {
+		return strings.Contains(logs(), "stop after persistence")
+	}, 5*time.Second, 10*time.Millisecond)
 	require.Contains(t, logs(), "blobSidecars=0")
 	require.Contains(t, logs(), "columnSidecars=0")
 	require.NotContains(t, logs(), "blobs=1")

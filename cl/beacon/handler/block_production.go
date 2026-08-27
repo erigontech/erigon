@@ -675,15 +675,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	startConsensusProcessing := time.Now()
 
-	processedState, blockBuildingMachine, err := a.processProducedBlock(baseState, block, builderBoostFactor)
+	postState, blockBuildingMachine, err := a.processProducedBlock(baseState, block, builderBoostFactor)
 	if err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
 	}
-	baseState = processedState
 	log.Info("[Beacon API] Built block consensus-state", "slot", targetSlot, "duration", time.Since(startConsensusProcessing))
 	startConsensusProcessing = time.Now()
-	block.StateRoot, err = baseState.HashSSZ()
+	block.StateRoot, err = postState.HashSSZ()
 	if err != nil {
 		log.Warn("Failed to get state root", "err", err)
 		return nil, err
@@ -871,32 +870,29 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	if !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		// directly return the block if:
-		// 1. builder is not enabled
-		// 2. failed to get builder payload
-		// 3. GLOAS: MEV-Boost blinded blocks not supported; builders use ePBS gossip bids
+	// A nil header covers disabled or unavailable legacy builders. Gloas also skips
+	// this request because its external bids are selected from ePBS after assembly.
+	if builderHeader == nil {
 		block.BeaconBody = beaconBody
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
 
-		block.ExecutionValue = new(big.Int).Set(localExecValue)
+		block.ExecutionValue = localExecValue
 		return block, nil
 	}
 
 	// determine whether to use local execution node or builder
 	// if exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100), then return a full (unblinded) block containing the execution node payload.
 	// otherwise, return a blinded block containing the builder payload header.
-	execValue := new(big.Int).Set(localExecValue)
 	builderValue := builderHeader.BlockValue()
-	useLocalExec := preferLocalExecutionValue(execValue, builderValue, boostFactor)
-	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", execValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
+	useLocalExec := preferLocalExecutionValue(localExecValue, builderValue, boostFactor)
+	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", localExecValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
 
 	if useLocalExec {
 		block.BeaconBody = beaconBody
 		block.Blobs = blobs
 		block.KzgProofs = kzgProofs
-		block.ExecutionValue = execValue
+		block.ExecutionValue = localExecValue
 	} else {
 		// prepare blinded block
 		blindedBody, err := beaconBody.Blinded()
@@ -955,6 +951,13 @@ func (a *ApiHandler) processProducedBlock(
 	block *cltypes.BlindOrExecutionBeaconBlock,
 	boostFactor uint64,
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
+	if block == nil {
+		return baseState, nil, errors.New("cannot process nil block")
+	}
+	// Gloas carries its signed builder bid in the full body and has no blinded block form.
+	if block.Version().AfterOrEqual(clparams.GloasVersion) && block.BeaconBody == nil {
+		return baseState, nil, errors.New("cannot process blinded Gloas block")
+	}
 	if block.Version().Before(clparams.GloasVersion) || a.epbsPool == nil {
 		blockMachine, err := processBlockForProduction(baseState, block)
 		return baseState, blockMachine, err
@@ -1233,6 +1236,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 	}
 	var executionPayload *cltypes.Eth1Block
+	// Keep the produced block's value independent from the engine-owned value.
 	executionValue := new(big.Int)
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever
 	// two steps fail together.
@@ -1293,9 +1297,7 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		// Determine block value
-		if blockValue == nil {
-			executionValue.SetUint64(0)
-		} else {
+		if blockValue != nil {
 			executionValue.Set(blockValue)
 		}
 
