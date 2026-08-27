@@ -93,8 +93,11 @@ reported. How they appear depends on the method:
 * **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction
   result shape, so withdrawals surface only through `stateDiff`. You must request
   `"stateDiff"` in the trace types; when you do, one extra entry is appended to the
-  result array, containing only the withdrawal balance changes. Multiple withdrawals to
-  the same address are merged into a single balance change.
+  result array, carrying the withdrawal state changes. Its shape depends on whether the
+  recipient already existed: an existing account gets a `"*"` balance change with `code`
+  and `nonce` marked `"="`, while an account created by the withdrawal itself gets `"+"`
+  entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either
+  way. Multiple withdrawals to the same address are merged into a single balance change.
 
 ## JSON-RPC methods
 
@@ -148,7 +151,7 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
-| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block, uncle or beacon-chain-withdrawal reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases, uncle authors or withdrawal recipients). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
 | `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
@@ -187,11 +190,11 @@ The `action` object's shape depends on `type`:
 | `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
 | `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
 
-**`type: "reward"`** (block/uncle reward, in `trace_block` and `trace_filter`)
+**`type: "reward"`** (block, uncle or withdrawal reward, in `trace_block` and `trace_filter`)
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `author` | DATA, 20 BYTES | Address receiving the reward (miner / uncle author). |
+| `author` | DATA, 20 BYTES | Address receiving the reward — the miner, the uncle author, or the withdrawal recipient when `rewardType` is `"withdrawal"`. |
 | `value` | QUANTITY | Wei amount of the reward. |
 | `rewardType` | String | `"block"` or `"uncle"`, and `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
 
@@ -572,7 +575,7 @@ params: [
 
 #### Returns
 
-`Array<TraceEntry>` — flat list of all call frames in the block, including any `"reward"` entries for block/uncle rewards. Each entry includes block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
+`Array<TraceEntry>` — flat list of all call frames in the block, including any `"reward"` entries for block, uncle and (when requested) withdrawal rewards. Every entry carries `blockHash` and `blockNumber`; `transactionHash` and `transactionPosition` are present on transaction call frames but omitted from `"reward"` entries, which no transaction caused. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 

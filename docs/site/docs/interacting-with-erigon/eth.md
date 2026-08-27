@@ -148,7 +148,12 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
 * `nonce` — from the pending nonce of `from`, or `0` when `from` is absent
 * `value` — `0` when absent
 * `gas` — from `eth_estimateGas` against `latest`
-* `chainId` — the node's chain ID; a mismatching supplied value is an error
+* `chainId` — the node's chain ID; a mismatching supplied value is an error. It is used
+  for validation and carried by typed transactions, but it does not appear in the
+  returned `tx` for an unsigned legacy transaction: `CallArgs.ToTransaction` builds a
+  `LegacyTx` with no chain-ID field, and the response encoder skips chain-ID derivation
+  while `v` is zero. A pre-London fill, or a post-London fill supplying `gasPrice` with
+  no access list, therefore returns `tx` without `chainId`
 * fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
   and cannot be combined with `maxFeePerGas` or `maxPriorityFeePerGas`. When it is absent:
   before London `gasPrice` comes from the gas oracle; after London the dynamic fields are
@@ -193,6 +198,9 @@ Accepted everywhere a block is selected:
 Rejected everywhere:
 
 * a quoted decimal string — `"3"`, `"100"`
+* a block number above `2^63-1`, in either parameter type — `BlockNumber.UnmarshalJSON`
+  and `BlockNumberOrHash.UnmarshalJSON` both fail with `blocknumber too high`, so
+  `"0x8000000000000000"` and the equivalent bare integer are out of range
 * hex with leading zeros — `"0x01"`
 * hex without the prefix — `"ff"`
 
