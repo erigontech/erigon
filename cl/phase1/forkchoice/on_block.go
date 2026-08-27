@@ -108,13 +108,13 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
+	if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, blockRoot) {
+		return errors.New("block conflicts with a previously validated proposal")
+	}
 	if block.Version() >= clparams.GloasVersion {
 		if _, ok := f.forkGraph.GetHeader(blockRoot); ok {
 			return nil
 		}
-	}
-	if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, blockRoot) {
-		return errors.New("block conflicts with a previously validated proposal")
 	}
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending

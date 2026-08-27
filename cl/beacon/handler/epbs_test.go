@@ -544,6 +544,94 @@ func TestPostExecutionPayloadEnvelopesRejectsMalformedContents(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostExecutionPayloadEnvelopesSSZDecodesReferencedScheduleCapacity(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	currentSlot := handler.ethClock.GetCurrentSlot()
+	referencedSlot := currentSlot - 1
+	handler.beaconChainCfg.SlotsPerEpoch = 1
+	handler.beaconChainCfg.NumberOfColumns = 1
+	handler.beaconChainCfg.MaxBlobsPerBlock = 1
+	handler.beaconChainCfg.MaxBlobsPerBlockElectra = 1
+	handler.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{
+		{Epoch: referencedSlot, MaxBlobsPerBlock: 2},
+		{Epoch: currentSlot, MaxBlobsPerBlock: 1},
+	}
+
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, referencedSlot)
+	root := common.Hash{0x42}
+	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	for i := byte(1); i <= 2; i++ {
+		contents.Blobs.Append(&cltypes.Blob{i})
+		contents.KZGProofs.Append(&cltypes.KZGProof{i})
+	}
+	body, err := contents.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	validationErr := errors.New("decoded contents reached validation")
+	fcu.ValidateExecutionPayloadEnvelopeErr = validationErr
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), validationErr.Error())
+}
+
+func TestPostExecutionPayloadEnvelopesUsesReferencedBlockForExactBlobCount(t *testing.T) {
+	for _, contentType := range []string{"application/json", "application/octet-stream"} {
+		t.Run(contentType, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			currentSlot := handler.ethClock.GetCurrentSlot()
+			referencedSlot := currentSlot - 1
+			handler.beaconChainCfg.SlotsPerEpoch = 1
+			handler.beaconChainCfg.NumberOfColumns = 1
+			handler.beaconChainCfg.MaxBlobsPerBlock = 1
+			handler.beaconChainCfg.MaxBlobsPerBlockElectra = 1
+			handler.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{
+				{Epoch: referencedSlot, MaxBlobsPerBlock: 1},
+				{Epoch: currentSlot, MaxBlobsPerBlock: 2},
+			}
+
+			root := common.Hash{0x43}
+			block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{
+				Slot: referencedSlot,
+				Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion),
+			}}
+			block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+			fcu.Blocks[root] = block
+
+			contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, currentSlot)
+			contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+			for i := byte(1); i <= 2; i++ {
+				contents.Blobs.Append(&cltypes.Blob{i})
+				contents.KZGProofs.Append(&cltypes.KZGProof{i})
+			}
+			var body []byte
+			var err error
+			if contentType == "application/json" {
+				body, err = json.Marshal(contents)
+			} else {
+				body, err = contents.EncodeSSZ(nil)
+			}
+			require.NoError(t, err)
+
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+			request.Header.Set("Content-Type", contentType)
+			request.Header.Set("Eth-Blob-Data-Included", "true")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), "counts do not match")
+		})
+	}
+}
+
 func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
@@ -652,6 +740,10 @@ func TestPostExecutionPayloadEnvelopesRejectsEquivocatingBlockBeforeGossip(t *te
 	fcu.Blocks = map[common.Hash]*cltypes.SignedBeaconBlock{
 		root: {Block: &cltypes.BeaconBlock{Slot: 12, ProposerIndex: 3, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}},
 		{2}:  {Block: &cltypes.BeaconBlock{Slot: 12, ProposerIndex: 3, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}},
+	}
+	fcu.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		root: {Slot: 12, ProposerIndex: 3},
+		{2}:  {Slot: 12, ProposerIndex: 3},
 	}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = root

@@ -1022,7 +1022,7 @@ func (a *ApiHandler) decodeExecutionPayloadEnvelopeRequest(w http.ResponseWriter
 	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(a.beaconChainCfg)}
 	var contents *cltypes.SignedExecutionPayloadEnvelopeContents
 	if blobDataIncluded {
-		contents = cltypes.NewSignedExecutionPayloadEnvelopeContents(a.beaconChainCfg, a.ethClock.GetCurrentSlot())
+		contents = newSignedExecutionPayloadEnvelopeContentsForDecoding(a.beaconChainCfg, a.ethClock.GetCurrentSlot())
 	}
 	switch contentType {
 	case "application/json":
@@ -1056,6 +1056,14 @@ func (a *ApiHandler) decodeExecutionPayloadEnvelopeRequest(w http.ResponseWriter
 		signedEnvelope = contents.SignedExecutionPayloadEnvelope
 	}
 	return signedEnvelope, contents, nil
+}
+
+func newSignedExecutionPayloadEnvelopeContentsForDecoding(cfg *clparams.BeaconChainConfig, currentSlot uint64) *cltypes.SignedExecutionPayloadEnvelopeContents {
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(cfg, currentSlot)
+	maxBlobs := int(min(cfg.MaxBlobsPerBlockUpperBound(), uint64(cltypes.MaxBlobsCommittmentsPerBlock)))
+	contents.KZGProofs = solid.NewStaticListSSZ[*cltypes.KZGProof](maxBlobs*int(cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF)
+	contents.Blobs = solid.NewStaticListSSZ[*cltypes.Blob](maxBlobs, int(cltypes.BYTES_PER_BLOB))
+	return contents
 }
 
 func (a *ApiHandler) validateAndStoreExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {

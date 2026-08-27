@@ -1036,6 +1036,7 @@ func TestForwardBeaconDownloaderScansPastGloasLookaheadGap(t *testing.T) {
 			}
 		},
 	}
+	downloader.SetCurrentSlotSampler(func() uint64 { return frontier + 66 })
 	downloader.SetHighestProcessedSlot(frontier)
 	var processedSlots []uint64
 	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
@@ -1060,10 +1061,62 @@ func TestForwardBeaconDownloaderScansPastGloasLookaheadGap(t *testing.T) {
 	emptyRequest := <-requests
 	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: frontier + 31, Count: 33}, emptyRequest)
 	farRequest := <-requests
-	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: frontier + 64, Count: 33}, farRequest)
+	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: frontier + 64, Count: 3}, farRequest)
 	require.Equal(t, frontier, downloader.GetHighestProcessedSlot())
 	close(allowSuccessor)
 	<-done
+	require.Equal(t, []uint64{frontier + 1}, processedSlots)
+	require.Equal(t, frontier+1, downloader.GetHighestProcessedSlot())
+}
+
+func TestForwardBeaconDownloaderRechecksNewSlotAfterNearHeadLookahead(t *testing.T) {
+	const frontier = uint64(100)
+	first := makeGloasBlock(frontier+1, hash(0xaa), common.Hash{})
+	successor := makeGloasBlock(frontier+2, hash(0xbb), hash(0xcc))
+	linkBeaconBlocks(t, first, successor)
+
+	var currentSlot atomic.Uint64
+	currentSlot.Store(frontier + 1)
+	requests := make(chan cltypes.BeaconBlocksByRangeRequest, 2)
+	var requestCount atomic.Int32
+	downloader := &ForwardBeaconDownloader{
+		beaconCfg: &clparams.MainnetBeaconConfig,
+		requestBlocksByRange: func(_ context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			requests <- cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count}
+			switch requestCount.Add(1) {
+			case 1:
+				return []*cltypes.SignedBeaconBlock{first}, "block-peer", nil
+			case 2:
+				return []*cltypes.SignedBeaconBlock{successor}, "block-peer", nil
+			default:
+				return nil, "block-peer", errors.New("unexpected request")
+			}
+		},
+	}
+	downloader.SetCurrentSlotSampler(currentSlot.Load)
+	downloader.SetHighestProcessedSlot(frontier)
+	var processedSlots []uint64
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		for _, block := range blocks {
+			processedSlots = append(processedSlots, block.Block.Slot)
+			highest = block.Block.Slot
+		}
+		return highest, nil
+	})
+
+	downloader.RequestMore(t.Context())
+	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: frontier - 2, Count: 4}, <-requests)
+	require.Empty(t, processedSlots)
+	downloader.RequestMore(t.Context())
+	select {
+	case request := <-requests:
+		t.Fatalf("requested future range before the slot existed: %+v", request)
+	default:
+	}
+
+	currentSlot.Store(frontier + 2)
+	downloader.RequestMore(t.Context())
+	require.Equal(t, cltypes.BeaconBlocksByRangeRequest{StartSlot: frontier + 2, Count: 1}, <-requests)
 	require.Equal(t, []uint64{frontier + 1}, processedSlots)
 	require.Equal(t, frontier+1, downloader.GetHighestProcessedSlot())
 }
@@ -1096,6 +1149,7 @@ func TestForwardBeaconDownloaderHTTPScansPastGloasLookaheadGap(t *testing.T) {
 	defer server.Close()
 
 	downloader := NewForwardBeaconDownloader(context.Background(), nil, &clparams.MainnetBeaconConfig)
+	downloader.SetCurrentSlotSampler(func() uint64 { return frontier + 45 })
 	downloader.SetHighestProcessedSlot(frontier)
 	downloader.SetHTTPFallbackURL(server.URL)
 	downloader.httpPreferred.Store(true)
@@ -1119,11 +1173,12 @@ func TestForwardBeaconDownloaderHTTPScansPastGloasLookaheadGap(t *testing.T) {
 	require.Equal(t, frontier, downloader.GetHighestProcessedSlot())
 
 	downloader.RequestMore(t.Context())
-	secondRange := make([]uint64, 42)
+	secondRange := make([]uint64, 3)
 	for i := range secondRange {
 		secondRange[i] = <-requestedSlots
 	}
 	require.Contains(t, secondRange, frontier+43)
+	require.Contains(t, secondRange, frontier+45)
 	require.NotContains(t, secondRange, frontier+1)
 	require.Equal(t, []uint64{frontier + 1}, processedSlots)
 	require.Equal(t, frontier+1, downloader.GetHighestProcessedSlot())
@@ -1207,6 +1262,7 @@ func TestForwardBeaconDownloaderPendingGloasScanDoesNotWrapAtMaxSlot(t *testing.
 			return nil, "block-peer", ctx.Err()
 		},
 	}
+	downloader.SetCurrentSlotSampler(func() uint64 { return math.MaxUint64 })
 	downloader.SetHighestProcessedSlot(frontier)
 	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
 		return highest, nil

@@ -59,6 +59,7 @@ type ForwardBeaconDownloader struct {
 	requestBlocksByRange  func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error)
 	banPeer               func(string)
 	process               ProcessFn
+	currentSlot           func() uint64
 	beaconCfg             *clparams.BeaconChainConfig
 	httpFallbackURL       string      // beacon API base URL for HTTP fallback when P2P fails
 	httpPreferred         atomic.Bool // set after first HTTP fallback success; skips P2P probing
@@ -66,6 +67,11 @@ type ForwardBeaconDownloader struct {
 	mu                 sync.Mutex
 	gloasLookahead     *cltypes.SignedBeaconBlock
 	gloasNextUnscanned uint64
+}
+
+// SetCurrentSlotSampler limits range requests to slots that can already exist.
+func (f *ForwardBeaconDownloader) SetCurrentSlotSampler(currentSlot func() uint64) {
+	f.currentSlot = currentSlot
 }
 
 func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, beaconCfg *clparams.BeaconChainConfig) *ForwardBeaconDownloader {
@@ -159,6 +165,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	defer cancelRequests()
 
 	count := uint64(32)
+	requestStart, _ := f.nextRequestStart(true)
+	if f.capAtCurrentSlot(requestStart, 1) == 0 {
+		return
+	}
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
 	commitHTTPBlocks := func(sampledHighestSlot, httpStart, httpCount uint64, hadGloasPending bool, blocks []*cltypes.SignedBeaconBlock) bool {
@@ -188,6 +198,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	if f.httpPreferred.Load() && f.httpFallbackURL != "" {
 		httpStart, hadGloasPending := f.nextRequestStart(false)
 		httpCount := capRequestCount(httpStart, count+10)
+		httpCount = f.capAtCurrentSlot(httpStart, httpCount)
 		highestSlotProcessed, _, _ := f.progressSnapshot()
 		httpBlocks, httpErr := fetchBlocksFromBeaconAPI(requestCtx, f.httpFallbackURL, httpStart, httpCount, f.beaconCfg)
 		switch {
@@ -228,6 +239,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				latestHighestSlotProcessed, _, _ := f.progressSnapshot()
 				httpStart, hadGloasPending := f.nextRequestStart(false)
 				httpCount := capRequestCount(httpStart, count+10)
+				httpCount = f.capAtCurrentSlot(httpStart, httpCount)
 				httpBlocks, httpErr := fetchBlocksFromBeaconAPI(probeCtx, f.httpFallbackURL, httpStart, httpCount, f.beaconCfg)
 				if probeCtx.Err() != nil {
 					return
@@ -328,6 +340,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if f.beaconCfg != nil {
 						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed)
 					}
+					reqCount = f.capAtCurrentSlot(reqSlot, reqCount)
 
 					// leave a warning if we are stuck for more than 90 seconds
 					if time.Since(highestSlotUpdateTime) > 90*time.Second {
@@ -576,6 +589,20 @@ Process:
 	} else {
 		f.clearGloasScan()
 	}
+}
+
+func (f *ForwardBeaconDownloader) capAtCurrentSlot(start, count uint64) uint64 {
+	if count == 0 || f.currentSlot == nil {
+		return count
+	}
+	currentSlot := f.currentSlot()
+	if start > currentSlot {
+		return 0
+	}
+	if count-1 > currentSlot-start {
+		return currentSlot - start + 1
+	}
+	return count
 }
 
 func (f *ForwardBeaconDownloader) nextRequestStart(overlap bool) (uint64, bool) {

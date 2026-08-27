@@ -451,8 +451,8 @@ func (f *ForkChoiceStorageMock) HasBlockChildAtOrAfter(blockRoot common.Hash, sl
 }
 
 func (f *ForkChoiceStorageMock) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
-	for root, block := range f.Blocks {
-		if root != exceptRoot && block != nil && block.Block != nil && block.Block.Slot == slot && block.Block.ProposerIndex == proposerIndex {
+	for root, header := range f.Headers {
+		if root != exceptRoot && header != nil && header.Slot == slot && header.ProposerIndex == proposerIndex {
 			return true
 		}
 	}

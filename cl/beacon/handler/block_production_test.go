@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -182,12 +183,32 @@ func (db unavailableUpdateDB) Update(context.Context, func(kv.RwTx) error) error
 type installingForkchoice struct {
 	forkchoice.ForkChoiceStorage
 	headers      map[common.Hash]*cltypes.BeaconBlockHeader
+	blocks       map[common.Hash]*cltypes.SignedBeaconBlock
 	onBlockCalls int
+}
+
+type conflictAfterValidationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	conflict bool
+}
+
+func (f *conflictAfterValidationForkchoice) OnBlockWithEquivocationCheck(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	f.conflict = true
+	return nil
+}
+
+func (f *conflictAfterValidationForkchoice) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
+	return f.conflict
 }
 
 func (f *installingForkchoice) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
 	header, ok := f.headers[root]
 	return header, ok
+}
+
+func (f *installingForkchoice) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := f.blocks[root]
+	return block, ok
 }
 
 func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedBeaconBlock, _, _, _ bool) error {
@@ -196,6 +217,7 @@ func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedB
 		return err
 	}
 	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	f.blocks[root] = block
 	f.onBlockCalls++
 	return nil
 }
@@ -1023,6 +1045,149 @@ func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
 	require.ErrorContains(t, err, validationErr.Error())
 }
 
+func TestBroadcastBlockRejectsKnownRootWithDifferentSignature(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
+			t.Run(version.String()+"/"+string(validation), func(t *testing.T) {
+				_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+				stored := blocks[1]
+				if version == clparams.GloasVersion {
+					stored = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+					stored.Block.Slot = blocks[1].Block.Slot
+				}
+				root, err := stored.Block.HashSSZ()
+				require.NoError(t, err)
+				fcu.Headers[root] = stored.SignedBeaconBlockHeader().Header
+				fcu.Blocks[root] = stored
+				fcu.OnTickFn = func(uint64) {}
+
+				incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
+				incoming.Signature[0] ^= 1
+				incomingRoot, rootErr := incoming.Block.HashSSZ()
+				require.NoError(t, rootErr)
+				require.Equal(t, root, incomingRoot)
+				handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+				handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+
+				err = handler.broadcastBlock(t.Context(), incoming, validation)
+				require.ErrorIs(t, err, errPublishedBlockValidation)
+				require.Same(t, stored, fcu.Blocks[root])
+			})
+		}
+	}
+}
+
+func TestBroadcastBlockAcceptsExactKnownReplay(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+			block := blocks[1]
+			if version == clparams.GloasVersion {
+				block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+				block.Block.Slot = blocks[1].Block.Slot
+			}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+			fcu.Blocks[root] = block
+			fcu.StateAtBlockRootVal[root] = postState
+			fcu.HeadVal = root
+			fcu.HeadSlotVal = block.Block.Slot
+			fcu.OnTickFn = func(uint64) {}
+			ctrl := gomock.NewController(t)
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(2)
+			handler.engine = engine
+			handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil).Times(2)
+			handler.gossipManager = gossipManager
+
+			incoming := &cltypes.SignedBeaconBlock{Block: block.Block, Signature: block.Signature}
+			incomingRoot, err := incoming.Block.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, root, incomingRoot)
+			_, known := fcu.GetHeader(incomingRoot)
+			require.True(t, known)
+			for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
+				require.NoError(t, handler.broadcastBlock(t.Context(), incoming, validation))
+			}
+		})
+	}
+}
+
+func TestBroadcastBlockRejectsUnknownBlockAtFinalizedHorizonBeforeWrites(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
+			t.Run(version.String()+"/"+string(validation), func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+				block := blocks[1]
+				if version == clparams.GloasVersion {
+					block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+					block.Block.Slot = blocks[1].Block.Slot
+				}
+				fcu.FinalizedSlotVal = block.Block.Slot
+				handler.blobStoage = blob_storage_mock.NewMockBlobStorage(ctrl)
+				handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+				handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+
+				err := handler.broadcastBlock(t.Context(), block, validation)
+				require.ErrorIs(t, err, errPublishedBlockValidation)
+				require.ErrorContains(t, err, "finalized validation horizon")
+			})
+		}
+	}
+}
+
+func TestBroadcastBlockRechecksEquivocationAfterStoreBeforePublish(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.StateAtBlockRootVal[root] = postState
+	fcu.HeadVal = root
+	fcu.HeadSlotVal = block.Block.Slot
+	fcu.OnTickFn = func(uint64) {}
+	handler.forkchoiceStore = &conflictAfterValidationForkchoice{ForkChoiceStorage: fcu}
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
+	handler.engine = engine
+	handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+
+	err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationConsensusAndEquivocation)
+
+	require.ErrorIs(t, err, errPublishedBlockValidation)
+	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
+}
+
+func TestBroadcastBlockRejectsKnownBlockAfterConflictingProposal(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = blocks[1].Block.Slot
+	block.Block.ProposerIndex = 7
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	conflict := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	conflict.Block.Slot = block.Block.Slot
+	conflict.Block.ProposerIndex = block.Block.ProposerIndex
+	conflict.Block.StateRoot[0] = 1
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+	fcu.Headers[common.Hash{0xff}] = conflict.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = block
+	fcu.Blocks[common.Hash{0xff}] = conflict
+	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+
+	err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationConsensusAndEquivocation)
+
+	require.ErrorIs(t, err, errPublishedBlockValidation)
+	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
+}
+
 func TestBroadcastBlockReleasesGossipReservationAfterPreparationFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blockService := network_services_mock.NewMockBlockService(ctrl)
@@ -1156,12 +1321,13 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 	installing := &installingForkchoice{
 		ForkChoiceStorage: fcu,
 		headers:           make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		blocks:            make(map[common.Hash]*cltypes.SignedBeaconBlock),
 	}
 	handler.forkchoiceStore = installing
 	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
 
 	for range 2 {
-		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, false)
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
 		require.ErrorContains(t, err, "database unavailable")
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
