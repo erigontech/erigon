@@ -158,7 +158,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		backgroundProgress: background.NewProgressSet(),
 		logger:             logger,
-		workers:            newWorkersCfg(1, 1),
+		workers:            newWorkersCfg(dbg.MergeWorkers, dbg.CollateWorkers),
 
 		produce: true,
 	}
