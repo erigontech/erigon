@@ -21,11 +21,13 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -33,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -71,6 +74,109 @@ func (s *maliciousColumnSentinel) SendPeerRequest(_ context.Context, req *sentin
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
 	return &sentinelproto.ResponseData{Data: s.columnResponse, Peer: peer}, nil
+}
+
+func TestRunDownloadDoesNotRevalidateBlobStorageWhileWaitingForColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	var halfChecks atomic.Int32
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]uint64, error) {
+			if halfChecks.Add(1) == 2 {
+				cancel()
+			}
+			return nil, nil
+		},
+	).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			durableReads.Add(1)
+			return nil, false, nil
+		},
+	).AnyTimes()
+
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+	}
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.Block.Slot}: {},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+		validatedBlobCount: map[common.Hash]uint32{root: 1},
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, true) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("download did not stop after its context was canceled")
+	}
+	require.Zero(t, durableReads.Load(), "storage validation must be event-driven, not ticker-driven")
+}
+
+func TestRunDownloadValidatesBlobStorageAfterCountChanges(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, _ := recoverableFuluData(t, &cfg)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	var halfChecks atomic.Int32
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]uint64, error) {
+			if halfChecks.Add(1) == 2 {
+				cancel()
+			}
+			return nil, nil
+		},
+	).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(len(sidecars)), nil).AnyTimes()
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			durableReads.Add(1)
+			return sidecars, true, nil
+		},
+	).AnyTimes()
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{beaconConfig: &cfg, columnStorage: columnStorage, blobStorage: blobStorage}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.Block.Slot}: {},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+		validatedBlobCount: map[common.Hash]uint32{root: 1},
+	}
+
+	require.NoError(t, d.runDownload(ctx, req, true))
+	require.Equal(t, int32(1), durableReads.Load(), "a changed durable count must trigger one validation event")
 }
 
 // A peer selects the response fork digest, so it can serve a Gloas-schema
