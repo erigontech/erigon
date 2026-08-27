@@ -49,31 +49,30 @@ const (
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
-// writeField writes f as a varint length then its bytes. A nil f writes -1, so
-// a reader tells it apart from an empty one.
-func writeField(w io.Writer, numBuf []byte, f []byte) error {
-	n := int64(len(f))
-	if f == nil {
-		n = -1
-	}
-	if _, err := w.Write(numBuf[:binary.PutVarint(numBuf, n)]); err != nil {
-		return err
-	}
-	if len(f) == 0 {
-		return nil
-	}
-	_, err := w.Write(f)
-	return err
-}
-
 // writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	for _, entry := range entries {
-		if err := writeField(w, numBuf[:], entry.key); err != nil {
+		lk := int64(len(entry.key))
+		if entry.key == nil {
+			lk = -1
+		}
+		n := binary.PutVarint(numBuf[:], lk)
+		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
-		if err := writeField(w, numBuf[:], entry.value); err != nil {
+		if _, err := w.Write(entry.key); err != nil {
+			return err
+		}
+		lv := int64(len(entry.value))
+		if entry.value == nil {
+			lv = -1
+		}
+		n = binary.PutVarint(numBuf[:], lv)
+		if _, err := w.Write(numBuf[:n]); err != nil {
+			return err
+		}
+		if _, err := w.Write(entry.value); err != nil {
 			return err
 		}
 	}
@@ -82,16 +81,15 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
+// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
+// 17*(256Mb/8) = 544Mb for all collectors combined. Buffers pool their
+// chunks — see dataChunks below.
 var (
-	// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
-	// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
-	// 17*(256Mb/8) = 544Mb for all collectors combined. Buffers pool their
-	// chunks — see dataChunks below.
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			// Sortable Buffer now pre-allocs only metadata arrays not internal buffers for data-holding (they are-preallocated and have own sync.Pool)
-			return NewSortableBuffer(etlSmallBufRAM).Prealloc(512, int(etlSmallBufRAM))
+			return NewSortableBuffer(etlSmallBufRAM)
 		},
 	})
 )
@@ -106,16 +104,15 @@ var (
 )
 
 const (
-	// sortableBuffer stores key/value bytes in chunks of a power-of-two size,
-	// each chunk carrying the index of its own entries, so an entry only has to
-	// address bytes inside its chunk. 1MB is also the least a collector can hold
+	// Each chunk carries the index of its own entries, so an entry addresses
+	// only bytes inside its chunk. 1MB is also the least a collector holds
 	// once it takes a chunk at all.
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
-	// entryLoc gives the offset dataChunkBits and the key length what is left of
-	// a uint32, biased by one. Sort also slices a key straight out of its chunk,
-	// so only a value may outgrow one.
+	// What is left of entryLoc's uint32 once the offset has dataChunkBits,
+	// less one for the bias. Sort slices a key out of its chunk, so only a
+	// value may outgrow one.
 	keyLenBits = 32 - dataChunkBits
 	maxKeyLen  = 1<<keyLenBits - 2
 )
@@ -129,9 +126,9 @@ var dataChunks = sync.Pool{New: func() any {
 
 func getDataChunk() []byte { return *dataChunks.Get().(*[]byte) }
 
-// isPooledChunk reports whether c came from the pool. An oversized entry gets a
-// private chunk instead, and handing that one back would let a later
-// getDataChunk give an unrelated buffer a chunk of the wrong size.
+// isPooledChunk reports whether c came from the pool. Handing back the private
+// chunk an oversized entry gets would let a later getDataChunk give an
+// unrelated buffer a chunk of the wrong size.
 func isPooledChunk(c []byte) bool { return len(c) == dataChunkSize }
 
 func putDataChunk(c []byte) {
@@ -144,10 +141,9 @@ func putDataChunk(c []byte) {
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	// Next returns the entries in key order, sorting the buffer first if
-	// anything was put since the last Sort. The slices point into the
-	// buffer's own storage and must not be modified. ok is false once every
-	// entry has been returned; Sort puts the cursor back at the first.
+	// Next returns the entries in key order, sorting first if it has to. The
+	// slices point into the buffer's own storage and must not be modified.
+	// Sort puts the cursor back at the first entry.
 	Next() (k, v []byte, ok bool)
 	Len() int
 	Reset()
@@ -169,10 +165,10 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// entryLoc packs the offset of an entry inside its chunk with the entry's key
-// length. The key length is stored biased by one, so nil and empty both fail
-// the `> 0` test the comparator makes on it. Offsets rise with insertion order,
-// which is what lets Sort order duplicate keys without a stable sort.
+// entryLoc packs an entry's offset inside its chunk with its key length. The
+// key length is biased by one, so nil and empty both fail the `> 0` test the
+// comparator makes on it. Offsets rise with insertion order, which is what
+// orders duplicate keys without a stable sort.
 type entryLoc uint32
 
 func makeEntryLoc(keyLenPlus1, offset int32) entryLoc {
@@ -191,16 +187,14 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	}
 }
 
-// dataChunk holds the bytes of the entries put into it, growing up from the
-// front, and the index of those entries, growing down from the back. The chunk
-// is full when the two meet, so the index costs no allocation of its own and a
-// buffer's whole footprint is the chunks it holds.
+// dataChunk holds entry bytes growing up from the front and the index of those
+// entries growing down from the back, and is full when the two meet. So the
+// index costs no allocation and a buffer's footprint is the chunks it holds.
 type dataChunk struct {
 	buf    []byte
 	entTop int32
 }
 
-// keyOf slices e's key out of the chunk holding it. A nil key comes back nil.
 func keyOf(buf []byte, e entryLoc) []byte {
 	if kLen := e.keyLen(); kLen > 0 {
 		off := e.offset() + entryHeaderSize
@@ -229,15 +223,15 @@ func (c *dataChunk) entries() []entryLoc {
 	if n == 0 {
 		return nil
 	}
-	// nextChunk checks the chunk's own alignment, and entTop starts at a
-	// multiple of entryLocSize and only ever moves by it.
+	// Aligned: nextChunk checks the chunk itself, and entTop starts at a
+	// multiple of entryLocSize and only moves by it.
 	return unsafe.Slice((*entryLoc)(unsafe.Pointer(&c.buf[c.entTop])), n)
 }
 
 type sortableBuffer struct {
 	// The chunk being filled, hoisted out of chunks so Put touches only this
-	// struct. nextChunk writes them back, and syncCur has to run before
-	// anything reads the last chunk's own copy.
+	// struct. syncCur writes it back, and has to run before anything reads
+	// the last chunk.
 	curBuf []byte
 	curEnd int32 // data grows up to here
 	curTop int32 // the index grows down to here
@@ -245,8 +239,8 @@ type sortableBuffer struct {
 
 	chunks []dataChunk
 
-	// Sort orders each chunk's index on its own, so reading the buffer in key
-	// order is a k-way merge over the chunks.
+	// Sort orders each chunk on its own, so reading in key order is a k-way
+	// merge over the chunks.
 	mrg     merger
 	sortedN int // n as of the last Sort; -1 while unsorted
 
@@ -254,9 +248,8 @@ type sortableBuffer struct {
 	optimalSize int
 }
 
-// chunkSizeFor returns the size of a chunk able to hold an entry of n bytes and
-// its index slot. Kept apart from nextChunk so the arithmetic can be tested
-// without allocating.
+// chunkSizeFor returns the size of a chunk able to hold an entry of n bytes
+// and its index slot.
 func chunkSizeFor(n int) int {
 	if size := n + entryLocSize; size > dataChunkSize {
 		return (size + entryLocSize - 1) &^ (entryLocSize - 1)
@@ -264,8 +257,8 @@ func chunkSizeFor(n int) int {
 	return dataChunkSize
 }
 
-// nextChunk starts a chunk able to hold an entry of n bytes and its index slot.
-// An entry never straddles chunks, so Get can hand out direct references.
+// nextChunk starts a chunk able to hold an entry of n bytes and its index
+// slot. An entry never straddles chunks, so Next hands out direct references.
 func (b *sortableBuffer) nextChunk(n int) {
 	size := chunkSizeFor(n)
 	var buf []byte
@@ -286,7 +279,6 @@ func (b *sortableBuffer) nextChunk(n int) {
 	b.chunkBytes += len(buf)
 }
 
-// syncCur puts the chunk being filled back into chunks, where the readers look.
 func (b *sortableBuffer) syncCur() {
 	if len(b.chunks) == 0 {
 		return
@@ -322,13 +314,12 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(kLen, int32(off)))) //nolint:gosec
 	b.curEnd = int32(off + n)                                                                  //nolint:gosec
 	b.n++
-	// Last, so nothing has to stay live across the copies.
 	copy(data[entryHeaderSize:entryHeaderSize+lk], k)
 	copy(data[entryHeaderSize+lk:], v)
 }
 
 // putSlow handles what Put's single guard rejects: a key too long to index,
-// and an entry the chunk being filled has no room for. nextChunk always leaves
+// and an entry the current chunk has no room for. nextChunk always leaves
 // room, so the retry cannot come back here.
 //
 //go:noinline
@@ -340,15 +331,14 @@ func (b *sortableBuffer) putSlow(k, v []byte) {
 	b.Put(k, v)
 }
 
-// Size counts the bytes of every chunk taken, minus what is still free in the
-// one being filled. The entry index lives inside the chunks, so it is counted.
+// Size counts every chunk taken, less what is free in the one being filled.
+// The entry index lives inside the chunks, so it is counted.
 func (b *sortableBuffer) Size() int { return b.chunkBytes - int(b.curTop-b.curEnd) }
 
 func (b *sortableBuffer) Len() int { return b.n }
 
-// Next returns the entry the read cursor sits on and moves it along. Reading
-// a sorted buffer is a merge over its chunks, so the buffer carries the merge
-// state and no two goroutines may read at once.
+// Next returns the entry the read cursor sits on and moves it along. The
+// buffer carries the merge state, so no two goroutines may read at once.
 func (b *sortableBuffer) Next() ([]byte, []byte, bool) {
 	if b.sortedN != b.n {
 		b.Sort()
@@ -372,9 +362,8 @@ func (b *sortableBuffer) Next() ([]byte, []byte, bool) {
 	return key, val, true
 }
 
-// Prealloc only reserves room for the chunk headers. The chunks themselves are
-// still taken from their pool one at a time and carry the entry index with
-// them, so an idle buffer holds nothing.
+// Prealloc only reserves room for the chunk headers. The chunks come from
+// their pool one at a time, so an idle buffer holds nothing.
 func (b *sortableBuffer) Prealloc(_, predictDataSize int) Buffer {
 	if n := predictDataSize/dataChunkSize + 1; cap(b.chunks) < n {
 		b.chunks = slices.Grow(b.chunks, n)
@@ -396,9 +385,8 @@ func (b *sortableBuffer) Reset() {
 
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 
-// Sort orders each chunk's index on its own. A chunk's keys are the only bytes
-// it reads, so the sort stays inside 1MB however large the buffer is; reading
-// the buffer back merges the runs.
+// Sort orders each chunk on its own, so it stays inside 1MB however large the
+// buffer is; reading the buffer back merges the runs.
 func (b *sortableBuffer) Sort() {
 	if b.sortedN != b.n {
 		b.syncCur()
@@ -417,8 +405,8 @@ func (c *dataChunk) sort() {
 		return
 	}
 	buf := c.buf
-	// Key extraction stays inside cmp: pdqsortCmpFunc calls the comparator
-	// indirectly, so a separate closure never inlines and costs a call per key.
+	// Key extraction stays inside cmp: the comparator is called indirectly,
+	// so a separate closure never inlines and costs a call per key.
 	cmp := func(x, y entryLoc) int {
 		var xk, yk []byte
 		if kLen := x.keyLen(); kLen > 0 {
@@ -434,8 +422,8 @@ func (c *dataChunk) sort() {
 		}
 		return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
 	}
-	// The index grows downward, so keys put in ascending order arrive reversed.
-	// pdqsort spots that too, but only after sampling for a pivot.
+	// The index grows downward, so ascending keys arrive reversed. pdqsort
+	// spots that too, but only after sampling for a pivot.
 	for j := 1; j < len(ents); j++ {
 		if cmp(ents[j-1], ents[j]) < 0 {
 			slices.SortFunc(ents, cmp)
@@ -445,19 +433,16 @@ func (c *dataChunk) sort() {
 	slices.Reverse(ents)
 }
 
-// merger walks already-sorted chunks in key order, one entry at a time. It
-// holds a cursor per chunk and a heap of chunk ids ordered by the key each
-// cursor sits on. The prefixes live apart from the cursors because the heap
-// reads them on nearly every comparison, and a few hundred bytes of them stay
-// in L1.
+// merger walks already-sorted chunks in key order, a cursor per chunk under a
+// heap of chunk ids. The prefixes live apart from the cursors because the heap
+// reads them on nearly every comparison and they stay in L1.
 type merger struct {
 	heap []int32  // chunk ids, ordered by their cursor's key
 	pfx  []uint64 // each cursor's key prefix, by chunk id
 	cur  []cursor // by chunk id
 
-	// Chunks that already run in order end to end, which keys arriving
-	// ascending produce, are read straight through instead of merged, so a
-	// read costs no step of the merge.
+	// Chunks already in order end to end, which ascending keys produce, are
+	// read straight through instead of merged.
 	concat bool
 	chunk  int // chunk the straight-through cursor sits in
 }
@@ -494,8 +479,8 @@ func (m *merger) rewind(chunks []dataChunk) {
 	}
 }
 
-// next returns the entry the cursor sits on and moves it to the following one
-// in key order. ok is false once every entry has been returned.
+// next returns the entry the cursor sits on and moves it to the next in key
+// order.
 func (m *merger) next() ([]byte, entryLoc, bool) {
 	if m.concat {
 		for ; m.chunk < len(m.cur); m.chunk++ {
@@ -534,7 +519,6 @@ func (m *merger) release() {
 	m.chunk, m.concat = 0, false
 }
 
-// load caches the key a cursor sits on and its prefix.
 func (m *merger) load(id int32) {
 	c := &m.cur[id]
 	c.key = keyOf(c.buf, c.ents[c.at])
@@ -542,8 +526,7 @@ func (m *merger) load(id int32) {
 }
 
 // chunksInOrder reports whether every chunk's last key comes before the next
-// chunk's first, which keys arriving ascending produce. A tie keeps the earlier
-// chunk first, which is insertion order.
+// chunk's first. A tie keeps the earlier chunk, which is insertion order.
 func (m *merger) chunksInOrder() bool {
 	for i := 1; i < len(m.cur); i++ {
 		prev, cur := &m.cur[i-1], &m.cur[i]
@@ -558,8 +541,7 @@ func (m *merger) chunksInOrder() bool {
 }
 
 // less orders two cursors by the key they sit on. Chunks fill in insertion
-// order, so the lower id wins a tie and equal keys come back in the order they
-// went in.
+// order, so the lower id wins a tie and equal keys keep the order they went in.
 func (m *merger) less(x, y int32) bool {
 	if px, py := m.pfx[x], m.pfx[y]; px != py {
 		return px < py
@@ -570,11 +552,10 @@ func (m *merger) less(x, y int32) bool {
 	return x < y
 }
 
-// siftRoot restores the heap after the root's cursor moved on. It sinks the
-// hole to a leaf taking the smaller child, then climbs back until the old root
-// fits, which costs one compare a level instead of siftDown's two. The cursor
-// that just won usually holds a larger key now, so the hole nearly always
-// reaches a leaf.
+// siftRoot restores the heap after the root's cursor moved on: sink the hole
+// to a leaf taking the smaller child, then climb back until the old root fits.
+// One compare a level instead of siftDown's two, and the cursor that just won
+// usually holds a larger key, so the hole nearly always reaches a leaf.
 func (m *merger) siftRoot() {
 	x, i := m.heap[0], 0
 	for {
@@ -627,8 +608,8 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 		if !ok {
 			return nil
 		}
-		// writeField says the same thing, but it does not inline and a call
-		// per field costs Write more than the duplication does.
+		// writeSortedEntries says the same, but a call per field does not
+		// inline and costs Write more than the duplication does.
 		lk := int64(len(k))
 		if k == nil {
 			lk = -1

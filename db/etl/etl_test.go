@@ -1269,10 +1269,10 @@ func BenchmarkSortableBufferPutOnly(b *testing.B) {
 	}
 }
 
-// BenchmarkSortableBufferGet reads a sorted buffer end to end through Get. It
-// re-reads the same buffer every iteration, which restarts the merge, where a
-// collector reads one only once.
-func BenchmarkSortableBufferGet(b *testing.B) {
+// BenchmarkSortableBufferRead reads a sorted buffer end to end. It re-reads
+// the same buffer every iteration, restarting the merge, where a collector
+// reads one only once.
+func BenchmarkSortableBufferRead(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
 
@@ -1689,9 +1689,8 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	require.Equal(t, []byte("reused"), got[0].value)
 }
 
-// TestChunkSizeFor: the size a chunk needs is computed in int, so an entry
-// larger than a chunk still asks for one of its own and an entry past what an
-// int32 holds does not wrap into a pooled one.
+// TestChunkSizeFor: the size is computed in int, so an entry past what an
+// int32 holds does not wrap into a pooled chunk.
 func TestChunkSizeFor(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -1756,9 +1755,8 @@ func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
 	require.True(t, probe.sawOwnChunks, "buffer was recycled before its providers were disposed")
 }
 
-// TestSortableBufferAllEmptyEntries: entries whose key and value are both
-// zero-length keep insertion order too. nil and empty stay distinguishable, so
-// the four combinations pin the order.
+// TestSortableBufferAllEmptyEntries: zero-length keys and values keep
+// insertion order too, and nil stays distinguishable from empty.
 func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	buf := NewSortableBuffer(256 * 1024)
 
@@ -1790,9 +1788,8 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	assert.Equal(t, []byte("last"), entries[4].value)
 }
 
-// TestSortableBufferChunkBoundary: an entry never straddles a chunk, whatever
-// per-entry bookkeeping the chunk itself holds. The sizes make the fill stop at
-// a different offset in the last chunk each time.
+// TestSortableBufferChunkBoundary: an entry never straddles a chunk. The sizes
+// stop the fill at a different offset in the last chunk each time.
 func TestSortableBufferChunkBoundary(t *testing.T) {
 	const keyLen = 8
 	// entryHeaderSize+keyLen+valLen divides dataChunkSize for 4, 20, 52, 116 and
@@ -1840,9 +1837,8 @@ func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	require.Nil(t, got[0].key)
 }
 
-// TestSortableBufferStableSortAcrossChunks: each chunk is sorted on its own and
-// the merge puts the runs back together, so duplicate keys spread over several
-// chunks are the case that can lose insertion order.
+// TestSortableBufferStableSortAcrossChunks: duplicate keys spread over several
+// chunks are the case the per-chunk sort plus merge can reorder.
 func TestSortableBufferStableSortAcrossChunks(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
@@ -1873,8 +1869,8 @@ func TestSortableBufferStableSortAcrossChunks(t *testing.T) {
 	require.Equal(t, dups, seq)
 }
 
-// BenchmarkSortableBufferPutOnlyCold fills a fresh buffer without Prealloc -
-// the pool-miss path, where the entry storage has to grow as Put runs.
+// BenchmarkSortableBufferPutOnlyCold fills a fresh buffer without Prealloc,
+// the pool-miss path.
 func BenchmarkSortableBufferPutOnlyCold(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
@@ -1899,8 +1895,7 @@ func BenchmarkSortableBufferPutOnlyCold(b *testing.B) {
 	}
 }
 
-// BenchmarkSortableBufferWrite isolates Sort+Write from disk: it is the flush
-// path a collector takes once it spills, minus the file.
+// BenchmarkSortableBufferWrite is the flush path minus the file.
 func BenchmarkSortableBufferWrite(b *testing.B) {
 	const keyLen = 32
 
@@ -1943,35 +1938,8 @@ func BenchmarkSortableBufferWrite(b *testing.B) {
 	}
 }
 
-func BenchmarkSortableBufferInmemLoadOneChunk(b *testing.B) {
-	const keyLen = 32
-	const valLen = 64
-
-	for _, count := range []int{2_000, 8_000} {
-		b.Run(fmt.Sprintf("random_%d", count), func(b *testing.B) {
-			b.ReportAllocs()
-			buf := NewSortableBuffer(256 * 1024 * 1024)
-			key := make([]byte, keyLen)
-			val := make([]byte, valLen)
-			for i := range count {
-				x := uint64(i) * 6364136223846793005
-				binary.BigEndian.PutUint64(key, x)
-				binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
-				binary.BigEndian.PutUint64(val, uint64(i)) //nolint:gosec
-				buf.Put(key, val)
-			}
-			for b.Loop() {
-				buf.Sort() // puts the read cursor back at the first entry
-				for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
-				}
-			}
-		})
-	}
-}
-
-// TestSortableBufferMergesChunks: ascending keys leave the chunks already
-// ordered end to end, descending keys interleave them. Both must read back in
-// key order, and a second pass must give the same answer.
+// TestSortableBufferMergesChunks: ascending keys leave the chunks ordered end
+// to end, descending keys interleave them. Both must read back in key order.
 func TestSortableBufferMergesChunks(t *testing.T) {
 	const count = 40_000 // several chunks at 4+8+64 bytes an entry
 	for _, ascending := range []bool{true, false} {
