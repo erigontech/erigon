@@ -766,6 +766,8 @@ func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cancelling seedCtx did not release goSeed tasks still waiting for a slot")
 	}
+	require.EqualValues(n-limit, batch.seedDropped.Load(),
+		"every task that never seeded must be counted, or the warn under-reports")
 }
 
 // goSeed waits on seedCtx, not the batch's own cancellation, so cancelling the batch alone must

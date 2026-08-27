@@ -75,6 +75,8 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 	return nil
 }
 
+// goSeed runs f under the downloader's seeding cap. The cap is on concurrent hashing, not on
+// goroutines: every kept item still gets one, parked in Acquire until a slot frees or seedCtx goes.
 func (me *downloadBatch) goSeed(f func()) {
 	me.all.Go(func() {
 		if me.d.seedSem.Acquire(me.seedCtx, 1) != nil {
@@ -82,6 +84,12 @@ func (me *downloadBatch) goSeed(f func()) {
 			return
 		}
 		defer me.d.seedSem.Release(1)
+		// Winning a slot just as the caller goes away seeds nothing either: seedKeptSnapshot
+		// swallows the ctx error, so count it here or the drop total under-reports.
+		if me.seedCtx.Err() != nil {
+			me.seedDropped.Add(1)
+			return
+		}
 		f()
 	})
 }
