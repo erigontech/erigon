@@ -188,9 +188,11 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 	// A client MAY queue attestation for processing once the block is retrieved.
 	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
 	if !ok {
-		// Block hasn't arrived yet, queue attestation for later processing
-		if queueMissing {
-			s.queuePendingAttestation(blockRoot, msg)
+		if !queueMissing {
+			return fmt.Errorf("%w: block not available", ErrIgnore)
+		}
+		if !s.queuePendingAttestation(blockRoot, msg) {
+			return fmt.Errorf("%w: %w: block not available", ErrIgnore, ErrAttestationCapacity)
 		}
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
@@ -327,10 +329,19 @@ func (s *payloadAttestationService) releaseValidatedRESTAttestation(key seenPayl
 }
 
 // queuePendingAttestation adds an attestation to the pending queue for later processing.
-func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	_ = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
-		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
-	})
+func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) bool {
+	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
+	if _, loaded := s.pending.jobs.Load(key); loaded {
+		return true
+	}
+	if !s.pending.reserve() {
+		if _, loaded := s.pending.jobs.Load(key); loaded {
+			return true
+		}
+		return false
+	}
+	s.pending.storeReserved(key, msg)
+	return true
 }
 
 func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {

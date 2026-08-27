@@ -449,13 +449,20 @@ func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
 		different.Signature[0] = 1
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: different}
 		collector := &gloasCollectorTest{}
-		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false), forkchoice.ErrIgnore)
 		require.Zero(t, collector.calls)
 	})
 	t.Run("read error", func(t *testing.T) {
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, readErr: errors.New("disk unavailable")}
 		collector := &gloasCollectorTest{}
-		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false), forkchoice.ErrIgnore)
+		require.Zero(t, collector.calls)
+	})
+	t.Run("validation failure", func(t *testing.T) {
+		validationErr := errors.New("invalid execution payload")
+		store := &envelopeReadTestStore{onErr: validationErr}
+		collector := &gloasCollectorTest{}
+		require.ErrorIs(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false), validationErr)
 		require.Zero(t, collector.calls)
 	})
 	t.Run("collector error", func(t *testing.T) {

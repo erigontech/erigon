@@ -500,6 +500,60 @@ func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
 	require.True(t, exists)
 }
 
+func TestPayloadAttestationServiceReportsCapacityWhenMissingBlockQueueIsFull(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	for i := range maxPendingAttestations {
+		key := pendingPayloadAttestationKey{
+			blockRoot:      common.Hash{byte(i), byte(i >> 8)},
+			validatorIndex: uint64(i),
+			messageRoot:    common.Hash{byte(i >> 8), byte(i)},
+		}
+		service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{})
+	}
+	service.pending.count.Store(maxPendingAttestations)
+
+	blockRoot := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAttestationCapacity)
+	require.NotErrorIs(t, err, ErrAttestationQueued)
+	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(pendingPayloadAttestationKeyFor(blockRoot, msg))
+	require.False(t, exists)
+}
+
+func TestPayloadAttestationServiceReportsQueuedWhenExactWorkExistsAtCapacity(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+	service.pending.jobs.Store(pendingPayloadAttestationKeyFor(blockRoot, msg), &pendingJob[*cltypes.PayloadAttestationMessage]{msg: msg})
+	for i := range maxPendingAttestations - 1 {
+		key := pendingPayloadAttestationKey{
+			blockRoot:      common.Hash{byte(i), byte(i >> 8)},
+			validatorIndex: uint64(i + 2),
+			messageRoot:    common.Hash{byte(i >> 8), byte(i)},
+		}
+		service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{})
+	}
+	service.pending.count.Store(maxPendingAttestations)
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
+
+	err := service.ProcessMessage(context.Background(), nil, msg)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAttestationQueued)
+	require.NotErrorIs(t, err, ErrAttestationCapacity)
+	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
+}
+
 func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
