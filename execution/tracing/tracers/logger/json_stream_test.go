@@ -207,6 +207,59 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	}
 }
 
+// closeStreamLikeCaller writes the tail ExecuteTraceTx appends once execution is
+// over: exactly one array end and one object end, whatever the logger emitted.
+func closeStreamLikeCaller(stream jsonstream.Stream) {
+	stream.WriteArrayEnd()
+	stream.WriteMore()
+	stream.WriteObjectField("gas")
+	stream.WriteUint64(0)
+	stream.WriteMore()
+	stream.WriteObjectField("failed")
+	stream.WriteBool(false)
+	stream.WriteObjectEnd()
+}
+
+// The structLogs prologue must be written at most once. OnExit opens it too, for
+// traces that captured no step, and the caller closes exactly one object and one
+// array however many frames exited.
+func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name    string
+		cfg     *LogConfig
+		ctx     context.Context
+		opcodes int
+	}{
+		{"a negative limit suppresses every step", &LogConfig{Limit: -1}, context.Background(), 3},
+		{"a dead context suppresses every step", &LogConfig{}, dead, 3},
+		{"nothing to capture", &LogConfig{}, context.Background(), 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			l := NewJsonStreamLogger(tt.cfg, tt.ctx, stream)
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			scope := &mockOpContext{}
+			for i := range tt.opcodes {
+				l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+			}
+			// Two frames exit, as in any trace of a transaction that makes a call.
+			l.OnExit(1, nil, 0, nil, false)
+			l.OnExit(0, nil, 0, nil, false)
+
+			closeStreamLikeCaller(stream)
+			require.NoError(t, stream.Flush())
+			require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+		})
+	}
+}
+
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
 // 0x-prefixed 64-char hex strings and that a partial last word is padded to 32 bytes.
 func TestJsonStreamLogger_MemoryEncoding(t *testing.T) {

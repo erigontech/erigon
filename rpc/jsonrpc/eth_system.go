@@ -311,7 +311,7 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
-func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -329,11 +329,11 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
-	return (*hexutil.Big)(gasResult.ToBig()), err
+	return (*hexutil.U256)(gasResult), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
-func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -344,7 +344,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(tipcap.ToBig()), err
+	return (*hexutil.U256)(new(uint256.Int).Set(tipcap)), err
 }
 
 type feeHistoryResult struct {
@@ -400,7 +400,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 }
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
-func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -423,11 +423,11 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(ret256.ToBig()), nil
+	return (*hexutil.U256)(&ret256), nil
 }
 
 // BaseFee returns the base fee at the current head.
-func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -446,7 +446,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return nil, nil
 	}
 	baseFee := misc.CalcBaseFee(config, header)
-	return (*hexutil.Big)(baseFee.ToBig()), nil
+	return (*hexutil.U256)(baseFee), nil
 }
 
 // EthHardForkConfig represents config of a hard-fork
