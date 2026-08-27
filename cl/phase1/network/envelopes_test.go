@@ -322,6 +322,28 @@ func TestRequestEnvelopesByRootRetainsValidatedPrefixOnError(t *testing.T) {
 	require.Equal(t, requestedRoot, envelopes[0].Message.BeaconBlockRoot)
 }
 
+func TestAcceptEnvelopeResponsesRejectsInvalidCandidateBeforeProgress(t *testing.T) {
+	root := common.Hash{1}
+	invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	invalid.Message.BeaconBlockRoot = root
+	valid := invalid.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	valid.Message.Payload.BlockHash = common.Hash{2}
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+	requested := map[common.Hash]struct{}{root: {}}
+	validate := func(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+		if envelope.Message.Payload.BlockHash == (common.Hash{}) {
+			return errors.New("invalid candidate")
+		}
+		return nil
+	}
+
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{invalid}, requested, received, validate)
+	require.Equal(t, [][32]byte{root}, filterReceived([][32]byte{root}, received))
+
+	acceptEnvelopeResponsesWithValidator([]*cltypes.SignedExecutionPayloadEnvelope{valid}, requested, received, validate)
+	require.Same(t, valid, received[root])
+}
+
 func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Hash, *cltypes.SignedBeaconBlock) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
