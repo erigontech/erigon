@@ -373,6 +373,15 @@ func TestEnvelopeRequestSlotRangeRejectsOverflow(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestRequestEnvelopesFranticallyPreservesParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 100 {
+		_, err := requestEnvelopesFranticallyWithValidator(ctx, nil, [][32]byte{{1}}, nil)
+		require.ErrorIs(t, err, context.Canceled)
+	}
+}
+
 func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Hash, *cltypes.SignedBeaconBlock) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
@@ -382,7 +391,10 @@ func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Has
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)
 
-	requestedRoot := common.Hash{1}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	requestedRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
 	valid.Message.BeaconBlockRoot = requestedRoot
 	invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
@@ -400,7 +412,5 @@ func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Has
 		clock,
 		nil,
 	)
-	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
-	block.Block.Slot = 1
 	return client, requestedRoot, block
 }
