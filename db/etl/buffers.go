@@ -491,6 +491,10 @@ func (b *appendSortableBuffer) Len() int {
 }
 
 func (b *appendSortableBuffer) Sort() {
+	if !b.unsorted { // already flattened; just put the read cursor back
+		b.at = 0
+		return
+	}
 	b.sortedBuf, b.at, b.unsorted = b.sortedBuf[:0], 0, false
 	if cap(b.sortedBuf) < len(b.entries) {
 		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
@@ -530,6 +534,9 @@ func (b *appendSortableBuffer) Reset() {
 
 func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
+	// The new map holds nothing, so neither does the run flattened out of the
+	// old one, and neither does what Size reports.
+	b.sortedBuf, b.at, b.unsorted, b.size = b.sortedBuf[:0], 0, false, 0
 	if cap(b.sortedBuf) < predictKeysAmount {
 		b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
 	}
@@ -582,6 +589,10 @@ func (b *oldestEntrySortableBuffer) Len() int {
 }
 
 func (b *oldestEntrySortableBuffer) Sort() {
+	if !b.unsorted { // already flattened; just put the read cursor back
+		b.at = 0
+		return
+	}
 	b.sortedBuf, b.at, b.unsorted = b.sortedBuf[:0], 0, false
 	if cap(b.sortedBuf) < len(b.entries) {
 		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
@@ -621,6 +632,9 @@ func (b *oldestEntrySortableBuffer) Reset() {
 
 func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
+	// The new map holds nothing, so neither does the run flattened out of the
+	// old one, and neither does what Size reports.
+	b.sortedBuf, b.at, b.unsorted, b.size = b.sortedBuf[:0], 0, false, 0
 	if cap(b.sortedBuf) < predictKeysAmount {
 		b.sortedBuf = make([]sortableBufferEntry, 0, predictKeysAmount)
 	}
