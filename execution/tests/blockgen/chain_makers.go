@@ -431,6 +431,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
