@@ -391,6 +391,17 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		defer close(finishCh)
 
 		for !cfg.downloader.Finished() {
+			if cfg.downloader.SkippedFullBlocksAtCapacity() {
+				if !completeTrackedHistoryBackfill(
+					ctx, cfg.downloader, skippedEnvelopeRecoveryRetryInterval,
+					func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+						return recoverSkippedEnvelopes(ctx, cfg, pending)
+					},
+					func() {},
+				) {
+					return
+				}
+			}
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					log.Warn("closing backfilling routine", "err", err)
@@ -399,9 +410,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 
-		skipped := cfg.downloader.SkippedFullBlocks()
-		if !completeHistoryBackfill(
-			ctx, skipped, skippedEnvelopeRecoveryRetryInterval,
+		if !completeTrackedHistoryBackfill(
+			ctx, cfg.downloader, skippedEnvelopeRecoveryRetryInterval,
 			func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 				return recoverSkippedEnvelopes(ctx, cfg, pending)
 			},
@@ -449,6 +459,37 @@ func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, wai
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+type skippedFullBlockTracker interface {
+	SkippedFullBlocks() []network.SkippedFullBlock
+	MarkSkippedFullBlocksRecovered([]common.Hash)
+}
+
+func completeTrackedHistoryBackfill(
+	ctx context.Context,
+	tracker skippedFullBlockTracker,
+	retryInterval time.Duration,
+	recoverEnvelopes func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock,
+	notifyBackfilled func(),
+) bool {
+	skipped := tracker.SkippedFullBlocks()
+	return completeHistoryBackfill(ctx, skipped, retryInterval, func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+		failed := recoverEnvelopes(ctx, pending)
+		failedRoots := make(map[common.Hash]struct{}, len(failed))
+		for _, skippedBlock := range failed {
+			failedRoots[common.Hash(skippedBlock.Root)] = struct{}{}
+		}
+		recoveredRoots := make([]common.Hash, 0, len(pending)-len(failed))
+		for _, skippedBlock := range pending {
+			root := common.Hash(skippedBlock.Root)
+			if _, ok := failedRoots[root]; !ok {
+				recoveredRoots = append(recoveredRoots, root)
+			}
+		}
+		tracker.MarkSkippedFullBlocksRecovered(recoveredRoots)
+		return failed
+	}, notifyBackfilled)
 }
 
 func completeHistoryBackfill(

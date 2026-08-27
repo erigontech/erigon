@@ -1034,10 +1034,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	if shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
 		recoverMissingEnvelopes(ctx, cfg)
 	}
-
-	if canValidateGloasPayloads(cfg) {
-		offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
-		runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset,
+	canValidatePayloads := canValidateGloasPayloads(cfg)
+	retryPhases := []func(context.Context){func(retryCtx context.Context) {
+		cfg.forkChoice.RetryPendingExecutionPayloadEnvelopeIndices(retryCtx, maxPendingGloasPayloadsPerCycle)
+	}}
+	if canValidatePayloads {
+		retryPhases = append(retryPhases,
 			func(retryCtx context.Context) {
 				cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
 			},
@@ -1048,6 +1050,11 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				retryUnverifiedAnchorPayload(retryCtx, cfg)
 			},
 		)
+	}
+	offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
+	runGloasPayloadRetryPhases(ctx, gloasPayloadRetryBudget, offset, retryPhases...)
+
+	if canValidatePayloads {
 		if cfg.executionClient.SupportInsertion() {
 			if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)

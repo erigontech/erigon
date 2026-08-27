@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -27,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -34,14 +36,18 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -169,12 +175,337 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
+}
+
+func TestPostExecutionPayloadEnvelopeRequiresBlobDataIncludedHeader(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	for _, value := range []string{"", "sometimes", "TRUE"} {
+		t.Run(value, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+			if value != "" {
+				request.Header.Set("Eth-Blob-Data-Included", value)
+			}
+			recorder := httptest.NewRecorder()
+
+			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeRequiresConsensusVersion(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.False(t, fcu.OnExecutionPayloadCheckBlobData)
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsUnknownBroadcastValidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation=fast", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.False(t, fcu.OnExecutionPayloadCheckBlobData)
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsConsensusEquivocationBeforeApplyOrPublish(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	fcu.HasEquivocatingBlockFunc = func(root common.Hash) (bool, bool) {
+		require.Equal(t, envelope.Message.BeaconBlockRoot, root)
+		return true, true
+	}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation=consensus_and_equivocation", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.False(t, fcu.OnExecutionPayloadCheckBlobData)
+}
+
+func TestPostExecutionPayloadEnvelopeEquivocationCheckOnlyAppliesToRequestedMode(t *testing.T) {
+	for _, validation := range []string{"", "gossip", "consensus"} {
+		t.Run(validation, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.HasEquivocatingBlockFunc = func(common.Hash) (bool, bool) {
+				t.Fatal("equivocation check called for weaker validation mode")
+				return false, false
+			}
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			body, err := json.Marshal(envelope)
+			require.NoError(t, err)
+			path := "/eth/v1/beacon/execution_payload_envelope"
+			if validation != "" {
+				path += "?broadcast_validation=" + validation
+			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+			request.Header.Set("Eth-Blob-Data-Included", "false")
+			recorder := httptest.NewRecorder()
+
+			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsUnavailableEquivocationContext(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.HasEquivocatingBlockFunc = func(common.Hash) (bool, bool) { return false, false }
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation=consensus_and_equivocation", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.False(t, fcu.OnExecutionPayloadCheckBlobData)
+}
+
+func emptyExecutionPayloadEnvelopeContents(t *testing.T, handler *ApiHandler, fcu *forkchoice_mock.ForkChoiceStorageMock) *executionPayloadEnvelopeContents {
+	t.Helper()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Blocks[root] = block
+	contents := newExecutionPayloadEnvelopeContents(handler.beaconChainCfg)
+	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	return contents
+}
+
+func TestPostExecutionPayloadEnvelopeAcceptsBlobContentsJSONAndStrictSSZ(t *testing.T) {
+	for _, contentType := range []string{"application/json", "application/octet-stream"} {
+		t.Run(contentType, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
+			var body []byte
+			var err error
+			if contentType == "application/json" {
+				body, err = json.Marshal(contents)
+			} else {
+				body, err = contents.EncodeSSZ(nil)
+			}
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+			request.Header.Set("Content-Type", contentType)
+			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+			request.Header.Set("Eth-Blob-Data-Included", "true")
+			recorder := httptest.NewRecorder()
+
+			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.True(t, fcu.OnExecutionPayloadCheckBlobData)
+		})
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsBlobContentsCardinalityMismatch(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
+	contents.KZGProofs.Append(new(cltypes.KZGProof))
+	body, err := json.Marshal(contents)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsBlobContentsAboveConfiguredBound(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	proofs := make([]*cltypes.KZGProof, int(handler.beaconChainCfg.MaxBlobsPerBlockUpperBound())+1)
+	for i := range proofs {
+		proofs[i] = new(cltypes.KZGProof)
+	}
+	body, err := json.Marshal(struct {
+		SignedExecutionPayloadEnvelope *cltypes.SignedExecutionPayloadEnvelope `json:"signed_execution_payload_envelope"`
+		KZGProofs                      []*cltypes.KZGProof                     `json:"kzg_proofs"`
+		Blobs                          []*cltypes.Blob                         `json:"blobs"`
+	}{
+		SignedExecutionPayloadEnvelope: &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)},
+		KZGProofs:                      proofs,
+		Blobs:                          []*cltypes.Blob{},
+	})
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "list exceeds decoder resource limit")
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsNonCanonicalBlobContentsSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
+	body, err := contents.EncodeSSZ(nil)
+	require.NoError(t, err)
+	body = append(body, 0)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvailability(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler.columnStorage = columnStorage
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blob := new(cltypes.Blob)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
+	require.NoError(t, err)
+	commitmentValue := cltypes.KZGCommitment(commitment)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Blocks[root] = block
+	contents := newExecutionPayloadEnvelopeContents(handler.beaconChainCfg)
+	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	proofValue := cltypes.KZGProof(proof)
+	contents.KZGProofs.Append(&proofValue)
+	contents.Blobs.Append(blob)
+	body, err := json.Marshal(contents)
+	require.NoError(t, err)
+	writes := 0
+	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), root, gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+			writes++
+			return nil
+		},
+	).Times(int(handler.beaconChainCfg.NumberOfColumns))
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), writes)
+		return nil
+	}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestDataColumnSidecarsGloasUseProgressiveColumnLists(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 1
+	cfg.MaxBlobCommittmentsPerBlock = 4
+	cell := cltypes.Cell{1}
+	proof := cltypes.KZGProof{2}
+
+	sidecars, err := dataColumnSidecarsGloas(&cfg, 3, common.HexToHash("0x1234"), []peerdasutils.CellsAndKZGProofs{{Blobs: []cltypes.Cell{cell}, Proofs: []cltypes.KZGProof{proof}}})
+	require.NoError(t, err)
+	expected := solid.NewStaticProgressiveListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
+	expected.Append(&cell)
+	wantRoot, err := expected.HashSSZ()
+	require.NoError(t, err)
+	gotRoot, err := sidecars[0].Column.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, gotRoot)
+}
+
+func TestPostExecutionPayloadEnvelopeChecksDataAvailability(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsUnavailableDataWithoutGossip(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningError(t *testing.T) {
@@ -200,11 +531,42 @@ func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningErr
 	})
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "disk unavailable")
+}
+
+func TestPostExecutionPayloadEnvelopeReturnsGossipPublishFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	injected := errors.New("gossip unavailable")
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(),
+		gossip.TopicNameExecutionPayload,
+		gomock.Any(),
+	).Return(injected)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
+	}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), injected.Error())
 }
 
 func TestPostExecutionPayloadEnvelopeGossipsWhenIndicesAreQueued(t *testing.T) {
@@ -228,6 +590,8 @@ func TestPostExecutionPayloadEnvelopeGossipsWhenIndicesAreQueued(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
@@ -245,6 +609,7 @@ func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
 	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
@@ -266,6 +631,8 @@ func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *t
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
@@ -284,6 +651,8 @@ func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *t
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)+`{}`))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
@@ -302,6 +671,8 @@ func TestPostExecutionPayloadEnvelopeAcceptsTrailingJSONWhitespace(t *testing.T)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)+" \n\t"))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)

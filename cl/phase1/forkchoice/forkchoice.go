@@ -206,6 +206,7 @@ type ForkChoiceStore struct {
 	payloadValidationOnce      sync.Once
 	payloadValidationAdmission chan struct{}
 	envelopeIndexWrites        sync.Map
+	envelopeIndexRepairs       envelopeIndexRepairTracker
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
@@ -779,6 +780,31 @@ func (f *ForkChoiceStore) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlock
 
 func (f *ForkChoiceStore) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return f.forkGraph.GetBlock(blockRoot)
+}
+
+func (f *ForkChoiceStore) HasEquivocatingBlock(blockRoot common.Hash) (bool, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	block, ok := f.forkGraph.GetBlock(blockRoot)
+	if !ok || block == nil || block.Block == nil {
+		return false, false
+	}
+	equivocating := false
+	f.blockTimeliness.Range(func(key, _ any) bool {
+		root := key.(common.Hash)
+		if root == blockRoot {
+			return true
+		}
+		candidate, ok := f.forkGraph.GetBlock(root)
+		if ok && candidate != nil && candidate.Block != nil &&
+			candidate.Block.Slot == block.Block.Slot && candidate.Block.ProposerIndex == block.Block.ProposerIndex {
+			equivocating = true
+			return false
+		}
+		return true
+	})
+	return equivocating, true
 }
 
 // HasEnvelope delegates to forkGraph.HasEnvelope.

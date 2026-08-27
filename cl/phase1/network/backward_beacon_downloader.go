@@ -85,6 +85,8 @@ type SkippedFullBlock struct {
 	Root  [32]byte
 }
 
+const maxSkippedFullBlocks = 64
+
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB, beaconCfg *clparams.BeaconChainConfig) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
 		ctx:         ctx,
@@ -334,6 +336,10 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Debug("[BackwardBeaconDownloader] unseeded GLOAS envelope unavailable, preserving cursor", "slot", block.Block.Slot)
 			return nil
 		}
+		if isFull && envelope == nil && b.SkippedFullBlocksAtCapacity() {
+			log.Debug("[BackwardBeaconDownloader] skipped FULL retention at capacity, preserving cursor", "slot", block.Block.Slot)
+			return nil
+		}
 
 		finished, err := b.onNewBlock(block, envelope)
 		b.finished.Store(finished)
@@ -344,7 +350,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 
 		// Record FULL blocks passing through without envelope for post-download recovery.
 		if isFull && envelope == nil {
-			b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Block: block, Root: blockRoot})
+			b.addSkippedFullBlock(SkippedFullBlock{Block: block, Root: blockRoot})
 		}
 
 		advanced = true
@@ -395,6 +401,10 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					log.Debug("[BackwardBeaconDownloader] unseeded GLOAS envelope unavailable for root-fetched block, preserving cursor", "slot", block.Block.Slot)
 					return nil
 				}
+				if isFull && envelope == nil && b.SkippedFullBlocksAtCapacity() {
+					log.Debug("[BackwardBeaconDownloader] skipped FULL retention at capacity after root fetch, preserving cursor", "slot", block.Block.Slot)
+					return nil
+				}
 
 				finished, err := b.onNewBlock(block, envelope)
 				b.finished.Store(finished)
@@ -402,7 +412,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					log.Warn("Error processing root-fetched block", "err", err)
 				} else {
 					if isFull && envelope == nil {
-						b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Block: block, Root: blockRoot})
+						b.addSkippedFullBlock(SkippedFullBlock{Block: block, Root: blockRoot})
 					}
 					b.prevBatchTopBlock = block
 					b.expectedRoot = block.Block.ParentRoot
@@ -542,7 +552,40 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 
 // SkippedFullBlocks returns confirmed FULL blocks awaiting envelope recovery.
 func (b *BackwardBeaconDownloader) SkippedFullBlocks() []SkippedFullBlock {
-	return b.skippedFullBlocks
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Clone(b.skippedFullBlocks)
+}
+
+func (b *BackwardBeaconDownloader) SkippedFullBlocksAtCapacity() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.skippedFullBlocks) >= maxSkippedFullBlocks
+}
+
+func (b *BackwardBeaconDownloader) addSkippedFullBlock(skipped SkippedFullBlock) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.skippedFullBlocks = append(b.skippedFullBlocks, skipped)
+}
+
+func (b *BackwardBeaconDownloader) MarkSkippedFullBlocksRecovered(roots []common.Hash) {
+	if len(roots) == 0 {
+		return
+	}
+	recovered := make(map[common.Hash]struct{}, len(roots))
+	for _, root := range roots {
+		recovered[root] = struct{}{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	retained := b.skippedFullBlocks[:0]
+	for _, skipped := range b.skippedFullBlocks {
+		if _, ok := recovered[common.Hash(skipped.Root)]; !ok {
+			retained = append(retained, skipped)
+		}
+	}
+	b.skippedFullBlocks = retained
 }
 
 // RecoverSkippedEnvelopes retries fetching envelopes for blocks that were

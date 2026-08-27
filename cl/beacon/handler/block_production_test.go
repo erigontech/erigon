@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	gossip_topic "github.com/erigontech/erigon/cl/gossip"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -255,8 +256,48 @@ func TestBroadcastSelfBuildEnvelopeUsesFullyValidatedIngress(t *testing.T) {
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
 
 	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
 	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
 	require.False(t, cached)
+}
+
+func TestIntegrateBlockPersistsGeneratedColumnsBeforeForkchoice(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	h.columnStorage = columnStorage
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	column := &cltypes.DataColumnSidecar{Index: 3}
+	written := false
+	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(column.Index), column).DoAndReturn(
+		func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+			written = true
+			return nil
+		},
+	)
+	fcu.OnBlockFunc = func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+		require.True(t, written)
+		return nil
+	}
+	fcu.OnTickFunc = func(uint64) {}
+
+	_, err = h.integrateBlockAndBlobs(t.Context(), block, nil, []*cltypes.DataColumnSidecar{column})
+
+	require.NoError(t, err)
+}
+
+func TestPublishBlockAndSidecarsReturnsPublishFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h := &ApiHandler{gossipManager: gossipManager}
+	injected := errors.New("injected publish failure")
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameBeaconBlock, []byte{1}).Return(injected)
+
+	err := h.publishBlockAndSidecars(t.Context(), []byte{1}, nil, nil, clparams.Phase0Version)
+
+	require.ErrorIs(t, err, injected)
 }
 
 func TestBroadcastSelfBuildEnvelopeRetainsPayloadWhenGossipFails(t *testing.T) {

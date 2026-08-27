@@ -617,6 +617,34 @@ func TestBackwardConfirmedMissingEnvelopesTransferToBatchRecoveryInOneTraversal(
 	}
 }
 
+func TestBackwardConfirmedFullEnvelopeRetentionBackpressuresAtCapacity(t *testing.T) {
+	parent := makeGloasBlock(7, hash(1), hash(0))
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child := makeGloasBlock(8, hash(2), hash(1))
+	child.Block.ParentRoot = parentRoot
+	downloader := &BackwardBeaconDownloader{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		expectedRoot:      parentRoot,
+		prevBatchTopBlock: child,
+		httpFallbackURL:   "://invalid",
+		onNewBlock: func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			t.Fatal("block advanced while skipped FULL retention was at capacity")
+			return false, nil
+		},
+	}
+	downloader.httpPreferred.Store(true)
+	for i := 0; i < 64; i++ {
+		downloader.skippedFullBlocks = append(downloader.skippedFullBlocks, SkippedFullBlock{Root: [32]byte{byte(i)}})
+	}
+	require.True(t, downloader.SkippedFullBlocksAtCapacity())
+
+	require.NoError(t, downloader.processResponses(context.Background(), []*cltypes.SignedBeaconBlock{parent}))
+
+	require.Equal(t, common.Hash(parentRoot), downloader.expectedRoot)
+	require.Len(t, downloader.SkippedFullBlocks(), 64)
+}
+
 func TestBackwardRestartZeroExecutionHashCannotSkip(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())

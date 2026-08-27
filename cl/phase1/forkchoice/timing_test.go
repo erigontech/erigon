@@ -29,6 +29,36 @@ func newTestForkChoiceStore(secondsPerSlot, intervalsPerSlot, slotsPerEpoch, glo
 	return f
 }
 
+func TestHasEquivocatingBlock(t *testing.T) {
+	root := common.HexToHash("0x01")
+	sameProposerAndSlot := common.HexToHash("0x02")
+	differentProposer := common.HexToHash("0x03")
+	differentSlot := common.HexToHash("0x04")
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		root:                {Block: &cltypes.BeaconBlock{Slot: 10, ProposerIndex: 7}},
+		sameProposerAndSlot: {Block: &cltypes.BeaconBlock{Slot: 10, ProposerIndex: 7}},
+		differentProposer:   {Block: &cltypes.BeaconBlock{Slot: 10, ProposerIndex: 8}},
+		differentSlot:       {Block: &cltypes.BeaconBlock{Slot: 11, ProposerIndex: 7}},
+	}
+	store := &ForkChoiceStore{forkGraph: ptcVoteForkGraph{blocks: blocks}}
+	store.blockTimeliness.Store(root, [clparams.NumBlockTimelinessDeadlines]bool{})
+	store.blockTimeliness.Store(differentProposer, [clparams.NumBlockTimelinessDeadlines]bool{})
+	store.blockTimeliness.Store(differentSlot, [clparams.NumBlockTimelinessDeadlines]bool{})
+
+	equivocating, known := store.HasEquivocatingBlock(root)
+	require.True(t, known)
+	require.False(t, equivocating)
+
+	store.blockTimeliness.Store(sameProposerAndSlot, [clparams.NumBlockTimelinessDeadlines]bool{})
+	equivocating, known = store.HasEquivocatingBlock(root)
+	require.True(t, known)
+	require.True(t, equivocating)
+
+	equivocating, known = store.HasEquivocatingBlock(common.HexToHash("0xff"))
+	require.False(t, known)
+	require.False(t, equivocating)
+}
+
 func TestGetAttestationDueMs_PreGloas(t *testing.T) {
 	// Pre-GLOAS: 12 * 1000 / 3 = 4000 ms
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 0)

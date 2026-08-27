@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -258,6 +259,25 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 			fcu.OnExecutionPayloadErr = processErr
 
 			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+			require.ErrorIs(t, err, ErrIgnore)
+		})
+	}
+}
+
+func TestExecutionPayloadServiceIgnoresLocalPersistenceFailures(t *testing.T) {
+	for _, processErr := range []error{
+		forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed,
+		forkchoice.ErrExecutionPayloadEnvelopeIndicesPending,
+	} {
+		t.Run(processErr.Error(), func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			blockRoot := common.HexToHash("0x1234")
+			fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.FinalizedSlotVal = 50
+			fcu.OnExecutionPayloadErr = processErr
+
+			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+
 			require.ErrorIs(t, err, ErrIgnore)
 		})
 	}

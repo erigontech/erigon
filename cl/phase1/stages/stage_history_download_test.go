@@ -19,6 +19,7 @@ package stages
 import (
 	"context"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -279,6 +280,57 @@ func TestCompleteHistoryBackfillPacesOnlyZeroProgress(t *testing.T) {
 			t.Fatal("recovery did not stop after cancellation")
 		}
 	})
+}
+
+type skippedFullBlockTrackerStub struct {
+	pending []network.SkippedFullBlock
+}
+
+func (s *skippedFullBlockTrackerStub) SkippedFullBlocks() []network.SkippedFullBlock {
+	return slices.Clone(s.pending)
+}
+
+func (s *skippedFullBlockTrackerStub) MarkSkippedFullBlocksRecovered(roots []common.Hash) {
+	recovered := make(map[common.Hash]struct{}, len(roots))
+	for _, root := range roots {
+		recovered[root] = struct{}{}
+	}
+	retained := s.pending[:0]
+	for _, pending := range s.pending {
+		if _, ok := recovered[common.Hash(pending.Root)]; !ok {
+			retained = append(retained, pending)
+		}
+	}
+	s.pending = retained
+}
+
+func TestTrackedSkippedFullBlockRecoveryStreamsLongHistoryWithinBound(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{}
+	for admitted := 0; admitted < 256; {
+		for len(tracker.pending) < 64 && admitted < 256 {
+			tracker.pending = append(tracker.pending, network.SkippedFullBlock{Root: [32]byte{byte(admitted), byte(admitted >> 8)}})
+			admitted++
+		}
+		require.LessOrEqual(t, len(tracker.pending), 64)
+		require.True(t, completeTrackedHistoryBackfill(context.Background(), tracker, 0,
+			func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock { return nil }, func() {}))
+		require.Empty(t, tracker.pending)
+	}
+}
+
+func TestTrackedSkippedFullBlockRecoveryRetainsPermanentlyUnavailableBatch(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	ctx, cancel := context.WithCancel(context.Background())
+	notified := false
+	completed := completeTrackedHistoryBackfill(ctx, tracker, 0,
+		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			cancel()
+			return pending
+		}, func() { notified = true })
+
+	require.False(t, completed)
+	require.Len(t, tracker.pending, 64)
+	require.False(t, notified)
 }
 
 func TestWaitForHistoryCompletion(t *testing.T) {

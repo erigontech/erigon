@@ -1962,7 +1962,7 @@ func (a *ApiHandler) parseEthConsensusVersion(
 }
 
 func (a *ApiHandler) parseBlockPublishingValidation(
-	w http.ResponseWriter,
+	_ http.ResponseWriter,
 	r *http.Request,
 	apiVersion int,
 ) BlockPublishingValidation {
@@ -1970,7 +1970,6 @@ func (a *ApiHandler) parseBlockPublishingValidation(
 	if apiVersion == 1 || str == string(BlockPublishingValidationGossip) {
 		return BlockPublishingValidationGossip
 	}
-	// fall to consensus anyway. equivocation is not supported yet.
 	return BlockPublishingValidationConsensus
 }
 
@@ -2219,31 +2218,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		"columnSidecars",
 		len(columnsSidecars),
 	)
-	// Broadcast the block and its blobs
-	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
-		a.logger.Error("Failed to publish block", "err", err)
-	}
-
-	if blk.Version() < clparams.FuluVersion {
-		for idx, blob := range blobsSidecarsBytes {
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
-				a.logger.Error("Failed to publish blob sidecar", "err", err)
-			}
-		}
-	}
-
-	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
-		for _, column := range columnsSidecars {
-			columnSSZ, err := column.EncodeSSZ(nil)
-			if err != nil {
-				a.logger.Error("Failed to encode column sidecar", "err", err)
-				continue
-			}
-			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
-				a.logger.Error("Failed to publish data column sidecar", "err", err)
-			}
-		}
+	if err := a.publishBlockAndSidecars(ctx, blkSSZ, blobsSidecarsBytes, columnsSidecars, blk.Version()); err != nil {
+		return err
 	}
 
 	// [New in Gloas:EIP7732] Publish the validator-signed envelope after local block integration.
@@ -2259,6 +2235,40 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	return nil
+}
+
+func (a *ApiHandler) publishBlockAndSidecars(
+	ctx context.Context,
+	blockSSZ []byte,
+	blobSidecars [][]byte,
+	columnSidecars []*cltypes.DataColumnSidecar,
+	version clparams.StateVersion,
+) error {
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blockSSZ); err != nil {
+		return fmt.Errorf("failed to publish beacon block: %w", err)
+	}
+	if version < clparams.FuluVersion {
+		for index, blob := range blobSidecars {
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(index)), blob); err != nil {
+				return fmt.Errorf("failed to publish blob sidecar %d: %w", index, err)
+			}
+		}
+		return nil
+	}
+	for _, column := range columnSidecars {
+		if column == nil {
+			return errors.New("missing data column sidecar")
+		}
+		columnSSZ, err := column.EncodeSSZ(nil)
+		if err != nil {
+			return fmt.Errorf("failed to encode data column sidecar %d: %w", column.Index, err)
+		}
+		subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
+		if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
+			return fmt.Errorf("failed to publish data column sidecar %d: %w", column.Index, err)
+		}
+	}
 	return nil
 }
 
@@ -2333,7 +2343,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		return err
 	}
 
-	applyErr := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
+	applyErr := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
 	persistenceFailed := false
 	if applyErr != nil {
 		switch {
@@ -2428,7 +2438,9 @@ func (a *ApiHandler) integrateBlockAndBlobs(
 	if err != nil {
 		return common.Hash{}, err
 	}
-	// TODO: write column sidecars if needed
+	if err := a.persistDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
+		return common.Hash{}, err
+	}
 
 	if block.Version() < clparams.FuluVersion {
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
@@ -2467,6 +2479,18 @@ func (a *ApiHandler) integrateBlockAndBlobs(
 		return common.Hash{}, err
 	}
 	return blockRoot, nil
+}
+
+func (a *ApiHandler) persistDataColumnSidecars(ctx context.Context, blockRoot common.Hash, columnSidecars []*cltypes.DataColumnSidecar) error {
+	for i, column := range columnSidecars {
+		if column == nil {
+			return fmt.Errorf("missing data column sidecar %d", i)
+		}
+		if err := a.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(column.Index), column); err != nil {
+			return fmt.Errorf("failed to persist data column sidecar %d: %w", column.Index, err)
+		}
+	}
+	return nil
 }
 
 func (a *ApiHandler) finishBlockAndBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) error {

@@ -53,7 +53,6 @@ func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
 	return e.version
 }
 
-// Version returns the consensus version of the execution requests.
 func (e *ExecutionRequests) Version() clparams.StateVersion {
 	return e.effectiveVersion()
 }
