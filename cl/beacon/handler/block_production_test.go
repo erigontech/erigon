@@ -670,7 +670,7 @@ func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
 	builderURL := "https://builder.example"
 	forwarded := make(chan struct{})
 	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
-	client.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
 		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
 			close(forwarded)
 			return nil
@@ -788,6 +788,78 @@ func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("submission was not retried automatically")
 	}
+}
+
+func TestForwardPublishedBlockUnboundRetryRemainsPublicOnly(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	failedAttempts := make(chan struct{})
+	succeeded := make(chan struct{})
+	gomock.InOrder(
+		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).Return(errors.New("unavailable")),
+		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).DoAndReturn(
+			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+				close(failedAttempts)
+				return errors.New("unavailable")
+			},
+		),
+		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).DoAndReturn(
+			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+				close(succeeded)
+				return nil
+			},
+		),
+	)
+	handler.builderClient = client
+
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-failedAttempts:
+	case <-time.After(time.Second):
+		t.Fatal("unbound route attempts did not fail")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		handler.builderRoutes.mu.Lock()
+		_, exists := handler.builderRoutes.routes[builderRouteKey{root: root, url: builderURL}]
+		handler.builderRoutes.mu.Unlock()
+		if !exists {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("unbound route was not discarded after failure")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-succeeded:
+	case <-time.After(time.Second):
+		t.Fatal("unbound public retry did not succeed")
+	}
+}
+
+func TestValidateSelfBuildPayloadAvailablePreservesUnsignedPayloadForValidator(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	payloadHash := common.HexToHash("0x1234")
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payloadHash
+	cacheEntry := &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)}
+	cacheEntry.Payload.BlockHash = payloadHash
+	handler.selfBuildPayloads.Add(payloadHash, cacheEntry)
+
+	require.NoError(t, handler.validateSelfBuildPayloadAvailable(block))
+	retained, ok := handler.selfBuildPayloads.Get(payloadHash)
+	require.True(t, ok)
+	require.Same(t, cacheEntry, retained)
+	require.Empty(t, fcu.Envelopes)
 }
 
 func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {

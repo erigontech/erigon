@@ -165,6 +165,15 @@ func (s *builderRouteStore) Complete(root common.Hash, url string, delivered boo
 	}
 }
 
+func (s *builderRouteStore) Discard(root common.Hash, url string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := builderRouteKey{root: root, url: url}
+	if route, ok := s.routes[key]; ok && route.state == builderRouteInFlight {
+		delete(s.routes, key)
+	}
+}
+
 func (s *builderRouteStore) pruneExpired(now time.Time) {
 	for key, route := range s.routes {
 		if route.state != builderRouteInFlight && !now.Before(route.expiresAt) {

@@ -170,7 +170,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 
 	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
-	finalizedSlot := s.forkchoiceStore.FinalizedSlot()
+	finalizedSlot := s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
 	if envelope.Payload == nil {
 		return errors.New("nil execution payload")
 	}

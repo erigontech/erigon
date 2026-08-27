@@ -1668,11 +1668,7 @@ func (a *ApiHandler) produceBeaconBody(
 		// BlobKzgCommitments are already populated during bundle processing above
 		beaconBody.SignedExecutionPayloadBid.Signature = common.Bytes96(bls.InfiniteSignature)
 
-		// Cache the execution payload and requests so broadcastBlock can construct
-		// the SignedExecutionPayloadEnvelope when the validator publishes the signed
-		// block. The envelope needs the beacon block root (only available after the
-		// block is fully assembled), so we defer envelope construction to broadcast time.
-		// [New in Gloas:EIP7732]
+		// Retain the payload until the validator publishes its signed envelope.
 		cachedExecReqs := gloasExecRequests
 		if cachedExecReqs == nil {
 			cachedExecReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
@@ -1883,19 +1879,28 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 	if err != nil {
 		return
 	}
-	if !a.builderRoutes.ClaimOrAdd(root, builderURL) {
+	trustedRoute := a.builderRoutes.Claim(root, builderURL)
+	if !trustedRoute && !a.builderRoutes.ClaimOrAdd(root, builderURL) {
 		return
 	}
 	go func() {
 		var err error
 		for range 2 {
-			err = a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block)
+			if trustedRoute {
+				err = a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block)
+			} else {
+				err = a.builderClient.SubmitSignedBeaconBlockPublic(context.Background(), builderURL, block)
+			}
 			if err == nil {
 				a.builderRoutes.Complete(root, builderURL, true)
 				return
 			}
 		}
-		a.builderRoutes.Complete(root, builderURL, false)
+		if trustedRoute {
+			a.builderRoutes.Complete(root, builderURL, false)
+		} else {
+			a.builderRoutes.Discard(root, builderURL)
+		}
 		a.logger.Warn("Failed to forward signed block to builder", "err", err)
 	}()
 }
@@ -2388,13 +2393,9 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
-	// [New in Gloas:EIP7732] For self-built blocks, construct and broadcast the
-	// SignedExecutionPayloadEnvelope so the block can transition from PENDING to FULL.
-	// If the validator client provided a signed envelope, use it directly (real BLS signature).
-	// Otherwise fall back to constructing one from the cache (legacy/fallback path).
 	if blk.Version() >= clparams.GloasVersion {
-		if err := a.applySelfBuildEnvelope(ctx, blk); err != nil {
-			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
+		if err := a.validateSelfBuildPayloadAvailable(blk); err != nil {
+			a.logger.Error("Self-build payload unavailable for validator envelope", "err", err)
 		}
 	}
 
@@ -2465,7 +2466,7 @@ func collectPublishedPayloadData(
 	return cellsAndProofs, false, nil
 }
 
-func (a *ApiHandler) applySelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
+func (a *ApiHandler) validateSelfBuildPayloadAvailable(blk *cltypes.SignedBeaconBlock) error {
 	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
 		return nil // no bid in block, nothing to do
@@ -2474,33 +2475,9 @@ func (a *ApiHandler) applySelfBuildEnvelope(ctx context.Context, blk *cltypes.Si
 		return nil // not a self-build block; builder will broadcast the envelope
 	}
 
-	blockRoot, err := blk.Block.HashSSZ()
-	if err != nil {
-		return fmt.Errorf("failed to compute block root: %w", err)
-	}
-
-	cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
+	_, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
 	if !ok {
 		return fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
-	}
-	execReqs := cached.ExecutionRequests
-	if execReqs == nil {
-		execReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
-	}
-	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: &cltypes.ExecutionPayloadEnvelope{
-			Payload:               cached.Payload,
-			ExecutionRequests:     execReqs,
-			BuilderIndex:          clparams.BuilderIndexSelfBuild,
-			BeaconBlockRoot:       blockRoot,
-			ParentBeaconBlockRoot: blk.Block.ParentRoot,
-		},
-		Signature: common.Bytes96(bls.InfiniteSignature),
-	}
-
-	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
-	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
-		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
 	}
 
 	return nil

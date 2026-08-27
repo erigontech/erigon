@@ -53,7 +53,10 @@ type ExecutionPayloadService serviceinterface.Service[*cltypes.SignedExecutionPa
 type ExecutionPayloadBidService serviceinterface.Service[*cltypes.SignedExecutionPayloadBid]
 
 //go:generate mockgen -typed=true -destination=./mock_services/payload_attestation_service_mock.go -package=mock_services . PayloadAttestationService
-type PayloadAttestationService serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+type PayloadAttestationService interface {
+	serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+	ProcessRESTMessage(context.Context, *cltypes.PayloadAttestationMessage, func() error) error
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_preferences_service_mock.go -package=mock_services . ProposerPreferencesService
 type ProposerPreferencesService serviceinterface.Service[*cltypes.SignedProposerPreferences]

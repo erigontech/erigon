@@ -739,6 +739,103 @@ func TestSubmitSignedBeaconBlock(t *testing.T) {
 	require.NoError(t, client.SubmitSignedBeaconBlock(context.Background(), "https://builder.example", block))
 }
 
+func TestSubmitSignedBeaconBlockPublicRejectsPrivateTargetWithPrivateConfigured(t *testing.T) {
+	for _, addresses := range [][]net.IPAddr{
+		{{IP: net.ParseIP("127.0.0.1")}},
+		{{IP: net.ParseIP("93.184.216.34")}, {IP: net.ParseIP("127.0.0.1")}},
+	} {
+		client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{AllowPrivate: true})
+		client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+			return addresses, nil
+		}
+		err := client.SubmitSignedBeaconBlockPublic(t.Context(), "http://builder.example", cltypes.NewSignedBeaconBlock(mockBeaconConfig, clparams.GloasVersion))
+		require.ErrorContains(t, err, "disallowed address")
+	}
+}
+
+func TestIsPublicBuilderIPRejectsSpecialPurposeRanges(t *testing.T) {
+	for _, value := range []string{
+		"10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.1.1", "192.0.2.1",
+		"198.18.0.1", "198.51.100.1", "203.0.113.1", "240.0.0.1",
+		"::1", "64:ff9b::1", "64:ff9b:1::1", "100::1", "100:0:0:1::1",
+		"2001:db8::1", "fc00::1", "fec0::1", "fe80::1",
+		"::ffff:100.64.0.1",
+	} {
+		require.False(t, isPublicBuilderIP(net.ParseIP(value)), value)
+	}
+	for _, value := range []string{"8.8.8.8", "93.184.216.34", "2001:4860:4860::8888"} {
+		require.True(t, isPublicBuilderIP(net.ParseIP(value)), value)
+	}
+}
+
+func TestSubmitSignedBeaconBlockPublicRejectsNewSpecialPurposeMixedAnswers(t *testing.T) {
+	for _, special := range []string{"fec0::1", "64:ff9b::1", "100:0:0:1::1"} {
+		t.Run(special, func(t *testing.T) {
+			client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+			client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+				return []net.IPAddr{{IP: net.ParseIP("2001:4860:4860::8888")}, {IP: net.ParseIP(special)}}, nil
+			}
+			err := client.SubmitSignedBeaconBlockPublic(t.Context(), "http://builder.example", cltypes.NewSignedBeaconBlock(mockBeaconConfig, clparams.GloasVersion))
+			require.ErrorContains(t, err, "disallowed address")
+		})
+	}
+}
+
+func TestSubmitSignedBeaconBlockPublicDoesNotReuseTrustedPrivateKeepalive(t *testing.T) {
+	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{AllowPrivate: true})
+	resolved := net.ParseIP("127.0.0.1")
+	client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: resolved}}, nil
+	}
+	privateRequests := make(chan struct{}, 2)
+	client.transport = newPinnedBuilderTransport(func(_ context.Context, _, _ string) (net.Conn, error) {
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			reader := bufio.NewReader(serverConn)
+			for {
+				request, err := http.ReadRequest(reader)
+				if err != nil {
+					return
+				}
+				request.Body.Close()
+				privateRequests <- struct{}{}
+				_, _ = serverConn.Write([]byte("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\n\r\n"))
+			}
+		}()
+		return clientConn, nil
+	})
+	publicDialed := make(chan string, 1)
+	client.publicTransport = newPinnedBuilderTransport(func(_ context.Context, _, address string) (net.Conn, error) {
+		publicDialed <- address
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			request, err := http.ReadRequest(bufio.NewReader(serverConn))
+			if err == nil {
+				request.Body.Close()
+				_, _ = serverConn.Write([]byte("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+			}
+		}()
+		return clientConn, nil
+	})
+	t.Cleanup(func() {
+		client.transport.(*http.Transport).CloseIdleConnections()
+		client.publicTransport.(*http.Transport).CloseIdleConnections()
+	})
+	block := cltypes.NewSignedBeaconBlock(mockBeaconConfig, clparams.GloasVersion)
+	require.NoError(t, client.SubmitSignedBeaconBlock(t.Context(), "http://builder.example:18550", block))
+	<-privateRequests
+	resolved = net.ParseIP("93.184.216.34")
+	require.NoError(t, client.SubmitSignedBeaconBlockPublic(t.Context(), "http://builder.example:18550", block))
+	require.Equal(t, "93.184.216.34:18550", <-publicDialed)
+	select {
+	case <-privateRequests:
+		t.Fatal("strict-public request reused trusted private keepalive")
+	default:
+	}
+}
+
 func TestSubmitSignedBeaconBlockHasHotPathDeadline(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
