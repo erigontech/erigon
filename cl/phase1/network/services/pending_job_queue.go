@@ -62,20 +62,6 @@ func newPendingJobQueue[K comparable, M any](
 	}
 }
 
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
-	if !q.reserve() {
-		return nil
-	}
-
-	key, err := buildKey()
-	if err != nil {
-		q.count.Add(-1)
-		return err
-	}
-	q.storeReserved(key, msg)
-	return nil
-}
-
 func (q *pendingJobQueue[K, M]) reserve() bool {
 	if q.count.Add(1) > q.capacity {
 		q.count.Add(-1)
@@ -97,9 +83,12 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
 	}
 }
 
-func (q *pendingJobQueue[K, M]) remove(key K) {
-	q.jobs.Delete(key)
+func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
+	if !q.jobs.CompareAndDelete(key, job) {
+		return false
+	}
 	q.count.Add(-1)
+	return true
 }
 
 // loop is the background goroutine that retries pending jobs.
@@ -147,8 +136,9 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		job := value.(*pendingJob[M])
 
 		if time.Since(job.creationTime) > q.expiry {
-			q.onExpired(k, job.msg)
-			q.remove(k)
+			if q.remove(k, job) {
+				q.onExpired(k, job.msg)
+			}
 			return true
 		}
 
@@ -156,8 +146,7 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		if !done {
 			return true
 		}
-		q.remove(k)
-		if process != nil {
+		if q.remove(k, job) && process != nil {
 			process()
 		}
 		return true

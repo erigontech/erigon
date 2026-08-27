@@ -637,10 +637,13 @@ func TestExecutionPayloadBidServiceUsesCoherentHeadNodeSnapshot(t *testing.T) {
 	require.True(t, compatible)
 }
 
-func TestSeenBidKeyIncludesCompatibleParentTuple(t *testing.T) {
+func TestSeenBidKeyIsBuilderAndSlotOnly(t *testing.T) {
 	bid1 := newTestSignedExecutionPayloadBid(100, 1, 1000).Message
 	bid2 := newTestSignedExecutionPayloadBid(100, 1, 1001).Message
 	bid2.ParentBlockRoot = common.HexToHash("0xdddd")
+	require.Equal(t, newSeenBidKey(bid1), newSeenBidKey(bid2))
+
+	bid2.BuilderIndex++
 	require.NotEqual(t, newSeenBidKey(bid1), newSeenBidKey(bid2))
 }
 
@@ -972,7 +975,7 @@ func TestExecutionPayloadBidServiceRejectsLowerBidBeforeStateFetch(t *testing.T)
 	require.Zero(t, service.validationStateCache.Len())
 }
 
-func TestExecutionPayloadBidServiceSameBuilderDistinctCompatibleParents(t *testing.T) {
+func TestExecutionPayloadBidServiceRejectsSecondBidFromBuilderAtSameSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -1004,17 +1007,16 @@ func TestExecutionPayloadBidServiceSameBuilderDistinctCompatibleParents(t *testi
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	err = service.ProcessMessage(context.Background(), nil, msg2)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "already seen bid")
 
-	// Both should have their own highest bid
 	bidKey1 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash1, ParentBlockRoot: parentRoot1}
 	bidKey2 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash2, ParentBlockRoot: parentRoot2}
 	stored1, found1 := epbsPool.HighestBids.Get(bidKey1)
-	stored2, found2 := epbsPool.HighestBids.Get(bidKey2)
+	_, found2 := epbsPool.HighestBids.Get(bidKey2)
 	require.True(t, found1)
-	require.True(t, found2)
+	require.False(t, found2)
 	require.Equal(t, uint64(1000), stored1.Message.Value)
-	require.Equal(t, uint64(500), stored2.Message.Value)
 }
 
 func TestExecutionPayloadBidServiceSuccess(t *testing.T) {

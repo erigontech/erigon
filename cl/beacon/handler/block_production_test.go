@@ -92,6 +92,20 @@ type replayableBlockService struct {
 	scheduled chan struct{}
 }
 
+type completedPublishedBlockJob struct {
+	err error
+}
+
+func (j completedPublishedBlockJob) Wait(context.Context) error { return j.err }
+
+type synchronousPublishedBlockService struct {
+	*replayableBlockService
+}
+
+func (s *synchronousPublishedBlockService) SchedulePublishedBlockForLaterProcessing(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+	return completedPublishedBlockJob{err: store(context.Background())}
+}
+
 func (s *replayableBlockService) ValidateGossip(_ context.Context, block *cltypes.SignedBeaconBlock) error {
 	root, err := block.HashSSZ()
 	if err != nil {
@@ -145,8 +159,9 @@ func (s *replayableBlockService) ScheduleBlockForLaterProcessing(*cltypes.Signed
 	s.scheduled <- struct{}{}
 }
 
-func (s *replayableBlockService) SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) {
+func (s *replayableBlockService) SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) clservices.PublishedBlockJob {
 	s.scheduled <- struct{}{}
+	return completedPublishedBlockJob{}
 }
 
 type failFirstSidecarGossip struct {
@@ -177,9 +192,18 @@ type conflictAfterValidationForkchoice struct {
 	conflict bool
 }
 
+type rejectingOnBlockForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	err error
+}
+
+func (f *rejectingOnBlockForkchoice) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	return f.err
+}
+
 func (f *conflictAfterValidationForkchoice) OnBlockWithEquivocationCheck(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
 	f.conflict = true
-	return nil
+	return fmt.Errorf("%w: block conflicts with a previously validated proposal", forkchoice.ErrBlockInvalid)
 }
 
 func (f *conflictAfterValidationForkchoice) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
@@ -765,6 +789,11 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 	require.NoError(t, err)
 
 	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(gomock.Any())
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(completedPublishedBlockJob{})
+	handler.blockService = blockService
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderURL := "https://builder.example"
 	blockRoot, err := block.Block.HashSSZ()
@@ -808,7 +837,13 @@ func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
 	require.NoError(t, err)
 	builderURL := "https://builder.example"
 	forwarded := make(chan struct{})
-	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(gomock.Any())
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(completedPublishedBlockJob{})
+	handler.blockService = blockService
+	client := builder_mock.NewMockBuilderClient(ctrl)
 	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
 		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
 			close(forwarded)
@@ -829,6 +864,173 @@ func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("signed block was not forwarded by the receiving beacon node")
 	}
+}
+
+func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentIntegrationFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+
+	validationErr := fmt.Errorf("%w: execution payload transactions are invalid", forkchoice.ErrBlockInvalid)
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: forkchoiceStore, err: validationErr}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	handler.gossipManager = &failFirstSidecarGossip{}
+
+	builderURL := "https://builder.example"
+	forwarded := make(chan struct{})
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwarded)
+			return nil
+		},
+	)
+	handler.builderClient = client
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=gossip", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	req.Header.Set("Eth-Builder-Url", builderURL)
+
+	_, err = handler.PostEthV2BeaconBlocks(recorder, req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	select {
+	case <-forwarded:
+	case <-time.After(time.Second):
+		t.Fatal("accepted block was not forwarded to the builder")
+	}
+}
+
+func TestPostEthV2BeaconBlocksConsensusRejectsPreflightFailureBeforeGossip(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	forkchoiceStore.ValidateBlockForPublishingFn = func(got *cltypes.SignedBeaconBlock, rejectEquivocation bool) error {
+		require.Equal(t, block.Block.Slot, got.Block.Slot)
+		require.False(t, rejectEquivocation)
+		return fmt.Errorf("%w: invalid consensus transition", forkchoice.ErrBlockInvalid)
+	}
+	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=consensus", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+}
+
+func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	preflightCalls := 0
+	forkchoiceStore.ValidateBlockForPublishingFn = func(*cltypes.SignedBeaconBlock, bool) error {
+		preflightCalls++
+		return nil
+	}
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               fmt.Errorf("%w: execution payload transactions are invalid", forkchoice.ErrBlockInvalid),
+	}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=consensus", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	_, err = handler.PostEthV2BeaconBlocks(recorder, req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Equal(t, 1, preflightCalls)
+}
+
+func TestPostEthV2BeaconBlocksReturnsServerErrorForTransientIntegrationFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: forkchoiceStore, err: errors.New("database unavailable")}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	handler.gossipManager = &failFirstSidecarGossip{}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=gossip", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusInternalServerError, endpointErr.Code)
+}
+
+func TestPostEthV1BeaconBlocksDoesNotWaitForFullIntegration(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	version := handler.beaconChainCfg.GetCurrentStateVersion(handler.ethClock.GetCurrentEpoch())
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+	block.Block.Slot = 1
+	body, err := json.Marshal(&cltypes.DenebSignedBeaconBlock{SignedBlock: block})
+	require.NoError(t, err)
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               fmt.Errorf("%w: integration rejected", forkchoice.ErrBlockInvalid),
+	}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	handler.gossipManager = &failFirstSidecarGossip{}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err = handler.PostEthV1BeaconBlocks(httptest.NewRecorder(), req)
+	require.NoError(t, err)
 }
 
 func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
@@ -1125,7 +1327,7 @@ func TestBroadcastBlockRejectsUnknownBlockAtFinalizedHorizonBeforeWrites(t *test
 	}
 }
 
-func TestBroadcastBlockRechecksEquivocationAfterStoreBeforePublish(t *testing.T) {
+func TestBroadcastBlockReportsAcceptedWhenEquivocationAppearsDuringIntegration(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
 	block := blocks[1]
@@ -1136,15 +1338,14 @@ func TestBroadcastBlockRechecksEquivocationAfterStoreBeforePublish(t *testing.T)
 	fcu.HeadSlotVal = block.Block.Slot
 	fcu.OnTickFn = func(uint64) {}
 	handler.forkchoiceStore = &conflictAfterValidationForkchoice{ForkChoiceStorage: fcu}
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
-	handler.engine = engine
 	handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
-	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
 
 	err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationConsensusAndEquivocation)
 
-	require.ErrorIs(t, err, errPublishedBlockValidation)
+	require.ErrorIs(t, err, errPublishedBlockAccepted)
 	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
 }
 
@@ -1234,8 +1435,9 @@ func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T
 	blockService.EXPECT().ReleaseGossipReservation(block)
 	blockService.EXPECT().ScheduleBlockForLaterProcessing(block).Times(0)
 	scheduledStore := make(chan func(context.Context) error, 1)
-	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).Do(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) {
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).DoAndReturn(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
 		scheduledStore <- store
+		return completedPublishedBlockJob{}
 	})
 	handler.blockService = blockService
 	blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
@@ -1277,7 +1479,10 @@ func TestBroadcastBlockSchedulesRecoveryAfterSidecarsAndForkchoiceSucceed(t *tes
 	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
 	blockService.EXPECT().CommitGossipReservation(block)
 	scheduledStore := make(chan func(context.Context) error, 1)
-	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).Do(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) { scheduledStore <- store })
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).DoAndReturn(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+		scheduledStore <- store
+		return completedPublishedBlockJob{}
+	})
 	handler.blockService = blockService
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
@@ -1316,6 +1521,44 @@ func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testin
 		require.ErrorContains(t, err, "database unavailable")
 	}
 	require.Equal(t, 1, installing.onBlockCalls)
+}
+
+func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	stored := blocks[1]
+	root, err := stored.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = stored.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = stored
+	incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
+	incoming.Signature[0] ^= 1
+
+	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus)
+	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	fcu.FinalizedSlotVal = block.Block.Slot
+
+	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = block
+	conflict := block.SignedBeaconBlockHeader().Header.Copy()
+	conflict.Root[0] ^= 1
+	fcu.Headers[common.Hash{0xff}] = conflict
+
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation)
+	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
 }
 
 func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
