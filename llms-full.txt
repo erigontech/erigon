@@ -6628,7 +6628,7 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 ### Transaction Pool Architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
-* The `txpool_content`, `txpool_contentFrom` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are executable and only wait for a lower base fee, so they are reported as pending, matching Geth
+* The `txpool_content`, `txpool_contentFrom` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are nonce-ready and otherwise valid, but are not executable at the current base fee: they wait for the fee condition to change. They are reported as pending, matching Geth
 * Blob transactions (type 3) are not reported by `txpool_content` and `txpool_contentFrom`, matching Geth and Nethermind. They are still counted by `txpool_status`
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
 * Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
