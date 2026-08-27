@@ -139,21 +139,14 @@ func putDataChunk(ref *[]byte) {
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	// Next returns the entries in key order, one goroutine at a time. Sort
-	// must have run since the last Put; reading without it panics rather
-	// than quietly returning a stale run. The slices point into the
-	// buffer's own storage and must not be modified.
+	// Next returns the entries in key order, one goroutine at a time. A
+	// buffer fills, then Sorts, then is read: Put after Sort, and Next or
+	// Write before it, both panic. Sort puts the cursor at the first entry,
+	// so Sorting again is how a buffer is read twice. The slices point into
+	// the buffer's own storage and must not be modified.
 	Next() (k, v []byte, ok bool)
-	// Rewind puts the read cursor back at the first entry. Write does it
-	// too, so a read interleaved with a Write starts over rather than
-	// resuming where the read left off.
-	Rewind()
 	Len() int
 	Reset()
-	// Size is what CheckFlushSize compares against SizeLimit. Each buffer
-	// counts what it actually holds, which for the chunked one is whole
-	// chunks - index and unfilled tail included.
-	Size() int
 	SizeLimit() int
 	Prealloc(predictKeysAmount, predictDataAmount int) Buffer
 	Write(io.Writer) error
@@ -297,40 +290,45 @@ func (b *sortableBuffer) syncCur() {
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
-	lk, lv := len(k), len(v)
-	n := entryHeaderSize + lk + lv
+	kLen, vLen := len(k), len(v)
+	n := entryHeaderSize + kLen + vLen
 	off := int(b.curEnd)
-	// One test for both, so the fast path holds no call and Put keeps its
-	// arguments in registers.
-	if lk > maxKeyLen || off+n+entryLocSize > int(b.curTop) {
+	// One test for all three, so the fast path holds no call and Put keeps
+	// its arguments in registers.
+	if kLen > maxKeyLen || off+n+entryLocSize > int(b.curTop) || b.sortedN == b.n {
 		b.putSlow(k, v)
 		return
 	}
-	kLen, vLen := int32(0), int32(-1)
+	// As on main a nil is stored apart from an empty: valLen goes to -1, and
+	// keyLen is biased by one so nil is the zero the slot already holds.
+	keyLen, valLen := int32(0), int32(-1)
 	if k != nil {
-		kLen = int32(lk) + 1 //nolint:gosec
+		keyLen = int32(kLen) + 1 //nolint:gosec
 	}
 	if v != nil {
-		vLen = int32(lv) //nolint:gosec
+		valLen = int32(vLen) //nolint:gosec
 	}
 	// Sliced to exactly n, so the two copies below take the length from the
 	// destination and the compiler drops the min against the source.
 	data := b.curBuf[off : off+n : off+n]
-	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
+	binary.NativeEndian.PutUint32(data, uint32(valLen)) //nolint:gosec
 	b.curTop -= entryLocSize
-	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(kLen, int32(off)))) //nolint:gosec
-	b.curEnd = int32(off + n)                                                                  //nolint:gosec
+	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(keyLen, int32(off)))) //nolint:gosec
+	b.curEnd = int32(off + n)                                                                    //nolint:gosec
 	b.n++
-	copy(data[entryHeaderSize:entryHeaderSize+lk], k)
-	copy(data[entryHeaderSize+lk:], v)
+	copy(data[entryHeaderSize:entryHeaderSize+kLen], k)
+	copy(data[entryHeaderSize+kLen:], v)
 }
 
-// putSlow handles what Put's single guard rejects: a key too long to index,
-// and an entry the current chunk has no room for. nextChunk always leaves
-// room, so the retry cannot come back here.
+// putSlow handles what Put's single guard rejects: a Put after Sort, a key
+// too long to index, and an entry the current chunk has no room for.
+// nextChunk always leaves room, so the retry cannot come back here.
 //
 //go:noinline
 func (b *sortableBuffer) putSlow(k, v []byte) {
+	if b.sortedN == b.n {
+		panic("etl: Put after Sort")
+	}
 	if len(k) > maxKeyLen {
 		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
 	}
@@ -393,22 +391,16 @@ func (b *sortableBuffer) Reset() {
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 
 // Sort orders each chunk on its own, so it stays inside 1MB however large the
-// buffer is; reading the buffer back merges the runs.
+// buffer is; reading the buffer back merges the runs. It also puts the read
+// cursor at the first entry, so Sorting again is how a buffer is read twice.
 func (b *sortableBuffer) Sort() {
-	if b.sortedN == b.n {
-		return
+	if b.sortedN != b.n {
+		b.syncCur()
+		for i := range b.chunks {
+			b.chunks[i].sort()
+		}
+		b.sortedN = b.n
 	}
-	b.syncCur()
-	for i := range b.chunks {
-		b.chunks[i].sort()
-	}
-	b.sortedN = b.n
-	b.mrg.rewind(b.chunks)
-}
-
-// Rewind puts the read cursor back at the first entry in key order.
-func (b *sortableBuffer) Rewind() {
-	panicIfUnsorted(b.sortedN != b.n)
 	b.mrg.rewind(b.chunks)
 }
 
@@ -442,8 +434,7 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 }
 
 func (b *sortableBuffer) Write(w io.Writer) error {
-	b.Sort()
-	b.Rewind() // Write drives the read cursor, so it writes the whole buffer
+	panicIfUnsorted(b.sortedN != b.n)
 	var numBuf [binary.MaxVarintLen64]byte
 	for {
 		k, v, ok := b.Next()
@@ -517,6 +508,7 @@ func (b *appendSortableBuffer) Len() int {
 
 func (b *appendSortableBuffer) Sort() {
 	if !b.unsorted {
+		b.at = 0 // already flattened; Sort still positions the cursor
 		return
 	}
 	b.sortedBuf, b.at, b.unsorted = b.sortedBuf[:0], 0, false
@@ -535,11 +527,6 @@ func (b *appendSortableBuffer) Less(i, j int) bool {
 
 func (b *appendSortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
-}
-
-func (b *appendSortableBuffer) Rewind() {
-	panicIfUnsorted(b.unsorted)
-	b.at = 0
 }
 
 func (b *appendSortableBuffer) Next() ([]byte, []byte, bool) {
@@ -571,8 +558,7 @@ func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) 
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
-	b.Sort()
-	b.Rewind() // writeSortedEntries does not use the cursor, but Write resets it
+	panicIfUnsorted(b.unsorted)
 	return writeSortedEntries(w, b.sortedBuf)
 }
 
@@ -618,6 +604,7 @@ func (b *oldestEntrySortableBuffer) Len() int {
 
 func (b *oldestEntrySortableBuffer) Sort() {
 	if !b.unsorted {
+		b.at = 0 // already flattened; Sort still positions the cursor
 		return
 	}
 	b.sortedBuf, b.at, b.unsorted = b.sortedBuf[:0], 0, false
@@ -636,11 +623,6 @@ func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
 
 func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
-}
-
-func (b *oldestEntrySortableBuffer) Rewind() {
-	panicIfUnsorted(b.unsorted)
-	b.at = 0
 }
 
 func (b *oldestEntrySortableBuffer) Next() ([]byte, []byte, bool) {
@@ -672,8 +654,7 @@ func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize 
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
-	b.Sort()
-	b.Rewind() // writeSortedEntries does not use the cursor, but Write resets it
+	panicIfUnsorted(b.unsorted)
 	return writeSortedEntries(w, b.sortedBuf)
 }
 
