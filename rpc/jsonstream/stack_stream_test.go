@@ -17,12 +17,16 @@
 package jsonstream
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -827,16 +831,12 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	assert.Equal(t, `{"raw":42,"normal":42}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 
-	// Test using Write method
+	// Test writing already-encoded JSON held as bytes
 	ss.Reset(nil)
 	ss.WriteArrayStart()
-	n, err := ss.Write([]byte(`"hello"`))
-	assert.NoError(t, err)
-	assert.Equal(t, 7, n)
+	ss.WriteRawBytes([]byte(`"hello"`))
 	ss.WriteMore()
-	n, err = ss.Write([]byte(`123`))
-	assert.NoError(t, err)
-	assert.Equal(t, 3, n)
+	ss.WriteRawBytes([]byte(`123`))
 	ss.WriteArrayEnd()
 
 	assert.Equal(t, `["hello",123]`, string(ss.Buffer()))
@@ -1088,4 +1088,179 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+var errWriterGone = errors.New("client gone")
+
+type goneWriter struct{}
+
+func (goneWriter) Write([]byte) (int, error) { return 0, errWriterGone }
+
+// TestFlushErrorDoesNotBuffer pins that a disconnected client cannot make a
+// response accumulate. jsoniter's Flush returns early on a latched error without
+// truncating, so ignoring it would restore the unbounded growth this bounds.
+func TestFlushErrorDoesNotBuffer(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+
+	chunk := strings.Repeat("x", 4096)
+	for range 2000 {
+		s.WriteRaw(chunk)
+	}
+
+	require.Less(t, len(s.stream.Buffer()), 2*FlushThreshold,
+		"buffer grew to %d after the writer failed", len(s.stream.Buffer()))
+	require.Error(t, s.Flush(), "the failure must still be reported")
+}
+
+// discardCounter accepts everything and records how much a response produced.
+type discardCounter struct{ n int64 }
+
+func (w *discardCounter) Write(p []byte) (int, error) { w.n += int64(len(p)); return len(p), nil }
+
+// TestBufferBoundedForEveryWriter pins the bound on the writers other than
+// WriteRaw and WriteString. A response made of numbers (trace gas, pc, depth) or
+// of already-encoded bytes has to stream just like a string-heavy one.
+func TestBufferBoundedForEveryWriter(t *testing.T) {
+	rawValue := []byte(`{"pc":1024,"op":"SSTORE","gas":"0x5208"}`)
+	for name, writeValue := range map[string]func(s *StackStream, i int){
+		"WriteInt":      func(s *StackStream, i int) { s.WriteInt(i) },
+		"WriteUint64":   func(s *StackStream, i int) { s.WriteUint64(uint64(i)) },
+		"WriteRawBytes": func(s *StackStream, i int) { s.WriteRawBytes(rawValue) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out discardCounter
+			s := New(&out).(*StackStream)
+			s.WriteArrayStart()
+
+			peak := 0
+			for i := range 200_000 {
+				if i > 0 {
+					s.WriteMore()
+				}
+				writeValue(s, i)
+				if n := len(s.Buffer()); n > peak {
+					peak = n
+				}
+			}
+			s.WriteArrayEnd()
+			require.NoError(t, s.Flush())
+
+			require.Greater(t, out.n, int64(1<<20), "the response must dwarf the buffer to mean anything")
+			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %dMB response", peak, out.n>>20)
+		})
+	}
+}
+
+// TestStackStreamEndClosesWhatIsOpen pins the point of the stack tracking: a
+// container end repairs whatever the caller left open inside it, so a handler
+// that stops early still yields a parseable response.
+func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(s *StackStream)
+		want  string
+	}{
+		{"trailing comma in an array", func(s *StackStream) {
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteMore()
+			s.WriteArrayEnd()
+		}, `[1,null]`},
+		{"field with no value", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("a")
+			s.WriteObjectEnd()
+		}, `{"a":null}`},
+		{"inner array left open", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("result")
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteObjectEnd()
+		}, `{"result":[1]}`},
+		{"complete output is untouched", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("a")
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteArrayEnd()
+			s.WriteObjectEnd()
+		}, `{"a":[1]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			tc.write(s)
+
+			require.Equal(t, tc.want, string(s.Buffer()))
+			require.NoError(t, json.Unmarshal(s.Buffer(), new(any)))
+			require.True(t, s.IsComplete(), "stack left as %s", s.StackSummary())
+		})
+	}
+}
+
+// TestStackStreamResetClearsError pins that a reused stream works again. jsoniter
+// latches the error on the stream, so leaving it set makes every later Flush
+// fail without draining, and the buffer bound then discards the response.
+func TestStackStreamResetClearsError(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+	s.WriteRaw(strings.Repeat("x", 2*FlushThreshold))
+	require.Error(t, s.Flush())
+
+	var out bytes.Buffer
+	s.Reset(&out)
+	s.WriteString("ok")
+
+	require.NoError(t, s.Flush())
+	require.Equal(t, `"ok"`, out.String())
+}
+
+// TestLazyFieldStreamWritesFieldFirst pins the wrapper's one invariant: whatever
+// value a caller writes first, the field name lands before it and the object
+// still parses. A method that slips through unensured puts the value's bytes at
+// the enclosing object's level.
+func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
+	for name, first := range map[string]func(s Stream){
+		"WriteInt":         func(s Stream) { s.WriteInt(1) },
+		"WriteString":      func(s Stream) { s.WriteString("a") },
+		"WriteNil":         func(s Stream) { s.WriteNil() },
+		"WriteRaw":         func(s Stream) { s.WriteRaw("1") },
+		"WriteRawBytes":    func(s Stream) { s.WriteRawBytes([]byte("1")) },
+		"WriteArrayStart":  func(s Stream) { s.WriteArrayStart() },
+		"WriteObjectStart": func(s Stream) { s.WriteObjectStart() },
+		"WriteEmptyArray":  func(s Stream) { s.WriteEmptyArray() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			first(lazy)
+
+			require.True(t, lazy.Written(), "the field was never opened")
+			require.True(t, strings.HasPrefix(string(inner.Buffer()), `{"result":`),
+				"buffer starts with %q", string(inner.Buffer()))
+			require.NoError(t, inner.ClosePending(0))
+			require.NoError(t, json.Unmarshal(inner.Buffer(), new(any)), "produced %q", string(inner.Buffer()))
+		})
+	}
+}
+
+// A separator and a field name carry no value, so the wrapper leaves them alone:
+// opening the field for one emits `"result":` with nothing able to follow it.
+func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
+	for name, write := range map[string]func(s Stream){
+		"WriteMore":        func(s Stream) { s.WriteMore() },
+		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			write(lazy)
+
+			require.False(t, lazy.Written(), "the field was opened for a write with no value")
+			require.NotContains(t, string(inner.Buffer()), `"result":`)
+		})
+	}
 }

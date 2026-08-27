@@ -333,7 +333,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		stream.Flush()
+		if err := stream.Flush(); err != nil {
+			// The status is already sent, so this is the only place a truncated
+			// reply can show up.
+			undeliveredGauge.Inc()
+			if common.FastContextErr(ctx) != nil {
+				s.logger.Trace("rpc: client stopped reading", "url", r.URL.String())
+			} else {
+				s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+			}
+		}
 	}
 }
 
