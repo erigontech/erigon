@@ -48,30 +48,45 @@ const (
 )
 
 // writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
-// fieldLenSize prefixes every key and value written to a spill file. Fixed
-// width rather than a varint: these files never leave the machine that wrote
-// them, so the length can be read back in one load instead of a decode loop.
-const fieldLenSize = 4
+// A spill file prefixes each field with its length. Fixed width rather than a
+// varint: the file never leaves the machine that wrote it. A key is capped at
+// maxKeyLen so two bytes hold it; a value has no cap.
+const (
+	keyLenSize = 2
+	valLenSize = 4
+	nilKeyLen  = math.MaxUint16 // no key reaches this, so it can mean nil
+)
 
-func putFieldLen(dst []byte, f []byte) {
-	n := int32(len(f)) //nolint:gosec
-	if f == nil {
-		n = -1
+func putKeyLen(dst []byte, keyLen int32) {
+	n := uint16(keyLen) //nolint:gosec
+	if keyLen < 0 {
+		n = nilKeyLen
 	}
-	binary.NativeEndian.PutUint32(dst, uint32(n)) //nolint:gosec
+	binary.NativeEndian.PutUint16(dst, n)
+}
+
+func putValLen(dst []byte, valLen int32) {
+	binary.NativeEndian.PutUint32(dst, uint32(valLen)) //nolint:gosec
 }
 
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry, numBuf []byte) error {
 	for _, entry := range entries {
-		putFieldLen(numBuf, entry.key)
-		if _, err := w.Write(numBuf[:fieldLenSize]); err != nil {
+		keyLen, valLen := int32(len(entry.key)), int32(len(entry.value)) //nolint:gosec
+		if entry.key == nil {
+			keyLen = -1
+		}
+		if entry.value == nil {
+			valLen = -1
+		}
+		putKeyLen(numBuf, keyLen)
+		if _, err := w.Write(numBuf[:keyLenSize]); err != nil {
 			return err
 		}
 		if _, err := w.Write(entry.key); err != nil {
 			return err
 		}
-		putFieldLen(numBuf, entry.value)
-		if _, err := w.Write(numBuf[:fieldLenSize]); err != nil {
+		putValLen(numBuf, valLen)
+		if _, err := w.Write(numBuf[:valLenSize]); err != nil {
 			return err
 		}
 		if _, err := w.Write(entry.value); err != nil {
@@ -200,7 +215,7 @@ type sortableBuffer struct {
 
 	// Write's length scratch. w.Write takes an io.Writer, so a local array
 	// escapes and costs an allocation on every Write.
-	numBuf [fieldLenSize]byte
+	numBuf [valLenSize]byte
 	// chunks hold the key/value bytes. Growing by chunk instead of by one big
 	// slice keeps Put from re-allocating and copying everything collected so
 	// far. All chunks are dataChunkSize, except the private chunk an entry
@@ -367,8 +382,8 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			data = b.entryData(e)
 		}
 		// write key
-		binary.NativeEndian.PutUint32(numBuf, uint32(e.keyLen)) //nolint:gosec
-		if _, err := w.Write(numBuf); err != nil {
+		putKeyLen(numBuf, e.keyLen)
+		if _, err := w.Write(numBuf[:keyLenSize]); err != nil {
 			return err
 		}
 		if kLen > 0 {
@@ -378,8 +393,8 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			data = data[kLen:]
 		}
 		// write value
-		binary.NativeEndian.PutUint32(numBuf, uint32(e.valLen)) //nolint:gosec
-		if _, err := w.Write(numBuf); err != nil {
+		putValLen(numBuf, e.valLen)
+		if _, err := w.Write(numBuf[:valLenSize]); err != nil {
 			return err
 		}
 		if vLen > 0 {
@@ -466,7 +481,7 @@ func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) 
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
-	var numBuf [fieldLenSize]byte
+	var numBuf [valLenSize]byte
 	return writeSortedEntries(w, b.sortedBuf, numBuf[:])
 }
 
@@ -551,7 +566,7 @@ func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize 
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
-	var numBuf [fieldLenSize]byte
+	var numBuf [valLenSize]byte
 	return writeSortedEntries(w, b.sortedBuf, numBuf[:])
 }
 

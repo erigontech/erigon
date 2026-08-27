@@ -144,15 +144,15 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 	m := &mmapBytesReader{data: bb, pos: 0}
 
 	for i := range entries {
-		k, err := readField(m)
+		k, err := readKeyField(m)
 		require.NoError(t, err)
-		v, err := readField(m)
+		v, err := readValField(m)
 		require.NoError(t, err)
 		assert.Equal(t, string(entries[i].key), string(k))
 		assert.Equal(t, string(entries[i].value), string(v))
 	}
 
-	_, err := readField(m)
+	_, err := readKeyField(m)
 	assert.Equal(t, io.EOF, err)
 }
 
@@ -1659,9 +1659,9 @@ func TestSortableBufferOversizedEntry(t *testing.T) {
 	m := &mmapBytesReader{data: w.Bytes()}
 	for i := range want {
 		wantK, wantV := want[i].key, want[i].value
-		gotK, err := readField(m)
+		gotK, err := readKeyField(m)
 		require.NoError(t, err)
-		gotV, err := readField(m)
+		gotV, err := readValField(m)
 		require.NoError(t, err)
 		require.Equal(t, wantK, gotK)
 		require.Equal(t, wantV, gotV)

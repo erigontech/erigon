@@ -124,11 +124,11 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 			return nil, nil, err
 		}
 	}
-	key, err := readField(p.mmapReader)
+	key, err := readKeyField(p.mmapReader)
 	if err != nil {
 		return nil, nil, err
 	}
-	val, err := readField(p.mmapReader)
+	val, err := readValField(p.mmapReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -152,12 +152,24 @@ func (p *fileDataProvider) initMmap() error {
 	return nil
 }
 
-func (m *mmapBytesReader) readFieldLen() (int, error) {
-	if m.pos+fieldLenSize > len(m.data) {
+func (m *mmapBytesReader) readKeyLen() (int, error) {
+	if m.pos+keyLenSize > len(m.data) {
+		return 0, io.EOF
+	}
+	n := binary.NativeEndian.Uint16(m.data[m.pos:])
+	m.pos += keyLenSize
+	if n == nilKeyLen {
+		return -1, nil
+	}
+	return int(n), nil
+}
+
+func (m *mmapBytesReader) readValLen() (int, error) {
+	if m.pos+valLenSize > len(m.data) {
 		return 0, io.EOF
 	}
 	n := int32(binary.NativeEndian.Uint32(m.data[m.pos:])) //nolint:gosec
-	m.pos += fieldLenSize
+	m.pos += valLenSize
 	return int(n), nil
 }
 
@@ -171,15 +183,19 @@ func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
 	return result, nil
 }
 
-// readField reads a length-prefixed byte slice from mmap data (zero-copy).
-// Negative length means nil.
-func readField(m *mmapBytesReader) ([]byte, error) {
-	n, err := m.readFieldLen()
-	if err != nil {
+// A nil field comes back nil. Zero-copy, like readAt.
+func readKeyField(m *mmapBytesReader) ([]byte, error) {
+	n, err := m.readKeyLen()
+	if err != nil || n < 0 {
 		return nil, err
 	}
-	if n < 0 {
-		return nil, nil
+	return m.readAt(n)
+}
+
+func readValField(m *mmapBytesReader) ([]byte, error) {
+	n, err := m.readValLen()
+	if err != nil || n < 0 {
+		return nil, err
 	}
 	return m.readAt(n)
 }
