@@ -159,6 +159,10 @@ The server implementation is found in `polygon/bridge/server.go` where the `Back
 
 ## Heimdall Backend gRPC API
 
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These services are still built in this release, but they are unmaintained and untested.
+:::
+
 The Heimdall Backend service provides APIs for validator and consensus-related functionality.
 
 ### Heimdall Backend Methods
