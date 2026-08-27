@@ -209,7 +209,11 @@ func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetr
 		return nil
 	}
 	var notified atomic.Int32
-	downloader.SetNotifyBlobBackfilled(func(bool) { notified.Add(1) })
+	downloader.SetNotifyBlobBackfilled(func(completed bool) {
+		if completed {
+			notified.Add(1)
+		}
+	})
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Zero(t, notified.Load())

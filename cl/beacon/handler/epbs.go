@@ -955,8 +955,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		case errors.Is(err, forkchoice.ErrIgnore):
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
+			a.logger.Debug("[Beacon REST] execution payload envelope ignored locally", "err", err)
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
 			a.logger.Debug("[Beacon REST] execution payload envelope indices queued", "err", err)
 		default:

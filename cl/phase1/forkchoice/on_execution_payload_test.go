@@ -101,6 +101,25 @@ type persistingEnvelopeForkGraph struct {
 	envelope *cltypes.SignedExecutionPayloadEnvelope
 }
 
+type interleavingIndexRepairForkGraph struct {
+	fork_graph.ForkGraph
+	envelope *cltypes.SignedExecutionPayloadEnvelope
+	started  chan struct{}
+	release  chan struct{}
+	reads    atomic.Int32
+}
+
+func (g *interleavingIndexRepairForkGraph) HasEnvelope(common.Hash) bool { return true }
+
+func (g *interleavingIndexRepairForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	envelope := g.envelope
+	if g.reads.Add(1) == 1 {
+		close(g.started)
+		<-g.release
+	}
+	return envelope, nil
+}
+
 func (g dataAvailabilityForkGraph) HasEnvelope(common.Hash) bool {
 	return false
 }
@@ -844,6 +863,60 @@ func TestIndexRepairGenerationDoesNotClearReplacement(t *testing.T) {
 	require.Equal(t, []envelopeIndexRepairToken{replacement}, repairs.repairs())
 	repairs.complete(replacement)
 	require.Empty(t, repairs.repairs())
+}
+
+func TestStaleIndexRepairValuesDoNotMutateReplacement(t *testing.T) {
+	var repairs envelopeIndexRepairTracker
+	root := common.HexToHash("0x1234")
+	first, ok := repairs.claim(root)
+	require.True(t, ok)
+	repairs.complete(first)
+	replacement, ok := repairs.claim(root)
+	require.True(t, ok)
+
+	stale := repairs.setValues(first, 99, common.HexToHash("0x99"))
+
+	require.Zero(t, stale.generation)
+	require.Equal(t, []envelopeIndexRepairToken{replacement}, repairs.repairs())
+}
+
+func TestStaleIndexRepairCannotOverwriteConcurrentSuccessfulRepair(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.Payload.BlockNumber = 42
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xaaaa")
+	graph := &interleavingIndexRepairForkGraph{
+		envelope: envelope,
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	f := &ForkChoiceStore{forkGraph: graph, db: db}
+	_, ok := f.envelopeIndexRepairs.claim(root)
+	require.True(t, ok)
+
+	retryDone := make(chan struct{})
+	go func() {
+		f.RetryPendingExecutionPayloadEnvelopeIndices(context.Background(), 1)
+		close(retryDone)
+	}()
+	<-graph.started
+	require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
+	close(graph.release)
+	<-retryDone
+
+	require.Empty(t, f.envelopeIndexRepairs.repairs())
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, blockNumber)
+		require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
+		blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
+		require.NoError(t, err)
+		require.Equal(t, envelope.Message.Payload.BlockHash, blockHash)
+		return nil
+	}))
 }
 
 func TestUntrackedIndexCheckUsesRequestedNonzeroRoot(t *testing.T) {

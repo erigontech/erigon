@@ -20,7 +20,6 @@ import (
 	"context"
 	"math"
 	"slices"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -394,26 +393,6 @@ func TestWaitForHistoryDownloadReadyStopsOnCancellation(t *testing.T) {
 	err := waitForHistoryDownloadReady(ctx, nil, func() bool { return false })
 
 	require.ErrorIs(t, err, context.Canceled)
-}
-
-func TestBlobBackfillNotificationWaitsForFinishedHistory(t *testing.T) {
-	var historyFinished atomic.Bool
-	var notifications atomic.Int32
-	notify := notifyBlobBackfilledWhenHistoryReady(historyFinished.Load, func() {
-		notifications.Add(1)
-	})
-
-	notify()
-	notify()
-	require.Zero(t, notifications.Load())
-
-	historyFinished.Store(true)
-	notify()
-	require.Zero(t, notifications.Load())
-
-	notify()
-	notify()
-	require.Equal(t, int32(1), notifications.Load())
 }
 
 func TestTrackedSkippedFullBlockRecoveryStreamsLongHistoryWithinBound(t *testing.T) {

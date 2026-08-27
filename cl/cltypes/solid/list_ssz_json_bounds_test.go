@@ -41,12 +41,40 @@ func TestListSSZUnmarshalJSONRejectsElementAtZeroLimit(t *testing.T) {
 	require.Zero(t, list.Len())
 }
 
+func TestZeroValueListSSZUnmarshalJSONAcceptsNonEmptyList(t *testing.T) {
+	var list ListSSZ[*DepositRequest]
+
+	err := list.UnmarshalJSON([]byte(`[{}]`))
+
+	require.NoError(t, err)
+	require.Equal(t, 1, list.Len())
+}
+
+func TestZeroValueListSSZUnmarshalJSONRetainsResourceGuard(t *testing.T) {
+	var list ListSSZ[*DepositRequest]
+
+	err := list.UnmarshalJSON([]byte(`[{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}]`))
+
+	require.ErrorContains(t, err, "list exceeds decoder resource limit 16")
+	require.Zero(t, list.Len())
+}
+
 func TestListSSZUnmarshalJSONPreservesNullAsEmpty(t *testing.T) {
 	list := NewStaticListSSZ[*DepositRequest](0, SizeDepositRequest)
 
 	err := list.UnmarshalJSON([]byte(`null`))
 
 	require.NoError(t, err)
+	require.Zero(t, list.Len())
+}
+
+func TestConfiguredZeroLimitRemainsBoundedAfterNull(t *testing.T) {
+	list := NewDynamicListSSZ[*DepositRequest](0)
+	require.NoError(t, list.UnmarshalJSON([]byte(`null`)))
+
+	err := list.UnmarshalJSON([]byte(`[{}]`))
+
+	require.ErrorContains(t, err, "list exceeds decoder resource limit 0")
 	require.Zero(t, list.Len())
 }
 

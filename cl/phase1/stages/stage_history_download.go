@@ -390,10 +390,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	if cfg.blobDownloader != nil {
 		cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
-		cfg.blobDownloader.SetNotifyBlobBackfilled(notifyBlobBackfilledWhenHistoryReady(
-			cfg.downloader.Finished,
-			cfg.antiquary.NotifyBlobBackfilled,
-		))
+		cfg.blobDownloader.SetNotifyBlobBackfilled(nil)
 		cfg.blobDownloader.Start()
 	}
 
@@ -427,6 +424,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				return
 			}
+		}
+		if cfg.blobDownloader != nil {
+			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
 		}
 
 		if !completeTrackedHistoryBackfill(
@@ -547,22 +547,6 @@ func waitForHistoryDownloadReady(ctx context.Context, stalled <-chan struct{}, r
 		}
 	}
 	return nil
-}
-
-func notifyBlobBackfilledWhenHistoryReady(historyFinished func() bool, notify func()) func() {
-	var state atomic.Uint32
-	return func() {
-		if historyFinished == nil || notify == nil || !historyFinished() {
-			return
-		}
-		// The first callback can belong to a pass that started before history finished.
-		if state.CompareAndSwap(0, 1) {
-			return
-		}
-		if state.CompareAndSwap(1, 2) {
-			notify()
-		}
-	}
 }
 
 func markTrackedHistoryRecovery(tracker skippedFullBlockTracker, pending, failed []network.SkippedFullBlock) {

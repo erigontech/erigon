@@ -566,6 +566,10 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 				continue
 			}
 			repair = f.envelopeIndexRepairs.setValues(repair, persisted.Message.Payload.BlockNumber, persisted.Message.Payload.BlockHash)
+			if repair.generation == 0 {
+				limit--
+				continue
+			}
 		}
 		_, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, repair.root, envelopeForIndexRepair(repair), true)
 		if err != nil {

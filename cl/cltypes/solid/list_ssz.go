@@ -37,7 +37,8 @@ type EncodableHashableSSZ interface {
 type ListSSZ[T EncodableHashableSSZ] struct {
 	list []T
 
-	limit int
+	limit      int
+	configured bool
 	// static means elements have fixed-size encodings and bytesPerElement is
 	// valid. The list itself remains variable-size.
 	static          bool
@@ -49,8 +50,9 @@ type ListSSZ[T EncodableHashableSSZ] struct {
 
 func NewDynamicListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
-		list:  make([]T, 0),
-		limit: limit,
+		list:       make([]T, 0),
+		limit:      limit,
+		configured: true,
 	}
 }
 
@@ -58,25 +60,27 @@ func NewStaticListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *L
 	return &ListSSZ[T]{
 		list:            make([]T, 0),
 		limit:           limit,
+		configured:      true,
 		static:          true,
 		bytesPerElement: bytesPerElement,
 	}
 }
 
 func NewDynamicProgressiveListSSZ[T EncodableHashableSSZ](limit int) *ListSSZ[T] {
-	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), progressive: true}
+	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), configured: true, progressive: true}
 }
 
 func NewStaticProgressiveListSSZ[T EncodableHashableSSZ](limit int, bytesPerElement int) *ListSSZ[T] {
-	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), static: true, bytesPerElement: bytesPerElement, progressive: true}
+	return &ListSSZ[T]{list: make([]T, 0), limit: progressiveDecodeLimit(limit), configured: true, static: true, bytesPerElement: bytesPerElement, progressive: true}
 }
 
 // NewStaticProgressiveListSSZWithDecodeLimit creates a progressive list with an explicit resource guard.
 func NewStaticProgressiveListSSZWithDecodeLimit[T EncodableHashableSSZ](decodeLimit int, bytesPerElement int) *ListSSZ[T] {
-	return &ListSSZ[T]{list: make([]T, 0), limit: decodeLimit, static: true, bytesPerElement: bytesPerElement, progressive: true}
+	return &ListSSZ[T]{list: make([]T, 0), limit: decodeLimit, configured: true, static: true, bytesPerElement: bytesPerElement, progressive: true}
 }
 
 func (l *ListSSZ[T]) EnsureStaticProgressive(limit int, bytesPerElement int) {
+	l.configured = true
 	if l.progressive && l.static && l.bytesPerElement == bytesPerElement {
 		return
 	}
@@ -108,6 +112,10 @@ func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
 }
 
 func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
+	if !l.configured {
+		l.limit = progressiveDecodeLimit(0)
+		l.configured = true
+	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		l.list = nil
 		l.root = common.Hash{}
@@ -163,8 +171,9 @@ func requireJSONEOF(decoder *json.Decoder) error {
 
 func NewDynamicListSSZFromList[T EncodableHashableSSZ](list []T, limit int) *ListSSZ[T] {
 	return &ListSSZ[T]{
-		list:  list,
-		limit: limit,
+		list:       list,
+		limit:      limit,
+		configured: true,
 	}
 }
 
@@ -172,6 +181,7 @@ func NewStaticListSSZFromList[T EncodableHashableSSZ](list []T, limit int, bytes
 	return &ListSSZ[T]{
 		list:            list,
 		limit:           limit,
+		configured:      true,
 		static:          true,
 		bytesPerElement: bytesPerElement,
 	}
@@ -260,10 +270,14 @@ func (l *ListSSZ[T]) HashSSZProgressive(hashElement func(T) ([32]byte, error)) (
 }
 
 func (l *ListSSZ[T]) Clone() clonable.Clonable {
+	if !l.configured {
+		return &ListSSZ[T]{}
+	}
 	if l.progressive {
 		return &ListSSZ[T]{
 			list:            make([]T, 0),
 			limit:           l.limit,
+			configured:      true,
 			static:          l.static,
 			bytesPerElement: l.bytesPerElement,
 			progressive:     true,
@@ -353,6 +367,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 	cpy := &ListSSZ[T]{
 		list:            make([]T, len(l.list), cap(l.list)),
 		limit:           l.limit,
+		configured:      l.configured,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
 		progressive:     l.progressive,
