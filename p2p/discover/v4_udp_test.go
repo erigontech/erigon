@@ -476,6 +476,10 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 	})
 }
 
+// endpointStatements exceeds enode's iptrackMinStatements, so a batch this size
+// moves the endpoint predictor once the statements are accepted.
+const endpointStatements = 20
+
 func TestUDPv4_unbondedPingDoesNotUpdateEndpoint(t *testing.T) {
 	test := newUDPTest(t)
 	defer test.close()
@@ -486,7 +490,7 @@ func TestUDPv4_unbondedPingDoesNotUpdateEndpoint(t *testing.T) {
 	before := test.udp.localNode.Node()
 
 	claimed := netip.MustParseAddrPort("198.51.100.1:40404")
-	for i := range 10 {
+	for i := range endpointStatements {
 		sender := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 2, byte(i + 1)}), 30303)
 		test.packetInFrom(nil, newkey(), sender, &v4wire.Ping{
 			From:       testRemote,
@@ -506,14 +510,16 @@ func TestUDPv4_unbondedPingDoesNotUpdateEndpoint(t *testing.T) {
 }
 
 func TestUDPv4_bondedPingUpdatesEndpoint(t *testing.T) {
-	test := newUDPTest(t)
+	// Long PingInterval so table revalidation never fires an unsolicited PING,
+	// whose logging could otherwise race the test's completion.
+	test := newUDPTestWithConfig(t, Config{PingInterval: time.Hour})
 	defer test.close()
 
 	test.udp.localNode.SetFallbackIP(net.IP{192, 0, 2, 1})
 	test.udp.localNode.SetFallbackUDP(30303)
 
 	claimed := netip.MustParseAddrPort("198.51.100.1:40404")
-	for i := range 10 {
+	for i := range endpointStatements {
 		key := newkey()
 		sender := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 2, byte(i + 1)}), 30303)
 		test.udp.db.UpdateLastPongReceived(v4wire.EncodePubkey(&key.PublicKey).ID(), sender.Addr(), time.Now())
