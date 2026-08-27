@@ -59,3 +59,11 @@ func (g *handshakeGate) inFlight() int {
 	defer g.mu.Unlock()
 	return len(g.inflight)
 }
+
+// holds reports whether a handshake slot for pid is currently taken.
+func (g *handshakeGate) holds(pid peer.ID) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, busy := g.inflight[pid]
+	return busy
+}
