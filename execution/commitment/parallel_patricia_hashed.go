@@ -41,6 +41,11 @@ type ParallelPatriciaHashed struct {
 
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
+
+	// metrics is the round's aggregate: each mount worker counts into its own
+	// Metrics and merges here when it finishes, so the fold loop never touches
+	// a shared cache line.
+	metrics *Metrics
 }
 
 func (p *ParallelPatriciaHashed) DeepLocalFolds() uint64 { return p.deepLocalFolds.Load() }
@@ -53,6 +58,9 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		numWorkers:     runtime.NumCPU(),
 		cfg:            cfg,
 	}
+	// Its own, not the template's: the template traverses the skeleton over the
+	// same keys the workers do, so aliasing them counts every key twice.
+	p.metrics = NewMetrics("")
 	return p
 }
 
@@ -250,6 +258,10 @@ func (p *ParallelPatriciaHashed) Process(
 	copy(out, rh)
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
+	if onProgress != nil && p.metrics != nil {
+		n := updates.Size()
+		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
+	}
 	return out, nil
 }
 
@@ -305,8 +317,14 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
 	}
 
-	if _, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch); err != nil {
+	// This path calls PutBranch directly rather than through a BranchEncoder,
+	// so it is the only place the parallel engine's branch writes get counted.
+	n, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch)
+	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
+	}
+	if p.metrics != nil {
+		p.metrics.updateBranch.Add(uint64(n))
 	}
 	return nil
 }
