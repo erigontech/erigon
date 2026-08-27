@@ -1605,6 +1605,7 @@ func TestSortableBufferChunks(t *testing.T) {
 		require.Equal(t, dataChunkSize, cap(c.buf), "chunk %d", i)
 	}
 
+	buf.Sort()
 	for i, e := range drainBuffer(buf) {
 		binary.BigEndian.PutUint64(key, uint64(i))
 		require.Equal(t, key, e.key, "entry %d", i)
@@ -1647,13 +1648,14 @@ func TestSortableBufferOversizedEntry(t *testing.T) {
 	buf.Put([]byte{0x02}, big)
 	buf.Put([]byte{0x03}, []byte("after"))
 
+	buf.Sort()
 	want := drainBuffer(buf)
 	require.Equal(t, []byte{0x02}, want[1].key)
 	require.Equal(t, big, want[1].value)
 	require.Equal(t, []byte{0x03}, want[2].key)
 	require.Equal(t, []byte("after"), want[2].value)
 
-	buf.Sort() // Write drives the same cursor, so put it back first
+	// Write rewinds the cursor drainBuffer just consumed.
 	w := bytes.NewBuffer(nil)
 	require.NoError(t, buf.Write(w))
 	m := &mmapBytesReader{data: w.Bytes()}
@@ -1684,6 +1686,7 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	require.Zero(t, buf.Len())
 
 	buf.Put([]byte{0x01}, []byte("reused"))
+	buf.Sort()
 	got := drainBuffer(buf)
 	require.Equal(t, []byte{0x01}, got[0].key)
 	require.Equal(t, []byte("reused"), got[0].value)
@@ -1776,6 +1779,7 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 		}
 	}
 
+	buf.Sort()
 	type nilness struct{ key, val bool }
 	entries := drainBuffer(buf)
 	got := make([]nilness, 4)
@@ -1832,6 +1836,7 @@ func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	require.Equal(t, 3, buf.Len())
 
 	// Sorted: the nil key, then the all-zero key of maxKeyLen, then 0x01.
+	buf.Sort()
 	got := drainBuffer(buf)
 	require.Len(t, got[1].key, maxKeyLen)
 	require.Nil(t, got[0].key)
@@ -1984,7 +1989,9 @@ func TestSortableBufferPutAfterSort(t *testing.T) {
 	}
 	buf.Sort()
 	buf.Put([]byte{7}, []byte{7})
+	buf.Sort()
 
+	// The second Sort has to re-read a chunk index the first one permuted.
 	var got []byte
 	for _, e := range drainBuffer(buf) {
 		got = append(got, e.key[0])
@@ -1992,24 +1999,67 @@ func TestSortableBufferPutAfterSort(t *testing.T) {
 	require.Equal(t, []byte{1, 3, 5, 7, 9}, got)
 }
 
-// TestBufferNextSortsFirst: every Buffer sorts on read, so a caller that never
-// calls Sort still gets its entries, and one that Puts after Sort gets the new
-// one rather than a stale run.
-func TestBufferNextSortsFirst(t *testing.T) {
+// TestBufferNextBeforeSort: reading a buffer that was not sorted since the
+// last Put must be loud. Returning the previous run instead would duplicate
+// rows into whatever the load feeds.
+func TestBufferNextBeforeSort(t *testing.T) {
 	for _, bt := range allBufferTypes {
 		t.Run(bt.name, func(t *testing.T) {
 			buf := bt.new()
 			buf.Put([]byte{3}, []byte("c"))
-			buf.Put([]byte{1}, []byte("a"))
-			require.Len(t, drainBuffer(buf), 2, "Next before Sort must return what was put")
+			require.Panics(t, func() { buf.Next() }, "Next before any Sort")
 
 			buf.Sort()
-			buf.Put([]byte{2}, []byte("b"))
-			got := drainBuffer(buf)
-			require.Len(t, got, 3, "Next after a Put must include it")
-			require.Equal(t, []byte{1}, got[0].key)
-			require.Equal(t, []byte{2}, got[1].key)
-			require.Equal(t, []byte{3}, got[2].key)
+			buf.Put([]byte{1}, []byte("a"))
+			require.Panics(t, func() { buf.Next() }, "Next after a Put")
+
+			buf.Sort()
+			require.Len(t, drainBuffer(buf), 2)
 		})
 	}
+}
+
+// TestBufferPutDuringRead: a Put between two Next calls must not restart the
+// read. Sort used to be called from Next, which rewound the cursor and handed
+// out the entries already read a second time.
+func TestBufferPutDuringRead(t *testing.T) {
+	buf := NewSortableBuffer(1 * datasize.MB)
+	defer buf.Reset()
+	for i := range 5 {
+		buf.Put([]byte{byte(i)}, []byte{byte(i)})
+	}
+	buf.Sort()
+	for range 3 {
+		_, _, ok := buf.Next()
+		require.True(t, ok)
+	}
+	buf.Put([]byte{9}, []byte{9})
+	require.Panics(t, func() { buf.Next() })
+}
+
+// TestSortableBufferWriteAfterPartialRead: Write drives the same cursor Next
+// does, so it has to rewind - otherwise a flush silently drops the entries
+// already read and mergeSortFiles panics on the short file.
+func TestSortableBufferWriteAfterPartialRead(t *testing.T) {
+	buf := NewSortableBuffer(1 * datasize.MB)
+	defer buf.Reset()
+	for i := range 10 {
+		buf.Put([]byte{byte(i)}, []byte{byte(i)})
+	}
+	buf.Sort()
+	buf.Next()
+	buf.Next()
+
+	w := bytes.NewBuffer(nil)
+	require.NoError(t, buf.Write(w))
+	m := &mmapBytesReader{data: w.Bytes()}
+	for i := range 10 {
+		k, err := readField(m)
+		require.NoError(t, err, "entry %d", i)
+		require.Equal(t, []byte{byte(i)}, k)
+		_, err = readField(m)
+		require.NoError(t, err)
+	}
+	_, err := readField(m)
+	require.Equal(t, io.EOF, err)
 }

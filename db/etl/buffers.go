@@ -141,9 +141,10 @@ func putDataChunk(c []byte) {
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	// Next returns the entries in key order, sorting first if it has to. The
-	// slices point into the buffer's own storage and must not be modified.
-	// Sort puts the cursor back at the first entry.
+	// Next returns the entries in key order. Sort must have run since the
+	// last Put, and puts the cursor back at the first entry; reading without
+	// it panics rather than quietly returning a stale run. The slices point
+	// into the buffer's own storage and must not be modified.
 	Next() (k, v []byte, ok bool)
 	Len() int
 	Reset()
@@ -341,7 +342,7 @@ func (b *sortableBuffer) Len() int { return b.n }
 // buffer carries the merge state, so no two goroutines may read at once.
 func (b *sortableBuffer) Next() ([]byte, []byte, bool) {
 	if b.sortedN != b.n {
-		b.Sort()
+		panic("etl: Next before Sort")
 	}
 	buf, e, ok := b.mrg.next()
 	if !ok {
@@ -602,6 +603,7 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 }
 
 func (b *sortableBuffer) Write(w io.Writer) error {
+	b.Sort() // Write drives the read cursor, so put it back at the first entry
 	var numBuf [binary.MaxVarintLen64]byte
 	for {
 		k, v, ok := b.Next()
@@ -694,7 +696,7 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 
 func (b *appendSortableBuffer) Next() ([]byte, []byte, bool) {
 	if b.unsorted {
-		b.Sort()
+		panic("etl: Next before Sort")
 	}
 	if b.at >= len(b.sortedBuf) {
 		return nil, nil, false
@@ -720,6 +722,7 @@ func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) 
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
+	b.Sort()
 	return writeSortedEntries(w, b.sortedBuf)
 }
 
@@ -784,7 +787,7 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 
 func (b *oldestEntrySortableBuffer) Next() ([]byte, []byte, bool) {
 	if b.unsorted {
-		b.Sort()
+		panic("etl: Next before Sort")
 	}
 	if b.at >= len(b.sortedBuf) {
 		return nil, nil, false
@@ -810,6 +813,7 @@ func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize 
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
+	b.Sort()
 	return writeSortedEntries(w, b.sortedBuf)
 }
 
