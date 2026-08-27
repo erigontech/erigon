@@ -83,6 +83,7 @@ var CLI struct {
 	CheckBlobsSnapshots       CheckBlobsSnapshots       `cmd:"" help:"check blobs snapshots"`
 	CheckBlobsSnapshotsCount  CheckBlobsSnapshotsCount  `cmd:"" help:"check blobs snapshots count"`
 	DumpBlobsSnapshotsToStore DumpBlobsSnapshotsToStore `cmd:"" help:"dump blobs snapshots to store"`
+	BlobFetchToStore          BlobFetchToStore          `cmd:"" help:"fill blob store gaps from beacon API endpoints"`
 	DumpStateSnapshots        DumpStateSnapshots        `cmd:"" help:"dump state snapshots"`
 	MakeDepositArgs           MakeDepositArgs           `cmd:"" help:"make deposit args"`
 }
