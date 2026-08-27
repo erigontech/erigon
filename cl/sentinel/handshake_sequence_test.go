@@ -18,11 +18,15 @@ package sentinel
 
 import (
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 )
 
@@ -33,79 +37,148 @@ func testSentinel() *Sentinel {
 
 func noop(peer.ID) {}
 
-// The pool bans a peer after three handshake failures. Every connection event must run
-// through the same serialized path, so the third failure is reached and the ban is applied
-// to the next event instead of another handshake being started.
-func TestExchangeStatusReachesTheBanAndThenRefusesThePeer(t *testing.T) {
-	s := testSentinel()
-	pid := peer.ID("peer-a")
-
-	validated, closed, dropped := 0, 0, 0
-	validate := func() (bool, error) {
-		validated++
-		return false, errors.New("stream reset")
-	}
-	onClose := func(peer.ID) { closed++ }
-	onDrop := func(peer.ID) { dropped++ }
-
-	for range 3 {
-		require.True(t, s.exchangeStatus(pid, validate, onClose, onDrop),
-			"a transport error keeps the peer: it may still serve gossip")
-	}
-	require.Equal(t, 3, validated)
-	require.True(t, s.peers.BanStatus(pid), "three handshake failures must ban the peer")
-
-	require.False(t, s.exchangeStatus(pid, validate, onClose, onDrop))
-	require.Equal(t, 3, validated, "a banned peer must not be handshaked again")
-	require.Equal(t, 1, closed)
-	require.Zero(t, dropped)
-	require.Zero(t, s.handshakeGate.inFlight(), "the gate must be released on the banned exit")
+// banObserver wraps the pool's BanStatus and counts every read that happens without this
+// peer's handshake slot being held. Reading the ban before admission is the defect under
+// test, and it is invisible to a test that only checks outcomes. Violations are counted
+// rather than asserted on the spot: this runs on handshake goroutines, where a failed
+// require would Goexit and deadlock the test instead of reporting.
+type banObserver struct {
+	s          *Sentinel
+	violations atomic.Int64
 }
 
-// A ban installed by a handshake that completed while this event was waiting must be seen:
-// the ban is read inside the serialized section, not before it.
-func TestExchangeStatusRefusesAPeerBannedWhileTheEventWaited(t *testing.T) {
-	s := testSentinel()
-	pid := peer.ID("peer-a")
+func (b *banObserver) read(pid peer.ID) bool {
+	if !b.s.handshakeGate.holds(pid) {
+		b.violations.Add(1)
+	}
+	return b.s.peers.BanStatus(pid)
+}
 
-	s.peers.SetBanStatus(pid, true)
-	closed := 0
-	require.False(t, s.exchangeStatus(pid, func() (bool, error) {
-		t.Fatal("a banned peer must not be handshaked")
+func (b *banObserver) assertAlwaysHeld(t *testing.T) {
+	t.Helper()
+	require.Zero(t, b.violations.Load(),
+		"the ban must be read while this peer's handshake slot is held, not before admission")
+}
+
+func waitForInFlight(t *testing.T, s *Sentinel, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for s.handshakeGate.inFlight() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d handshake(s) in flight, have %d", want, s.handshakeGate.inFlight())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// The full sequence: one handshake paused mid-flight, a second event for the same peer
+// arriving while it runs, an unrelated peer proceeding regardless, three failures reaching
+// the pool ban, and the next event for the banned peer closing it without a handshake.
+func TestHandshakeSequenceSerializesPerPeerAndReachesTheBan(t *testing.T) {
+	s := testSentinel()
+	obs := &banObserver{s: s}
+	banned := obs.read
+	pidA, pidB := peer.ID("peer-a"), peer.ID("peer-b")
+
+	var validatedA, validatedB, closedA int
+	var mu sync.Mutex
+	countA := func() { mu.Lock(); validatedA++; mu.Unlock() }
+
+	resume := make(chan struct{})
+	entered := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		// First event for peer A: holds the slot until released.
+		s.exchangeStatus(pidA, banned, func() (bool, error) {
+			countA()
+			close(entered)
+			<-resume
+			return false, errors.New("stream reset")
+		}, noop, noop)
+	})
+
+	<-entered
+	waitForInFlight(t, s, 1)
+
+	// A second event for the same peer, arriving while the first handshake is in flight.
+	require.False(t, s.exchangeStatus(pidA, banned, func() (bool, error) {
+		t.Error("a second handshake started for a peer already being handshaked")
 		return false, nil
-	}, func(peer.ID) { closed++ }, noop))
-	require.Equal(t, 1, closed)
-}
+	}, noop, noop))
 
-// Serializing per peer is the point: while one handshake is in flight, a second event for
-// the same peer must not start another.
-func TestExchangeStatusAdmitsOneHandshakePerPeerAtATime(t *testing.T) {
-	s := testSentinel()
-	pid := peer.ID("peer-a")
-
-	outer := 0
-	require.True(t, s.exchangeStatus(pid, func() (bool, error) {
-		outer++
-		require.False(t, s.exchangeStatus(pid, func() (bool, error) {
-			t.Fatal("a second handshake started while one was in flight")
-			return false, nil
-		}, noop, noop), "the concurrent event must be refused")
+	// An unrelated peer must not be held up by peer A's in-flight handshake.
+	require.True(t, s.exchangeStatus(pidB, banned, func() (bool, error) {
+		validatedB++
 		return true, nil
 	}, noop, noop))
-	require.Equal(t, 1, outer)
+	require.Equal(t, 1, validatedB)
+
+	close(resume)
+	wg.Wait()
+
+	// Two more failures reach the pool's three-strike ban.
+	for range 2 {
+		require.True(t, s.exchangeStatus(pidA, banned, func() (bool, error) {
+			countA()
+			return false, errors.New("stream reset")
+		}, noop, noop))
+	}
+	require.Equal(t, 3, validatedA)
+	require.True(t, s.peers.BanStatus(pidA), "three handshake failures must ban the peer")
+
+	// The next event closes the banned peer instead of handshaking it again.
+	require.False(t, s.exchangeStatus(pidA, banned, func() (bool, error) {
+		t.Error("a banned peer must not be handshaked")
+		return false, nil
+	}, func(peer.ID) { closedA++ }, noop))
+	require.Equal(t, 3, validatedA)
+	require.Equal(t, 1, closedA)
+	require.Zero(t, s.handshakeGate.inFlight(), "every exit path must release the slot")
+	obs.assertAlwaysHeld(t)
+}
+
+// The connection handler must route through the serialized path: a banned peer entering
+// handleNewConnection is closed without its handshake being attempted.
+func TestHandleNewConnectionRefusesABannedPeerWithoutHandshaking(t *testing.T) {
+	s := testSentinel()
+	s.p2p = stubP2P{host: newTestHost(t)}
+	s.cfg = &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}}
+	pidA := peer.ID("peer-a")
+	s.peers.SetBanStatus(pidA, true)
+
+	require.False(t, s.handleNewConnection(pidA, func() (bool, error) {
+		t.Error("a banned peer must not be handshaked")
+		return false, nil
+	}))
 	require.Zero(t, s.handshakeGate.inFlight())
 }
 
-// A completed handshake reporting the wrong fork is not a failure to retry: the peer is
-// dropped outright and must not count toward the ban.
+// A peer that is not banned reaches its handshake through the handler.
+func TestHandleNewConnectionHandshakesAnUnbannedPeer(t *testing.T) {
+	s := testSentinel()
+	s.p2p = stubP2P{host: newTestHost(t)}
+	s.cfg = &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}}
+
+	validated := 0
+	require.True(t, s.handleNewConnection(peer.ID("peer-a"), func() (bool, error) {
+		validated++
+		return true, nil
+	}))
+	require.Equal(t, 1, validated)
+}
+
+// A completed handshake reporting the wrong fork is dropped and must not count toward the ban.
 func TestExchangeStatusDropsAForkMismatchWithoutRecordingAFailure(t *testing.T) {
 	s := testSentinel()
 	pid := peer.ID("peer-a")
 
 	dropped := 0
-	require.False(t, s.exchangeStatus(pid, func() (bool, error) { return false, nil },
+	obs := &banObserver{s: s}
+	require.False(t, s.exchangeStatus(pid, obs.read,
+		func() (bool, error) { return false, nil },
 		noop, func(peer.ID) { dropped++ }))
 	require.Equal(t, 1, dropped)
 	require.False(t, s.peers.BanStatus(pid))
-	require.Zero(t, s.handshakeGate.inFlight(), "the gate must be released on the fork-mismatch exit")
+	require.Zero(t, s.handshakeGate.inFlight(), "the fork-mismatch exit must release the slot")
+	obs.assertAlwaysHeld(t)
 }

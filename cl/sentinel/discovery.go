@@ -554,9 +554,17 @@ func (s *Sentinel) listenForPeers() {
 }
 
 func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
-	go func() {
-		peerId := conn.RemotePeer()
+	peerId := conn.RemotePeer()
+	go s.handleNewConnection(peerId, func() (bool, error) {
+		return s.handshaker.ValidatePeer(s.ctx, peerId)
+	})
+}
 
+// handleNewConnection admits or rejects a peer that has just connected, then runs its status
+// handshake. validate is injected so the sequence can be driven without a live handshaker.
+// Reports whether the peer was kept.
+func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
+	{
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
 		peerHelpsSubnets := false
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
@@ -580,18 +588,17 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.closePeer(peerId)
 			s.peers.RemovePeer(peerId)
-			return
+			return false
 		}
+	}
 
-		s.exchangeStatus(peerId,
-			func() (bool, error) { return s.handshaker.ValidatePeer(s.ctx, peerId) },
-			s.closePeer,
-			func(id peer.ID) {
-				s.p2p.Host().Peerstore().RemovePeer(id)
-				s.closePeer(id)
-				s.peers.RemovePeer(id)
-			})
-	}()
+	return s.exchangeStatus(peerId, s.peers.BanStatus, validate,
+		s.closePeer,
+		func(id peer.ID) {
+			s.p2p.Host().Peerstore().RemovePeer(id)
+			s.closePeer(id)
+			s.peers.RemovePeer(id)
+		})
 }
 
 // exchangeStatus runs one status handshake for peerId and reports whether the peer was kept.
@@ -601,13 +608,15 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 // threshold. The ban is read inside that serialized section, because a handshake that
 // completed while this event waited may have installed it — and ConnectWithPeer only
 // refuses banned peers on dials we initiate, not on events that arrive anyway.
-func (s *Sentinel) exchangeStatus(peerId peer.ID, validate func() (bool, error), closePeer, dropPeer func(peer.ID)) bool {
+// banned is injected so a test can assert that the gate is already held when the ban is read;
+// reading it before admission is the bug this exists to prevent.
+func (s *Sentinel) exchangeStatus(peerId peer.ID, banned func(peer.ID) bool, validate func() (bool, error), closePeer, dropPeer func(peer.ID)) bool {
 	if !s.handshakeGate.tryAcquire(peerId) {
 		return false
 	}
 	defer s.handshakeGate.release(peerId)
 
-	if s.peers.BanStatus(peerId) {
+	if banned(peerId) {
 		closePeer(peerId)
 		return false
 	}
