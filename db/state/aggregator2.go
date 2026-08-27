@@ -144,10 +144,10 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 
 type workersCfg struct {
 	mu              sync.Mutex
-	editLocks       int // >0 while a background build/merge pins config
+	editLocks       int // >0 while background build/merge pins config
 	merge           int // usually 1
 	collateAndBuild int
-	pending         func() // newest request that arrived while pinned
+	pending         []func() // requests that arrived while pinned
 }
 
 func (w *workersCfg) getMerge() int {
@@ -156,23 +156,27 @@ func (w *workersCfg) getMerge() int {
 	return w.merge
 }
 
+func (w *workersCfg) setMerge(n int) {
+	w.trySet(func() { w.merge = n })
+}
+
 func (w *workersCfg) getCollateAndBuild() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.collateAndBuild
 }
 
-func (w *workersCfg) setMergeLocked(n int) { w.merge = n }
+func (w *workersCfg) setCollateAndBuild(n int) {
+	w.trySet(func() { w.collateAndBuild = n })
+}
 
-func (w *workersCfg) setCollateAndBuildLocked(n int) { w.collateAndBuild = n }
-
-// apply runs fn under mu, holding it for the last unlockEditing while a background op pins the
-// config: dropping the request loses it for the process — a restart merges before any preset lands.
-func (w *workersCfg) apply(fn func()) {
+// trySet runs fn under mu, or queues it for the last unlockEditing while a background op pins
+// the config: dropping the request loses it for the process — a restart merges before any preset.
+func (w *workersCfg) trySet(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.editLocks > 0 {
-		w.pending = fn
+		w.pending = append(w.pending, fn)
 		return
 	}
 	fn()
@@ -192,10 +196,13 @@ func (w *workersCfg) unlockEditing() {
 	if w.editLocks > 0 {
 		w.editLocks--
 	}
-	if w.editLocks == 0 && w.pending != nil {
-		w.pending()
-		w.pending = nil
+	if w.editLocks != 0 {
+		return
 	}
+	for _, fn := range w.pending {
+		fn()
+	}
+	w.pending = nil
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
