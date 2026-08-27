@@ -126,8 +126,15 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 		if len(list) >= l.limit {
 			return fmt.Errorf("list exceeds decoder resource limit %d", l.limit)
 		}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return err
+		}
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("null list element")
+		}
 		var element T
-		if err := decoder.Decode(&element); err != nil {
+		if err := json.Unmarshal(raw, &element); err != nil {
 			return err
 		}
 		list = append(list, element)

@@ -289,6 +289,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	})
 
 	finishCh := make(chan struct{})
+	historyDownloadStalled := make(chan struct{}, 1)
 	// Start logging thread
 
 	isBackfilling := atomic.Bool{}
@@ -387,18 +388,37 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 	}()
 
+	if cfg.blobDownloader != nil {
+		cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
+		cfg.blobDownloader.SetNotifyBlobBackfilled(notifyBlobBackfilledWhenHistoryReady(
+			cfg.downloader.Finished,
+			cfg.antiquary.NotifyBlobBackfilled,
+		))
+		cfg.blobDownloader.Start()
+	}
+
 	go func() {
 		defer close(finishCh)
 
 		for !cfg.downloader.Finished() {
 			if cfg.downloader.SkippedFullBlocksAtCapacity() {
-				if !relieveTrackedHistoryBackfill(
-					ctx, cfg.downloader, skippedEnvelopeRecoveryRetryInterval,
+				switch relieveTrackedHistoryBackfill(
+					ctx, cfg.downloader,
 					func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 						return recoverSkippedEnvelopes(ctx, cfg, pending)
 					},
 				) {
+				case trackedHistoryCanceled:
 					return
+				case trackedHistoryStalled:
+					select {
+					case historyDownloadStalled <- struct{}{}:
+					default:
+					}
+					if !waitForTrackedHistoryRetry(ctx, skippedEnvelopeRecoveryRetryInterval) {
+						return
+					}
+					continue
 				}
 			}
 			if err := cfg.downloader.RequestMore(ctx); err != nil {
@@ -407,12 +427,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				return
 			}
-		}
-
-		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
-			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
-			cfg.blobDownloader.Start()
 		}
 
 		if !completeTrackedHistoryBackfill(
@@ -430,12 +444,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	}()
 	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.
-	for !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress() > destinationSlotForEL) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
+	if err := waitForHistoryDownloadReady(ctx, historyDownloadStalled, func() bool {
+		return cfg.downloader.Finished() || (cfg.engine != nil && cfg.downloader.Progress() <= destinationSlotForEL)
+	}); err != nil {
+		return err
 	}
 	cfg.downloader.SetThrottle(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	cfg.downloader.SetNeverSkip(false)
@@ -467,43 +479,90 @@ type skippedFullBlockTracker interface {
 	MarkSkippedFullBlocksRecovered([]common.Hash)
 }
 
+type trackedHistoryRelief uint8
+
+const (
+	trackedHistoryRelieved trackedHistoryRelief = iota
+	trackedHistoryStalled
+	trackedHistoryCanceled
+)
+
 func relieveTrackedHistoryBackfill(
 	ctx context.Context,
 	tracker skippedFullBlockTracker,
-	retryInterval time.Duration,
 	recoverEnvelopes func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock,
-) bool {
-	for tracker.SkippedFullBlocksAtCapacity() {
+) trackedHistoryRelief {
+	if tracker.SkippedFullBlocksAtCapacity() {
 		if err := ctx.Err(); err != nil {
-			return false
+			return trackedHistoryCanceled
 		}
 		pending := tracker.SkippedFullBlocks()
-		madeProgress := false
 		for start := 0; start < len(pending) && tracker.SkippedFullBlocksAtCapacity(); start += skippedEnvelopeRecoveryBatchSize {
 			if err := ctx.Err(); err != nil {
-				return false
+				return trackedHistoryCanceled
 			}
 			end := min(start+skippedEnvelopeRecoveryBatchSize, len(pending))
 			batch := pending[start:end]
 			failed := recoverEnvelopes(ctx, batch)
 			markTrackedHistoryRecovery(tracker, batch, failed)
-			madeProgress = madeProgress || len(failed) < len(batch)
-		}
-		if !tracker.SkippedFullBlocksAtCapacity() {
-			return true
-		}
-		if madeProgress || retryInterval <= 0 {
-			continue
-		}
-		retryTimer := time.NewTimer(retryInterval)
-		select {
-		case <-ctx.Done():
-			retryTimer.Stop()
-			return false
-		case <-retryTimer.C:
 		}
 	}
-	return true
+	if tracker.SkippedFullBlocksAtCapacity() {
+		return trackedHistoryStalled
+	}
+	return trackedHistoryRelieved
+}
+
+func waitForTrackedHistoryRetry(ctx context.Context, retryInterval time.Duration) bool {
+	if retryInterval <= 0 {
+		return ctx.Err() == nil
+	}
+	retryTimer := time.NewTimer(retryInterval)
+	defer retryTimer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-retryTimer.C:
+		return true
+	}
+}
+
+func waitForHistoryDownloadReady(ctx context.Context, stalled <-chan struct{}, ready func() bool) error {
+	for !ready() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pollTimer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			pollTimer.Stop()
+			return ctx.Err()
+		case <-stalled:
+			pollTimer.Stop()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return nil
+		case <-pollTimer.C:
+		}
+	}
+	return nil
+}
+
+func notifyBlobBackfilledWhenHistoryReady(historyFinished func() bool, notify func()) func() {
+	var state atomic.Uint32
+	return func() {
+		if historyFinished == nil || notify == nil || !historyFinished() {
+			return
+		}
+		// The first callback can belong to a pass that started before history finished.
+		if state.CompareAndSwap(0, 1) {
+			return
+		}
+		if state.CompareAndSwap(1, 2) {
+			notify()
+		}
+	}
 }
 
 func markTrackedHistoryRecovery(tracker skippedFullBlockTracker, pending, failed []network.SkippedFullBlock) {

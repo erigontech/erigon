@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -315,13 +316,13 @@ func TestTrackedSkippedFullBlockCapacityDrainResumesAfterPartialRecovery(t *test
 	}
 	attempts := 0
 
-	completed := relieveTrackedHistoryBackfill(context.Background(), tracker, time.Hour,
+	result := relieveTrackedHistoryBackfill(context.Background(), tracker,
 		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 			attempts++
 			return pending[:1]
 		})
 
-	require.True(t, completed)
+	require.Equal(t, trackedHistoryRelieved, result)
 	require.Equal(t, 1, attempts)
 	require.Len(t, tracker.pending, 57)
 	require.Equal(t, byte(1), tracker.pending[0].Root[0])
@@ -332,26 +333,87 @@ func TestTrackedSkippedFullBlockCapacityDrainChecksPastUnavailableBatch(t *testi
 	for i := range tracker.pending {
 		tracker.pending[i].Root[0] = byte(i + 1)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	attempts := 0
 
-	completed := relieveTrackedHistoryBackfill(ctx, tracker, 0,
+	result := relieveTrackedHistoryBackfill(context.Background(), tracker,
 		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 			attempts++
 			if pending[0].Root[0] == 1 {
-				if attempts > 1 {
-					cancel()
-				}
 				return pending
 			}
 			return nil
 		})
 
-	require.True(t, completed)
+	require.Equal(t, trackedHistoryRelieved, result)
 	require.Equal(t, 2, attempts)
 	require.Len(t, tracker.pending, 56)
 	require.Equal(t, byte(1), tracker.pending[0].Root[0])
+}
+
+func TestTrackedSkippedFullBlockCapacityReliefReturnsStalledWithoutLosingEntries(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	for i := range tracker.pending {
+		tracker.pending[i].Root[0] = byte(i + 1)
+	}
+	want := slices.Clone(tracker.pending)
+	attempts := 0
+
+	result := relieveTrackedHistoryBackfill(context.Background(), tracker,
+		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			attempts++
+			return pending
+		})
+
+	require.Equal(t, trackedHistoryStalled, result)
+	require.Equal(t, 8, attempts)
+	require.Equal(t, want, tracker.pending)
+}
+
+func TestWaitForHistoryDownloadReadyReturnsOnStalledCapacity(t *testing.T) {
+	stalled := make(chan struct{}, 1)
+	stalled <- struct{}{}
+	checks := 0
+
+	err := waitForHistoryDownloadReady(context.Background(), stalled, func() bool {
+		checks++
+		return false
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, checks)
+}
+
+func TestWaitForHistoryDownloadReadyPreservesReadyFastPath(t *testing.T) {
+	require.NoError(t, waitForHistoryDownloadReady(context.Background(), nil, func() bool { return true }))
+}
+
+func TestWaitForHistoryDownloadReadyStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := waitForHistoryDownloadReady(ctx, nil, func() bool { return false })
+
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBlobBackfillNotificationWaitsForFinishedHistory(t *testing.T) {
+	var historyFinished atomic.Bool
+	var notifications atomic.Int32
+	notify := notifyBlobBackfilledWhenHistoryReady(historyFinished.Load, func() {
+		notifications.Add(1)
+	})
+
+	notify()
+	notify()
+	require.Zero(t, notifications.Load())
+
+	historyFinished.Store(true)
+	notify()
+	require.Zero(t, notifications.Load())
+
+	notify()
+	notify()
+	require.Equal(t, int32(1), notifications.Load())
 }
 
 func TestTrackedSkippedFullBlockRecoveryStreamsLongHistoryWithinBound(t *testing.T) {

@@ -554,6 +554,19 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 
 	require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
 
+	t.Run("different fee recipients", func(t *testing.T) {
+		cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+		env.Message.Payload.FeeRecipient = common.HexToAddress("0x0000000000000000000000000000000000000094")
+		requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, env.Message.ExecutionRequests))
+		env.Message.Payload.BlockHash = anchorPayloadHeaderHash(t, env.Message.Payload, env.Message.ParentBeaconBlockRoot, requestsHash)
+		bid.BlockHash = env.Message.Payload.BlockHash
+		privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+		require.NoError(t, err)
+		signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+
+		require.NoError(t, validateAnchorEnvelope(cfg, st, anchorRoot, bid, env))
+	})
+
 	tests := []struct {
 		name    string
 		mutate  func(*cltypes.ExecutionPayloadBid, *cltypes.SignedExecutionPayloadEnvelope)
@@ -602,11 +615,11 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 			wantErr: "prev randao mismatch",
 		},
 		{
-			name: "fee recipient mismatch",
+			name: "fee recipient mutation with stale block hash",
 			mutate: func(_ *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) {
 				env.Message.Payload.FeeRecipient = common.HexToAddress("0x0000000000000000000000000000000000000094")
 			},
-			wantErr: "fee recipient mismatch",
+			wantErr: "payload header: cannot derive rlp header: mismatching hash",
 		},
 		{
 			name: "gas limit mismatch",

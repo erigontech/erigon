@@ -857,6 +857,29 @@ func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "missing message")
 }
 
+func TestPostExecutionPayloadBidRejectsNullCommitmentBeforeProcessingOrPublishing(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	handler.executionPayloadBidService = mock_services.NewMockExecutionPayloadBidService(ctrl)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+
+	body, err := json.Marshal(&cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)})
+	require.NoError(t, err)
+	const emptyCommitments = `"blob_kzg_commitments":[]`
+	require.Contains(t, string(body), emptyCommitments)
+	body = []byte(strings.Replace(string(body), emptyCommitments, `"blob_kzg_commitments":[null]`, 1))
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
 func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
