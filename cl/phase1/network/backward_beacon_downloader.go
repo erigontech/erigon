@@ -610,7 +610,9 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			continue
 		}
 		for i := *newSlot + 1; i < *slot; i++ {
-			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i)); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -346,7 +345,7 @@ func TestLightClientUpdates(t *testing.T) {
 
 		_, err := stream.Read(forkDigest)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			if err == io.EOF { //nolint:errorlint // intentional bare sentinel check
 				t.Fatal("Stream is empty")
 			} else {
 				require.NoError(t, err)
@@ -384,11 +383,13 @@ func TestLightClientUpdates(t *testing.T) {
 		require.Equal(t, f.LCUpdates[uint64(currentPeriod)], update)
 		currentPeriod++
 
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if !errors.Is(err, io.EOF) {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 }

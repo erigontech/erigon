@@ -180,7 +180,9 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				WrapEndpointError(err).WriteTo(w)
 				return
 			}
-			w.Write(encoded)
+			if _, err := w.Write(encoded); err != nil {
+				log.Debug("beaconapi failed to write ssz response", "err", err)
+			}
 		case responseEncodingEventStream:
 			return
 		default:

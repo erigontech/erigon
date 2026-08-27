@@ -122,7 +122,7 @@ func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
 		hex.Encode(l.hexEncodeBuf[:], chunk)
 	}
 	l.stream.WriteRaw(`"0x`)
-	l.stream.Write(l.hexEncodeBuf[:64]) //nolint:errcheck
+	l.stream.WriteRawBytes(l.hexEncodeBuf[:64])
 	l.stream.WriteRaw(`"`)
 }
 
