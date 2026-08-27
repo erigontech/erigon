@@ -591,10 +591,26 @@ type getFinalizedExecutionHashForkGraph struct {
 	anchorRoot            common.Hash
 	anchorSlot            uint64
 	currentJustified      solid.Checkpoint
+	hasBlockEquivocation  bool
 }
 
 func (f *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
-	return false
+	return f.hasBlockEquivocation
+}
+
+func TestOnBlockWithEquivocationCheckRejectsKnownGloasConflict(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers:              map[common.Hash]*cltypes.BeaconBlockHeader{root: block.SignedBeaconBlockHeader().Header},
+		hasBlockEquivocation: true,
+	}
+	store := &ForkChoiceStore{forkGraph: graph}
+
+	err = store.OnBlockWithEquivocationCheck(t.Context(), block, true, true, false)
+	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
+	require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
