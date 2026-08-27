@@ -53,13 +53,20 @@ type proposerIndexAndSlot struct {
 
 type blockJob struct {
 	block        *cltypes.SignedBeaconBlock
+	store        func(context.Context) error
 	creationTime time.Time
 }
 
 type blockReservation struct {
 	pending    chan struct{}
+	root       common.Hash
 	version    uint64
 	validators uint64
+}
+
+type seenBlock struct {
+	signedRoot    common.Hash
+	replayAllowed bool
 }
 
 type blockService struct {
@@ -69,7 +76,7 @@ type blockService struct {
 	beaconCfg       *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
-	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
+	seenBlocksCache *lru.Cache[proposerIndexAndSlot, seenBlock]
 	reservations    map[proposerIndexAndSlot]*blockReservation
 	seenBlocksMu    sync.Mutex
 
@@ -90,7 +97,7 @@ func NewBlockService(
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
-	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
+	seenBlocksCache, err := lru.New[proposerIndexAndSlot, seenBlock]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -147,10 +154,27 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
+	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
+		return errors.New("missing beacon block")
+	}
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return err
+	}
+	key := blockGossipKey(msg)
+	b.seenBlocksMu.Lock()
+	claimed, claimErr := b.claimGossipReplayLocked(key, common.Hash(root))
+	b.seenBlocksMu.Unlock()
+	if claimErr != nil {
+		return claimErr
+	}
+	if claimed {
+		return nil
+	}
 	if err := b.validateGossip(ctx, msg, nil); err != nil {
 		return err
 	}
-	return b.reserveGossipKey(blockGossipKey(msg))
+	return b.reserveGossipKey(key, common.Hash(root))
 }
 
 func (b *blockService) CommitGossipReservation(msg *cltypes.SignedBeaconBlock) {
@@ -164,11 +188,19 @@ func (b *blockService) ReleaseGossipReservation(msg *cltypes.SignedBeaconBlock) 
 	if msg == nil || msg.Block == nil {
 		return
 	}
-	b.releaseGossipKey(blockGossipKey(msg))
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return
+	}
+	b.releaseGossipKey(blockGossipKey(msg), common.Hash(root))
 }
 
 func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock, schedule func(), waitForPending bool) error {
 	key := blockGossipKey(msg)
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return err
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("%w: block validation canceled: %w", ErrIgnore, err)
@@ -230,18 +262,25 @@ func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.Sig
 			b.seenBlocksMu.Unlock()
 			continue
 		}
-		b.seenBlocksCache.Add(key, struct{}{})
+		b.seenBlocksCache.Add(key, seenBlock{signedRoot: common.Hash(root)})
 		b.cleanupReservationLocked(key, reservation)
 		b.seenBlocksMu.Unlock()
 		return nil
 	}
 }
 
-func (b *blockService) reserveGossipKey(key proposerIndexAndSlot) error {
+func (b *blockService) reserveGossipKey(key proposerIndexAndSlot, root common.Hash) error {
 	b.seenBlocksMu.Lock()
 	defer b.seenBlocksMu.Unlock()
 	reservation := b.reservations[key]
-	if b.seenBlocksCache.Contains(key) || reservation != nil && reservation.pending != nil {
+	claimed, err := b.claimGossipReplayLocked(key, root)
+	if err != nil {
+		return err
+	}
+	if claimed {
+		return nil
+	}
+	if reservation != nil && reservation.pending != nil {
 		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
 	}
 	if reservation == nil {
@@ -249,6 +288,7 @@ func (b *blockService) reserveGossipKey(key proposerIndexAndSlot) error {
 		b.reservations[key] = reservation
 	}
 	reservation.pending = make(chan struct{})
+	reservation.root = root
 	reservation.version++
 	return nil
 }
@@ -263,16 +303,21 @@ func (b *blockService) commitGossipKey(key proposerIndexAndSlot) {
 	done := reservation.pending
 	reservation.pending = nil
 	reservation.version++
-	b.seenBlocksCache.Add(key, struct{}{})
+	b.seenBlocksCache.Add(key, seenBlock{signedRoot: reservation.root})
 	close(done)
 	b.cleanupReservationLocked(key, reservation)
 }
 
-func (b *blockService) releaseGossipKey(key proposerIndexAndSlot) {
+func (b *blockService) releaseGossipKey(key proposerIndexAndSlot, root common.Hash) {
 	b.seenBlocksMu.Lock()
 	defer b.seenBlocksMu.Unlock()
 	reservation := b.reservations[key]
 	if reservation == nil || reservation.pending == nil {
+		seen, ok := b.seenBlocksCache.Get(key)
+		if ok && seen.signedRoot == root {
+			seen.replayAllowed = true
+			b.seenBlocksCache.Add(key, seen)
+		}
 		return
 	}
 	done := reservation.pending
@@ -280,6 +325,19 @@ func (b *blockService) releaseGossipKey(key proposerIndexAndSlot) {
 	reservation.version++
 	close(done)
 	b.cleanupReservationLocked(key, reservation)
+}
+
+func (b *blockService) claimGossipReplayLocked(key proposerIndexAndSlot, root common.Hash) (bool, error) {
+	seen, ok := b.seenBlocksCache.Get(key)
+	if !ok {
+		return false, nil
+	}
+	if seen.signedRoot != root || !seen.replayAllowed {
+		return false, fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
+	}
+	seen.replayAllowed = false
+	b.seenBlocksCache.Add(key, seen)
+	return true, nil
 }
 
 func (b *blockService) cleanupReservationLocked(key proposerIndexAndSlot, reservation *blockReservation) {
@@ -509,6 +567,14 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // ScheduleBlockForLaterProcessing schedules a block for later processing.
 func (b *blockService) ScheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+	b.scheduleBlockForLaterProcessing(block, nil)
+}
+
+func (b *blockService) SchedulePublishedBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) {
+	b.scheduleBlockForLaterProcessing(block, store)
+}
+
+func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -521,10 +587,24 @@ func (b *blockService) ScheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		return
 	}
 
-	b.blocksScheduledForLaterExecution.Store(blockRoot, &blockJob{
+	job := &blockJob{
 		block:        block,
+		store:        store,
 		creationTime: time.Now(),
-	})
+	}
+	for {
+		existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
+		if !loaded {
+			return
+		}
+		existing := existingValue.(*blockJob)
+		if existing.store != nil || store == nil {
+			return
+		}
+		if b.blocksScheduledForLaterExecution.CompareAndSwap(blockRoot, existing, job) {
+			return
+		}
+	}
 }
 
 // processAndStoreBlock processes and stores a block
@@ -534,9 +614,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return err
 	}
 
-	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
-		return nil
-	}
+	_, headerExists := b.forkchoiceStore.GetHeader(blockRoot)
 
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
@@ -544,10 +622,12 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return err
 	}
 
-	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
-		return err
+	if !headerExists {
+		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+			return err
+		}
+		go b.importBlockOperations(block)
 	}
-	go b.importBlockOperations(block)
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil {
@@ -592,18 +672,24 @@ func (b *blockService) loop(ctx context.Context) {
 		case <-ticker.C:
 		}
 		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			blockJob := value.(*blockJob)
-			// check if it has expired
-			if time.Since(blockJob.creationTime) > blockJobExpiry {
-				b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-				log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
-				return true
-			}
-			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
+			b.processScheduledBlock(ctx, key.([32]byte), value.(*blockJob), time.Now())
 			return true
 		})
 	}
+}
+
+func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, job *blockJob, now time.Time) {
+	if now.Sub(job.creationTime) > blockJobExpiry {
+		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		return
+	}
+	store := job.store
+	if store == nil {
+		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
+	}
+	if err := store(ctx); err != nil {
+		log.Trace("Failed to process and store block", "block", job.block, "error", err)
+		return
+	}
+	b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
 }
