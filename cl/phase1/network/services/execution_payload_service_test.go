@@ -346,11 +346,39 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 
 	// Set finalized slot higher than envelope slot
 	fcu.FinalizedSlotVal = 100
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 
 	err := service.ProcessMessage(context.Background(), nil, envelope)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
-	require.Contains(t, err.Error(), "envelope slot 50 < finalized slot 100")
+	require.Contains(t, err.Error(), "envelope slot 50 < finalized slot 64")
+}
+
+func TestExecutionPayloadServiceUsesFinalizedEpochStartBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		slot    uint64
+		ignored bool
+	}{
+		{name: "below", slot: 63, ignored: true},
+		{name: "exact", slot: 64},
+		{name: "above", slot: 65},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			root := common.Hash{byte(tc.slot)}
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
+			fcu.FinalizedSlotVal = 95
+			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: tc.slot}}
+
+			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(tc.slot, root, 1))
+			if tc.ignored {
+				require.ErrorIs(t, err, ErrIgnore)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestExecutionPayloadServiceSuccess(t *testing.T) {

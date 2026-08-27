@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
@@ -46,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
@@ -244,14 +248,38 @@ func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostPayloadAttestationsAcceptsEmptySSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", http.NoBody)
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
 func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	handler.payloadAttestationService = attestationService
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	handler.gossipManager = gossipManager
 	msg := &cltypes.PayloadAttestationMessage{
 		Data: new(cltypes.PayloadAttestationData),
 	}
 	encoded, err := msg.EncodeSSZ(nil)
 	require.NoError(t, err)
 	body := strings.Repeat(string(encoded), int(handler.beaconChainCfg.MaxPayloadAttestations)+1)
+	count := int(handler.beaconChainCfg.MaxPayloadAttestations) + 1
+	attestationService.EXPECT().ProcessRESTMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ *cltypes.PayloadAttestationMessage, publish func() error) error {
+			return publish()
+		},
+	).Times(count)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNamePayloadAttestation, gomock.Any()).Return(nil).Times(count)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/octet-stream")
@@ -265,6 +293,17 @@ func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing
 
 func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	attestationService.EXPECT().ProcessRESTMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ *cltypes.PayloadAttestationMessage, publish func() error) error {
+			return publish()
+		},
+	)
+	handler.payloadAttestationService = attestationService
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNamePayloadAttestation, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
 	msg := &cltypes.PayloadAttestationMessage{
 		Data: new(cltypes.PayloadAttestationData),
 	}
@@ -340,14 +379,14 @@ func TestPostPayloadAttestationsCapsJSONCardinality(t *testing.T) {
 	}
 }
 
-func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
+func TestPostPayloadAttestationsRejectsQueuedWithoutPooling(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
 	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
-	attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationQueued))
+	attestationService.EXPECT().ProcessRESTMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationQueued))
 	handler.payloadAttestationService = attestationService
 	handler.epbsPool = pool.NewEpbsPool()
 
@@ -360,9 +399,76 @@ func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
 
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	_, found := handler.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: msg.Data.Slot, ValidatorIndex: msg.ValidatorIndex})
+	require.False(t, found)
+}
+
+func TestPostPayloadAttestationsAcceptsDuplicateWithoutPooling(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	attestationService.EXPECT().ProcessRESTMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationDuplicate))
+	handler.payloadAttestationService = attestationService
+	handler.epbsPool = pool.NewEpbsPool()
+	body, err := json.Marshal([]*cltypes.PayloadAttestationMessage{msg})
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	_, found := handler.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: msg.Data.Slot, ValidatorIndex: msg.ValidatorIndex})
 	require.False(t, found)
+}
+
+func TestPostPayloadAttestationsReturnsPublishFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	attestationService.EXPECT().ProcessRESTMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ *cltypes.PayloadAttestationMessage, publish func() error) error {
+			return publish()
+		},
+	)
+	handler.payloadAttestationService = attestationService
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNamePayloadAttestation, gomock.Any()).Return(errors.New("gossip unavailable"))
+	handler.gossipManager = gossipManager
+	body, err := json.Marshal([]*cltypes.PayloadAttestationMessage{msg})
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsRejectsRetryableValidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	msg := newTestPayloadAttestationMessage(t, 12, common.HexToHash("0x1234"))
+	attestationService := mock_services.NewMockPayloadAttestationService(ctrl)
+	attestationService.EXPECT().ProcessRESTMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationRetryable))
+	handler.payloadAttestationService = attestationService
+	body, err := json.Marshal([]*cltypes.PayloadAttestationMessage{msg})
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
 func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
@@ -394,6 +500,11 @@ func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
 func TestPostExecutionPayloadEnvelopeAcceptsGossipIntegrationError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	fcu.Blocks[common.Hash{}] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
@@ -404,6 +515,7 @@ func TestPostExecutionPayloadEnvelopeAcceptsGossipIntegrationError(t *testing.T)
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
 }
 
 func TestPostExecutionPayloadEnvelopesRequiresBlobDataHeader(t *testing.T) {
@@ -559,9 +671,16 @@ func TestPostExecutionPayloadEnvelopesRejectsEquivocatingBlockBeforeGossip(t *te
 
 func TestPostExecutionPayloadEnvelopesReturnsErrorWhenGossipPublishFails(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
 	ctrl := gomock.NewController(t)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
-	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(errors.New("gossip unavailable"))
+	gomock.InOrder(
+		gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(errors.New("gossip unavailable")),
+		gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil),
+	)
 	handler.gossipManager = gossipManager
 	root := common.Hash{1}
 	fcu.Blocks = map[common.Hash]*cltypes.SignedBeaconBlock{
@@ -581,6 +700,266 @@ func TestPostExecutionPayloadEnvelopesReturnsErrorWhenGossipPublishFails(t *test
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "gossip unavailable")
+	for range 3 {
+		<-events
+	}
+	fcu.Envelopes[root] = envelope
+	fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder = httptest.NewRecorder()
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	select {
+	case event := <-events:
+		t.Fatalf("retry emitted duplicate event %s", event.Event)
+	default:
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeDuplicateDoesNotRepublishOrEmit(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Envelopes[common.Hash{}] = persisted
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Signature[0] = 1
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected event %s", event.Event)
+	default:
+	}
+}
+
+func TestPostExecutionPayloadEnvelopeConcurrentIdenticalReconcilesPersistedImport(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil).Times(2)
+	handler.gossipManager = gossipManager
+	root := common.Hash{7}
+	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = root
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	firstPersisted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	fcu.OnExecutionPayloadFn = func(_ context.Context, imported *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+		if calls.Add(1) == 1 {
+			fcu.Envelopes[root] = imported
+			close(firstPersisted)
+			<-releaseFirst
+			return nil
+		}
+		return forkchoice.ErrIgnore
+	}
+	post := func(payload []byte) *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(payload))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", "gloas")
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+	firstResult := make(chan *httptest.ResponseRecorder, 1)
+	go func() { firstResult <- post(body) }()
+	<-firstPersisted
+	second := post(body)
+	close(releaseFirst)
+	first := <-firstResult
+	require.ElementsMatch(t, []int{http.StatusOK, http.StatusAccepted}, []int{first.Code, second.Code})
+	eventCounts := map[beaconevents.EventTopic]int{}
+	for range 3 {
+		eventCounts[(<-events).Event]++
+	}
+	require.Equal(t, 1, eventCounts[beaconevents.OpExecutionPayloadGossip])
+	require.Equal(t, 1, eventCounts[beaconevents.OpExecutionPayload])
+	require.Equal(t, 1, eventCounts[beaconevents.OpExecutionPayloadAvailable])
+
+	forgedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	forgedEnvelope.Message.BeaconBlockRoot = root
+	forgedEnvelope.Signature[0] = 1
+	forged, err := json.Marshal(forgedEnvelope)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusServiceUnavailable, post(forged).Code)
+}
+
+func TestPostExecutionPayloadEnvelopeMissingBlockRequiresRetry(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	handler.gossipManager = gossipManager
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	post := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", "gloas")
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+	require.Equal(t, http.StatusServiceUnavailable, post().Code)
+	fcu.OnExecutionPayloadErr = nil
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+	require.Equal(t, http.StatusOK, post().Code)
+}
+
+func TestEmitFullHeadV2DropsChangedPayloadSnapshot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := handler.emitters.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	root := common.HexToHash("0x1234")
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	fcu.HeadVal = root
+	fcu.HeadSlotVal = 1
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		fcu.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+		headState := state.New(handler.beaconChainCfg)
+		headState.SetVersion(clparams.GloasVersion)
+		require.NoError(t, headState.SetSlot(1))
+		require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+		return headState, nil
+	}
+
+	handler.emitFullHeadV2(block, root)
+
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected event %s", event.Event)
+	default:
+	}
+}
+
+func TestEmitFullHeadV2DropsChangedOptimismSnapshot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := handler.emitters.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	root := common.HexToHash("0x1234")
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	fcu.HeadVal = root
+	fcu.HeadSlotVal = 1
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		fcu.IsRootOptimisticVal = true
+		headState := state.New(handler.beaconChainCfg)
+		headState.SetVersion(clparams.GloasVersion)
+		require.NoError(t, headState.SetSlot(1))
+		require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+		return headState, nil
+	}
+
+	handler.emitFullHeadV2(block, root)
+
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected event %s", event.Event)
+	default:
+	}
+}
+
+func TestGetExecutionPayloadEnvelopeDoesNotFinalizeSameSlotSideBranch(t *testing.T) {
+	db, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.HexToHash("0x1234")
+	slot := uint64(12)
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: slot, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	fcu.FinalizedSlotVal = slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xbeef")}
+	fcu.Ancestors[slot] = forkchoice.ForkChoiceNode{Root: common.HexToHash("0xbeef")}
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, common.HexToHash("0xbeef"))
+	}))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"finalized":false`)
+}
+
+func TestGetExecutionPayloadEnvelopeFinalizesCheckpointRootOnly(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	root := common.HexToHash("0x1234")
+	slot := uint64(64)
+	fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: slot, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: root}
+	fcu.Ancestors[slot] = forkchoice.ForkChoiceNode{Root: root}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"finalized":true`)
+}
+
+func TestGetExecutionPayloadEnvelopeFinalityBoundaryMatrix(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		slot      uint64
+		ancestor  bool
+		finalized bool
+	}{
+		{name: "earlier canonical ancestor", slot: 63, ancestor: true, finalized: true},
+		{name: "descendant", slot: 65, ancestor: true, finalized: false},
+		{name: "earlier side branch", slot: 63, ancestor: false, finalized: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			root := common.HexToHash("0x1234")
+			finalizedRoot := common.HexToHash("0xbeef")
+			fcu.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			fcu.Blocks[root] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: test.slot, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+			fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: finalizedRoot}
+			if test.ancestor {
+				fcu.Ancestors[test.slot] = forkchoice.ForkChoiceNode{Root: root}
+			} else {
+				fcu.Ancestors[test.slot] = forkchoice.ForkChoiceNode{Root: common.HexToHash("0xdead")}
+			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"finalized":%t`, test.finalized))
+		})
+	}
 }
 
 func TestPostExecutionPayloadEnvelopesClassifiesIntegrationFailureByValidationMode(t *testing.T) {

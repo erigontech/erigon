@@ -81,6 +81,7 @@ type ForkChoiceStorageMock struct {
 	VerifiedPayloads                    map[common.Hash]bool
 	OnBlockErr                          error
 	OnExecutionPayloadErr               error
+	OnExecutionPayloadFn                func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnTickFn                            func(uint64)
 	ValidateExecutionPayloadEnvelopeErr error
 	GetBeaconCommitteeMock              func(slot, committeeIndex uint64) ([]uint64, error)
@@ -380,6 +381,9 @@ func (f *ForkChoiceStorageMock) OnBlockWithEquivocationCheck(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	if f.OnExecutionPayloadFn != nil {
+		return f.OnExecutionPayloadFn(ctx, signedEnvelope, checkBlobData, validatePayload)
+	}
 	return f.OnExecutionPayloadErr
 }
 

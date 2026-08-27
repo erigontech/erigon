@@ -33,5 +33,6 @@ type BuilderClient interface {
 	SubmitBuilderPreferences(ctx context.Context, builderURL string, proposerPubkey common.Bytes48, request *cltypes.BuilderPreferencesRequest) error
 	RequestExecutionPayloadBid(ctx context.Context, builderURL string, slot uint64, parentHash, parentRoot common.Hash, proposerPubkey common.Bytes48, auth *cltypes.SignedBuilderRequestAuth, timeout time.Duration) (*cltypes.SignedExecutionPayloadBid, error)
 	SubmitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error
+	SubmitSignedBeaconBlockPublic(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error
 	GetStatus(ctx context.Context) error
 }

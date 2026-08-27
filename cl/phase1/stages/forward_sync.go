@@ -118,14 +118,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// the payload is delivered separately via a SignedExecutionPayloadEnvelope.
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
-				// FULL block: update forkchoice with the envelope (updates eth2Roots, persists to disk).
-				if fceErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, shouldValidateForwardSyncPayload(cfg, shouldInsert)); fceErr != nil {
-					logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", fceErr)
-				} else if shouldInsert {
-					if err = cfg.blockCollector.AddGloasBlock(block.Block, env); err != nil {
-						err = fmt.Errorf("failed to add gloas block to collector: %w", err)
-						return
-					}
+				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
+					return
 				}
 			}
 			// Dump state periodically for restart checkpoints.
@@ -174,6 +168,37 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		}
 	}
 	return
+}
+
+type gloasBlockCollector interface {
+	AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
+}
+
+func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
+	err := store.OnExecutionPayload(ctx, envelope, false, validate)
+	if err != nil && !(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope)) {
+		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
+		return nil
+	}
+	if shouldInsert {
+		if err := collector.AddGloasBlock(block, envelope); err != nil {
+			return fmt.Errorf("failed to add gloas block to collector: %w", err)
+		}
+	}
+	return nil
+}
+
+func persistedEnvelopeMatches(store forkchoice.ForkChoiceStorage, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	persisted, err := store.ReadEnvelopeFromDisk(root)
+	if err != nil || persisted == nil || envelope == nil {
+		return false
+	}
+	persistedRoot, err := persisted.HashSSZ()
+	if err != nil {
+		return false
+	}
+	envelopeRoot, err := envelope.HashSSZ()
+	return err == nil && persistedRoot == envelopeRoot
 }
 
 func shouldValidateForwardSyncPayload(cfg *Cfg, shouldInsert bool) bool {

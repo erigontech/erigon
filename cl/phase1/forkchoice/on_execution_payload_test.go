@@ -791,7 +791,7 @@ func TestOnExecutionPayloadRedeliveryRepairsMissingIndices(t *testing.T) {
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 	f := &ForkChoiceStore{forkGraph: graph, db: db}
 
-	require.NoError(t, f.OnExecutionPayload(context.Background(), redelivered, false, true))
+	require.ErrorIs(t, f.OnExecutionPayload(context.Background(), redelivered, false, true), ErrIgnore)
 	require.Equal(t, int32(1), graph.reads.Load())
 	require.Equal(t, 1, db.calls)
 	require.NoError(t, rwdb.View(context.Background(), func(tx kv.Tx) error {
@@ -826,7 +826,7 @@ func TestOnExecutionPayloadRedeliveryRepairsZeroHashIndices(t *testing.T) {
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 	f := &ForkChoiceStore{forkGraph: graph, db: db}
 
-	require.NoError(t, f.OnExecutionPayload(context.Background(), redelivered, false, true))
+	require.ErrorIs(t, f.OnExecutionPayload(context.Background(), redelivered, false, true), ErrIgnore)
 	require.Equal(t, int32(1), graph.reads.Load())
 	require.Equal(t, 1, db.calls)
 	require.NoError(t, rwdb.View(context.Background(), func(tx kv.Tx) error {
@@ -908,7 +908,7 @@ func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
 		db:        db,
 	}
 
-	require.NoError(t, f.OnExecutionPayload(context.Background(), redelivered, false, true))
+	require.ErrorIs(t, f.OnExecutionPayload(context.Background(), redelivered, false, true), ErrIgnore)
 	require.Zero(t, graph.reads.Load())
 	require.Zero(t, db.calls)
 }
