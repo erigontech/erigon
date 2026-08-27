@@ -987,12 +987,11 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return bytes.Clone(enc), step, nil
 }
 
-// WarmupBranch returns the branch bytes uncopied, for trie warmup. They stay
-// valid for the life of this context's transaction -- mdbx guarantees that much
-// for a read, mmapped .kv pages are pinned by it, and the mem batch and the
-// branch/state caches all hand out heap-owned values -- but not past it, which is
-// why anything that keeps branch data uses Branch.
-func (sdc *TrieContext) WarmupBranch(pref []byte) ([]byte, kv.Step, error) {
+// BranchNoCopy returns the branch bytes uncopied, for a caller that consumes them
+// before its next read -- the trie warmup. The result is valid only until the
+// next call on this context and must not be mutated; anything that keeps branch
+// data uses Branch.
+func (sdc *TrieContext) BranchNoCopy(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branch(pref)
 }
 

@@ -262,10 +262,12 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 	}
 }
 
-// countingBranchCtx records which read path the warmuper took. Branch models the
-// owning read (it copies); WarmupBranch hands back the source slice itself.
+// countingBranchCtx records which read path the warmuper took, and holds
+// BranchNoCopy to its contract: each call poisons what the previous one returned,
+// so a caller that kept the bytes reads garbage and descends differently.
 type countingBranchCtx struct {
 	src      []byte
+	last     []byte
 	owned    atomic.Int64
 	borrowed atomic.Int64
 }
@@ -275,19 +277,23 @@ func (c *countingBranchCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return bytes.Clone(c.src), 0, nil
 }
 
-func (c *countingBranchCtx) WarmupBranch(prefix []byte) ([]byte, kv.Step, error) {
+func (c *countingBranchCtx) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
 	c.borrowed.Add(1)
-	return c.src, 0, nil
+	for i := range c.last {
+		c.last[i] = 0xff
+	}
+	c.last = bytes.Clone(c.src)
+	return c.last, 0, nil
 }
 
 func (c *countingBranchCtx) PutBranch(prefix, data, prevData []byte) error { return nil }
 func (c *countingBranchCtx) Account(plainKey []byte) (*Update, error)      { return nil, nil }
 func (c *countingBranchCtx) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
 
-// TestWarmuperUsesWarmupBranch pins the warmuper on the non-copying read. It keeps
+// TestWarmuperUsesBranchNoCopy pins the warmuper on the non-copying read. It keeps
 // nothing it reads, and it issues several times more branch reads than the fold
 // does, so an owning read there is the bulk of the copying.
-func TestWarmuperUsesWarmupBranch(t *testing.T) {
+func TestWarmuperUsesBranchNoCopy(t *testing.T) {
 	t.Parallel()
 	// touchMap, afterMap with nibble 0 set, then one cell with no fields.
 	ctx := &countingBranchCtx{src: []byte{0x00, 0x01, 0x00, 0x01, 0x00}}
@@ -302,6 +308,8 @@ func TestWarmuperUsesWarmupBranch(t *testing.T) {
 	require.NoError(t, w.WaitBufferFree(0))
 	w.CloseAndWait()
 
-	require.Positive(t, ctx.borrowed.Load(), "warmup read branches through the copying path")
 	require.Zero(t, ctx.owned.Load(), "warmup still copies branch bytes it drops immediately")
+	// One read per nibble of the key, then one more that stops at its end. A
+	// caller holding a poisoned branch would read 0xff and stop short.
+	require.Equal(t, int64(5), ctx.borrowed.Load(), "warmup descent read the wrong number of branches")
 }

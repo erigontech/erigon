@@ -117,8 +117,8 @@ func (w *Warmuper) Start() {
 			}
 
 			readBranch := trieCtx.Branch
-			if w, ok := trieCtx.(BranchWarmer); ok {
-				readBranch = w.WarmupBranch
+			if w, ok := trieCtx.(BranchNoCopyReader); ok {
+				readBranch = w.BranchNoCopy
 			}
 
 			for {
