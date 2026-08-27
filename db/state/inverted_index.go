@@ -1260,7 +1260,11 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	if sf.decomp == nil {
 		return // build was skipped — don't overwrite existing dirty files
 	}
-	fi := newFilesItem(txNumFrom, txNumTo)
+	itemFrom, itemTo := txNumFrom, txNumTo
+	if v4From, v4To, err := parseV4EFBaseName(filepath.Base(sf.decomp.FilePath())); err == nil {
+		itemFrom, itemTo = v4From, v4To
+	}
+	fi := newFilesItem(itemFrom, itemTo)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence

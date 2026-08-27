@@ -1616,11 +1616,32 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
+	// When retire's per-domain output is a v4 tail (mid-step raw txN
+	// in its name), the paired v4 #1 boundary file must NOT be
+	// subsumed here — the background merger owns composition of the
+	// v4 pair into a step-aligned file. Subsuming at retire time
+	// unlinks v4 #1 before the merger runs, orphaning its
+	// pre-target range.
+	anyV4Tail := false
+	for _, d := range sf.d {
+		if d.valuesDecomp == nil {
+			continue
+		}
+		if _, _, err := parseV4KVBaseName(filepath.Base(d.valuesDecomp.FilePath())); err == nil {
+			anyV4Tail = true
+			break
+		}
+	}
+
 	for id, d := range a.d {
 		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
 	}
 	for id, ii := range a.standaloneIIs() {
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
+	}
+
+	if anyV4Tail {
+		return
 	}
 
 	// A retire that just landed a step-aligned .kv covering [txNumFrom,

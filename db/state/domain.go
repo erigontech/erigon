@@ -1514,8 +1514,14 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo)
-	fi.version, _ = version.ParseVersion(filepath.Base(sf.valuesDecomp.FilePath()))
+	base := filepath.Base(sf.valuesDecomp.FilePath())
+	itemFrom, itemTo := txNumFrom, txNumTo
+	if v4From, v4To, err := parseV4KVBaseName(base); err == nil {
+		itemFrom, itemTo = v4From, v4To
+	}
+
+	fi := newFilesItem(itemFrom, itemTo)
+	fi.version, _ = version.ParseVersion(base)
 	fi.decompressor = sf.valuesDecomp
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt

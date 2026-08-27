@@ -946,7 +946,12 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo)
+	itemFrom, itemTo := txNumFrom, txNumTo
+	if v4From, v4To, err := parseV4VBaseName(filepath.Base(sf.historyDecomp.FilePath())); err == nil {
+		itemFrom, itemTo = v4From, v4To
+	}
+
+	fi := newFilesItem(itemFrom, itemTo)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.dirtyFiles.Set(fi)
