@@ -144,29 +144,10 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 
 type workersCfg struct {
 	mu              sync.Mutex
-	editLocks       int // >0 while background build/merge pins config
+	editLocks       int // >0 while a background build/merge pins config
 	merge           int // usually 1
 	collateAndBuild int
-
-	// Latest requested counts, and the latest deferred compressor write. A Preset*
-	// call arriving while a background build or merge pins the config must not take
-	// effect mid-operation, but discarding it loses the setting for the rest of the
-	// process: a node restarted with files on disk starts merging before the first
-	// Preset* call, so every one of them is dropped and the aggregator keeps its
-	// construction defaults forever. Hold the request instead and apply it when the
-	// last pin is released.
-	wantMerge           int
-	wantCollateAndBuild int
-	pendingSet          func()
-}
-
-func newWorkersCfg(merge, collateAndBuild int) workersCfg {
-	return workersCfg{
-		merge:               merge,
-		collateAndBuild:     collateAndBuild,
-		wantMerge:           merge,
-		wantCollateAndBuild: collateAndBuild,
-	}
+	pending         func() // newest request that arrived while pinned
 }
 
 func (w *workersCfg) getMerge() int {
@@ -175,40 +156,26 @@ func (w *workersCfg) getMerge() int {
 	return w.merge
 }
 
-func (w *workersCfg) setMerge(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.wantMerge = n
-	if w.editLocks == 0 {
-		w.merge = n
-	}
-}
-
 func (w *workersCfg) getCollateAndBuild() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.collateAndBuild
 }
 
-func (w *workersCfg) setCollateAndBuild(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.wantCollateAndBuild = n
-	if w.editLocks == 0 {
-		w.collateAndBuild = n
-	}
-}
+func (w *workersCfg) setMergeLocked(n int) { w.merge = n }
 
-// trySet runs fn under mu, deferring it to the last unlockEditing while a background
-// op holds the config pinned. fn must not take w.mu.
-func (w *workersCfg) trySet(fn func()) {
+func (w *workersCfg) setCollateAndBuildLocked(n int) { w.collateAndBuild = n }
+
+// apply runs fn under mu, holding it for the last unlockEditing while a background op pins the
+// config: dropping the request loses it for the process — a restart merges before any preset lands.
+func (w *workersCfg) apply(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		fn()
+	if w.editLocks > 0 {
+		w.pending = fn
 		return
 	}
-	w.pendingSet = fn
+	fn()
 }
 
 // lockEditing is reentrant: overlapping build/merge ops each hold a lock, and
@@ -225,14 +192,9 @@ func (w *workersCfg) unlockEditing() {
 	if w.editLocks > 0 {
 		w.editLocks--
 	}
-	if w.editLocks != 0 {
-		return
-	}
-	w.merge = w.wantMerge
-	w.collateAndBuild = w.wantCollateAndBuild
-	if w.pendingSet != nil {
-		w.pendingSet()
-		w.pendingSet = nil
+	if w.editLocks == 0 && w.pending != nil {
+		w.pending()
+		w.pending = nil
 	}
 }
 

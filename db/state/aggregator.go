@@ -158,7 +158,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		backgroundProgress: background.NewProgressSet(),
 		logger:             logger,
-		workers:            newWorkersCfg(dbg.MergeWorkers, dbg.CollateWorkers),
+		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
 	}
@@ -771,101 +771,104 @@ func (a *Aggregator) closeDirtyFiles() {
 
 func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Enabled = true }
 
-func (a *Aggregator) setBuildAccessorsWorkers(i int) {
-	a.workers.trySet(func() {
-		for _, d := range a.d {
-			if d == nil {
-				continue
-			}
-			d.BuildAccessorsWorkers = i
-			if d.History != nil {
-				d.History.BuildAccessorsWorkers = i
-				d.History.InvertedIndex.BuildAccessorsWorkers = i
-			}
+func (a *Aggregator) setBuildAccessorsWorkersLocked(i int) {
+	for _, d := range a.d {
+		if d == nil {
+			continue
 		}
-		for _, ii := range a.standaloneIIs() {
-			ii.BuildAccessorsWorkers = i
+		d.BuildAccessorsWorkers = i
+		if d.History != nil {
+			d.History.BuildAccessorsWorkers = i
+			d.History.InvertedIndex.BuildAccessorsWorkers = i
 		}
-	})
+	}
+	for _, ii := range a.standaloneIIs() {
+		ii.BuildAccessorsWorkers = i
+	}
 }
 
-// applyEnvCompressWorkers stamps COMPRESS_WORKERS onto everything registered so far.
-// Domains and indices are built after the aggregator, so the constructor cannot reach
-// their compressor config; re-stamping on each registration is cheap and runs only at
-// startup. Without it the env value depends on a Preset* call landing, which is skipped
-// whenever a background build or merge holds the config pinned.
+func (a *Aggregator) setCompressWorkersLocked(i int) {
+	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
+		d.CompressCfg.Workers = i
+		if d.History != nil {
+			d.History.CompressorCfg.Workers = i
+			d.History.InvertedIndex.CompressorCfg.Workers = i
+		}
+	}
+	for _, ii := range a.standaloneIIs() {
+		ii.CompressorCfg.Workers = i
+	}
+}
+
+// applyEnvCompressWorkers covers the window before the first preset lands: a restart with
+// files on disk merges with whatever the compressor config holds at registration.
 func (a *Aggregator) applyEnvCompressWorkers() {
 	if dbg.CompressWorkers <= 0 {
 		return
 	}
-	a.setCompressWorkers(dbg.CompressWorkers)
-	a.setBuildAccessorsWorkers(dbg.CompressWorkers)
-}
-
-func (a *Aggregator) setCompressWorkers(i int) {
-	a.workers.trySet(func() {
-		for _, d := range a.d {
-			if d == nil {
-				continue
-			}
-			d.CompressCfg.Workers = i
-			if d.History != nil {
-				d.History.CompressorCfg.Workers = i
-				d.History.InvertedIndex.CompressorCfg.Workers = i
-			}
-		}
-		for _, ii := range a.standaloneIIs() {
-			ii.CompressorCfg.Workers = i
-		}
+	a.workers.apply(func() {
+		a.setCompressWorkersLocked(dbg.CompressWorkers)
+		a.setBuildAccessorsWorkersLocked(dbg.CompressWorkers)
 	})
 }
 
 // PresetChainTipConcurrency configures workers for live chain-tip syncing:
 // minimal collate workers to avoid competing with block execution.
 func (a *Aggregator) PresetChainTipConcurrency() {
-	a.workers.setCollateAndBuild(1)
-	a.workers.setMerge(dbg.MergeWorkers)
-	a.setCompressWorkers(max(1, dbg.CompressWorkers))
-	a.setBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
+	a.workers.apply(func() {
+		a.workers.setMergeLocked(dbg.MergeWorkers)
+		a.workers.setCollateAndBuildLocked(1)
+		a.setCompressWorkersLocked(max(1, dbg.CompressWorkers))
+		a.setBuildAccessorsWorkersLocked(max(1, dbg.CompressWorkers))
+	})
 }
 
 // PresetNonChainTipConcurrency configures workers for initial sync (not at chain tip):
 // allows more collate/merge parallelism via env-var overrides.
 func (a *Aggregator) PresetNonChainTipConcurrency() {
-	a.workers.setCollateAndBuild(dbg.CollateWorkers)
-	a.workers.setMerge(dbg.MergeWorkers)
-	a.setCompressWorkers(max(1, dbg.CompressWorkers))
-	a.setBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
+	a.workers.apply(func() {
+		a.workers.setMergeLocked(dbg.MergeWorkers)
+		a.workers.setCollateAndBuildLocked(dbg.CollateWorkers)
+		a.setCompressWorkersLocked(max(1, dbg.CompressWorkers))
+		a.setBuildAccessorsWorkersLocked(max(1, dbg.CompressWorkers))
+	})
 }
 
 // PresetOfflineMerge configures workers for offline merge operations:
 // uses RAM/CPU estimates to maximise merge and compression throughput.
 // COMPRESS_WORKERS env-var overrides the estimate when set.
 func (a *Aggregator) PresetOfflineMerge() {
-	a.workers.setCollateAndBuild(estimate.StateV3Collate.Workers())
-	if dbg.CompressWorkers > 0 {
-		a.setCompressWorkers(dbg.CompressWorkers)
-		a.setBuildAccessorsWorkers(dbg.CompressWorkers)
-	} else {
-		a.setCompressWorkers(estimate.CompressSnapshot.Workers())
-		a.setBuildAccessorsWorkers(estimate.IndexSnapshot.Workers())
-	}
-	a.workers.setMerge(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
+	a.workers.apply(func() {
+		a.workers.setMergeLocked(dbg.MergeWorkers) // parallel building makes extra merge workers unnecessary
+		a.workers.setCollateAndBuildLocked(estimate.StateV3Collate.Workers())
+		if dbg.CompressWorkers > 0 {
+			a.setCompressWorkersLocked(dbg.CompressWorkers)
+			a.setBuildAccessorsWorkersLocked(dbg.CompressWorkers)
+			return
+		}
+		a.setCompressWorkersLocked(estimate.CompressSnapshot.Workers())
+		a.setBuildAccessorsWorkersLocked(estimate.IndexSnapshot.Workers())
+	})
 }
 
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
 // uses RAM/CPU estimates to maximise collate/build and compression throughput.
 // COMPRESS_WORKERS env-var overrides the estimate when set.
 func (a *Aggregator) PresetOfflineExecution() {
-	a.workers.setCollateAndBuild(min(2, estimate.StateV3Collate.Workers()))
-	if dbg.CompressWorkers > 0 {
-		a.setCompressWorkers(dbg.CompressWorkers)
-		a.setBuildAccessorsWorkers(dbg.CompressWorkers)
-	} else {
-		a.setCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
-		a.setBuildAccessorsWorkers(estimate.IndexSnapshot.WorkersHalf())
-	}
-	a.workers.setMerge(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
+	a.workers.apply(func() {
+		a.workers.setMergeLocked(dbg.MergeWorkers) // parallel building makes extra merge workers unnecessary
+		a.workers.setCollateAndBuildLocked(min(2, estimate.StateV3Collate.Workers()))
+		if dbg.CompressWorkers > 0 {
+			a.setCompressWorkersLocked(dbg.CompressWorkers)
+			a.setBuildAccessorsWorkersLocked(dbg.CompressWorkers)
+			return
+		}
+		a.setCompressWorkersLocked(estimate.CompressSnapshot.WorkersHalf())
+		a.setBuildAccessorsWorkersLocked(estimate.IndexSnapshot.WorkersHalf())
+	})
 }
 
 func (a *Aggregator) LockWorkersEditing() {
