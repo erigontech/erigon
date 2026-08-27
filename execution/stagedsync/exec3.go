@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -228,12 +227,13 @@ func execV3(ctx context.Context,
 			isApplyingBlocks:  isApplyingBlocks,
 			logger:            logger,
 			logPrefix:         logPrefix,
-			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, logPrefix, logger),
+			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, logPrefix, logger),
 			enableChaosMonkey: initialCycle,
 			hooks:             hooks,
 			blockSrc:          blockSrc,
 		},
 		workerCount: cfg.syncCfg.ExecWorkerCount,
+		syscallEVM:  protocol.NewSysCallEVM(cfg.chainConfig, *cfg.vmConfig),
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)
 	// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -341,7 +341,7 @@ func execV3Serial(ctx context.Context,
 			applyTx:           applyTx,
 			logger:            logger,
 			logPrefix:         execStage.LogPrefix(),
-			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
+			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, execStage.LogPrefix(), logger),
 			enableChaosMonkey: initialCycle,
 			hooks:             hooks,
 		}}
@@ -381,7 +381,7 @@ func execV3Serial(ctx context.Context,
 				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
 
 				if initialCycle {
-					se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
+					se.LogCommitments(committedTransactions, stepsInDb, se.LastCommitProgress())
 				}
 			case errors.Is(execErr, ErrWrongTrieRoot):
 				execErr = handleIncorrectRootHashError(
@@ -612,12 +612,12 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
-	data := block.BlockAccessList()
-	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
-		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
+	bal := block.BlockAccessList()
+	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
 	}
-	return data, nil
+	return bal, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
@@ -704,16 +704,19 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			// dbBAL is fed by the block source (src.next -> blockAndBAL), which
-			// prefers the payload-carried BAL and falls back to the DB sidecar.
+			blockBAL := dbBAL
 			header := b.HeaderNoCopy()
-			if dbBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasBAL() {
+			executionBAL := blockBAL
+			if dbg.IgnoreBAL {
+				executionBAL = nil
+			}
+			if executionBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
 				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
 			}
 			if dbg.TraceBALFeed {
-				if dbBAL != nil {
-					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(dbBAL))
-				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) {
+				if executionBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(executionBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
 					fmt.Printf("BAL-MISSING blk=%d\n", blockNum)
 				}
 			}
@@ -782,7 +785,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					firstTxNum: blockStartTxNum,
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
-					bal:        dbBAL,
+					bal:        executionBAL,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
@@ -792,7 +795,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				block:         b,
 				gasPool:       protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				accessList:    dbBAL,
+				accessList:    executionBAL,
 				tasks:         txTasks,
 				applyResults:  applyResults,
 				commitResults: commitResults,

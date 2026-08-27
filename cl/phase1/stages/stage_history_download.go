@@ -318,7 +318,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 
 				if cfg.sn != nil && cfg.sn.SegmentsMax() == 0 {
-					cfg.sn.OpenFolder()
+					if err := cfg.sn.OpenFolder(); err != nil {
+						log.Warn("could not open snapshot folder", "err", err)
+					}
 				}
 
 				highestBlockSeen := initialBeaconBlock.Block.Slot

@@ -94,8 +94,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
-	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
+	availableRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -122,7 +122,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	for _, tt := range debugTraceTransactionTests {
@@ -880,84 +880,54 @@ func TestAccountRange(t *testing.T) {
 	})
 }
 
-func TestAccountRangeBlockTags(t *testing.T) {
-	m, chainPack, _ := rpcdaemontest.CreateTestExecModule(t)
+func TestAccountRangeResolvesCommittedBlockTags(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
-	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+	start := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
 
-	// The test chain has 13 blocks (1–13). Set up forkchoice state with
-	// distinct positions so we can prove each tag resolves to its own block:
-	//   finalized = block 3
-	//   safe      = block 5
-	//   head      = block 10
-	finalizedBlock := chainPack.Blocks[2] // index 2 = block 3
-	safeBlock := chainPack.Blocks[4]      // index 4 = block 5
-	headBlock := chainPack.Blocks[9]      // index 9 = block 10
-
-	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
-		rawdb.WriteForkchoiceFinalized(tx, finalizedBlock.Hash())
-		rawdb.WriteForkchoiceSafe(tx, safeBlock.Hash())
-		rawdb.WriteForkchoiceHead(tx, headBlock.Hash())
+	var latestExecuted uint64
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		latestExecuted, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	blockNumbers := map[rpc.BlockNumber]uint64{
+		rpc.FinalizedBlockNumber:      1,
+		rpc.SafeBlockNumber:           3,
+		rpc.LatestExecutedBlockNumber: latestExecuted,
+	}
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		finalizedHash, err := rawdb.ReadCanonicalHash(tx, blockNumbers[rpc.FinalizedBlockNumber])
+		if err != nil {
+			return err
+		}
+		safeHash, err := rawdb.ReadCanonicalHash(tx, blockNumbers[rpc.SafeBlockNumber])
+		if err != nil {
+			return err
+		}
+		rawdb.WriteForkchoiceFinalized(tx, finalizedHash)
+		rawdb.WriteForkchoiceSafe(tx, safeHash)
 		return nil
-	})
-	require.NoError(t, err)
+	}))
 
-	t.Run("safe tag matches concrete block", func(t *testing.T) {
-		safeTag := rpc.SafeBlockNumber
-		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &safeTag}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
+	for tag, blockNumber := range blockNumbers {
+		t.Run(tag.String(), func(t *testing.T) {
+			want, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber)), start[:], 10, true, true, nil)
+			require.NoError(t, err)
 
-		concreteNum := rpc.BlockNumber(safeBlock.NumberU64())
-		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
+			got, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHashWithNumber(tag), start[:], 10, true, true, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
 
-		require.Equal(t, byNumber, byTag)
-	})
-
-	t.Run("finalized tag matches concrete block", func(t *testing.T) {
-		finalizedTag := rpc.FinalizedBlockNumber
-		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &finalizedTag}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
-
-		concreteNum := rpc.BlockNumber(finalizedBlock.NumberU64())
-		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
-
-		require.Equal(t, byNumber, byTag)
-	})
-
-	t.Run("safe and finalized return different state when blocks differ", func(t *testing.T) {
-		safeTag := rpc.SafeBlockNumber
-		safeResult, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &safeTag}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
-
-		finalizedTag := rpc.FinalizedBlockNumber
-		finalizedResult, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &finalizedTag}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
-
-		// Blocks 3 and 5 should have different state roots since they're different blocks.
-		require.NotEqual(t, safeResult.Root, finalizedResult.Root)
-	})
-
-	t.Run("latest tag matches forkchoice head", func(t *testing.T) {
+	t.Run("latest resolves to execution head", func(t *testing.T) {
 		latestTag := rpc.LatestBlockNumber
-		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, start[:], 10, true, true, nil)
 		require.NoError(t, err)
 
-		concreteNum := rpc.BlockNumber(headBlock.NumberU64())
-		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
-
-		require.Equal(t, byNumber, byTag)
-	})
-
-	t.Run("latestExecuted tag matches execution head", func(t *testing.T) {
-		latestExecutedTag := rpc.LatestExecutedBlockNumber
-		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestExecutedTag}, addr[:], 10, true, true, nil)
-		require.NoError(t, err)
-
-		concreteNum := rpc.BlockNumber(chainPack.Blocks[len(chainPack.Blocks)-1].NumberU64())
-		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		concreteNum := rpc.BlockNumber(latestExecuted)
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, start[:], 10, true, true, nil)
 		require.NoError(t, err)
 
 		require.Equal(t, byNumber, byTag)
@@ -965,14 +935,14 @@ func TestAccountRangeBlockTags(t *testing.T) {
 
 	t.Run("pending tag is rejected", func(t *testing.T) {
 		pendingTag := rpc.PendingBlockNumber
-		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &pendingTag}, addr[:], 10, true, true, nil)
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &pendingTag}, start[:], 10, true, true, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "pending block not supported")
 	})
 
 	t.Run("earliest tag returns genesis state root", func(t *testing.T) {
 		earliestTag := rpc.EarliestBlockNumber
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, addr[:], 10, true, true, nil)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, start[:], 10, true, true, nil)
 		require.NoError(t, err)
 
 		tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -1102,12 +1072,12 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
 		payload, err := rlp.EncodeToBytes(pendingBlock)
 		require.NoError(t, err)
 		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
-		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 		apiWithFilters := NewPrivateDebugAPI(baseWithFilters, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 		result, err := apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
@@ -1173,14 +1143,15 @@ func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
 
-	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
+	var blockHash0, blockHash1, blockHash3, blockHash7, blockHash10, blockHashNonExistent common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
 		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
 		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash7, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 7)
 		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
 		blockHashNonExistent, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 20)
-		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent
+		_, _, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash7, blockHash10, blockHashNonExistent
 		return nil
 	})
 
@@ -1217,12 +1188,20 @@ func TestAccountAt(t *testing.T) {
 		results, err = api.AccountAt(m.Ctx, blockHash10, 1, contract)
 		require.NoError(err)
 		require.Equal(39, int(results.Nonce))
-		require.Equal("0x", results.Code.String())
+		require.Equal(crypto.Keccak256Hash(results.Code), results.CodeHash)
 
-		// and too big txIndex
-		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(err)
-		require.Equal(42, int(results.Nonce))
+	})
+	t.Run("code matches code hash", func(t *testing.T) {
+		tokenContract := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+		result, err := api.AccountAt(m.Ctx, blockHash7, 1, tokenContract)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Code)
+		require.Equal(t, crypto.Keccak256Hash(result.Code), result.CodeHash)
+	})
+	t.Run("large transaction index", func(t *testing.T) {
+		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
+		require.NoError(t, err)
+		require.Equal(t, 42, int(result.Nonce))
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -1359,7 +1338,7 @@ func TestGetRawReceipts(t *testing.T) {
 
 	testedNonEmpty := false
 	for i := uint64(0); i <= number; i++ {
-		block, err := api.blockByNumberWithSenders(ctx, tx, i)
+		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), i)
 		require.NoError(err)
 		receipts, err := api.getReceipts(ctx, tx, block)
 		require.NoError(err)
@@ -1646,12 +1625,14 @@ func TestSetHead(t *testing.T) {
 	roTx.Rollback()
 	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
 
-	// Helper to build a DebugAPIImpl wired to a mockEthBackend
-	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
-		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+	makeAPIWithBase := func(m *execmoduletester.ExecModuleTester, base *BaseAPI, mock *mockEthBackend) *DebugAPIImpl {
+		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, &rpccfg.DebugApiConfig{})
+		return NewPrivateDebugAPI(base, m.DB, backend, &rpccfg.DebugApiConfig{})
+	}
+	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
+		return makeAPIWithBase(m, newBaseApiForTest(m), mock)
 	}
 
 	// Rewinding one block below the current head is the simplest valid rewind.
@@ -1683,6 +1664,16 @@ func TestSetHead(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "in the future")
 		require.False(t, mock.setHeadCalled, "backend must not be called for a future block")
+	})
+
+	t.Run("overlay-only head is rejected", func(t *testing.T) {
+		base, overlayTester, overlayHeader := newOverlayAheadTestAPI(t)
+		mock := &mockEthBackend{}
+		api := makeAPIWithBase(overlayTester, base, mock)
+
+		err := api.SetHead(overlayTester.Ctx, hexutil.Uint64(overlayHeader.Number.Uint64()))
+		require.ErrorContains(t, err, "in the future")
+		require.False(t, mock.setHeadCalled, "backend must not be called for an uncommitted block")
 	})
 
 	// A far-future block number must be rejected.

@@ -274,6 +274,12 @@ func Test_CompressWithMetadata(t *testing.T) {
 	d := prepareDictMetadata(t, 1, true, metadata, 100)
 	defer d.Close()
 	require.Equal(t, metadata, d.GetMetadata())
+	prefixLen := uint64(2 + 4 + len(metadata))
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		prefixLen++
+	}
+	require.Equal(t, prefixLen+d.wordsStart, d.wordsFileOffset)
+	require.Equal(t, d.wordsFileOffset, d.MakeGetter().dataOffset)
 	g := d.MakeGetter()
 	i := 0
 	g.Reset(0)

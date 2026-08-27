@@ -104,7 +104,7 @@ func TestCaplinStateSnapshotTypes(t *testing.T) {
 }
 
 func TestCaplinStateSnapshotTypeRange(t *testing.T) {
-	require.LessOrEqual(t, len(snaptype.CaplinSnapshotTypes)+len(snaptype.CaplinStateSnapshotTypes), snaptype.MinBorEnum-snaptype.MinCaplinEnum)
+	require.LessOrEqual(t, len(snaptype.CaplinSnapshotTypes)+len(snaptype.CaplinStateSnapshotTypes), snaptype.MaxCaplinEnum-snaptype.MinCaplinEnum)
 	for i, typ := range snaptype.CaplinStateSnapshotTypes {
 		require.Equal(t, snaptype.MinCaplinEnum+2+snaptype.Enum(i), typ.Enum())
 		require.True(t, snaptype.IsCaplinType(typ.Enum()))
@@ -112,7 +112,7 @@ func TestCaplinStateSnapshotTypeRange(t *testing.T) {
 	require.True(t, snaptype.IsCaplinType(snaptype.CaplinEnums.BeaconBlocks))
 	require.True(t, snaptype.IsCaplinType(snaptype.CaplinEnums.BlobSidecars))
 	require.False(t, snaptype.IsCaplinType(snaptype.MinCaplinEnum-1))
-	require.False(t, snaptype.IsCaplinType(snaptype.MinBorEnum))
+	require.False(t, snaptype.IsCaplinType(snaptype.MaxCaplinEnum))
 }
 
 func TestCaplinSnapshotTypesRemainBlockTypes(t *testing.T) {
