@@ -131,7 +131,7 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 
 	entries := make([]sortableBufferEntry, 100)
 	for i := range entries {
-		entries[i].key = fmt.Appendf(nil, "key-%d", i)
+		entries[i].key = fmt.Appendf(nil, "key-%03d", i)
 		entries[i].value = fmt.Appendf(nil, "value-%d", i)
 		b.Put(entries[i].key, entries[i].value)
 	}
@@ -1767,14 +1767,13 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	buf.Put(nil, []byte{})
 	buf.Put([]byte{}, nil)
 
-	for i := 1; i < buf.Len(); i++ {
+	seen := map[int32]bool{}
+	for i := range buf.Len() {
 		_, e := buf.entryAt(i)
-		_, prev := buf.entryAt(i - 1)
-		require.Greater(t, e.offset(), prev.offset(),
+		require.False(t, seen[e.offset()],
 			"Sort orders equal keys by offset, so every entry needs one of its own")
+		seen[e.offset()] = true
 	}
-
-	buf.Sort()
 
 	type nilness struct{ key, val bool }
 	got := make([]nilness, 4)
@@ -1834,9 +1833,10 @@ func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	buf.Put(nil, nil)
 	require.Equal(t, 3, buf.Len())
 
-	k, _ := buf.Get(0)
+	// Sorted: the nil key, then the all-zero key of maxKeyLen, then 0x01.
+	k, _ := buf.Get(1)
 	require.Len(t, k, maxKeyLen)
-	k, _ = buf.Get(2)
+	k, _ = buf.Get(0)
 	require.Nil(t, k)
 }
 
@@ -2007,4 +2007,21 @@ func TestSortableBufferMergesChunks(t *testing.T) {
 			require.Equal(t, key, k)
 		})
 	}
+}
+
+func TestSortableBufferPutAfterSort(t *testing.T) {
+	buf := NewSortableBuffer(1 * datasize.MB)
+	defer buf.Reset()
+	for _, k := range []byte{5, 3, 9, 1} {
+		buf.Put([]byte{k}, []byte{k})
+	}
+	buf.Sort()
+	buf.Put([]byte{7}, []byte{7})
+
+	var got []byte
+	for i := range buf.Len() {
+		k, _ := buf.Get(i)
+		got = append(got, k[0])
+	}
+	require.Equal(t, []byte{1, 3, 5, 7, 9}, got)
 }

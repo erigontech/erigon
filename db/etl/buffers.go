@@ -373,21 +373,12 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	return key, val
 }
 
-// entryAt returns the i-th entry and the chunk holding it: key order once Sort
-// has run over the current contents, insertion order before that. Walking i
-// upward costs O(1) a step; going back restarts the merge.
+// entryAt returns the i-th entry in key order and the chunk holding it,
+// sorting first if anything was put since the last Sort. Walking i upward
+// costs O(1) a step; going back restarts the merge.
 func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 	if b.sortedN != b.n {
-		b.syncCur()
-		for k, left := 0, i; k < len(b.chunks); k++ {
-			c := &b.chunks[k]
-			m := c.len()
-			if left < m {
-				return c.buf, c.entries()[m-1-left]
-			}
-			left -= m
-		}
-		panic(fmt.Sprintf("etl: entry %d out of range", i))
+		b.Sort()
 	}
 	m := &b.mrg
 	if m.concat {
