@@ -733,6 +733,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	spanStart := 0
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
+		if pos >= len(branchData) {
+			return nil, errors.New("replacePlainKeys buffer too small for cell fields")
+		}
 		fields := cellFields(branchData[pos])
 		pos++
 		if fields&fieldExtension != 0 {

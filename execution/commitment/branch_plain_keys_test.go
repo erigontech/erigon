@@ -31,9 +31,10 @@ func branchOfCells(t *testing.T, cells ...[]byte) BranchData {
 	t.Helper()
 	require.LessOrEqual(t, len(cells), 16)
 	bitmap := uint16(1)<<len(cells) - 1
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint16(b[0:], bitmap)
-	binary.BigEndian.PutUint16(b[2:], bitmap)
+	var header [4]byte
+	binary.BigEndian.PutUint16(header[0:], bitmap)
+	binary.BigEndian.PutUint16(header[2:], bitmap)
+	b := header[:]
 	for _, c := range cells {
 		b = append(b, c...)
 	}
@@ -85,6 +86,20 @@ func TestCountPlainKeysWalksPastAShortenedKey(t *testing.T) {
 		require.Equal(t, uint64(2), plainStorages)
 		require.Zero(t, shortened)
 		require.False(t, branch.HasShortenedKeys())
+	})
+
+	// A cell header that runs off the end was the one unchecked index in
+	// ReplacePlainKeys. It only became reachable once the count stopped returning
+	// at the first shortened key: before that, a referencing branch aborted on
+	// cell 0 and never advanced into the overrun.
+	t.Run("a branch ending on a cell boundary errors instead of panicking", func(t *testing.T) {
+		var branch BranchData = []byte{0, 3, 0, 3, 0x00} // two cells advertised, one fieldBits byte
+
+		require.NotPanics(t, func() {
+			_, _, _, err := branch.CountPlainKeys()
+			require.ErrorContains(t, err, "buffer too small for cell fields")
+		})
+		require.True(t, branch.HasShortenedKeys(), "an unparseable branch must never read as plain")
 	})
 
 	t.Run("a truncated branch errors and still reads as referencing", func(t *testing.T) {
