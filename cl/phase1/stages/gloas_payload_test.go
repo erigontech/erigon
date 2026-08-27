@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -554,7 +555,9 @@ func TestProcessDownloadedBlockBatchesRetainsFrontierForEnvelopeLocalFailure(t *
 		map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{blockRoot: nil},
 	)
 
-	require.NoError(t, err)
+	require.Error(t, err)
+	require.ErrorIs(t, err, network2.ErrUnattributableProcess)
+	require.ErrorContains(t, err, "nil execution payload envelope")
 	require.Equal(t, uint64(10), frontier)
 	require.Zero(t, collector.calls)
 }

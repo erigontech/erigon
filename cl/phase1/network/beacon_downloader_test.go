@@ -19,6 +19,8 @@ package network
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -871,4 +873,12 @@ func TestForwardRequestMoreSynchronizesConcurrentProgressUpdates(t *testing.T) {
 	close(stopUpdates)
 	<-updatesDone
 	require.Positive(t, downloader.GetHighestProcessedSlot())
+}
+
+func TestShouldBanProcessPeer(t *testing.T) {
+	processErr := errors.New("process failed")
+
+	require.False(t, shouldBanProcessPeer("block-peer", fmt.Errorf("%w: %w", ErrUnattributableProcess, processErr)))
+	require.True(t, shouldBanProcessPeer("block-peer", processErr))
+	require.False(t, shouldBanProcessPeer("http-fallback", processErr))
 }
