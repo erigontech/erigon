@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -472,7 +473,7 @@ func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
 	attempts := 0
 	storedSidecars := false
 	imported := false
-	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
 		attempts++
 		if attempts == 1 {
 			return errors.New("sidecar storage unavailable")
@@ -493,6 +494,9 @@ func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
 	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
 	_, ok = service.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, ok)
+	require.True(t, job.terminal)
+	require.NoError(t, handle.Wait(t.Context()))
+	require.NoError(t, handle.Wait(t.Context()))
 	require.True(t, storedSidecars)
 	require.True(t, imported)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
@@ -562,12 +566,15 @@ func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
 	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
 	staleJob := staleValue.(*blockJob)
-	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	fullStoreCalls := 0
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		fullStoreCalls++
+		return nil
+	})
 	service.processScheduledBlock(t.Context(), root, staleJob, staleJob.creationTime)
-	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
-	require.True(t, ok)
-	require.NotSame(t, staleJob, currentValue)
-	require.NotNil(t, currentValue.(*blockJob).store)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+	require.Equal(t, 1, fullStoreCalls)
 }
 
 func TestPublishedBlockRefreshSurvivesStaleFullStoreWorker(t *testing.T) {
@@ -580,18 +587,15 @@ func TestPublishedBlockRefreshSurvivesStaleFullStoreWorker(t *testing.T) {
 	})
 	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
-	staleJob := staleValue.(*blockJob)
+	stableJob := staleValue.(*blockJob)
 	freshStoreCalls := 0
 	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
 		freshStoreCalls++
 		return nil
 	})
-	staleJob.creationTime = time.Now().Add(-blockJobExpiry - time.Second)
-	service.processScheduledBlock(t.Context(), root, staleJob, time.Now())
-
 	freshValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
-	require.NotSame(t, staleJob, freshValue)
+	require.Same(t, stableJob, freshValue)
 	service.processScheduledBlock(t.Context(), root, freshValue.(*blockJob), time.Now())
 	require.Equal(t, 1, freshStoreCalls)
 	_, ok = service.blocksScheduledForLaterExecution.Load(root)
@@ -925,4 +929,176 @@ func TestBlockServiceDecodeGossipMessageStrictPreGloasCompatibility(t *testing.T
 	require.NoError(t, err)
 	_, err = service.DecodeGossipMessage("peer", encoded, clparams.DenebVersion)
 	require.NoError(t, err)
+}
+
+func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	firstStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	service.scheduleBlockForLaterProcessing(block, func(context.Context) error {
+		close(firstStarted)
+		<-firstRelease
+		return nil
+	})
+	firstDone := make(chan struct{})
+	go func() {
+		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		close(firstDone)
+	}()
+	<-firstStarted
+	secondCalls := 0
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		secondCalls++
+		return nil
+	})
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- handle.Wait(t.Context()) }()
+	close(firstRelease)
+	<-firstDone
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, scheduled)
+	select {
+	case err := <-waitDone:
+		t.Fatalf("waiter completed for superseded store generation: %v", err)
+	default:
+	}
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.NoError(t, <-waitDone)
+	require.Equal(t, 1, secondCalls)
+}
+
+func TestPublishedBlockJobTransientFailureReturnsToWaiterAndRemainsRetryable(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	transient := errors.New("database unavailable")
+	calls := 0
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return transient
+		}
+		return nil
+	})
+	firstWaitDone := make(chan error, 1)
+	go func() { firstWaitDone <- handle.Wait(t.Context()) }()
+	waiter := handle.(*publishedBlockJobHandle)
+	require.Eventually(t, func() bool {
+		if waiter.mu.TryLock() {
+			waiter.mu.Unlock()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond)
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.ErrorIs(t, <-firstWaitDone, transient)
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- handle.Wait(t.Context()) }()
+	select {
+	case err := <-waitDone:
+		t.Fatalf("waiter replayed a previously observed transient failure: %v", err)
+	default:
+	}
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.NoError(t, <-waitDone)
+	require.Equal(t, 2, calls)
+}
+
+func TestPublishedBlockJobWaitConsumesAttemptCompletedWhileWaiting(t *testing.T) {
+	transient := errors.New("database unavailable")
+	job := newBlockJob(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version), func(context.Context) error {
+		return transient
+	})
+	handle := &publishedBlockJobHandle{job: job, generation: job.storeGeneration}
+	attempt := job.attempt
+	attempt.err = transient
+	attempt.generation = job.storeGeneration
+	close(attempt.done)
+	require.ErrorIs(t, handle.Wait(t.Context()), transient)
+
+	job.mu.Lock()
+	job.lastAttempt = attempt
+	job.attempt = &blockJobAttempt{done: make(chan struct{})}
+	job.mu.Unlock()
+	waitCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, handle.Wait(waitCtx), context.Canceled)
+}
+
+func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	})
+	processDone := make(chan struct{})
+	go func() {
+		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		close(processDone)
+	}()
+	<-started
+	waitCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, handle.Wait(waitCtx), context.Canceled)
+	close(release)
+	<-processDone
+	require.NoError(t, handle.Wait(t.Context()))
+}
+
+func TestPublishedBlockJobPermanentFailureIsTerminal(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	calls := 0
+	permanent := fmt.Errorf("%w: execution payload is invalid", forkchoice.ErrBlockInvalid)
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		calls++
+		return permanent
+	})
+	job := serviceJob(t, service, root)
+	service.processScheduledBlock(context.Background(), root, job, time.Now())
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, scheduled)
+	require.ErrorIs(t, handle.Wait(t.Context()), forkchoice.ErrBlockInvalid)
+	require.ErrorIs(t, handle.Wait(t.Context()), forkchoice.ErrBlockInvalid)
+	service.processScheduledBlock(context.Background(), root, job, time.Now())
+	require.Equal(t, 1, calls)
+}
+
+func TestPublishedBlockJobHashFailureWaitIsReplayable(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	hashErr := errors.New("hash failure")
+	service := &blockService{}
+	job := newFailedBlockJob(block, func(context.Context) error { return nil }, hashErr)
+	handle := &publishedBlockJobHandle{job: job, generation: job.storeGeneration}
+	require.EqualError(t, handle.Wait(t.Context()), hashErr.Error())
+	require.EqualError(t, handle.Wait(t.Context()), hashErr.Error())
+	count := 0
+	service.blocksScheduledForLaterExecution.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	require.Zero(t, count)
+}
+
+func serviceJob(t *testing.T, service *blockService, root [32]byte) *blockJob {
+	t.Helper()
+	job, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	return job.(*blockJob)
 }

@@ -224,3 +224,43 @@ func TestBackwardBeaconDownloaderHTTPPreferredEmptyResponseFallsBack(t *testing.
 		t.Fatal("httpPreferred remained true after empty HTTP response")
 	}
 }
+
+func TestFetchBlockFromBeaconAPIByRootRejectsDifferentBlock(t *testing.T) {
+	block := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	otherRoot := common.HexToHash("0xdead")
+	fetched, err := fetchBlockFromBeaconAPIByRoot(t.Context(), server.URL, otherRoot, gloasFromGenesisConfig())
+	require.ErrorContains(t, err, "root")
+	require.Nil(t, fetched)
+}
+
+func TestBackwardBeaconDownloaderFetchEnvelopeUsesRootAndRejectsIdentityMismatch(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	block := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0xdead")
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	requestedPath := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath <- r.URL.Path
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+	downloader := &BackwardBeaconDownloader{httpFallbackURL: server.URL, beaconCfg: cfg}
+
+	fetched, err := downloader.fetchSingleEnvelope(t.Context(), block)
+	require.ErrorContains(t, err, "root mismatch")
+	require.Nil(t, fetched)
+	require.Equal(t, "/eth/v1/beacon/execution_payload_envelope/"+common.Hash(blockRoot).Hex(), <-requestedPath)
+}

@@ -794,6 +794,9 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("block not found for block root %v", blockRoot))
 	}
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	slot := block.Block.Slot
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	finalized := a.forkchoiceStore.FinalizedCheckpoint()

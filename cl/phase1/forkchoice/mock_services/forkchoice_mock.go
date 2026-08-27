@@ -19,6 +19,7 @@ package mock_services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -81,6 +82,7 @@ type ForkChoiceStorageMock struct {
 	VerifiedPayloads                    map[common.Hash]bool
 	OnExecutionPayloadErr               error
 	OnExecutionPayloadFn                func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+	ValidateBlockForPublishingFn        func(*cltypes.SignedBeaconBlock, bool) error
 	OnTickFn                            func(uint64)
 	ValidateExecutionPayloadEnvelopeErr error
 	GetBeaconCommitteeMock              func(slot, committeeIndex uint64) ([]uint64, error)
@@ -377,6 +379,28 @@ func (f *ForkChoiceStorageMock) OnBlockWithEquivocationCheck(
 		}
 	}
 	return f.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
+}
+
+func (f *ForkChoiceStorageMock) ValidateBlockForPublishing(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) error {
+	if f.ValidateBlockForPublishingFn != nil {
+		return f.ValidateBlockForPublishingFn(block, rejectEquivocation)
+	}
+	if block == nil || block.Block == nil {
+		return fmt.Errorf("%w: missing beacon block", forkchoice.ErrBlockInvalid)
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("%w: %w", forkchoice.ErrBlockInvalid, err)
+	}
+	if _, known := f.Headers[root]; known {
+		stored, ok := f.Blocks[root]
+		if !ok || stored == nil || stored.Block == nil || stored.Version() != block.Version() || stored.Signature != block.Signature {
+			return fmt.Errorf("%w: published block does not match the validated block for its root", forkchoice.ErrBlockInvalid)
+		}
+	} else if block.Block.Slot <= f.FinalizedSlotVal {
+		return fmt.Errorf("%w: block is at or below the finalized validation horizon", forkchoice.ErrBlockInvalid)
+	}
+	return nil
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {

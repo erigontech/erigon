@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,13 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
+
+func TestKzgCommitmentValidationErrorIsPermanent(t *testing.T) {
+	cause := errors.New("blob hash mismatch")
+	err := invalidKzgCommitmentsError(cause)
+	require.ErrorIs(t, err, ErrBlockInvalid)
+	require.ErrorIs(t, err, cause)
+}
 
 // A response's decoded schema comes from the peer-chosen fork digest, so it is
 // independent of the slot the block claims. Gloas removed ExecutionPayload and

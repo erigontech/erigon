@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -678,8 +677,7 @@ func fetchBlockFromBeaconAPIByRoot(ctx context.Context, baseURL string, root com
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	body, err := readBeaconAPIResponseBody(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -690,10 +688,26 @@ func fetchBlockFromBeaconAPIByRoot(ctx context.Context, baseURL string, root com
 		return nil, fmt.Errorf("block fetch by root: status %d", resp.StatusCode)
 	}
 
-	version := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+	version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		return nil, err
+	}
 	block := cltypes.NewSignedBeaconBlock(beaconCfg, version)
-	if err := block.DecodeSSZ(body, int(version)); err != nil {
+	if err := block.DecodeSSZStrict(body, int(version)); err != nil {
 		return nil, fmt.Errorf("block decode by root: %w", err)
+	}
+	if block.Block == nil {
+		return nil, errors.New("block fetched by root has no message")
+	}
+	if err := validateHTTPBlockVersion(beaconCfg, block.Block.Slot, version); err != nil {
+		return nil, err
+	}
+	decodedRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("block root: %w", err)
+	}
+	if decodedRoot != root {
+		return nil, fmt.Errorf("block root mismatch: requested %v, received %v", root, decodedRoot)
 	}
 	return block, nil
 }
@@ -705,9 +719,16 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if b.httpFallbackURL == "" {
 		return nil, fmt.Errorf("no HTTP fallback URL configured")
 	}
+	if block == nil || block.Block == nil {
+		return nil, errors.New("cannot fetch envelope for nil block")
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("block root: %w", err)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", b.httpFallbackURL, block.Block.Slot)
+	reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/0x%x", b.httpFallbackURL, blockRoot)
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -718,8 +739,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if err != nil {
 		return nil, err
 	}
-	body, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	body, err := readBeaconAPIResponseBody(resp)
 	if err != nil {
 		return nil, err
 	}
@@ -729,12 +749,25 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("envelope fetch: HTTP %d", resp.StatusCode)
 	}
+	version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		return nil, err
+	}
+	if version != clparams.GloasVersion {
+		return nil, fmt.Errorf("envelope version mismatch: expected %s, received %s", clparams.GloasVersion, version)
+	}
+	if err := validateHTTPBlockVersion(b.beaconCfg, block.Block.Slot, version); err != nil {
+		return nil, err
+	}
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(b.beaconCfg),
 	}
-	if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
+	if err := envelope.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
 		return nil, fmt.Errorf("envelope decode: %w", err)
+	}
+	if envelope.Message == nil || envelope.Message.BeaconBlockRoot != blockRoot {
+		return nil, fmt.Errorf("envelope block root mismatch: requested %v", blockRoot)
 	}
 	return envelope, nil
 }

@@ -83,6 +83,7 @@ const (
 var errBuilderNotEnabled = errors.New("builder is not enabled")
 var errPublishedBlockValidation = errors.New("published block validation failed")
 var errPublishedBlockDataStorage = errors.New("published block data storage failed")
+var errPublishedBlockAccepted = errors.New("published block broadcast before integration rejection")
 
 const (
 	caplinClientCode = "CN"
@@ -913,7 +914,7 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	if builderHeader == nil {
+	if builderHeader == nil || !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		// directly return the block if:
 		// 1. builder is not enabled
 		// 2. failed to get builder payload
@@ -2005,7 +2006,13 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	if err := a.broadcastBlock(ctx, block.SignedBlock, validation); err != nil {
+	waitForIntegration := apiVersion == 2
+	if err := a.broadcastBlockWithIntegrationWait(ctx, block.SignedBlock, validation, waitForIntegration); err != nil {
+		if errors.Is(err, errPublishedBlockAccepted) {
+			w.WriteHeader(http.StatusAccepted)
+			a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
+			return newBeaconResponse(nil), nil
+		}
 		if errors.Is(err, errPublishedBlockValidation) {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
@@ -2236,7 +2243,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	}
 
 	// broadcast the block
-	if err := a.broadcastBlock(r.Context(), signedBlock, BlockPublishingValidationGossip); err != nil {
+	if err := a.broadcastBlockWithIntegrationWait(r.Context(), signedBlock, BlockPublishingValidationGossip, false); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
@@ -2363,11 +2370,15 @@ func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
+	return a.broadcastBlockWithIntegrationWait(ctx, blk, validation, true)
+}
+
+func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation, waitForIntegration bool) error {
+	if a.blockService == nil {
+		return errors.New("block integration service unavailable")
+	}
 	releaseGossipReservation := false
 	if validation == BlockPublishingValidationGossip {
-		if a.blockService == nil {
-			return errors.New("block gossip validator unavailable")
-		}
 		if err := a.blockService.ValidateGossip(ctx, blk); err != nil {
 			return fmt.Errorf("%w: %w", errPublishedBlockValidation, err)
 		}
@@ -2377,6 +2388,14 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				a.blockService.ReleaseGossipReservation(blk)
 			}
 		}()
+	} else {
+		rejectEquivocation := validation == BlockPublishingValidationConsensusAndEquivocation
+		if err := a.forkchoiceStore.ValidateBlockForPublishing(blk, rejectEquivocation); err != nil {
+			if errors.Is(err, forkchoice.ErrBlockInvalid) {
+				return fmt.Errorf("%w: %w", errPublishedBlockValidation, err)
+			}
+			return err
+		}
 	}
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
@@ -2491,6 +2510,12 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			return err
 		}
 	}
+	lenBlobs := 0
+	if blk.Version() >= clparams.DenebVersion {
+		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
+			lenBlobs = c.Len()
+		}
+	}
 
 	log.Info(
 		"BlockPublishing: publishing block and sidecars",
@@ -2498,6 +2523,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		blk.Block.Slot,
 		"blobSidecars",
 		len(blobsSidecars),
+		"commitments",
+		lenBlobs,
 		"columnSidecars",
 		len(columnsSidecars),
 	)
@@ -2511,8 +2538,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	}
 	if validation == BlockPublishingValidationGossip {
 		a.blockService.CommitGossipReservation(blk)
-		a.blockService.SchedulePublishedBlockForLaterProcessing(blk, store)
 	}
+	job := a.blockService.SchedulePublishedBlockForLaterProcessing(blk, store)
 
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
@@ -2542,6 +2569,17 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 	releaseGossipReservation = false
+	if waitForIntegration {
+		if job == nil {
+			return errors.New("block integration job unavailable")
+		}
+		if err := job.Wait(ctx); err != nil {
+			if errors.Is(err, forkchoice.ErrBlockInvalid) {
+				return fmt.Errorf("%w: %w", errPublishedBlockAccepted, err)
+			}
+			return err
+		}
+	}
 
 	return nil
 }
@@ -2626,14 +2664,14 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if _, exists := a.forkchoiceStore.GetHeader(blockRoot); exists {
 		stored, ok := a.forkchoiceStore.GetBlock(blockRoot)
 		if !ok || !rootKeyedSignedBlockReplayMatches(stored, block) {
-			return fmt.Errorf("%w: published block does not match the validated block for its root", errPublishedBlockValidation)
+			return fmt.Errorf("%w: published block does not match the validated block for its root", forkchoice.ErrBlockInvalid)
 		}
 		knownBlock = true
 		if rejectEquivocation && a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, blockRoot) {
-			return fmt.Errorf("%w: block conflicts with a previously validated proposal", errPublishedBlockValidation)
+			return fmt.Errorf("%w: block conflicts with a previously validated proposal", forkchoice.ErrBlockInvalid)
 		}
 	} else if validation != BlockPublishingValidationGossip && block.Block.Slot <= a.forkchoiceStore.FinalizedSlot() {
-		return fmt.Errorf("%w: block is at or below the finalized validation horizon", errPublishedBlockValidation)
+		return fmt.Errorf("%w: block is at or below the finalized validation horizon", forkchoice.ErrBlockInvalid)
 	}
 	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
 		return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
@@ -2654,7 +2692,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 			blockErr = a.forkchoiceStore.OnBlock(ctx, block, true, true, false)
 		}
 		if blockErr != nil {
-			return fmt.Errorf("%w: %w", errPublishedBlockValidation, blockErr)
+			return blockErr
 		}
 	}
 
