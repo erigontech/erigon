@@ -1968,10 +1968,16 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 
 	// Backlog comes from the values table's own prune progress: the history keys
 	// table tracks separate progress, and stays empty when history is disabled -
-	// as it is for commitment by default.
+	// as it is for commitment by default. prg.TxTo is the rotation's target,
+	// stored even when the scan was cut short, so only a completed rotation proves
+	// the values below it are gone; txFrom is 0, so an unfinished one bounds nothing.
+	prunedThrough := uint64(0)
+	if prg.ValueProgress == prune.Done {
+		prunedThrough = prg.TxTo
+	}
 	delta := 0.0
-	if filesEnd := dt.files.EndTxNum(); filesEnd > prg.TxTo {
-		delta = float64(filesEnd-prg.TxTo) / float64(dt.stepSize)
+	if filesEnd := dt.files.EndTxNum(); filesEnd > prunedThrough {
+		delta = float64(filesEnd-prunedThrough) / float64(dt.stepSize)
 	}
 	switch dt.name {
 	case kv.AccountsDomain:

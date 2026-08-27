@@ -17,6 +17,7 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"testing"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
@@ -109,4 +111,56 @@ func requirePrunableGauge(t *testing.T, cfg statecfg.DomainCfg, gauge metrics.Ga
 	defer drt.Close()
 	drt.canScanPruneDomainTables(tx, uint64(totalSteps)*aggStep)
 	require.Equal(t, uint64(totalSteps-prunedSteps), gauge.GetValueUint64(), "collated but not pruned")
+}
+
+// TestDomain_PrunableGaugeInterruptedRotation pins the reading when a value scan
+// is cut short. prg.TxTo stores the rotation's target even then, so trusting it
+// would report a cleared backlog while the whole span is still in the table.
+func TestDomain_PrunableGaugeInterruptedRotation(t *testing.T) {
+	const aggStep = uint64(4)
+	const totalSteps = kv.Step(5)
+
+	ctx := t.Context()
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, aggStep, log.New())
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	drt := d.beginForTests()
+	w := drt.NewWriter()
+	prev := map[string][]byte{}
+	for txNum := range uint64(totalSteps) * aggStep {
+		k := fmt.Appendf(nil, "key-%d", txNum%3)
+		v := fmt.Appendf(nil, "val-%d", txNum)
+		require.NoError(t, w.PutWithPrev(k, v, txNum, prev[string(k)]))
+		prev[string(k)] = v
+	}
+	require.NoError(t, w.Flush(ctx, tx))
+	w.Close()
+	drt.Close()
+
+	for step := range totalSteps {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	drt = d.beginForTests()
+	_, err = drt.Prune(cancelled, tx, totalSteps-1, 0, uint64(totalSteps)*aggStep, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	drt.Close()
+
+	prg, err := GetPruneValProgress(tx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.NotEqual(t, prune.Done, prg.ValueProgress, "scan was cut short")
+	require.Equal(t, uint64(totalSteps)*aggStep, prg.TxTo, "target is stored regardless")
+
+	mxPrunableDComm.Set(999)
+	drt = d.beginForTests()
+	defer drt.Close()
+	drt.canScanPruneDomainTables(tx, uint64(totalSteps)*aggStep)
+	require.Equal(t, uint64(totalSteps), mxPrunableDComm.GetValueUint64(), "unfinished rotation bounds nothing")
 }
