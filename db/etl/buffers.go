@@ -267,7 +267,7 @@ func (b *sortableBuffer) nextChunk(n int) {
 		buf = getDataChunk()
 	} else {
 		if size > math.MaxInt32 {
-			panic(fmt.Sprintf("etl: entry of %d bytes exceeds %d", n, math.MaxInt32-entryLocSize))
+			panic(fmt.Sprintf("etl: entry of %d bytes needs a chunk of %d, over %d", n, size, math.MaxInt32))
 		}
 		buf = make([]byte, size)
 	}
@@ -373,12 +373,12 @@ func (b *sortableBuffer) Prealloc(_, predictDataSize int) Buffer {
 }
 
 func (b *sortableBuffer) Reset() {
+	b.mrg.release() // cursors alias the chunks, so drop them before the pool takes them
 	for i := range b.chunks {
 		putDataChunk(b.chunks[i].buf)
 	}
 	clear(b.chunks)
 	b.chunks = b.chunks[:0]
-	b.mrg.release()
 	b.curBuf, b.curEnd, b.curTop = nil, 0, 0
 	b.n, b.chunkBytes = 0, 0
 	b.sortedN = -1
@@ -457,6 +457,7 @@ type cursor struct {
 
 // rewind puts the cursor on the first entry in key order.
 func (m *merger) rewind(chunks []dataChunk) {
+	clear(m.cur) // a shorter run would leave the old cursors pinning their chunks
 	m.cur = slices.Grow(m.cur[:0], len(chunks))[:len(chunks)]
 	m.pfx = slices.Grow(m.pfx[:0], len(chunks))[:len(chunks)]
 	for i := range chunks {
@@ -529,14 +530,19 @@ func (m *merger) load(id int32) {
 // chunksInOrder reports whether every chunk's last key comes before the next
 // chunk's first. A tie keeps the earlier chunk, which is insertion order.
 func (m *merger) chunksInOrder() bool {
-	for i := 1; i < len(m.cur); i++ {
-		prev, cur := &m.cur[i-1], &m.cur[i]
-		if len(prev.ents) == 0 || len(cur.ents) == 0 {
+	prev := -1 // last chunk holding anything, so an empty one does not hide a pair
+	for i := range m.cur {
+		cur := &m.cur[i]
+		if len(cur.ents) == 0 {
 			continue
 		}
-		if bytes.Compare(keyOf(prev.buf, prev.ents[len(prev.ents)-1]), keyOf(cur.buf, cur.ents[0])) > 0 {
-			return false
+		if prev >= 0 {
+			p := &m.cur[prev]
+			if bytes.Compare(keyOf(p.buf, p.ents[len(p.ents)-1]), keyOf(cur.buf, cur.ents[0])) > 0 {
+				return false
+			}
 		}
+		prev = i
 	}
 	return true
 }

@@ -2063,3 +2063,23 @@ func TestSortableBufferWriteAfterPartialRead(t *testing.T) {
 	_, err := readField(m)
 	require.Equal(t, io.EOF, err)
 }
+
+// TestChunksInOrderAcrossEmptyChunk: an empty chunk must not hide the pair on
+// either side of it. Skipping both comparisons let concat mode read chunks
+// that were out of order, which emits unsorted entries.
+func TestChunksInOrderAcrossEmptyChunk(t *testing.T) {
+	buf := NewSortableBuffer(1 * datasize.MB)
+	defer buf.Reset()
+	buf.Put([]byte{9}, []byte("hi"))
+	buf.nextChunk(0) // an empty chunk between two that are out of order
+	buf.nextChunk(entryHeaderSize + 2)
+	buf.Put([]byte{1}, []byte("lo"))
+	buf.Sort()
+
+	require.False(t, buf.mrg.concat, "chunk 0 sorts after chunk 2, so the heap is needed")
+	var got []byte
+	for _, e := range drainBuffer(buf) {
+		got = append(got, e.key[0])
+	}
+	require.Equal(t, []byte{1, 9}, got)
+}
