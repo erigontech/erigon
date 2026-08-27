@@ -406,27 +406,17 @@ func (c *dataChunk) sort() {
 		return
 	}
 	buf := c.buf
-	// Key extraction stays inside cmp: the comparator is called indirectly,
-	// so a separate closure never inlines and costs a call per key.
 	cmp := func(x, y entryLoc) int {
-		var xk, yk []byte
-		if kLen := x.keyLen(); kLen > 0 {
-			off := x.offset() + entryHeaderSize
-			xk = buf[off : off+kLen]
-		}
-		if kLen := y.keyLen(); kLen > 0 {
-			off := y.offset() + entryHeaderSize
-			yk = buf[off : off+kLen]
-		}
-		if r := bytes.Compare(xk, yk); r != 0 {
+		if r := bytes.Compare(keyOf(buf, x), keyOf(buf, y)); r != 0 {
 			return r
 		}
 		return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
 	}
 	// The index grows downward, so ascending keys arrive reversed. pdqsort
-	// spots that too, but only after sampling for a pivot.
+	// spots that too, but only after sampling for a pivot. Equal keys leave
+	// the offsets descending, which the byte compare alone already accepts.
 	for j := 1; j < len(ents); j++ {
-		if cmp(ents[j-1], ents[j]) < 0 {
+		if bytes.Compare(keyOf(buf, ents[j-1]), keyOf(buf, ents[j])) < 0 {
 			slices.SortFunc(ents, cmp)
 			return
 		}
