@@ -780,7 +780,7 @@ func TestIndexRepairSurvivesUnknownRootQueueAdmissions(t *testing.T) {
 	f.processPendingEnvelopeAfterBlock(context.Background(), blockRoot, false)
 	require.False(t, pending.Contains(blockRoot))
 	require.Len(t, f.envelopeIndexRepairs.repairs(), 1)
-	for i := 0; i < queueCacheSize; i++ {
+	for i := range queueCacheSize {
 		root := common.BigToHash(new(big.Int).SetUint64(uint64(i + 1)))
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 		envelope.Message.BeaconBlockRoot = root
@@ -817,7 +817,7 @@ func TestIndexRepairAdmissionBackpressuresBeforePersistence(t *testing.T) {
 		pendingEnvelopes: pending,
 		db:               mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 	}
-	for i := 0; i < queueCacheSize; i++ {
+	for i := range queueCacheSize {
 		root := common.BigToHash(new(big.Int).SetUint64(uint64(i + 1)))
 		_, ok := f.envelopeIndexRepairs.claim(root)
 		require.True(t, ok)

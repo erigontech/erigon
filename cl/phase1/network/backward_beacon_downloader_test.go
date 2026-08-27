@@ -636,7 +636,7 @@ func TestBackwardConfirmedFullEnvelopeRetentionBackpressuresAtCapacity(t *testin
 		},
 	}
 	downloader.httpPreferred.Store(true)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		downloader.skippedFullBlocks = append(downloader.skippedFullBlocks, SkippedFullBlock{Root: [32]byte{byte(i)}})
 	}
 	require.True(t, downloader.SkippedFullBlocksAtCapacity())
