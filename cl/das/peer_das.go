@@ -1415,10 +1415,15 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 }
 
 func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
+	type resolvedColumn struct {
+		slot      uint64
+		blockRoot common.Hash
+	}
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
 		reqLength int
+		requested map[requestedDataColumn]struct{}
 		err       error
 	}
 	if req.remainingEntriesCount() == 0 {
@@ -1443,21 +1448,19 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 				wg.Go(func() {
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
-					ids := req.requestData()
+					ids, requested := req.requestData()
 					if ids.Len() == 0 {
 						return
 					}
-					reqLength := 0
-					ids.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, length int) bool {
-						reqLength += id.Columns.Length()
-						return true
-					})
-					s, pid, err := d.rpc.SendColumnSidecarsByRootIdentifierReq(cctx, ids)
+					s, pid, filtered, err := d.rpc.SendColumnSidecarsByRootIdentifierReqWithSnapshot(cctx, ids)
+					requested = requestedDataColumnsForPayload(requested, filtered)
+					reqLength := len(requested)
 					select {
 					case resultChan <- resultData{
 						sidecars:  s,
 						pid:       pid,
 						reqLength: reqLength,
+						requested: requested,
 						err:       err,
 					}:
 					default:
@@ -1525,15 +1528,45 @@ mainloop:
 				continue
 			}
 			log.Debug("received column sidecars", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
+			if len(result.sidecars) > result.reqLength {
+				log.Debug("rejecting over-cardinality column response", "pid", result.pid, "reqLength", result.reqLength, "count", len(result.sidecars))
+				d.rpc.BanPeer(result.pid)
+				continue
+			}
+			resolved := make([]resolvedColumn, len(result.sidecars))
+			seen := make(map[requestedDataColumn]struct{}, len(result.sidecars))
+			validResponse := true
+			for i, sidecar := range result.sidecars {
+				if sidecar == nil {
+					validResponse = false
+					break
+				}
+				slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
+				if !ok {
+					validResponse = false
+					break
+				}
+				key := requestedDataColumn{slot: slot, blockRoot: blockRoot, index: sidecar.Index}
+				if _, ok := result.requested[key]; !ok {
+					validResponse = false
+					break
+				}
+				if _, duplicate := seen[key]; duplicate {
+					validResponse = false
+					break
+				}
+				seen[key] = struct{}{}
+				resolved[i] = resolvedColumn{slot: slot, blockRoot: blockRoot}
+			}
+			if !validResponse {
+				log.Debug("rejecting malformed, schema-inconsistent, or unrequested column response", "pid", result.pid)
+				d.rpc.BanPeer(result.pid)
+				continue
+			}
 			var wg sync.WaitGroup
-			for _, sidecar := range result.sidecars {
+			for i, sidecar := range result.sidecars {
 				wg.Go(func() {
-					slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
-					if !ok {
-						log.Debug("rejecting malformed or schema-inconsistent column sidecar", "pid", result.pid)
-						d.rpc.BanPeer(result.pid)
-						return
-					}
+					slot, blockRoot := resolved[i].slot, resolved[i].blockRoot
 					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
@@ -1657,6 +1690,36 @@ func isExpectedColumnDownloadMiss(err error) bool {
 type downloadTableEntry struct {
 	blockRoot common.Hash
 	slot      uint64
+}
+
+type requestedDataColumn struct {
+	slot      uint64
+	blockRoot common.Hash
+	index     uint64
+}
+
+func requestedDataColumnsForPayload(requested map[requestedDataColumn]struct{}, payload *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier]) map[requestedDataColumn]struct{} {
+	type identity struct {
+		blockRoot common.Hash
+		index     uint64
+	}
+	selected := make(map[identity]struct{})
+	if payload != nil {
+		payload.Range(func(_ int, id *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+			id.Columns.Range(func(_ int, column uint64, _ int) bool {
+				selected[identity{blockRoot: id.BlockRoot, index: column}] = struct{}{}
+				return true
+			})
+			return true
+		})
+	}
+	filtered := make(map[requestedDataColumn]struct{}, len(selected))
+	for column := range requested {
+		if _, ok := selected[identity{blockRoot: column.blockRoot, index: column.index}]; ok {
+			filtered[column] = struct{}{}
+		}
+	}
+	return filtered
 }
 
 // downloadRequest is used to track the download progress of the column sidecars
@@ -1805,8 +1868,9 @@ func (d *downloadRequest) removeBlock(slot uint64, blockRoot common.Hash) {
 	})
 }
 
-func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier] {
+func (d *downloadRequest) requestData() (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], map[requestedDataColumn]struct{}) {
 	payload := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(d.beaconConfig.MaxRequestBlocksDeneb))
+	requested := make(map[requestedDataColumn]struct{})
 
 	d.tableMutex.RLock()
 	defer d.tableMutex.RUnlock()
@@ -1817,12 +1881,13 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 		}
 		for column := range columns {
 			id.Columns.Append(column)
+			requested[requestedDataColumn{slot: entry.slot, blockRoot: entry.blockRoot, index: column}] = struct{}{}
 		}
 		if id.Columns.Length() > 0 {
 			payload.Append(id)
 		}
 	}
-	return payload
+	return payload, requested
 }
 
 func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {

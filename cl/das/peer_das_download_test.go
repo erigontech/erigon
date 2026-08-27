@@ -19,6 +19,7 @@ package das
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -43,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // maliciousColumnSentinel stands in for a selected custody peer. It answers
@@ -52,15 +55,21 @@ type maliciousColumnSentinel struct {
 	sentinelproto.SentinelClient
 	metadataResponse []byte
 	columnResponse   []byte
+	columnResponses  [][]byte
+	peerEnodeID      string
 
-	metadataOnce  sync.Once
-	metadataReady chan struct{}
-	banOnce       sync.Once
-	banned        chan struct{}
+	metadataOnce    sync.Once
+	metadataReady   chan struct{}
+	columnOnce      sync.Once
+	columnRequested chan struct{}
+	releaseColumn   chan struct{}
+	columnCalls     atomic.Int32
+	banOnce         sync.Once
+	banned          chan struct{}
 }
 
 func (s *maliciousColumnSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
-	return &sentinelproto.PeersInfoResponse{Peers: []*sentinelproto.Peer{{Pid: "malicious-peer"}}}, nil
+	return &sentinelproto.PeersInfoResponse{Peers: []*sentinelproto.Peer{{Pid: "malicious-peer", EnodeId: s.peerEnodeID}}}, nil
 }
 
 func (s *maliciousColumnSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
@@ -68,13 +77,437 @@ func (s *maliciousColumnSentinel) BanPeer(context.Context, *sentinelproto.Peer, 
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *maliciousColumnSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+func (s *maliciousColumnSentinel) SendPeerRequest(ctx context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	peer := &sentinelproto.Peer{Pid: "malicious-peer"}
 	if strings.Contains(req.Topic, "metadata") {
 		s.metadataOnce.Do(func() { close(s.metadataReady) })
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
-	return &sentinelproto.ResponseData{Data: s.columnResponse, Peer: peer}, nil
+	if s.columnRequested != nil {
+		s.columnOnce.Do(func() { close(s.columnRequested) })
+	}
+	if s.releaseColumn != nil {
+		select {
+		case <-s.releaseColumn:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	response := s.columnResponse
+	if len(s.columnResponses) > 0 {
+		index := min(int(s.columnCalls.Add(1))-1, len(s.columnResponses)-1)
+		response = s.columnResponses[index]
+	}
+	return &sentinelproto.ResponseData{Data: response, Peer: peer}, nil
+}
+
+type writeObservingColumnStorage struct {
+	blob_storage.DataColumnStorage
+	lookups chan struct{}
+	writes  chan *cltypes.DataColumnSidecar
+}
+
+func (s *writeObservingColumnStorage) ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error) {
+	select {
+	case s.lookups <- struct{}{}:
+	default:
+	}
+	return s.DataColumnStorage.ColumnSidecarExists(ctx, slot, blockRoot, columnIndex)
+}
+
+func (s *writeObservingColumnStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	if err := s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar); err != nil {
+		return err
+	}
+	select {
+	case s.writes <- sidecar:
+	default:
+	}
+	return nil
+}
+
+func newColumnResponseRPC(t *testing.T, cfg *clparams.BeaconChainConfig, currentSlot uint64, responses ...[]*cltypes.DataColumnSidecar) (*rpc.BeaconRpcP2P, *maliciousColumnSentinel) {
+	return newColumnResponseRPCWithPeer(t, cfg, currentSlot, "", cfg.NumberOfColumns, responses...)
+}
+
+func newColumnResponseRPCWithPeer(t *testing.T, cfg *clparams.BeaconChainConfig, currentSlot uint64, peerEnodeID string, custodyGroupCount uint64, responses ...[]*cltypes.DataColumnSidecar) (*rpc.BeaconRpcP2P, *maliciousColumnSentinel) {
+	t.Helper()
+	genesisTime := uint64(time.Now().Unix()) - currentSlot*cfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg)
+	require.GreaterOrEqual(t, clock.StateVersionByEpoch(clock.GetCurrentEpoch()), clparams.FuluVersion)
+	digest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+	encoded := make([][]byte, len(responses))
+	for i, sidecars := range responses {
+		var wire bytes.Buffer
+		for j, sidecar := range sidecars {
+			if j > 0 {
+				require.NoError(t, wire.WriteByte(0))
+			}
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&wire, sidecar, digest[:]...))
+		}
+		encoded[i] = wire.Bytes()
+	}
+
+	syncnets := [1]byte{}
+	metadata := &cltypes.Metadata{Syncnets: &syncnets, CustodyGroupCount: &custodyGroupCount}
+	var metadataWire bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&metadataWire, metadata))
+	sentinel := &maliciousColumnSentinel{
+		metadataResponse: metadataWire.Bytes(),
+		columnResponses:  encoded,
+		peerEnodeID:      peerEnodeID,
+		metadataReady:    make(chan struct{}),
+		banned:           make(chan struct{}),
+	}
+	rpcClient := rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil)
+	select {
+	case <-sentinel.metadataReady:
+	case <-time.After(30 * time.Second):
+		t.Fatal("column response peer was not added to the custody-peer queue")
+	}
+	return rpcClient, sentinel
+}
+
+func TestRunDownloadRejectsColumnFilteredOutOfWireRequest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+
+	var nodeID enode.ID
+	foundPeer := false
+	for candidate := range uint64(10_000) {
+		binary.LittleEndian.PutUint64(nodeID[:8], candidate)
+		mask, err := peerdasutils.GetCustodyColumns(nodeID, 1)
+		require.NoError(t, err)
+		if mask[0] && !mask[1] {
+			foundPeer = true
+			break
+		}
+	}
+	require.True(t, foundPeer)
+	rpcClient, sentinel := newColumnResponseRPCWithPeer(t, &cfg, block.GetSlot(), nodeID.String(), 1, []*cltypes.DataColumnSidecar{columns[1]})
+
+	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: baseStorage,
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true, 1: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-storage.lookups:
+		cancel()
+		<-done
+		t.Fatal("column excluded from the wire request reached storage lookup")
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("column excluded from the wire request was neither rejected nor stored")
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, 1, req.remainingEntriesCount())
+}
+
+func TestRunDownloadRejectsValidUnrequestedFuluIdentityBeforeStorage(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	blockA, rootA, _, _ := recoverableFuluDataAtSlot(t, &cfg, 100)
+	_, rootB, _, columnsB := recoverableFuluDataAtSlot(t, &cfg, 101)
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, blockA.GetSlot(), []*cltypes.DataColumnSidecar{columnsB[1]})
+
+	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: baseStorage,
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: rootA, slot: blockA.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-storage.lookups:
+		cancel()
+		<-done
+		t.Fatalf("unrequested root %x reached storage lookup", rootB)
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("unrequested sidecar was neither rejected nor stored")
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, 1, req.remainingEntriesCount(), "intended root was removed by an unrelated response")
+}
+
+func TestRunDownloadRejectsOverCardinalityBeforeStorage(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0], columns[0]})
+
+	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: baseStorage,
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-storage.lookups:
+		cancel()
+		<-done
+		t.Fatal("over-cardinality response reached storage lookup")
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("over-cardinality response was neither rejected nor stored")
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, 1, req.remainingEntriesCount())
+}
+
+func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0], columns[0]})
+
+	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: baseStorage,
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true, 1: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-storage.lookups:
+		cancel()
+		<-done
+		t.Fatal("duplicate requested tuple reached storage lookup")
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("duplicate response tuple was neither rejected nor processed")
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, 1, req.remainingEntriesCount())
+}
+
+func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[2], columns[0]}, nil)
+
+	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: baseStorage,
+		lookups:           make(chan struct{}, 8),
+		writes:            make(chan *cltypes.DataColumnSidecar, 2),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true, 1: true, 2: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	written := map[uint64]bool{}
+	for len(written) < 2 {
+		select {
+		case sidecar := <-storage.writes:
+			written[sidecar.Index] = true
+		case <-sentinel.banned:
+			cancel()
+			<-done
+			t.Fatal("legal partial reordered response was banned")
+		case <-time.After(30 * time.Second):
+			cancel()
+			<-done
+			t.Fatal("legal partial reordered response did not reach storage")
+		}
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, map[uint64]bool{0: true, 2: true}, written)
+	_, remaining := req.requestData()
+	require.Equal(t, map[requestedDataColumn]struct{}{
+		{slot: block.GetSlot(), blockRoot: root, index: 1}: {},
+	}, remaining)
+}
+
+func TestRunDownloadAcceptsLateSnapshotMemberAfterConcurrentCompletion(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, 100)
+	rpcClient, sentinel := newColumnResponseRPC(t, &cfg, block.GetSlot(), []*cltypes.DataColumnSidecar{columns[0]})
+	sentinel.columnRequested = make(chan struct{})
+	sentinel.releaseColumn = make(chan struct{})
+
+	baseStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: baseStorage,
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.columnRequested:
+	case <-time.After(30 * time.Second):
+		t.Fatal("column request did not reach the selected peer")
+	}
+	require.NoError(t, baseStorage.WriteColumnSidecars(t.Context(), root, 0, columns[0]))
+	req.removeColumn(block.GetSlot(), root, 0)
+	close(sentinel.releaseColumn)
+
+	select {
+	case <-storage.lookups:
+	case <-sentinel.banned:
+		t.Fatal("late response member was checked against mutable current membership")
+	case <-time.After(30 * time.Second):
+		t.Fatal("late response was not processed")
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-sentinel.banned:
+		t.Fatal("late response member was falsely banned")
+	case <-time.After(30 * time.Second):
+		t.Fatal("runDownload did not finish after concurrent completion")
+	}
 }
 
 func TestRunDownloadDoesNotRevalidateBlobStorageWhileWaitingForColumns(t *testing.T) {

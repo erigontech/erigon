@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -28,6 +29,16 @@ type contextRecordingSentinel struct {
 	sentinelproto.SentinelClient
 	deadline    time.Time
 	hasDeadline bool
+}
+
+type emptyColumnResponseSentinel struct {
+	sentinelproto.SentinelClient
+	calls int
+}
+
+func (s *emptyColumnResponseSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.calls++
+	return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: req.Pid}}, nil
 }
 
 func (s *contextRecordingSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
@@ -73,6 +84,52 @@ func TestReqRespRequestsBoundContextsWithoutDeadline(t *testing.T) {
 		require.False(t, sentinel.deadline.Before(before))
 		require.False(t, sentinel.deadline.After(after))
 	}
+}
+
+func TestColumnSidecarsRequestSnapshotReflectsPeerMaskAndPreservesWrapper(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	}
+	sentinel := &emptyColumnResponseSentinel{}
+	client := &BeaconRpcP2P{
+		sentinel:     sentinel,
+		beaconConfig: &cfg,
+		columnDataPeers: &columnDataPeers{
+			beaconConfig: &cfg,
+			peersQueue: []peerData{{
+				pid:  "partial-peer",
+				mask: map[uint64]bool{0: true},
+			}},
+		},
+	}
+	root := common.HexToHash("0x1234")
+	request := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	identifier := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: root,
+		Columns:   solid.NewUint64ListSSZ(int(cfg.NumberOfColumns)),
+	}
+	identifier.Columns.Append(0)
+	identifier.Columns.Append(1)
+	request.Append(identifier)
+
+	sidecars, pid, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+	require.NoError(t, err)
+	require.Empty(t, sidecars)
+	require.Equal(t, "partial-peer", pid)
+	require.Equal(t, 1, snapshot.Len())
+	snapshot.Range(func(_ int, item *cltypes.DataColumnsByRootIdentifier, _ int) bool {
+		require.Equal(t, root, common.Hash(item.BlockRoot))
+		require.Equal(t, 1, item.Columns.Length())
+		require.Equal(t, uint64(0), item.Columns.Get(0))
+		return true
+	})
+
+	sidecars, pid, err = client.SendColumnSidecarsByRootIdentifierReq(t.Context(), request)
+	require.NoError(t, err)
+	require.Empty(t, sidecars)
+	require.Equal(t, "partial-peer", pid)
+	require.Equal(t, 2, sentinel.calls)
 }
 
 func (s *blockResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {

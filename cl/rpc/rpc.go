@@ -140,33 +140,41 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, error) {
+	response, pid, _, err := b.SendColumnSidecarsByRootIdentifierReqWithSnapshot(ctx, req)
+	return response, pid, err
+}
+
+func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
+	ctx context.Context,
+	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
+) ([]*cltypes.DataColumnSidecar, string, *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
 	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, nil, err
 	}
 
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, filteredReq); err != nil {
-		return nil, "", err
+		return nil, "", filteredReq, err
 	}
 
 	data := buffer.Bytes()
 	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), uint64(filteredReq.Len())*b.beaconConfig.NumberOfColumns)
 	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
-		return nil, pid, err
+		return nil, pid, filteredReq, err
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}
 	for _, data := range responsePacket {
 		columnSidecar := &cltypes.DataColumnSidecar{}
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
+			return nil, pid, filteredReq, err
 		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
-	return ColumnSidecars, pid, nil
+	return ColumnSidecars, pid, filteredReq, nil
 }
 
 // SendExecutionPayloadEnvelopesByRangeReq retrieves execution payload envelopes by slot range.
