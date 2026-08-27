@@ -62,6 +62,16 @@ type writeNotifyingBlobStorage struct {
 	once    sync.Once
 }
 
+type savedColumnReadCountingStorage struct {
+	blob_storage.DataColumnStorage
+	reads atomic.Int32
+}
+
+func (s *savedColumnReadCountingStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
+	s.reads.Add(1)
+	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+}
+
 type blockHashCountingBlock struct {
 	cltypes.ColumnSyncableSignedBlock
 	calls atomic.Int32
@@ -236,6 +246,53 @@ func TestDownloadColumnsAndRecoverBlobsOverwritesInvalidBlobStorageWithExpectedC
 	})
 }
 
+func TestDownloadColumnsAndRecoverBlobsAdmitsHealthyRootWithDelayedCapacityFull(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluData(t, &cfg)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	storage := blob_storage.NewBlobStore(db, afero.NewMemMapFs())
+	notifying := &writeNotifyingBlobStorage{BlobStorage: storage, written: make(chan struct{})}
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:     columnStorage,
+		blobStorage:       notifying,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	for i := range cap(d.recoverBlobsQueue) {
+		poisonedRoot := common.Hash{byte(i + 1), 0xff}
+		d.delayBlobRecovery(recoverBlobsRequest{slot: block.Block.Slot, blockRoot: poisonedRoot})
+	}
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(t.Context(), []cltypes.ColumnSyncableSignedBlock{block}))
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var workers sync.WaitGroup
+	for range numOfBlobRecoveryWorkers {
+		workers.Go(func() { d.blobsRecoverWorker(ctx) })
+	}
+	select {
+	case <-notifying.written:
+	case <-time.After(10 * time.Second):
+		cancel()
+		workers.Wait()
+		t.Fatal("delayed retries blocked a fresh healthy recovery root")
+	}
+	cancel()
+	workers.Wait()
+}
+
 func TestBlobsRecoverWorkerStopsWhenDurableCheckIsCanceled(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	cfg := clparams.MainnetBeaconConfig
@@ -402,6 +459,56 @@ func TestBlobsRecoverWorkerRechecksDurableCompletionBeforeWrite(t *testing.T) {
 	default:
 	}
 	require.GreaterOrEqual(t, countReads.Load(), int32(2), "worker must revalidate immediately before writing")
+}
+
+func TestMetadataFreeBlobRecoveryRechecksConcurrentCompletionBeforeWrite(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, _, columns := recoverableFuluData(t, &cfg)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+
+	ctrl := gomock.NewController(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	var countReads atomic.Int32
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).DoAndReturn(
+		func(context.Context, common.Hash) (uint32, error) {
+			if countReads.Add(1) == 1 {
+				return 0, nil
+			}
+			cancel()
+			return 1, nil
+		},
+	).AnyTimes()
+	overwriteAttempted := make(chan struct{})
+	var overwriteOnce sync.Once
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), root, gomock.Any()).DoAndReturn(
+		func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+			overwriteOnce.Do(func() { close(overwriteAttempted) })
+			return errors.New("unexpected metadata-free overwrite")
+		},
+	).AnyTimes()
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	require.NoError(t, d.enqueueBlobRecovery(recoverBlobsRequest{slot: block.Block.Slot, blockRoot: root}))
+	d.blobsRecoverWorker(ctx)
+
+	select {
+	case <-overwriteAttempted:
+		t.Fatal("metadata-free recovery overwrote concurrent durable data")
+	default:
+	}
+	require.GreaterOrEqual(t, countReads.Load(), int32(2))
 }
 
 func TestBlobsRecoverWorkerContinuesAfterTransientAdmissionValidation(t *testing.T) {
@@ -621,6 +728,10 @@ func TestBlobsRecoverWorkersDoNotStarveHealthyRootBehindPersistentUnavailable(t 
 	d.recoveryRetryMutex.Lock()
 	require.Empty(t, d.recoveryRetries)
 	d.recoveryRetryMutex.Unlock()
+	d.recoveringMutex.Lock()
+	require.Empty(t, d.recoveryResults)
+	require.Zero(t, d.recoveryResultBytes)
+	d.recoveringMutex.Unlock()
 }
 
 func TestEnqueueBlobRecoveryDeduplicatesOwnedRoot(t *testing.T) {
@@ -635,9 +746,11 @@ func TestEnqueueBlobRecoveryDeduplicatesOwnedRoot(t *testing.T) {
 	require.Len(t, d.isRecovering, 1)
 
 	queued := <-d.recoverBlobsQueue
-	require.True(t, d.claimBlobRecovery(queued.blockRoot))
-	require.False(t, d.claimBlobRecovery(queued.blockRoot))
-	d.releaseBlobRecovery(queued.blockRoot)
+	_, generation, ok := d.claimBlobRecovery(queued)
+	require.True(t, ok)
+	_, _, ok = d.claimBlobRecovery(queued)
+	require.False(t, ok)
+	d.releaseBlobRecovery(queued.blockRoot, generation)
 	require.Empty(t, d.isRecovering)
 }
 
@@ -657,8 +770,9 @@ func TestEnqueueBlobRecoveryPreservesOwnershipAtCapacity(t *testing.T) {
 	require.NotContains(t, d.isRecovering, third.blockRoot)
 
 	queued := <-d.recoverBlobsQueue
-	require.True(t, d.claimBlobRecovery(queued.blockRoot))
-	d.releaseBlobRecovery(queued.blockRoot)
+	_, generation, ok := d.claimBlobRecovery(queued)
+	require.True(t, ok)
+	d.releaseBlobRecovery(queued.blockRoot, generation)
 	require.NoError(t, d.enqueueBlobRecovery(third))
 	require.Len(t, d.recoverBlobsQueue, 2)
 	require.Len(t, d.isRecovering, 2)
@@ -677,6 +791,7 @@ func TestNextBlobRecoveryRequestAlternatesReadyQueueAndRetry(t *testing.T) {
 		request:   delayed,
 		notBefore: time.Now().Add(-time.Second),
 	}
+	d.recoveryRetryOrder = append(d.recoveryRetryOrder, delayed.blockRoot)
 
 	first, ok := d.nextBlobRecoveryRequest(t.Context())
 	require.True(t, ok)
@@ -686,6 +801,146 @@ func TestNextBlobRecoveryRequestAlternatesReadyQueueAndRetry(t *testing.T) {
 	require.Equal(t, delayed.blockRoot, second.blockRoot)
 }
 
+func TestDelayBlobRecoveryEvictsOldestAtCapacity(t *testing.T) {
+	const delayedCapacity = 128
+	d := &peerdas{
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	oldest := common.Hash{1}
+	for i := range delayedCapacity + 1 {
+		root := common.Hash{byte(i + 1), byte((i + 1) >> 8)}
+		d.delayBlobRecovery(recoverBlobsRequest{blockRoot: root})
+	}
+
+	require.Len(t, d.recoveryRetries, delayedCapacity)
+	require.NotContains(t, d.recoveryRetries, oldest)
+	require.NotContains(t, d.isRecovering, oldest)
+	require.Contains(t, d.recoveryRetries, common.Hash{byte(delayedCapacity + 1), byte((delayedCapacity + 1) >> 8)})
+}
+
+func TestBlobRecoveryMetadataUpgradeRepairsInvalidEqualCountStorage(t *testing.T) {
+	for _, lifecycle := range []string{"queued", "active", "delayed"} {
+		t.Run(lifecycle, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.FuluForkEpoch = 0
+			cfg.InitializeForkSchedule()
+			initTestBeaconConfig(&cfg)
+			block, root, sidecars, columns := recoverableFuluData(t, &cfg)
+			columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+			for i := range (cfg.NumberOfColumns + 1) / 2 {
+				require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+			}
+
+			ctrl := gomock.NewController(t)
+			firstCountStarted := make(chan struct{})
+			releaseFirstCount := make(chan struct{})
+			var countCalls atomic.Int32
+			blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).DoAndReturn(
+				func(context.Context, common.Hash) (uint32, error) {
+					if lifecycle == "active" && countCalls.Add(1) == 1 {
+						close(firstCountStarted)
+						<-releaseFirstCount
+					}
+					return uint32(len(sidecars)), nil
+				},
+			).AnyTimes()
+			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).Return(nil, false, nil).AnyTimes()
+			written := make(chan struct{})
+			var writeOnce sync.Once
+			ctx, cancel := context.WithCancel(t.Context())
+			blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), root, gomock.Any()).DoAndReturn(
+				func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+					writeOnce.Do(func() { close(written) })
+					cancel()
+					return errors.New("stop after metadata repair")
+				},
+			).AnyTimes()
+			metadata, err := newBlobRecoveryMetadata(block, root)
+			require.NoError(t, err)
+			d := &peerdas{
+				beaconConfig:      &cfg,
+				state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+				columnStorage:     columnStorage,
+				blobStorage:       blobStorage,
+				recoverBlobsQueue: make(chan recoverBlobsRequest, 2),
+				isRecovering:      make(map[common.Hash]bool),
+			}
+			nilRequest := recoverBlobsRequest{slot: block.Block.Slot, blockRoot: root}
+			strongRequest := recoverBlobsRequest{slot: block.Block.Slot, blockRoot: root, metadata: metadata}
+			switch lifecycle {
+			case "queued":
+				require.NoError(t, d.enqueueBlobRecovery(nilRequest))
+				require.NoError(t, d.enqueueBlobRecovery(strongRequest))
+			case "delayed":
+				d.delayBlobRecovery(nilRequest)
+				require.NoError(t, d.enqueueBlobRecovery(strongRequest))
+			case "active":
+				require.NoError(t, d.enqueueBlobRecovery(nilRequest))
+			}
+
+			workerDone := make(chan struct{})
+			go func() {
+				d.blobsRecoverWorker(ctx)
+				close(workerDone)
+			}()
+			if lifecycle == "active" {
+				select {
+				case <-firstCountStarted:
+				case <-time.After(10 * time.Second):
+					cancel()
+					<-workerDone
+					t.Fatal("metadata-free recovery did not become active")
+				}
+				require.NoError(t, d.enqueueBlobRecovery(strongRequest))
+				close(releaseFirstCount)
+			}
+			select {
+			case <-written:
+			case <-time.After(30 * time.Second):
+				cancel()
+				<-workerDone
+				t.Fatal("stronger metadata did not retain recovery ownership")
+			}
+			cancel()
+			<-workerDone
+		})
+	}
+}
+
+func TestBlobRecoveryResultCacheEnforcesByteCapacity(t *testing.T) {
+	d := &peerdas{}
+	firstRoot := common.Hash{1}
+	secondRoot := common.Hash{2}
+	require.True(t, d.cacheBlobRecoveryResult(firstRoot, &blobRecoveryResult{encodedBytes: maxBlobRecoveryResultBytes - 1}))
+	require.True(t, d.cacheBlobRecoveryResult(secondRoot, &blobRecoveryResult{encodedBytes: 2}))
+	require.NotContains(t, d.recoveryResults, firstRoot)
+	require.Contains(t, d.recoveryResults, secondRoot)
+	require.Equal(t, 2, d.recoveryResultBytes)
+	require.False(t, d.cacheBlobRecoveryResult(common.Hash{3}, &blobRecoveryResult{encodedBytes: maxBlobRecoveryResultBytes + 1}))
+}
+
+func TestBlobsRecoverWorkerClearsQueuedOwnershipOnShutdown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	d := &peerdas{
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 2),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	require.NoError(t, d.enqueueBlobRecovery(recoverBlobsRequest{blockRoot: common.Hash{1}}))
+	require.NoError(t, d.enqueueBlobRecovery(recoverBlobsRequest{blockRoot: common.Hash{2}}))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	d.blobsRecoverWorker(ctx)
+
+	require.Empty(t, d.isRecovering)
+	require.Empty(t, d.recoveryRequests)
+	require.Empty(t, d.recoveryGenerations)
+}
+
 func assertBlobsRecoverWorkerPrewriteUnavailable(t *testing.T, persistent bool) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
@@ -693,7 +948,8 @@ func assertBlobsRecoverWorkerPrewriteUnavailable(t *testing.T, persistent bool) 
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
 	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	baseColumnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	columnStorage := &savedColumnReadCountingStorage{DataColumnStorage: baseColumnStorage}
 	for i := range (cfg.NumberOfColumns + 1) / 2 {
 		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
 	}
@@ -758,6 +1014,7 @@ func assertBlobsRecoverWorkerPrewriteUnavailable(t *testing.T, persistent bool) 
 		expectedReads = 2
 	}
 	require.Equal(t, expectedReads, durableReads.Load(), "prewrite validation must be paced and retain ownership")
+	require.Equal(t, int32(1), columnStorage.reads.Load(), "prewrite retry must reuse the completed reconstruction")
 	select {
 	case <-writeAttempted:
 		require.False(t, persistent, "persistent unavailable storage must not be overwritten")
