@@ -152,16 +152,13 @@ func (p *fileDataProvider) initMmap() error {
 	return nil
 }
 
-func (m *mmapBytesReader) readVarint() (int, error) {
-	v, n := binary.Varint(m.data[m.pos:])
-	if n <= 0 {
-		if n == 0 {
-			return 0, io.EOF
-		}
-		return 0, fmt.Errorf("varint overflow")
+func (m *mmapBytesReader) readFieldLen() (int, error) {
+	if m.pos+fieldLenSize > len(m.data) {
+		return 0, io.EOF
 	}
-	m.pos += n
-	return int(v), nil
+	n := int32(binary.NativeEndian.Uint32(m.data[m.pos:])) //nolint:gosec
+	m.pos += fieldLenSize
+	return int(n), nil
 }
 
 // readAt returns a zero-copy slice directly from mmap'd memory
@@ -174,10 +171,10 @@ func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
 	return result, nil
 }
 
-// readField reads a varint-prefixed byte slice from mmap data (zero-copy).
+// readField reads a length-prefixed byte slice from mmap data (zero-copy).
 // Negative length means nil.
 func readField(m *mmapBytesReader) ([]byte, error) {
-	n, err := m.readVarint()
+	n, err := m.readFieldLen()
 	if err != nil {
 		return nil, err
 	}
@@ -213,20 +210,18 @@ func (p *fileDataProvider) String() string {
 }
 
 type memoryDataProvider struct {
-	buffer       Buffer
-	currentIndex int
+	buffer Buffer
 }
 
 func KeepInRAM(buffer Buffer) dataProvider {
-	return &memoryDataProvider{buffer, 0}
+	return &memoryDataProvider{buffer}
 }
 
 func (p *memoryDataProvider) Next() ([]byte, []byte, error) {
-	if p.currentIndex >= p.buffer.Len() {
+	key, value, ok := p.buffer.Next()
+	if !ok {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.Get(p.currentIndex)
-	p.currentIndex++
 	return key, value, nil
 }
 
