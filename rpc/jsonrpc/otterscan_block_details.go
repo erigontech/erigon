@@ -89,7 +89,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, err
 	}
 
-	b, err := api.blockWithSenders(ctx, tx, hash, *blockNumber)
+	b, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +127,6 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["issuance"] = getIssuanceRes
-	response["totalFees"] = (*hexutil.Big)(feesRes)
+	response["totalFees"] = (*hexutil.U256)(&feesRes)
 	return response, nil
 }

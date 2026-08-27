@@ -649,7 +649,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	// generated changeset is pruned 96 blocks later, defeating the point.
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
-		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
+		// Some chains produce blocks with 400 chunks of diff = 3mb
 		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
 			pruneChangeSetsStartTime := time.Now()
 			if err := rawdb.PruneTable(
