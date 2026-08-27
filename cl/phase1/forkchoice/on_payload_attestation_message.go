@@ -45,10 +45,8 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	blockRoot := data.BeaconBlockRoot
 
 	if !isFromBlock {
-		// Wall-clock time is authoritative for gossip because store time can lag OnTick.
-		currentSlot := f.ethClock.GetCurrentSlot()
-		if data.Slot != currentSlot {
-			return fmt.Errorf("%w: attestation slot %d is not current slot %d", ErrIgnore, data.Slot, currentSlot)
+		if !f.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(data.Slot) {
+			return fmt.Errorf("%w: attestation slot %d is not current slot with clock disparity", ErrIgnore, data.Slot)
 		}
 	}
 
