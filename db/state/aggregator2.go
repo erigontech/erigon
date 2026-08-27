@@ -203,12 +203,7 @@ func (w *workersCfg) unlockEditing() {
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
-	directories := []string{
-		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
-		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
-	}
-	for _, dirPath := range directories {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { //skip magically disappeared files

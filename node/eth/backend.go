@@ -446,21 +446,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// live here; see node/components/sentry/provider.go.
 	backend.sentryProvider = &sentrycomp.Provider{}
 	backend.sentryProvider.Configure(sentrycomp.Config{
-		SentryCtx:         backend.sentryCtx,
-		P2P:               p2pConfig,
-		ChainDB:           backend.chainDB,
-		ChainConfig:       backend.chainConfig,
-		GenesisHash:       backend.genesisHash,
-		NetworkID:         backend.networkID,
-		Genesis:           genesis,
-		BlockReader:       blockReader,
-		EthDiscoveryURLs:  backend.config.EthDiscoveryURLs,
-		ChainName:         config.Snapshot.ChainName,
-		NodesDir:          stack.Config().Dirs.Nodes,
-		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
-		Events:            backend.notifications.Events,
-		Logger:            logger,
-		Disable:           stack.Config().DisableSentry,
+		SentryCtx:        backend.sentryCtx,
+		P2P:              p2pConfig,
+		ChainDB:          backend.chainDB,
+		ChainConfig:      backend.chainConfig,
+		GenesisHash:      backend.genesisHash,
+		NetworkID:        backend.networkID,
+		Genesis:          genesis,
+		BlockReader:      blockReader,
+		EthDiscoveryURLs: backend.config.EthDiscoveryURLs,
+		ChainName:        config.Snapshot.ChainName,
+		NodesDir:         stack.Config().Dirs.Nodes,
+		Events:           backend.notifications.Events,
+		Logger:           logger,
+		Disable:          stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err

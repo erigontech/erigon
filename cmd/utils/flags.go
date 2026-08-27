@@ -477,12 +477,12 @@ var (
 	}
 	RpcGetLogsMaxResults = cli.IntFlag{
 		Name:  "rpc.logs.maxresults",
-		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
+		Usage: "Maximum number of logs returned by eth_getLogs, eth_getFilterLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
 	}
 	RpcLogQueryLimit = cli.IntFlag{
 		Name:  "rpc.logs.querylimit",
-		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs and eth_getFilterLogs filter criteria (<=0 = unlimited)",
 		Value: 1_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
@@ -1121,11 +1121,6 @@ var (
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
-	WitProtocolFlag = cli.BoolFlag{
-		Name:    "wit-protocol",
-		Aliases: []string{"polygon.wit-protocol"},
-		Usage:   "Enable WIT protocol for stateless witness data exchange",
-	}
 	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
 	// (ModeParallel) for commitment computation. Default off; flip to compare
 	// root hashes against a sequential sync before enabling broadly.
@@ -1218,7 +1213,7 @@ var (
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:  "exec.no-prune",
-		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
 		Value: false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
@@ -1382,7 +1377,7 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port uint,
 	protocol uint,
-	metricsEnabled, witProtocol bool,
+	metricsEnabled bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -1402,18 +1397,17 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:        fmt.Sprintf(":%d", port),
-		MaxPeers:          maxPeers,
-		MaxPendingPeers:   maxPendPeers,
-		NAT:               nat.Any(),
-		NoDiscovery:       nodiscover,
-		DiscoveryV5:       !nodiscover,
-		PrivateKey:        serverKey,
-		Name:              nodeName,
-		NodeDatabase:      enodeDBPath,
-		TmpDir:            dirs.Tmp,
-		MetricsEnabled:    metricsEnabled,
-		EnableWitProtocol: witProtocol,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		DiscoveryV5:     !nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		NodeDatabase:    enodeDBPath,
+		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1525,8 +1519,6 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 	setBoolIfSet(&cfg.DiscoveryV4, &DiscoveryV4Flag)
 	setBoolIfSet(&cfg.DiscoveryV5, &DiscoveryV5Flag)
 	setBoolIfSet(&cfg.MetricsEnabled, &MetricsEnabledFlag)
-	setBoolIfSet(&cfg.EnableWitProtocol, &WitProtocolFlag)
-
 	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
 
 	if netrestrict := ctx.String(NetrestrictFlag.Name); netrestrict != "" {

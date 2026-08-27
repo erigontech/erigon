@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1781,9 +1782,17 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 		binary.BigEndian.PutUint64(k, uint64(i))
 		return k
 	}
+	lruLen := func() int {
+		g := c.data.Load()
+		sum := 0
+		for i := range g.shards {
+			sum += g.shards[i].Len()
+		}
+		return sum
+	}
 	check := func(phase string) {
 		t.Helper()
-		require.Equal(t, c.data.Load().lru.Len(), c.Len(), "entry counter drifted after %s", phase)
+		require.Equal(t, lruLen(), c.Len(), "entry counter drifted after %s", phase)
 	}
 
 	for i := range 500 {
@@ -1809,14 +1818,57 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 	}
 	check("stale drops")
 
-	before := c.data.Load()
 	for i := 500; i < 4000; i++ {
 		c.Put(key(i), []byte("v"), 30)
 	}
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+	g := c.data.Load()
+	require.Greater(t, slices.Max(g.curCap), g.startCapPerShard, "no shard grew")
 	check("grow")
 
 	c.Clear()
 	require.Equal(t, 0, c.Len())
 	check("clear")
+}
+
+// TestGrowLRU_PutOfPresentKeyKeepsCount pins that storing a key the generation
+// already holds does not raise the entry count. freelru replaces such a key in
+// place and fires no OnEvict, so a count raised on the way in never comes back
+// down and the grow gate trips on entries that are not there.
+func TestGrowLRU_PutOfPresentKeyKeepsCount(t *testing.T) {
+	t.Run("same key twice", func(t *testing.T) {
+		g := newGrowLRU[int](1*datasize.MB, 8, nil)
+		defer g.Close()
+
+		g.Put(1, 10)
+		g.Put(1, 20)
+
+		require.Equal(t, 1, g.Len())
+		v, ok := g.Get(1)
+		require.True(t, ok)
+		require.Equal(t, 20, v)
+	})
+
+	// A grow copies a key into the next generation, a read-path Remove then
+	// drops it from the still-current old one, and a writer that missed on old
+	// stores it after the publish -- into a generation that already holds it.
+	t.Run("key carried in by a racing grow copy", func(t *testing.T) {
+		var evicted int
+		g := newGrowLRU[int](1*datasize.MB, 8, func(uint64, int) { evicted++ })
+		defer g.Close()
+
+		g.Put(1, 10)
+		old := g.cur.Load()
+
+		next := g.newShards(g.curCap.Load())
+		next.add(1, 10) // the grow's copy
+		old.lru.Remove(1)
+		g.cur.Store(next) // the publish the writer's miss straddles
+
+		evictedBefore := evicted
+		g.Put(1, 20)
+
+		require.Equal(t, 1, g.Len())
+		require.Equal(t, 1, evicted-evictedBefore,
+			"the copy the store displaced must be evicted, not dropped silently")
+	})
 }
