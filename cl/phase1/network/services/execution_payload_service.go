@@ -96,9 +96,10 @@ func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJ
 	},
 		s.tryProcessPendingEnvelope,
 		s.processPendingEnvelope,
-		func(key pendingEnvelopeKey) {
+		func(key pendingEnvelopeKey, _ *cltypes.SignedExecutionPayloadEnvelope) {
 			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)
-		})
+		},
+		nil)
 }
 
 func (s *executionPayloadService) Names() []string {

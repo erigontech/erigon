@@ -550,6 +550,21 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenFutureSlot_Retu
 	t.Equal(ErrIgnore, err)
 }
 
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenIncorrectSubnetAndFutureSlot_ReturnsError() {
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 }
+	incorrectSubnet := uint64(9999)
+
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockEthClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(testSlot + 100).Return(false).AnyTimes()
+
+	sidecar := createMockGloasDataColumnSidecar(testSlot+100, 0, testBlockRoot)
+	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), &incorrectSubnet, sidecar)
+
+	t.Error(err)
+	t.Contains(err.Error(), "incorrect subnet")
+}
+
 // TestGloasProcessMessage_WhenSlotFinalized_ReturnsErrIgnore tests GLOAS finalized slot handling
 func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSlotFinalized_ReturnsErrIgnore() {
 	t.mockSyncedData.EXPECT().Syncing().Return(false)

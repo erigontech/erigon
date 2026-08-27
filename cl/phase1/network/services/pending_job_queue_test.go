@@ -103,7 +103,8 @@ func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQu
 			return pendingJobKeep
 		},
 		nil,
-		func(int) {},
+		func(int, string) {},
+		nil,
 	)
 }
 
@@ -128,7 +129,8 @@ func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 			},
 			nil,
 			nil,
-			func(int) {},
+			func(int, string) {},
+			nil,
 		)
 	})
 }
@@ -146,6 +148,7 @@ func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
 			func(context.Context, int, string) pendingJobDecision {
 				return pendingJobKeep
 			},
+			nil,
 			nil,
 			nil,
 		)
@@ -238,7 +241,8 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 			return pendingJobRemove
 		},
 		nil,
-		func(int) {},
+		func(int, string) {},
+		nil,
 	)
 
 	result, err := queue.enqueueLazy("message", func() (int, error) {
@@ -273,7 +277,7 @@ func TestPendingJobQueueDoesNotProcessAfterContextCancellation(t *testing.T) {
 				processed++
 				return pendingJobRemove
 			},
-			onExpired: func(int) {},
+			onExpired: func(int, string) {},
 			wakeLoop:  make(chan struct{}, 1),
 		}
 		storePendingJob(t, queue, 1, "message", time.Now())
@@ -297,7 +301,7 @@ func TestPendingJobQueueCancellationStopsCurrentScan(t *testing.T) {
 			cancel()
 			return pendingJobKeep
 		},
-		onExpired: func(int) {},
+		onExpired: func(int, string) {},
 	}
 	storePendingJob(t, queue, 1, "first", time.Now())
 	storePendingJob(t, queue, 2, "second", time.Now())
@@ -329,7 +333,8 @@ func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 			return pendingJobRemove
 		},
 		nil,
-		func(int) {},
+		func(int, string) {},
+		nil,
 	)
 	defer func() {
 		releaseProcessing()
@@ -549,7 +554,8 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 			require.False(t, exists)
 			_ = enqueueTestPendingJob(queue, key, "replacement")
 		},
-		func(int) {},
+		func(int, string) {},
+		nil,
 	)
 
 	_ = enqueueTestPendingJob(queue, 1, "original")

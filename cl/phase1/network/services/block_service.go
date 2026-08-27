@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -50,19 +51,29 @@ type proposerIndexAndSlot struct {
 }
 
 type pendingBlockJob struct {
+	mu                      sync.Mutex
 	block                   *cltypes.SignedBeaconBlock
 	persisted               bool
-	gossipEventPublished    bool
 	executionAndDataChecked bool
+	processingFailureAt     time.Time
 	retryAfter              time.Time
 	retryDelay              time.Duration
 }
 
 func (job *pendingBlockJob) readyToRetry(now time.Time) bool {
+	job.mu.Lock()
+	defer job.mu.Unlock()
 	return job.retryAfter.IsZero() || !now.Before(job.retryAfter)
 }
 
 func (job *pendingBlockJob) recordProcessingFailure(now time.Time, err error) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.recordProcessingFailureLocked(now, err)
+}
+
+func (job *pendingBlockJob) recordProcessingFailureLocked(now time.Time, err error) {
+	job.processingFailureAt = now
 	// MissingSegment is returned only after execution and data checks complete,
 	// so later state retries can skip those expensive phases.
 	if errors.Is(err, forkchoice.ErrMissingSegment) {
@@ -83,6 +94,58 @@ func (job *pendingBlockJob) recordProcessingFailure(now time.Time, err error) {
 	job.retryAfter = now.Add(job.retryDelay)
 }
 
+func (job *pendingBlockJob) processingState() (persisted, executionAndDataChecked bool) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	return job.persisted, job.executionAndDataChecked
+}
+
+func (job *pendingBlockJob) markPersisted() {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.persisted = true
+}
+
+// A duplicate delivery preserves completed work and the original admission
+// time. The newest failure controls the next retry, while an existing EL delay
+// remains the base of exponential backoff.
+func mergePendingBlockJobs(existing, incoming *pendingBlockJob) {
+	if existing == incoming {
+		return
+	}
+	incoming.mu.Lock()
+	incomingPersisted := incoming.persisted
+	incomingExecutionAndDataChecked := incoming.executionAndDataChecked
+	incomingProcessingFailureAt := incoming.processingFailureAt
+	incomingRetryAfter := incoming.retryAfter
+	incomingRetryDelay := incoming.retryDelay
+	incoming.mu.Unlock()
+
+	existing.mu.Lock()
+	defer existing.mu.Unlock()
+	existing.persisted = existing.persisted || incomingPersisted
+	existing.executionAndDataChecked = existing.executionAndDataChecked || incomingExecutionAndDataChecked
+	if incomingProcessingFailureAt.After(existing.processingFailureAt) {
+		existing.processingFailureAt = incomingProcessingFailureAt
+		if incomingRetryAfter.IsZero() {
+			existing.retryDelay = max(existing.retryDelay, incomingRetryDelay)
+			existing.retryAfter = time.Time{}
+		} else {
+			if existing.retryDelay == 0 {
+				existing.retryDelay = incomingRetryDelay
+			} else {
+				existing.retryDelay = max(incomingRetryDelay, min(2*existing.retryDelay, blockELRetryMaxDelay))
+			}
+			existing.retryAfter = incomingProcessingFailureAt.Add(existing.retryDelay)
+		}
+	} else {
+		existing.retryDelay = max(existing.retryDelay, incomingRetryDelay)
+		if !existing.retryAfter.IsZero() {
+			existing.retryAfter = existing.processingFailureAt.Add(existing.retryDelay)
+		}
+	}
+}
+
 type blockService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	syncedData      *synced_data.SyncedDataManager
@@ -90,7 +153,8 @@ type blockService struct {
 	beaconCfg       *clparams.BeaconChainConfig
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
-	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
+	seenBlocksMu    sync.Mutex
+	seenBlocksCache *lru.Cache[proposerIndexAndSlot, common.Hash]
 	emitter         *beaconevents.EventEmitter
 
 	// Blocks waiting for their slot or a processing dependency.
@@ -108,7 +172,7 @@ func NewBlockService(
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
-	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
+	seenBlocksCache, err := lru.New[proposerIndexAndSlot, common.Hash]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -134,9 +198,11 @@ func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueu
 	},
 		b.tryProcessPendingBlock,
 		nil,
-		func(blockRoot common.Hash) {
+		func(blockRoot common.Hash, job *pendingBlockJob) {
+			b.forgetSeenBlock(pendingBlockSeenKey(job.block), blockRoot)
 			log.Trace("Pending block expired", "blockRoot", blockRoot)
-		})
+		},
+		mergePendingBlockJobs)
 }
 
 func (b *blockService) Names() []string {
@@ -173,12 +239,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	seenCacheKey := proposerIndexAndSlot{
-		proposerIndex: msg.Block.ProposerIndex,
-		slot:          msg.Block.Slot,
-	}
-	if b.seenBlocksCache.Contains(seenCacheKey) {
-		return nil
+	seenKey := pendingBlockSeenKey(msg)
+	if b.hasSeenBlock(seenKey) {
+		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
 	}
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -197,32 +260,54 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}); err != nil {
 		return err
 	}
+	blockRoot, err := msg.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	root := common.Hash(blockRoot)
+	if _, alreadySeen := b.loadOrAddSeenBlock(seenKey, root); alreadySeen {
+		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
+	}
 
 	if err := b.validateBlockAfterSignature(msg); err != nil {
 		if errors.Is(err, ErrIgnore) {
-			if scheduleErr := b.scheduleBlockForLaterProcessing(msg); scheduleErr != nil {
+			if scheduleErr := b.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: msg}); scheduleErr != nil {
+				b.forgetSeenBlock(seenKey, root)
 				return scheduleErr
 			}
 		}
 		return err
 	}
-	b.publishBlockGossipEvent(msg)
 	if b.forkchoiceStore.Slot() < msg.Block.Slot {
-		if err := b.schedulePendingBlock(&pendingBlockJob{block: msg, gossipEventPublished: true}); err != nil {
+		if err := b.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: msg}); err != nil {
+			b.forgetSeenBlock(seenKey, root)
 			return err
 		}
+		return fmt.Errorf("%w: block queued until fork choice reaches slot %d", ErrIgnore, msg.Block.Slot)
+	}
+	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
+		b.publishBlockGossipEvent(root, msg.Block.Slot)
 		return nil
 	}
+	if err := b.storeBlock(ctx, msg); err != nil {
+		if scheduleErr := b.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: msg}); scheduleErr != nil {
+			b.forgetSeenBlock(seenKey, root)
+			return scheduleErr
+		}
+		return fmt.Errorf("%w: block queued after a local storage failure: %v", ErrIgnore, err) //nolint:errorlint // converting a local failure to IGNORE
+	}
 	// Fork choice performs the remaining block validation.
-	if err := b.processAndStoreBlock(ctx, msg); err != nil {
+	if err := b.processStoredBlock(ctx, msg, true); err != nil {
 		if isPendingBlockRetryableError(err) {
-			if scheduleErr := b.scheduleBlockAfterProcessingFailure(msg, err); scheduleErr != nil {
+			if scheduleErr := b.scheduleBlockAfterProcessingFailure(root, msg, err); scheduleErr != nil {
+				b.forgetSeenBlock(seenKey, root)
 				return scheduleErr
 			}
-			return nil
+			return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %v", ErrIgnore, err) //nolint:errorlint // fork-choice sentinels must not stay matchable
 		}
 		return err
 	}
+	b.publishBlockGossipEvent(root, msg.Block.Slot)
 	return nil
 }
 
@@ -279,50 +364,78 @@ func (b *blockService) validateBlockAfterSignature(block *cltypes.SignedBeaconBl
 	return nil
 }
 
-// publishBlockGossipEvent publishes after the block passes gossip validation.
-func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock) {
+func pendingBlockSeenKey(block *cltypes.SignedBeaconBlock) proposerIndexAndSlot {
+	return proposerIndexAndSlot{
+		proposerIndex: block.Block.ProposerIndex,
+		slot:          block.Block.Slot,
+	}
+}
+
+func (b *blockService) hasSeenBlock(key proposerIndexAndSlot) bool {
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	return b.seenBlocksCache.Contains(key)
+}
+
+// loadOrAddSeenBlock atomically reserves a proposer and slot for the first block
+// with a valid signature. Its root lets that block continue deferred processing
+// while a different root is treated as an equivocation.
+func (b *blockService) loadOrAddSeenBlock(
+	key proposerIndexAndSlot,
+	blockRoot common.Hash,
+) (seenRoot common.Hash, alreadySeen bool) {
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	if seenRoot, ok := b.seenBlocksCache.Peek(key); ok {
+		return seenRoot, true
+	}
+	b.seenBlocksCache.Add(key, blockRoot)
+	return blockRoot, false
+}
+
+// forgetSeenBlock releases only the matching reservation when its pending job
+// cannot be retained. Matching the root protects a later reservation for the slot.
+func (b *blockService) forgetSeenBlock(key proposerIndexAndSlot, blockRoot common.Hash) {
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	if seenRoot, ok := b.seenBlocksCache.Peek(key); ok && seenRoot == blockRoot {
+		b.seenBlocksCache.Remove(key)
+	}
+}
+
+// publishBlockGossipEvent must run only after rejection-grade beacon_block
+// topic checks have completed.
+func (b *blockService) publishBlockGossipEvent(blockRoot common.Hash, slot uint64) {
 	if b.emitter == nil {
 		return
 	}
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		log.Debug("Failed to hash block", "block", block, "error", err)
-		return
-	}
-	// publish block to event handler
 	b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{
-		Slot:  block.Block.Slot,
-		Block: common.Hash(blockRoot),
+		Slot:  slot,
+		Block: blockRoot,
 	})
 }
 
-// scheduleBlockForLaterProcessing queues a block after its gossip signature has
-// been validated, while another processing dependency is unavailable.
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) error {
-	return b.schedulePendingBlock(&pendingBlockJob{block: block})
-}
-
-func (b *blockService) scheduleBlockAfterProcessingFailure(block *cltypes.SignedBeaconBlock, processingErr error) error {
+func (b *blockService) scheduleBlockAfterProcessingFailure(
+	blockRoot common.Hash,
+	block *cltypes.SignedBeaconBlock,
+	processingErr error,
+) error {
 	// Retryable processing errors are returned only after the block transaction
 	// commits, so deferred attempts must not write the same block again.
-	job := &pendingBlockJob{block: block, persisted: true, gossipEventPublished: true}
+	job := &pendingBlockJob{block: block, persisted: true}
 	job.recordProcessingFailure(time.Now(), processingErr)
-	return b.schedulePendingBlock(job)
+	return b.schedulePendingBlockWithRoot(blockRoot, job)
 }
 
-func (b *blockService) schedulePendingBlock(job *pendingBlockJob) error {
-	block := job.block
-	result, err := b.blocksScheduledForLaterExecution.enqueueLazy(job, func() (common.Hash, error) {
-		blockRoot, err := block.Block.HashSSZ()
-		if err != nil {
-			return common.Hash{}, err
-		}
-		return common.Hash(blockRoot), nil
-	})
-	if err != nil {
-		log.Debug("Failed to hash block", "block", block, "error", err)
-		return err
-	}
+func (b *blockService) schedulePendingBlockWithRoot(blockRoot common.Hash, job *pendingBlockJob) error {
+	result := b.blocksScheduledForLaterExecution.enqueueKey(blockRoot, job)
+	return b.finishPendingBlockSchedule(job.block, result)
+}
+
+func (b *blockService) finishPendingBlockSchedule(
+	block *cltypes.SignedBeaconBlock,
+	result pendingJobEnqueueResult,
+) error {
 	// Gloas blocks do not carry an execution payload in the block body.
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -336,23 +449,6 @@ func (b *blockService) schedulePendingBlock(job *pendingBlockJob) error {
 		return fmt.Errorf("%w: pending block queue is full", ErrIgnore)
 	}
 	return nil
-}
-
-// processAndStoreBlock processes and stores a block
-func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return err
-	}
-
-	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
-		return nil
-	}
-
-	if err := b.storeBlock(ctx, block); err != nil {
-		return err
-	}
-	return b.processStoredBlock(ctx, block, true)
 }
 
 func (b *blockService) storeBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
@@ -369,7 +465,9 @@ func (b *blockService) processStoredBlock(ctx context.Context, block *cltypes.Si
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil {
-		return err
+		// Fork choice has already accepted the block. An auxiliary index failure
+		// must not turn a valid gossip message into a peer-level rejection.
+		log.Warn("Failed to update highest finalized block after import", "slot", block.Block.Slot, "error", err)
 	}
 	return nil
 }
@@ -416,7 +514,12 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 
 func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot common.Hash, job *pendingBlockJob) pendingJobDecision {
 	block := job.block
+	seenRoot, alreadySeen := b.loadOrAddSeenBlock(pendingBlockSeenKey(block), blockRoot)
+	if alreadySeen && seenRoot != blockRoot {
+		return pendingJobRemove
+	}
 	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
+		b.publishBlockGossipEvent(blockRoot, block.Block.Slot)
 		return pendingJobRemove
 	}
 	if !job.readyToRetry(time.Now()) {
@@ -429,14 +532,11 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 		log.Trace("Pending block failed validation", "block", block, "error", err)
 		return pendingJobRemove
 	}
-	if !job.gossipEventPublished {
-		b.publishBlockGossipEvent(block)
-		job.gossipEventPublished = true
-	}
 	if b.forkchoiceStore.Slot() < block.Block.Slot {
 		return pendingJobKeep
 	}
-	if !job.persisted {
+	persisted, executionAndDataChecked := job.processingState()
+	if !persisted {
 		stored, err := b.blockStored(ctx, blockRoot)
 		if err != nil {
 			log.Trace("Failed to check pending block storage", "block", block, "error", err)
@@ -448,9 +548,9 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 				return pendingJobKeep
 			}
 		}
-		job.persisted = true
+		job.markPersisted()
 	}
-	if err := b.processStoredBlock(ctx, block, !job.executionAndDataChecked); err != nil {
+	if err := b.processStoredBlock(ctx, block, !executionAndDataChecked); err != nil {
 		log.Trace("Failed to process and store block", "block", block, "error", err)
 		if isPendingBlockRetryableError(err) {
 			job.recordProcessingFailure(time.Now(), err)
@@ -458,6 +558,7 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 		}
 		return pendingJobRemove
 	}
+	b.publishBlockGossipEvent(blockRoot, block.Block.Slot)
 	return pendingJobRemove
 }
 

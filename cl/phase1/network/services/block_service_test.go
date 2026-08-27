@@ -73,6 +73,13 @@ type blockDBError struct {
 	updateErr error
 }
 
+type failNthUpdateDB struct {
+	kv.RwDB
+	failAt  int
+	updates int
+	err     error
+}
+
 func (db *updateCountingDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
 	db.updates++
 	return db.RwDB.Update(ctx, f)
@@ -95,6 +102,14 @@ func (db *blockDBError) View(ctx context.Context, f func(kv.Tx) error) error {
 		return db.viewErr
 	}
 	return db.RwDB.View(ctx, f)
+}
+
+func (db *failNthUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	db.updates++
+	if db.updates == db.failAt {
+		return db.err
+	}
+	return db.RwDB.Update(ctx, f)
 }
 
 func (s *blockProcessingErrorStore) OnBlock(
@@ -194,6 +209,21 @@ func setupIncomingBellatrixBlock(t *testing.T, ctrl *gomock.Controller, processi
 	return service, block, processingStore
 }
 
+func fillPendingBlockQueue(t *testing.T, service *blockService, block *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	for i := range maxPendingBlocks {
+		key := common.Hash{byte(i), byte(i >> 8)}
+		storePendingJob(t, service.blocksScheduledForLaterExecution, key, &pendingBlockJob{block: block}, time.Now())
+	}
+}
+
+func pendingBlockRoot(t *testing.T, block *cltypes.SignedBeaconBlock) common.Hash {
+	t.Helper()
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return common.Hash(root)
+}
+
 func TestBlockServiceUnsynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -218,7 +248,7 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
-func TestBlockServiceAcceptsAndQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
+func TestBlockServiceIgnoresAndQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -245,15 +275,31 @@ func TestBlockServiceAcceptsAndQueuesValidBlockBeforeForkChoiceReachesSlot(t *te
 
 	err := service.ProcessMessage(t.Context(), nil, block)
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrIgnore)
 	require.Zero(t, processingStore.calls)
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+	require.True(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
 	select {
 	case event := <-events:
-		require.Equal(t, beaconevents.StateBlockGossip, event.Event)
+		t.Fatalf("block emitted gossip event before topic validation completed: %v", event)
 	default:
-		t.Fatal("gossip-validated queued block did not emit gossip event")
 	}
+}
+
+func TestBlockServiceIgnoresSeenProposerSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, nil)
+	service.seenBlocksCache.Add(proposerIndexAndSlot{
+		proposerIndex: block.Block.ProposerIndex,
+		slot:          block.Block.Slot,
+	}, common.Hash{1})
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, processingStore.calls)
 }
 
 func TestBlockServiceIgnoresBlockWhenPendingQueueIsFull(t *testing.T) {
@@ -270,15 +316,13 @@ func TestBlockServiceIgnoresBlockWhenPendingQueueIsFull(t *testing.T) {
 	forkchoiceStore.FinalizedCheckpointVal = pre.FinalizedCheckpoint()
 	forkchoiceStore.Headers[block.Block.ParentRoot] = &cltypes.BeaconBlockHeader{Slot: block.Block.Slot - 1}
 	forkchoiceStore.SlotVal = block.Block.Slot - 1
-	for i := range maxPendingBlocks {
-		key := common.Hash{byte(i), byte(i >> 8)}
-		storePendingJob(t, service.blocksScheduledForLaterExecution, key, &pendingBlockJob{block: block}, time.Now())
-	}
+	fillPendingBlockQueue(t, service, block)
 
 	err := service.ProcessMessage(t.Context(), nil, block)
 
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.count.Load())
+	require.False(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
 }
 
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
@@ -371,13 +415,13 @@ func TestBlockServiceSuccess(t *testing.T) {
 	subscription := emitter.State().Subscribe(events)
 	defer subscription.Unsubscribe()
 	blockService.emitter = emitter
-	eventPublishedBeforeProcessing := false
+	eventPublishedDuringProcessing := false
 	processingStore := &blockProcessingErrorStore{
 		ForkChoiceStorage: fcu,
 		onBlock: func() {
 			select {
-			case event := <-events:
-				eventPublishedBeforeProcessing = event.Event == beaconevents.StateBlockGossip
+			case <-events:
+				eventPublishedDuringProcessing = true
 			default:
 			}
 		},
@@ -386,15 +430,20 @@ func TestBlockServiceSuccess(t *testing.T) {
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
 	require.Equal(t, 1, processingStore.calls)
-	require.True(t, eventPublishedBeforeProcessing)
+	require.False(t, eventPublishedDuringProcessing)
 	select {
 	case event := <-events:
-		t.Fatalf("block emitted duplicate gossip event: %v", event)
+		require.Equal(t, beaconevents.StateBlockGossip, event.Event)
 	default:
+		t.Fatal("successfully validated block did not emit gossip event")
 	}
+	require.True(t, blockService.seenBlocksCache.Contains(proposerIndexAndSlot{
+		proposerIndex: blocks[1].Block.ProposerIndex,
+		slot:          blocks[1].Block.Slot,
+	}))
 }
 
-func TestBlockServiceAcceptsAndQueuesRetryableDependencyFailure(t *testing.T) {
+func TestBlockServiceIgnoresAndQueuesRetryableDependencyFailure(t *testing.T) {
 	testCases := []struct {
 		name string
 		err  error
@@ -409,13 +458,71 @@ func TestBlockServiceAcceptsAndQueuesRetryableDependencyFailure(t *testing.T) {
 			defer ctrl.Finish()
 
 			service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, fmt.Errorf("dependency unavailable: %w", tc.err))
+			emitter := beaconevents.NewEventEmitter()
+			events := make(chan *beaconevents.EventStream, 1)
+			subscription := emitter.State().Subscribe(events)
+			defer subscription.Unsubscribe()
+			service.emitter = emitter
 
 			err := service.ProcessMessage(t.Context(), nil, block)
 
-			require.NoError(t, err)
+			require.ErrorIs(t, err, ErrIgnore)
+			require.NotErrorIs(t, err, tc.err)
 			require.Equal(t, 1, processingStore.calls)
 			require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+			select {
+			case event := <-events:
+				t.Fatalf("block emitted gossip event before topic validation completed: %v", event)
+			default:
+			}
 		})
+	}
+}
+
+func TestBlockServiceIgnoresAndQueuesInitialDatabaseFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, nil)
+	service.db = &blockDBError{
+		RwDB:      service.db,
+		updateErr: errors.New("temporary database failure"),
+	}
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, processingStore.calls)
+	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+	require.True(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+}
+
+func TestBlockServiceAcceptsAfterFinalizedIndexDatabaseFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, nil)
+	service.db = &failNthUpdateDB{
+		RwDB:   service.db,
+		failAt: 2,
+		err:    errors.New("temporary database failure"),
+	}
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	service.emitter = emitter
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, processingStore.calls)
+	require.True(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+	select {
+	case event := <-events:
+		require.Equal(t, beaconevents.StateBlockGossip, event.Event)
+	default:
+		t.Fatal("validated block did not emit gossip event")
 	}
 }
 
@@ -424,10 +531,7 @@ func TestBlockServiceIgnoresRetryableDependencyFailureWhenPendingQueueIsFull(t *
 	defer ctrl.Finish()
 
 	service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, forkchoice.ErrNewPayloadNoStatus)
-	for i := range maxPendingBlocks {
-		key := common.Hash{byte(i), byte(i >> 8)}
-		storePendingJob(t, service.blocksScheduledForLaterExecution, key, &pendingBlockJob{block: block}, time.Now())
-	}
+	fillPendingBlockQueue(t, service, block)
 
 	err := service.ProcessMessage(t.Context(), nil, block)
 
@@ -447,13 +551,12 @@ func TestBlockServicePendingQueueCap(t *testing.T) {
 	service.blocksScheduledForLaterExecution.count.Store(maxPendingBlocks)
 	output := captureServiceLogs(t)
 
-	err := service.scheduleBlockForLaterProcessing(blocks[0])
+	root := pendingBlockRoot(t, blocks[0])
+	err := service.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: blocks[0]})
 
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.count.Load())
-	root, err := blocks[0].Block.HashSSZ()
-	require.NoError(t, err)
-	_, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
+	_, exists := service.blocksScheduledForLaterExecution.jobs.Load(root)
 	require.False(t, exists)
 	require.Contains(t, output.String(), "Pending block queue full; block not scheduled")
 	require.NotContains(t, output.String(), "Block scheduled for later processing")
@@ -467,17 +570,88 @@ func TestBlockServicePendingQueueDeduplicates(t *testing.T) {
 	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
 	service := serviceAPI.(*blockService)
 
-	require.NoError(t, service.scheduleBlockForLaterProcessing(blocks[0]))
-	root, err := blocks[0].Block.HashSSZ()
-	require.NoError(t, err)
-	first, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
+	root := pendingBlockRoot(t, blocks[0])
+	require.NoError(t, service.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: blocks[0]}))
+	first, exists := service.blocksScheduledForLaterExecution.jobs.Load(root)
 	require.True(t, exists)
-	require.NoError(t, service.scheduleBlockForLaterProcessing(blocks[0]))
+	require.NoError(t, service.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: blocks[0]}))
 
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
-	stored, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
+	stored, exists := service.blocksScheduledForLaterExecution.jobs.Load(root)
 	require.True(t, exists)
 	require.Same(t, first, stored)
+}
+
+func TestBlockServicePendingQueueExpiryForgetsSeenSignature(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	blockRoot := pendingBlockRoot(t, block)
+	service.seenBlocksCache.Add(pendingBlockSeenKey(block), blockRoot)
+	require.NoError(t, service.schedulePendingBlockWithRoot(blockRoot, &pendingBlockJob{block: block}))
+	stored, exists := service.blocksScheduledForLaterExecution.jobs.Load(blockRoot)
+	require.True(t, exists)
+	stored.(*pendingJob[*pendingBlockJob]).creationTime = time.Now().Add(-blockJobExpiry - time.Second)
+
+	service.blocksScheduledForLaterExecution.processPending(t.Context())
+
+	require.False(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+}
+
+func TestBlockServicePendingQueueMergesDuplicateExecutionFailureState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	service.blocksScheduledForLaterExecution.capacity = 1
+	root := pendingBlockRoot(t, block)
+	require.NoError(t, service.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: block}))
+	storedBefore, exists := service.blocksScheduledForLaterExecution.jobs.Load(root)
+	require.True(t, exists)
+	creationTime := storedBefore.(*pendingJob[*pendingBlockJob]).creationTime
+
+	require.NoError(t, service.scheduleBlockAfterProcessingFailure(root, block, forkchoice.ErrNewPayloadNoStatus))
+
+	storedAfter, exists := service.blocksScheduledForLaterExecution.jobs.Load(root)
+	require.True(t, exists)
+	require.Same(t, storedBefore, storedAfter)
+	require.Equal(t, creationTime, storedAfter.(*pendingJob[*pendingBlockJob]).creationTime)
+	job := storedAfter.(*pendingJob[*pendingBlockJob]).msg
+	require.True(t, job.persisted)
+	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+	require.False(t, job.retryAfter.IsZero())
+	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+}
+
+func TestBlockServicePendingQueueMergesDuplicateDependencyProgress(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	job := &pendingBlockJob{block: block}
+	job.recordProcessingFailure(time.Now(), forkchoice.ErrNewPayloadNoStatus)
+	root := pendingBlockRoot(t, block)
+	require.NoError(t, service.schedulePendingBlockWithRoot(root, job))
+	require.NoError(t, service.scheduleBlockAfterProcessingFailure(root, block, forkchoice.ErrMissingSegment))
+
+	stored, exists := service.blocksScheduledForLaterExecution.jobs.Load(root)
+	require.True(t, exists)
+	merged := stored.(*pendingJob[*pendingBlockJob]).msg
+	require.True(t, merged.persisted)
+	require.True(t, merged.executionAndDataChecked)
+	require.Equal(t, blockELRetryInitialDelay, merged.retryDelay)
+	require.True(t, merged.retryAfter.IsZero())
+	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
 }
 
 func TestBlockServicePendingQueueRemovesPermanentProcessingFailure(t *testing.T) {
@@ -588,22 +762,38 @@ func TestPendingBlockJobPreservesExecutionBackoffAcrossOtherFailures(t *testing.
 	require.Equal(t, now.Add(2*blockELRetryInitialDelay), job.retryAfter)
 }
 
-func TestBlockServicePendingQueueBacksOffExecutionStatusRetries(t *testing.T) {
+func TestMergePendingBlockJobsAdvancesExecutionBackoff(t *testing.T) {
+	firstFailure := time.Unix(1_000, 0)
+	latestFailure := time.Unix(2_000, 0)
+	existing := &pendingBlockJob{}
+	existing.recordProcessingFailure(firstFailure, forkchoice.ErrNewPayloadNoStatus)
+	incoming := &pendingBlockJob{}
+	incoming.recordProcessingFailure(latestFailure, forkchoice.ErrNewPayloadNoStatus)
+
+	mergePendingBlockJobs(existing, incoming)
+
+	require.Equal(t, 2*blockELRetryInitialDelay, existing.retryDelay)
+	require.Equal(t, latestFailure.Add(2*blockELRetryInitialDelay), existing.retryAfter)
+}
+
+func TestBlockServicePendingQueueArmsExecutionStatusBackoff(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	service, block, processingStore := setupPendingBellatrixBlock(t, ctrl, forkchoice.ErrNewPayloadNoStatus)
-	require.NoError(t, service.scheduleBlockForLaterProcessing(block))
+	blockRoot := pendingBlockRoot(t, block)
+	require.NoError(t, service.schedulePendingBlockWithRoot(blockRoot, &pendingBlockJob{block: block}))
 
+	started := time.Now()
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	queued, ok := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(blockRoot))
+	queued, ok := service.blocksScheduledForLaterExecution.jobs.Load(blockRoot)
 	require.True(t, ok)
-	queued.(*pendingJob[*pendingBlockJob]).msg.retryAfter = time.Now().Add(time.Hour)
-	service.blocksScheduledForLaterExecution.processPending(t.Context())
-
+	job := queued.(*pendingJob[*pendingBlockJob]).msg
 	require.Equal(t, 1, processingStore.calls)
+	require.True(t, job.persisted)
+	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+	require.False(t, job.processingFailureAt.Before(started))
+	require.Equal(t, job.processingFailureAt.Add(blockELRetryInitialDelay), job.retryAfter)
 }
 
 func TestBlockServicePendingQueueDoesNotRewriteStoredBlock(t *testing.T) {
@@ -613,7 +803,8 @@ func TestBlockServicePendingQueueDoesNotRewriteStoredBlock(t *testing.T) {
 	service, block, processingStore := setupPendingBellatrixBlock(t, ctrl, forkchoice.ErrMissingSegment)
 	countingDB := &updateCountingDB{RwDB: service.db}
 	service.db = countingDB
-	require.NoError(t, service.scheduleBlockForLaterProcessing(block))
+	blockRoot := pendingBlockRoot(t, block)
+	require.NoError(t, service.schedulePendingBlockWithRoot(blockRoot, &pendingBlockJob{block: block}))
 
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
@@ -625,7 +816,7 @@ func TestBlockServicePendingQueueDoesNotRewriteStoredBlock(t *testing.T) {
 	require.Equal(t, 1, countingDB.views)
 }
 
-func TestBlockServicePendingQueuePublishesGossipEventOnceAfterValidation(t *testing.T) {
+func TestBlockServicePendingQueuePublishesGossipEventAfterSuccessfulProcessing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -636,9 +827,18 @@ func TestBlockServicePendingQueuePublishesGossipEventOnceAfterValidation(t *test
 	defer subscription.Unsubscribe()
 	service.emitter = emitter
 	job := &pendingBlockJob{block: block}
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
 
-	require.Equal(t, pendingJobKeep, service.tryProcessPendingBlock(t.Context(), common.Hash{}, job))
-	require.Equal(t, pendingJobKeep, service.tryProcessPendingBlock(t.Context(), common.Hash{}, job))
+	require.Equal(t, pendingJobKeep, service.tryProcessPendingBlock(t.Context(), common.Hash(blockRoot), job))
+	select {
+	case event := <-events:
+		t.Fatalf("block emitted gossip event before successful processing: %v", event)
+	default:
+	}
+
+	processingStore.err = nil
+	require.Equal(t, pendingJobRemove, service.tryProcessPendingBlock(t.Context(), common.Hash(blockRoot), job))
 	require.Equal(t, 2, processingStore.calls)
 	select {
 	case event := <-events:
@@ -651,6 +851,10 @@ func TestBlockServicePendingQueuePublishesGossipEventOnceAfterValidation(t *test
 		t.Fatalf("deferred block emitted duplicate gossip event: %v", event)
 	default:
 	}
+	require.True(t, service.seenBlocksCache.Contains(proposerIndexAndSlot{
+		proposerIndex: block.Block.ProposerIndex,
+		slot:          block.Block.Slot,
+	}))
 }
 
 func TestBlockServicePendingQueueKeepsBlockAfterDatabaseFailure(t *testing.T) {
@@ -792,6 +996,19 @@ func TestBlockServicePendingQueueWaitsForBlockSlotBeforeProcessing(t *testing.T)
 	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, &pendingBlockJob{block: block})
 
 	require.Equal(t, pendingJobKeep, decision)
+	require.Zero(t, processingStore.calls)
+}
+
+func TestBlockServicePendingQueueRemovesSeenProposerSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore := setupPendingBellatrixBlock(t, ctrl, nil)
+	service.seenBlocksCache.Add(pendingBlockSeenKey(block), common.Hash{2})
+
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{1}, &pendingBlockJob{block: block})
+
+	require.Equal(t, pendingJobRemove, decision)
 	require.Zero(t, processingStore.calls)
 }
 

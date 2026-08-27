@@ -125,10 +125,11 @@ func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Conte
 	},
 		s.tryProcessPendingGloasSidecar,
 		nil,
-		func(key pendingGloasSidecarKey) {
+		func(key pendingGloasSidecarKey, _ pendingGloasSidecar) {
 			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
 				"slot", key.slot, "blockRoot", key.beaconBlockRoot.String(), "index", key.index)
-		})
+		},
+		nil)
 }
 
 func (s *dataColumnSidecarService) Names() []string {
@@ -291,6 +292,12 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
+	// [REJECT] The sidecar is for the correct subnet. This must precede
+	// content-based IGNORE checks so source metadata cannot alter their verdict.
+	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
+		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
+	}
+
 	// [IGNORE] The sidecar is not from a future slot (with some tolerance for clock disparity)
 	if slot > s.ethClock.GetCurrentSlot() && !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(slot) {
 		return ErrIgnore
@@ -315,12 +322,6 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		if _, ok := myCustodyColumns[msg.Index]; !ok {
 			return ErrIgnore
 		}
-	}
-
-	// [REJECT] The sidecar is for the correct subnet. This check must precede
-	// queueing because the pending key identifies content, not its source subnet.
-	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
-		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
 
 	// [IGNORE] A valid block for the sidecar's slot has been seen.
