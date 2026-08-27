@@ -92,6 +92,9 @@ func (f *ForkChoiceStore) claimEnvelopeIndexRepair(root common.Hash, signedEnvel
 			}
 		}
 		token = f.captureEnvelopeIndexRepairValues(token, signedEnvelope)
+		if token.generation == 0 {
+			return envelopeIndexRepairToken{}, false, nil
+		}
 		if !token.valuesKnown {
 			if !f.forkGraph.HasEnvelope(root) {
 				f.envelopeIndexRepairs.complete(token)

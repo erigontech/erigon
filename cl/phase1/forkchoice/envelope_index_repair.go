@@ -93,7 +93,7 @@ func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, b
 	defer t.mu.Unlock()
 	entry, ok := t.entries[token.root]
 	if !ok || entry.generation != token.generation {
-		return token
+		return envelopeIndexRepairToken{}
 	}
 	entry.valuesKnown = true
 	entry.blockNumber = blockNumber
