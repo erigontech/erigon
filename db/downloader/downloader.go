@@ -870,7 +870,7 @@ func (d *Downloader) startSnapshotsDownload(
 
 	defer func() {
 		if err != nil {
-			batch.end(ctx, err)
+			err = batch.end(ctx, err)
 		}
 	}()
 	err = batch.addAllItems(ctx, items)

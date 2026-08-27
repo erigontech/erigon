@@ -120,11 +120,14 @@ func (me *downloadBatch) doMetainfoTask(task func() func()) {
 	}
 }
 
-// Queued seeding is dropped only when ctx goes away, including a cancel arriving during the join.
+var errBatchEnded = errors.New("download batch ended")
+
+// end joins the batch and returns the cause it ended with. Queued seeding is dropped only when ctx
+// goes away, including a cancel arriving during the join, which is why the cause is read after it.
 // A batch that failed for its own reasons still seeds what it holds.
-func (me *downloadBatch) end(ctx context.Context, cause error) {
+func (me *downloadBatch) end(ctx context.Context, cause error) error {
 	me.ended.Do(func() {
-		ended := cmp.Or(cause, errors.New("download batch ended"))
+		ended := cmp.Or(cause, errBatchEnded)
 		me.cancel(ended)
 		stop := context.AfterFunc(ctx, func() { me.seedCancel(context.Cause(ctx)) })
 		defer stop()
@@ -136,17 +139,13 @@ func (me *downloadBatch) end(ctx context.Context, cause error) {
 		}
 		me.d.decDownloadRequests()
 	})
+	return cmp.Or(cause, context.Cause(ctx))
 }
 
 func (me *downloadBatch) wait(ctx context.Context) (err error) {
 	// An all-kept-local batch has no torrents, so the loop below never samples ctx: a cancelled
-	// caller must still surface as an error, or seeding it dropped reports success. end joins the
-	// seed tasks, so the cause is read again after it: a cancel arriving during that join drops
-	// queued seeding just the same.
-	defer func() {
-		me.end(ctx, cmp.Or(err, context.Cause(ctx)))
-		err = cmp.Or(err, context.Cause(ctx))
-	}()
+	// caller must still surface as an error, or seeding it dropped reports success.
+	defer func() { err = me.end(ctx, err) }()
 	for _, t := range me.torrents {
 		select {
 		case <-t.Complete().On():
