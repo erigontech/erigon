@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -55,14 +54,23 @@ func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing
 
 type blockProcessingErrorStore struct {
 	forkchoice.ForkChoiceStorage
-	err   error
-	calls int
+	err                       error
+	calls                     int
+	newPayloadArgs            []bool
+	checkDataAvailabilityArgs []bool
+	onBlock                   func()
 }
 
 type updateCountingDB struct {
 	kv.RwDB
 	updates int
 	views   int
+}
+
+type blockDBError struct {
+	kv.RwDB
+	viewErr   error
+	updateErr error
 }
 
 func (db *updateCountingDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
@@ -75,8 +83,33 @@ func (db *updateCountingDB) View(ctx context.Context, f func(kv.Tx) error) error
 	return db.RwDB.View(ctx, f)
 }
 
-func (s *blockProcessingErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+func (db *blockDBError) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	if db.updateErr != nil {
+		return db.updateErr
+	}
+	return db.RwDB.Update(ctx, f)
+}
+
+func (db *blockDBError) View(ctx context.Context, f func(kv.Tx) error) error {
+	if db.viewErr != nil {
+		return db.viewErr
+	}
+	return db.RwDB.View(ctx, f)
+}
+
+func (s *blockProcessingErrorStore) OnBlock(
+	_ context.Context,
+	_ *cltypes.SignedBeaconBlock,
+	newPayload bool,
+	_ bool,
+	checkDataAvailability bool,
+) error {
 	s.calls++
+	s.newPayloadArgs = append(s.newPayloadArgs, newPayload)
+	s.checkDataAvailabilityArgs = append(s.checkDataAvailabilityArgs, checkDataAvailability)
+	if s.onBlock != nil {
+		s.onBlock()
+	}
 	return s.err
 }
 
@@ -198,8 +231,9 @@ func TestBlockServiceQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
 	select {
 	case event := <-events:
-		t.Fatalf("queued block emitted gossip event: %v", event)
+		require.Equal(t, beaconevents.StateBlockGossip, event.Event)
 	default:
+		t.Fatal("gossip-validated queued block did not emit gossip event")
 	}
 }
 
@@ -313,21 +347,31 @@ func TestBlockServiceSuccess(t *testing.T) {
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	fcu.SlotVal = blocks[1].Block.Slot
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
-	processingStore := &blockProcessingErrorStore{ForkChoiceStorage: fcu}
-	blockService.forkchoiceStore = processingStore
 	emitter := beaconevents.NewEventEmitter()
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.State().Subscribe(events)
 	defer subscription.Unsubscribe()
 	blockService.emitter = emitter
+	eventPublishedBeforeProcessing := false
+	processingStore := &blockProcessingErrorStore{
+		ForkChoiceStorage: fcu,
+		onBlock: func() {
+			select {
+			case event := <-events:
+				eventPublishedBeforeProcessing = event.Event == beaconevents.StateBlockGossip
+			default:
+			}
+		},
+	}
+	blockService.forkchoiceStore = processingStore
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
 	require.Equal(t, 1, processingStore.calls)
+	require.True(t, eventPublishedBeforeProcessing)
 	select {
 	case event := <-events:
-		require.Equal(t, beaconevents.StateBlockGossip, event.Event)
+		t.Fatalf("block emitted duplicate gossip event: %v", event)
 	default:
-		t.Fatal("successfully processed block did not emit gossip event")
 	}
 }
 
@@ -364,6 +408,7 @@ func TestBlockServiceInitialProcessingQueuesRetryableDependencyFailure(t *testin
 			err := service.ProcessMessage(t.Context(), nil, block)
 
 			require.ErrorIs(t, err, ErrIgnore)
+			require.NotErrorIs(t, err, tc.err)
 			require.Equal(t, 1, processingStore.calls)
 			require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
 		})
@@ -505,16 +550,21 @@ func TestPendingBlockJobBacksOffExecutionStatusFailures(t *testing.T) {
 	require.Equal(t, blockELRetryMaxDelay, job.retryDelay)
 }
 
-func TestPendingBlockJobDoesNotBackOffOtherDependencyFailures(t *testing.T) {
+func TestPendingBlockJobPreservesExecutionBackoffAcrossOtherFailures(t *testing.T) {
 	job := &pendingBlockJob{
 		retryAfter: time.Unix(2_000, 0),
-		retryDelay: blockELRetryMaxDelay,
+		retryDelay: blockELRetryInitialDelay,
 	}
 
 	job.recordProcessingFailure(time.Unix(1_000, 0), forkchoice.ErrMissingSegment)
 
-	require.Zero(t, job.retryDelay)
+	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
 	require.True(t, job.retryAfter.IsZero())
+
+	now := time.Unix(3_000, 0)
+	job.recordProcessingFailure(now, forkchoice.ErrNewPayloadNoStatus)
+	require.Equal(t, 2*blockELRetryInitialDelay, job.retryDelay)
+	require.Equal(t, now.Add(2*blockELRetryInitialDelay), job.retryAfter)
 }
 
 func TestBlockServicePendingQueueBacksOffExecutionStatusRetries(t *testing.T) {
@@ -525,6 +575,11 @@ func TestBlockServicePendingQueueBacksOffExecutionStatusRetries(t *testing.T) {
 	require.NoError(t, service.scheduleBlockForLaterProcessing(block))
 
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	queued, ok := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(blockRoot))
+	require.True(t, ok)
+	queued.(*pendingJob[*pendingBlockJob]).msg.retryAfter = time.Now().Add(time.Hour)
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
 
 	require.Equal(t, 1, processingStore.calls)
@@ -543,8 +598,75 @@ func TestBlockServicePendingQueueDoesNotRewriteStoredBlock(t *testing.T) {
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
 
 	require.Equal(t, 2, processingStore.calls)
+	require.Equal(t, []bool{true, false}, processingStore.newPayloadArgs)
+	require.Equal(t, []bool{true, false}, processingStore.checkDataAvailabilityArgs)
 	require.Equal(t, 1, countingDB.updates)
 	require.Equal(t, 1, countingDB.views)
+}
+
+func TestBlockServicePendingQueuePublishesGossipEventOnceAfterValidation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore := setupPendingBellatrixBlock(t, ctrl, forkchoice.ErrMissingSegment)
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	service.emitter = emitter
+	job := &pendingBlockJob{block: block}
+
+	require.Equal(t, pendingJobKeep, service.tryProcessPendingBlock(t.Context(), common.Hash{}, job))
+	require.Equal(t, pendingJobKeep, service.tryProcessPendingBlock(t.Context(), common.Hash{}, job))
+	require.Equal(t, 2, processingStore.calls)
+	select {
+	case event := <-events:
+		require.Equal(t, beaconevents.StateBlockGossip, event.Event)
+	default:
+		t.Fatal("deferred block did not emit gossip event after validation")
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("deferred block emitted duplicate gossip event: %v", event)
+	default:
+	}
+}
+
+func TestBlockServicePendingQueueKeepsBlockAfterDatabaseFailure(t *testing.T) {
+	testCases := []struct {
+		name      string
+		configure func(*blockDBError, error)
+	}{
+		{
+			name: "storage probe",
+			configure: func(db *blockDBError, err error) {
+				db.viewErr = err
+			},
+		},
+		{
+			name: "block store",
+			configure: func(db *blockDBError, err error) {
+				db.updateErr = err
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			service, block, processingStore := setupPendingBellatrixBlock(t, ctrl, nil)
+			db := &blockDBError{RwDB: service.db}
+			tc.configure(db, errors.New("temporary database failure"))
+			service.db = db
+
+			decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, &pendingBlockJob{block: block})
+
+			require.Equal(t, pendingJobKeep, decision)
+			require.Zero(t, processingStore.calls)
+		})
+	}
 }
 
 func TestBlockServicePendingQueueWaitsForGloasParentPayloadStatus(t *testing.T) {
@@ -689,11 +811,7 @@ func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var output bytes.Buffer
-			logger := log.Root()
-			previousHandler := logger.GetHandler()
-			logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
-			t.Cleanup(func() { logger.SetHandler(previousHandler) })
+			output := captureServiceLogs(t)
 
 			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 			block.Block.Body.AttesterSlashings.Append(&cltypes.AttesterSlashing{})

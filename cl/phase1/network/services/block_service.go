@@ -50,10 +50,12 @@ type proposerIndexAndSlot struct {
 }
 
 type pendingBlockJob struct {
-	block      *cltypes.SignedBeaconBlock
-	persisted  bool
-	retryAfter time.Time
-	retryDelay time.Duration
+	block                   *cltypes.SignedBeaconBlock
+	persisted               bool
+	gossipEventPublished    bool
+	executionAndDataChecked bool
+	retryAfter              time.Time
+	retryDelay              time.Duration
 }
 
 func (job *pendingBlockJob) readyToRetry(now time.Time) bool {
@@ -61,14 +63,18 @@ func (job *pendingBlockJob) readyToRetry(now time.Time) bool {
 }
 
 func (job *pendingBlockJob) recordProcessingFailure(now time.Time, err error) {
-	// Data-availability failures stay on the fast queue interval so newly
-	// arrived sidecars unblock promptly. An unavailable EL gets bounded backoff
-	// because repeated newPayload calls do not make it recover faster.
+	// MissingSegment is returned only after execution and data checks complete,
+	// so later state retries can skip those expensive phases.
+	if errors.Is(err, forkchoice.ErrMissingSegment) {
+		job.executionAndDataChecked = true
+	}
+	// Other dependencies stay on the fast queue interval. Retaining retryDelay
+	// ensures that a later EL failure continues the existing backoff sequence.
 	if !errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
 		job.retryAfter = time.Time{}
-		job.retryDelay = 0
 		return
 	}
+	// Repeated newPayload calls do not help an unavailable EL recover faster.
 	if job.retryDelay == 0 {
 		job.retryDelay = blockELRetryInitialDelay
 	} else {
@@ -200,8 +206,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		}
 		return err
 	}
+	b.publishBlockGossipEvent(msg)
 	if b.forkchoiceStore.Slot() < msg.Block.Slot {
-		if err := b.scheduleBlockForLaterProcessing(msg); err != nil {
+		if err := b.schedulePendingBlock(&pendingBlockJob{block: msg, gossipEventPublished: true}); err != nil {
 			return err
 		}
 		return fmt.Errorf("%w: block queued until fork choice reaches slot %d", ErrIgnore, msg.Block.Slot)
@@ -212,11 +219,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			if scheduleErr := b.scheduleBlockAfterProcessingFailure(msg, err); scheduleErr != nil {
 				return scheduleErr
 			}
-			return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %w", ErrIgnore, err)
+			return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %v", ErrIgnore, err) //nolint:errorlint // fork-choice errors must not remain matchable after conversion to IGNORE
 		}
 		return err
 	}
-	b.publishBlockGossipEvent(msg)
 	return nil
 }
 
@@ -299,7 +305,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 func (b *blockService) scheduleBlockAfterProcessingFailure(block *cltypes.SignedBeaconBlock, processingErr error) error {
 	// Retryable processing errors are returned only after the block transaction
 	// commits, so deferred attempts must not write the same block again.
-	job := &pendingBlockJob{block: block, persisted: true}
+	job := &pendingBlockJob{block: block, persisted: true, gossipEventPublished: true}
 	job.recordProcessingFailure(time.Now(), processingErr)
 	return b.schedulePendingBlock(job)
 }
@@ -346,7 +352,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	if err := b.storeBlock(ctx, block); err != nil {
 		return err
 	}
-	return b.processStoredBlock(ctx, block)
+	return b.processStoredBlock(ctx, block, true)
 }
 
 func (b *blockService) storeBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
@@ -355,8 +361,8 @@ func (b *blockService) storeBlock(ctx context.Context, block *cltypes.SignedBeac
 	})
 }
 
-func (b *blockService) processStoredBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
-	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
+func (b *blockService) processStoredBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, checkExecutionAndData bool) error {
+	if err := b.forkchoiceStore.OnBlock(ctx, block, checkExecutionAndData, true, checkExecutionAndData); err != nil {
 		return err
 	}
 	go b.importBlockOperations(block)
@@ -423,6 +429,10 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 		log.Trace("Pending block failed validation", "block", block, "error", err)
 		return pendingJobRemove
 	}
+	if !job.gossipEventPublished {
+		b.publishBlockGossipEvent(block)
+		job.gossipEventPublished = true
+	}
 	if b.forkchoiceStore.Slot() < block.Block.Slot {
 		return pendingJobKeep
 	}
@@ -430,17 +440,17 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 		stored, err := b.blockStored(ctx, blockRoot)
 		if err != nil {
 			log.Trace("Failed to check pending block storage", "block", block, "error", err)
-			return pendingJobRemove
+			return pendingJobKeep
 		}
 		if !stored {
 			if err := b.storeBlock(ctx, block); err != nil {
 				log.Trace("Failed to store pending block", "block", block, "error", err)
-				return pendingJobRemove
+				return pendingJobKeep
 			}
 		}
 		job.persisted = true
 	}
-	if err := b.processStoredBlock(ctx, block); err != nil {
+	if err := b.processStoredBlock(ctx, block, !job.executionAndDataChecked); err != nil {
 		log.Trace("Failed to process and store block", "block", block, "error", err)
 		if isPendingBlockRetryableError(err) {
 			job.recordProcessingFailure(time.Now(), err)
