@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bytes"
+	"slices"
 )
 
 type HeapElem struct {
@@ -119,4 +120,142 @@ func down(h *Heap, i0, n int) bool {
 		i = j
 	}
 	return i > i0
+}
+
+// ------ the merge over a sortableBuffer's sorted chunks
+
+// merger walks already-sorted chunks in key order, a cursor per chunk under a
+// heap of chunk ids.
+type merger struct {
+	heap []int32  // chunk ids, ordered by their cursor's key
+	cur  []cursor // by chunk id
+
+	// Chunks already in order end to end, which ascending keys produce, are
+	// read straight through instead of merged.
+	concat bool
+	chunk  int // chunk the straight-through cursor sits in
+}
+
+type cursor struct {
+	ents []entryLoc
+	buf  []byte
+	at   int32
+	key  []byte
+}
+
+// rewind puts the cursor on the first entry in key order.
+func (m *merger) rewind(chunks []dataChunk) {
+	clear(m.cur) // a shorter run would leave the old cursors pinning their chunks
+	m.cur = slices.Grow(m.cur[:0], len(chunks))[:len(chunks)]
+	for i := range chunks {
+		m.cur[i] = cursor{ents: chunks[i].entries(), buf: chunks[i].buf}
+	}
+	m.chunk = 0
+
+	if m.concat = m.chunksInOrder(); m.concat {
+		return
+	}
+	m.heap = m.heap[:0]
+	for i := range m.cur {
+		if len(m.cur[i].ents) == 0 {
+			continue
+		}
+		m.load(int32(i)) //nolint:gosec
+		m.heap = append(m.heap, int32(i))
+	}
+	for i := len(m.heap)/2 - 1; i >= 0; i-- {
+		m.siftRoot(i)
+	}
+}
+
+// next returns the entry the cursor sits on and moves it to the next in key
+// order.
+func (m *merger) next() ([]byte, entryLoc, bool) {
+	if m.concat {
+		for ; m.chunk < len(m.cur); m.chunk++ {
+			c := &m.cur[m.chunk]
+			if int(c.at) < len(c.ents) {
+				e := c.ents[c.at]
+				c.at++
+				return c.buf, e, true
+			}
+		}
+		return nil, 0, false
+	}
+	if len(m.heap) == 0 {
+		return nil, 0, false
+	}
+	id := m.heap[0]
+	c := &m.cur[id]
+	buf, e := c.buf, c.ents[c.at]
+	c.at++
+	if int(c.at) == len(c.ents) {
+		last := len(m.heap) - 1
+		m.heap[0] = m.heap[last]
+		m.heap = m.heap[:last]
+	} else {
+		m.load(id)
+	}
+	if len(m.heap) > 0 {
+		m.siftRoot(0)
+	}
+	return buf, e, true
+}
+
+func (m *merger) release() {
+	clear(m.cur)
+	m.cur, m.heap = m.cur[:0], m.heap[:0]
+	m.chunk, m.concat = 0, false
+}
+
+func (m *merger) load(id int32) {
+	c := &m.cur[id]
+	c.key = keyOf(c.buf, c.ents[c.at])
+}
+
+// chunksInOrder reports whether every chunk's last key comes before the next
+// chunk's first. A tie keeps the earlier chunk, which is insertion order.
+func (m *merger) chunksInOrder() bool {
+	prev := -1 // last chunk holding anything, so an empty one does not hide a pair
+	for i := range m.cur {
+		cur := &m.cur[i]
+		if len(cur.ents) == 0 {
+			continue
+		}
+		if prev >= 0 {
+			p := &m.cur[prev]
+			if bytes.Compare(keyOf(p.buf, p.ents[len(p.ents)-1]), keyOf(cur.buf, cur.ents[0])) > 0 {
+				return false
+			}
+		}
+		prev = i
+	}
+	return true
+}
+
+// less orders two cursors by the key they sit on. Chunks fill in insertion
+// order, so the lower id wins a tie and equal keys keep the order they went in.
+func (m *merger) less(x, y int32) bool {
+	if r := bytes.Compare(m.cur[x].key, m.cur[y].key); r != 0 {
+		return r < 0
+	}
+	return x < y
+}
+
+// siftRoot restores the heap under i, whose element changed.
+func (m *merger) siftRoot(i int) {
+	for {
+		s, l, r := i, 2*i+1, 2*i+2
+		if l < len(m.heap) && m.less(m.heap[l], m.heap[s]) {
+			s = l
+		}
+		if r < len(m.heap) && m.less(m.heap[r], m.heap[s]) {
+			s = r
+		}
+		if s == i {
+			return
+		}
+		m.heap[i], m.heap[s] = m.heap[s], m.heap[i]
+		i = s
+	}
 }
