@@ -624,7 +624,9 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	blockRoot := common.HexToHash("0xffff")
 	envelope := newTestSignedEnvelope(100, blockRoot, 999)
 
-	impl.queuePendingEnvelope(blockRoot, envelope)
+	queued, err := impl.queuePendingEnvelope(blockRoot, envelope)
+	require.Error(t, err)
+	require.False(t, queued)
 
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
 	envelopeHash, err := envelope.HashSSZ()
@@ -654,7 +656,7 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		wg.Go(func() {
 			blockRoot := common.Hash{byte(i), byte(i >> 8)}
 			envelope := newTestSignedEnvelope(100, blockRoot, uint64(10000+i))
-			impl.queuePendingEnvelope(blockRoot, envelope)
+			_, _ = impl.queuePendingEnvelope(blockRoot, envelope)
 		})
 	}
 	wg.Wait()
