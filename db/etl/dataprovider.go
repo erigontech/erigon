@@ -213,20 +213,18 @@ func (p *fileDataProvider) String() string {
 }
 
 type memoryDataProvider struct {
-	buffer       Buffer
-	currentIndex int
+	buffer Buffer
 }
 
 func KeepInRAM(buffer Buffer) dataProvider {
-	return &memoryDataProvider{buffer, 0}
+	return &memoryDataProvider{buffer}
 }
 
 func (p *memoryDataProvider) Next() ([]byte, []byte, error) {
-	if p.currentIndex >= p.buffer.Len() {
+	key, value, ok := p.buffer.Next()
+	if !ok {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.Get(p.currentIndex)
-	p.currentIndex++
 	return key, value, nil
 }
 
