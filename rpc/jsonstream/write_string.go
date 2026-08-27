@@ -25,24 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/bitutil"
 )
 
-// ctrlEscape holds the escape jsoniter emits for each byte below 0x20.
-var ctrlEscape = func() (t [0x20]string) {
-	const hexDigits = "0123456789abcdef"
-	for b := range t {
-		switch byte(b) {
-		case '\n':
-			t[b] = `\n`
-		case '\r':
-			t[b] = `\r`
-		case '\t':
-			t[b] = `\t`
-		default:
-			t[b] = `\u00` + string([]byte{hexDigits[b>>4], hexDigits[b&0xf]})
-		}
-	}
-	return t
-}()
-
 // escapeIndex returns the offset of the first byte a JSON string must escape,
 // or len(val) if there is none. It reads eight bytes at a time: the stdlib has
 // nothing for a set of bytes, IndexByte is SIMD but takes one, and ContainsAny
@@ -68,31 +50,47 @@ func escapeIndex(val string) int {
 // one go where jsoniter's WriteString appends a byte at a time. The output is
 // byte for byte what jsoniter produces, including the HTML characters it leaves
 // alone: Erigon writes through WriteString, not WriteStringWithHTMLEscaped.
+//
+// It borrows the stream buffer for the whole value rather than calling WriteRaw
+// per piece: an escape is two to six bytes, and passing those as a string makes
+// each one a memmove call, which is what a dense-escape value pays for.
 func writeStringFast(stream *jsoniter.Stream, val string) {
-	stream.WriteRaw(`"`)
-	for {
-		i := escapeIndex(val)
-		stream.WriteRaw(val[:i])
-		if i == len(val) {
-			break
+	buf := append(stream.Buffer(), '"')
+	for len(val) > 0 {
+		// Escapes come in runs (a quoted phrase, a stretch of control bytes), so
+		// test the next byte before paying for the word scan: on dense input the
+		// scanner costs a load and three broadword ops to report a byte already
+		// in hand.
+		c := val[0]
+		if c >= 0x20 && c != '"' && c != '\\' {
+			i := escapeIndex(val)
+			buf = append(buf, val[:i]...)
+			val = val[i:]
+			continue
 		}
-		switch c := val[i]; c {
-		case '"':
-			stream.WriteRaw(`\"`)
-		case '\\':
-			stream.WriteRaw(`\\`)
+		switch c {
+		case '"', '\\':
+			buf = append(buf, '\\', c)
+		case '\n':
+			buf = append(buf, '\\', 'n')
+		case '\r':
+			buf = append(buf, '\\', 'r')
+		case '\t':
+			buf = append(buf, '\\', 't')
 		default:
-			stream.WriteRaw(ctrlEscape[c])
+			buf = append(buf, '\\', 'u', '0', '0', hexDigits[c>>4], hexDigits[c&0xf])
 		}
-		val = val[i+1:]
+		val = val[1:]
 	}
-	stream.WriteRaw(`"`)
+	stream.SetBuffer(append(buf, '"'))
 }
+
+const hexDigits = "0123456789abcdef"
 
 // writeObjectFieldFast writes a field name and its colon. jsoniter follows the
 // colon with a space while indenting, which no stream here ever does: NewSized
 // is the only way in and it fixes the config at a zero indention step.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
 	writeStringFast(stream, fieldName)
-	stream.WriteRaw(":")
+	stream.SetBuffer(append(stream.Buffer(), ':'))
 }

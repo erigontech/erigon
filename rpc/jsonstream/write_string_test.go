@@ -177,6 +177,9 @@ func BenchmarkWriteString(b *testing.B) {
 		{"escapeEarly", `a "quoted" value`},
 		{"clean4k", longClean},
 		{"escapeLate4k", longClean + `"`},
+		{"quotes4k", strings.Repeat(`"`, 4096)},
+		{"backslashes4k", strings.Repeat("\\", 4096)},
+		{"ctrl4k", strings.Repeat("\x00", 4096)},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			b.Run("jsoniter", func(b *testing.B) {
