@@ -184,9 +184,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.Equal(t, key[0], storedV[0])
 		require.Equal(t, key[length.Addr], storedV[1])
 	}
-	newAgg.Close()
-
-	require.NoError(t, err)
+	// newAgg is closed by t.Cleanup, after tx.Rollback and newDoms.Close have
+	// released their file pins: Close waits for readers to drain before it
+	// unmaps, and a live reader here would stall it.
+	newDoms.Close()
 }
 
 func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
