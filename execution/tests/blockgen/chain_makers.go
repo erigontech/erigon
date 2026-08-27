@@ -432,6 +432,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
 	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -704,4 +705,3 @@ func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Bloc
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
 func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
 func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
-func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }
