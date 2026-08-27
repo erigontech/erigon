@@ -42,24 +42,48 @@ const putStripeCount = 256
 // currentSize and reported via PrintStatsAndReset.
 const avgBytesPerEntry = 256
 
-// freelruSlotBytes is what a slot costs on top of the payload estimate: one
-// freelru element (hashed key, five uint32 list indices, an expiry) plus a
-// uint32 bucket index, doubled because a shard's table is rounded up to a power
-// of two of capacity*5/4.
+// freelruElemBytes is what one slot costs beyond the payload estimate: a freelru
+// element (hashed key, five uint32 list indices, an expiry) plus its uint32
+// bucket index.
+const freelruElemBytes = 112 + 4
+
+// freelruSlotBytes is that overhead at the 5/4 table ratio fitTableSlots pins,
+// plus a byte: rounding the capacity down to the boundary leaves the real ratio a
+// hair above 5/4, and the charge has to stay on the covering side of it.
 // TestGenericCache_EnvelopeCoversSlotArray measures a real table against it.
-const freelruSlotBytes = 2 * (112 + 4)
+const freelruSlotBytes = freelruElemBytes*5/4 + 1
 
-const maxCacheBytes = 1024 * 1024 * 1024
+// maxCacheSlots is the absolute ceiling on a cache's slot array, independent of
+// the configured byte budget.
+const maxCacheSlots = 1 << 24
 
-// capFitsTable is the largest capacity served by the table this one already
-// pays for: above 4/5 of a power of two the element array doubles, and half of
-// it cannot be used.
-func capFitsTable(capacity uint32) uint32 {
-	fits := uint32(math.NextPowerOfTwo(uint64(capacity)+uint64(capacity)/4) / 5 * 4)
-	if fits == 0 || fits > capacity {
-		return capacity
+// fitTableSlots rounds a capacity down to the largest one whose table freelru
+// does not round up. freelru is asked for NextPowerOfTwo(capacity*5/4) elements,
+// so only 4/5 of a power of two leaves the ratio at 5/4; anywhere else it lands
+// somewhere in [5/4, 5/2) and a fixed per-slot charge is wrong by up to that
+// factor in either direction, swinging with GOMAXPROCS via the shard count.
+func fitTableSlots(perShard uint32) uint32 {
+	if perShard < minShardStart {
+		return perShard
 	}
-	return fits
+	table := uint32(math.NextPowerOfTwo(uint64(perShard)*5/4+1) / 2)
+	if fitted := table / 5 * 4; fitted >= minShardStart {
+		return fitted
+	}
+	return perShard
+}
+
+// budgetedSlots converts a byte budget into the slot ceiling it buys and the
+// shard count that ceiling is split across, sized so each shard's table sits on
+// the 5/4 boundary.
+func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32) (maxCap, shards uint32) {
+	perSlot := uint64(payloadBytes) + freelruSlotBytes
+	approx := min(uint32(uint64(capacityBytes)/perSlot), maxCacheSlots)
+	shards = initialShardCount(approx, shardCeil())
+	if shards == 0 {
+		shards = 1
+	}
+	return fitTableSlots(approx/shards) * shards, shards
 }
 
 // minShardStart keeps a shard's initial table off a handful of slots, which a
@@ -173,15 +197,15 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 		avgBytes = avgBytesPerEntry
 	}
 	// A slot costs the payload estimate plus freelru's own per-slot overhead, so
-	// the byte budget buys the RAM it charges for rather than ~2.5x it.
+	// the byte budget buys the RAM it charges for rather than ~2.5x it. Shard
+	// granularity comes out of the same computation: a shard grows on its own, so
+	// its share of maxCap is what bounds one grow's copy, and its table is what
+	// the charge has to match.
 	perSlot := int64(avgBytes) + freelruSlotBytes
-	budgeted := uint32(uint64(min(capacityBytes, maxCacheBytes)) / uint64(perSlot))
-	maxCap := max(capFitsTable(budgeted), genericCacheStartCapacity)
-	// Shard granularity follows the ceiling, not the start size: a shard grows
-	// on its own, so its share of maxCap is what bounds one grow's copy. The
-	// start size is raised to keep each shard off a one-slot table, which a large
-	// GOMAXPROCS would otherwise produce.
-	shards := initialShardCount(maxCap, shardCeil())
+	budgeted, shards := budgetedSlots(capacityBytes, avgBytes)
+	maxCap := max(budgeted, genericCacheStartCapacity)
+	// The start size is raised to keep each shard off a one-slot table, which a
+	// large GOMAXPROCS would otherwise produce.
 	start := min(max(uint32(genericCacheStartCapacity), shards*minShardStart), maxCap)
 	c := &GenericCache[T]{
 		capacityB:     capacityBytes,

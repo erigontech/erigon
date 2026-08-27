@@ -25,6 +25,7 @@ import (
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
@@ -55,15 +56,33 @@ type growLRU[V any] struct {
 	closed   bool
 }
 
+// newGrowLRUEntries builds a growLRU from an entry ceiling rather than a byte
+// budget, for layers whose contract is the entry count. The envelope charge
+// follows freelru.NewSharded's real geometry: it rounds capacity*5/4 up to a
+// power of two for the whole cache, so the overhead per slot is that table over
+// the capacity, not a constant.
+func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
+	if avgBytes == 0 {
+		avgBytes = avgBytesPerEntry
+	}
+	maxCap := max(min(maxEntries, maxCacheSlots), 1)
+	table := math.NextPowerOfTwo(uint64(maxCap) * 5 / 4)
+	perSlot := int64(avgBytes) + int64(uint64(freelruElemBytes)*table/uint64(maxCap))
+	return newGrowLRUWith(maxCap, perSlot, onEvict)
+}
+
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
 	perSlot := int64(avgBytes) + freelruSlotBytes
-	budgeted := uint32(uint64(min(maxBytes, maxCacheBytes)) / uint64(perSlot))
-	maxCap := max(capFitsTable(budgeted), 1)
+	maxCap := max(fitTableSlots(min(uint32(uint64(maxBytes)/uint64(perSlot)), maxCacheSlots)), 1)
+	return newGrowLRUWith(maxCap, perSlot, onEvict)
+}
+
+func newGrowLRUWith[V any](maxCap uint32, perSlot int64, onEvict func(uint64, V)) *growLRU[V] {
 	// Start small (bounded by the ceiling); the floor is on the start size, not
-	// the ceiling — a tiny configured budget yields a tiny, still-evicting cap.
+	// the ceiling -- a tiny configured budget yields a tiny, still-evicting cap.
 	start := min(uint32(genericCacheStartCapacity), maxCap)
 	g := &growLRU[V]{onEvict: onEvict, avgBytes: perSlot, startCap: start, maxCap: maxCap}
 	g.curCap.Store(start)

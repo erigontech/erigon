@@ -18,6 +18,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"math/rand"
 	"runtime"
@@ -45,21 +46,35 @@ func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
 		func(v []byte) int { return len(v) }, ModeEvictLRU))
 
-	const slots = 262144
-	runtime.GC()
-	var before runtime.MemStats
-	runtime.ReadMemStats(&before)
-	gen := c.newShards(slots, slots, c.shardCount)
-	runtime.GC()
-	var after runtime.MemStats
-	runtime.ReadMemStats(&after)
-	runtime.KeepAlive(gen)
+	// The production ceiling, not a power of two, across the shard counts a
+	// GOMAXPROCS between 8 and 32 produces. A power-of-two capacity divides into
+	// power-of-two shards and lands on the cheapest table ratio, so it can never
+	// observe the rounding that makes a fixed per-slot charge wrong.
+	for _, shards := range []uint32{128, 256, 512} {
+		t.Run(fmt.Sprintf("shards=%d", shards), func(t *testing.T) {
+			slots := c.maxCap
+			require.Positive(t, slots)
 
-	allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
-	reserved := int64(slots) * c.avgEntryBytes
-	require.Positive(t, allocated)
-	require.GreaterOrEqual(t, reserved, allocated,
-		"envelope reserves %d B for %d slots but the table allocates %d B", reserved, slots, allocated)
+			runtime.GC()
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+			gen := c.newShards(slots, slots, shards)
+			runtime.GC()
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(gen)
+
+			allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+			// Only the overhead share of the reserve may cover the table. Comparing
+			// the whole per-slot charge would let the payload estimate -- which pays
+			// for values the table does not hold -- mask an undercharged table.
+			overhead := (c.avgEntryBytes - int64(avgStorageEntryBytes)) * int64(slots)
+			require.Positive(t, allocated)
+			require.GreaterOrEqual(t, overhead, allocated,
+				"envelope reserves %d B of slot overhead for %d slots across %d shards but the table allocates %d B",
+				overhead, slots, shards, allocated)
+		})
+	}
 }
 
 // grownShards counts the shards that have grown past their birth size, so a
