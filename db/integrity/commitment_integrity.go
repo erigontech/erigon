@@ -570,12 +570,12 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 			continue
 		}
 		counts.branchKeys++
-		accounts, storages, shortened := commitment.BranchData(v).CountPlainKeys()
-		if shortened {
+		plainAccounts, plainStorages, shortened, err := commitment.BranchData(v).CountPlainKeys()
+		if err != nil || shortened > 0 {
 			return commitmentFileScan{referenced: true}
 		}
-		counts.plainAccounts += accounts
-		counts.plainStorages += storages
+		counts.plainAccounts += plainAccounts
+		counts.plainStorages += plainStorages
 	}
 	return commitmentFileScan{counts: counts}
 }

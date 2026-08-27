@@ -691,32 +691,28 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-var errShortenedKeyFound = errors.New("shortened key found")
-
 // A malformed branch reports true: treat as referenced, never under-report.
 func (branchData BranchData) HasShortenedKeys() bool {
-	_, _, shortened := branchData.CountPlainKeys()
-	return shortened
+	_, _, shortened, err := branchData.CountPlainKeys()
+	return shortened > 0 || err != nil
 }
 
-// CountPlainKeys tallies the branch's plain account and storage keys. The tally stops at the first
-// shortened key, so it is complete only when shortened is false.
-func (branchData BranchData) CountPlainKeys() (accounts, storages uint64, shortened bool) {
-	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) != length.Addr+length.Hash {
-				return nil, errShortenedKeyFound
-			}
-			storages++
-			return nil, nil
+// CountPlainKeys tallies the branch's keys by kind. It walks every cell rather than stopping at the
+// first shortened key, so a branch holding both kinds reports both truthfully. A non-nil err is a
+// parse failure, and leaves the tally partial.
+func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, shortened uint64, err error) {
+	_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		switch {
+		case isStorage && len(key) == length.Addr+length.Hash:
+			plainStorages++
+		case !isStorage && len(key) == length.Addr:
+			plainAccounts++
+		default:
+			shortened++
 		}
-		if len(key) != length.Addr {
-			return nil, errShortenedKeyFound
-		}
-		accounts++
 		return nil, nil
 	})
-	return accounts, storages, err != nil
+	return plainAccounts, plainStorages, shortened, err
 }
 
 // If fn returns nil, the original key is kept.
