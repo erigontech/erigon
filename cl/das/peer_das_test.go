@@ -20,18 +20,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // initTestBeaconConfig installs cfg as the global config if no test has done so
@@ -42,6 +52,62 @@ func initTestBeaconConfig(cfg *clparams.BeaconChainConfig) {
 	if clparams.GetBeaconConfig() == nil {
 		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
 	}
+}
+
+type writeNotifyingBlobStorage struct {
+	blob_storage.BlobStorage
+	written chan struct{}
+	once    sync.Once
+}
+
+func (s *writeNotifyingBlobStorage) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.BlobSidecar) error {
+	if err := s.BlobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
+		return err
+	}
+	s.once.Do(func() { close(s.written) })
+	return nil
+}
+
+func recoverableFuluData(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
+	t.Helper()
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	blobs := []goethkzg.Blob{{1}, {2}}
+	commitments := make([]goethkzg.KZGCommitment, len(blobs))
+	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
+	for i := range blobs {
+		commitment, err := kzg.Ctx().BlobToKZGCommitment(&blobs[i], 0)
+		require.NoError(t, err)
+		commitments[i] = commitment
+		block.GetBlobKzgCommitments().Append((*cltypes.KZGCommitment)(&commitment))
+		cells, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blobs[i][:])
+		require.NoError(t, err)
+		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	proofRaw, err := block.Block.Body.KzgCommitmentsInclusionProof()
+	require.NoError(t, err)
+	columnProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+	for i := range proofRaw {
+		columnProof.Set(i, proofRaw[i])
+	}
+	columns, err := peerdasutils.GetDataColumnSidecars(block.SignedBeaconBlockHeader(), block.GetBlobKzgCommitments(), columnProof, cellsAndProofs)
+	require.NoError(t, err)
+
+	sidecars := make([]*cltypes.BlobSidecar, len(blobs))
+	for i := range blobs {
+		proof, err := kzg.Ctx().ComputeBlobKZGProof(&blobs[i], commitments[i], 0)
+		require.NoError(t, err)
+		branch, err := block.Block.Body.KzgCommitmentMerkleProof(i)
+		require.NoError(t, err)
+		inclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+		for j := range branch {
+			inclusionProof.Set(j, common.Hash(branch[j]))
+		}
+		sidecars[i] = cltypes.NewBlobSidecar(uint64(i), (*cltypes.Blob)(&blobs[i]), common.Bytes48(commitments[i]), common.Bytes48(proof), block.SignedBeaconBlockHeader(), inclusionProof)
+	}
+	return block, root, sidecars, columns
 }
 
 func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
@@ -94,6 +160,68 @@ func TestDownloadColumnsAndRecoverBlobsAdmitsPartialBlobCount(t *testing.T) {
 	cancel()
 
 	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+}
+
+func assertDownloadColumnsOverwritesBlobStorage(t *testing.T, initialSidecars func([]*cltypes.BlobSidecar) []*cltypes.BlobSidecar) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fs := afero.NewMemMapFs()
+	storage := blob_storage.NewBlobStore(db, fs)
+	require.NoError(t, storage.WriteBlobSidecars(t.Context(), root, initialSidecars(sidecars)))
+	notifying := &writeNotifyingBlobStorage{BlobStorage: storage, written: make(chan struct{})}
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		caplinConfig:      &clparams.CaplinConfig{ArchiveBlobs: true},
+		state:             peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:     columnStorage,
+		blobStorage:       notifying,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	go d.blobsRecoverWorker(ctx)
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	select {
+	case <-notifying.written:
+	case <-time.After(30 * time.Second):
+		t.Fatal("incomplete or invalid blob storage was not overwritten by PeerDAS recovery")
+	}
+
+	fresh := blob_storage.NewBlobStore(db, fs)
+	stored, found, err := fresh.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, stored, len(sidecars))
+	require.NoError(t, blob_storage.VerifyBlobSidecars(stored, clparams.FuluVersion, nil))
+	for i := range stored {
+		require.Equal(t, uint64(i), stored[i].Index)
+		require.Equal(t, sidecars[i].KzgCommitment, stored[i].KzgCommitment)
+	}
+}
+
+func TestDownloadColumnsAndRecoverBlobsOverwritesPartialBlobStorage(t *testing.T) {
+	assertDownloadColumnsOverwritesBlobStorage(t, func(sidecars []*cltypes.BlobSidecar) []*cltypes.BlobSidecar {
+		return sidecars[:1]
+	})
+}
+
+func TestDownloadColumnsAndRecoverBlobsOverwritesInvalidBlobStorageWithExpectedCount(t *testing.T) {
+	assertDownloadColumnsOverwritesBlobStorage(t, func(sidecars []*cltypes.BlobSidecar) []*cltypes.BlobSidecar {
+		return []*cltypes.BlobSidecar{sidecars[0], sidecars[0]}
+	})
 }
 
 func TestIsExpectedColumnDownloadMiss(t *testing.T) {

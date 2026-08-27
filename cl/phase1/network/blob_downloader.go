@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/btree"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -43,19 +45,27 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	blocksBatchSize             = uint64(8)
-	maxBlobRetryRanges          = 1024
+	blobRetryShardBits          = 10
+	maxBlobRetryRanges          = 1 << blobRetryShardBits
+	blobRetryShardShift         = 64 - blobRetryShardBits
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
 )
 
 type blobRetryRange struct {
+	start          uint64
+	end            uint64
+	cursor         uint64
+	intervals      *btree.BTreeG[blobRetryInterval]
+	intervalCursor uint64
+	work           uint64
+}
+
+type blobRetryInterval struct {
 	start  uint64
 	end    uint64
 	cursor uint64
-	// parts keeps exact disjoint intervals when a scheduling bucket spans gaps.
-	parts      []blobRetryRange
-	partCursor int
 }
 
 // SyncedChecker is an interface to check if the forkchoice is synced
@@ -430,86 +440,21 @@ func (b *BlobHistoryDownloader) retryBlock(block *cltypes.SignedBeaconBlock) (bo
 }
 
 func (b *BlobHistoryDownloader) addRetrySlot(slot uint64) {
-	b.retryRanges = append(b.retryRanges, blobRetryRange{start: slot, end: slot, cursor: slot})
-	sort.Slice(b.retryRanges, func(i, j int) bool {
-		return b.retryRanges[i].start < b.retryRanges[j].start
+	shard := slot >> blobRetryShardShift
+	index := sort.Search(len(b.retryRanges), func(i int) bool {
+		return b.retryRanges[i].start>>blobRetryShardShift >= shard
 	})
-	merged := b.retryRanges[:0]
-	for _, retryRange := range b.retryRanges {
-		last := len(merged) - 1
-		if last >= 0 && (retryRange.start <= merged[last].end || retryRange.start-merged[last].end == 1) {
-			merged[last] = mergeBlobRetryRanges(merged[last], retryRange)
-			continue
-		}
-		merged = append(merged, retryRange)
+	if index < len(b.retryRanges) && b.retryRanges[index].start>>blobRetryShardShift == shard {
+		b.retryRanges[index].add(slot)
+		return
 	}
-	b.retryRanges = merged
-	b.compactRetryRanges()
-}
-
-func mergeBlobRetryRanges(left, right blobRetryRange) blobRetryRange {
-	if len(left.parts) > 0 || len(right.parts) > 0 || retryRangesHaveGap(left, right) {
-		cursor := mergedBlobRetryCursor(left, right)
-		parts := appendBlobRetryLeaves(nil, left)
-		parts = appendBlobRetryLeaves(parts, right)
-		sort.Slice(parts, func(i, j int) bool { return parts[i].start < parts[j].start })
-		merged := parts[:0]
-		for _, part := range parts {
-			last := len(merged) - 1
-			if last >= 0 && !retryRangesHaveGap(merged[last], part) {
-				merged[last] = mergeBlobRetryRanges(merged[last], part)
-				continue
-			}
-			merged = append(merged, part)
-		}
-		if len(merged) == 1 {
-			return merged[0]
-		}
-		bucket := blobRetryRange{
-			start:  merged[0].start,
-			end:    merged[len(merged)-1].end,
-			cursor: cursor,
-			parts:  merged,
-		}
-		for i := range bucket.parts {
-			if bucket.parts[i].contains(cursor) {
-				bucket.partCursor = i
-				break
-			}
-		}
-		return bucket
-	}
-	if right.end > left.end {
-		left.cursor = mergedBlobRetryCursor(left, right)
-		left.end = right.end
-	}
-	return left
-}
-
-func mergedBlobRetryCursor(left, right blobRetryRange) uint64 {
-	if right.end > left.end && (right.cursor != right.end || left.start == left.end) {
-		return right.cursor
-	}
-	return left.cursor
-}
-
-func retryRangesHaveGap(left, right blobRetryRange) bool {
-	return left.end != ^uint64(0) && right.start > left.end+1
-}
-
-func appendBlobRetryLeaves(dst []blobRetryRange, retryRange blobRetryRange) []blobRetryRange {
-	if len(retryRange.parts) == 0 {
-		retryRange.partCursor = 0
-		return append(dst, retryRange)
-	}
-	for _, part := range retryRange.parts {
-		dst = appendBlobRetryLeaves(dst, part)
-	}
-	return dst
+	b.retryRanges = append(b.retryRanges, blobRetryRange{})
+	copy(b.retryRanges[index+1:], b.retryRanges[index:])
+	b.retryRanges[index] = blobRetryRange{start: slot, end: slot, cursor: slot}
 }
 
 func (r *blobRetryRange) nextSlot() uint64 {
-	if len(r.parts) == 0 {
+	if r.intervals == nil {
 		slot := r.cursor
 		if slot == r.start {
 			r.cursor = r.end
@@ -518,9 +463,21 @@ func (r *blobRetryRange) nextSlot() uint64 {
 		}
 		return slot
 	}
-	index := r.partCursor % len(r.parts)
-	r.partCursor = (index + 1) % len(r.parts)
-	slot := r.parts[index].nextSlot()
+	interval, found := retryIntervalAtOrBefore(r.intervals, r.intervalCursor)
+	var slot uint64
+	if found && r.intervalCursor <= interval.end {
+		slot = r.intervalCursor
+	} else if interval, found = retryIntervalAtOrAfter(r.intervals, r.intervalCursor); found {
+		slot = interval.start
+	} else {
+		interval, _ = r.intervals.Min()
+		slot = interval.start
+	}
+	if slot == ^uint64(0) {
+		r.intervalCursor = 0
+	} else {
+		r.intervalCursor = slot + 1
+	}
 	r.cursor = slot
 	return slot
 }
@@ -529,54 +486,120 @@ func (r blobRetryRange) contains(slot uint64) bool {
 	if slot < r.start || slot > r.end {
 		return false
 	}
-	if len(r.parts) == 0 {
+	if r.intervals == nil {
 		return true
 	}
-	index := sort.Search(len(r.parts), func(i int) bool { return r.parts[i].end >= slot })
-	return index < len(r.parts) && r.parts[index].contains(slot)
+	interval, found := retryIntervalAtOrBefore(r.intervals, slot)
+	return found && slot <= interval.end
 }
 
 func (r blobRetryRange) workCount() uint64 {
-	if len(r.parts) == 0 {
+	if r.intervals == nil {
 		width := r.end - r.start
 		if width == ^uint64(0) {
 			return width
 		}
 		return width + 1
 	}
-	var count uint64
-	for _, part := range r.parts {
-		partCount := part.workCount()
-		if ^uint64(0)-count < partCount {
-			return ^uint64(0)
-		}
-		count += partCount
-	}
-	return count
+	return r.work
 }
 
-func (b *BlobHistoryDownloader) compactRetryRanges() {
-	for len(b.retryRanges) > maxBlobRetryRanges {
-		nearest := -1
-		var nearestWork uint64
-		var nearestGap uint64
-		for i := 0; i < len(b.retryRanges)-1; i++ {
-			gap := b.retryRanges[i+1].start - b.retryRanges[i].end
-			leftWork := b.retryRanges[i].workCount()
-			rightWork := b.retryRanges[i+1].workCount()
-			work := leftWork + rightWork
-			if work < leftWork {
-				work = ^uint64(0)
-			}
-			if nearest == -1 || work < nearestWork || work == nearestWork && gap < nearestGap {
-				nearest = i
-				nearestWork = work
-				nearestGap = gap
-			}
+func (r *blobRetryRange) add(slot uint64) {
+	if r.intervals == nil {
+		if r.start <= slot && slot <= r.end {
+			return
 		}
-		b.retryRanges[nearest] = mergeBlobRetryRanges(b.retryRanges[nearest], b.retryRanges[nearest+1])
-		b.retryRanges = append(b.retryRanges[:nearest+1], b.retryRanges[nearest+2:]...)
+		if r.end != ^uint64(0) && slot == r.end+1 {
+			r.end = slot
+			return
+		}
+		if slot != ^uint64(0) && slot+1 == r.start {
+			r.start = slot
+			return
+		}
+		r.intervals = newBlobRetryIntervalTree()
+		r.intervals.ReplaceOrInsert(blobRetryInterval{start: r.start, end: r.end, cursor: r.cursor})
+		r.intervals.ReplaceOrInsert(blobRetryInterval{start: slot, end: slot, cursor: slot})
+		r.work = r.workCountWithoutCache() + 1
+		r.refreshBounds()
+		return
 	}
+	previous, hasPrevious := retryIntervalAtOrBefore(r.intervals, slot)
+	if hasPrevious && slot <= previous.end {
+		return
+	}
+	next, hasNext := retryIntervalAtOrAfter(r.intervals, slot)
+	mergePrevious := hasPrevious && previous.end != ^uint64(0) && previous.end+1 == slot
+	mergeNext := hasNext && slot != ^uint64(0) && slot+1 == next.start
+	switch {
+	case mergePrevious && mergeNext:
+		r.intervals.Delete(previous)
+		r.intervals.Delete(next)
+		previous.end = next.end
+		r.intervals.ReplaceOrInsert(previous)
+	case mergePrevious:
+		r.intervals.Delete(previous)
+		previous.end = slot
+		r.intervals.ReplaceOrInsert(previous)
+	case mergeNext:
+		r.intervals.Delete(next)
+		next.start = slot
+		r.intervals.ReplaceOrInsert(next)
+	default:
+		r.intervals.ReplaceOrInsert(blobRetryInterval{start: slot, end: slot, cursor: slot})
+	}
+	if r.work != ^uint64(0) {
+		r.work++
+	}
+	r.refreshBounds()
+}
+
+func newBlobRetryIntervalTree() *btree.BTreeG[blobRetryInterval] {
+	return btree.NewG(8, func(left, right blobRetryInterval) bool { return left.start < right.start })
+}
+
+func retryIntervalAtOrBefore(tree *btree.BTreeG[blobRetryInterval], slot uint64) (blobRetryInterval, bool) {
+	var interval blobRetryInterval
+	found := false
+	tree.DescendLessOrEqual(blobRetryInterval{start: slot}, func(item blobRetryInterval) bool {
+		interval = item
+		found = true
+		return false
+	})
+	return interval, found
+}
+
+func retryIntervalAtOrAfter(tree *btree.BTreeG[blobRetryInterval], slot uint64) (blobRetryInterval, bool) {
+	var interval blobRetryInterval
+	found := false
+	tree.AscendGreaterOrEqual(blobRetryInterval{start: slot}, func(item blobRetryInterval) bool {
+		interval = item
+		found = true
+		return false
+	})
+	return interval, found
+}
+
+func (r *blobRetryRange) refreshBounds() {
+	first, _ := r.intervals.Min()
+	last, _ := r.intervals.Max()
+	r.start = first.start
+	r.end = last.end
+}
+
+func (r blobRetryRange) workCountWithoutCache() uint64 {
+	width := r.end - r.start
+	if width == ^uint64(0) {
+		return width
+	}
+	return width + 1
+}
+
+func (r blobRetryRange) intervalCount() int {
+	if r.intervals == nil {
+		return 1
+	}
+	return r.intervals.Len()
 }
 
 func (b *BlobHistoryDownloader) addRetryBlocks(blocks []*cltypes.SignedBeaconBlock) {
@@ -591,75 +614,82 @@ func (b *BlobHistoryDownloader) resolveRetrySlot(slot uint64) {
 		if !retryRange.contains(slot) {
 			continue
 		}
-		if len(retryRange.parts) > 0 {
-			partIndex := sort.Search(len(retryRange.parts), func(j int) bool { return retryRange.parts[j].end >= slot })
-			parts := retryRange.parts
-			part := &parts[partIndex]
-			switch {
-			case part.start == part.end:
-				parts = append(parts[:partIndex], parts[partIndex+1:]...)
-			case slot == part.start:
-				part.start++
-			case slot == part.end:
-				part.end--
-			default:
-				left := blobRetryRange{start: part.start, end: slot - 1, cursor: part.cursor}
-				if !left.contains(left.cursor) {
-					left.cursor = left.end
-				}
-				right := blobRetryRange{start: slot + 1, end: part.end, cursor: part.end}
-				parts[partIndex] = left
-				parts = append(parts, blobRetryRange{})
-				copy(parts[partIndex+2:], parts[partIndex+1:])
-				parts[partIndex+1] = right
-			}
-			for j := range parts {
-				if !parts[j].contains(parts[j].cursor) {
-					parts[j].cursor = parts[j].end
-				}
-			}
-			switch len(parts) {
-			case 0:
-				b.retryRanges = append(b.retryRanges[:i], b.retryRanges[i+1:]...)
-			case 1:
-				b.retryRanges[i] = parts[0]
-			default:
-				retryRange.parts = parts
-				retryRange.start = parts[0].start
-				retryRange.end = parts[len(parts)-1].end
-				if retryRange.partCursor >= len(parts) {
-					retryRange.partCursor = 0
-				}
-			}
-			return
-		}
-		if retryRange.start == retryRange.end {
+		if retryRange.remove(slot) {
 			b.retryRanges = append(b.retryRanges[:i], b.retryRanges[i+1:]...)
-			return
-		}
-		switch {
-		case slot == retryRange.start:
-			retryRange.start++
-		case slot == retryRange.end:
-			retryRange.end--
-		default:
-			left := blobRetryRange{start: retryRange.start, end: slot - 1, cursor: retryRange.cursor}
-			if left.cursor < left.start || left.cursor > left.end {
-				left.cursor = left.end
-			}
-			right := blobRetryRange{start: slot + 1, end: retryRange.end, cursor: retryRange.end}
-			b.retryRanges[i] = left
-			b.retryRanges = append(b.retryRanges, blobRetryRange{})
-			copy(b.retryRanges[i+2:], b.retryRanges[i+1:])
-			b.retryRanges[i+1] = right
-			b.compactRetryRanges()
-			return
-		}
-		if retryRange.cursor < retryRange.start || retryRange.cursor > retryRange.end {
-			retryRange.cursor = retryRange.end
 		}
 		return
 	}
+}
+
+func (r *blobRetryRange) remove(slot uint64) bool {
+	if r.intervals == nil {
+		if r.start == r.end {
+			return true
+		}
+		switch {
+		case slot == r.start:
+			r.start++
+		case slot == r.end:
+			r.end--
+		default:
+			left := blobRetryInterval{start: r.start, end: slot - 1, cursor: r.cursor}
+			if left.cursor < left.start || left.cursor > left.end {
+				left.cursor = left.end
+			}
+			right := blobRetryInterval{start: slot + 1, end: r.end, cursor: r.end}
+			r.intervals = newBlobRetryIntervalTree()
+			r.intervals.ReplaceOrInsert(left)
+			r.intervals.ReplaceOrInsert(right)
+			r.work = r.workCountWithoutCache() - 1
+			r.refreshBounds()
+			return false
+		}
+		if r.cursor < r.start || r.cursor > r.end {
+			r.cursor = r.end
+		}
+		return false
+	}
+	interval, found := retryIntervalAtOrBefore(r.intervals, slot)
+	if !found || slot > interval.end {
+		return false
+	}
+	r.intervals.Delete(interval)
+	switch {
+	case interval.start == interval.end:
+	case slot == interval.start:
+		interval.start++
+		if interval.cursor < interval.start || interval.cursor > interval.end {
+			interval.cursor = interval.end
+		}
+		r.intervals.ReplaceOrInsert(interval)
+	case slot == interval.end:
+		interval.end--
+		if interval.cursor > interval.end {
+			interval.cursor = interval.end
+		}
+		r.intervals.ReplaceOrInsert(interval)
+	default:
+		left := blobRetryInterval{start: interval.start, end: slot - 1, cursor: interval.cursor}
+		if left.cursor < left.start || left.cursor > left.end {
+			left.cursor = left.end
+		}
+		right := blobRetryInterval{start: slot + 1, end: interval.end, cursor: interval.end}
+		r.intervals.ReplaceOrInsert(left)
+		r.intervals.ReplaceOrInsert(right)
+	}
+	if r.work > 0 {
+		r.work--
+	}
+	if r.intervals.Len() == 0 {
+		return true
+	}
+	if r.intervals.Len() == 1 {
+		interval, _ := r.intervals.Min()
+		*r = blobRetryRange{start: interval.start, end: interval.end, cursor: interval.cursor}
+		return false
+	}
+	r.refreshBounds()
+	return false
 }
 
 func (b *BlobHistoryDownloader) trimRetryRanges(firstUnfrozenSlot uint64) {
@@ -668,32 +698,10 @@ func (b *BlobHistoryDownloader) trimRetryRanges(firstUnfrozenSlot uint64) {
 		if retryRange.end < firstUnfrozenSlot {
 			continue
 		}
-		if len(retryRange.parts) > 0 {
-			parts := retryRange.parts[:0]
-			for _, part := range retryRange.parts {
-				if part.end < firstUnfrozenSlot {
-					continue
-				}
-				if part.start < firstUnfrozenSlot {
-					part.start = firstUnfrozenSlot
-				}
-				if !part.contains(part.cursor) {
-					part.cursor = part.end
-				}
-				parts = append(parts, part)
-			}
-			if len(parts) == 0 {
+		if retryRange.intervals != nil {
+			retryRange.trimBefore(firstUnfrozenSlot)
+			if retryRange.intervals != nil && retryRange.intervals.Len() == 0 {
 				continue
-			}
-			if len(parts) == 1 {
-				kept = append(kept, parts[0])
-				continue
-			}
-			retryRange.parts = parts
-			retryRange.start = parts[0].start
-			retryRange.end = parts[len(parts)-1].end
-			if retryRange.partCursor >= len(parts) {
-				retryRange.partCursor = 0
 			}
 			kept = append(kept, retryRange)
 			continue
@@ -707,6 +715,42 @@ func (b *BlobHistoryDownloader) trimRetryRanges(firstUnfrozenSlot uint64) {
 		kept = append(kept, retryRange)
 	}
 	b.retryRanges = kept
+}
+
+func (r *blobRetryRange) trimBefore(floor uint64) {
+	if floor == 0 || r.intervals == nil {
+		return
+	}
+	remove := make([]blobRetryInterval, 0)
+	r.intervals.AscendLessThan(blobRetryInterval{start: floor}, func(interval blobRetryInterval) bool {
+		remove = append(remove, interval)
+		return true
+	})
+	for _, interval := range remove {
+		r.intervals.Delete(interval)
+		removedEnd := min(interval.end, floor-1)
+		removed := removedEnd - interval.start + 1
+		if removed > r.work {
+			r.work = 0
+		} else {
+			r.work -= removed
+		}
+		if interval.end >= floor {
+			interval.start = floor
+			if interval.cursor < interval.start || interval.cursor > interval.end {
+				interval.cursor = interval.end
+			}
+			r.intervals.ReplaceOrInsert(interval)
+		}
+	}
+	if r.intervals.Len() == 1 {
+		interval, _ := r.intervals.Min()
+		*r = blobRetryRange{start: interval.start, end: interval.end, cursor: interval.cursor}
+		return
+	}
+	if r.intervals.Len() > 0 {
+		r.refreshBounds()
+	}
 }
 
 func (b *BlobHistoryDownloader) peersAvailable() bool {

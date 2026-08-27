@@ -19,6 +19,7 @@ package network
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -392,10 +393,8 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
 	downloader.blobStorage = blobStorage
 
-	require.Len(t, downloader.retryRanges, failureCount)
-	for _, retryRange := range downloader.retryRanges {
-		require.Equal(t, retryRange.start, retryRange.end)
-	}
+	require.Len(t, downloader.retryRanges, 1)
+	require.Equal(t, failureCount, downloader.retryRanges[0].intervalCount())
 	for range (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
 		require.NoError(t, downloader.retryFailedRecoveries(0))
 	}
@@ -406,22 +405,24 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 
 func TestBlobHistoryDownloaderRetryRangeOverflowConservesEveryFailure(t *testing.T) {
 	downloader := newBoundaryDownloader(t, 1, 0, 1, &boundaryBlockReader{})
-	for i := range maxBlobRetryRanges + 1 {
-		downloader.addRetrySlot(uint64(i) * 10)
+	for shard := range maxBlobRetryRanges {
+		downloader.addRetrySlot(uint64(shard) << blobRetryShardShift)
 	}
+	downloader.addRetrySlot(1)
 
 	require.Len(t, downloader.retryRanges, maxBlobRetryRanges)
 	require.Equal(t, uint64(0), downloader.retryRanges[0].start)
-	require.Equal(t, uint64(10), downloader.retryRanges[0].end)
-	require.Equal(t, []blobRetryRange{{start: 0, end: 0, cursor: 0}, {start: 10, end: 10, cursor: 10}}, downloader.retryRanges[0].parts)
-	for i := range maxBlobRetryRanges + 1 {
-		slot := uint64(i) * 10
+	require.Equal(t, uint64(1), downloader.retryRanges[0].end)
+	require.Equal(t, uint64(2), downloader.retryRanges[0].workCount())
+	for shard := range maxBlobRetryRanges {
+		slot := uint64(shard) << blobRetryShardShift
 		contained := false
 		for _, retryRange := range downloader.retryRanges {
 			contained = contained || retryRange.contains(slot)
 		}
 		require.Truef(t, contained, "retry slot %d was discarded", slot)
 	}
+	require.True(t, downloader.retryRanges[0].contains(1))
 }
 
 func TestBlobHistoryDownloaderRetryRangeOverflowVisitsOnlySparseFailures(t *testing.T) {
@@ -457,11 +458,63 @@ func TestBlobHistoryDownloaderRetryRangeOverflowVisitsOnlySparseFailures(t *test
 	require.Len(t, seen, failureCount)
 }
 
-func TestBlobHistoryDownloaderRetryRangeMergePreservesAbsorbedCursor(t *testing.T) {
-	left := blobRetryRange{start: 0, end: 9, cursor: 4}
-	right := blobRetryRange{start: 10, end: 20, cursor: 15}
+func TestBlobHistoryDownloaderRetryVisitsMixedDenseAndSparseFailuresWithinOneCycle(t *testing.T) {
+	const denseFailures = 32
+	const sparseFailures = 32
+	ctrl := gomock.NewController(t)
+	blocks := make(map[uint64]*cltypes.SignedBeaconBlock, denseFailures+sparseFailures)
+	reader := &boundaryBlockReader{blocks: blocks}
+	downloader := newBoundaryDownloader(t, 1, 0, 1, reader)
+	addFailure := func(slot uint64) {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+		block.Block.Slot = slot
+		block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+		blocks[slot] = block
+		downloader.addRetrySlot(slot)
+	}
+	for slot := range uint64(denseFailures) {
+		addFailure(slot)
+	}
+	for i := range sparseFailures {
+		addFailure(uint64(i+1) * 1_000_000)
+	}
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), errors.New("temporary read failure")).AnyTimes()
+	downloader.blobStorage = blobStorage
 
-	require.Equal(t, blobRetryRange{start: 0, end: 20, cursor: 15}, mergeBlobRetryRanges(left, right))
+	for range (len(blocks) + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
+		require.NoError(t, downloader.retryFailedRecoveries(0))
+	}
+	seen := make(map[uint64]struct{}, len(reader.slots))
+	for _, slot := range reader.slots {
+		_, failed := blocks[slot]
+		require.Truef(t, failed, "retried synthetic gap slot %d", slot)
+		seen[slot] = struct{}{}
+	}
+	require.Len(t, seen, len(blocks))
+}
+
+func BenchmarkBlobHistoryDownloaderAddSparseRetrySlots(b *testing.B) {
+	for _, failures := range []int{1024, 2048, 4096} {
+		b.Run(fmt.Sprintf("failures_%d", failures), func(b *testing.B) {
+			b.ReportMetric(float64(failures), "failures/op")
+			for b.Loop() {
+				downloader := &BlobHistoryDownloader{}
+				for i := range failures {
+					downloader.addRetrySlot(uint64(i)*1_000_000 + 1)
+				}
+			}
+		})
+	}
+}
+
+func TestBlobHistoryDownloaderRetryRangeCompressesContiguousSlots(t *testing.T) {
+	downloader := &BlobHistoryDownloader{}
+	for slot := range uint64(21) {
+		downloader.addRetrySlot(slot)
+	}
+
+	require.Equal(t, []blobRetryRange{{start: 0, end: 20, cursor: 0}}, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderResolvedRetrySlotsAreRemovedAroundReadFailure(t *testing.T) {
@@ -470,29 +523,31 @@ func TestBlobHistoryDownloaderResolvedRetrySlotsAreRemovedAroundReadFailure(t *t
 	downloader.retryRanges = []blobRetryRange{{start: 0, end: 2, cursor: 1}}
 
 	require.NoError(t, downloader.retryFailedRecoveries(0))
-	require.Equal(t, []uint64{1, 2, 0}, reader.slots)
+	require.ElementsMatch(t, []uint64{0, 1, 2}, reader.slots)
 	require.Equal(t, []blobRetryRange{{start: 2, end: 2, cursor: 2}}, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderInteriorResolveKeepsRetryRangeBound(t *testing.T) {
 	downloader := newBoundaryDownloader(t, 10, 0, 10, &boundaryBlockReader{})
-	downloader.retryRanges = []blobRetryRange{{start: 0, end: 10, cursor: 4}}
+	for slot := range uint64(11) {
+		downloader.addRetrySlot(slot)
+	}
 	for i := 1; i < maxBlobRetryRanges; i++ {
 		slot := uint64(i+1) * 10
-		downloader.retryRanges = append(downloader.retryRanges, blobRetryRange{start: slot, end: slot, cursor: slot})
+		downloader.addRetrySlot(slot)
 	}
 
 	downloader.resolveRetrySlot(5)
 
-	require.Len(t, downloader.retryRanges, maxBlobRetryRanges)
+	require.LessOrEqual(t, len(downloader.retryRanges), maxBlobRetryRanges)
 	for _, retryRange := range downloader.retryRanges {
-		require.False(t, retryRange.start <= 5 && 5 <= retryRange.end)
+		require.False(t, retryRange.contains(5))
 	}
 	for i := range maxBlobRetryRanges + 1 {
 		slot := uint64(i) * 10
 		contained := false
 		for _, retryRange := range downloader.retryRanges {
-			contained = contained || retryRange.start <= slot && slot <= retryRange.end
+			contained = contained || retryRange.contains(slot)
 		}
 		require.Truef(t, contained, "retry slot %d was discarded", slot)
 	}
