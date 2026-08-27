@@ -29,9 +29,17 @@ concurrency:
 
 permissions:
   contents: read
+  # For the reusable changes.yml docs-only detection.
+  pull-requests: read
 
 jobs:
+  # Skips the suites below on docs-only PRs; see changes.yml.
+  changes:
+    uses: ./.github/workflows/changes.yml
+
   gnosis-rpc-integ-tests:
+    needs: [changes]
+    if: needs.changes.outputs.code != 'false'
     runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
     env:
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
