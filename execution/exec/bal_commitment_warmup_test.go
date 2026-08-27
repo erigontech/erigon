@@ -18,8 +18,11 @@ package exec
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -46,6 +49,16 @@ func (tx *commitmentRecordingTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetL
 }
 
 func (*commitmentRecordingTx) Rollback() {}
+
+type commitmentBeginErrorDB struct {
+	kv.RoDB
+	errs []error
+	next atomic.Uint64
+}
+
+func (db *commitmentBeginErrorDB) BeginRo(context.Context) (kv.Tx, error) {
+	return nil, db.errs[db.next.Add(1)-1]
+}
 
 func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	readOnlyAddress := accounts.InternAddress(common.Address{19: 1})
@@ -94,4 +107,24 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 	for _, domain := range tx.domains {
 		require.Equal(t, kv.CommitmentDomain, domain)
 	}
+}
+
+func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
+	firstErr := errors.New("first factory error")
+	secondErr := errors.New("second factory error")
+	db := &commitmentBeginErrorDB{errs: []error{firstErr, secondErr}}
+	bal := types.BlockAccessList{
+		{
+			Address:        accounts.InternAddress(common.Address{19: 1}),
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+		},
+		{
+			Address:        accounts.InternAddress(common.Address{19: 2}),
+			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(2)}},
+		},
+	}
+
+	err := warmBALCommitment(t.Context(), db, bal, 2)
+	require.ErrorIs(t, err, firstErr)
+	require.ErrorIs(t, err, secondErr)
 }

@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -94,22 +93,17 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	log.Info("[warmBAL] commitment warmup started", "keys", len(keys), "workers", workers)
 	started := time.Now()
 
-	var factoryErr error
-	var factoryErrMu sync.Mutex
+	factoryErrs := make(chan error, workers)
 	factory := func(workerCtx context.Context) (commitment.PatriciaContext, func()) {
 		tx, err := db.BeginRo(kv.WithNonBlockingAcquire(workerCtx)) //nolint:gocritic // The returned cleanup owns Rollback.
 		if err != nil {
-			factoryErrMu.Lock()
-			factoryErr = errors.Join(factoryErr, err)
-			factoryErrMu.Unlock()
+			factoryErrs <- err
 			return nil, nil
 		}
 		txTemporal, ok := tx.(kv.TemporalTx)
 		if !ok {
 			tx.Rollback()
-			factoryErrMu.Lock()
-			factoryErr = errors.Join(factoryErr, errors.New("BAL commitment warmup requires a temporal read transaction"))
-			factoryErrMu.Unlock()
+			factoryErrs <- errors.New("BAL commitment warmup requires a temporal read transaction")
 			return nil, nil
 		}
 		return &balCommitmentContext{tx: txTemporal}, tx.Rollback
@@ -136,9 +130,10 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	warmuper.Close()
 	warmuper.DrainPending()
 	warmuper.CloseAndWait()
-	factoryErrMu.Lock()
-	err = errors.Join(err, factoryErr)
-	factoryErrMu.Unlock()
+	close(factoryErrs)
+	for factoryErr := range factoryErrs {
+		err = errors.Join(err, factoryErr)
+	}
 	log.Info("[warmBAL] commitment warmup finished", "keys", len(keys), "workers", workers, "elapsed", time.Since(started), "err", err)
 	return err
 }
