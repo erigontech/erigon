@@ -1,6 +1,6 @@
 ---
 title: "Layer 2 Networks"
-description: "Running Erigon for Optimism and other Layer 2 networks."
+description: "Using Erigon as an L1 provider for Optimism and other Layer 2 networks."
 sidebar_position: 9
 ---
 
