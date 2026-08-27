@@ -561,8 +561,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 }
 
 // handleNewConnection admits or rejects a peer that has just connected, then runs its status
-// handshake. validate is injected so the sequence can be driven without a live handshaker.
-// Reports whether the peer was kept.
+// handshake. Reports whether the peer was kept.
 func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
 	{
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
@@ -602,14 +601,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 }
 
 // exchangeStatus runs one status handshake for peerId and reports whether the peer was kept.
-//
-// Only one handshake per peer runs at a time: a burst of connection events would otherwise
-// start one each, all completing before the failure count could reach the pool's ban
-// threshold. The ban is read inside that serialized section, because a handshake that
-// completed while this event waited may have installed it — and ConnectWithPeer only
-// refuses banned peers on dials we initiate, not on events that arrive anyway.
-// banned is injected so a test can assert that the gate is already held when the ban is read;
-// reading it before admission is the bug this exists to prevent.
+// The ban must be read while the slot is held: a handshake completing meanwhile may install it.
 func (s *Sentinel) exchangeStatus(peerId peer.ID, banned func(peer.ID) bool, validate func() (bool, error), closePeer, dropPeer func(peer.ID)) bool {
 	if !s.handshakeGate.tryAcquire(peerId) {
 		return false
