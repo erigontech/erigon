@@ -70,15 +70,37 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 	// An empty batch writes no file, so it has no slot to lock on; it still records a
 	// zero count row, which is what tells "this block has no blobs" from "unknown".
 	if len(blobSidecars) > 0 {
-		lock := bs.forSlot(blobSidecars[0].SignedBlockHeader.Header.Slot)
-		lock.Lock()
-		for _, blobSidecar := range blobSidecars {
-			if _, err := bs.write(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
-				lock.Unlock()
-				return err
+		var slot uint64
+		for index, sidecar := range blobSidecars {
+			if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+				return errors.New("blob sidecar is missing its signed block header")
+			}
+			if index == 0 {
+				slot = sidecar.SignedBlockHeader.Header.Slot
+				continue
+			}
+			if sidecar.SignedBlockHeader.Header.Slot != slot {
+				return errors.New("blob sidecars span multiple slots")
 			}
 		}
-		lock.Unlock()
+		if !bs.startWrite(slot) {
+			return nil
+		}
+		defer bs.finishWrite()
+		lock := bs.forSlot(slot)
+		lock.Lock()
+		err := func() error {
+			defer lock.Unlock()
+			for _, blobSidecar := range blobSidecars {
+				if _, err := bs.writeAdmitted(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
+					return err
+				}
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
 	}
 	val := make([]byte, 4)
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))

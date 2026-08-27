@@ -42,9 +42,11 @@ import (
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/p2p/enode"
 )
 
 // initTestBeaconConfig installs cfg as the global config if no test has done so
@@ -85,6 +87,40 @@ type savedColumnReadCountingStorage struct {
 	reads atomic.Int32
 }
 
+type blockingBlobWriteStorage struct {
+	blob_storage.BlobStorage
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingBlobWriteStorage) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.BlobSidecar) error {
+	s.once.Do(func() { close(s.entered) })
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.release:
+		return s.BlobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars)
+	}
+}
+
+type postPruneColumnWriteStorage struct {
+	blob_storage.DataColumnStorage
+	pruned atomic.Bool
+	writes atomic.Int32
+	want   int32
+	done   chan struct{}
+	once   sync.Once
+}
+
+func (s *postPruneColumnWriteStorage) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, sidecar *cltypes.DataColumnSidecar) error {
+	err := s.DataColumnStorage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
+	if s.pruned.Load() && s.writes.Add(1) == s.want {
+		s.once.Do(func() { close(s.done) })
+	}
+	return err
+}
+
 func (s *savedColumnReadCountingStorage) GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error) {
 	s.reads.Add(1)
 	return s.DataColumnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
@@ -109,9 +145,13 @@ func (s *writeNotifyingBlobStorage) WriteBlobSidecars(ctx context.Context, block
 }
 
 func recoverableFuluData(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
+	return recoverableFuluDataAtSlot(t, cfg, 100)
+}
+
+func recoverableFuluDataAtSlot(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
-	block.Block.Slot = 100
+	block.Block.Slot = slot
 	blobs := []goethkzg.Blob{{1}, {2}}
 	commitments := make([]goethkzg.KZGCommitment, len(blobs))
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
@@ -257,6 +297,105 @@ func TestPeerDasPruneBelowHandlesQueuedAndActiveRecovery(t *testing.T) {
 	_, _, ok = d.claimBlobRecovery(queuedToken)
 	require.False(t, ok)
 	require.NotContains(t, d.isRecovering, queued.blockRoot)
+}
+
+func TestPeerDasPruneBelowPreventsActiveRecoveryFromRecreatingColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	const slot = uint64(9_999)
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, slot)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	nodeDB, err := enode.OpenDB("")
+	require.NoError(t, err)
+	t.Cleanup(func() { nodeDB.Close() })
+	state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+	state.SetLocalNodeID(enode.NewLocalNode(nodeDB, key))
+	custodyColumns, err := state.GetMyCustodyColumns()
+	require.NoError(t, err)
+	require.NotEmpty(t, custodyColumns)
+
+	columnFS := afero.NewMemMapFs()
+	baseColumnStorage := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	seeded := 0
+	for index, sidecar := range columns {
+		if custodyColumns[uint64(index)] {
+			continue
+		}
+		require.NoError(t, baseColumnStorage.WriteColumnSidecars(t.Context(), root, int64(index), sidecar))
+		seeded++
+		if seeded == int((cfg.NumberOfColumns+1)/2) {
+			break
+		}
+	}
+	require.Equal(t, int((cfg.NumberOfColumns+1)/2), seeded)
+	columnStorage := &postPruneColumnWriteStorage{
+		DataColumnStorage: baseColumnStorage,
+		want:              int32(len(custodyColumns)),
+		done:              make(chan struct{}),
+	}
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobFS := afero.NewMemMapFs()
+	baseBlobStorage := blob_storage.NewBlobStore(db, blobFS)
+	blobStorage := &blockingBlobWriteStorage{
+		BlobStorage: baseBlobStorage,
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		state:             state,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 1),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	require.NoError(t, d.enqueueBlobRecovery(recoverBlobsRequest{slot: slot, blockRoot: root, metadata: metadata}))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+	t.Cleanup(func() {
+		select {
+		case <-blobStorage.release:
+		default:
+			close(blobStorage.release)
+		}
+		cancel()
+		<-workerDone
+	})
+	select {
+	case <-blobStorage.entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("blob recovery did not reach persistence")
+	}
+
+	require.NoError(t, d.PruneBelow(slot+1))
+	columnStorage.pruned.Store(true)
+	close(blobStorage.release)
+	select {
+	case <-columnStorage.done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("blob recovery did not finish its column persistence suffix")
+	}
+
+	freshColumns := blob_storage.NewDataColumnStore(columnFS, &cfg, beaconevents.NewEventEmitter())
+	storedColumns, err := freshColumns.GetSavedColumnIndex(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.Empty(t, storedColumns)
+	blobs, found, err := baseBlobStorage.ReadBlobSidecars(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, blobs, 2)
 }
 
 func TestDownloadColumnsAndRecoverBlobsAdmitsPartialBlobCount(t *testing.T) {

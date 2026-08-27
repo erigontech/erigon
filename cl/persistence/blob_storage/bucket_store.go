@@ -48,7 +48,9 @@ var ErrPruneNotStarted = errors.New("prune did not start")
 // The caller picks the slot granularity. Reads need none: a write lands by rename, so a
 // reader sees the old file or the new one and never a partial. Writes do — see write.
 type bucketStore struct {
-	fs afero.Fs
+	fs         afero.Fs
+	pruneMutex sync.RWMutex
+	pruneFloor uint64
 	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
 	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
 	bucketLocks []sync.RWMutex
@@ -69,6 +71,19 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 	return dir, file
 }
 
+func (b *bucketStore) startWrite(slot uint64) bool {
+	b.pruneMutex.RLock()
+	if slot < b.pruneFloor {
+		b.pruneMutex.RUnlock()
+		return false
+	}
+	return true
+}
+
+func (b *bucketStore) finishWrite() {
+	b.pruneMutex.RUnlock()
+}
+
 // write encodes v onto a temp file and renames it onto the target, so a failure
 // never leaves a partial file where a reader would take it for a complete one.
 // created reports whether the target was absent beforehand.
@@ -77,6 +92,14 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 // (slot, root, idx) would share it and interleave into one file. Callers must
 // hold that slot's lock.
 func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
+	if !b.startWrite(slot) {
+		return false, nil
+	}
+	defer b.finishWrite()
+	return b.writeAdmitted(slot, root, idx, v)
+}
+
+func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
 	l := b.forBucket(slot / subdivisionSlot)
 	l.RLock()
 	defer l.RUnlock()
@@ -205,13 +228,24 @@ func (e *errWriter) Write(p []byte) (int, error) {
 // returns the first failure, so one bucket that cannot be removed — an open file blocks
 // its directory on Windows — does not stop the rest.
 func (b *bucketStore) pruneBelow(slot uint64) error {
-	cutoff := slot / subdivisionSlot
-	if cutoff == 0 {
+	if slot == 0 {
 		return nil
 	}
+	b.pruneMutex.Lock()
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
+		b.pruneMutex.Unlock()
 		return fmt.Errorf("%w: %w", ErrPruneNotStarted, err)
+	}
+	if slot > b.pruneFloor {
+		b.pruneFloor = slot
+	}
+	effectiveFloor := b.pruneFloor
+	b.pruneMutex.Unlock()
+
+	cutoff := effectiveFloor / subdivisionSlot
+	if cutoff == 0 {
+		return nil
 	}
 	var firstErr error
 	for _, entry := range entries {

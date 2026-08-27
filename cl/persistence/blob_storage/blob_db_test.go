@@ -94,6 +94,77 @@ func TestBlobDB(t *testing.T) {
 	require.Equal(t, s2.SignedBlockHeader, sidecars[1].SignedBlockHeader)
 }
 
+func TestBlobStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	existingRoot := common.Hash{1}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), existingRoot, []*cltypes.BlobSidecar{testSidecar(100, 0, 1)}))
+
+	require.NoError(t, bs.PruneBelow(500))
+	require.NoError(t, bs.RemoveBlobSidecars(t.Context(), 100, existingRoot))
+	_, found, err := bs.ReadBlobSidecars(t.Context(), 100, existingRoot)
+	require.NoError(t, err)
+	require.False(t, found, "cleanup removes must still clear the stale commitment row below the write floor")
+
+	lateRoot := common.Hash{2}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), lateRoot, []*cltypes.BlobSidecar{testSidecar(499, 0, 2)}))
+	count, err := bs.KzgCommitmentsCount(t.Context(), lateRoot)
+	require.NoError(t, err)
+	require.Zero(t, count, "a rejected write must not publish a count without files")
+	_, found, err = bs.ReadBlobSidecars(t.Context(), 499, lateRoot)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	boundaryRoot := common.Hash{3}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), boundaryRoot, []*cltypes.BlobSidecar{testSidecar(500, 0, 3)}))
+	_, found, err = bs.ReadBlobSidecars(t.Context(), 500, boundaryRoot)
+	require.NoError(t, err)
+	require.True(t, found, "the floor itself remains writable")
+}
+
+func TestBlobStoreRejectsMixedSlotBatchAcrossPruneFloor(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	require.NoError(t, bs.PruneBelow(500))
+	root := common.Hash{1}
+
+	err := bs.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{
+		testSidecar(500, 0, 1),
+		testSidecar(499, 1, 2),
+	})
+	require.Error(t, err)
+	count, err := bs.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Zero(t, count)
+	for _, slot := range []uint64{499, 500} {
+		for index := range uint64(2) {
+			exists, err := bs.BlobSidecarExists(t.Context(), slot, root, index)
+			require.NoError(t, err)
+			require.False(t, exists)
+		}
+	}
+}
+
+func TestBlobStoreRejectsMissingHeadersBeforeMutation(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	root := common.Hash{1}
+
+	for _, sidecar := range []*cltypes.BlobSidecar{
+		nil,
+		{},
+		{SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{}},
+	} {
+		require.Error(t, bs.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{sidecar}))
+	}
+	count, err := bs.KzgCommitmentsCount(t.Context(), root)
+	require.NoError(t, err)
+	require.Zero(t, count)
+}
+
 type createOrderFs struct {
 	afero.Fs
 	mu      sync.Mutex
