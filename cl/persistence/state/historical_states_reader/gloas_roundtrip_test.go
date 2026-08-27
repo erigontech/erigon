@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -366,9 +366,9 @@ func TestReadCompressedSSZ_ExecutionPayloadAvailability(t *testing.T) {
 	slotsPerHistoricalRoot := int(clparams.MainnetBeaconConfig.SlotsPerHistoricalRoot)
 	bv := solid.NewBitVector(slotsPerHistoricalRoot)
 	// Set a few bits
-	bv.SetBitAt(0, true)
-	bv.SetBitAt(42, true)
-	bv.SetBitAt(slotsPerHistoricalRoot-1, true)
+	require.NoError(t, bv.SetBitAt(0, true))
+	require.NoError(t, bv.SetBitAt(42, true))
+	require.NoError(t, bv.SetBitAt(slotsPerHistoricalRoot-1, true))
 
 	sszData, err := bv.EncodeSSZ(nil)
 	require.NoError(t, err)
@@ -476,7 +476,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	slot := cfg.SlotsPerEpoch // = 32
 
 	// ---- Genesis state (mainnet has real validators) ----
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	numValidators := uint64(genesisState.ValidatorLength())
 
@@ -518,8 +518,8 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 
 	// ExecutionPayloadAvailability bit-vector — seed two non-zero bits
 	expectedEPA := solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot))
-	expectedEPA.SetBitAt(7, true)
-	expectedEPA.SetBitAt(100, true)
+	require.NoError(t, expectedEPA.SetBitAt(7, true))
+	require.NoError(t, expectedEPA.SetBitAt(100, true))
 
 	// BuilderPendingPayments vector — seed a non-zero entry at index 3
 	expectedBPP := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
@@ -624,7 +624,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	compressedPEW := compressRawSSZ(t, pewSSZ)
 
 	// ---- Populate memdb ----
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

@@ -98,7 +98,7 @@ func TestAllToolsDeclareReadOnlyHint(t *testing.T) {
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	require.NoError(t, err)
 	addr := l.Addr().String()
 	require.NoError(t, l.Close())

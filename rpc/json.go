@@ -64,10 +64,6 @@ func (msg *jsonrpcMessage) isNotification() bool {
 	return msg.ID == nil && msg.Method != ""
 }
 
-func (msg *jsonrpcMessage) hasVersion() bool {
-	return msg.Version != ""
-}
-
 func (msg *jsonrpcMessage) isCall() bool {
 	return msg.hasValidID() && msg.Method != ""
 }
@@ -94,7 +90,10 @@ func (msg *jsonrpcMessage) namespace() string {
 }
 
 func (msg *jsonrpcMessage) String() string {
-	b, _ := json.Marshal(msg)
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return ""
+	}
 	return string(b)
 }
 

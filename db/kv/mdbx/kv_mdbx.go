@@ -29,7 +29,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 	"unsafe"
 
@@ -100,7 +99,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
-		pageSize:   DefaultPageSize(),
+		pageSize:   defaultPageSize(),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -159,7 +158,7 @@ func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdb
 func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
 func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
-func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
+func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	if tmpDir != "" {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
@@ -171,20 +170,11 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
-	opts.autoRemove = tb == nil
+	opts.autoRemove = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
-	if tb != nil {
-		opts.dirtySpace = uint64(2 * datasize.MB)
-		// Parallel unit tests pile 16GB VA reservations into the Go race heap
-		// window ("too many address space collisions for -race mode"); cap them.
-		// Benchmarks run sequentially and can need the full map.
-		if _, isBench := tb.(*testing.B); !isBench {
-			opts.mapSize = 1 * datasize.GB
-		}
-	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts
@@ -267,6 +257,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		}
 	}
 
+	requestedPageSize := opts.pageSize
+	if requestedPageSize == 0 {
+		requestedPageSize = defaultPageSize()
+	}
+	var dirtySpace uint64
+
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
 	if !opts.HasFlag(mdbx.Readonly) {
@@ -297,11 +293,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
 		// but we want call all `SetOption` before env.Open(), because:
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
-		pageSize := opts.pageSize
-		if pageSize == 0 {
-			pageSize = DefaultPageSize()
-		}
-		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
 			dirtySpace = opts.dirtySpace
 		} else {
@@ -317,7 +308,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize.Bytes()); err != nil {
+		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/requestedPageSize.Bytes()); err != nil {
 			return nil, err
 		}
 
@@ -341,6 +332,15 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 
 	opts.pageSize = datasize.ByteSize(in.PageSize)
 	opts.mapSize = datasize.ByteSize(in.MapSize)
+
+	// OptTxnDpLimit counts pages, but the budget we want is a byte one. mdbx keeps the pageSize of
+	// an existing db, so a stale limit would scale the dirty-page memory by the size ratio.
+	// Accede must stay lock-free here - SetOption after Open takes the rwtx-lock.
+	if dirtySpace > 0 && opts.pageSize != requestedPageSize && !opts.HasFlag(mdbx.Accede) {
+		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize.Bytes()); err != nil {
+			return nil, fmt.Errorf("%w, label: %s", err, opts.label)
+		}
+	}
 	if opts.label == dbcfg.ChainDB {
 		opts.log.Info("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	} else {

@@ -60,7 +60,9 @@ func (bs *CachingBeaconState) reinitCaches() error {
 	bs.totalActiveBalanceCache = nil
 	bs._refreshActiveBalancesIfNeeded()
 	bs.previousStateRoot = common.Hash{}
-	bs.initCaches()
+	if err := bs.initCaches(); err != nil {
+		return err
+	}
 	if err := bs._updateProposerIndex(); err != nil {
 		return err
 	}

@@ -76,7 +76,6 @@ func (r readerMock) GetTd(common.Hash, uint64) *uint256.Int {
 func (r readerMock) FrozenBlocks() uint64 {
 	return 0
 }
-func (r readerMock) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 // The thing only that changes between normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
@@ -92,7 +91,7 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 
 	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
-	if err != errInvalidDifficulty {
+	if !errors.Is(err, errInvalidDifficulty) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
@@ -114,7 +113,7 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 
 	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
-	if err != errInvalidNonce {
+	if !errors.Is(err, errInvalidNonce) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {

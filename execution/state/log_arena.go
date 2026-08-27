@@ -21,7 +21,6 @@ import (
 	"slices"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -37,8 +36,8 @@ const (
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
 	// Fractions of those, because the pool never shrinks: the whole ceiling would
-	// park 13MB of entries per arena, while a tenth still holds the p99 block of
-	// 1706 logs that a caller resetting per block pools in one go.
+	// park 13MB of entries per arena, while a tenth still holds the ~1700 logs of
+	// a p99 block that a caller resetting per block pools in one go.
 	maxPooledLogEntries = maxLogsPerTxn / 10
 	maxPooledLogBytes   = maxLogBytesPerTxn / 2
 
@@ -49,7 +48,7 @@ const (
 
 	// Slots the arena keeps between resets. The run is a block for a caller that
 	// resets per block, so this is bounded by the memory it costs rather than by
-	// a transaction's budget: 32KB of pointers, holding the p99 block of 1706.
+	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
 	maxRetainedLogSlots = 32 * 1024 / 8
 )
 
@@ -150,14 +149,15 @@ func (a *logArena) revertLast(txIndex int) {
 }
 
 // forTx returns the entries txIndex emitted, owned by the arena. They are held
-// in one run rather than grouped, and a transaction's own are the tail of it,
-// so any other transaction reads as empty.
+// in one run rather than grouped, and a transaction's own are the tail of it, so
+// a transaction newer than the tail reads as empty and an older one panics.
 func (a *logArena) forTx(txIndex int) types.Logs {
 	entries := a.entries
 	i := len(entries)
-	if dbg.AssertEnabled && i > 0 && txIndex < int(entries[i-1].TxIndex) {
+	if i > 0 && txIndex < int(entries[i-1].TxIndex) {
 		// Newer than the tail is a transaction that emitted nothing, which is
-		// how most of them end. Older is a caller reading what it has left.
+		// how most of them end. Older is a caller reading what it has left:
+		// answering empty would read as "emitted no logs", so say so instead.
 		panic(fmt.Sprintf("logs of tx %d asked for, the run has reached tx %d",
 			txIndex, int(entries[i-1].TxIndex)))
 	}

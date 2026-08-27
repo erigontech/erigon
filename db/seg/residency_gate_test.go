@@ -36,7 +36,7 @@ import (
 // regionAround returns the page-aligned mmap slice covering [offset, offset+window)
 // within the getter's data, mirroring what the residency gate probes.
 func regionAround(g *Getter, offset uint64, window int) []byte {
-	full := g.d.mmapHandle1
+	full := g.d._mmapHandle
 	base := int(uintptr(unsafe.Pointer(&g.data[0])) - uintptr(unsafe.Pointer(&full[0])))
 	absStart := base + int(offset)
 	pg := os.Getpagesize()
@@ -45,9 +45,9 @@ func regionAround(g *Getter, offset uint64, window int) []byte {
 	return full[aligned:end]
 }
 
-func TestResidencyGateWarmsOnReset(t *testing.T) {
+func TestResidencyGateUsesBlockingAsyncIOOnReset(t *testing.T) {
 	if !iouring.Available() {
-		t.Skip("io_uring unavailable; the gate's warm path no-ops, so the warmed-page assertion below would fail")
+		t.Skip("io_uring unavailable; blocking async I/O cannot run")
 	}
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "test.kv")
@@ -66,7 +66,7 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 	require.NoError(t, err)
 	defer d.Close()
 
-	// Collect (offset, word) pairs; iterating warms the whole file.
+	// Collect (offset, word) pairs; iterating reads the whole file.
 	type ent struct {
 		off uint64
 		w   []byte
@@ -81,13 +81,13 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 	require.Greater(t, len(ents), n/2)
 	pick := ents[len(ents)*3/4]
 
-	// Probe just the word's start page; the gate warms at least this,
+	// Probe just the word's start page; the gate reads at least this,
 	// independent of the configured window size.
 	window := os.Getpagesize()
 	evict := func() {
-		require.NoError(t, unix.Madvise(d.mmapHandle1, unix.MADV_DONTNEED))
+		require.NoError(t, unix.Madvise(d._mmapHandle, unix.MADV_DONTNEED))
 		require.NoError(t, d.f.Sync())
-		require.NoError(t, unix.Fadvise(int(d.f.Fd()), 0, int64(len(d.mmapHandle1)), unix.FADV_DONTNEED))
+		require.NoError(t, unix.Fadvise(int(d.f.Fd()), 0, int64(len(d._mmapHandle)), unix.FADV_DONTNEED))
 	}
 	isResident := func(g *Getter) bool {
 		r, err := mmap.Resident(regionAround(g, pick.off, window))
@@ -95,21 +95,47 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 		return r
 	}
 
-	// Ungated getter: Reset must not warm anything.
+	// Ungated getter: Reset must not read the page.
 	evict()
 	gu := d.MakeGetter()
 	require.False(t, isResident(gu), "region must be cold right after eviction")
 	gu.Reset(pick.off)
-	require.False(t, isResident(gu), "ungated Reset must not warm the page")
+	require.False(t, isResident(gu), "ungated Reset must not read the page")
 
-	// Gated getter: Reset warms the word's pages before the mmap touch.
+	// Gated getter: Reset reads the word's pages before the mmap access.
 	evict()
 	gg := d.MakeGetter()
 	gg.EnableResidencyGate()
 	require.False(t, isResident(gg), "region must be cold right after eviction")
 	gg.Reset(pick.off)
-	require.True(t, isResident(gg), "gated Reset should warm the word's pages")
+	require.True(t, isResident(gg), "gated Reset should read the word's pages")
 
 	w, _ := gg.Next(nil)
 	require.Equal(t, pick.w, w, "gated read must still return the correct word")
+}
+
+// Every reader of one file shares one bitmap and one rescan goroutine, including a
+// SequentialView that maps the file a second time.
+func TestResidencyBitmapIsPerFile(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	rb := d.residencyBitmap()
+	require.NotNil(t, rb)
+	require.Same(t, rb, d.residencyBitmap(), "a second call must not build another bitmap")
+
+	v, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	defer v.Close()
+	require.Same(t, rb, v.MakeGetter().d.residencyBitmap(), "a view of the same file shares it")
+}
+
+// A closed Decompressor reports no bitmap instead of building one over the mapping
+// Close just released.
+func TestResidencyBitmapNilAfterClose(t *testing.T) {
+	d := prepareLoremDict(t)
+	require.NotNil(t, d.residencyBitmap())
+
+	d.Close()
+	require.Nil(t, d.residencyBitmap(), "no mapping left to probe")
 }

@@ -64,7 +64,7 @@ func ValidateAATransaction(
 	}
 	validationGasUsed = preTxCost
 
-	if err := chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
+	if err := chargeGas(header, tx, gasPool, ibs); err != nil {
 		return nil, 0, err
 	}
 
@@ -181,7 +181,7 @@ func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraB
 	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
-			"error getting code for sender:%s err:%s",
+			"error getting code for sender:%s err:%w",
 			tx.SenderAddress.String(), err,
 		))
 	}
@@ -317,7 +317,11 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	totalGasLimit, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: RIP-7560 gas limits sum overflows uint64", protocol.ErrGasLimitReached)
+	}
+	gasPool.AddGas(totalGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }

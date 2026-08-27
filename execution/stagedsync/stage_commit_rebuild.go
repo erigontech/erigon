@@ -34,8 +34,6 @@ type TrieCfg struct {
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
 	blockReader       dbservices.FullBlockReader
-
-	agg *state.Aggregator
 }
 
 func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader dbservices.FullBlockReader) TrieCfg {

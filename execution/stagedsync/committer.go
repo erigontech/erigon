@@ -9,12 +9,15 @@ import (
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -82,8 +85,13 @@ type commitmentCalculator struct {
 	// execLoop or apply loop. Only this goroutine reads/writes it.
 	updates *commitment.Updates
 
+	// spare is the other half of the compute buffer ring. handOffUpdates gives
+	// updates to the commitment context and rotates this one in; the context
+	// drains its buffer synchronously, so by the next rotation it is idle.
+	spare *commitment.Updates
+
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
-	// instead of reallocated — avoids a fresh prefix-trie arena (16k-node slab) each block.
+	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
 	balUpdates *commitment.Updates
 
 	// state accumulates account/storage values across TX writes.
@@ -99,6 +107,12 @@ type commitmentCalculator struct {
 	// roTx is a persistent read-only transaction for domain reads.
 	// Opened at start, lives for the calculator's lifetime.
 	roTx kv.TemporalTx
+
+	// commitProgress holds the most recent CommitProgress the trie reported,
+	// and firstCommitAtNs the wall time of the first round. The parallel
+	// executor reads both to log commitment stats on its own ticker.
+	commitProgress  atomic.Pointer[commitment.CommitProgress]
+	firstCommitAtNs atomic.Int64
 
 	// lastTarget tracks the most recent block boundary so that
 	// computeAndPublish knows which block to compute for.
@@ -193,6 +207,60 @@ type commitmentCalculator struct {
 
 	wg   sync.WaitGroup
 	done chan struct{}
+
+	// processedThrough is the highest block whose blockResult the calculator
+	// has fully handled (computed or merely accumulated). processedWake is
+	// closed and replaced on every advance so waiters can select on it.
+	processedMu      sync.Mutex
+	processedThrough uint64
+	processedWake    chan struct{}
+}
+
+// markProcessed publishes that blockNum's blockResult is fully handled. Only
+// the COMMITMENT_AFTER_EXEC barrier reads this, so the default path never pays
+// for the lock and the replacement channel.
+func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
+	cc.processedMu.Lock()
+	defer cc.processedMu.Unlock()
+	if blockNum <= cc.processedThrough {
+		return
+	}
+	cc.processedThrough = blockNum
+	close(cc.processedWake)
+	cc.processedWake = make(chan struct{})
+}
+
+// WaitProcessed blocks until the calculator has handled blockNum, the
+// calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
+// barrier: it serializes block-end handling against exec, not the mid-block
+// step-edge computes.
+//
+// A stopped calculator returns nil even when blockNum was never handled. That is
+// only safe because the sole caller is the exec loop, whose own defer closes
+// cc.in and so cannot still be waiting; a second caller would need to tell that
+// case apart.
+func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
+	if cc.in == nil {
+		// Exec-only (DISCARD_COMMITMENT): loop() never runs, so nothing ever
+		// marks a block processed and every escape below is unreachable.
+		return nil
+	}
+	for {
+		cc.processedMu.Lock()
+		reached := cc.processedThrough >= blockNum
+		wake := cc.processedWake
+		cc.processedMu.Unlock()
+		if reached {
+			return nil
+		}
+		select {
+		case <-wake:
+		case <-cc.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func newCommitmentCalculator(
@@ -209,12 +277,23 @@ func newCommitmentCalculator(
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
+	// This calculator folds block N while the exec loop already writes N+1 into
+	// sd.mem; both settings below are what keep that read-safe.
+	if !doms.InMemHistoryReads() {
+		return nil, errors.New("commitmentCalculator: in-mem history reads must be enabled")
+	}
+	if !doms.InlineTouchKeyDisabled() {
+		return nil, errors.New("commitmentCalculator: inline TouchKey must be disabled")
+	}
+
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
+	spareUpdates := sdCtxUpdates.NewEmpty()
 	if sdCtxUpdates.Mode() != commitment.ModeParallel {
 		calcUpdates.SetMode(commitment.ModeUpdate)
+		spareUpdates.SetMode(commitment.ModeUpdate)
 	}
 
 	// Open a persistent read-only TX for lazy-loading state from the domain.
@@ -244,6 +323,7 @@ func newCommitmentCalculator(
 		logPrefix:            logPrefix,
 		logger:               logger,
 		updates:              calcUpdates,
+		spare:                spareUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
@@ -257,7 +337,36 @@ func newCommitmentCalculator(
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
+		processedWake:        make(chan struct{}),
 	}, nil
+}
+
+// onCommitProgress is handed to ComputeCommitment so the trie's counters
+// reach the executor. Called from the calculator goroutine.
+func (cc *commitmentCalculator) onCommitProgress(p *commitment.CommitProgress) {
+	if p == nil {
+		return
+	}
+	cc.commitProgress.Store(p)
+	cc.firstCommitAtNs.CompareAndSwap(0, time.Now().UnixNano())
+}
+
+// LastCommitProgress returns the most recent round's counters, or the zero
+// value if no round has completed.
+func (cc *commitmentCalculator) LastCommitProgress() commitment.CommitProgress {
+	if p := cc.commitProgress.Load(); p != nil {
+		return *p
+	}
+	return commitment.CommitProgress{}
+}
+
+// FirstCommitAt reports when the first round ran; zero if none has.
+func (cc *commitmentCalculator) FirstCommitAt() time.Time {
+	ns := cc.firstCommitAtNs.Load()
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }
 
 func (cc *commitmentCalculator) Start(ctx context.Context) {
@@ -461,6 +570,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		delete(cc.pending, blockNum)
 		delete(cc.computedAhead, blockNum)
 		delete(cc.balRoots, blockNum)
+		if dbg.CommitmentAfterExec {
+			// Before the compute-ahead: that work is block n+1's, and overlapping
+			// it with exec is the whole point of computing ahead. Holding the
+			// barrier through it would serialize what the flag exists to measure.
+			cc.markProcessed(blockNum)
+		}
 		cc.maybeComputeAhead(ctx, blockNum+1)
 
 	case *commitComputeRequest:
@@ -698,9 +813,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
-	incUpdates := cc.updates
-	cc.updates = cc.updates.NewEmpty()
-	rh, err := cc.computeRootFromUpdates(ctx, target, incUpdates, cc.asOfReader)
+	rh, err := cc.computeRootFromUpdates(ctx, target, cc.handOffUpdates(), cc.asOfReader)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
 		return
@@ -771,6 +884,15 @@ type computeMode struct {
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
+// handOffUpdates returns the filled buffer for the caller to compute against and
+// rotates the spare into cc.updates.
+func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
+	filled := cc.updates
+	cc.updates, cc.spare = cc.spare, filled
+	cc.updates.Reset()
+	return filled
+}
+
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
@@ -785,8 +907,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.updates)
-	cc.updates = cc.updates.NewEmpty()
+	sdCtx.SetUpdates(cc.handOffUpdates())
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
@@ -830,7 +951,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	defer cc.doms.UnlockChangesetAccumulator()
 	defer cc.doms.DetachChangesetAccumulatorLocked()()
 
-	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -952,7 +1073,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	defer cc.doms.UnlockChangesetAccumulator()
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
 	if cs == nil {
-		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress)
 	}
 	// LOAD-BEARING swap under the outer lock (already taken above). The
 	// swap below mutates the global current-accumulator pointer; the
@@ -964,8 +1085,8 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	//
 	// Inside the lock we must use the *Locked variants — the public
 	// counterparts re-acquire the same Mutex and would self-deadlock.
-	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
-	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	defer cc.doms.SwapCommitmentDiffLocked(cs)()
+	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
@@ -973,14 +1094,10 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd    *execctx.SharedDomains
-	roTx  kv.TemporalTx
-	txNum uint64
-	// workerCtx, when non-nil, carries this worker's lock-free metrics
-	// accumulator; the CommitmentDomain read routes through GetLatestContext so
-	// a concurrent trie-warmup worker doesn't write the shared main accumulator
-	// (a race) or take the global metrics lock. Nil on the main reader.
-	workerCtx context.Context
+	sd     *execctx.SharedDomains
+	roTx   kv.TemporalTx
+	getter execctxapi.StateGetter
+	txNum  uint64
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -992,8 +1109,8 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		if r.workerCtx != nil {
-			enc, step, err = r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
+		if r.getter != nil {
+			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
 		} else {
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
@@ -1032,8 +1149,9 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+	getterOpts := execctxapi.StateGetterOptions{}
+	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
+		getterOpts = getterOpts.WithMetrics(metrics)
+	}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
 }
-
-// Keep imports used.
-var _ = commitment.CommitProgress{}
