@@ -189,11 +189,12 @@ func readField(m *mmapBytesReader) ([]byte, error) {
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
+	// Wait first: the async flush assigns p.file from its own goroutine, so
+	// reading it before joining both races and can leak a file created after.
+	p.Wait()
 	if p.file == nil {
 		return
 	}
-
-	p.Wait()
 
 	if p.mmapData != nil {
 		_ = p.mmapData.Unmap()
