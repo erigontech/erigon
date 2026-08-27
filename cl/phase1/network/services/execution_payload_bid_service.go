@@ -41,8 +41,10 @@ import (
 )
 
 type seenBidKey struct {
-	builderIndex uint64
-	slot         uint64
+	slot            uint64
+	parentBlockHash common.Hash
+	parentBlockRoot common.Hash
+	builderIndex    uint64
 }
 
 type seenBidStore struct {
@@ -82,8 +84,10 @@ func (s *seenBidStore) PruneExpired(clock eth_clock.EthereumClock, beaconCfg *cl
 
 func newSeenBidKey(bid *cltypes.ExecutionPayloadBid) seenBidKey {
 	return seenBidKey{
-		builderIndex: bid.BuilderIndex,
-		slot:         bid.Slot,
+		slot:            bid.Slot,
+		parentBlockHash: bid.ParentBlockHash,
+		parentBlockRoot: bid.ParentBlockRoot,
+		builderIndex:    bid.BuilderIndex,
 	}
 }
 

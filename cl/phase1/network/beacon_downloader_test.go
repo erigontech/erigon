@@ -1037,10 +1037,10 @@ func TestFetchEnvelopesFromBeaconAPIUsesRootAndRejectsIdentityMismatch(t *testin
 	defer server.Close()
 
 	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-	fetched := fetchEnvelopesFromBeaconAPI(t.Context(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{blockRoot}, received, cfg)
-	require.Zero(t, fetched)
+	result := fetchEnvelopesFromBeaconAPI(t.Context(), server.URL, []*cltypes.SignedBeaconBlock{block}, [][32]byte{blockRoot}, received, cfg)
+	require.Zero(t, result.fetched)
 	require.Empty(t, received)
-	require.Equal(t, "/eth/v1/beacon/execution_payload_envelope/0x"+common.Hash(blockRoot).Hex()[2:], <-requestedPath)
+	require.Equal(t, "/eth/v1/beacon/execution_payload_envelopes/0x"+common.Hash(blockRoot).Hex()[2:], <-requestedPath)
 }
 
 func TestForwardBeaconDownloaderHTTPFailureWithoutP2PReturnsSafely(t *testing.T) {
