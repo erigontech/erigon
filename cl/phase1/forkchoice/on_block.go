@@ -608,19 +608,29 @@ func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, block
 	if pending == nil || pending.Message != appliedEnvelope {
 		pending = &cltypes.SignedExecutionPayloadEnvelope{Message: appliedEnvelope}
 	}
-	indexEnvelope, notify, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, blockRoot, pending, envelopeApplied)
+	token, tracked, err := f.claimEnvelopeIndexRepair(blockRoot, pending, envelopeApplied)
+	if err != nil {
+		log.Warn("OnBlock: failed to prepare execution payload index repair", "blockRoot", blockRoot, "local", local, "err", err)
+		return
+	}
+	indexEnvelope, notify, err := f.ensureClaimedEnvelopeIndexRepair(ctx, blockRoot, token, tracked, pending, envelopeApplied)
 	if err == nil {
+		if tracked {
+			f.envelopeIndexRepairs.complete(token)
+		}
 		if notify {
 			f.emitExecutionPayloadIntegrationEvents(blockRoot, indexEnvelope)
 		}
 		return
 	}
-	if local {
-		f.pendingLocalSelfBuildEnvelopes.Add(blockRoot, indexEnvelope)
-	} else {
-		f.pendingEnvelopes.Add(blockRoot, indexEnvelope)
+	if !tracked {
+		if local {
+			f.pendingLocalSelfBuildEnvelopes.Add(blockRoot, indexEnvelope)
+		} else {
+			f.pendingEnvelopes.Add(blockRoot, indexEnvelope)
+		}
 	}
-	log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "err", err)
+	log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) {
@@ -652,6 +662,42 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 				return
 			}
 		}
+	}
+}
+
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
+	for _, repair := range f.envelopeIndexRepairs.repairs() {
+		if limit <= 0 || ctx.Err() != nil {
+			return
+		}
+		persisted, readErr := f.forkGraph.ReadEnvelopeFromDisk(repair.root)
+		if !repair.valuesKnown {
+			if readErr != nil || persisted == nil || persisted.Message == nil || persisted.Message.Payload == nil {
+				if readErr == nil {
+					readErr = errors.New("persisted execution payload envelope is incomplete")
+				}
+				if f.forkGraph.HasEnvelope(repair.root) {
+					f.envelopeIndexRepairs.retryFailed(repair)
+				} else {
+					f.envelopeIndexRepairs.complete(repair)
+				}
+				log.Warn("Failed to load execution payload envelope index repair values", "blockRoot", repair.root, "err", readErr)
+				limit--
+				continue
+			}
+			repair = f.envelopeIndexRepairs.setValues(repair, persisted.Message.Payload.BlockNumber, persisted.Message.Payload.BlockHash)
+		}
+		_, notify, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, repair.root, envelopeForIndexRepair(repair), true)
+		if err != nil {
+			f.envelopeIndexRepairs.retryFailed(repair)
+			log.Warn("Failed to repair execution payload envelope indices", "blockRoot", repair.root, "err", err)
+		} else {
+			f.envelopeIndexRepairs.complete(repair)
+			if notify && readErr == nil && persisted != nil && persisted.Message != nil && persisted.Message.Payload != nil {
+				f.emitExecutionPayloadIntegrationEvents(repair.root, persisted)
+			}
+		}
+		limit--
 	}
 }
 

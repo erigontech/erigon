@@ -61,6 +61,74 @@ var (
 	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
 )
 
+func (f *ForkChoiceStore) reserveEnvelopeIndexPersistence(root common.Hash) (envelopeIndexRepairToken, bool, error) {
+	if f.db == nil {
+		return envelopeIndexRepairToken{}, false, nil
+	}
+	token, ok := f.envelopeIndexRepairs.reserve(root)
+	if !ok {
+		return envelopeIndexRepairToken{}, false, fmt.Errorf("%w: execution payload envelope index repair backlog is full", ErrExecutionPayloadEnvelopePersistenceFailed)
+	}
+	return token, true, nil
+}
+
+func (f *ForkChoiceStore) claimEnvelopeIndexRepair(root common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (envelopeIndexRepairToken, bool, error) {
+	if f.db == nil || (!applied && !f.forkGraph.HasEnvelope(root)) {
+		return envelopeIndexRepairToken{}, false, nil
+	}
+	token, ok := f.envelopeIndexRepairs.claim(root)
+	if !ok {
+		return envelopeIndexRepairToken{}, false, fmt.Errorf("%w: execution payload envelope index repair backlog is full", ErrExecutionPayloadEnvelopePersistenceFailed)
+	}
+	if !token.valuesKnown {
+		if !applied {
+			var err error
+			signedEnvelope, err = f.forkGraph.ReadEnvelopeFromDisk(root)
+			if err != nil {
+				if !f.forkGraph.HasEnvelope(root) {
+					f.envelopeIndexRepairs.complete(token)
+				}
+				return token, true, err
+			}
+		}
+		token = f.captureEnvelopeIndexRepairValues(token, signedEnvelope)
+		if !token.valuesKnown {
+			if !f.forkGraph.HasEnvelope(root) {
+				f.envelopeIndexRepairs.complete(token)
+			}
+			return token, true, errors.New("persisted execution payload envelope is incomplete")
+		}
+	}
+	return token, true, nil
+}
+
+func (f *ForkChoiceStore) captureEnvelopeIndexRepairValues(token envelopeIndexRepairToken, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) envelopeIndexRepairToken {
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
+		return token
+	}
+	return f.envelopeIndexRepairs.setValues(token, signedEnvelope.Message.Payload.BlockNumber, signedEnvelope.Message.Payload.BlockHash)
+}
+
+func envelopeForIndexRepair(token envelopeIndexRepairToken) *cltypes.SignedExecutionPayloadEnvelope {
+	return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		Payload: &cltypes.Eth1Block{BlockNumber: token.blockNumber, BlockHash: token.blockHash},
+	}}
+}
+
+func (f *ForkChoiceStore) ensureClaimedEnvelopeIndexRepair(
+	ctx context.Context,
+	blockRoot common.Hash,
+	token envelopeIndexRepairToken,
+	tracked bool,
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	applied bool,
+) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
+	if tracked && token.valuesKnown {
+		return f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, token.root, envelopeForIndexRepair(token), true)
+	}
+	return f.ensureExecutionPayloadEnvelopeIndices(ctx, blockRoot, signedEnvelope, applied)
+}
+
 // validateEnvelopeAgainstBlock validates the envelope against the block and state.
 // This includes:
 //   - bid matching (slot, builder_index, block_hash)
@@ -529,9 +597,20 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 		}
 	}
 
+	indexRepairToken, indexRepairReserved, err := f.reserveEnvelopeIndexPersistence(common.Hash(beaconBlockRoot))
+	if err != nil {
+		return false, err
+	}
+	if indexRepairReserved {
+		defer f.envelopeIndexRepairs.release(indexRepairToken)
+	}
+
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
+	}
+	if indexRepairReserved {
+		f.envelopeIndexRepairs.persisted(indexRepairToken, envelope.Payload.BlockNumber, envelope.Payload.BlockHash)
 	}
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
@@ -665,9 +744,24 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	}
 
 	f.mu.Lock()
-	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
-		f.mu.Unlock()
-		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
+	applied := false
+	if !f.forkGraph.HasEnvelope(blockRoot) {
+		token, reserved, err := f.reserveEnvelopeIndexPersistence(blockRoot)
+		if err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("StoreAnchorEnvelope: %w", err)
+		}
+		if reserved {
+			defer f.envelopeIndexRepairs.release(token)
+		}
+		if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
+			f.mu.Unlock()
+			return fmt.Errorf("%w: StoreAnchorEnvelope failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
+		}
+		if reserved {
+			f.envelopeIndexRepairs.persisted(token, envelope.Payload.BlockNumber, envelope.Payload.BlockHash)
+		}
+		applied = true
 	}
 	if f.engine == nil {
 		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
@@ -680,14 +774,22 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.mu.Unlock()
 
-	if f.db != nil {
-		ctx := context.Background()
-		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, envelope)
-		}); err != nil {
-			f.pendingEnvelopes.Add(blockRoot, signedEnvelope)
-			return fmt.Errorf("StoreAnchorEnvelope: failed to write indices: %w", err)
+	token, tracked, err := f.claimEnvelopeIndexRepair(blockRoot, signedEnvelope, applied)
+	if err != nil {
+		if tracked {
+			return fmt.Errorf("%w: StoreAnchorEnvelope failed to load persisted index values: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
 		}
+		return fmt.Errorf("StoreAnchorEnvelope: %w", err)
+	}
+	indexEnvelope, _, err := f.ensureClaimedEnvelopeIndexRepair(context.Background(), blockRoot, token, tracked, signedEnvelope, applied)
+	if tracked {
+		token = f.captureEnvelopeIndexRepairValues(token, indexEnvelope)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: StoreAnchorEnvelope failed to write indices: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
+	}
+	if tracked {
+		f.envelopeIndexRepairs.complete(token)
 	}
 
 	return nil
@@ -732,10 +834,25 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 		}
 		return err
 	}
-	indexEnvelope, notify, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)
+	token, tracked, err := f.claimEnvelopeIndexRepair(common.Hash(beaconBlockRoot), signedEnvelope, applied)
 	if err != nil {
-		f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
+		if tracked {
+			return fmt.Errorf("%w: OnExecutionPayload failed to load persisted index values: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
+		}
+		return err
+	}
+	indexEnvelope, notify, err := f.ensureClaimedEnvelopeIndexRepair(ctx, common.Hash(beaconBlockRoot), token, tracked, signedEnvelope, applied)
+	if tracked {
+		token = f.captureEnvelopeIndexRepairValues(token, indexEnvelope)
+	}
+	if err != nil {
+		if !tracked {
+			f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
+		}
 		return fmt.Errorf("%w: OnExecutionPayload: failed to write execution payload indices: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
+	}
+	if tracked {
+		f.envelopeIndexRepairs.complete(token)
 	}
 	if notify {
 		f.emitExecutionPayloadIntegrationEvents(common.Hash(beaconBlockRoot), indexEnvelope)
@@ -811,10 +928,25 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 		}
 		return err
 	}
-	indexEnvelope, notify, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)
+	token, tracked, err := f.claimEnvelopeIndexRepair(common.Hash(beaconBlockRoot), signedEnvelope, applied)
 	if err != nil {
-		f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
+		if tracked {
+			return fmt.Errorf("%w: ApplyLocalSelfBuildEnvelope failed to load persisted index values: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
+		}
+		return err
+	}
+	indexEnvelope, notify, err := f.ensureClaimedEnvelopeIndexRepair(ctx, common.Hash(beaconBlockRoot), token, tracked, signedEnvelope, applied)
+	if tracked {
+		token = f.captureEnvelopeIndexRepairValues(token, indexEnvelope)
+	}
+	if err != nil {
+		if !tracked {
+			f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
+		}
 		return fmt.Errorf("%w: ApplyLocalSelfBuildEnvelope failed to write execution payload indices: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
+	}
+	if tracked {
+		f.envelopeIndexRepairs.complete(token)
 	}
 	if notify {
 		f.emitExecutionPayloadIntegrationEvents(common.Hash(beaconBlockRoot), indexEnvelope)
@@ -1075,8 +1207,18 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		}
 	}
 
+	indexRepairToken, indexRepairReserved, err := f.reserveEnvelopeIndexPersistence(common.Hash(beaconBlockRoot))
+	if err != nil {
+		return false, err
+	}
+	if indexRepairReserved {
+		defer f.envelopeIndexRepairs.release(indexRepairToken)
+	}
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
+		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
+	}
+	if indexRepairReserved {
+		f.envelopeIndexRepairs.persisted(indexRepairToken, envelope.Payload.BlockNumber, envelope.Payload.BlockHash)
 	}
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)

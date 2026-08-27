@@ -211,6 +211,7 @@ type ForkChoiceStore struct {
 	payloadValidationOnce       sync.Once
 	payloadValidationAdmission  chan struct{}
 	envelopeIndexWrites         sync.Map
+	envelopeIndexRepairs        envelopeIndexRepairTracker
 	executionPayloadFirstSeenMu sync.Mutex
 	executionPayloadFirstSeen   map[common.Hash]executionPayloadArrival
 	pendingEnvelopeArrivalOnce  sync.Once

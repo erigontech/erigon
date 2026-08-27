@@ -605,6 +605,25 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadServiceIgnoresLocalPersistenceFailures(t *testing.T) {
+	for _, processErr := range []error{
+		forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed,
+		forkchoice.ErrExecutionPayloadEnvelopeIndicesPending,
+	} {
+		t.Run(processErr.Error(), func(t *testing.T) {
+			service, fcu := setupExecutionPayloadService(t)
+			blockRoot := common.HexToHash("0x1234")
+			fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+			fcu.FinalizedSlotVal = 50
+			fcu.OnExecutionPayloadErr = processErr
+
+			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+
+			require.ErrorIs(t, err, ErrIgnore)
+		})
+	}
+}
+
 func TestExecutionPayloadServiceDifferentBuildersSameBlock(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 
