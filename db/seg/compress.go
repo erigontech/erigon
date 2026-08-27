@@ -150,10 +150,6 @@ type Timings struct {
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
-	if cfg.MaxPatternLen > etl.MaxKeyLen {
-		// patterns become etl keys in extractPatternsInSuperstrings
-		return nil, fmt.Errorf("MaxPatternLen %d exceeds %d", cfg.MaxPatternLen, etl.MaxKeyLen)
-	}
 	workers := cfg.Workers
 	dir2.MustExist(tmpDir)
 	_, fileName := filepath.Split(outputFile)

@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1308,7 +1309,7 @@ func BenchmarkSortableBufferRead(b *testing.B) {
 				buf.Put(key, val)
 			}
 			for b.Loop() {
-				buf.Sort() // puts the read cursor back at the first entry
+				buf.Rewind()
 				for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 				}
 			}
@@ -1450,7 +1451,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 			b.Run(name+"/Next", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					buf.Sort() // puts the read cursor back at the first entry
+					buf.Rewind()
 					p := &memoryDataProvider{buffer: buf}
 					for {
 						_, _, err := p.Next()
@@ -1467,7 +1468,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 			b.Run(name+"/Buffer", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					buf.Sort() // puts the read cursor back at the first entry
+					buf.Rewind()
 					for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 					}
 				}
@@ -1696,9 +1697,11 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	require.Equal(t, []byte("reused"), got[0].value)
 }
 
-// TestChunkSizeFor: the size is computed in int, so an entry past what an
-// int32 holds does not wrap into a pooled chunk.
+// TestChunkSizeFor: a chunk's entTop is an int32, so the size has to fit one.
+// n is bounded before the rounding, which would otherwise wrap and come back
+// small enough to pass for a pooled chunk.
 func TestChunkSizeFor(t *testing.T) {
+	const biggest = math.MaxInt32 - entryLocSize - entryLocAlign
 	for _, tc := range []struct {
 		name string
 		n    int
@@ -1707,10 +1710,18 @@ func TestChunkSizeFor(t *testing.T) {
 		{"empty", 0, dataChunkSize},
 		{"fills a chunk", dataChunkSize - entryLocSize, dataChunkSize},
 		{"one byte over", dataChunkSize - entryLocSize + 1, dataChunkSize + entryLocSize},
-		{"two gigabytes", 1 << 31, 1<<31 + entryLocSize},
+		{"largest that fits", biggest, (biggest + entryLocSize + entryLocAlign - 1) &^ (entryLocAlign - 1)},
+		{"one past", biggest + 1, 0},
+		{"two gigabytes", 1 << 31, 0},
+		{"maxint", math.MaxInt, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.size, chunkSizeFor(tc.n))
+			got := chunkSizeFor(tc.n)
+			require.Equal(t, tc.size, got)
+			require.LessOrEqual(t, got, math.MaxInt32, "a chunk must fit entTop")
+			// entries() views the chunk tail as []entryLoc through
+			// unsafe.Slice, so every size it can hand out must be aligned.
+			require.Zero(t, got%entryLocAlign, "chunk size must fit whole index slots")
 		})
 	}
 }
@@ -1829,18 +1840,18 @@ func TestSortableBufferChunkBoundary(t *testing.T) {
 func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
-	require.Panics(t, func() { buf.Put(make([]byte, MaxKeyLen+1), []byte("v")) })
+	require.Panics(t, func() { buf.Put(make([]byte, maxKeyLen+1), []byte("v")) })
 
-	// MaxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
-	buf.Put(make([]byte, MaxKeyLen), []byte("v"))
+	// maxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
+	buf.Put(make([]byte, maxKeyLen), []byte("v"))
 	buf.Put([]byte{0x01}, make([]byte, dataChunkSize+7))
 	buf.Put(nil, nil)
 	require.Equal(t, 3, buf.Len())
 
-	// Sorted: the nil key, then the all-zero key of MaxKeyLen, then 0x01.
+	// Sorted: the nil key, then the all-zero key of maxKeyLen, then 0x01.
 	buf.Sort()
 	got := drainBuffer(buf)
-	require.Len(t, got[1].key, MaxKeyLen)
+	require.Len(t, got[1].key, maxKeyLen)
 	require.Nil(t, got[0].key)
 }
 
@@ -1974,7 +1985,7 @@ func TestSortableBufferMergesChunks(t *testing.T) {
 				require.Equal(t, uint64(i), binary.BigEndian.Uint64(e.value), "entry %d", i) //nolint:gosec
 			}
 			// a second pass must restart cleanly
-			buf.Sort()
+			buf.Rewind()
 			binary.BigEndian.PutUint64(key, 0)
 			k, _, ok := buf.Next()
 			require.True(t, ok)
@@ -2180,14 +2191,14 @@ func TestSortableBufferReadIsAllocFree(t *testing.T) {
 
 	got := 0
 	n := testing.AllocsPerRun(3, func() {
-		buf.Sort()
+		buf.Rewind()
 		got = 0
 		for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 			got++
 		}
 	})
 	require.Equal(t, count, got)
-	require.Zero(t, n, "Sort and a full read must not allocate")
+	require.Zero(t, n, "Rewind and a full read must not allocate")
 }
 
 // TestMapBufferSortIsIdempotent: sortAndFlush calls Sort and then Write, and
@@ -2243,4 +2254,42 @@ func TestMapBufferPreallocClearsState(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBufferSortDoesNotRewind: Sort orders, Rewind positions. Conflating them
+// is what let Write silently consume a read and let a Sort mid-read restart it.
+func TestBufferSortDoesNotRewind(t *testing.T) {
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			for _, k := range []byte{3, 1, 2} {
+				buf.Put([]byte{k}, []byte{k})
+			}
+			buf.Sort()
+			k, _, ok := buf.Next()
+			require.True(t, ok)
+			require.Equal(t, []byte{1}, k)
+
+			buf.Sort() // already sorted: must not move the cursor
+			k, _, ok = buf.Next()
+			require.True(t, ok)
+			require.Equal(t, []byte{2}, k, "Sort moved the read cursor")
+
+			buf.Rewind()
+			k, _, ok = buf.Next()
+			require.True(t, ok)
+			require.Equal(t, []byte{1}, k, "Rewind must go back to the first entry")
+		})
+	}
+}
+
+// TestCollectRejectsOversizedKey: Put panics past maxKeyLen, but Collect sits
+// under Load and the stage loop, which return errors.
+func TestCollectRejectsOversizedKey(t *testing.T) {
+	c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1*datasize.MB), log.New())
+	defer c.Close()
+	require.NoError(t, c.Collect(make([]byte, maxKeyLen), []byte("v")))
+	err := c.Collect(make([]byte, maxKeyLen+1), []byte("v"))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "exceeds")
 }
