@@ -125,10 +125,15 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 A commitment snapshot file stores Merkle-Patricia trie branches. Each branch has to refer to the account and storage keys underneath it, and Erigon can encode those references in one of two ways:
 
-| Encoding | What a branch stores | File version stamp |
-|----------|----------------------|--------------------|
-| **Referenced** | *Shortened keys* — offsets into the accounts and storage files, which must be dereferenced on read | `v2.1` |
-| **Plain** | The keys themselves, inline | `v2.2` |
+| Encoding | What a branch stores | When a file uses it |
+|----------|----------------------|---------------------|
+| **Referenced** | *Shortened keys* — offsets into the accounts and storage files, which must be dereferenced on read | Stamped below `v2.2` **and** spanning at least 2 steps |
+| **Plain** | The keys themselves, inline | `v2.2` and later, or a sub-`v2.2` file spanning fewer than 2 steps |
+
+The version stamp alone does not decide the encoding. `CommitmentBranchReferenced`
+(in `db/state/domain_committed.go`) requires both a version below `v2.2` *and* a range of at least
+`commitment.DefaultKeyReferencingMinSteps` (2) steps, so a small `v2.1` file — a single unmerged step — is plain
+despite its stamp.
 
 Plain files are **larger on disk**, but state reads and snapshot merges are **faster**, because nothing has to be looked up in the accounts and storage files first.
 
@@ -168,7 +173,14 @@ erigon seg reset --datadir /your/datadir
 
 Cost: whatever the downloader has to re-fetch, plus rebuilding state on the next start. Run `--dry-run` first, and back up the datadir.
 
-`seg reset` has no `--chain` flag of its own; it reads the chain name from `chaindata/`. If `chaindata/` is missing or unreadable, pass the chain as a root-level flag before the subcommand — `erigon --chain mainnet seg reset --datadir /your/datadir`.
+Size that cost by how far the node is past the published preverified manifest, not by download time. The manifest can
+lag the live tip considerably, and only the range it covers can be restored by fetching a torrent. Blocks past it are
+held either in `chaindata/` or in locally built segments — and at `--local=true` `seg reset` removes both (the reset
+path in `db/datadir/reset`). That range then comes back through Caplin's per-block beacon backfill rather than a segment
+fetch, which is orders of magnitude slower, and a node far enough behind it may need more than one restart before
+execution resumes.
+
+`seg reset` has no `--chain` flag of its own; it reads the chain name from `chaindata/`. If `chaindata/` is missing or unreadable, pass `--chain` — it is a root-level flag and resolves in either position: `erigon --chain mainnet seg reset --datadir /your/datadir` and `erigon seg reset --chain mainnet --datadir /your/datadir` behave the same.
 
 :::note
 `erigon seg reset` is not new in v3.6 (`seg` is an alias for `snapshots`, so `erigon snapshots reset` is the same command). What is new is its role as a shortcut to the plain commitment format. See also [Snapshots Upgrade Options](../get-started/installation/upgrading#snapshots-upgrade-options).
