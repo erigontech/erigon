@@ -49,6 +49,34 @@ type proposerIndexAndSlot struct {
 	slot          uint64
 }
 
+type pendingBlockJob struct {
+	block      *cltypes.SignedBeaconBlock
+	persisted  bool
+	retryAfter time.Time
+	retryDelay time.Duration
+}
+
+func (job *pendingBlockJob) readyToRetry(now time.Time) bool {
+	return job.retryAfter.IsZero() || !now.Before(job.retryAfter)
+}
+
+func (job *pendingBlockJob) recordProcessingFailure(now time.Time, err error) {
+	// Data-availability failures stay on the fast queue interval so newly
+	// arrived sidecars unblock promptly. An unavailable EL gets bounded backoff
+	// because repeated newPayload calls do not make it recover faster.
+	if !errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
+		job.retryAfter = time.Time{}
+		job.retryDelay = 0
+		return
+	}
+	if job.retryDelay == 0 {
+		job.retryDelay = blockELRetryInitialDelay
+	} else {
+		job.retryDelay = min(2*job.retryDelay, blockELRetryMaxDelay)
+	}
+	job.retryAfter = now.Add(job.retryDelay)
+}
+
 type blockService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	syncedData      *synced_data.SyncedDataManager
@@ -59,10 +87,9 @@ type blockService struct {
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
 	emitter         *beaconevents.EventEmitter
 
-	// Blocks waiting for missing dependencies such as blobs.
-	blocksScheduledForLaterExecution *pendingJobQueue[common.Hash, *cltypes.SignedBeaconBlock]
-	// store the block in db
-	db kv.RwDB
+	// Blocks waiting for their slot or a processing dependency.
+	blocksScheduledForLaterExecution *pendingJobQueue[common.Hash, *pendingBlockJob]
+	db                               kv.RwDB
 }
 
 // NewBlockService creates a new block service
@@ -92,7 +119,7 @@ func NewBlockService(
 	return b
 }
 
-func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.SignedBeaconBlock] {
+func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueue[common.Hash, *pendingBlockJob] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		name:          "beacon_block",
 		capacity:      maxPendingBlocks,
@@ -167,23 +194,29 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 
 	if err := b.validateBlockAfterSignature(msg); err != nil {
 		if errors.Is(err, ErrIgnore) {
-			b.scheduleBlockForLaterProcessing(msg)
+			if scheduleErr := b.scheduleBlockForLaterProcessing(msg); scheduleErr != nil {
+				return scheduleErr
+			}
 		}
 		return err
 	}
-	b.publishBlockGossipEvent(msg)
 	if b.forkchoiceStore.Slot() < msg.Block.Slot {
-		b.scheduleBlockForLaterProcessing(msg)
-		return nil
+		if err := b.scheduleBlockForLaterProcessing(msg); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: block queued until fork choice reaches slot %d", ErrIgnore, msg.Block.Slot)
 	}
 	// Fork choice performs the remaining block validation.
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if isPendingBlockRetryableError(err) {
-			b.scheduleBlockForLaterProcessing(msg)
-			return nil
+			if scheduleErr := b.scheduleBlockAfterProcessingFailure(msg, err); scheduleErr != nil {
+				return scheduleErr
+			}
+			return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %w", ErrIgnore, err)
 		}
 		return err
 	}
+	b.publishBlockGossipEvent(msg)
 	return nil
 }
 
@@ -240,7 +273,7 @@ func (b *blockService) validateBlockAfterSignature(block *cltypes.SignedBeaconBl
 	return nil
 }
 
-// publishBlockGossipEvent publishes a block event which has not been processed yet
+// publishBlockGossipEvent publishes after the block passes gossip validation.
 func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock) {
 	if b.emitter == nil {
 		return
@@ -259,8 +292,21 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // scheduleBlockForLaterProcessing queues a block after its gossip signature has
 // been validated, while another processing dependency is unavailable.
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	result, err := b.blocksScheduledForLaterExecution.enqueueLazy(block, func() (common.Hash, error) {
+func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) error {
+	return b.schedulePendingBlock(&pendingBlockJob{block: block})
+}
+
+func (b *blockService) scheduleBlockAfterProcessingFailure(block *cltypes.SignedBeaconBlock, processingErr error) error {
+	// Retryable processing errors are returned only after the block transaction
+	// commits, so deferred attempts must not write the same block again.
+	job := &pendingBlockJob{block: block, persisted: true}
+	job.recordProcessingFailure(time.Now(), processingErr)
+	return b.schedulePendingBlock(job)
+}
+
+func (b *blockService) schedulePendingBlock(job *pendingBlockJob) error {
+	block := job.block
+	result, err := b.blocksScheduledForLaterExecution.enqueueLazy(job, func() (common.Hash, error) {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return common.Hash{}, err
@@ -269,7 +315,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	})
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
-		return
+		return err
 	}
 	// Gloas blocks do not carry an execution payload in the block body.
 	var blockNum uint64
@@ -281,7 +327,9 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
 	case pendingJobQueueFull:
 		log.Debug("Pending block queue full; block not scheduled", "slot", block.Block.Slot, "block", blockNum)
+		return fmt.Errorf("%w: pending block queue is full", ErrIgnore)
 	}
+	return nil
 }
 
 // processAndStoreBlock processes and stores a block
@@ -295,12 +343,19 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return nil
 	}
 
-	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
-	}); err != nil {
+	if err := b.storeBlock(ctx, block); err != nil {
 		return err
 	}
+	return b.processStoredBlock(ctx, block)
+}
 
+func (b *blockService) storeBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	return b.db.Update(ctx, func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+	})
+}
+
+func (b *blockService) processStoredBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
 	if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 		return err
 	}
@@ -311,6 +366,21 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		return err
 	}
 	return nil
+}
+
+func (b *blockService) blockStored(ctx context.Context, blockRoot common.Hash) (bool, error) {
+	var stored bool
+	err := b.db.View(ctx, func(tx kv.Tx) error {
+		// The slot index is committed atomically with the block and avoids
+		// re-encoding and rewriting the block on every pending retry.
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		if err != nil {
+			return err
+		}
+		stored = slot != nil
+		return nil
+	})
+	return stored, err
 }
 
 // importBlockOperations imports block operations in parallel
@@ -338,9 +408,13 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
-func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot common.Hash, block *cltypes.SignedBeaconBlock) pendingJobDecision {
+func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot common.Hash, job *pendingBlockJob) pendingJobDecision {
+	block := job.block
 	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
 		return pendingJobRemove
+	}
+	if !job.readyToRetry(time.Now()) {
+		return pendingJobKeep
 	}
 	if err := b.validateBlockAfterSignature(block); err != nil {
 		if errors.Is(err, ErrIgnore) {
@@ -352,9 +426,24 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 	if b.forkchoiceStore.Slot() < block.Block.Slot {
 		return pendingJobKeep
 	}
-	if err := b.processAndStoreBlock(ctx, block); err != nil {
+	if !job.persisted {
+		stored, err := b.blockStored(ctx, blockRoot)
+		if err != nil {
+			log.Trace("Failed to check pending block storage", "block", block, "error", err)
+			return pendingJobRemove
+		}
+		if !stored {
+			if err := b.storeBlock(ctx, block); err != nil {
+				log.Trace("Failed to store pending block", "block", block, "error", err)
+				return pendingJobRemove
+			}
+		}
+		job.persisted = true
+	}
+	if err := b.processStoredBlock(ctx, block); err != nil {
 		log.Trace("Failed to process and store block", "block", block, "error", err)
 		if isPendingBlockRetryableError(err) {
+			job.recordProcessingFailure(time.Now(), err)
 			return pendingJobKeep
 		}
 		return pendingJobRemove

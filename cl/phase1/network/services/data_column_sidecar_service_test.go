@@ -244,40 +244,16 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidDataColumnSid
 	t.Contains(err.Error(), "invalid data column sidecar")
 }
 
-// TestProcessMessage_WhenIncorrectSubnet_ReturnsError tests subnet validation
-func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_ReturnsError() {
-	// Setup mock functions
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_RejectsBeforeSidecarVerification() {
 	incorrectSubnet := uint64(987654321)
-	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 } // Return different subnet
+	computeSubnetForDataColumnSidecar = func(index uint64) uint64 { return 1234 }
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
-	blsVerify = t.mockFuncs.BlsVerify
 
-	// Setup
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
-	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 
-	// Mock fork choice methods to avoid panic
-	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{
-		// Slot: testSlot - 1,
-	}
-	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{
-		// Epoch: (testSlot - 100) / 32,
-		// Root:  [32]byte{1},
-	}
-	//t.mockForkChoice.Ancestors[(testSlot-100)/32*32] = [32]byte{1}
-
-	// Mock ViewHeadState to avoid panic
-	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	}).Return(nil).AnyTimes()
-
-	// Execute
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), &incorrectSubnet, sidecar)
 
-	// Assert
 	t.Error(err)
 	t.Contains(err.Error(), "incorrect subnet")
 }

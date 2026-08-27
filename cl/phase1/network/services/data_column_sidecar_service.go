@@ -208,14 +208,14 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return errors.New("invalid column sidecar length")
 	}
 
-	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
-	if !verifyDataColumnSidecar(msg) {
-		return errors.New("invalid data column sidecar")
-	}
-
 	// [REJECT] The sidecar is for the correct subnet
 	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
 		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
+	}
+
+	// [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar).
+	if !verifyDataColumnSidecar(msg) {
+		return errors.New("invalid data column sidecar")
 	}
 
 	// [IGNORE] The sidecar is not from a future slot
