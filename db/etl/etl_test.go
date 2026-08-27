@@ -33,6 +33,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
@@ -1711,23 +1712,21 @@ func TestChunkSizeFor(t *testing.T) {
 	}
 }
 
-// TestPutDataChunkRejectsOversized: an entry's private chunk (bigger than
-// dataChunkSize) must never enter the shared pool — a later getDataChunk
-// handing it out under a normal chunk index would corrupt an unrelated buffer.
+// TestPutDataChunkRejectsOversized: an entry's private chunk must never enter
+// the shared pool - a later getDataChunk handing it out as a normal chunk
+// would corrupt an unrelated buffer. Only a chunk the pool gave out carries a
+// ref, so only those can go back.
 func TestPutDataChunkRejectsOversized(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		length int
-		pooled bool
-	}{
-		{"short", dataChunkSize - 1, false},
-		{"exact", dataChunkSize, true},
-		{"oversized", dataChunkSize + 7, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.pooled, isPooledChunk(make([]byte, tc.length)))
-		})
-	}
+	buf := NewSortableBuffer(256 * datasize.MB)
+	defer buf.Reset()
+	buf.Put([]byte{0x01}, []byte("small"))
+	buf.Put([]byte{0x02}, bytes.Repeat([]byte{0xCD}, dataChunkSize+7))
+	require.Len(t, buf.chunks, 2)
+
+	require.NotNil(t, buf.chunks[0].ref, "a pooled chunk goes back")
+	require.Equal(t, dataChunkSize, len(buf.chunks[0].buf))
+	require.Nil(t, buf.chunks[1].ref, "an oversized chunk has no ref, so it cannot")
+	require.Greater(t, len(buf.chunks[1].buf), dataChunkSize)
 }
 
 // disposeProbe records whether the collector still owned its data chunks when
@@ -2082,4 +2081,29 @@ func TestChunksInOrderAcrossEmptyChunk(t *testing.T) {
 		got = append(got, e.key[0])
 	}
 	require.Equal(t, []byte{1, 9}, got)
+}
+
+// TestOversizedChunkEntryIndex: entries() views a chunk's tail as []entryLoc
+// through unsafe.Slice, and a private chunk is sized by chunkSizeFor rather
+// than being a round 1MB. Run under -race for checkptr's alignment check.
+func TestOversizedChunkEntryIndex(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	defer buf.Reset()
+
+	big := bytes.Repeat([]byte{0xCD}, dataChunkSize+7)
+	buf.Put([]byte{0x02}, big)          // takes a chunk of its own
+	buf.Put([]byte{0x01}, []byte("nx")) // and the next entry starts a fresh one
+
+	c := &buf.chunks[0]
+	require.Nil(t, c.ref, "chunk 0 must be the private one")
+	require.Zero(t, uintptr(unsafe.Pointer(&c.buf[c.entTop]))%entryLocSize)
+
+	ents := c.entries()
+	require.Len(t, ents, 1)
+	require.Equal(t, []byte{0x02}, keyOf(c.buf, ents[0]))
+
+	buf.Sort()
+	got := drainBuffer(buf)
+	require.Equal(t, []byte{0x01}, got[0].key)
+	require.Equal(t, big, got[1].value)
 }

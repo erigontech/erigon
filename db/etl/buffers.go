@@ -46,6 +46,7 @@ const (
 	BufIOSize = 128 * 4096
 
 	entryLocSize    = 4 // sizeof(entryLoc)
+	entryLocAlign   = 4 // what a chunk's length has to be a multiple of, so the index lands aligned
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
@@ -114,8 +115,7 @@ const (
 	// less one for the bias. Sort slices a key out of its chunk, so only a
 	// value may outgrow one. Exported because Put panics past it, so callers
 	// that size their own keys have to check against it.
-	keyLenBits = 32 - dataChunkBits
-	MaxKeyLen  = 1<<keyLenBits - 2
+	MaxKeyLen = 1<<(32-dataChunkBits) - 2
 )
 
 // dataChunks are shared by all sortableBuffer instances: a buffer takes chunks as
@@ -125,18 +125,16 @@ var dataChunks = sync.Pool{New: func() any {
 	return &c
 }}
 
-func getDataChunk() []byte { return *dataChunks.Get().(*[]byte) }
+func getDataChunk() *[]byte { return dataChunks.Get().(*[]byte) }
 
-// isPooledChunk reports whether c came from the pool. Handing back the private
-// chunk an oversized entry gets would let a later getDataChunk give an
-// unrelated buffer a chunk of the wrong size.
-func isPooledChunk(c []byte) bool { return len(c) == dataChunkSize }
-
-func putDataChunk(c []byte) {
-	if !isPooledChunk(c) {
-		return
+// putDataChunk hands a chunk back. ref is what the pool gave out, so putting
+// it back costs no allocation, and the private chunk an oversized entry gets
+// has none - which is what keeps it out of the pool, where a later
+// getDataChunk would hand an unrelated buffer a chunk of the wrong size.
+func putDataChunk(ref *[]byte) {
+	if ref != nil {
+		dataChunks.Put(ref)
 	}
-	dataChunks.Put(&c)
 }
 
 type Buffer interface {
@@ -194,6 +192,7 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 // index costs no allocation and a buffer's footprint is the chunks it holds.
 type dataChunk struct {
 	buf    []byte
+	ref    *[]byte // what the pool gave out; nil for a chunk of its own size
 	entTop int32
 }
 
@@ -216,12 +215,10 @@ func keyPrefix(k []byte) uint64 {
 	return binary.BigEndian.Uint64(pad[:])
 }
 
-func (c *dataChunk) len() int { return (len(c.buf) - int(c.entTop)) / entryLocSize }
-
 // entries views the chunk's index as entryLoc. Sort leaves it in key order;
 // before that it runs newest-first, because it grows downward.
 func (c *dataChunk) entries() []entryLoc {
-	n := c.len()
+	n := (len(c.buf) - int(c.entTop)) / entryLocSize
 	if n == 0 {
 		return nil
 	}
@@ -254,7 +251,7 @@ type sortableBuffer struct {
 // and its index slot.
 func chunkSizeFor(n int) int {
 	if size := n + entryLocSize; size > dataChunkSize {
-		return (size + entryLocSize - 1) &^ (entryLocSize - 1)
+		return (size + entryLocAlign - 1) &^ (entryLocAlign - 1)
 	}
 	return dataChunkSize
 }
@@ -264,20 +261,22 @@ func chunkSizeFor(n int) int {
 func (b *sortableBuffer) nextChunk(n int) {
 	size := chunkSizeFor(n)
 	var buf []byte
+	var ref *[]byte
 	if size == dataChunkSize {
-		buf = getDataChunk()
+		ref = getDataChunk()
+		buf = *ref
 	} else {
 		if size > math.MaxInt32 {
 			panic(fmt.Sprintf("etl: entry of %d bytes needs a chunk of %d, over %d", n, size, math.MaxInt32))
 		}
 		buf = make([]byte, size)
 	}
-	if uintptr(unsafe.Pointer(&buf[0]))%entryLocSize != 0 {
+	if uintptr(unsafe.Pointer(&buf[0]))%entryLocAlign != 0 {
 		panic("etl: chunk is not aligned for its entry index")
 	}
 	b.syncCur()
-	b.chunks = append(b.chunks, dataChunk{buf: buf, entTop: int32(len(buf))}) //nolint:gosec
-	b.curBuf, b.curEnd, b.curTop = buf, 0, int32(len(buf))                    //nolint:gosec
+	b.chunks = append(b.chunks, dataChunk{buf: buf, ref: ref, entTop: int32(len(buf))}) //nolint:gosec
+	b.curBuf, b.curEnd, b.curTop = buf, 0, int32(len(buf))                              //nolint:gosec
 	b.chunkBytes += len(buf)
 }
 
@@ -376,7 +375,7 @@ func (b *sortableBuffer) Prealloc(_, predictDataSize int) Buffer {
 func (b *sortableBuffer) Reset() {
 	b.mrg.release() // cursors alias the chunks, so drop them before the pool takes them
 	for i := range b.chunks {
-		putDataChunk(b.chunks[i].buf)
+		putDataChunk(b.chunks[i].ref)
 	}
 	clear(b.chunks)
 	b.chunks = b.chunks[:0]
