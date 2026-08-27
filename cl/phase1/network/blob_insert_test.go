@@ -49,6 +49,19 @@ func (h *recordingHandler) find(msg string) *log.Record {
 	return nil
 }
 
+// ctxValue returns a named field from a log record's context, so an assertion cannot be
+// satisfied by an unrelated field that happens to hold the same value.
+func ctxValue(t *testing.T, rec *log.Record, key string) any {
+	t.Helper()
+	for i := 0; i+1 < len(rec.Ctx); i += 2 {
+		if k, ok := rec.Ctx[i].(string); ok && k == key {
+			return rec.Ctx[i+1]
+		}
+	}
+	t.Fatalf("log record has no %q field: %v", key, rec.Ctx)
+	return nil
+}
+
 // VerifyAgainstIdentifiersAndInsertIntoTheBlobStore stops at the first identifier a
 // response does not match and returns a nil error reporting how many it stored, so a
 // caller that checks only the error cannot tell a full insert from an empty one. A
@@ -82,6 +95,8 @@ func TestStoreDenebBlobsReportsWhenTheStoreTookFewerThanRequested(t *testing.T) 
 
 	rec := handler.find("[BlobHistoryDownloader] Store took fewer blobs than requested")
 	require.NotNil(t, rec, "a zero insert must not pass silently")
-	require.Contains(t, rec.Ctx, 1, "the log must name how many were requested")
-	require.Contains(t, rec.Ctx, uint64(0), "the log must name how many were stored")
+	require.Equal(t, log.LvlWarn, rec.Lvl, "a silent data loss must be a warning, not a debug line")
+	require.Equal(t, 1, ctxValue(t, rec, "requested"))
+	require.Equal(t, uint64(0), ctxValue(t, rec, "stored"))
+	require.Equal(t, 1, ctxValue(t, rec, "responses"))
 }
