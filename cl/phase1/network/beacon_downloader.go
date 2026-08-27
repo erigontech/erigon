@@ -367,9 +367,6 @@ Process:
 		// batch boundary has its envelope skipped, and the next batch's first
 		// block fails with ErrParentEnvelopePending.
 		processCount := min(int(count), len(processBlocks)-1)
-		if processCount < 1 {
-			processCount = len(processBlocks) // single block: process it (best-effort)
-		}
 		fullRoots := determineFullGloasRoots(processBlocks, processCount)
 		processBlocks = processBlocks[:processCount]
 		if len(fullRoots) > 0 {
@@ -403,6 +400,12 @@ Process:
 				"batchBlocks", len(processBlocks),
 				"firstSlot", processBlocks[0].Block.Slot,
 				"lastSlot", processBlocks[len(processBlocks)-1].Block.Slot)
+			retained := retainBlocksBeforeMissingGloasEnvelope(processBlocks, fullRoots, envelopes)
+			if len(retained) < len(processBlocks) {
+				log.Debug("[ForwardBeaconDownloader] retaining frontier before missing GLOAS envelope",
+					"retainedBlocks", len(retained), "batchBlocks", len(processBlocks))
+				processBlocks = retained
+			}
 		}
 	} else if uint64(len(processBlocks)) > count {
 		// Non-GLOAS: still trim the extra lookahead block.
@@ -434,6 +437,22 @@ Process:
 		f.highestSlotProcessed = highestSlotProcessed
 		f.highestSlotUpdateTime = time.Now()
 	}
+}
+
+func retainBlocksBeforeMissingGloasEnvelope(blocks []*cltypes.SignedBeaconBlock, fullRoots [][32]byte, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) []*cltypes.SignedBeaconBlock {
+	for _, root := range fullRoots {
+		if envelopes[common.Hash(root)] != nil {
+			continue
+		}
+		for i, block := range blocks {
+			blockRoot, err := block.Block.HashSSZ()
+			if err != nil || blockRoot == root {
+				return blocks[:i]
+			}
+		}
+		return nil
+	}
+	return blocks
 }
 
 func shouldBanProcessPeer(pid string, err error) bool {

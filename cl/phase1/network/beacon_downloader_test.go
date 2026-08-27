@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -881,4 +882,95 @@ func TestShouldBanProcessPeer(t *testing.T) {
 	require.False(t, shouldBanProcessPeer("block-peer", fmt.Errorf("%w: %w", ErrUnattributableProcess, processErr)))
 	require.True(t, shouldBanProcessPeer("block-peer", processErr))
 	require.False(t, shouldBanProcessPeer("http-fallback", processErr))
+}
+
+func TestForwardBeaconDownloaderRetainsFrontierWhenHTTPFullEnvelopeIsMissing(t *testing.T) {
+	first := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	lookahead := makeGloasBlock(11, hash(0xbb), hash(0xaa))
+	firstEncoded, err := first.EncodeSSZ(nil)
+	require.NoError(t, err)
+	lookaheadEncoded, err := lookahead.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Eth-Consensus-Version", "gloas")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/beacon/blocks/10"):
+			_, _ = w.Write(firstEncoded)
+		case strings.HasSuffix(r.URL.Path, "/beacon/blocks/11"):
+			_, _ = w.Write(lookaheadEncoded)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	downloader := NewForwardBeaconDownloader(context.Background(), nil, &clparams.MainnetBeaconConfig)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+	processed := 0
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed += len(blocks)
+		if len(blocks) == 0 {
+			return highest, nil
+		}
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	downloader.RequestMore(t.Context())
+
+	require.Zero(t, processed)
+	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
+}
+
+func TestForwardBeaconDownloaderRetainsSingleHTTPGloasBlockUntilLookahead(t *testing.T) {
+	block := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/beacon/blocks/10") {
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(encoded)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	downloader := NewForwardBeaconDownloader(context.Background(), nil, &clparams.MainnetBeaconConfig)
+	downloader.SetHighestProcessedSlot(9)
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+	processed := 0
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processed += len(blocks)
+		if len(blocks) == 0 {
+			return highest, nil
+		}
+		return blocks[len(blocks)-1].Block.Slot, nil
+	})
+
+	downloader.RequestMore(t.Context())
+
+	require.Zero(t, processed)
+	require.Equal(t, uint64(9), downloader.GetHighestProcessedSlot())
+}
+
+func TestRetainBlocksBeforeMissingGloasEnvelopeKeepsCompletePrefix(t *testing.T) {
+	first := makeGloasBlock(10, hash(0xaa), common.Hash{})
+	second := makeGloasBlock(11, hash(0xbb), hash(0xaa))
+	lookahead := makeGloasBlock(12, hash(0xcc), hash(0xbb))
+	blocks := []*cltypes.SignedBeaconBlock{first, second}
+	fullRoots := determineFullGloasRoots([]*cltypes.SignedBeaconBlock{first, second, lookahead}, len(blocks))
+	firstRoot, err := first.Block.HashSSZ()
+	require.NoError(t, err)
+
+	retained := retainBlocksBeforeMissingGloasEnvelope(
+		blocks,
+		fullRoots,
+		map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{firstRoot: {}},
+	)
+
+	require.Equal(t, blocks[:1], retained)
 }

@@ -38,7 +38,7 @@ type pendingJobQueue[K comparable, M any] struct {
 	// tick; done=true removes it. A non-nil process func runs after the removal,
 	// so that a concurrent re-enqueue under the same key is not lost.
 	tryProcess func(ctx context.Context, key K, msg M) (process func(), done bool)
-	onExpired  func(key K)
+	onExpired  func(key K, msg M)
 
 	jobs  sync.Map // K -> *pendingJob[M]
 	count atomic.Int32
@@ -50,7 +50,7 @@ func newPendingJobQueue[K comparable, M any](
 	expiry time.Duration,
 	tick time.Duration,
 	tryProcess func(ctx context.Context, key K, msg M) (func(), bool),
-	onExpired func(key K),
+	onExpired func(key K, msg M),
 ) *pendingJobQueue[K, M] {
 	return &pendingJobQueue[K, M]{
 		capacity:   capacity,
@@ -147,8 +147,8 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		job := value.(*pendingJob[M])
 
 		if time.Since(job.creationTime) > q.expiry {
+			q.onExpired(k, job.msg)
 			q.remove(k)
-			q.onExpired(k)
 			return true
 		}
 

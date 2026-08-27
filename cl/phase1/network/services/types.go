@@ -14,6 +14,7 @@ type BlockService interface {
 	CommitGossipReservation(*cltypes.SignedBeaconBlock)
 	ReleaseGossipReservation(*cltypes.SignedBeaconBlock)
 	ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock)
+	SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error)
 }
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_sidecars_service_mock.go -package=mock_services . BlobSidecarsService

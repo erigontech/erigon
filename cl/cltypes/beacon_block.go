@@ -766,6 +766,10 @@ func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
+	ptcSize := clparams.MaxPtcSize
+	if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
+		ptcSize = b.beaconCfg.PtcSize
+	}
 
 	var tmp struct {
 		RandaoReveal       common.Bytes96                              `json:"randao_reveal"`
@@ -811,10 +815,6 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
 			},
 		}
-		ptcSize := clparams.MaxPtcSize
-		if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
-			ptcSize = b.beaconCfg.PtcSize
-		}
 		tmp.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 		tmp.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
@@ -840,6 +840,9 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		if err := solid.RangeErr(tmp.PayloadAttestations, func(i int, attestation *PayloadAttestation, _ int) error {
 			if attestation == nil || attestation.AggregationBits == nil || attestation.Data == nil {
 				return fmt.Errorf("payload attestation %d is incomplete", i)
+			}
+			if err := attestation.AggregationBits.ValidateSize(int(ptcSize)); err != nil {
+				return fmt.Errorf("payload attestation %d aggregation bits: %w", i, err)
 			}
 			return nil
 		}); err != nil {

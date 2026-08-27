@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -477,16 +478,19 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope,
+	ownedBytes := uint64(envelope.EncodingSizeSSZ())
+	impl.pending.jobs.Store(key, &pendingJob[*pendingEnvelopeJob]{
+		msg:          &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes},
 		creationTime: time.Now().Add(-pendingEnvelopeExpiry - time.Second), // expired
 	})
 	impl.pending.count.Store(1)
+	impl.pendingBytes.Store(ownedBytes)
 
 	// Process pending - should remove expired
 	impl.pending.processPending(ctx)
 
 	require.Equal(t, int32(0), impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
 	_, exists := impl.pending.jobs.Load(key)
 	require.False(t, exists)
 }
@@ -517,11 +521,13 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope,
+	ownedBytes := uint64(envelope.EncodingSizeSSZ())
+	impl.pending.jobs.Store(key, &pendingJob[*pendingEnvelopeJob]{
+		msg:          &pendingEnvelopeJob{envelope: envelope, ownedBytes: ownedBytes},
 		creationTime: time.Now(),
 	})
 	impl.pending.count.Store(1)
+	impl.pendingBytes.Store(ownedBytes)
 
 	// Block not yet available - should keep pending
 	impl.pending.processPending(ctx)
@@ -537,6 +543,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	// Process again - should process and remove
 	impl.pending.processPending(ctx)
 	require.Equal(t, int32(0), impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
 	_, exists := impl.pending.jobs.Load(key)
 	require.False(t, exists)
 
@@ -569,15 +576,18 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	hash2, _ := envelope2.HashSSZ()
 
 	// Add both as pending
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash1}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope1,
+	ownedBytes1 := uint64(envelope1.EncodingSizeSSZ())
+	ownedBytes2 := uint64(envelope2.EncodingSizeSSZ())
+	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash1}, &pendingJob[*pendingEnvelopeJob]{
+		msg:          &pendingEnvelopeJob{envelope: envelope1, ownedBytes: ownedBytes1},
 		creationTime: time.Now(),
 	})
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash2}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope2,
+	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash2}, &pendingJob[*pendingEnvelopeJob]{
+		msg:          &pendingEnvelopeJob{envelope: envelope2, ownedBytes: ownedBytes2},
 		creationTime: time.Now(),
 	})
 	impl.pending.count.Store(2)
+	impl.pendingBytes.Store(ownedBytes1 + ownedBytes2)
 
 	// Add block
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -590,6 +600,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	impl.pending.processPending(ctx)
 
 	require.Equal(t, int32(0), impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
@@ -655,6 +666,179 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		return true
 	})
 	require.Equal(t, 5, stored)
+}
+
+func TestExecutionPayloadServicePendingQueueOwnsBoundedBytes(t *testing.T) {
+	service, forkchoiceMock := setupExecutionPayloadService(t)
+	var forkchoiceAdmissions atomic.Int32
+	forkchoiceMock.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		forkchoiceAdmissions.Add(1)
+		return nil
+	}
+
+	largeTransaction := make([]byte, int(clparams.MaxChunkSize)-1024)
+	for i := range 5 {
+		root := common.Hash{byte(i + 1)}
+		envelope := newTestSignedEnvelope(100, root, uint64(i+1))
+		envelope.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{largeTransaction})
+		err := service.ProcessMessage(t.Context(), nil, envelope)
+		require.ErrorIs(t, err, ErrIgnore)
+		if i == 4 {
+			require.ErrorContains(t, err, "capacity reached")
+		}
+	}
+
+	impl := service.(*executionPayloadService)
+	require.Equal(t, int32(4), impl.pending.count.Load())
+	require.Zero(t, forkchoiceAdmissions.Load())
+}
+
+func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesAfterAdmission(t *testing.T) {
+	service, forkchoiceMock := setupExecutionPayloadService(t)
+	blockRoot := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	type call struct {
+		checkBlobData   bool
+		validatePayload bool
+	}
+	calls := make(chan call, 2)
+	forkchoiceMock.OnExecutionPayloadFn = func(_ context.Context, got *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+		require.Same(t, envelope, got)
+		calls <- call{checkBlobData: checkBlobData, validatePayload: validatePayload}
+		return nil
+	}
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	require.Empty(t, calls)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	service.(*executionPayloadService).pending.processPending(t.Context())
+
+	require.Equal(t, call{checkBlobData: true, validatePayload: true}, <-calls)
+	require.Empty(t, calls)
+	require.Zero(t, service.(*executionPayloadService).pending.count.Load())
+	require.Zero(t, service.(*executionPayloadService).pendingBytes.Load())
+}
+
+func TestExecutionPayloadServiceProcessesEnvelopeWhenBlockArrivesBeforeAdmission(t *testing.T) {
+	service, forkchoiceMock := setupExecutionPayloadService(t)
+	blockRoot := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	var calls atomic.Int32
+	forkchoiceMock.OnExecutionPayloadFn = func(_ context.Context, got *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+		require.Same(t, envelope, got)
+		require.True(t, checkBlobData)
+		require.True(t, validatePayload)
+		calls.Add(1)
+		return nil
+	}
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+	require.Equal(t, int32(1), calls.Load())
+	require.Zero(t, service.(*executionPayloadService).pending.count.Load())
+	require.Zero(t, service.(*executionPayloadService).pendingBytes.Load())
+}
+
+func TestExecutionPayloadServicePendingByteAdmissionConcurrent(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	impl := &executionPayloadService{
+		forkchoiceStore: forkchoiceMock,
+		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
+	}
+	impl.pending = impl.newPendingQueue()
+	envelopeSize := uint64(newTestSignedEnvelope(100, common.Hash{1}, 1).EncodingSizeSSZ())
+	impl.pendingBytes.Store(maxPendingEnvelopeBytes - 5*envelopeSize)
+
+	type result struct {
+		queued bool
+		err    error
+	}
+	results := make(chan result, 100)
+	var wg sync.WaitGroup
+	for i := range 100 {
+		wg.Go(func() {
+			queued, err := impl.queuePendingEnvelope(
+				common.Hash{byte(i), byte(i >> 8)},
+				newTestSignedEnvelope(100, common.Hash{byte(i), byte(i >> 8)}, uint64(i+1)),
+			)
+			results <- result{queued: queued, err: err}
+		})
+	}
+	wg.Wait()
+	close(results)
+
+	admitted := 0
+	for result := range results {
+		if result.queued {
+			require.NoError(t, result.err)
+			admitted++
+			continue
+		}
+		require.ErrorContains(t, result.err, "capacity reached")
+	}
+	require.Equal(t, 5, admitted)
+	require.Equal(t, int32(5), impl.pending.count.Load())
+	require.Equal(t, maxPendingEnvelopeBytes, impl.pendingBytes.Load())
+}
+
+func TestExecutionPayloadServiceDuplicateAtByteCapacityDoesNotReadmitForkchoice(t *testing.T) {
+	service, forkchoiceMock := setupExecutionPayloadService(t)
+	var forkchoiceAdmissions atomic.Int32
+	forkchoiceMock.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		forkchoiceAdmissions.Add(1)
+		return nil
+	}
+	envelope := newTestSignedEnvelope(100, common.Hash{1}, 1)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+
+	impl := service.(*executionPayloadService)
+	impl.pendingBytes.Store(maxPendingEnvelopeBytes)
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	require.Zero(t, forkchoiceAdmissions.Load())
+}
+
+func TestExecutionPayloadServiceConcurrentDuplicateRemovalConservesOwnership(t *testing.T) {
+	service, forkchoiceMock := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	blockRoot := common.Hash{1}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	queued, err := impl.queuePendingEnvelope(blockRoot, envelope)
+	require.NoError(t, err)
+	require.True(t, queued)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+
+	results := make(chan error, 50)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 50 {
+			impl.pending.processPending(t.Context())
+		}
+	})
+	for range 50 {
+		wg.Go(func() {
+			_, err := impl.queuePendingEnvelope(blockRoot, envelope)
+			results <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	impl.pending.processPending(t.Context())
+
+	stored := 0
+	ownedBytes := uint64(0)
+	impl.pending.jobs.Range(func(_, value any) bool {
+		stored++
+		ownedBytes += value.(*pendingJob[*pendingEnvelopeJob]).msg.ownedBytes
+		return true
+	})
+	require.Equal(t, int32(stored), impl.pending.count.Load())
+	require.Equal(t, ownedBytes, impl.pendingBytes.Load())
 }
 
 func TestExecutionPayloadServiceNames(t *testing.T) {
