@@ -1719,6 +1719,9 @@ func TestChunkSizeFor(t *testing.T) {
 			got := chunkSizeFor(tc.n)
 			require.Equal(t, tc.size, got)
 			require.LessOrEqual(t, got, math.MaxInt32, "a chunk must fit entTop")
+			// entries() views the chunk tail as []entryLoc through
+			// unsafe.Slice, so every size it can hand out must be aligned.
+			require.Zero(t, got%entryLocAlign, "chunk size must fit whole index slots")
 		})
 	}
 }

@@ -161,9 +161,9 @@ type Buffer interface {
 	CheckFlushSize() bool
 }
 
-// mustBeSorted is what every Next calls: a buffer read after a Put and before
-// a Sort would hand back the previous run, which duplicates rows silently.
-func mustBeSorted(unsorted bool) {
+// panicIfUnsorted guards every read: a buffer read after a Put and before a
+// Sort would hand back the previous run, which duplicates rows silently.
+func panicIfUnsorted(unsorted bool) {
 	if unsorted {
 		panic("etl: Next before Sort")
 	}
@@ -226,8 +226,8 @@ func (c *dataChunk) entries() []entryLoc {
 	if n == 0 {
 		return nil
 	}
-	// Aligned: nextChunk checks len(buf), and entTop starts there and only
-	// moves by entryLocSize, which is a multiple of entryLocAlign.
+	// Aligned: chunkSizeFor only returns multiples of entryLocAlign, and
+	// entTop starts at len(buf) and moves by entryLocSize.
 	return unsafe.Slice((*entryLoc)(unsafe.Pointer(&c.buf[c.entTop])), n)
 }
 
@@ -279,12 +279,6 @@ func (b *sortableBuffer) nextChunk(n int) {
 		buf = *ref
 	} else {
 		buf = make([]byte, size)
-	}
-	// entries() views the tail from entTop as []entryLoc. entTop starts at
-	// len(buf) and only moves by entryLocSize, so this is what keeps it
-	// aligned; the allocator already covers the pointer itself.
-	if len(buf)%entryLocAlign != 0 {
-		panic("etl: chunk length is not a multiple of the index slot")
 	}
 	b.syncCur()
 	b.chunks = append(b.chunks, dataChunk{buf: buf, ref: ref, entTop: int32(len(buf))}) //nolint:gosec
@@ -353,7 +347,7 @@ func (b *sortableBuffer) Len() int { return b.n }
 // Next returns the entry the read cursor sits on and moves it along. The
 // buffer carries the merge state, so no two goroutines may read at once.
 func (b *sortableBuffer) Next() ([]byte, []byte, bool) {
-	mustBeSorted(b.sortedN != b.n)
+	panicIfUnsorted(b.sortedN != b.n)
 	buf, e, ok := b.mrg.next()
 	if !ok {
 		return nil, nil, false
@@ -414,7 +408,7 @@ func (b *sortableBuffer) Sort() {
 
 // Rewind puts the read cursor back at the first entry in key order.
 func (b *sortableBuffer) Rewind() {
-	mustBeSorted(b.sortedN != b.n)
+	panicIfUnsorted(b.sortedN != b.n)
 	b.mrg.rewind(b.chunks)
 }
 
@@ -544,12 +538,12 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 }
 
 func (b *appendSortableBuffer) Rewind() {
-	mustBeSorted(b.unsorted)
+	panicIfUnsorted(b.unsorted)
 	b.at = 0
 }
 
 func (b *appendSortableBuffer) Next() ([]byte, []byte, bool) {
-	mustBeSorted(b.unsorted)
+	panicIfUnsorted(b.unsorted)
 	if b.at >= len(b.sortedBuf) {
 		return nil, nil, false
 	}
@@ -645,12 +639,12 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 }
 
 func (b *oldestEntrySortableBuffer) Rewind() {
-	mustBeSorted(b.unsorted)
+	panicIfUnsorted(b.unsorted)
 	b.at = 0
 }
 
 func (b *oldestEntrySortableBuffer) Next() ([]byte, []byte, bool) {
-	mustBeSorted(b.unsorted)
+	panicIfUnsorted(b.unsorted)
 	if b.at >= len(b.sortedBuf) {
 		return nil, nil, false
 	}
