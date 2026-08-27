@@ -53,8 +53,8 @@ func (h ExecutionHeader) BlockValue() *big.Int {
 		log.Warn("cannot parse block value", "value", h.Data.Message.Value)
 		return nil
 	}
-	if blockValue.Sign() < 0 {
-		log.Warn("negative block value", "value", h.Data.Message.Value)
+	if blockValue.Sign() < 0 || blockValue.BitLen() > 256 {
+		log.Warn("builder block value outside uint256 range", "value", h.Data.Message.Value)
 		return nil
 	}
 	return blockValue

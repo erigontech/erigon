@@ -622,15 +622,23 @@ func TestShouldRequestBuilderHeader(t *testing.T) {
 }
 
 func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
-	for _, value := range []string{"", "not-a-number", "-1"} {
-		t.Run(value, func(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "empty"},
+		{name: "not_a_number", value: "not-a-number"},
+		{name: "negative", value: "-1"},
+		{name: "over_uint256", value: new(big.Int).Lsh(big.NewInt(1), 256).String()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 			builderClient := builder_mock.NewMockBuilderClient(ctrl)
 			builderClient.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&builder.ExecutionHeader{
 				Version: postState.Version().String(),
 				Data: builder.ExecutionHeaderData{Message: builder.ExecutionHeaderMessage{
-					Value: value,
+					Value: test.value,
 				}},
 			}, nil)
 			handler.builderClient = builderClient
