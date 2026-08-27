@@ -304,6 +304,29 @@ func (s *skippedFullBlockTrackerStub) MarkSkippedFullBlocksRecovered(roots []com
 	s.pending = retained
 }
 
+func (s *skippedFullBlockTrackerStub) SkippedFullBlocksAtCapacity() bool {
+	return len(s.pending) >= 64
+}
+
+func TestTrackedSkippedFullBlockCapacityDrainResumesAfterPartialRecovery(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	for i := range tracker.pending {
+		tracker.pending[i].Root[0] = byte(i + 1)
+	}
+	attempts := 0
+
+	completed := relieveTrackedHistoryBackfill(context.Background(), tracker, time.Hour,
+		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			attempts++
+			return pending[:1]
+		})
+
+	require.True(t, completed)
+	require.Equal(t, 1, attempts)
+	require.Len(t, tracker.pending, 57)
+	require.Equal(t, byte(1), tracker.pending[0].Root[0])
+}
+
 func TestTrackedSkippedFullBlockRecoveryStreamsLongHistoryWithinBound(t *testing.T) {
 	tracker := &skippedFullBlockTrackerStub{}
 	for admitted := 0; admitted < 256; {

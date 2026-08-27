@@ -932,8 +932,9 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 	}
+	var columnSidecars []*cltypes.DataColumnSidecar
 	if blobDataIncluded {
-		columnSidecars, err := a.dataColumnSidecarsFromEnvelopeBlobs(signedEnvelope, contents.KZGProofs, contents.Blobs)
+		columnSidecars, err = a.dataColumnSidecarsFromEnvelopeBlobs(signedEnvelope, contents.KZGProofs, contents.Blobs)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
@@ -953,9 +954,11 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		case errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
-		case errors.Is(err, forkchoice.ErrIgnore) ||
-			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
-			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
+		case errors.Is(err, forkchoice.ErrIgnore):
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
+			a.logger.Debug("[Beacon REST] execution payload envelope indices queued", "err", err)
 		default:
 			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
@@ -964,6 +967,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 
 	// Broadcast the envelope on the execution_payload gossip topic
 	if a.sentinel != nil {
+		if err := a.publishDataColumnSidecars(r.Context(), columnSidecars); err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)

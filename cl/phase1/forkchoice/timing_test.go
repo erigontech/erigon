@@ -271,8 +271,7 @@ func TestRecordBlockTimeliness_PostGloas_BetweenDeadlines(t *testing.T) {
 	require.True(t, timeliness[clparams.PtcTimelinessIndex], "block timely for PTC (5000ms < 9000ms)")
 }
 
-func TestRecordBlockTimeliness_WrongSlot(t *testing.T) {
-	// Block slot doesn't match current slot — should not record
+func TestRecordBlockTimeliness_LateKnownBlockRecordsFalseVector(t *testing.T) {
 	f := newTestForkChoiceStore(12, 3, 32, math.MaxUint64, 0, 24) // time=24 → slot 2
 
 	block := &cltypes.BeaconBlock{Slot: 0} // block for slot 0
@@ -280,8 +279,10 @@ func TestRecordBlockTimeliness_WrongSlot(t *testing.T) {
 
 	f.recordBlockTimeliness(block, blockRoot)
 
-	_, ok := f.getBlockTimeliness(blockRoot)
-	require.False(t, ok, "should not record timeliness for wrong slot")
+	timeliness, ok := f.getBlockTimeliness(blockRoot)
+	require.True(t, ok)
+	require.False(t, timeliness[clparams.AttestationTimelinessIndex])
+	require.False(t, timeliness[clparams.PtcTimelinessIndex])
 }
 
 func TestUpdateProposerBoostRoot_TimelyBlock(t *testing.T) {

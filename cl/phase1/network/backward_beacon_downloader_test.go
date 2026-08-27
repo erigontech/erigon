@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -779,47 +781,96 @@ func TestEnvelopeHTTPFallbackRejectsBidCommitmentMismatch(t *testing.T) {
 }
 
 func TestInvalidP2PEnvelopeDoesNotSuppressHealthyHTTPFallback(t *testing.T) {
-	validP2PBlock := makeGloasBlock(9, hash(1), hash(2))
-	validP2PEnvelope, validP2PRoot := makeGloasEnvelopeForBlock(t, validP2PBlock)
-	httpBlock := makeGloasBlock(8, hash(3), hash(4))
-	httpEnvelope, httpRoot := makeGloasEnvelopeForBlock(t, httpBlock)
+	previousExpiration := requestEnvelopeBatchExpiration
+	requestEnvelopeBatchExpiration = time.Millisecond
+	defer func() { requestEnvelopeBatchExpiration = previousExpiration }()
 
-	invalidP2PEnvelope := httpEnvelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
-	invalidP2PEnvelope.Message.Payload.GasUsed++
-	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
-		validP2PRoot: validP2PEnvelope,
-		httpRoot:     invalidP2PEnvelope,
-	}
-	filterEnvelopesByBlockCommitments(
-		&clparams.MainnetBeaconConfig,
-		received,
-		[]*cltypes.SignedBeaconBlock{validP2PBlock, httpBlock},
-	)
-	require.Contains(t, received, validP2PRoot)
-	require.NotContains(t, received, httpRoot)
-
-	encoded, err := httpEnvelope.EncodeSSZ(nil)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)
-	httpRequests := 0
+
+	block := makeGloasBlock(9, hash(1), hash(2))
+	valid, root := makeGloasEnvelopeForBlock(t, block)
+	lookahead := makeGloasBlock(10, hash(3), valid.Message.Payload.BlockHash)
+	linkGloasChild(t, block, lookahead)
+	lookaheadRoot, err := lookahead.Block.HashSSZ()
+	require.NoError(t, err)
+	invalid := valid.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	invalid.Message.Payload.GasUsed++
+
+	sentinel := &forwardEnvelopeSentinel{envelopeResponses: [][]byte{encodeForwardResponses(t, gloasDigest, invalid)}}
+	client := rpc.NewBeaconRpcP2P(context.Background(), sentinel, &cfg, clock, nil)
+	encoded, err := valid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	var httpRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		httpRequests++
-		require.Contains(t, r.URL.Path, common.Bytes2Hex(httpRoot[:]))
+		require.Contains(t, r.URL.Path, common.Bytes2Hex(root[:]))
 		_, _ = w.Write(encoded)
 	}))
 	defer server.Close()
 
-	fetched := fetchEnvelopesFromBeaconAPI(
-		context.Background(),
-		server.URL,
-		[]*cltypes.SignedBeaconBlock{validP2PBlock, httpBlock},
-		[][32]byte{validP2PRoot, httpRoot},
-		received,
-		&clparams.MainnetBeaconConfig,
-	)
-	require.Equal(t, 1, fetched)
+	downloader := &BackwardBeaconDownloader{
+		beaconCfg:       &cfg,
+		rpc:             client,
+		expectedRoot:    lookaheadRoot,
+		httpFallbackURL: server.URL,
+	}
+	downloader.SetInitialBlockEnvelopeDeferred(lookaheadRoot)
+	envelopes, _, _ := downloader.fetchGloasEnvelopes(context.Background(), []*cltypes.SignedBeaconBlock{block, lookahead})
+
 	require.Equal(t, 1, httpRequests)
-	require.Same(t, validP2PEnvelope, received[validP2PRoot])
-	require.Equal(t, httpEnvelope.Message.Payload.BlockHash, received[httpRoot].Message.Payload.BlockHash)
+	require.Equal(t, valid.Message.Payload.BlockHash, envelopes[root].Message.Payload.BlockHash)
+}
+
+func TestBackwardBeaconDownloaderRetriesInvalidP2PEnvelopeWithinBatch(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+
+	block := makeGloasBlock(9, hash(1), hash(2))
+	valid, root := makeGloasEnvelopeForBlock(t, block)
+	lookahead := makeGloasBlock(10, hash(3), valid.Message.Payload.BlockHash)
+	linkGloasChild(t, block, lookahead)
+	lookaheadRoot, err := lookahead.Block.HashSSZ()
+	require.NoError(t, err)
+	invalid := valid.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	invalid.Message.Payload.GasUsed++
+
+	sentinel := &forwardEnvelopeSentinel{envelopeResponses: [][]byte{
+		encodeForwardResponses(t, gloasDigest, invalid),
+		encodeForwardResponses(t, gloasDigest, valid),
+	}}
+	client := rpc.NewBeaconRpcP2P(context.Background(), sentinel, &cfg, clock, nil)
+	downloader := &BackwardBeaconDownloader{
+		beaconCfg:    &cfg,
+		rpc:          client,
+		expectedRoot: lookaheadRoot,
+	}
+	downloader.SetInitialBlockEnvelopeDeferred(lookaheadRoot)
+
+	envelopes, _, _ := downloader.fetchGloasEnvelopes(context.Background(), []*cltypes.SignedBeaconBlock{block, lookahead})
+	require.Equal(t, int32(2), sentinel.envelopeRequests.Load())
+	require.Equal(t, valid.Message.Payload.BlockHash, envelopes[root].Message.Payload.BlockHash)
+	require.NoError(t, cltypes.ValidateExecutionPayloadEnvelopeCommitments(&cfg, block, envelopes[root]))
 }
 
 func TestEnvelopeHTTPFallbackRejectsConfiguredRequestLimit(t *testing.T) {

@@ -410,6 +410,8 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 	ctrl := gomock.NewController(t)
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
 	handler.columnStorage = columnStorage
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	blob := new(cltypes.Blob)
 	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
@@ -439,6 +441,20 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 		require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), writes)
 		return nil
 	}
+	columnPublishes := 0
+	envelopePublishes := 0
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, topic string, _ []byte) error {
+			if topic == gossip.TopicNameExecutionPayload {
+				require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columnPublishes)
+				envelopePublishes++
+				return nil
+			}
+			require.True(t, gossip.IsTopicDataColumnSidecar(topic))
+			columnPublishes++
+			return nil
+		},
+	).Times(int(handler.beaconChainCfg.NumberOfColumns) + 1)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
@@ -448,6 +464,8 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columnPublishes)
+	require.Equal(t, 1, envelopePublishes)
 }
 
 func TestDataColumnSidecarsGloasUseProgressiveColumnLists(t *testing.T) {
@@ -498,6 +516,26 @@ func TestPostExecutionPayloadEnvelopeRejectsUnavailableDataWithoutGossip(t *test
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsIgnoredEnvelopeWithoutGossip(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 	request.Header.Set("Eth-Blob-Data-Included", "false")

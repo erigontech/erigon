@@ -86,12 +86,22 @@ func matchedSelfBuildEnvelope(t *testing.T, cfg *clparams.BeaconChainConfig, blo
 	t.Helper()
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewProgressiveTransactionsSSZ()
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
 	payload.SlotNumber = block.Block.Slot
-	payload.BlockHash = bid.Message.BlockHash
+	payload.ParentHash = bid.Message.ParentBlockHash
+	payload.PrevRandao = bid.Message.PrevRandao
+	payload.FeeRecipient = bid.Message.FeeRecipient
+	payload.GasLimit = bid.Message.GasLimit
 	requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
 	requestsRoot, err := requests.HashSSZ()
 	require.NoError(t, err)
 	bid.Message.ExecutionRequestsRoot = requestsRoot
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, requests))
+	payload.BlockHash, err = payload.ComputeBlockHash(&block.Block.ParentRoot, requestsHash, nil)
+	require.NoError(t, err)
+	bid.Message.BlockHash = payload.BlockHash
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	return &cltypes.SignedExecutionPayloadEnvelope{
@@ -117,8 +127,8 @@ func TestBroadcastSelfBuildEnvelopeStopsPermanentApplyErrorBeforeGossip(t *testi
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	bid.Message.BlockHash = common.HexToHash("0x1234")
-	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 
 	err := h.broadcastSelfBuildEnvelope(context.Background(), block, envelope)
 	require.ErrorContains(t, err, "invalid payload")
@@ -137,8 +147,8 @@ func TestBroadcastSelfBuildEnvelopeDoesNotPublishQueuedUnverifiedEnvelope(t *tes
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	bid.Message.BlockHash = common.HexToHash("0x1234")
-	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	require.ErrorIs(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), forkchoice.ErrIgnore)
 	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
 	require.True(t, cached)
@@ -189,6 +199,9 @@ func TestBroadcastSelfBuildEnvelopeRejectsQueuedEnvelopeForDifferentBlock(t *tes
 		{name: "payload block hash", wantErr: "block hash", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 			envelope.Message.Payload.BlockHash = common.HexToHash("0xdead")
 		}},
+		{name: "prev randao", wantErr: "prev randao", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.Payload.PrevRandao = common.HexToHash("0xdead")
+		}},
 		{name: "execution requests root", wantErr: "execution requests root", mutate: func(t *testing.T, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 			block.Block.Body.GetSignedExecutionPayloadBid().Message.ExecutionRequestsRoot = common.HexToHash("0xdead")
 			blockRoot, err := block.Block.HashSSZ()
@@ -208,8 +221,8 @@ func TestBroadcastSelfBuildEnvelopeRejectsQueuedEnvelopeForDifferentBlock(t *tes
 			bid := block.Block.Body.GetSignedExecutionPayloadBid()
 			bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 			bid.Message.BlockHash = common.HexToHash("0x1234")
-			h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 			envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+			h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 			test.mutate(t, block, envelope)
 
 			err := h.broadcastSelfBuildEnvelope(context.Background(), block, envelope)
@@ -231,8 +244,8 @@ func TestBroadcastSelfBuildEnvelopeContinuesWhenIndicesArePending(t *testing.T) 
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	bid.Message.BlockHash = common.HexToHash("0x1234")
-	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
 
 	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
@@ -251,8 +264,8 @@ func TestBroadcastSelfBuildEnvelopeUsesFullyValidatedIngress(t *testing.T) {
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	bid.Message.BlockHash = common.HexToHash("0x1234")
-	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
 
 	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
@@ -300,6 +313,24 @@ func TestPublishBlockAndSidecarsReturnsPublishFailure(t *testing.T) {
 	require.ErrorIs(t, err, injected)
 }
 
+func TestPublishDataColumnSidecarsReturnsPublishFailure(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	h.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	injected := errors.New("column publish failed")
+	column := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	h.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(), gomock.Any(), gomock.Any(),
+	).Return(injected)
+
+	err := h.publishDataColumnSidecars(t.Context(), []*cltypes.DataColumnSidecar{column})
+
+	require.ErrorIs(t, err, injected)
+}
+
 func TestBroadcastSelfBuildEnvelopeRetainsPayloadWhenGossipFails(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
@@ -310,8 +341,8 @@ func TestBroadcastSelfBuildEnvelopeRetainsPayloadWhenGossipFails(t *testing.T) {
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	bid.Message.BlockHash = common.HexToHash("0x1234")
-	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(errors.New("publish failed"))
 
 	require.ErrorContains(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), "publish failed")
@@ -330,8 +361,8 @@ func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRe
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
 	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
 	bid.Message.BlockHash = common.HexToHash("0x1234")
-	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
 
 	require.ErrorIs(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed)

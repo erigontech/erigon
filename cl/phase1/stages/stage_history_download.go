@@ -392,12 +392,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		for !cfg.downloader.Finished() {
 			if cfg.downloader.SkippedFullBlocksAtCapacity() {
-				if !completeTrackedHistoryBackfill(
+				if !relieveTrackedHistoryBackfill(
 					ctx, cfg.downloader, skippedEnvelopeRecoveryRetryInterval,
 					func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 						return recoverSkippedEnvelopes(ctx, cfg, pending)
 					},
-					func() {},
 				) {
 					return
 				}
@@ -408,6 +407,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 				return
 			}
+		}
+
+		if cfg.blobDownloader != nil {
+			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
+			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
+			cfg.blobDownloader.Start()
 		}
 
 		if !completeTrackedHistoryBackfill(
@@ -423,11 +428,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Info("Full backfilling finished")
 		}
 
-		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
-			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
-			cfg.blobDownloader.Start()
-		}
 	}()
 	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.
 	for !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress() > destinationSlotForEL) {
@@ -463,7 +463,54 @@ func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, wai
 
 type skippedFullBlockTracker interface {
 	SkippedFullBlocks() []network.SkippedFullBlock
+	SkippedFullBlocksAtCapacity() bool
 	MarkSkippedFullBlocksRecovered([]common.Hash)
+}
+
+func relieveTrackedHistoryBackfill(
+	ctx context.Context,
+	tracker skippedFullBlockTracker,
+	retryInterval time.Duration,
+	recoverEnvelopes func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock,
+) bool {
+	for tracker.SkippedFullBlocksAtCapacity() {
+		if err := ctx.Err(); err != nil {
+			return false
+		}
+		pending := tracker.SkippedFullBlocks()
+		batchSize := min(skippedEnvelopeRecoveryBatchSize, len(pending))
+		failed := recoverEnvelopes(ctx, pending[:batchSize])
+		markTrackedHistoryRecovery(tracker, pending[:batchSize], failed)
+		if !tracker.SkippedFullBlocksAtCapacity() {
+			return true
+		}
+		if len(failed) < batchSize || retryInterval <= 0 {
+			continue
+		}
+		retryTimer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			retryTimer.Stop()
+			return false
+		case <-retryTimer.C:
+		}
+	}
+	return true
+}
+
+func markTrackedHistoryRecovery(tracker skippedFullBlockTracker, pending, failed []network.SkippedFullBlock) {
+	failedRoots := make(map[common.Hash]struct{}, len(failed))
+	for _, skippedBlock := range failed {
+		failedRoots[common.Hash(skippedBlock.Root)] = struct{}{}
+	}
+	recoveredRoots := make([]common.Hash, 0, len(pending)-len(failed))
+	for _, skippedBlock := range pending {
+		root := common.Hash(skippedBlock.Root)
+		if _, ok := failedRoots[root]; !ok {
+			recoveredRoots = append(recoveredRoots, root)
+		}
+	}
+	tracker.MarkSkippedFullBlocksRecovered(recoveredRoots)
 }
 
 func completeTrackedHistoryBackfill(
@@ -476,18 +523,7 @@ func completeTrackedHistoryBackfill(
 	skipped := tracker.SkippedFullBlocks()
 	return completeHistoryBackfill(ctx, skipped, retryInterval, func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 		failed := recoverEnvelopes(ctx, pending)
-		failedRoots := make(map[common.Hash]struct{}, len(failed))
-		for _, skippedBlock := range failed {
-			failedRoots[common.Hash(skippedBlock.Root)] = struct{}{}
-		}
-		recoveredRoots := make([]common.Hash, 0, len(pending)-len(failed))
-		for _, skippedBlock := range pending {
-			root := common.Hash(skippedBlock.Root)
-			if _, ok := failedRoots[root]; !ok {
-				recoveredRoots = append(recoveredRoots, root)
-			}
-		}
-		tracker.MarkSkippedFullBlocksRecovered(recoveredRoots)
+		markTrackedHistoryRecovery(tracker, pending, failed)
 		return failed
 	}, notifyBackfilled)
 }
