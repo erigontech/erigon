@@ -195,10 +195,15 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, blocks[1]))
-	require.True(t, service.(*blockService).seenBlocksCache.Contains(proposerIndexAndSlot{
+	key := proposerIndexAndSlot{
 		proposerIndex: blocks[1].Block.ProposerIndex,
 		slot:          blocks[1].Block.Slot,
-	}))
+	}
+	seen, ok := service.(*blockService).seenBlocksCache.Get(key)
+	require.True(t, ok)
+	signedRoot, err := blocks[1].HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(signedRoot), seen.signedRoot)
 }
 
 func TestBlockServiceGossipRejectsBlockOutsideFinalizedChain(t *testing.T) {
@@ -416,6 +421,18 @@ func TestBlockServiceValidateGossipRejectsMissingBodyBeforeHashing(t *testing.T)
 	require.ErrorContains(t, service.ValidateGossip(t.Context(), block), "missing beacon block")
 }
 
+func TestBlockServiceP2PDuplicateIsIgnoredBeforeHashing(t *testing.T) {
+	service, child, _, _, _ := newGloasGossipValidationFixture(t, nil)
+	child.Block.Body.Eth1Data = nil
+	key := blockGossipKey(child)
+	service.(*blockService).seenBlocksCache.Add(key, seenBlock{})
+
+	err := service.ProcessMessage(t.Context(), nil, child)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Nil(t, child.Block.Body.Eth1Data)
+}
+
 func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
 	underlying := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &failFirstUpdateDB{RwDB: underlying}
@@ -498,6 +515,41 @@ func TestPublishedBlockJobUpgradesBlockOnlyRecovery(t *testing.T) {
 	require.NotNil(t, jobValue.(*blockJob).store)
 }
 
+func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	fullValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	service.ScheduleBlockForLaterProcessing(block)
+	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, fullValue, currentValue)
+}
+
+func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	newer := &blockJob{
+		block:        block,
+		store:        func(context.Context) error { return nil },
+		creationTime: time.Now().Add(time.Minute),
+	}
+	service := &blockService{}
+	service.blocksScheduledForLaterExecution.Store(root, newer)
+
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		return errors.New("older store should not replace newer store")
+	})
+
+	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, newer, currentValue)
+}
+
 func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
@@ -516,6 +568,34 @@ func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
 	require.True(t, ok)
 	require.NotSame(t, staleJob, currentValue)
 	require.NotNil(t, currentValue.(*blockJob).store)
+}
+
+func TestPublishedBlockRefreshSurvivesStaleFullStoreWorker(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		return errors.New("stale store should not run")
+	})
+	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	staleJob := staleValue.(*blockJob)
+	freshStoreCalls := 0
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		freshStoreCalls++
+		return nil
+	})
+	staleJob.creationTime = time.Now().Add(-blockJobExpiry - time.Second)
+	service.processScheduledBlock(t.Context(), root, staleJob, time.Now())
+
+	freshValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.NotSame(t, staleJob, freshValue)
+	service.processScheduledBlock(t.Context(), root, freshValue.(*blockJob), time.Now())
+	require.Equal(t, 1, freshStoreCalls)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
 }
 
 func TestBlockServicePendingGossipReservationHandsOffToP2P(t *testing.T) {
