@@ -790,7 +790,8 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	}
 
 	txNum, blockNum = DecodeTxBlockNums(state)
-	return blockNum, txNum, state, nil
+	// Outlives this call: Branch hands back a buffer it reuses on the next read.
+	return blockNum, txNum, bytes.Clone(state), nil
 }
 
 // SeekCommitment searches for last encoded state from DomainCommitted
@@ -945,6 +946,8 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+
+	branchBuf []byte // reused across Branch calls; see the ownership note on Branch
 }
 
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
@@ -958,15 +961,24 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
-	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
-	// underlying state cache / getter aliases shared storage that another goroutine
-	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
-	// boundary so all downstream consumers are safe.
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	return bytes.Clone(enc), step, nil
+	// The slice from the underlying state cache / getter aliases storage another
+	// commitment worker can recycle, so the bytes have to be owned here. They are
+	// copied into a per-context buffer rather than a fresh allocation: a trie
+	// context belongs to exactly one goroutine (every mount worker builds its own
+	// via TrieContextFactory), and every caller finishes with one branch before
+	// reading the next. LatestCommitmentState is the sole caller that keeps the
+	// bytes past its own return, and clones them itself.
+	if enc == nil {
+		return nil, step, nil
+	}
+	if sdc.branchBuf == nil {
+		sdc.branchBuf = make([]byte, 0, len(enc))
+	}
+	sdc.branchBuf = append(sdc.branchBuf[:0], enc...)
+	return sdc.branchBuf, step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
