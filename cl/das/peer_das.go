@@ -82,9 +82,14 @@ type peerdas struct {
 	gossipManager     gossipmgr.Gossip
 	recoverBlobsQueue chan recoverBlobsRequest
 
-	recoveringMutex   sync.Mutex
-	isRecovering      map[common.Hash]bool
-	blocksToCheckSync sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
+	recoveringMutex     sync.Mutex
+	isRecovering        map[common.Hash]bool
+	recoveryRetryOnce   sync.Once
+	recoveryRetryMutex  sync.Mutex
+	recoveryRetries     map[common.Hash]delayedRecoverBlobsRequest
+	recoveryRetryWake   chan struct{}
+	recoveryPreferRetry bool
+	blocksToCheckSync   sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -125,6 +130,8 @@ func NewPeerDas(
 
 		recoveringMutex:   sync.Mutex{},
 		isRecovering:      make(map[common.Hash]bool),
+		recoveryRetries:   make(map[common.Hash]delayedRecoverBlobsRequest),
+		recoveryRetryWake: make(chan struct{}, numOfBlobRecoveryWorkers),
 		blocksToCheckSync: sync.Map{},
 
 		blockReader:    blockReader,
@@ -447,23 +454,162 @@ type recoverBlobsRequest struct {
 	metadata  *blobRecoveryMetadata
 }
 
-func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
-	waitForStoredBlobRecoveryValidation := func(metadata *blobRecoveryMetadata) blobRecoveryValidation {
-		for {
-			validation, _ := d.storedBlobRecoveryValidation(ctx, metadata)
-			if validation != blobRecoveryUnavailable {
-				return validation
+type delayedRecoverBlobsRequest struct {
+	request   recoverBlobsRequest
+	notBefore time.Time
+}
+
+func (d *peerdas) initBlobRecoveryRetries() {
+	d.recoveryRetryOnce.Do(func() {
+		if d.recoveryRetries == nil {
+			d.recoveryRetries = make(map[common.Hash]delayedRecoverBlobsRequest)
+		}
+		if d.recoveryRetryWake == nil {
+			d.recoveryRetryWake = make(chan struct{}, numOfBlobRecoveryWorkers)
+		}
+	})
+}
+
+func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) {
+	d.initBlobRecoveryRetries()
+	d.recoveringMutex.Lock()
+	d.isRecovering[request.blockRoot] = false
+	d.recoveringMutex.Unlock()
+	d.recoveryRetryMutex.Lock()
+	d.recoveryRetries[request.blockRoot] = delayedRecoverBlobsRequest{
+		request:   request,
+		notBefore: time.Now().Add(blobRecoveryValidationRetryInterval),
+	}
+	d.recoveryRetryMutex.Unlock()
+	select {
+	case d.recoveryRetryWake <- struct{}{}:
+	default:
+	}
+}
+
+func (d *peerdas) nextBlobRecoveryRequest(ctx context.Context) (recoverBlobsRequest, bool) {
+	d.initBlobRecoveryRetries()
+	for {
+		now := time.Now()
+		var next time.Time
+		var dueRoot common.Hash
+		var due delayedRecoverBlobsRequest
+		var hasDue bool
+		d.recoveryRetryMutex.Lock()
+		for root, delayed := range d.recoveryRetries {
+			if !hasDue && !delayed.notBefore.After(now) {
+				dueRoot = root
+				due = delayed
+				hasDue = true
+				continue
 			}
-			timer := time.NewTimer(blobRecoveryValidationRetryInterval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return blobRecoveryUnavailable
-			case <-timer.C:
+			if next.IsZero() || delayed.notBefore.Before(next) {
+				next = delayed.notBefore
 			}
 		}
+		if hasDue {
+			if !d.recoveryPreferRetry {
+				select {
+				case request := <-d.recoverBlobsQueue:
+					d.recoveryPreferRetry = true
+					d.recoveryRetryMutex.Unlock()
+					return request, true
+				default:
+				}
+			}
+			delete(d.recoveryRetries, dueRoot)
+			d.recoveryPreferRetry = false
+			d.recoveryRetryMutex.Unlock()
+			return due.request, true
+		}
+		d.recoveryRetryMutex.Unlock()
+
+		if next.IsZero() {
+			select {
+			case <-ctx.Done():
+				return recoverBlobsRequest{}, false
+			case request := <-d.recoverBlobsQueue:
+				return request, true
+			case <-d.recoveryRetryWake:
+			}
+			continue
+		}
+
+		timer := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return recoverBlobsRequest{}, false
+		case request := <-d.recoverBlobsQueue:
+			timer.Stop()
+			return request, true
+		case <-d.recoveryRetryWake:
+			timer.Stop()
+		case <-timer.C:
+		}
 	}
-	recover := func(toRecover recoverBlobsRequest) {
+}
+
+func (d *peerdas) claimBlobRecovery(blockRoot common.Hash) bool {
+	d.recoveringMutex.Lock()
+	defer d.recoveringMutex.Unlock()
+	active, exists := d.isRecovering[blockRoot]
+	if active {
+		return false
+	}
+	if !exists && len(d.isRecovering) >= cap(d.recoverBlobsQueue) {
+		return false
+	}
+	d.isRecovering[blockRoot] = true
+	return true
+}
+
+func (d *peerdas) releaseBlobRecovery(blockRoot common.Hash) {
+	d.recoveringMutex.Lock()
+	delete(d.isRecovering, blockRoot)
+	d.recoveringMutex.Unlock()
+}
+
+func (d *peerdas) clearDelayedBlobRecoveries() {
+	d.initBlobRecoveryRetries()
+	d.recoveryRetryMutex.Lock()
+	roots := make([]common.Hash, 0, len(d.recoveryRetries))
+	for root := range d.recoveryRetries {
+		roots = append(roots, root)
+		delete(d.recoveryRetries, root)
+	}
+	d.recoveryRetryMutex.Unlock()
+	d.recoveringMutex.Lock()
+	for _, root := range roots {
+		if active := d.isRecovering[root]; !active {
+			delete(d.isRecovering, root)
+		}
+	}
+	d.recoveringMutex.Unlock()
+}
+
+func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
+	d.recoveringMutex.Lock()
+	defer d.recoveringMutex.Unlock()
+	if _, ok := d.isRecovering[request.blockRoot]; ok {
+		return nil
+	}
+	if len(d.isRecovering) >= cap(d.recoverBlobsQueue) {
+		return errors.New("failed to schedule recover: capacity reached")
+	}
+	d.isRecovering[request.blockRoot] = false
+	select {
+	case d.recoverBlobsQueue <- request:
+		return nil
+	default:
+		delete(d.isRecovering, request.blockRoot)
+		return errors.New("failed to schedule recover: capacity reached")
+	}
+}
+
+func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
+	defer d.clearDelayedBlobRecoveries()
+	recover := func(toRecover recoverBlobsRequest) (retryScheduled bool) {
 		if ctx.Err() != nil {
 			return
 		}
@@ -620,7 +766,12 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 		// Save blobs
 		if toRecover.metadata != nil {
-			if validation := waitForStoredBlobRecoveryValidation(toRecover.metadata); validation != blobRecoveryInvalid {
+			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
+			if validation == blobRecoveryUnavailable && ctx.Err() == nil {
+				d.delayBlobRecovery(toRecover)
+				return true
+			}
+			if validation != blobRecoveryInvalid {
 				return
 			}
 		}
@@ -710,38 +861,36 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		timeAddColumns := time.Since(beginAddColumns)
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin),
 			"timeRecoverMatrix", timeRecoverMatrix, "timeRecoverBlobs", timeRecoverBlobs, "timeRemoveColumns", timeRemoveColumns, "timeAddColumns", timeAddColumns)
+		return false
 	}
 
 	// main loop
 	for {
-		select {
-		case <-ctx.Done():
+		toRecover, ok := d.nextBlobRecoveryRequest(ctx)
+		if !ok {
 			return
-		case toRecover := <-d.recoverBlobsQueue:
-			d.recoveringMutex.Lock()
-			if _, ok := d.isRecovering[toRecover.blockRoot]; ok {
-				// recovering, skip
-				d.recoveringMutex.Unlock()
-				continue
-			}
-			d.isRecovering[toRecover.blockRoot] = true
-			d.recoveringMutex.Unlock()
+		}
+		if !d.claimBlobRecovery(toRecover.blockRoot) {
+			continue
+		}
 
-			var recoverNeeded bool
-			if toRecover.metadata != nil {
-				validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
-				recoverNeeded = validation != blobRecoveryComplete
-			} else {
-				recoverNeeded = !d.IsBlobAlreadyRecovered(toRecover.blockRoot)
+		var retryScheduled bool
+		if toRecover.metadata != nil {
+			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
+			switch validation {
+			case blobRecoveryUnavailable:
+				if ctx.Err() == nil {
+					d.delayBlobRecovery(toRecover)
+					retryScheduled = true
+				}
+			case blobRecoveryInvalid:
+				retryScheduled = recover(toRecover)
 			}
-			if recoverNeeded && ctx.Err() == nil {
-				// recover the blobs
-				recover(toRecover)
-			}
-			// remove the block from the recovering map
-			d.recoveringMutex.Lock()
-			delete(d.isRecovering, toRecover.blockRoot)
-			d.recoveringMutex.Unlock()
+		} else if !d.IsBlobAlreadyRecovered(toRecover.blockRoot) && ctx.Err() == nil {
+			retryScheduled = recover(toRecover)
+		}
+		if !retryScheduled {
+			d.releaseBlobRecovery(toRecover.blockRoot)
 		}
 	}
 }
@@ -760,26 +909,12 @@ func (d *peerdas) tryScheduleRecover(slot uint64, blockRoot common.Hash, metadat
 		return nil
 	}
 
-	// early check if the blobs are recovering
-	d.recoveringMutex.Lock()
-	if _, ok := d.isRecovering[blockRoot]; ok {
-		d.recoveringMutex.Unlock()
-		return nil
-	}
-	d.recoveringMutex.Unlock()
-	// schedule
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case d.recoverBlobsQueue <- recoverBlobsRequest{
+	request := recoverBlobsRequest{
 		slot:      slot,
 		blockRoot: blockRoot,
 		metadata:  metadata,
-	}:
-	case <-timer.C:
-		return errors.New("failed to schedule recover: timeout")
 	}
-	return nil
+	return d.enqueueBlobRecovery(request)
 }
 
 var allColumns = func() map[cltypes.CustodyIndex]bool {
