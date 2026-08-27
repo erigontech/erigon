@@ -238,6 +238,45 @@ func TestBlockServiceSuccess(t *testing.T) {
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
 }
 
+func TestBlockServiceInitialProcessingQueuesRetryableDependencyFailure(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+	}{
+		{name: "parent state", err: forkchoice.ErrMissingSegment},
+		{name: "execution status", err: forkchoice.ErrNewPayloadNoStatus},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			blocks, _, post := tests.GetBellatrixRandom()
+			block := blocks[1]
+			serviceAPI, syncedData, ethClock, forkchoiceStore := setupBlockService(t, ctrl)
+			service := serviceAPI.(*blockService)
+			require.NoError(t, syncedData.OnHeadState(post))
+			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+			forkchoiceStore.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+			forkchoiceStore.Headers[block.Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+			forkchoiceStore.SlotVal = block.Block.Slot
+			block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
+			processingStore := &blockProcessingErrorStore{
+				ForkChoiceStorage: forkchoiceStore,
+				err:               fmt.Errorf("dependency unavailable: %w", tc.err),
+			}
+			service.forkchoiceStore = processingStore
+
+			err := service.ProcessMessage(t.Context(), nil, block)
+
+			require.NoError(t, err)
+			require.Equal(t, 1, processingStore.calls)
+			require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+		})
+	}
+}
+
 func TestBlockServicePendingQueueCap(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
