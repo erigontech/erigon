@@ -21,6 +21,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -540,4 +541,53 @@ func TestStatefulPrecompileStateChargeIsTraced(t *testing.T) {
 	// only the charge itself is in the state dimension.
 	require.Contains(t, events, gasEvent{reservoir, reservoir - charge},
 		"a reservoir-covered state charge must still reach the tracer")
+}
+
+type overRefundStatefulPrecompile struct{ refundErr error }
+
+func (*overRefundStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (*overRefundStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (*overRefundStatefulPrecompile) Name() string               { return "OVERREFUND" }
+
+func (p *overRefundStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if gas.RefundExecution(1) {
+		p.refundErr = errors.New("refund accepted with nothing charged")
+		return nil, nil
+	}
+	if !gas.ChargeExecution(100) {
+		return nil, vm.ErrOutOfGas
+	}
+	if gas.RefundExecution(101) {
+		p.refundErr = errors.New("refund accepted above the charged total")
+		return nil, nil
+	}
+	if !gas.RefundExecution(100) {
+		p.refundErr = errors.New("refund of the charged total was rejected")
+	}
+	return nil, nil
+}
+
+// TestStatefulPrecompileCannotMintExecutionGas pins the bound on
+// RefundExecution. Execution gas only comes back from a charge this frame
+// made, so an unbounded refill underflows used.Execution and returns the
+// caller more gas than it handed in — evm.call validates nothing after
+// RunStateful.
+func TestStatefulPrecompileCannotMintExecutionGas(t *testing.T) {
+	const chainID = 900412
+	const handed = uint64(100_000)
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x91}))
+	p := &overRefundStatefulPrecompile{}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: p}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: handed}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.NoError(t, p.refundErr)
+	require.Equal(t, handed, remaining.Execution, "the frame must not end holding more execution gas than it was handed")
+	require.Zero(t, gasUsed.Execution)
 }

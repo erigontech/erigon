@@ -183,6 +183,8 @@ type PrecompileGas struct {
 	remaining *mdgas.MdGas
 	used      *mdgas.MdGasUsage
 	tracer    *tracing.Hooks
+	// Execution gas charged through this handle and not yet given back.
+	chargedExecution uint64
 }
 
 // onGasChange reports a charge or refund the way the interpreter's useMdGas
@@ -212,6 +214,7 @@ func (g *PrecompileGas) ChargeExecution(amount uint64) bool {
 	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.ExecutionGas) {
 		return false
 	}
+	g.chargedExecution += amount
 	g.onGasChange(before, 0, mdgas.ExecutionGas, tracing.GasChangeCallPrecompiledContract)
 	return true
 }
@@ -229,11 +232,19 @@ func (g *PrecompileGas) ChargeState(amount uint64) bool {
 }
 
 // RefundExecution gives execution gas back, e.g. the leftover a nested
-// ctx.Evm call returned.
-func (g *PrecompileGas) RefundExecution(amount uint64) {
+// ctx.Evm call returned. Reports false and refunds nothing above what this
+// handle charged: unlike a state refund, execution gas can only return from a
+// charge this frame made, and an unbounded refill underflows used.Execution
+// and hands the caller more gas than the frame was given.
+func (g *PrecompileGas) RefundExecution(amount uint64) bool {
+	if amount > g.chargedExecution {
+		return false
+	}
 	before := *g.remaining
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.ExecutionGas)
+	g.chargedExecution -= amount
 	g.onGasChange(before, 0, mdgas.ExecutionGas, tracing.GasChangeCallLeftOverRefunded)
+	return true
 }
 
 // RefundState reverses a state charge — clearing state the frame created, or
