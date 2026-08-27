@@ -1149,6 +1149,9 @@ func (a *ApiHandler) validateAndStoreExecutionPayloadEnvelopeContents(ctx contex
 	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil {
 		return errors.New("execution payload envelope contents has nil envelope")
 	}
+	if err := contents.SignedExecutionPayloadEnvelope.ValidateForPersistence(a.beaconChainCfg); err != nil {
+		return err
+	}
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(ctx, contents.SignedExecutionPayloadEnvelope); err != nil {
 		return err
 	}

@@ -807,6 +807,24 @@ func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestValidateAndStoreExecutionPayloadEnvelopeContentsRejectsUnpersistableEnvelope(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, 64)
+	payload := contents.SignedExecutionPayloadEnvelope.Message.Payload
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewProgressiveTransactionsSSZ()
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
+	require.NoError(t, payload.BlockAccessList.DecodeSSZ(
+		make([]byte, int(clparams.MaxChunkSize)+1024),
+		int(clparams.GloasVersion),
+	))
+
+	err := handler.validateAndStoreExecutionPayloadEnvelopeContents(t.Context(), contents)
+
+	require.ErrorContains(t, err, "encoding size")
+}
+
 func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
