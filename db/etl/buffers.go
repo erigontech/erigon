@@ -275,12 +275,14 @@ func (b *sortableBuffer) nextChunk(n int) {
 		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))
 	}
 	size, pooled := chunkSizeFor(n)
-	if size > math.MaxInt32 {
-		panic(fmt.Sprintf("etl: entry of %d bytes exceeds %d", n, math.MaxInt32-entryLocSize))
-	}
-	buf := make([]byte, size)
+	var buf []byte
 	if pooled {
 		buf = getDataChunk()
+	} else {
+		if size > math.MaxInt32 {
+			panic(fmt.Sprintf("etl: entry of %d bytes exceeds %d", n, math.MaxInt32-entryLocSize))
+		}
+		buf = make([]byte, size)
 	}
 	if uintptr(unsafe.Pointer(&buf[0]))%entryLocSize != 0 {
 		panic("etl: chunk is not aligned for its entry index")
