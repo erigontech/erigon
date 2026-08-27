@@ -466,6 +466,12 @@ func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
 		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
 		require.Equal(t, 1, collector.calls)
 	})
+	t.Run("indices pending after persistence", func(t *testing.T) {
+		store := &envelopeReadTestStore{onErr: forkchoice.ErrExecutionPayloadEnvelopeIndicesPending, persisted: envelope}
+		collector := &gloasCollectorTest{}
+		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.Equal(t, 1, collector.calls)
+	})
 	t.Run("mismatch", func(t *testing.T) {
 		different := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 		different.Message.BeaconBlockRoot = root

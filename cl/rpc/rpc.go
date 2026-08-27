@@ -229,6 +229,9 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
+		if uint64(len(data.raw)) > clparams.MaxChunkSize {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by range length %d exceeds max chunk size %d", len(data.raw), clparams.MaxChunkSize)
+		}
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
 			return envelopes, pid, err
 		}
@@ -272,6 +275,9 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
+		if uint64(len(data.raw)) > clparams.MaxChunkSize {
+			return envelopes, pid, fmt.Errorf("execution payload envelope by root length %d exceeds max chunk size %d", len(data.raw), clparams.MaxChunkSize)
+		}
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
 			return envelopes, pid, err
 		}
