@@ -117,8 +117,8 @@ func (w *Warmuper) Start() {
 			}
 
 			readBranch := trieCtx.Branch
-			if b, ok := trieCtx.(BorrowedBranchReader); ok {
-				readBranch = b.BranchBorrowed
+			if w, ok := trieCtx.(BranchWarmer); ok {
+				readBranch = w.WarmupBranch
 			}
 
 			for {
@@ -147,8 +147,8 @@ func (w *Warmuper) Start() {
 	})
 }
 
-// warmupKey descends one key, parsing each branch and dropping it before the next
-// read, which is what lets the caller pass a borrowing reader.
+// warmupKey descends one key, parsing each branch only to pick the next nibble.
+// It keeps nothing, so the caller can pass the non-copying read.
 func (w *Warmuper) warmupKey(readBranch func([]byte) ([]byte, kv.Step, error), hashedKey []byte, startDepth int) {
 	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte

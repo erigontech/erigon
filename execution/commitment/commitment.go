@@ -121,12 +121,11 @@ type PatriciaContext interface {
 	Storage(plainKey []byte) (*Update, error)
 }
 
-// BorrowedBranchReader reads branch bytes without copying them. The returned
-// slice aliases storage the context reuses, so it is only valid until that
-// context's next read. Implement it only where that is true, and use it only
-// from callers that are done with the bytes before reading again.
-type BorrowedBranchReader interface {
-	BranchBorrowed(prefix []byte) ([]byte, kv.Step, error)
+// BranchWarmer reads a branch for trie warmup, which only needs the bytes to pick
+// the next nibble and never keeps them. Unlike Branch it does not copy, so the
+// result stays valid only as long as the context's transaction.
+type BranchWarmer interface {
+	WarmupBranch(prefix []byte) ([]byte, kv.Step, error)
 }
 
 type TrieVariant string

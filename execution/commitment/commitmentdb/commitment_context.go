@@ -987,10 +987,12 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return bytes.Clone(enc), step, nil
 }
 
-// BranchBorrowed returns the branch bytes uncopied. The slice aliases the mdbx
-// page or the file getter's buffer and this context's next read invalidates it,
-// so it suits only callers that finish with it before reading again.
-func (sdc *TrieContext) BranchBorrowed(pref []byte) ([]byte, kv.Step, error) {
+// WarmupBranch returns the branch bytes uncopied, for trie warmup. They stay
+// valid for the life of this context's transaction -- mdbx guarantees that much
+// for a read, mmapped .kv pages are pinned by it, and the mem batch and the
+// branch/state caches all hand out heap-owned values -- but not past it, which is
+// why anything that keeps branch data uses Branch.
+func (sdc *TrieContext) WarmupBranch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branch(pref)
 }
 

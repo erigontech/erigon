@@ -263,7 +263,7 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 }
 
 // countingBranchCtx records which read path the warmuper took. Branch models the
-// owning read (it copies); branchBorrowed hands back the source slice itself.
+// owning read (it copies); WarmupBranch hands back the source slice itself.
 type countingBranchCtx struct {
 	src      []byte
 	owned    atomic.Int64
@@ -275,7 +275,7 @@ func (c *countingBranchCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return bytes.Clone(c.src), 0, nil
 }
 
-func (c *countingBranchCtx) BranchBorrowed(prefix []byte) ([]byte, kv.Step, error) {
+func (c *countingBranchCtx) WarmupBranch(prefix []byte) ([]byte, kv.Step, error) {
 	c.borrowed.Add(1)
 	return c.src, 0, nil
 }
@@ -284,11 +284,10 @@ func (c *countingBranchCtx) PutBranch(prefix, data, prevData []byte) error { ret
 func (c *countingBranchCtx) Account(plainKey []byte) (*Update, error)      { return nil, nil }
 func (c *countingBranchCtx) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
 
-// TestWarmuperBorrowsBranchBytes pins the warmuper on the non-copying read. It
-// parses each branch and descends before its next read on the same context, so it
-// never needs to own the bytes -- and it issues several times more branch reads
-// than the fold does, so an owning read there is the bulk of the copying.
-func TestWarmuperBorrowsBranchBytes(t *testing.T) {
+// TestWarmuperUsesWarmupBranch pins the warmuper on the non-copying read. It keeps
+// nothing it reads, and it issues several times more branch reads than the fold
+// does, so an owning read there is the bulk of the copying.
+func TestWarmuperUsesWarmupBranch(t *testing.T) {
 	t.Parallel()
 	// touchMap, afterMap with nibble 0 set, then one cell with no fields.
 	ctx := &countingBranchCtx{src: []byte{0x00, 0x01, 0x00, 0x01, 0x00}}
