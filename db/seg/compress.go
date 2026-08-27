@@ -80,6 +80,16 @@ type Cfg struct {
 	ValuesOnCompressedPage int
 }
 
+// Validate rejects a Cfg the compressor cannot run with. Every entry point
+// that builds a pattern collector has to call it, not just NewCompressor.
+func (c Cfg) Validate() error {
+	if c.MaxPatternLen > etl.MaxKeyLen {
+		// patterns become etl keys in extractPatternsInSuperstrings
+		return fmt.Errorf("MaxPatternLen %d exceeds %d", c.MaxPatternLen, etl.MaxKeyLen)
+	}
+	return nil
+}
+
 func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
 	c.ValuesOnCompressedPage = n
 	return c
@@ -150,9 +160,8 @@ type Timings struct {
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
-	if cfg.MaxPatternLen > etl.MaxKeyLen {
-		// patterns become etl keys in extractPatternsInSuperstrings
-		return nil, fmt.Errorf("MaxPatternLen %d exceeds %d", cfg.MaxPatternLen, etl.MaxKeyLen)
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	workers := cfg.Workers
 	dir2.MustExist(tmpDir)

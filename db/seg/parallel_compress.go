@@ -1140,6 +1140,9 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 }
 
 func DictionaryBuilderFromCollectors(ctx context.Context, cfg Cfg, logPrefix, tmpDir string, collectors []*etl.Collector, lvl log.Lvl, logger log.Logger) (*DictionaryBuilder, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	t := time.Now()
 	dictCollector := etl.NewCollectorWithAllocator(logPrefix+"_collectDict", tmpDir, etl.SmallSortableBuffers, logger)
 	defer dictCollector.Close()

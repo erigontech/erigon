@@ -217,6 +217,7 @@ type memoryDataProvider struct {
 }
 
 func KeepInRAM(buffer Buffer) dataProvider {
+	buffer.Rewind() // the provider reads from the start, wherever the cursor was
 	return &memoryDataProvider{buffer}
 }
 

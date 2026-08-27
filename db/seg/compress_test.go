@@ -468,4 +468,9 @@ func TestCompressorRejectsOversizedPatternLen(t *testing.T) {
 	_, err := NewCompressor(context.Background(), t.Name(), filepath.Join(t.TempDir(), "out.seg"), t.TempDir(), cfg, log.LvlDebug, logger)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "MaxPatternLen")
+
+	// the other entry point that builds a pattern-keyed collector
+	_, err = DictionaryBuilderFromCollectors(context.Background(), cfg, t.Name(), t.TempDir(), nil, log.LvlDebug, logger)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "MaxPatternLen")
 }
