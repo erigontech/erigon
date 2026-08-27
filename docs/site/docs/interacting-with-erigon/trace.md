@@ -193,7 +193,7 @@ The `action` object's shape depends on `type`:
 | --- | --- | --- |
 | `author` | DATA, 20 BYTES | Address receiving the reward (miner / uncle author). |
 | `value` | QUANTITY | Wei amount of the reward. |
-| `rewardType` | String | `"block"` or `"uncle"`. |
+| `rewardType` | String | `"block"` or `"uncle"`, and `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
 
 ### Result variants
 
@@ -438,7 +438,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 1. `Quantity`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: an integer block number, a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Boolean` - Optional. `gasBailOut`.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call.
 4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
 ```js
@@ -560,8 +560,8 @@ Returns traces created at given block.
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
-2. `Boolean` - Optional. `gasBailOut`.
+1. `Quantity`, `Tag` or `null` - A plain block number: an integer (hex string or bare JSON integer), a named tag (`'earliest'`, `'latest'`, `'pending'`, `'safe'`, `'finalized'`, or the Erigon-specific `'latestExecuted'`), or `null` / `"null"`, both of which mean `latest`. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
+2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour.
 3. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to append a `"reward"` entry per beacon-chain withdrawal. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
 ```js

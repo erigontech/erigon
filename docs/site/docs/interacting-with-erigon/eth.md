@@ -99,16 +99,20 @@ without a full state database.
 :::info
 `eth_getTxWitness` currently only bounds-checks `txIndex` — an index past the end of the
 block is an error, but the witness it returns is the same whole-block witness
-`eth_getWitness` produces. At the genesis block not even that check runs: both methods
-share one implementation that returns the empty witness as soon as the block number
-resolves to `0`, so any `txIndex` is accepted there.
+`eth_getWitness` produces. Two cases are not rejected: the check narrows the index with
+`int(txIndex)`, so on a 64-bit build a value from `0x8000000000000000` upward wraps
+negative and passes; and at the genesis block the check never runs at all, because both
+methods share one implementation that returns the empty witness as soon as the block
+number resolves to `0`.
 :::
 
 **Returns**
 
-`DATA` — the serialized witness. Erigon decodes the bytes it is about to return and
-checks that they rebuild the parent state root, so a witness that comes back is
-self-verified. The genesis block returns an empty witness.
+`DATA` — the serialized witness. On the normal path Erigon decodes the bytes it is about
+to return and checks that they rebuild the parent state root, so the witness is
+self-verified. Two early returns skip that check because they produce no witness to
+verify: the genesis block, and any block whose access set turns out to be empty. Both
+return the empty witness.
 
 **Requirements**
 
@@ -169,16 +173,18 @@ Accepted everywhere a block is selected:
 * a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
 * a bare, unquoted JSON integer — `3`
 * the named tags `"earliest"`, `"latest"`, `"safe"`, `"finalized"`, `"pending"`
-* `null`, but only where the selector is optional: it leaves the parameter unset, and
-  the method's own default applies — `latest` for most, though the default is
-  per-method. A **required** block-or-hash parameter rejects top-level `null`:
-  `BlockNumberOrHash.UnmarshalJSON` decodes `null` into an empty struct and then fails
-  with `at least one of BlockNumber or BlockHash is needed if a dictionary is provided`
-  (`rpc/types.go`). That is a property of the type, not a list of special-cased methods
-  — it holds for every method whose selector is a required `BlockNumberOrHash`,
-  including `eth_getBlockReceipts`, `eth_getBlockAccessList`, `eth_simulateV1`,
-  `eth_getWitness`, `eth_getTxWitness`, `eth_getBlockByHash` and
-  `trace_replayBlockTransactions`
+* `null`, whose handling depends on the parameter's type, not on the method:
+  * a plain **block-number** parameter accepts it — `BlockNumber.UnmarshalJSON` maps
+    top-level `null` to `latest`, so `eth_getBlockByNumber`, `trace_block` and the rest
+    of that family take it even though the parameter is required;
+  * an **optional** block-or-hash parameter accepts it too: the selector is left unset
+    and the method's own default applies, `latest` for most;
+  * a **required** block-or-hash parameter rejects it —
+    `BlockNumberOrHash.UnmarshalJSON` decodes `null` into an empty struct and then fails
+    with `at least one of BlockNumber or BlockHash is needed if a dictionary is
+    provided` (`rpc/types.go`). This holds for every such method, including
+    `eth_getBlockReceipts`, `eth_getBlockAccessList`, `eth_simulateV1`, `eth_getWitness`,
+    `eth_getTxWitness`, `eth_getBlockByHash` and `trace_replayBlockTransactions`
 
 Rejected everywhere:
 
