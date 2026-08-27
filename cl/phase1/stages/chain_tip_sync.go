@@ -70,6 +70,10 @@ func canValidateGloasPayloads(cfg *Cfg) bool {
 	return cfg.executionClient != nil
 }
 
+func rememberBlockAfterProcess(err error) bool {
+	return !errors.Is(err, forkchoice.ErrParentEnvelopePending)
+}
+
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
 // It periodically checks the readiness of the execution client and returns true if the client is ready before
 // the timeout occurs. If the context is canceled or a timeout occurs, it returns false with the corresponding error.
@@ -280,7 +284,9 @@ MainLoop:
 				// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
 					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
-					seenBlockRoots[blockRoot] = struct{}{}
+					if rememberBlockAfterProcess(err) {
+						seenBlockRoots[blockRoot] = struct{}{}
+					}
 					continue
 				}
 
