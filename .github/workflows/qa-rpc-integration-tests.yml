@@ -29,13 +29,14 @@ concurrency:
 
 permissions:
   contents: read
-  # For the reusable changes.yml docs-only detection.
-  pull-requests: read
 
 jobs:
   # Skips the suites below on docs-only PRs; see changes.yml.
   changes:
     uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
 
   mainnet-rpc-integ-tests:
     needs: [changes]
