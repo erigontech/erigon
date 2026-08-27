@@ -17,6 +17,7 @@
 package app
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -133,11 +134,13 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 
-	importSession, err := newChainImportSession(ethereum, ethereum.ChainDB(), logger)
-	if err != nil {
-		return err
-	}
-	return importSession.finish(importFiles(cliCtx.Args().Slice(), logger, importSession.importFile))
+	files := cliCtx.Args().Slice()
+	fileIndex := 0
+	return importFiles(files, logger, func(fn string) error {
+		lastFile := fileIndex == len(files)-1
+		fileIndex++
+		return importFile(ethereum, ethereum.ChainDB(), fn, lastFile, logger)
+	})
 }
 
 // importFiles imports each file in order; with more than one file, per-file
@@ -159,49 +162,7 @@ func importFiles(files []string, logger log.Logger, importOne func(fn string) er
 	return importErr
 }
 
-type chainImportSession struct {
-	ethereum      *eth.Ethereum
-	chainDB       kv.RwDB
-	logger        log.Logger
-	safeHash      common.Hash
-	finalizedHash common.Hash
-}
-
-func newChainImportSession(ethereum *eth.Ethereum, chainDB kv.RwDB, logger log.Logger) (*chainImportSession, error) {
-	session := &chainImportSession{ethereum: ethereum, chainDB: chainDB, logger: logger}
-	err := chainDB.View(context.Background(), func(tx kv.Tx) error {
-		session.safeHash = rawdb.ReadForkchoiceSafe(tx)
-		session.finalizedHash = rawdb.ReadForkchoiceFinalized(tx)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return session, nil
-}
-
-func (s *chainImportSession) finish(importErr error) error {
-	if errors.Is(importErr, errInterrupted) {
-		return importErr
-	}
-	return errors.Join(importErr, s.finalizeHead())
-}
-
-func (s *chainImportSession) finalizeHead() error {
-	return s.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		headHash := rawdb.ReadHeadBlockHash(tx)
-		if headHash == (common.Hash{}) {
-			return nil
-		}
-		rawdb.WriteForkchoiceHead(tx, headHash)
-		rawdb.WriteForkchoiceSafe(tx, headHash)
-		rawdb.WriteForkchoiceFinalized(tx, headHash)
-		return nil
-	})
-}
-
-func (s *chainImportSession) importFile(fn string) error {
-	ethereum, chainDB, logger := s.ethereum, s.chainDB, s.logger
+func importFile(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, lastFile bool, logger log.Logger) error {
 	// Watch for Ctrl-C while the import is running.
 	// If a signal is received, the import will stop at the next batch.
 	interrupt := make(chan os.Signal, 1)
@@ -239,7 +200,8 @@ func (s *chainImportSession) importFile(fn string) error {
 			return err
 		}
 	}
-	stream := rlp.NewStream(reader, 0)
+	bufferedReader := bufio.NewReader(reader)
+	stream := rlp.NewStream(bufferedReader, 0)
 
 	// Run actual the import.
 	blocks := make(types.Blocks, importBatchSize)
@@ -268,6 +230,11 @@ func (s *chainImportSession) importFile(fn string) error {
 		if i == 0 {
 			break
 		}
+		lastBatch := i < importBatchSize
+		if !lastBatch {
+			_, err := bufferedReader.Peek(1)
+			lastBatch = errors.Is(err, io.EOF)
+		}
 		// Import the batch.
 		if checkInterrupt() {
 			return errInterrupted
@@ -286,7 +253,7 @@ func (s *chainImportSession) importFile(fn string) error {
 			TopBlock: missing[len(missing)-1],
 		}
 
-		if err := insertChain(ethereum, missingChain, true, s.safeHash, s.finalizedHash); err != nil {
+		if err := insertChain(ethereum, missingChain, true, lastFile && lastBatch); err != nil {
 			return err
 		}
 	}
@@ -328,7 +295,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservice
 	return nil
 }
 
-func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool, safeHash, finalizedHash common.Hash) error {
+func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead, finalize bool) error {
 	if len(chain.Blocks) == 0 {
 		return nil
 	}
@@ -353,9 +320,15 @@ func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
 	var parentTd, currentHeadTd *uint256.Int
+	var genesisHash common.Hash
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
+		var err error
+		genesisHash, err = rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return fmt.Errorf("read genesis hash: %w", err)
+		}
 		if firstBlock.NumberU64() > 0 {
 			td, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
 			if readErr != nil {
@@ -442,6 +415,10 @@ func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
+	safeHash, finalizedHash := genesisHash, genesisHash
+	if finalize {
+		safeHash, finalizedHash = tipHash, tipHash
+	}
 	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, safeHash, finalizedHash)
 	if err != nil {
 		return err
