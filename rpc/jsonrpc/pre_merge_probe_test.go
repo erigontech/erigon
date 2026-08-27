@@ -23,7 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -286,4 +289,125 @@ func TestPreMergeProbeReleasesWaitersOnPanic(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("a probe that died left the next caller waiting on it forever")
 	}
+}
+
+// chainProbeBlockReader answers the probe from a chain described by the user
+// transactions of each block. unreadable keeps the bodies while taking the
+// transactions away, which is what chain history expiry leaves on disk.
+type chainProbeBlockReader struct {
+	dbservices.FullBlockReader
+	userTxns   []int
+	inflation  []int
+	unreadable bool
+	bodyReads  atomic.Int64
+}
+
+func (r *chainProbeBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	return 0, nil
+}
+
+func (r *chainProbeBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.BodyForStorage, error) {
+	r.bodyReads.Add(1)
+	if blockNum >= uint64(len(r.userTxns)) {
+		return nil, nil
+	}
+	base := 0
+	for block, txns := range r.userTxns[:blockNum] {
+		base += systemTxsPerBlock + txns
+		if block < len(r.inflation) {
+			base += r.inflation[block]
+		}
+	}
+	return &types.BodyForStorage{
+		BaseTxnID: types.BaseTxnID(base),
+		TxCount:   uint32(systemTxsPerBlock + r.userTxns[blockNum]),
+	}, nil
+}
+
+func (r *chainProbeBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
+	if r.unreadable || blockNum >= uint64(len(r.userTxns)) || r.userTxns[blockNum] <= i {
+		return nil, false, nil
+	}
+	return types.NewTransaction(0, common.Address{}, uint256.NewInt(1), 21000, nil, nil), true, nil
+}
+
+// sparsePreMergeChain has its only user transaction in a block no halving candidate
+// below the merge height reaches.
+func sparsePreMergeChain() []int {
+	chain := make([]int, probeSparseMergeHeight)
+	chain[3] = 1
+	return chain
+}
+
+const probeSparseMergeHeight = 8
+
+// TestPreMergeVerdictFindsATransactionOffTheSampledPath pins that an archive is read as
+// one however its transactions are spread: the sampled blocks prove nothing on a sparse
+// chain, while the cumulative count says an early transaction is there to be found.
+func TestPreMergeVerdictFindsATransactionOffTheSampledPath(t *testing.T) {
+	t.Parallel()
+
+	reader := &chainProbeBlockReader{userTxns: sparsePreMergeChain()}
+	api := newProbeAPI(reader)
+
+	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.True(t, decided, "a chain that holds an early transaction answers the question")
+	require.True(t, holds, "the datadir holds pre-merge transactions, sampled or not")
+}
+
+// TestPreMergeVerdictReadsASparseExpiryAsExpiry pins the other side of the same chain:
+// with the transactions gone the verdict is expiry, and it is settled rather than left
+// open, so it is remembered for the TTL like any other observation.
+func TestPreMergeVerdictReadsASparseExpiryAsExpiry(t *testing.T) {
+	t.Parallel()
+
+	reader := &chainProbeBlockReader{userTxns: sparsePreMergeChain(), unreadable: true}
+	api := newProbeAPI(reader)
+
+	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.True(t, decided, "bodies on disk without their transactions answer the question")
+	require.False(t, holds)
+}
+
+// TestPreMergeVerdictStopsAtTheFirstSampledTransaction pins that the search for a
+// sparse transaction is the exception: a chain whose sampled block already holds one
+// must not pay for it, since this runs on every request that refreshes the verdict.
+func TestPreMergeVerdictStopsAtTheFirstSampledTransaction(t *testing.T) {
+	t.Parallel()
+
+	dense := make([]int, 64)
+	for i := range dense {
+		dense[i] = 1
+	}
+	reader := &chainProbeBlockReader{userTxns: dense}
+	api := newProbeAPI(reader)
+
+	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, uint64(len(dense)))
+	require.NoError(t, err)
+	require.True(t, decided)
+	require.True(t, holds)
+	require.LessOrEqual(t, reader.bodyReads.Load(), int64(2), "the count and the first sampled block answer")
+}
+
+// TestPreMergeVerdictDoesNotSettleOnAnInflatedCount pins that the cumulative count is
+// taken for what it is, an upper bound: the database numbers non-canonical bodies from
+// the same sequence, so it can point below the first user transaction. A block that
+// holds none cannot say whether the datadir does, and answering from it would settle
+// expiry on an archive.
+func TestPreMergeVerdictDoesNotSettleOnAnInflatedCount(t *testing.T) {
+	t.Parallel()
+
+	userTxns := make([]int, probeSparseMergeHeight)
+	userTxns[6] = 1
+	inflation := make([]int, probeSparseMergeHeight)
+	inflation[0] = 1
+	reader := &chainProbeBlockReader{userTxns: userTxns, inflation: inflation}
+	api := newProbeAPI(reader)
+
+	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.False(t, decided, "a count inflated by non-canonical bodies answers nothing")
+	require.False(t, holds)
 }

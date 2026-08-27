@@ -58,6 +58,7 @@ type RemoteBlockReader struct {
 	frozenBlocksValue     uint64
 	frozenBlocksFetchedAt time.Time
 	frozenBlocksFetching  bool
+	frozenBlocksFetched   chan struct{}
 	frozenBlocksTTL       time.Duration
 	frozenBlocksTimeout   time.Duration
 }
@@ -151,25 +152,67 @@ func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not 
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 // FrozenBlocks is answered by the backend. The context-free signature leaves no way to
-// surface an error or honor request cancellation, so the call is bounded by an internal
-// timeout and its result cached for a short TTL. On failure the last known value is
-// kept: the count only grows, and a stale-low answer is the conservative one for the
-// availability gates. It is not conservative for the pre-Byzantium receipt paths, which
-// read zero as "no snapshots" and re-execute, so a failure is not cached as a success.
-// One fetch runs at a time and the others are served from the cache: this sits on every
-// receipt request, and a slow backend must delay one goroutine rather than all of them.
+// surface an error or honor request cancellation, so the whole call is bounded by an
+// internal timeout however many rounds it takes, cached for a short TTL, and not
+// duplicated while one is in flight.
+// The count only grows, so a stale-low answer is the conservative one for the
+// availability gates and is served while a refresh runs. Zero is not: the pre-Byzantium
+// receipt paths read it as "no snapshots" and re-execute, so a failed fetch is not
+// cached, and it reaches only the callers that have no observation to wait for.
 func (r *RemoteBlockReader) FrozenBlocks() uint64 {
-	r.frozenBlocksMu.Lock()
-	fresh := !r.frozenBlocksFetchedAt.IsZero() && time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
-	if fresh || r.frozenBlocksFetching {
-		value := r.frozenBlocksValue
+	deadline := time.Now().Add(r.frozenBlocksTimeout)
+	for waited := false; ; waited = true {
+		r.frozenBlocksMu.Lock()
+		observed := !r.frozenBlocksFetchedAt.IsZero()
+		fresh := time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
+		if observed && (fresh || r.frozenBlocksFetching) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if waited && !time.Now().Before(deadline) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if r.frozenBlocksFetching {
+			fetched := r.frozenBlocksFetched
+			r.frozenBlocksMu.Unlock()
+			select {
+			case <-fetched:
+			case <-time.After(time.Until(deadline)):
+			}
+			if waited {
+				r.frozenBlocksMu.Lock()
+				value := r.frozenBlocksValue
+				r.frozenBlocksMu.Unlock()
+				return value
+			}
+			// Waiting is not asking: a caller left with nothing observed has spent no
+			// attempt of its own, and one more is worth its wait. A second is not.
+			continue
+		}
+		r.frozenBlocksFetching = true
+		r.frozenBlocksFetched = make(chan struct{})
+		fetched := r.frozenBlocksFetched
 		r.frozenBlocksMu.Unlock()
-		return value
-	}
-	r.frozenBlocksFetching = true
-	r.frozenBlocksMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), r.frozenBlocksTimeout)
+		return r.fetchFrozenBlocks(fetched, deadline)
+	}
+}
+
+// fetchFrozenBlocks asks the backend, within what is left of the caller's budget, and
+// publishes what came back. Releasing the callers waiting on it is deferred: a fetch
+// that dies must not leave them on a result nobody will produce.
+func (r *RemoteBlockReader) fetchFrozenBlocks(fetched chan struct{}, deadline time.Time) uint64 {
+	defer func() {
+		r.frozenBlocksMu.Lock()
+		r.frozenBlocksFetching = false
+		r.frozenBlocksMu.Unlock()
+		close(fetched)
+	}()
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
 	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
@@ -178,7 +221,6 @@ func (r *RemoteBlockReader) FrozenBlocks() uint64 {
 
 	r.frozenBlocksMu.Lock()
 	defer r.frozenBlocksMu.Unlock()
-	r.frozenBlocksFetching = false
 	if err == nil {
 		r.frozenBlocksValue = reply.FrozenBlocks
 		r.frozenBlocksFetchedAt = time.Now()

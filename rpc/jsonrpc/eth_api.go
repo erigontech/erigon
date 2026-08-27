@@ -616,23 +616,18 @@ func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 
 // hasEarlyTransaction reports whether a user transaction below limit is readable, and
 // whether the block data it takes to answer was there at all. The last pre-merge body
-// carries the cumulative txnum position, which says how many entries the chain consumed
-// below limit: no more than the system ones means there is no user transaction to be
-// missing, and the bodies both retentions keep are the whole answer. Otherwise
-// candidates are taken by halving the range, which keeps them clear of the transaction
-// segment spanning limit.
+// carries the cumulative txnum position: no more than the system entries below limit
+// means there is no user transaction to be missing. Sampling by halving keeps the
+// candidates clear of the transaction segment spanning limit, and only a count that
+// proves one exists pays for a search where the samples missed it.
 func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uint64) (holds, decided bool, err error) {
 	last, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, limit-1)
 	if err != nil {
 		return false, false, err
 	}
-	if last != nil {
-		// Non-canonical bodies are numbered from the same sequence, so a reorg can only
-		// inflate the total and cost a sample. The same holds for a genesis position
-		// past zero, which is why this compares against the system entries alone.
-		totalTxns := last.BaseTxnID.U64() + uint64(last.TxCount)
-		systemTxns := systemTxsPerBlock * limit
-		if totalTxns <= systemTxns {
+	counted := last != nil
+	if counted {
+		if earlyUserTxns(last, limit-1) == 0 {
 			return true, true, nil
 		}
 	}
@@ -644,15 +639,77 @@ func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uin
 		if body == nil || body.TxCount <= systemTxsPerBlock {
 			continue
 		}
-		txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, tx, candidate, 0)
-		if err != nil {
-			return false, false, err
-		}
-		return ok && txn != nil, true, nil
+		return api.readsUserTransaction(ctx, tx, candidate)
 	}
-	// Nothing sampled could show a transaction, and no count proved there are none, so
-	// the datadir has not answered: a verdict inferred from what is missing is not one.
-	return false, false, nil
+	if !counted {
+		// Nothing sampled could show a transaction, and no count proved there are none,
+		// so the datadir has not answered: a verdict inferred from what is missing is
+		// not one.
+		return false, false, nil
+	}
+	candidate, found, err := api.firstBlockWithUserTxn(ctx, tx, limit-1)
+	if err != nil || !found {
+		return false, false, err
+	}
+	return api.readsUserTransaction(ctx, tx, candidate)
+}
+
+// earlyUserTxns reports how many user transactions the chain consumed up to blockNum.
+// It is an upper bound: the database numbers non-canonical bodies from the same sequence,
+// so a reorg inflates the total, as does a genesis position past zero. Zero is therefore
+// the only value that answers on its own; anything higher has to be confirmed against the
+// body of the block it points at.
+func earlyUserTxns(body *types.BodyForStorage, blockNum uint64) uint64 {
+	totalTxns := body.BaseTxnID.U64() + uint64(body.TxCount)
+	systemTxns := systemTxsPerBlock * (blockNum + 1)
+	if totalTxns <= systemTxns {
+		return 0
+	}
+	return totalTxns - systemTxns
+}
+
+// firstBlockWithUserTxn locates a block up to last holding a user transaction, which the
+// count the caller read says is there. That count is monotone, so halving the range finds
+// the block wherever the transactions sit, and it is an upper bound, so the block it
+// lands on is confirmed against its own body before being reported. A body missing along
+// the way, or a count that proves inflated, leaves the question unanswered rather than
+// moving the bound past it.
+func (api *BaseAPI) firstBlockWithUserTxn(ctx context.Context, tx kv.Tx, last uint64) (uint64, bool, error) {
+	low, high := uint64(1), last
+	if high < low {
+		return 0, false, nil
+	}
+	for low < high {
+		middle := low + (high-low)/2
+		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, middle)
+		if err != nil {
+			return 0, false, err
+		}
+		if body == nil {
+			return 0, false, nil
+		}
+		if earlyUserTxns(body, middle) > 0 {
+			high = middle
+		} else {
+			low = middle + 1
+		}
+	}
+	body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, low)
+	if err != nil {
+		return 0, false, err
+	}
+	if body == nil || body.TxCount <= systemTxsPerBlock {
+		return 0, false, nil
+	}
+	return low, true, nil
+}
+
+func (api *BaseAPI) readsUserTransaction(ctx context.Context, tx kv.Tx, blockNum uint64) (holds, decided bool, err error) {
+	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, tx, blockNum, 0)
+	if err != nil {
+		return false, false, err
+	}
+	return ok && txn != nil, true, nil
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
