@@ -57,6 +57,7 @@ type ForwardBeaconDownloader struct {
 	minSlot               uint64 // earliest requestable slot (e.g. checkpoint anchor)
 	rpc                   *rpc.BeaconRpcP2P
 	requestBlocksByRange  func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error)
+	banPeer               func(string)
 	process               ProcessFn
 	beaconCfg             *clparams.BeaconChainConfig
 	httpFallbackURL       string      // beacon API base URL for HTTP fallback when P2P fails
@@ -75,6 +76,7 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, beac
 	}
 	if rpc != nil {
 		f.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
+		f.banPeer = rpc.BanPeer
 	}
 	return f
 }
@@ -423,6 +425,13 @@ Process:
 			return
 		}
 	}
+	slices.SortFunc(processBlocks, func(a, b *cltypes.SignedBeaconBlock) int {
+		return cmp.Compare(a.Block.Slot, b.Block.Slot)
+	})
+	if anyGloasBlock(processBlocks) && !connectedGloasBlocks(processBlocks) {
+		f.rejectInvalidGloasResponse(pid)
+		return
+	}
 	f.mu.Lock()
 	lookahead := f.gloasLookahead
 	f.mu.Unlock()
@@ -528,12 +537,15 @@ Process:
 		if lookahead != nil && f.gloasLookahead == lookahead {
 			f.clearGloasScan()
 		}
-		if lookahead == nil && shouldBanProcessPeer(pid, err) {
-			f.rpc.BanPeer(pid)
+		if lookahead == nil && shouldBanProcessPeer(pid, err) && f.banPeer != nil {
+			f.banPeer(pid)
 		}
 		return
 	}
-	if len(processBlocks) > 0 && nextGloasLookahead != nil && highestSlotProcessed <= f.highestSlotProcessed {
+	attemptedNewSlot := slices.ContainsFunc(processBlocks, func(block *cltypes.SignedBeaconBlock) bool {
+		return block.Block.Slot > f.highestSlotProcessed
+	})
+	if attemptedNewSlot && nextGloasLookahead != nil && highestSlotProcessed <= f.highestSlotProcessed {
 		if resp.fromHTTP {
 			f.httpPreferred.Store(false)
 		}
@@ -631,6 +643,29 @@ func connectedGloasBlocks(blocks []*cltypes.SignedBeaconBlock) bool {
 		}
 	}
 	return true
+}
+
+const (
+	banInvalidGloasResponse         = "ban-peer"
+	disableHTTPInvalidGloasResponse = "disable-http"
+)
+
+func invalidGloasResponseAction(pid string) string {
+	if pid == "http-fallback" {
+		return disableHTTPInvalidGloasResponse
+	}
+	return banInvalidGloasResponse
+}
+
+func (f *ForwardBeaconDownloader) rejectInvalidGloasResponse(pid string) {
+	switch invalidGloasResponseAction(pid) {
+	case banInvalidGloasResponse:
+		if f.banPeer != nil {
+			f.banPeer(pid)
+		}
+	case disableHTTPInvalidGloasResponse:
+		f.httpPreferred.Store(false)
+	}
 }
 
 func capRequestCount(start, count uint64) uint64 {
