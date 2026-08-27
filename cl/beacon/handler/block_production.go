@@ -2239,6 +2239,10 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
+	blockRoot, err := blk.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
 	blkCommitments := blk.Block.Body.GetBlobKzgCommitments()
 	blkCommitmentsLen := 0
 	if blkCommitments != nil {
@@ -2335,7 +2339,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	}
 
 	store := func(ctx context.Context) error {
-		return a.storeBlockAndBlobs(ctx, blk, blobsSidecars, columnsSidecars, validation == BlockPublishingValidationConsensusAndEquivocation)
+		return a.storeBlockAndBlobs(ctx, blk, blobsSidecars, columnsSidecars, validation)
 	}
 	if validation != BlockPublishingValidationGossip {
 		if err := store(ctx); err != nil {
@@ -2357,6 +2361,10 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		"blobs",
 		lenBlobs,
 	)
+	if validation == BlockPublishingValidationConsensusAndEquivocation &&
+		a.forkchoiceStore.HasBlockEquivocation(blk.Block.Slot, blk.Block.ProposerIndex, blockRoot) {
+		return fmt.Errorf("%w: block conflicts with a previously validated proposal", errPublishedBlockValidation)
+	}
 	// Broadcast the block and its blobs
 	if err := a.publishGossip(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		return err
@@ -2464,7 +2472,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	block *cltypes.SignedBeaconBlock,
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
-	rejectEquivocation bool,
+	validation BlockPublishingValidation,
 ) error {
 	finishProduction := a.payloadPreparationGate.beginProduction()
 	defer finishProduction()
@@ -2472,6 +2480,20 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
+	}
+	knownBlock := false
+	rejectEquivocation := validation == BlockPublishingValidationConsensusAndEquivocation
+	if _, exists := a.forkchoiceStore.GetHeader(blockRoot); exists {
+		stored, ok := a.forkchoiceStore.GetBlock(blockRoot)
+		if !ok || !rootKeyedSignedBlockReplayMatches(stored, block) {
+			return fmt.Errorf("%w: published block does not match the validated block for its root", errPublishedBlockValidation)
+		}
+		knownBlock = true
+		if rejectEquivocation && a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, blockRoot) {
+			return fmt.Errorf("%w: block conflicts with a previously validated proposal", errPublishedBlockValidation)
+		}
+	} else if validation != BlockPublishingValidationGossip && block.Block.Slot <= a.forkchoiceStore.FinalizedSlot() {
+		return fmt.Errorf("%w: block is at or below the finalized validation horizon", errPublishedBlockValidation)
 	}
 	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
 		return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
@@ -2484,7 +2506,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 	currentSlot := a.ethClock.GetCurrentSlot()
 	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
-	if _, exists := a.forkchoiceStore.GetHeader(blockRoot); !exists {
+	if !knownBlock {
 		var blockErr error
 		if rejectEquivocation {
 			blockErr = a.forkchoiceStore.OnBlockWithEquivocationCheck(ctx, block, true, true, false)
@@ -2536,6 +2558,11 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 
 	return nil
+}
+
+func rootKeyedSignedBlockReplayMatches(stored, incoming *cltypes.SignedBeaconBlock) bool {
+	return stored != nil && incoming != nil && stored.Block != nil && incoming.Block != nil &&
+		stored.Version() == incoming.Version() && stored.Signature == incoming.Signature
 }
 
 func (a *ApiHandler) storeDataColumnSidecars(ctx context.Context, blockRoot common.Hash, sidecars []*cltypes.DataColumnSidecar) error {
