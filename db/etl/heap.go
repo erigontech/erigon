@@ -18,117 +18,108 @@ package etl
 
 import (
 	"bytes"
+	"encoding/binary"
 	"slices"
 )
 
+// HeapElem is the entry a provider currently sits on. pfx caches the first 8
+// key bytes, so a comparison reaches Key only when two providers agree there.
 type HeapElem struct {
+	pfx     uint64
 	Key     []byte
 	Value   []byte
 	TimeIdx int
 }
 
+func (e *HeapElem) setKey(k []byte) { e.Key, e.pfx = k, keyPrefix(k) }
+
+// Heap orders providers by the key each one sits on. Providers are numbered in
+// the order their files were written, so the lower TimeIdx wins a tie and
+// equal keys come out in the order they went in.
 type Heap struct {
 	elems []*HeapElem
 }
 
-func (h *Heap) Len() int {
-	return len(h.elems)
-}
+func (h *Heap) Len() int { return len(h.elems) }
 
-func (h *Heap) Less(i, j int) bool {
-	if c := bytes.Compare(h.elems[i].Key, h.elems[j].Key); c != 0 {
+func lessElem(a, b *HeapElem) bool {
+	if a.pfx != b.pfx {
+		return a.pfx < b.pfx
+	}
+	if c := bytes.Compare(a.Key, b.Key); c != 0 {
 		return c < 0
 	}
-	return h.elems[i].TimeIdx < h.elems[j].TimeIdx
+	return a.TimeIdx < b.TimeIdx
 }
 
-func (h *Heap) Swap(i, j int) {
-	h.elems[i], h.elems[j] = h.elems[j], h.elems[i]
-}
-
-func (h *Heap) Push(x *HeapElem) {
-	h.elems = append(h.elems, x)
-}
-
-func (h *Heap) Pop() *HeapElem {
-	old := h.elems
-	n := len(old) - 1
-	x := old[n]
-	//old[n].Key, old[n].Value, old[n].TimeIdx = nil, nil, 0
-	old[n] = nil
-	h.elems = old[0:n]
-	return x
-}
-
-// ------ Copy-Paste of `container/heap/heap.go` without interface conversion
-
-// Init establishes the heap invariants required by the other routines in this package.
-// Init is idempotent with respect to the heap invariants
-// and may be called whenever the heap invariants may have been invalidated.
-// The complexity is O(n) where n = h.Len().
+// heapInit orders elems appended in provider order.
 func heapInit(h *Heap) {
-	// heapify
-	n := h.Len()
-	for i := n/2 - 1; i >= 0; i-- {
-		down(h, i, n)
+	for i := len(h.elems)/2 - 1; i >= 0; i-- {
+		h.siftRoot(i)
 	}
 }
 
-// Push pushes the element x onto the heap.
-// The complexity is O(log n) where n = h.Len().
-func heapPush(h *Heap, x *HeapElem) {
-	h.Push(x)
-	up(h, h.Len()-1)
+// heapFixRoot restores the order after the root provider moved to its next key.
+func heapFixRoot(h *Heap) { h.siftRoot(0) }
+
+// heapPopRoot drops the root, whose provider has no more keys.
+func heapPopRoot(h *Heap) {
+	last := len(h.elems) - 1
+	h.elems[0] = h.elems[last]
+	h.elems[last] = nil
+	h.elems = h.elems[:last]
+	if last > 0 {
+		h.siftRoot(0)
+	}
 }
 
-// Pop removes and returns the minimum element (according to Less) from the heap.
-// The complexity is O(log n) where n = h.Len().
-// Pop is equivalent to Remove(h, 0).
-func heapPop(h *Heap) *HeapElem {
-	n := h.Len() - 1
-	h.Swap(0, n)
-	down(h, 0, n)
-	return h.Pop()
-}
-
-func up(h *Heap, j int) {
+// siftRoot restores the heap under i, whose element changed: sink the hole to
+// a leaf taking the smaller child, then climb back until the old element fits.
+// One compare a level rather than the two a top-down sift needs, and the
+// element that just moved on usually holds a larger key now, so the hole
+// nearly always reaches a leaf. The climb back is also the heapify step.
+func (h *Heap) siftRoot(i int) {
+	x, top, n := h.elems[i], i, len(h.elems)
 	for {
-		i := (j - 1) / 2 // parent
-		if i == j || !h.Less(j, i) {
+		l := 2*i + 1
+		if l >= n {
 			break
 		}
-		h.Swap(i, j)
-		j = i
+		if r := l + 1; r < n && lessElem(h.elems[r], h.elems[l]) {
+			l = r
+		}
+		h.elems[i] = h.elems[l]
+		i = l
 	}
-}
-
-func down(h *Heap, i0, n int) bool {
-	i := i0
-	for {
-		j1 := 2*i + 1
-		if j1 >= n || j1 < 0 { // j1 < 0 after int overflow
+	for i > top {
+		p := (i - 1) / 2
+		if lessElem(h.elems[p], x) {
 			break
 		}
-		j := j1 // left child
-		if j2 := j1 + 1; j2 < n && h.Less(j2, j1) {
-			j = j2 // = 2*i + 2  // right child
-		}
-		if !h.Less(j, i) {
-			break
-		}
-		h.Swap(i, j)
-		i = j
+		h.elems[i] = h.elems[p]
+		i = p
 	}
-	return i > i0
+	h.elems[i] = x
 }
 
 // ------ the merge over a sortableBuffer's sorted chunks
 
+// keyPrefix is the first 8 bytes of k, zero-padded. Big-endian, so comparing
+// two prefixes as integers orders them the way bytes.Compare would.
+func keyPrefix(k []byte) uint64 {
+	if len(k) >= 8 {
+		return binary.BigEndian.Uint64(k)
+	}
+	var pad [8]byte // len(k) < 8
+	copy(pad[:], k)
+	return binary.BigEndian.Uint64(pad[:])
+}
+
 // merger walks already-sorted chunks in key order, a cursor per chunk under a
-// heap of chunk ids.
+// heap of the cursors that still have entries.
 type merger struct {
-	heap []int32  // chunk ids, ordered by their cursor's key
-	cur  []cursor // by chunk id
+	heap []*cursor
+	cur  []cursor
 
 	// Chunks already in order end to end, which ascending keys produce, are
 	// read straight through instead of merged.
@@ -136,11 +127,25 @@ type merger struct {
 	chunk  int // chunk the straight-through cursor sits in
 }
 
+// cursor is one chunk's read position. pfx caches the first 8 key bytes, so a
+// comparison reads the chunk only when two cursors agree there.
 type cursor struct {
 	ents []entryLoc
 	buf  []byte
-	at   int32
 	key  []byte
+	pfx  uint64
+	at   int32
+	id   int32 // chunks fill in insertion order, so the lower id wins a tie
+}
+
+// advance moves the cursor to its next entry, or reports that it has none.
+func (c *cursor) advance() bool {
+	if c.at++; int(c.at) >= len(c.ents) {
+		return false
+	}
+	c.key = keyOf(c.buf, c.ents[c.at])
+	c.pfx = keyPrefix(c.key)
+	return true
 }
 
 // rewind puts the cursor on the first entry in key order.
@@ -148,20 +153,22 @@ func (m *merger) rewind(chunks []dataChunk) {
 	clear(m.cur) // a shorter run would leave the old cursors pinning their chunks
 	m.cur = slices.Grow(m.cur[:0], len(chunks))[:len(chunks)]
 	for i := range chunks {
-		m.cur[i] = cursor{ents: chunks[i].entries(), buf: chunks[i].buf}
+		c := &m.cur[i]
+		*c = cursor{ents: chunks[i].entries(), buf: chunks[i].buf, at: -1, id: int32(i)} //nolint:gosec
 	}
 	m.chunk = 0
 
 	if m.concat = m.chunksInOrder(); m.concat {
+		for i := range m.cur {
+			m.cur[i].at = 0
+		}
 		return
 	}
 	m.heap = m.heap[:0]
 	for i := range m.cur {
-		if len(m.cur[i].ents) == 0 {
-			continue
+		if c := &m.cur[i]; c.advance() {
+			m.heap = append(m.heap, c)
 		}
-		m.load(int32(i)) //nolint:gosec
-		m.heap = append(m.heap, int32(i))
 	}
 	for i := len(m.heap)/2 - 1; i >= 0; i-- {
 		m.siftRoot(i)
@@ -185,16 +192,12 @@ func (m *merger) next() ([]byte, entryLoc, bool) {
 	if len(m.heap) == 0 {
 		return nil, 0, false
 	}
-	id := m.heap[0]
-	c := &m.cur[id]
+	c := m.heap[0]
 	buf, e := c.buf, c.ents[c.at]
-	c.at++
-	if int(c.at) == len(c.ents) {
+	if !c.advance() {
 		last := len(m.heap) - 1
-		m.heap[0] = m.heap[last]
+		m.heap[0], m.heap[last] = m.heap[last], nil
 		m.heap = m.heap[:last]
-	} else {
-		m.load(id)
 	}
 	if len(m.heap) > 0 {
 		m.siftRoot(0)
@@ -204,13 +207,9 @@ func (m *merger) next() ([]byte, entryLoc, bool) {
 
 func (m *merger) release() {
 	clear(m.cur)
+	clear(m.heap)
 	m.cur, m.heap = m.cur[:0], m.heap[:0]
 	m.chunk, m.concat = 0, false
-}
-
-func (m *merger) load(id int32) {
-	c := &m.cur[id]
-	c.key = keyOf(c.buf, c.ents[c.at])
 }
 
 // chunksInOrder reports whether every chunk's last key comes before the next
@@ -233,29 +232,43 @@ func (m *merger) chunksInOrder() bool {
 	return true
 }
 
-// less orders two cursors by the key they sit on. Chunks fill in insertion
-// order, so the lower id wins a tie and equal keys keep the order they went in.
-func (m *merger) less(x, y int32) bool {
-	if r := bytes.Compare(m.cur[x].key, m.cur[y].key); r != 0 {
+// less orders two cursors by the key they sit on. Equal keys keep the order
+// they went in, which is the order the chunks filled.
+func less(a, b *cursor) bool {
+	if a.pfx != b.pfx {
+		return a.pfx < b.pfx
+	}
+	if r := bytes.Compare(a.key, b.key); r != 0 {
 		return r < 0
 	}
-	return x < y
+	return a.id < b.id
 }
 
-// siftRoot restores the heap under i, whose element changed.
+// siftRoot restores the heap under i, whose cursor just moved: sink the hole
+// to a leaf taking the smaller child, then climb back until the old value
+// fits. One compare a level instead of the usual two, and the cursor that just
+// won usually holds a larger key, so the hole nearly always reaches a leaf.
+// The climb back is also what makes it serve as the heapify step.
 func (m *merger) siftRoot(i int) {
+	x, top := m.heap[i], i
 	for {
-		s, l, r := i, 2*i+1, 2*i+2
-		if l < len(m.heap) && m.less(m.heap[l], m.heap[s]) {
-			s = l
+		l := 2*i + 1
+		if l >= len(m.heap) {
+			break
 		}
-		if r < len(m.heap) && m.less(m.heap[r], m.heap[s]) {
-			s = r
+		if r := l + 1; r < len(m.heap) && less(m.heap[r], m.heap[l]) {
+			l = r
 		}
-		if s == i {
-			return
-		}
-		m.heap[i], m.heap[s] = m.heap[s], m.heap[i]
-		i = s
+		m.heap[i] = m.heap[l]
+		i = l
 	}
+	for i > top {
+		p := (i - 1) / 2
+		if less(m.heap[p], x) {
+			break
+		}
+		m.heap[i] = m.heap[p]
+		i = p
+	}
+	m.heap[i] = x
 }
