@@ -1,6 +1,6 @@
 ---
 title: "Layer 2 Networks"
-description: "Using Erigon as an L1 provider for Optimism and other Layer 2 networks."
+description: "Using Erigon with an Optimism op-node, and the experimental Erigon Nitro client for Arbitrum."
 sidebar_position: 9
 ---
 
