@@ -354,6 +354,21 @@ func (fv *ForkValidator) PromoteBlock(ctx context.Context, tx kv.TemporalTx, sd 
 	if err != nil {
 		return false, err
 	}
+	// Re-key canonical[N] in the PROMOTED gen's OWN overlay to its sealed head hash before the merge flushes
+	// that overlay into the canonical sd. During pre-exec StateStep wrote canonical[N]=deferred-placeholder
+	// there so exec3 could locate the in-progress block; copyFrontierChainTables then copied that placeholder
+	// forward through the whole frontier chain, and it has no stored header after the seal. promoteSD is the
+	// PARKED gen at the front of the queue (the sealed block N) — NOT the running frontier — so re-keying it
+	// here corrects the value sd.Merge propagates to the FCU sd (and thence durable) WITHOUT touching the live
+	// frontier's exec or a successor's SeekCommitment (the RunAheadEmptyTailDrain corruption Fix A caused by
+	// writing fv.sharedDom, the wrong SD). blockHash is the gen's sealed head. Without this the placeholder
+	// rides the merge to durable, and the first safe-checkpoint that lands on block N reads a header-less
+	// canonical hash → verifyForkchoiceHashes false → InvalidForkchoice → FCU skips its commit (the stall).
+	if ov := promoteSD.BlockOverlay(); ov != nil {
+		if err := rawdb.WriteCanonicalHash(ov, blockHash, blockNumber); err != nil {
+			return false, err
+		}
+	}
 	if err := sd.Merge(ctx, sdTxNum, promoteSD, otherTxNum, !fv.frontierMode); err != nil {
 		return false, err
 	}
