@@ -595,6 +595,9 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 		f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
 		return fmt.Errorf("OnExecutionPayload: failed to write execution payload indices: %w", err)
 	}
+	if !applied {
+		return fmt.Errorf("%w: execution payload envelope already processed", ErrIgnore)
+	}
 
 	return nil
 }

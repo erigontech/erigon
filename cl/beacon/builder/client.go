@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -66,6 +67,7 @@ type builderClient struct {
 	lookupIP                 func(context.Context, string) ([]net.IPAddr, error)
 	targetPolicy             BuilderTargetPolicy
 	transport                http.RoundTripper
+	publicTransport          http.RoundTripper
 	admission                *semaphore.Weighted
 	admissionOnce            sync.Once
 	preferencesAdmission     *semaphore.Weighted
@@ -99,6 +101,7 @@ func newBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainCon
 		beaconConfig:         beaconConfig,
 		targetPolicy:         policy,
 		transport:            newPinnedBuilderTransport(nil),
+		publicTransport:      newPinnedBuilderTransport(nil),
 		admission:            semaphore.NewWeighted(defaultBuilderCallLimit),
 		preferencesAdmission: semaphore.NewWeighted(defaultPreferenceCallLimit),
 	}
@@ -338,6 +341,14 @@ func (b *builderClient) RequestExecutionPayloadBid(ctx context.Context, builderU
 }
 
 func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	return b.submitSignedBeaconBlock(ctx, builderURL, block, b.targetPolicy, false)
+}
+
+func (b *builderClient) SubmitSignedBeaconBlockPublic(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	return b.submitSignedBeaconBlock(ctx, builderURL, block, BuilderTargetPolicy{}, true)
+}
+
+func (b *builderClient) submitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock, policy BuilderTargetPolicy, strictPublic bool) error {
 	if block == nil || block.Block == nil || block.Block.Body == nil {
 		return errors.New("nil signed beacon block")
 	}
@@ -351,13 +362,17 @@ func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL 
 		return err
 	}
 	defer b.builderAdmission().Release(1)
-	target, err := b.builderEndpoint(requestContext, b.targetPolicy, builderURL, "eth", "v1", "builder", "beacon_blocks")
+	target, err := b.builderEndpoint(requestContext, policy, builderURL, "eth", "v1", "builder", "beacon_blocks")
 	if err != nil {
 		return err
 	}
-	response, err := b.builderCall(requestContext, http.MethodPost, target, map[string]string{
+	transport := b.transport
+	if strictPublic {
+		transport = b.publicTransport
+	}
+	response, err := b.builderCallWithTransport(requestContext, http.MethodPost, target, map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
-	}, bytes.NewReader(payload))
+	}, bytes.NewReader(payload), transport)
 	if err != nil {
 		return err
 	}
@@ -411,7 +426,42 @@ func (b *builderClient) builderEndpoint(ctx context.Context, policy BuilderTarge
 }
 
 func isPublicBuilderIP(ip net.IP) bool {
-	return ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return false
+	}
+	addr = addr.Unmap()
+	if !addr.IsGlobalUnicast() {
+		return false
+	}
+	for _, prefix := range nonPublicBuilderPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+var nonPublicBuilderPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"), netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.31.196.0/24"), netip.MustParsePrefix("192.52.193.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"), netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("192.175.48.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"), netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"), netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"), netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"), netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/23"), netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"), netip.MustParsePrefix("5f00::/16"),
+	netip.MustParsePrefix("fc00::/7"), netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
 }
 
 func isAllowedBuilderIP(ip net.IP, policy BuilderTargetPolicy) bool {
@@ -428,6 +478,10 @@ type builderHTTPResponse struct {
 }
 
 func (b *builderClient) builderCall(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader) (*builderHTTPResponse, error) {
+	return b.builderCallWithTransport(ctx, method, target, headers, body, b.transport)
+}
+
+func (b *builderClient) builderCallWithTransport(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader, transport http.RoundTripper) (*builderHTTPResponse, error) {
 	var attemptTimeout time.Duration
 	if deadline, ok := ctx.Deadline(); ok && len(target.ips) > 1 {
 		attemptTimeout = time.Until(deadline) / time.Duration(len(target.ips))
@@ -448,8 +502,8 @@ func (b *builderClient) builderCall(ctx context.Context, method string, target b
 		return nil, errors.New("nil builder HTTP client")
 	}
 	client := *b.httpClient
-	if b.transport != nil {
-		client.Transport = b.transport
+	if transport != nil {
+		client.Transport = transport
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return errors.New("builder redirects are not allowed")

@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
@@ -389,6 +390,80 @@ func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
 
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, true)
 	require.Equal(t, common.Hash{}, cfg.gloasEnvelopeRecoveryCursor)
+}
+
+func TestPersistedEnvelopeMatchesExactIdentity(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	store := mock_services.NewForkChoiceStorageMock(t)
+	store.Envelopes[root] = envelope
+
+	require.True(t, persistedEnvelopeMatches(store, root, envelope))
+	different := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	different.Message.BeaconBlockRoot = root
+	different.Signature[0] = 1
+	require.False(t, persistedEnvelopeMatches(store, root, different))
+}
+
+type envelopeReadTestStore struct {
+	forkchoice.ForkChoiceStorage
+	onErr     error
+	persisted *cltypes.SignedExecutionPayloadEnvelope
+	readErr   error
+}
+
+func (s *envelopeReadTestStore) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+	return s.onErr
+}
+
+func (s *envelopeReadTestStore) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return s.persisted, s.readErr
+}
+
+type gloasCollectorTest struct {
+	calls int
+	err   error
+}
+
+func (c *gloasCollectorTest) AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error {
+	c.calls++
+	return c.err
+}
+
+func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	block := &cltypes.BeaconBlock{Slot: 64}
+
+	t.Run("exact persisted duplicate", func(t *testing.T) {
+		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}
+		collector := &gloasCollectorTest{}
+		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.Equal(t, 1, collector.calls)
+	})
+	t.Run("mismatch", func(t *testing.T) {
+		different := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+		different.Message.BeaconBlockRoot = root
+		different.Signature[0] = 1
+		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: different}
+		collector := &gloasCollectorTest{}
+		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.Zero(t, collector.calls)
+	})
+	t.Run("read error", func(t *testing.T) {
+		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, readErr: errors.New("disk unavailable")}
+		collector := &gloasCollectorTest{}
+		require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false))
+		require.Zero(t, collector.calls)
+	})
+	t.Run("collector error", func(t *testing.T) {
+		store := &envelopeReadTestStore{}
+		collector := &gloasCollectorTest{err: errors.New("collector failed")}
+		err := processDownloadedGloasEnvelope(t.Context(), log.Root(), store, collector, block, root, envelope, true, false)
+		require.ErrorContains(t, err, "collector failed")
+	})
 }
 
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
