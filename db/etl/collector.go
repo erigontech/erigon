@@ -176,9 +176,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.allocator != nil {
 		c.buf = nil // drawn again lazily on the next Collect; a flush is often the collector's last write event
 	} else {
-		// What the buffer held, not what it was allowed to hold: SizeLimit is
-		// a constant, so the reserve never tracked the load.
-		prevLen, prevSize := fullBuf.Len(), fullBuf.Size()
+		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}

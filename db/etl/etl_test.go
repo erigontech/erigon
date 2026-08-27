@@ -141,6 +141,7 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 		b.Put(entries[i].key, entries[i].value)
 	}
 
+	b.Sort() // a buffer fills, then Sorts, then is read
 	if err := b.Write(buffer); err != nil {
 		t.Error(err)
 	}
@@ -1309,7 +1310,7 @@ func BenchmarkSortableBufferRead(b *testing.B) {
 				buf.Put(key, val)
 			}
 			for b.Loop() {
-				buf.Rewind()
+				buf.Sort()
 				for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 				}
 			}
@@ -1451,7 +1452,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 			b.Run(name+"/Next", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					buf.Rewind()
+					buf.Sort()
 					p := &memoryDataProvider{buffer: buf}
 					for {
 						_, _, err := p.Next()
@@ -1468,7 +1469,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 			b.Run(name+"/Buffer", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					buf.Rewind()
+					buf.Sort()
 					for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 					}
 				}
@@ -1660,7 +1661,7 @@ func TestSortableBufferOversizedEntry(t *testing.T) {
 	require.Equal(t, []byte{0x03}, want[2].key)
 	require.Equal(t, []byte("after"), want[2].value)
 
-	// Write rewinds the cursor drainBuffer just consumed.
+	buf.Sort() // drainBuffer consumed the cursor; Write needs it back
 	w := bytes.NewBuffer(nil)
 	require.NoError(t, buf.Write(w))
 	m := &mmapBytesReader{data: w.Bytes()}
@@ -1985,7 +1986,7 @@ func TestSortableBufferMergesChunks(t *testing.T) {
 				require.Equal(t, uint64(i), binary.BigEndian.Uint64(e.value), "entry %d", i) //nolint:gosec
 			}
 			// a second pass must restart cleanly
-			buf.Rewind()
+			buf.Sort()
 			binary.BigEndian.PutUint64(key, 0)
 			k, _, ok := buf.Next()
 			require.True(t, ok)
@@ -2001,58 +2002,32 @@ func TestSortableBufferPutAfterSort(t *testing.T) {
 		buf.Put([]byte{k}, []byte{k})
 	}
 	buf.Sort()
-	buf.Put([]byte{7}, []byte{7})
-	buf.Sort()
-
-	// The second Sort has to re-read a chunk index the first one permuted.
-	var got []byte
-	for _, e := range drainBuffer(buf) {
-		got = append(got, e.key[0])
-	}
-	require.Equal(t, []byte{1, 3, 5, 7, 9}, got)
+	// Sort permutes each chunk's index, so a later Put has no insertion order
+	// left to fall back on. Filling and reading are separate phases.
+	require.Panics(t, func() { buf.Put([]byte{7}, []byte{7}) })
 }
 
-// TestBufferNextBeforeSort: reading a buffer that was not sorted since the
-// last Put must be loud. Returning the previous run instead would duplicate
-// rows into whatever the load feeds.
+// TestBufferNextBeforeSort: reading a buffer that was never sorted must be
+// loud. Returning the previous run instead would duplicate rows into whatever
+// the load feeds.
 func TestBufferNextBeforeSort(t *testing.T) {
 	for _, bt := range allBufferTypes {
 		t.Run(bt.name, func(t *testing.T) {
 			buf := bt.new()
 			buf.Put([]byte{3}, []byte("c"))
 			require.Panics(t, func() { buf.Next() }, "Next before any Sort")
+			require.Panics(t, func() { _ = buf.Write(io.Discard) }, "Write before any Sort")
 
 			buf.Sort()
-			buf.Put([]byte{1}, []byte("a"))
-			require.Panics(t, func() { buf.Next() }, "Next after a Put")
-
-			buf.Sort()
-			require.Len(t, drainBuffer(buf), 2)
+			require.Len(t, drainBuffer(buf), 1)
 		})
 	}
 }
 
-// TestBufferPutDuringRead: a Put between two Next calls must not restart the
-// read. Sort used to be called from Next, which rewound the cursor and handed
-// out the entries already read a second time.
-func TestBufferPutDuringRead(t *testing.T) {
-	buf := NewSortableBuffer(1 * datasize.MB)
-	defer buf.Reset()
-	for i := range 5 {
-		buf.Put([]byte{byte(i)}, []byte{byte(i)})
-	}
-	buf.Sort()
-	for range 3 {
-		_, _, ok := buf.Next()
-		require.True(t, ok)
-	}
-	buf.Put([]byte{9}, []byte{9})
-	require.Panics(t, func() { buf.Next() })
-}
-
 // TestSortableBufferWriteAfterPartialRead: Write drives the same cursor Next
-// does, so it has to rewind - otherwise a flush silently drops the entries
-// already read and mergeSortFiles panics on the short file.
+// does, so a Sort has to come between them - otherwise a flush would silently
+// drop the entries already read and mergeSortFiles would panic on the short
+// file.
 func TestSortableBufferWriteAfterPartialRead(t *testing.T) {
 	buf := NewSortableBuffer(1 * datasize.MB)
 	defer buf.Reset()
@@ -2063,6 +2038,7 @@ func TestSortableBufferWriteAfterPartialRead(t *testing.T) {
 	buf.Next()
 	buf.Next()
 
+	buf.Sort() // what sortAndFlush does before it writes
 	w := bytes.NewBuffer(nil)
 	require.NoError(t, buf.Write(w))
 	m := &mmapBytesReader{data: w.Bytes()}
@@ -2191,14 +2167,14 @@ func TestSortableBufferReadIsAllocFree(t *testing.T) {
 
 	got := 0
 	n := testing.AllocsPerRun(3, func() {
-		buf.Rewind()
+		buf.Sort()
 		got = 0
 		for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 			got++
 		}
 	})
 	require.Equal(t, count, got)
-	require.Zero(t, n, "Rewind and a full read must not allocate")
+	require.Zero(t, n, "Sort and a full read must not allocate")
 }
 
 // TestMapBufferSortIsIdempotent: sortAndFlush calls Sort and then Write, and
@@ -2256,29 +2232,26 @@ func TestMapBufferPreallocClearsState(t *testing.T) {
 	}
 }
 
-// TestBufferSortDoesNotRewind: Sort orders, Rewind positions. Conflating them
-// is what let Write silently consume a read and let a Sort mid-read restart it.
-func TestBufferSortDoesNotRewind(t *testing.T) {
+// TestBufferSortPositionsCursor: a buffer fills, Sorts, then is read, and
+// Sorting again is the only way to read it twice.
+func TestBufferSortPositionsCursor(t *testing.T) {
 	for _, bt := range allBufferTypes {
 		t.Run(bt.name, func(t *testing.T) {
 			buf := bt.new()
 			for _, k := range []byte{3, 1, 2} {
 				buf.Put([]byte{k}, []byte{k})
 			}
+			require.Panics(t, func() { buf.Next() }, "read before Sort")
+
 			buf.Sort()
 			k, _, ok := buf.Next()
 			require.True(t, ok)
 			require.Equal(t, []byte{1}, k)
 
-			buf.Sort() // already sorted: must not move the cursor
+			buf.Sort() // already ordered, but the cursor goes back
 			k, _, ok = buf.Next()
 			require.True(t, ok)
-			require.Equal(t, []byte{2}, k, "Sort moved the read cursor")
-
-			buf.Rewind()
-			k, _, ok = buf.Next()
-			require.True(t, ok)
-			require.Equal(t, []byte{1}, k, "Rewind must go back to the first entry")
+			require.Equal(t, []byte{1}, k)
 		})
 	}
 }
