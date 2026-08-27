@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -96,8 +97,8 @@ func (s *stubPoolContentClient) Status(context.Context, *txpoolproto.StatusReque
 	return s.status, nil
 }
 
-// Transactions the pool keeps in its base fee sub-pool are executable but pay less than the
-// current base fee, which is what Geth reports as pending, so they belong to the pending bucket.
+// Transactions the pool keeps in its base fee sub-pool are nonce-ready and otherwise valid, but pay
+// less than the current base fee, which is what Geth reports as pending, so they are pending here too.
 func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	require := require.New(t)
@@ -154,4 +155,16 @@ func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 	require.Len(status, 2)
 	require.Equal(hexutil.Uint(3), status["pending"])
 	require.Equal(hexutil.Uint(1), status["queued"])
+}
+
+func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {
+	require := require.New(t)
+	pool := &stubPoolContentClient{
+		status: &txpoolproto.StatusReply{PendingCount: math.MaxUint32, BaseFeeCount: 1, QueuedCount: 0},
+	}
+	api := NewTxPoolAPI(nil, nil, pool)
+
+	status, err := api.Status(context.Background())
+	require.NoError(err)
+	require.Equal(hexutil.Uint(math.MaxUint32)+1, status["pending"])
 }
