@@ -97,7 +97,7 @@ func newExecutionPayloadEnvelopeContents(cfg *clparams.BeaconChainConfig) *execu
 func (c *executionPayloadEnvelopeContents) Static() bool { return false }
 
 func (c *executionPayloadEnvelopeContents) EncodingSizeSSZ() int {
-	return c.SignedExecutionPayloadEnvelope.EncodingSizeSSZ() + c.KZGProofs.EncodingSizeSSZ() + c.Blobs.EncodingSizeSSZ()
+	return 3*4 + c.SignedExecutionPayloadEnvelope.EncodingSizeSSZ() + c.KZGProofs.EncodingSizeSSZ() + c.Blobs.EncodingSizeSSZ()
 }
 
 func (c *executionPayloadEnvelopeContents) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -934,6 +934,19 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 	var columnSidecars []*cltypes.DataColumnSidecar
 	if blobDataIncluded {
+		if err := signedEnvelope.ValidateForConfig(a.beaconChainCfg); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if !ok || block == nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("beacon block is unavailable for envelope validation")).WriteTo(w)
+			return
+		}
+		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(a.beaconChainCfg, block, signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 		columnSidecars, err = a.dataColumnSidecarsFromEnvelopeBlobs(signedEnvelope, contents.KZGProofs, contents.Blobs)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)

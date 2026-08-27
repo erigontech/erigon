@@ -305,11 +305,35 @@ func TestPostExecutionPayloadEnvelopeRejectsUnavailableEquivocationContext(t *te
 func emptyExecutionPayloadEnvelopeContents(t *testing.T, handler *ApiHandler, fcu *forkchoice_mock.ForkChoiceStorageMock) *executionPayloadEnvelopeContents {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	return executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+}
+
+func executionPayloadEnvelopeContentsForBlock(t *testing.T, handler *ApiHandler, fcu *forkchoice_mock.ForkChoiceStorageMock, block *cltypes.SignedBeaconBlock) *executionPayloadEnvelopeContents {
+	t.Helper()
+	contents := newExecutionPayloadEnvelopeContents(handler.beaconChainCfg)
+	envelope := contents.SignedExecutionPayloadEnvelope.Message
+	envelope.ParentBeaconBlockRoot = block.Block.ParentRoot
+	envelope.Payload.SlotNumber = block.Block.Slot
+	envelope.Payload.Extra = solid.NewExtraData()
+	envelope.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	envelope.Payload.BlockAccessList = solid.NewByteListSSZ(handler.beaconChainCfg.MaxBytesPerTransaction)
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	require.NoError(t, err)
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(handler.beaconChainCfg, envelope.ExecutionRequests))
+	envelope.Payload.BlockHash, err = envelope.Payload.ComputeBlockHash(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.ParentBlockHash = envelope.Payload.ParentHash
+	bid.BlockHash = envelope.Payload.BlockHash
+	bid.PrevRandao = envelope.Payload.PrevRandao
+	bid.GasLimit = envelope.Payload.GasLimit
+	bid.BuilderIndex = envelope.BuilderIndex
+	bid.ExecutionRequestsRoot = requestsRoot
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	fcu.Blocks[root] = block
-	contents := newExecutionPayloadEnvelopeContents(handler.beaconChainCfg)
-	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	envelope.BeaconBlockRoot = root
 	return contents
 }
 
@@ -324,6 +348,8 @@ func TestPostExecutionPayloadEnvelopeAcceptsBlobContentsJSONAndStrictSSZ(t *test
 				body, err = json.Marshal(contents)
 			} else {
 				body, err = contents.EncodeSSZ(nil)
+				require.NoError(t, err)
+				require.Len(t, body, contents.EncodingSizeSSZ())
 			}
 			require.NoError(t, err)
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
@@ -420,11 +446,8 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 	require.NoError(t, err)
 	commitmentValue := cltypes.KZGCommitment(commitment)
 	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	fcu.Blocks[root] = block
-	contents := newExecutionPayloadEnvelopeContents(handler.beaconChainCfg)
-	contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot = root
+	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+	root := contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot
 	proofValue := cltypes.KZGProof(proof)
 	contents.KZGProofs.Append(&proofValue)
 	contents.Blobs.Append(blob)
@@ -466,6 +489,52 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columnPublishes)
 	require.Equal(t, 1, envelopePublishes)
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsInvalidEnvelopeBeforeBlobColumns(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*cltypes.SignedExecutionPayloadEnvelope)
+	}{
+		{name: "nil payload", mutate: func(envelope *cltypes.SignedExecutionPayloadEnvelope) { envelope.Message.Payload = nil }},
+		{name: "commitment mismatch", mutate: func(envelope *cltypes.SignedExecutionPayloadEnvelope) { envelope.Message.Payload.BlockHash[0]++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			if clparams.GetBeaconConfig() == nil {
+				clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+			}
+			ctrl := gomock.NewController(t)
+			handler.columnStorage = blob_storage_mock.NewMockDataColumnStorage(ctrl)
+			handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+			handler.sentinel = &nonNilSentinelClient{}
+			block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+			blob := new(cltypes.Blob)
+			commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
+			require.NoError(t, err)
+			proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
+			require.NoError(t, err)
+			commitmentValue := cltypes.KZGCommitment(commitment)
+			block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
+			contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+			tc.mutate(contents.SignedExecutionPayloadEnvelope)
+			proofValue := cltypes.KZGProof(proof)
+			contents.KZGProofs.Append(&proofValue)
+			contents.Blobs.Append(blob)
+			body, err := json.Marshal(contents)
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+			request.Header.Set("Eth-Blob-Data-Included", "true")
+			recorder := httptest.NewRecorder()
+
+			handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.False(t, fcu.OnExecutionPayloadCheckBlobData)
+		})
+	}
 }
 
 func TestDataColumnSidecarsGloasUseProgressiveColumnLists(t *testing.T) {
