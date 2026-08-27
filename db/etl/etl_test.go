@@ -1689,20 +1689,17 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 // int32 holds does not wrap into a pooled one.
 func TestChunkSizeFor(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		n      int
-		size   int
-		pooled bool
+		name string
+		n    int
+		size int
 	}{
-		{"empty", 0, dataChunkSize, true},
-		{"fills a chunk", dataChunkSize - entryLocSize, dataChunkSize, true},
-		{"one byte over", dataChunkSize - entryLocSize + 1, dataChunkSize + entryLocSize, false},
-		{"two gigabytes", 1 << 31, 1<<31 + entryLocSize, false},
+		{"empty", 0, dataChunkSize},
+		{"fills a chunk", dataChunkSize - entryLocSize, dataChunkSize},
+		{"one byte over", dataChunkSize - entryLocSize + 1, dataChunkSize + entryLocSize},
+		{"two gigabytes", 1 << 31, 1<<31 + entryLocSize},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			size, pooled := chunkSizeFor(tc.n)
-			require.Equal(t, tc.size, size)
-			require.Equal(t, tc.pooled, pooled)
+			require.Equal(t, tc.size, chunkSizeFor(tc.n))
 		})
 	}
 }

@@ -118,12 +118,6 @@ const (
 	// so only a value may outgrow one.
 	keyLenBits = 32 - dataChunkBits
 	maxKeyLen  = 1<<keyLenBits - 2
-
-	// A buffer takes at most this many chunks; nextChunk panics past that.
-	// NewSortableBuffer's MaxInt32 bound on optimalSize does not rule it out,
-	// since Put can grow the buffer past optimalSize before CheckFlushSize is
-	// checked, and an oversized entry gets a chunk of its own size.
-	maxDataChunks = math.MaxInt32>>dataChunkBits + 1
 )
 
 // dataChunks are shared by all sortableBuffer instances: a buffer takes chunks as
@@ -259,24 +253,21 @@ type sortableBuffer struct {
 }
 
 // chunkSizeFor returns the size of a chunk able to hold an entry of n bytes and
-// its index slot, and whether a pooled chunk is already that size. Kept apart
-// from nextChunk so the arithmetic can be tested without allocating.
-func chunkSizeFor(n int) (size int, pooled bool) {
-	if size = n + entryLocSize; size <= dataChunkSize {
-		return dataChunkSize, true
+// its index slot. Kept apart from nextChunk so the arithmetic can be tested
+// without allocating.
+func chunkSizeFor(n int) int {
+	if size := n + entryLocSize; size > dataChunkSize {
+		return (size + entryLocSize - 1) &^ (entryLocSize - 1)
 	}
-	return (size + entryLocSize - 1) &^ (entryLocSize - 1), false
+	return dataChunkSize
 }
 
 // nextChunk starts a chunk able to hold an entry of n bytes and its index slot.
 // An entry never straddles chunks, so Get can hand out direct references.
 func (b *sortableBuffer) nextChunk(n int) {
-	if len(b.chunks) >= maxDataChunks {
-		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))
-	}
-	size, pooled := chunkSizeFor(n)
+	size := chunkSizeFor(n)
 	var buf []byte
-	if pooled {
+	if size == dataChunkSize {
 		buf = getDataChunk()
 	} else {
 		if size > math.MaxInt32 {
