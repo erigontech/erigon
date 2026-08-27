@@ -464,13 +464,13 @@ func (f *forkGraphDisk) HasBlockEquivocation(slot, proposerIndex uint64, exceptR
 		return false
 	}
 	found := false
-	f.blocks.Range(func(key, value any) bool {
+	f.headers.Range(func(key, value any) bool {
 		root, ok := key.(common.Hash)
 		if !ok || root == exceptRoot {
 			return true
 		}
-		block, ok := value.(*cltypes.SignedBeaconBlock)
-		if ok && block != nil && block.Block != nil && block.Block.Slot == slot && block.Block.ProposerIndex == proposerIndex {
+		header, ok := value.(*cltypes.BeaconBlockHeader)
+		if ok && header != nil && header.Slot == slot && header.ProposerIndex == proposerIndex {
 			found = true
 			return false
 		}

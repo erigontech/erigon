@@ -433,6 +433,15 @@ Process:
 	slices.SortFunc(processBlocks, func(a, b *cltypes.SignedBeaconBlock) int {
 		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
+	hasGloasBlocks := anyGloasBlock(processBlocks)
+	if hasGloasBlocks && !connectedGloasBlocks(processBlocks) {
+		f.mu.Lock()
+		if lookahead != nil && f.gloasLookahead == lookahead {
+			f.clearGloasScan()
+		}
+		f.mu.Unlock()
+		return
+	}
 
 	// For GLOAS blocks, fetch envelopes only for FULL blocks (whose payload was delivered).
 	// EMPTY blocks never have envelopes on the network, so requesting them causes a 30s stall.
@@ -445,7 +454,7 @@ Process:
 	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	var nextGloasLookahead *cltypes.SignedBeaconBlock
 	nextGloasCursor := nextSlotAfterRange(resp.rangeStart, resp.rangeCount)
-	if anyGloasBlock(processBlocks) {
+	if hasGloasBlocks {
 		// Always keep at least 1 block as lookahead so the last processed
 		// block's FULL/EMPTY status is determined from the actual next block
 		// rather than guessed as EMPTY.  Without this, a FULL block at the
@@ -516,12 +525,20 @@ Process:
 		if resp.fromHTTP {
 			f.httpPreferred.Store(false)
 		}
-		if len(processBlocks) > 0 {
-			f.gloasLookahead = processBlocks[0]
-			f.gloasNextUnscanned = saturatingIncrement(processBlocks[0].Block.Slot)
+		if lookahead != nil && f.gloasLookahead == lookahead {
+			f.clearGloasScan()
 		}
-		if shouldBanProcessPeer(pid, err) {
+		if lookahead == nil && shouldBanProcessPeer(pid, err) {
 			f.rpc.BanPeer(pid)
+		}
+		return
+	}
+	if len(processBlocks) > 0 && nextGloasLookahead != nil && highestSlotProcessed <= f.highestSlotProcessed {
+		if resp.fromHTTP {
+			f.httpPreferred.Store(false)
+		}
+		if lookahead != nil && f.gloasLookahead == lookahead {
+			f.clearGloasScan()
 		}
 		return
 	}
@@ -604,6 +621,16 @@ func mergeGloasLookahead(blocks []*cltypes.SignedBeaconBlock, lookahead *cltypes
 		merged = append(merged, block)
 	}
 	return merged
+}
+
+func connectedGloasBlocks(blocks []*cltypes.SignedBeaconBlock) bool {
+	for i := 1; i < len(blocks); i++ {
+		root, err := blocks[i-1].Block.HashSSZ()
+		if err != nil || blocks[i].Block.ParentRoot != root {
+			return false
+		}
+	}
+	return true
 }
 
 func capRequestCount(start, count uint64) uint64 {
