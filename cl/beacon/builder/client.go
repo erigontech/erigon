@@ -431,6 +431,9 @@ func isPublicBuilderIP(ip net.IP) bool {
 		return false
 	}
 	addr = addr.Unmap()
+	if addr.Is6() && !publicIPv6BuilderPrefix.Contains(addr) {
+		return false
+	}
 	if !addr.IsGlobalUnicast() {
 		return false
 	}
@@ -441,6 +444,8 @@ func isPublicBuilderIP(ip net.IP) bool {
 	}
 	return true
 }
+
+var publicIPv6BuilderPrefix = netip.MustParsePrefix("2000::/3")
 
 var nonPublicBuilderPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8"),

@@ -754,18 +754,44 @@ func TestSubmitSignedBeaconBlockPublicRejectsPrivateTargetWithPrivateConfigured(
 }
 
 func TestIsPublicBuilderIPRejectsSpecialPurposeRanges(t *testing.T) {
-	for _, value := range []string{
-		"10.0.0.1", "100.64.0.1", "127.0.0.1", "169.254.1.1", "192.0.2.1",
-		"198.18.0.1", "198.51.100.1", "203.0.113.1", "240.0.0.1",
-		"::1", "64:ff9b::1", "64:ff9b:1::1", "100::1", "100:0:0:1::1",
-		"2001:db8::1", "fc00::1", "fec0::1", "fe80::1",
-		"::ffff:100.64.0.1",
-	} {
-		require.False(t, isPublicBuilderIP(net.ParseIP(value)), value)
+	tests := []struct {
+		address string
+		public  bool
+	}{
+		{address: "10.0.0.1"}, {address: "100.64.0.1"}, {address: "127.0.0.1"},
+		{address: "169.254.1.1"}, {address: "192.0.2.1"}, {address: "198.18.0.1"},
+		{address: "198.51.100.1"}, {address: "203.0.113.1"}, {address: "240.0.0.1"},
+		{address: "::1"}, {address: "::2"}, {address: "::127.0.0.1"},
+		{address: "::169.254.169.254"}, {address: "64:ff9b::1"}, {address: "64:ff9b:1::1"},
+		{address: "100::1"}, {address: "100:0:0:1::1"}, {address: "2001:db8::1"},
+		{address: "1fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+		{address: "2000::", public: true},
+		{address: "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", public: true},
+		{address: "4000::"},
+		{address: "4000::1"}, {address: "6000::1"}, {address: "fc00::1"},
+		{address: "fec0::1"}, {address: "fe80::1"}, {address: "::ffff:100.64.0.1"},
+		{address: "::ffff:127.0.0.1"},
+		{address: "8.8.8.8", public: true}, {address: "93.184.216.34", public: true},
+		{address: "::ffff:8.8.8.8", public: true}, {address: "2001:4860:4860::8888", public: true},
 	}
-	for _, value := range []string{"8.8.8.8", "93.184.216.34", "2001:4860:4860::8888"} {
-		require.True(t, isPublicBuilderIP(net.ParseIP(value)), value)
+	for _, test := range tests {
+		t.Run(test.address, func(t *testing.T) {
+			require.Equal(t, test.public, isPublicBuilderIP(net.ParseIP(test.address)))
+		})
 	}
+}
+
+func TestSubmitSignedBeaconBlockPublicRejectsIPv4CompatibleLiteralBeforeDial(t *testing.T) {
+	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{AllowPrivate: true})
+	dialed := false
+	client.publicTransport = mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		dialed = true
+		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+	})
+
+	err := client.SubmitSignedBeaconBlockPublic(t.Context(), "http://[::127.0.0.1]:18550", cltypes.NewSignedBeaconBlock(mockBeaconConfig, clparams.GloasVersion))
+	require.ErrorContains(t, err, "disallowed address")
+	require.False(t, dialed)
 }
 
 func TestSubmitSignedBeaconBlockPublicRejectsNewSpecialPurposeMixedAnswers(t *testing.T) {
