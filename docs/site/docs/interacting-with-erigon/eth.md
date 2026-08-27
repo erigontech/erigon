@@ -155,7 +155,10 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
   while `v` is zero. A pre-London fill, or a post-London fill supplying `gasPrice` with
   no access list, therefore returns `tx` without `chainId`
 * fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
-  and cannot be combined with `maxFeePerGas` or `maxPriorityFeePerGas`. When it is absent:
+  though after London it must be non-zero (`gasPrice must be non-zero after london fork`);
+  before London a zero is accepted. It cannot be combined with `maxFeePerGas` or
+  `maxPriorityFeePerGas`, and a supplied pair must satisfy `maxFeePerGas` non-zero and
+  `>= maxPriorityFeePerGas`. When `gasPrice` is absent:
   before London `gasPrice` comes from the gas oracle; after London the dynamic fields are
   filled independently, `maxPriorityFeePerGas` from the oracle and `maxFeePerGas` as twice
   the base fee plus the tip. The dynamic fields are rejected before London
@@ -163,13 +166,21 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
 
 **Returns**
 
-An object with `raw`, the RLP-encoded unsigned transaction, and `tx`, the same
-transaction in JSON form. The standardized result carries only `tx`; the extra `raw`
-field is the geth-compatible shape.
+An object with `raw`, the unsigned transaction in its canonical binary encoding, and
+`tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare
+RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
+encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
+result carries only `tx`; the extra `raw` field is the geth-compatible shape.
 
 :::info
 KZG commitment and proof generation from raw blobs is not implemented. Blob
 transactions must already carry their `blobVersionedHashes`.
+
+The sidecar fields the specification defines — `blobs`, `commitments` and `proofs` — are
+not supported: `CallArgs` has no field for them, so they are dropped from the request
+without an error even when a complete precomputed sidecar is supplied, and they are
+absent from the returned `tx` and `raw`. Callers that need the sidecar must keep it
+themselves and reattach it before submitting.
 :::
 
 ### Block number parameter format

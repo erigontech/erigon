@@ -5075,7 +5075,10 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
   while `v` is zero. A pre-London fill, or a post-London fill supplying `gasPrice` with
   no access list, therefore returns `tx` without `chainId`
 * fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
-  and cannot be combined with `maxFeePerGas` or `maxPriorityFeePerGas`. When it is absent:
+  though after London it must be non-zero (`gasPrice must be non-zero after london fork`);
+  before London a zero is accepted. It cannot be combined with `maxFeePerGas` or
+  `maxPriorityFeePerGas`, and a supplied pair must satisfy `maxFeePerGas` non-zero and
+  `>= maxPriorityFeePerGas`. When `gasPrice` is absent:
   before London `gasPrice` comes from the gas oracle; after London the dynamic fields are
   filled independently, `maxPriorityFeePerGas` from the oracle and `maxFeePerGas` as twice
   the base fee plus the tip. The dynamic fields are rejected before London
@@ -5083,13 +5086,21 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
 
 **Returns**
 
-An object with `raw`, the RLP-encoded unsigned transaction, and `tx`, the same
-transaction in JSON form. The standardized result carries only `tx`; the extra `raw`
-field is the geth-compatible shape.
+An object with `raw`, the unsigned transaction in its canonical binary encoding, and
+`tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare
+RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
+encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
+result carries only `tx`; the extra `raw` field is the geth-compatible shape.
 
 :::info
 KZG commitment and proof generation from raw blobs is not implemented. Blob
 transactions must already carry their `blobVersionedHashes`.
+
+The sidecar fields the specification defines — `blobs`, `commitments` and `proofs` — are
+not supported: `CallArgs` has no field for them, so they are dropped from the request
+without an error even when a complete precomputed sidecar is supplied, and they are
+absent from the returned `tx` and `raw`. Callers that need the sidecar must keep it
+themselves and reattach it before submitting.
 :::
 
 ### Block number parameter format
@@ -6145,7 +6156,7 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
-| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block or uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors; `trace_block` alone also emits beacon-chain-withdrawal rewards, on request). |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (a consensus payout rather than a call — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors; `trace_block` alone also emits Aura block-reward-contract payouts and, on request, beacon-chain withdrawals. See `rewardType` for the full set). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
 | `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
@@ -6184,13 +6195,13 @@ The `action` object's shape depends on `type`:
 | `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
 | `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
 
-**`type: "reward"`** (block or uncle reward in `trace_block` and `trace_filter`; withdrawal reward in `trace_block` only)
+**`type: "reward"`** (block and uncle rewards in `trace_block` and `trace_filter`; Aura block-reward-contract and withdrawal rewards in `trace_block` only)
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `author` | DATA, 20 BYTES | Address receiving the reward — the miner, the uncle author, or the withdrawal recipient when `rewardType` is `"withdrawal"`. |
+| `author` | DATA, 20 BYTES | Address receiving the reward: the block author, the uncle author, the beneficiary named by the block-reward contract for `"external"` and `"emptyStep"`, or the withdrawal recipient for `"withdrawal"`. |
 | `value` | QUANTITY | Wei amount of the reward. |
-| `rewardType` | String | `"block"` or `"uncle"`. `trace_block` also emits `"withdrawal"` when `IncludeWithdrawals` is set; `trace_filter` never does — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
+| `rewardType` | String | `trace_filter` emits only `"block"` and `"uncle"`. `trace_block` maps the consensus reward kind through `rewardKindToString`, so it can also return `"emptyStep"` and `"external"` on Aura chains such as Gnosis (a block-reward-contract payout), or `"unknown"` for an unrecognised kind; it additionally emits `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
 
 ### Result variants
 
