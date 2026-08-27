@@ -35,6 +35,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -43,7 +44,10 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/transition/machine"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -561,7 +565,7 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 
 func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 	t.Run("higher bid", func(t *testing.T) {
-		localValueWei := new(big.Int).Mul(big.NewInt(2), big.NewInt(common.GWei))
+		localValueWei := gweiToWei(big.NewInt(2))
 		externalBid := &cltypes.SignedExecutionPayloadBid{
 			Message: &cltypes.ExecutionPayloadBid{Value: 3},
 		}
@@ -573,7 +577,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 	})
 
 	t.Run("equal bid", func(t *testing.T) {
-		localValueWei := new(big.Int).Mul(big.NewInt(2), big.NewInt(common.GWei))
+		localValueWei := gweiToWei(big.NewInt(2))
 		externalBid := &cltypes.SignedExecutionPayloadBid{
 			Message: &cltypes.ExecutionPayloadBid{Value: 2},
 		}
@@ -588,7 +592,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 		externalBid := &cltypes.SignedExecutionPayloadBid{
 			Message: &cltypes.ExecutionPayloadBid{Value: ^uint64(0)},
 		}
-		wantWei := new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(common.GWei))
+		wantWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
 
 		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid, 100)
 
@@ -598,7 +602,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 }
 
 func TestSelectHigherGloasBidValueHonorsBoostFactor(t *testing.T) {
-	localValueWei := new(big.Int).Mul(big.NewInt(2), big.NewInt(common.GWei))
+	localValueWei := gweiToWei(big.NewInt(2))
 	externalBid := &cltypes.SignedExecutionPayloadBid{
 		Message: &cltypes.ExecutionPayloadBid{Value: 3},
 	}
@@ -609,33 +613,123 @@ func TestSelectHigherGloasBidValueHonorsBoostFactor(t *testing.T) {
 	require.Same(t, localValueWei, selectedValueWei)
 }
 
-func TestTrySelectGloasBidFallsBackAfterParentBuilderExit(t *testing.T) {
-	productionState, block, externalBid := newGloasBidSelectionFixture(t, true)
-	selfBid := block.BeaconBody.SignedExecutionPayloadBid
-	localValueWei := big.NewInt(common.GWei)
-
-	selectedValueWei, selected, err := trySelectGloasBid(productionState, block, localValueWei, externalBid, 100)
-
-	require.ErrorContains(t, err, "builder is not active")
-	require.False(t, selected)
-	require.Same(t, selfBid, block.BeaconBody.SignedExecutionPayloadBid)
-	require.Same(t, localValueWei, selectedValueWei)
-	require.Len(t, block.Blobs, 1)
-	require.Len(t, block.KzgProofs, 1)
-	require.NoError(t, validateGloasBid(productionState, block.ToGeneric()))
+func TestPreferLocalExecutionValueRejectsNilBuilderValue(t *testing.T) {
+	require.True(t, preferLocalExecutionValue(big.NewInt(1), nil, 100))
 }
 
-func TestTrySelectGloasBidClearsSelfBuildSidecars(t *testing.T) {
-	productionState, block, externalBid := newGloasBidSelectionFixture(t, false)
+func TestShouldRequestBuilderHeader(t *testing.T) {
+	require.True(t, shouldRequestBuilderHeader(clparams.FuluVersion, true, true))
+	require.False(t, shouldRequestBuilderHeader(clparams.GloasVersion, true, true))
+	require.False(t, shouldRequestBuilderHeader(clparams.FuluVersion, false, true))
+	require.False(t, shouldRequestBuilderHeader(clparams.FuluVersion, true, false))
+}
 
-	selectedValueWei, selected, err := trySelectGloasBid(productionState, block, big.NewInt(common.GWei), externalBid, 100)
+func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
+	for _, value := range []string{"", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			builderClient.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&builder.ExecutionHeader{
+				Version: postState.Version().String(),
+				Data: builder.ExecutionHeaderData{Message: builder.ExecutionHeaderMessage{
+					Value: value,
+				}},
+			}, nil)
+			handler.builderClient = builderClient
+
+			_, err := handler.getBuilderPayload(t.Context(), postState, postState.Slot()+1)
+
+			require.ErrorContains(t, err, "invalid builder block value")
+		})
+	}
+}
+
+func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{exitBuilder: true})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	expectedState, err := fixture.productionState.Copy()
+	require.NoError(t, err)
+	expectedMachine := &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}
+	require.NoError(t, machine.ProcessBlock(expectedMachine, expectedState, fixture.block.ToGeneric()))
+	expectedRoot, err := expectedState.HashSSZ()
+	require.NoError(t, err)
+	logs := captureProductionLogs(t)
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block, 100)
 
 	require.NoError(t, err)
-	require.True(t, selected)
-	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
-	require.Equal(t, "3000000000", selectedValueWei.String())
-	require.Nil(t, block.Blobs)
-	require.Nil(t, block.KzgProofs)
+	require.Same(t, fixture.productionState, selectedState)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "1000000000", fixture.block.ExecutionValue.String())
+	require.Len(t, fixture.block.Blobs, 1)
+	require.Len(t, fixture.block.KzgProofs, 1)
+	selectedRoot, err := selectedState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expectedRoot, selectedRoot)
+	_, found := handler.epbsPool.HighestBids.Get(fixture.bidKey)
+	require.False(t, found)
+	require.Contains(t, logs(), "builderIndex=0")
+	require.Contains(t, logs(), "bidValueGwei=3")
+}
+
+func TestProcessProducedBlockSelectsExternalBidWithoutMutatingBaseState(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	originalRoot, err := fixture.productionState.HashSSZ()
+	require.NoError(t, err)
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	selectedState, blockMachine, err := handler.processProducedBlock(fixture.productionState, fixture.block, 100)
+
+	require.NoError(t, err)
+	require.NotSame(t, fixture.productionState, selectedState)
+	require.NotNil(t, blockMachine.BlockRewardsCollector)
+	require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "3000000000", fixture.block.ExecutionValue.String())
+	require.Nil(t, fixture.block.Blobs)
+	require.Nil(t, fixture.block.KzgProofs)
+	afterRoot, err := fixture.productionState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, originalRoot, afterRoot)
+	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
+}
+
+func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
+	tests := []struct {
+		name    string
+		options gloasBidSelectionOptions
+	}{
+		{
+			name: "randao mismatch",
+			options: gloasBidSelectionOptions{mutateBid: func(bid *cltypes.ExecutionPayloadBid) {
+				bid.PrevRandao[0] ^= 0xff
+			}},
+		},
+		{
+			name: "builder version mismatch",
+			options: gloasBidSelectionOptions{mutateBuilder: func(builder *cltypes.Builder) {
+				builder.Version++
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newGloasBidSelectionFixture(t, test.options)
+			selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+			handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+			_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block, 100)
+
+			require.NoError(t, err)
+			require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+			_, found := handler.epbsPool.HighestBids.Get(fixture.bidKey)
+			require.False(t, found)
+		})
+	}
 }
 
 func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
@@ -646,23 +740,44 @@ func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
 		SyncAggregate:     4,
 	}
 	wantGwei := new(big.Int).Add(new(big.Int).SetUint64(^uint64(0)), big.NewInt(9))
-	wantWei := new(big.Int).Mul(wantGwei, big.NewInt(common.GWei))
+	wantWei := gweiToWei(wantGwei)
 
 	require.Equal(t, wantWei, consensusBlockValueWei(rewards))
 }
 
-func newGloasBidSelectionFixture(
-	t *testing.T,
-	exitBuilder bool,
-) (*state.CachingBeaconState, *cltypes.BlindOrExecutionBeaconBlock, *cltypes.SignedExecutionPayloadBid) {
+type gloasBidSelectionOptions struct {
+	exitBuilder   bool
+	mutateBuilder func(*cltypes.Builder)
+	mutateBid     func(*cltypes.ExecutionPayloadBid)
+}
+
+type gloasBidSelectionFixture struct {
+	productionState *state.CachingBeaconState
+	block           *cltypes.BlindOrExecutionBeaconBlock
+	externalBid     *cltypes.SignedExecutionPayloadBid
+	bidKey          pool.HighestBidKey
+}
+
+func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions) gloasBidSelectionFixture {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
+	cfg.PayloadBuilderVersion = 7
 	productionState := state.New(&cfg)
 	productionState.SetVersion(clparams.GloasVersion)
 	slot := cfg.SlotsPerEpoch
 	require.NoError(t, productionState.SetSlot(slot))
 	productionState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
+	productionState.SetGenesisValidatorsRoot(common.Hash{0x91})
+	productionState.SetFork(&cltypes.Fork{
+		PreviousVersion: utils.Uint32ToBytes4(uint32(cfg.FuluForkVersion)),
+		CurrentVersion:  utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion)),
+		Epoch:           state.Epoch(productionState),
+	})
+	require.NoError(t, productionState.SetRandaoMixAt(
+		int(state.Epoch(productionState)%cfg.EpochsPerHistoricalVector),
+		common.Hash{0xa1},
+	))
 
 	privateKey, err := bls.GenerateKey()
 	require.NoError(t, err)
@@ -677,24 +792,38 @@ func newGloasBidSelectionFixture(
 		cfg.FarFutureEpoch,
 		cfg.FarFutureEpoch,
 	), cfg.MaxEffectiveBalance))
+	committee := make([]common.Bytes48, int(cfg.SyncCommitteeSize))
+	for i := range committee {
+		committee[i] = pubkey
+	}
+	require.NoError(t, productionState.SetCurrentSyncCommittee(
+		solid.NewSyncCommitteeFromParameters(committee, pubkey),
+	))
 
 	executionAddress := common.Address{0x42}
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
-	builders.Append(&cltypes.Builder{
+	payloadBuilder := &cltypes.Builder{
 		Pubkey:            pubkey,
 		Version:           cfg.PayloadBuilderVersion,
 		ExecutionAddress:  executionAddress,
 		Balance:           cfg.MinDepositAmount + 100,
 		DepositEpoch:      0,
 		WithdrawableEpoch: cfg.FarFutureEpoch,
-	})
+	}
+	if options.mutateBuilder != nil {
+		options.mutateBuilder(payloadBuilder)
+	}
+	builders.Append(payloadBuilder)
 	productionState.SetBuilders(builders)
 
-	parentRoot := common.Hash{0x11}
+	parentHeader := productionState.LatestBlockHeader()
+	parentRootRaw, err := (&parentHeader).HashSSZ()
+	require.NoError(t, err)
+	parentRoot := common.Hash(parentRootRaw)
 	parentHash := common.Hash{0x22}
 	require.NoError(t, productionState.SetBlockRootAt(int((slot-1)%cfg.SlotsPerHistoricalRoot), parentRoot))
 	parentRequests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
-	if exitBuilder {
+	if options.exitBuilder {
 		parentRequests.BuilderExits.Append(&solid.BuilderExitRequest{
 			SourceAddress: executionAddress,
 			PubKey:        pubkey,
@@ -722,6 +851,9 @@ func newGloasBidSelectionFixture(
 		Value:              3,
 		BlobKzgCommitments: *commitments,
 	}}
+	if options.mutateBid != nil {
+		options.mutateBid(externalBid.Message)
+	}
 	domain, err := productionState.GetDomain(cfg.DomainBeaconBuilder, state.Epoch(productionState))
 	require.NoError(t, err)
 	signingRoot, err := fork.ComputeSigningRoot(externalBid.Message, domain)
@@ -745,21 +877,31 @@ func newGloasBidSelectionFixture(
 	body.ParentExecutionRequests = parentRequests
 
 	block := &cltypes.BlindOrExecutionBeaconBlock{
-		Slot:          slot,
-		ProposerIndex: 0,
-		ParentRoot:    parentRoot,
-		BeaconBody:    body,
-		Blobs:         []*cltypes.Blob{{0x77}},
-		KzgProofs:     []common.Bytes48{{0x88}},
-		Cfg:           &cfg,
+		Slot:           slot,
+		ProposerIndex:  0,
+		ParentRoot:     parentRoot,
+		BeaconBody:     body,
+		Blobs:          []*cltypes.Blob{{0x77}},
+		KzgProofs:      []common.Bytes48{{0x88}},
+		ExecutionValue: gweiToWei(big.NewInt(1)),
+		Cfg:            &cfg,
 	}
-	return productionState, block, externalBid
+	return gloasBidSelectionFixture{
+		productionState: productionState,
+		block:           block,
+		externalBid:     externalBid,
+		bidKey: pool.HighestBidKey{
+			Slot:            slot,
+			ParentBlockHash: parentHash,
+			ParentBlockRoot: parentRoot,
+		},
+	}
 }
 
 func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
-	valueWei := new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(common.GWei))
+	valueWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
 
 	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, valueWei, new(big.Int))
 
@@ -792,6 +934,7 @@ func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
 }
 
 func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
+	logs := captureAllProductionLogs(t)
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	db := notifyingUpdateFailingDB{RwDB: h.indiciesDB, called: make(chan struct{})}
 	h.indiciesDB = db
@@ -809,6 +952,9 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("block persistence did not start")
 	}
+	require.Contains(t, logs(), "blobSidecars=0")
+	require.Contains(t, logs(), "columnSidecars=0")
+	require.NotContains(t, logs(), "blobs=1")
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
@@ -1163,18 +1309,24 @@ func (s *syncedBuffer) String() string {
 	return s.buf.String()
 }
 
-// captureProductionLogs redirects the root logger for one test and returns everything written at
-// warning level or above. It deliberately does not filter by message: a record this package emits
-// under another name is exactly what a test asserting silence needs to see.
-func captureProductionLogs(t *testing.T) func() string {
+func captureAllProductionLogs(t *testing.T) func() string {
 	t.Helper()
 	output := &syncedBuffer{}
 	previous := log.Root().GetHandler()
 	log.Root().SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
 	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	return output.String
+}
+
+// captureProductionLogs redirects the root logger for one test and returns everything written at
+// warning level or above. It deliberately does not filter by message: a record this package emits
+// under another name is exactly what a test asserting silence needs to see.
+func captureProductionLogs(t *testing.T) func() string {
+	t.Helper()
+	allLogs := captureAllProductionLogs(t)
 	return func() string {
 		var loud []string
-		for line := range strings.SplitSeq(output.String(), "\n") {
+		for line := range strings.SplitSeq(allLogs(), "\n") {
 			if strings.Contains(line, "lvl=eror") || strings.Contains(line, "lvl=warn") {
 				loud = append(loud, line)
 			}

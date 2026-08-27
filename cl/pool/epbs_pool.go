@@ -1,6 +1,8 @@
 package pool
 
 import (
+	"sync"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
@@ -37,6 +39,8 @@ type HighestBidKey struct {
 // EpbsPool holds EPBS-related gossip data caches.
 // [New in Gloas:EIP7732]
 type EpbsPool struct {
+	highestBidsMu sync.Mutex
+
 	// ProposerPreferences stores validated SignedProposerPreferences keyed by (slot, dependent_root).
 	// Written by the proposer_preferences gossip service, read by the execution_payload_bid service.
 	ProposerPreferences *lru.Cache[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]
@@ -48,6 +52,24 @@ type EpbsPool struct {
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
+}
+
+// StoreHighestBid replaces the current entry for key.
+func (p *EpbsPool) StoreHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
+	p.highestBidsMu.Lock()
+	defer p.highestBidsMu.Unlock()
+	p.HighestBids.Add(key, bid)
+}
+
+// RemoveHighestBid preserves a concurrently stored replacement for the same key.
+func (p *EpbsPool) RemoveHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) bool {
+	p.highestBidsMu.Lock()
+	defer p.highestBidsMu.Unlock()
+	current, found := p.HighestBids.Get(key)
+	if !found || current != bid {
+		return false
+	}
+	return p.HighestBids.Remove(key)
 }
 
 func NewEpbsPool() *EpbsPool {

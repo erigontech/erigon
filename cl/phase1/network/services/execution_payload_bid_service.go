@@ -368,7 +368,7 @@ func (s *executionPayloadBidService) storeValidBid(msg *cltypes.SignedExecutionP
 	}
 	s.seenCache.Add(seenKey, struct{}{})
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	s.epbsPool.HighestBids.Add(bidKey, msg)
+	s.epbsPool.StoreHighestBid(bidKey, msg)
 	return nil
 }
 
