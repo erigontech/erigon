@@ -267,6 +267,9 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			if err := b.retryFailedRecoveries(retryFloor); err != nil {
 				return err
 			}
+			if b.ctx.Err() != nil {
+				return nil
+			}
 			retryPending = false
 		}
 
@@ -369,7 +372,11 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor uint64) error {
 
 		block, err := b.readRetryBlock(slot)
 		if err != nil {
-			return err
+			if b.ctx.Err() != nil {
+				return nil
+			}
+			b.logger.Warn("[BlobHistoryDownloader] Failed to read retry block", "slot", slot, "err", err)
+			continue
 		}
 		if block == nil || block.Version() < clparams.DenebVersion || block.GetBlobKzgCommitments() == nil {
 			b.resolveRetrySlot(slot)
@@ -377,7 +384,11 @@ func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor uint64) error {
 		}
 		complete, err := b.retryBlock(block)
 		if err != nil {
-			return err
+			if b.ctx.Err() != nil {
+				return nil
+			}
+			b.logger.Warn("[BlobHistoryDownloader] Failed to retry blob recovery", "slot", slot, "err", err)
+			continue
 		}
 		if complete {
 			b.resolveRetrySlot(slot)

@@ -236,6 +236,50 @@ func TestBlobHistoryDownloaderSecondCompletedPassScansRecentUnfrozenRange(t *tes
 	require.Equal(t, recentFloor, reader.slots[len(reader.slots)-1])
 }
 
+func TestBlobHistoryDownloaderRetryReadFailureDoesNotBlockRecentScan(t *testing.T) {
+	const (
+		head      = uint64(1_000)
+		retrySlot = uint64(1)
+	)
+	recentFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
+	reader := &boundaryBlockReader{errors: map[uint64]error{retrySlot: errors.New("retry read failed")}}
+	downloader := newBoundaryDownloader(t, head, 0, recentFloor, reader)
+	downloader.addRetrySlot(retrySlot)
+
+	for range 2 {
+		reader.slots = nil
+		require.NoError(t, downloader.downloadOnce(false))
+		require.Equal(t, retrySlot, reader.slots[0])
+		require.Equal(t, head, reader.slots[1])
+		require.Equal(t, recentFloor, reader.slots[len(reader.slots)-1])
+		require.Equal(t, []blobRetryRange{{start: retrySlot, end: retrySlot, cursor: retrySlot}}, downloader.retryRanges)
+	}
+}
+
+func TestBlobHistoryDownloaderCancellationDuringRetryStopsBeforeRecentScan(t *testing.T) {
+	const (
+		head      = uint64(1_000)
+		retrySlot = uint64(1)
+	)
+	ctx, cancel := context.WithCancel(t.Context())
+	reader := &boundaryBlockReader{
+		errors: map[uint64]error{retrySlot: context.Canceled},
+		onRead: func(slot uint64) {
+			if slot == retrySlot {
+				cancel()
+			}
+		},
+	}
+	recentFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
+	downloader := newBoundaryDownloader(t, head, 0, recentFloor, reader)
+	downloader.ctx = ctx
+	downloader.addRetrySlot(retrySlot)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, []uint64{retrySlot}, reader.slots)
+	require.Equal(t, []blobRetryRange{{start: retrySlot, end: retrySlot, cursor: retrySlot}}, downloader.retryRanges)
+}
+
 func TestBlobHistoryDownloaderFailedRecoveryContinuesScanAndNotifies(t *testing.T) {
 	const (
 		head   = uint64(100)
@@ -392,18 +436,14 @@ func TestBlobHistoryDownloaderRetryRangeMergePreservesAbsorbedCursor(t *testing.
 	require.Equal(t, blobRetryRange{start: 0, end: 20, cursor: 15}, mergeBlobRetryRanges(left, right))
 }
 
-func TestBlobHistoryDownloaderResolvedInteriorRetrySlotIsRemoved(t *testing.T) {
-	wantErr := errors.New("stop after interior retry")
-	reader := &boundaryBlockReader{errors: map[uint64]error{2: wantErr}}
+func TestBlobHistoryDownloaderResolvedRetrySlotsAreRemovedAroundReadFailure(t *testing.T) {
+	reader := &boundaryBlockReader{errors: map[uint64]error{2: errors.New("retry read failed")}}
 	downloader := newBoundaryDownloader(t, 2, 0, 2, reader)
 	downloader.retryRanges = []blobRetryRange{{start: 0, end: 2, cursor: 1}}
 
-	require.ErrorIs(t, downloader.retryFailedRecoveries(0), wantErr)
-
-	require.Equal(t, []blobRetryRange{
-		{start: 0, end: 0, cursor: 0},
-		{start: 2, end: 2, cursor: 2},
-	}, downloader.retryRanges)
+	require.NoError(t, downloader.retryFailedRecoveries(0))
+	require.Equal(t, []uint64{1, 2, 0}, reader.slots)
+	require.Equal(t, []blobRetryRange{{start: 2, end: 2, cursor: 2}}, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderInteriorResolveKeepsRetryRangeBound(t *testing.T) {
