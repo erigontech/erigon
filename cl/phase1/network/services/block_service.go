@@ -201,10 +201,6 @@ func (b *blockService) ReleaseGossipReservation(msg *cltypes.SignedBeaconBlock) 
 
 func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock, schedule func(), waitForPending bool) error {
 	key := blockGossipKey(msg)
-	root, err := msg.HashSSZ()
-	if err != nil {
-		return err
-	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("%w: block validation canceled: %w", ErrIgnore, err)
@@ -243,6 +239,10 @@ func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.Sig
 		b.seenBlocksMu.Unlock()
 
 		validationErr := b.validateGossip(ctx, msg, schedule)
+		var root [32]byte
+		if validationErr == nil && ctx.Err() == nil {
+			root, validationErr = msg.HashSSZ()
+		}
 
 		b.seenBlocksMu.Lock()
 		reservation.validators--
@@ -602,7 +602,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 			return
 		}
 		existing := existingValue.(*blockJob)
-		if existing.store != nil || store == nil {
+		if store == nil || (existing.store != nil && !job.creationTime.After(existing.creationTime)) {
 			return
 		}
 		if b.blocksScheduledForLaterExecution.CompareAndSwap(blockRoot, existing, job) {

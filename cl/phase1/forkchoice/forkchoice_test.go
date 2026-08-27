@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"sync"
@@ -27,15 +28,120 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 )
+
+type embeddedPtcVoteForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	postState *state.CachingBeaconState
+	envelopes map[common.Hash]bool
+}
+
+func (g *embeddedPtcVoteForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, fork_graph.InvalidBlock, err
+	}
+	g.blocks[root] = block
+	g.headers[root] = &cltypes.BeaconBlockHeader{Slot: block.Block.Slot, ParentRoot: block.Block.ParentRoot}
+	g.addChainSegmentCalled = true
+	return g.postState, fork_graph.Success, nil
+}
+
+func (g *embeddedPtcVoteForkGraph) HasEnvelope(root common.Hash) bool {
+	return g.envelopes[root]
+}
+
+func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotes(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+
+	anchor := state.New(&cfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(1))
+	anchor.SetPtcWindow(solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize)))
+	anchorRoot, err := anchor.BlockRoot()
+	require.NoError(t, err)
+
+	postState, err := anchor.Copy()
+	require.NoError(t, err)
+	require.NoError(t, postState.SetSlot(2))
+	graph := &embeddedPtcVoteForkGraph{
+		getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
+			blocks:     make(map[common.Hash]*cltypes.SignedBeaconBlock),
+			headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: 1}},
+			states:     map[common.Hash]*state.CachingBeaconState{anchorRoot: anchor},
+			anchorRoot: anchorRoot,
+			anchorSlot: 1,
+		},
+		postState: postState,
+		envelopes: map[common.Hash]bool{anchorRoot: true},
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	store, err := NewForkChoiceStore(
+		clock,
+		anchor,
+		nil,
+		pool.NewOperationsPool(&cfg),
+		graph,
+		beaconevents.NewEventEmitter(),
+		synced_data.NewSyncedDataManager(&cfg, true),
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(2 * cfg.SecondsPerSlot)
+	store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
+
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = 2
+	child.Block.ParentRoot = anchorRoot
+	votes := solid.NewBitVector(int(cfg.PtcSize))
+	for i := range int(cfg.PtcSize/2 + 1) {
+		require.NoError(t, votes.SetBitAt(i, true))
+	}
+	child.Block.Body.PayloadAttestations.Append(&cltypes.PayloadAttestation{
+		AggregationBits: votes,
+		Data: &cltypes.PayloadAttestationData{
+			BeaconBlockRoot:   anchorRoot,
+			Slot:              1,
+			PayloadPresent:    false,
+			BlobDataAvailable: false,
+		},
+	})
+
+	require.NoError(t, store.OnBlock(context.Background(), child, false, false, false))
+	require.True(t, store.payloadTimeliness(anchorRoot, false))
+	require.True(t, store.payloadDataAvailability(anchorRoot, false))
+	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
+	head, err := store.GetHeadNode()
+	require.NoError(t, err)
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+}
 
 type headerOnlyAnchorForkGraph struct {
 	fork_graph.ForkGraph
