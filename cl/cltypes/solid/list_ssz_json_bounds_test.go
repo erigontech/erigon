@@ -49,3 +49,21 @@ func TestListSSZUnmarshalJSONPreservesNullAsEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, list.Len())
 }
+
+func TestListSSZUnmarshalJSONRejectsNullElement(t *testing.T) {
+	list := NewStaticListSSZ[*DepositRequest](1, SizeDepositRequest)
+
+	err := list.UnmarshalJSON([]byte(`[null]`))
+
+	require.ErrorContains(t, err, "null list element")
+	require.Zero(t, list.Len())
+}
+
+func TestListSSZUnmarshalJSONAcceptsValueElement(t *testing.T) {
+	list := NewStaticListSSZ[Validator](1, validatorSize)
+
+	err := list.UnmarshalJSON([]byte(`[{}]`))
+
+	require.NoError(t, err)
+	require.Equal(t, 1, list.Len())
+}
