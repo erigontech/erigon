@@ -194,9 +194,9 @@ The `action` object's shape depends on `type`:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `author` | DATA, 20 BYTES | Address receiving the reward: the block author, the uncle author, the beneficiary named by the block-reward contract for `"external"` and `"emptyStep"`, or the withdrawal recipient for `"withdrawal"`. |
+| `author` | DATA, 20 BYTES | Address receiving the reward: the block author, the uncle author, the beneficiary attributed by the block-reward contract for `"external"`, or the withdrawal recipient for `"withdrawal"`. |
 | `value` | QUANTITY | Wei amount of the reward. |
-| `rewardType` | String | `trace_filter` emits only `"block"` and `"uncle"`. `trace_block` maps the consensus reward kind through `rewardKindToString`, so it can also return `"emptyStep"` and `"external"` on Aura chains such as Gnosis (a block-reward-contract payout), or `"unknown"` for an unrecognised kind; it additionally emits `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
+| `rewardType` | String | `trace_filter` emits only `"block"` and `"uncle"`. `trace_block` maps the consensus reward kind through `rewardKindToString`, so it also returns `"external"` for a block-reward-contract payout on Aura chains such as Gnosis, and emits `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). That mapping additionally defines `"emptyStep"` (an AuthorityRound empty-step author) and `"unknown"`, but no current code path produces either. |
 
 ### Result variants
 

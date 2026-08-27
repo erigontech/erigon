@@ -143,6 +143,11 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
 
 1. `Object` — a transaction object in the same shape `eth_call` accepts.
 
+The standard `type` field is ignored. `CallArgs` has no field for it and unknown JSON
+properties are accepted silently, so the envelope is inferred from whichever fee,
+access-list and blob fields are present. On a post-London head, `{"type": "0x0"}` with no
+`gasPrice` comes back as a type `0x2` transaction rather than the legacy type requested.
+
 **Fills in**
 
 * `nonce` — from the pending nonce of `from`, or `0` when `from` is absent
@@ -171,6 +176,13 @@ An object with `raw`, the unsigned transaction in its canonical binary encoding,
 RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
 encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
 result carries only `tx`; the extra `raw` field is the geth-compatible shape.
+
+A typed result also carries `gasPrice: null`. `FillTransaction` passes no base fee to the
+response encoder, so `computeGasPrice` returns nothing and the missing key is filled with
+`null` — deliberate geth parity, pinned by `rpc/ethapi/api_test.go`. The standardized
+type-2 unsigned schema requires `gasPrice` to be a hex quantity, so a schema-validating
+client will reject the result; read `maxFeePerGas` and `maxPriorityFeePerGas` instead.
+Legacy results carry a real `gasPrice`.
 
 :::info
 KZG commitment and proof generation from raw blobs is not implemented. Blob
