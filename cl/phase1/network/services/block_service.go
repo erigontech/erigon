@@ -211,7 +211,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		if err := b.schedulePendingBlock(&pendingBlockJob{block: msg, gossipEventPublished: true}); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: block queued until fork choice reaches slot %d", ErrIgnore, msg.Block.Slot)
+		return nil
 	}
 	// Fork choice performs the remaining block validation.
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
@@ -219,7 +219,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			if scheduleErr := b.scheduleBlockAfterProcessingFailure(msg, err); scheduleErr != nil {
 				return scheduleErr
 			}
-			return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %v", ErrIgnore, err) //nolint:errorlint // fork-choice errors must not remain matchable after conversion to IGNORE
+			return nil
 		}
 		return err
 	}

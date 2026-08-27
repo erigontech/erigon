@@ -175,6 +175,25 @@ func setupPendingBellatrixBlock(t *testing.T, ctrl *gomock.Controller, processin
 	return service, block, processingStore
 }
 
+func setupIncomingBellatrixBlock(t *testing.T, ctrl *gomock.Controller, processingErr error) (*blockService, *cltypes.SignedBeaconBlock, *blockProcessingErrorStore) {
+	blocks, _, post := tests.GetBellatrixRandom()
+	block := blocks[1]
+	serviceAPI, syncedData, ethClock, forkchoiceStore := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	require.NoError(t, syncedData.OnHeadState(post))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	forkchoiceStore.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	forkchoiceStore.Headers[block.Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	forkchoiceStore.SlotVal = block.Block.Slot
+	block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
+	processingStore := &blockProcessingErrorStore{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               processingErr,
+	}
+	service.forkchoiceStore = processingStore
+	return service, block, processingStore
+}
+
 func TestBlockServiceUnsynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -199,7 +218,7 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
-func TestBlockServiceQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
+func TestBlockServiceAcceptsAndQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -226,7 +245,7 @@ func TestBlockServiceQueuesValidBlockBeforeForkChoiceReachesSlot(t *testing.T) {
 
 	err := service.ProcessMessage(t.Context(), nil, block)
 
-	require.ErrorIs(t, err, ErrIgnore)
+	require.NoError(t, err)
 	require.Zero(t, processingStore.calls)
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
 	select {
@@ -375,7 +394,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	}
 }
 
-func TestBlockServiceInitialProcessingQueuesRetryableDependencyFailure(t *testing.T) {
+func TestBlockServiceAcceptsAndQueuesRetryableDependencyFailure(t *testing.T) {
 	testCases := []struct {
 		name string
 		err  error
@@ -389,30 +408,32 @@ func TestBlockServiceInitialProcessingQueuesRetryableDependencyFailure(t *testin
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			blocks, _, post := tests.GetBellatrixRandom()
-			block := blocks[1]
-			serviceAPI, syncedData, ethClock, forkchoiceStore := setupBlockService(t, ctrl)
-			service := serviceAPI.(*blockService)
-			require.NoError(t, syncedData.OnHeadState(post))
-			ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-			forkchoiceStore.FinalizedCheckpointVal = post.FinalizedCheckpoint()
-			forkchoiceStore.Headers[block.Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
-			forkchoiceStore.SlotVal = block.Block.Slot
-			block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
-			processingStore := &blockProcessingErrorStore{
-				ForkChoiceStorage: forkchoiceStore,
-				err:               fmt.Errorf("dependency unavailable: %w", tc.err),
-			}
-			service.forkchoiceStore = processingStore
+			service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, fmt.Errorf("dependency unavailable: %w", tc.err))
 
 			err := service.ProcessMessage(t.Context(), nil, block)
 
-			require.ErrorIs(t, err, ErrIgnore)
-			require.NotErrorIs(t, err, tc.err)
+			require.NoError(t, err)
 			require.Equal(t, 1, processingStore.calls)
 			require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
 		})
 	}
+}
+
+func TestBlockServiceIgnoresRetryableDependencyFailureWhenPendingQueueIsFull(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore := setupIncomingBellatrixBlock(t, ctrl, forkchoice.ErrNewPayloadNoStatus)
+	for i := range maxPendingBlocks {
+		key := common.Hash{byte(i), byte(i >> 8)}
+		storePendingJob(t, service.blocksScheduledForLaterExecution, key, &pendingBlockJob{block: block}, time.Now())
+	}
+
+	err := service.ProcessMessage(t.Context(), nil, block)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Equal(t, 1, processingStore.calls)
+	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.count.Load())
 }
 
 func TestBlockServicePendingQueueCap(t *testing.T) {
