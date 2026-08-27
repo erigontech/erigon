@@ -242,6 +242,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	}
 	a.d[cfg.Name].salt.Store(salt)
 	a.AddDependencyBtwnHistoryII(cfg.Name)
+	a.applyEnvCompressWorkers()
 	return nil
 }
 
@@ -259,6 +260,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	}
 	a.iis[a.iisCount] = ii
 	a.iisCount++
+	a.applyEnvCompressWorkers()
 	return nil
 }
 
@@ -785,6 +787,19 @@ func (a *Aggregator) setBuildAccessorsWorkers(i int) {
 			ii.BuildAccessorsWorkers = i
 		}
 	})
+}
+
+// applyEnvCompressWorkers stamps COMPRESS_WORKERS onto everything registered so far.
+// Domains and indices are built after the aggregator, so the constructor cannot reach
+// their compressor config; re-stamping on each registration is cheap and runs only at
+// startup. Without it the env value depends on a Preset* call landing, which is skipped
+// whenever a background build or merge holds the config pinned.
+func (a *Aggregator) applyEnvCompressWorkers() {
+	if dbg.CompressWorkers <= 0 {
+		return
+	}
+	a.setCompressWorkers(dbg.CompressWorkers)
+	a.setBuildAccessorsWorkers(dbg.CompressWorkers)
 }
 
 func (a *Aggregator) setCompressWorkers(i int) {
