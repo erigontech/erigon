@@ -552,7 +552,7 @@ func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
 		index int
 	}{
 		{name: "first", index: 0},
-		{name: "last", index: int(clparams.MainnetBeaconConfig.NumberOfColumns) - 1},
+		{name: "last", index: 2*int(clparams.MainnetBeaconConfig.NumberOfColumns) - 1},
 	}
 	for _, proofIndex := range proofIndexes {
 		for _, proofLength := range []int{length.Bytes48 - 1, length.Bytes48 + 1} {
@@ -588,15 +588,21 @@ func TestProduceBeaconBodyPreservesPreFuluValidationOrder(t *testing.T) {
 
 func produceFuluBodyWithProofLength(t *testing.T, proofIndex, proofLength int) (*cltypes.BeaconBody, error) {
 	t.Helper()
-	proofs := make([]hexutil.Bytes, clparams.MainnetBeaconConfig.NumberOfColumns)
+	proofs := make([]hexutil.Bytes, 2*int(clparams.MainnetBeaconConfig.NumberOfColumns))
 	for i := range proofs {
 		proofs[i] = make([]byte, length.Bytes48)
 	}
 	proofs[proofIndex] = make([]byte, proofLength)
 	bundle := &engine_types.BlobsBundle{
-		Blobs:       []hexutil.Bytes{make([]byte, cltypes.BYTES_PER_BLOB)},
-		Commitments: []hexutil.Bytes{make([]byte, length.Bytes48)},
-		Proofs:      proofs,
+		Blobs: []hexutil.Bytes{
+			make([]byte, cltypes.BYTES_PER_BLOB),
+			make([]byte, cltypes.BYTES_PER_BLOB),
+		},
+		Commitments: []hexutil.Bytes{
+			make([]byte, length.Bytes48),
+			make([]byte, length.Bytes48),
+		},
+		Proofs: proofs,
 	}
 	return produceBodyWithBundle(t, clparams.FuluVersion, bundle)
 }
