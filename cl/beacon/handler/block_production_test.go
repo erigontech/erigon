@@ -547,18 +547,27 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 }
 
 func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
-	for _, proofLength := range []int{length.Bytes48 - 1, length.Bytes48 + 1} {
-		t.Run(fmt.Sprintf("proof length %d", proofLength), func(t *testing.T) {
-			body, err := produceFuluBodyWithProofLength(t, proofLength)
+	proofIndexes := []struct {
+		name  string
+		index int
+	}{
+		{name: "first", index: 0},
+		{name: "last", index: int(clparams.MainnetBeaconConfig.NumberOfColumns) - 1},
+	}
+	for _, proofIndex := range proofIndexes {
+		for _, proofLength := range []int{length.Bytes48 - 1, length.Bytes48 + 1} {
+			t.Run(fmt.Sprintf("%s proof length %d", proofIndex.name, proofLength), func(t *testing.T) {
+				body, err := produceFuluBodyWithProofLength(t, proofIndex.index, proofLength)
 
-			require.Nil(t, body)
-			require.ErrorContains(t, err, "invalid proof length")
-		})
+				require.Nil(t, body)
+				require.ErrorContains(t, err, "invalid proof length")
+			})
+		}
 	}
 }
 
 func TestProduceBeaconBodyAcceptsExactFuluCellProofLength(t *testing.T) {
-	body, err := produceFuluBodyWithProofLength(t, length.Bytes48)
+	body, err := produceFuluBodyWithProofLength(t, 0, length.Bytes48)
 
 	require.NoError(t, err)
 	require.NotNil(t, body)
@@ -577,13 +586,13 @@ func TestProduceBeaconBodyPreservesPreFuluValidationOrder(t *testing.T) {
 	require.ErrorContains(t, err, "invalid commitment length")
 }
 
-func produceFuluBodyWithProofLength(t *testing.T, proofLength int) (*cltypes.BeaconBody, error) {
+func produceFuluBodyWithProofLength(t *testing.T, proofIndex, proofLength int) (*cltypes.BeaconBody, error) {
 	t.Helper()
 	proofs := make([]hexutil.Bytes, clparams.MainnetBeaconConfig.NumberOfColumns)
 	for i := range proofs {
 		proofs[i] = make([]byte, length.Bytes48)
 	}
-	proofs[0] = make([]byte, proofLength)
+	proofs[proofIndex] = make([]byte, proofLength)
 	bundle := &engine_types.BlobsBundle{
 		Blobs:       []hexutil.Bytes{make([]byte, cltypes.BYTES_PER_BLOB)},
 		Commitments: []hexutil.Bytes{make([]byte, length.Bytes48)},
