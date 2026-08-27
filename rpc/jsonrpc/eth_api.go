@@ -94,12 +94,12 @@ type EthAPI interface {
 	NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]any, error)
-	GetFilterLogs(_ context.Context, index string) (types.Logs, error)
+	GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error)
 	Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error)
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.U256, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
 	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
@@ -110,9 +110,9 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (any, error)
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
-	GasPrice(_ context.Context) (*hexutil.Big, error)
-	BaseFee(ctx context.Context) (*hexutil.Big, error)
-	BlobBaseFee(ctx context.Context) (*hexutil.Big, error)
+	GasPrice(_ context.Context) (*hexutil.U256, error)
+	BaseFee(ctx context.Context) (*hexutil.U256, error)
+	BlobBaseFee(ctx context.Context) (*hexutil.U256, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
