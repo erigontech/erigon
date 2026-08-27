@@ -1144,11 +1144,9 @@ func findStorageChange(sc *types.SlotChanges, index uint32) *types.StorageChange
 	return nil
 }
 
-// TestEngineApiNewPayloadBALMalformedVsInvalid pins the EIP-7928 newPayload
-// error split: a blockAccessList param that is not decodable RLP is a
-// malformed request (-32602 invalid params), while a decodable one that
-// violates EIP-7928 ordering rules is an invalid block ({status: INVALID}).
-func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
+// TestEngineApiNewPayloadBALInvalid pins that both an undecodable blockAccessList
+// and a decodable one violating EIP-7928 make the block invalid.
+func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -1191,11 +1189,11 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 			"string not list":   {0x80},
 			"truncated list":    {0xc1},
 		} {
-			_, err := sendWithBAL(malformed)
-			require.Errorf(t, err, "%s: expected invalid-params error", name)
-			var rpcErr rpc.Error
-			require.ErrorAsf(t, err, &rpcErr, "%s: expected rpc error, got: %v", name, err)
-			require.Equalf(t, -32602, rpcErr.ErrorCode(), "%s: %v", name, err)
+			status, err := sendWithBAL(malformed)
+			require.NoErrorf(t, err, "%s: expected INVALID status, got error: %v", name, err)
+			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "%s", name)
+			require.NotNilf(t, status.ValidationError, "%s", name)
+			require.ErrorContainsf(t, status.ValidationError.Error(), "undecodable blockAccessList", "%s", name)
 		}
 		account := append([]byte{0xda, 0x94}, make([]byte, 20)...)
 		account = append(account, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
