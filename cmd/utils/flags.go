@@ -727,8 +727,9 @@ var (
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name: "torrent.upload.rate",
-		// Agreed in meeting to leave it quite a bit higher than 3.0 unless it becomes a problem.
-		Value: "16mb",
+		// Still above 3.0's default, but low enough that seeding does not starve
+		// block execution for CPU and syscalls on a busy node.
+		Value: "8mb",
 		Usage: "Bytes per second, example: 32mb. Set Inf for no limit.",
 	}
 	// Deprecated (v3.0): This flag no longer has any effect and will be removed in a future release.
