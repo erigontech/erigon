@@ -121,9 +121,10 @@ type PatriciaContext interface {
 	Storage(plainKey []byte) (*Update, error)
 }
 
-// BranchNoCopyReader reads a branch without copying it, for a caller that reads
-// the bytes and keeps nothing. The result is not owned: it must not be retained
-// or mutated. Branch copies because the trie's consumers do both.
+// BranchNoCopyReader reads a branch without copying it. The result aliases the
+// reader's memory: it is valid until the next call on the same context, and must
+// not be mutated. Branch copies because the trie's consumers keep branch data
+// past that.
 type BranchNoCopyReader interface {
 	BranchNoCopy(prefix []byte) ([]byte, kv.Step, error)
 }

@@ -262,10 +262,12 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 	}
 }
 
-// countingBranchCtx records which read path the warmuper took. Branch models the
-// owning read (it copies); BranchNoCopy hands back the source slice itself.
+// countingBranchCtx records which read path the warmuper took, and holds
+// BranchNoCopy to its contract: each call poisons what the previous one returned,
+// so a caller that kept the bytes reads garbage and descends differently.
 type countingBranchCtx struct {
 	src      []byte
+	last     []byte
 	owned    atomic.Int64
 	borrowed atomic.Int64
 }
@@ -277,7 +279,11 @@ func (c *countingBranchCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {
 
 func (c *countingBranchCtx) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
 	c.borrowed.Add(1)
-	return c.src, 0, nil
+	for i := range c.last {
+		c.last[i] = 0xff
+	}
+	c.last = bytes.Clone(c.src)
+	return c.last, 0, nil
 }
 
 func (c *countingBranchCtx) PutBranch(prefix, data, prevData []byte) error { return nil }
@@ -302,6 +308,8 @@ func TestWarmuperUsesBranchNoCopy(t *testing.T) {
 	require.NoError(t, w.WaitBufferFree(0))
 	w.CloseAndWait()
 
-	require.Positive(t, ctx.borrowed.Load(), "warmup read branches through the copying path")
 	require.Zero(t, ctx.owned.Load(), "warmup still copies branch bytes it drops immediately")
+	// One read per nibble of the key, then one more that stops at its end. A
+	// caller holding a poisoned branch would read 0xff and stop short.
+	require.Equal(t, int64(5), ctx.borrowed.Load(), "warmup descent read the wrong number of branches")
 }

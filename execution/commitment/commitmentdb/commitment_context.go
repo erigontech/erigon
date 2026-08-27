@@ -966,9 +966,10 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return bytes.Clone(enc), step, nil
 }
 
-// BranchNoCopy returns the branch bytes uncopied, for a caller that reads them
-// and keeps nothing -- the trie warmup. The result aliases the reader's memory
-// and is not owned: it must not be retained or mutated.
+// BranchNoCopy returns the branch bytes uncopied, for a caller that consumes them
+// before its next read -- the trie warmup. The result is valid only until the
+// next call on this context and must not be mutated; anything that keeps branch
+// data uses Branch.
 func (sdc *TrieContext) BranchNoCopy(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branch(pref)
 }
