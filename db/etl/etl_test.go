@@ -2107,3 +2107,47 @@ func TestOversizedChunkEntryIndex(t *testing.T) {
 	require.Equal(t, []byte{0x01}, got[0].key)
 	require.Equal(t, big, got[1].value)
 }
+
+// TestMergerMatchesReferenceSort: the merge is a heap over per-chunk runs, so
+// build one from random keys spread over many chunks and check it against a
+// plain sort of the same pairs, duplicates and insertion order included.
+func TestMergerMatchesReferenceSort(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	defer buf.Reset()
+
+	const count = 60_000
+	pad := make([]byte, 200) // few entries per chunk, so the runs interleave
+	want := make([]sortableBufferEntry, 0, count)
+	key := make([]byte, 8)
+	for i := range count {
+		binary.BigEndian.PutUint64(key, uint64(i)*6364136223846793005%1000) //nolint:gosec
+		val := make([]byte, len(pad))
+		binary.BigEndian.PutUint64(val, uint64(i)) //nolint:gosec
+		want = append(want, sortableBufferEntry{key: bytes.Clone(key), value: val})
+		buf.Put(key, val)
+	}
+	require.Greater(t, len(buf.chunks), 8, "keys must spread over many chunks")
+
+	slices.SortStableFunc(want, func(a, b sortableBufferEntry) int {
+		return bytes.Compare(a.key, b.key)
+	})
+
+	buf.Sort()
+	require.False(t, buf.mrg.concat, "random keys must go through the heap")
+
+	// rewind heapifies with the same sift the reads use, so check the
+	// invariant directly - a broken heapify need not show up in the order.
+	m := &buf.mrg
+	require.Greater(t, len(m.heap), 8, "a heap of a few elements proves little")
+	for i := 1; i < len(m.heap); i++ {
+		require.False(t, m.less(m.heap[i], m.heap[(i-1)/2]),
+			"heap[%d] sorts before its parent %d", i, (i-1)/2)
+	}
+
+	got := drainBuffer(buf)
+	require.Len(t, got, count)
+	for i := range want {
+		require.Equal(t, want[i].key, got[i].key, "entry %d", i)
+		require.Equal(t, want[i].value, got[i].value, "entry %d value (insertion order)", i)
+	}
+}
