@@ -404,6 +404,166 @@ func TestBlobsRecoverWorkerRechecksDurableCompletionBeforeWrite(t *testing.T) {
 	require.GreaterOrEqual(t, countReads.Load(), int32(2), "worker must revalidate immediately before writing")
 }
 
+func TestBlobsRecoverWorkerContinuesAfterTransientAdmissionValidation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+
+	ctrl := gomock.NewController(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	sentinelRoot := common.HexToHash("0xfeed")
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blockRoot common.Hash) (uint32, error) {
+			if blockRoot == sentinelRoot {
+				cancel()
+				return 1, nil
+			}
+			return uint32(len(sidecars)), nil
+		},
+	).AnyTimes()
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			if durableReads.Add(1) == 1 {
+				return nil, false, errors.New("transient admission read failure")
+			}
+			return nil, false, nil
+		},
+	).AnyTimes()
+	writeAttempted := make(chan struct{})
+	var writeOnce sync.Once
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), root, gomock.Any()).DoAndReturn(
+		func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+			writeOnce.Do(func() { close(writeAttempted) })
+			return errors.New("stop after observing recovery write")
+		},
+	).AnyTimes()
+
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 2),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	d.recoverBlobsQueue <- recoverBlobsRequest{slot: block.Block.Slot, blockRoot: root, metadata: metadata}
+	d.recoverBlobsQueue <- recoverBlobsRequest{blockRoot: sentinelRoot}
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+	select {
+	case <-workerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("blob recovery worker did not release capacity")
+	}
+	select {
+	case <-writeAttempted:
+	default:
+		t.Fatal("transient admission validation dropped the only recovery owner")
+	}
+	require.Equal(t, int32(2), durableReads.Load(), "worker must revalidate at the write boundary")
+}
+
+func TestBlobsRecoverWorkerRetriesTransientPrewriteValidation(t *testing.T) {
+	assertBlobsRecoverWorkerPrewriteUnavailable(t, false)
+}
+
+func TestBlobsRecoverWorkerPacesPersistentPrewriteUnavailableUntilCancellation(t *testing.T) {
+	assertBlobsRecoverWorkerPrewriteUnavailable(t, true)
+}
+
+func assertBlobsRecoverWorkerPrewriteUnavailable(t *testing.T, persistent bool) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, columns := recoverableFuluData(t, &cfg)
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter())
+	for i := range (cfg.NumberOfColumns + 1) / 2 {
+		require.NoError(t, columnStorage.WriteColumnSidecars(t.Context(), root, int64(i), columns[i]))
+	}
+
+	ctrl := gomock.NewController(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	sentinelRoot := common.HexToHash("0xbeef")
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	var countReads atomic.Int32
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blockRoot common.Hash) (uint32, error) {
+			if blockRoot == sentinelRoot {
+				cancel()
+				return 1, nil
+			}
+			if countReads.Add(1) == 1 {
+				return 0, nil
+			}
+			return uint32(len(sidecars)), nil
+		},
+	).AnyTimes()
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			read := durableReads.Add(1)
+			if persistent || read == 1 {
+				if persistent && read == 2 {
+					cancel()
+				}
+				return nil, false, errors.New("prewrite storage unavailable")
+			}
+			return nil, false, nil
+		},
+	).AnyTimes()
+	writeAttempted := make(chan struct{})
+	var writeOnce sync.Once
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), root, gomock.Any()).DoAndReturn(
+		func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+			writeOnce.Do(func() { close(writeAttempted) })
+			return errors.New("stop after observing recovery write")
+		},
+	).AnyTimes()
+
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{
+		beaconConfig:      &cfg,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 2),
+		isRecovering:      make(map[common.Hash]bool),
+	}
+	d.recoverBlobsQueue <- recoverBlobsRequest{slot: block.Block.Slot, blockRoot: root, metadata: metadata}
+	d.recoverBlobsQueue <- recoverBlobsRequest{blockRoot: sentinelRoot}
+	workerDone := make(chan struct{})
+	go func() {
+		d.blobsRecoverWorker(ctx)
+		close(workerDone)
+	}()
+	select {
+	case <-workerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("blob recovery worker did not stop")
+	}
+	require.Equal(t, int32(2), durableReads.Load(), "prewrite validation must be paced and retain ownership")
+	select {
+	case <-writeAttempted:
+		require.False(t, persistent, "persistent unavailable storage must not be overwritten")
+	default:
+		require.True(t, persistent, "finite transient outage dropped the recovery owner")
+	}
+}
+
 func TestRecoverBlobsRequestDoesNotRetainFullBlock(t *testing.T) {
 	blockType := reflect.TypeFor[cltypes.ColumnSyncableSignedBlock]()
 	requestType := reflect.TypeFor[recoverBlobsRequest]()
@@ -497,7 +657,7 @@ func TestBlobRecoveryMetadataRejectsWrongBlockSignature(t *testing.T) {
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).Return(sidecars, true, nil)
 	d := &peerdas{blobStorage: blobStorage}
 
-	require.False(t, d.validateStoredBlobRecoveryMetadata(t.Context(), metadata, uint32(len(sidecars))))
+	require.Equal(t, blobRecoveryInvalid, d.validateStoredBlobRecoveryMetadata(t.Context(), metadata, uint32(len(sidecars))))
 }
 
 func TestIsExpectedColumnDownloadMiss(t *testing.T) {

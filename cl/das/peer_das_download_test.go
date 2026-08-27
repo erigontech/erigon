@@ -19,6 +19,7 @@ package das
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -177,6 +178,150 @@ func TestRunDownloadValidatesBlobStorageAfterCountChanges(t *testing.T) {
 
 	require.NoError(t, d.runDownload(ctx, req, true))
 	require.Equal(t, int32(1), durableReads.Load(), "a changed durable count must trigger one validation event")
+}
+
+func TestRunDownloadRetriesTransientBlobReadAtUnchangedCount(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	block, root, sidecars, _ := recoverableFuluData(t, &cfg)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	var halfChecks atomic.Int32
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]uint64, error) {
+			if halfChecks.Add(1) == 3 {
+				cancel()
+			}
+			return nil, nil
+		},
+	).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(len(sidecars)), nil).AnyTimes()
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			if durableReads.Add(1) == 1 {
+				return nil, false, errors.New("transient read failure")
+			}
+			return sidecars, true, nil
+		},
+	).AnyTimes()
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{beaconConfig: &cfg, columnStorage: columnStorage, blobStorage: blobStorage}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.Block.Slot}: {},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+		validatedBlobCount: map[common.Hash]uint32{root: 1},
+	}
+
+	require.NoError(t, d.runDownload(ctx, req, true))
+	require.Equal(t, int32(2), durableReads.Load(), "transient validation failure must retry without a count mutation")
+	require.NoError(t, ctx.Err(), "valid storage must finish the request before lifecycle cancellation")
+}
+
+func TestRunDownloadPacesPermanentBlobReadErrorsUntilCancellation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, root).Return(nil, nil).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			if durableReads.Add(1) == 2 {
+				cancel()
+			}
+			return nil, false, errors.New("permanent read failure")
+		},
+	).AnyTimes()
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{beaconConfig: &cfg, columnStorage: columnStorage, blobStorage: blobStorage}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.Block.Slot}: {},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+		validatedBlobCount: map[common.Hash]uint32{root: 0},
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, true) }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("permanent read errors were not paced by the download lifecycle")
+	}
+	require.Equal(t, int32(2), durableReads.Load())
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestRunDownloadDoesNotRepeatConclusiveInvalidBlobValidation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	var halfChecks atomic.Int32
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]uint64, error) {
+			if halfChecks.Add(1) == 2 {
+				cancel()
+			}
+			return nil, nil
+		},
+	).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil).AnyTimes()
+	var durableReads atomic.Int32
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), block.Block.Slot, root).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+			durableReads.Add(1)
+			return []*cltypes.BlobSidecar{nil}, true, nil
+		},
+	).AnyTimes()
+	metadata, err := newBlobRecoveryMetadata(block, root)
+	require.NoError(t, err)
+	d := &peerdas{beaconConfig: &cfg, columnStorage: columnStorage, blobStorage: blobStorage}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.Block.Slot}: {},
+		},
+		recoveryDetails:    map[common.Hash]*blobRecoveryMetadata{root: metadata},
+		validatedBlobCount: map[common.Hash]uint32{root: 0},
+	}
+
+	require.NoError(t, d.runDownload(ctx, req, true))
+	require.Equal(t, int32(1), durableReads.Load(), "conclusively invalid storage must stay cached until its count changes")
 }
 
 // A peer selects the response fork digest, so it can serve a Gloas-schema
