@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -86,6 +87,7 @@ type payloadAttestationService struct {
 	validationAdmission chan struct{}
 	validatedRESTMu     sync.Mutex
 	validatedREST       map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation
+	now                 func() time.Time
 }
 
 // NewPayloadAttestationService creates a new payload attestation service.
@@ -111,6 +113,7 @@ func NewPayloadAttestationService(
 		seenAttestationsCache: seenCache,
 		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 		validatedREST:         make(map[seenPayloadAttestationKey]*validatedRESTPayloadAttestation),
+		now:                   time.Now,
 	}
 	s.pending = s.newPendingQueue()
 	go s.pending.loop(ctx)
@@ -170,8 +173,7 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 		"validatorIndex", validatorIndex,
 		"blockRoot", blockRoot)
 
-	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(slot) {
+	if !isPayloadAttestationSlotCurrent(s.ethClock, s.now(), slot) {
 		return fmt.Errorf("%w: payload attestation slot %d is not current slot (with clock disparity)", ErrIgnore, slot)
 	}
 
@@ -254,6 +256,34 @@ func (s *payloadAttestationService) processMessage(ctx context.Context, msg *clt
 	}
 	s.commitPayloadAttestation(seenKey, msg)
 	return nil
+}
+
+func isPayloadAttestationSlotCurrent(clock eth_clock.EthereumClock, now time.Time, slot uint64) bool {
+	if slot == math.MaxUint64 {
+		return false
+	}
+	slotStart := clock.GetSlotTime(slot)
+	nextSlotStart := clock.GetSlotTime(slot + 1)
+	slotUnix := slotStart.Unix()
+	nextSlotUnix := nextSlotStart.Unix()
+	if slotUnix < 0 || nextSlotUnix <= slotUnix {
+		return false
+	}
+	secondsPerSlot := uint64(nextSlotUnix - slotUnix)
+	genesisTime := clock.GenesisTime()
+	if genesisTime > math.MaxInt64 || slot > (math.MaxUint64-genesisTime)/secondsPerSlot {
+		return false
+	}
+	expectedSlotUnix := genesisTime + slot*secondsPerSlot
+	if expectedSlotUnix > math.MaxInt64 || slotUnix != int64(expectedSlotUnix) || uint64(nextSlotUnix)-expectedSlotUnix != secondsPerSlot {
+		return false
+	}
+	lowerBound := slotStart.Add(-gloasMaximumClockDisparity)
+	upperBound := nextSlotStart.Add(gloasMaximumClockDisparity)
+	if lowerBound.After(slotStart) || upperBound.Before(nextSlotStart) {
+		return false
+	}
+	return !now.Before(lowerBound) && !now.After(upperBound)
 }
 
 func (s *payloadAttestationService) validatePayloadAttestation(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error {
@@ -356,7 +386,7 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 // tryProcessPendingAttestation re-runs validation via ProcessMessage once the block has arrived,
 // dropping attestations that are no longer for the current slot.
 func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) (func(), bool) {
-	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
+	if !isPayloadAttestationSlotCurrent(s.ethClock, s.now(), msg.Data.Slot) {
 		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
 		return nil, true
 	}

@@ -44,12 +44,6 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	data := msg.Data
 	blockRoot := data.BeaconBlockRoot
 
-	if !isFromBlock {
-		if !f.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(data.Slot) {
-			return fmt.Errorf("%w: attestation slot %d is not current slot with clock disparity", ErrIgnore, data.Slot)
-		}
-	}
-
 	validationContext, err := f.payloadAttestationValidationContext(ctx, blockRoot, data.Slot)
 	if err != nil {
 		return err
