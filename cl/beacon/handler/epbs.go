@@ -894,6 +894,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 	gossipValidated := false
 	emitGossipEvent := false
+	emitIntegrationEvents := false
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
 		if canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
@@ -915,7 +916,9 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 				break
 			}
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
-			status = http.StatusAccepted
+			if !contentsIntegrationFailed {
+				status = http.StatusOK
+			}
 			gossipValidated = true
 		case errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
@@ -936,6 +939,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	} else {
 		gossipValidated = true
 		emitGossipEvent = true
+		emitIntegrationEvents = true
 	}
 	if gossipValidated && (canonical || a.sentinel != nil) && validation == BlockPublishingValidationConsensusAndEquivocation {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
@@ -953,7 +957,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			})
 		}
 	}
-	if status == http.StatusOK && a.emitters != nil {
+	if status == http.StatusOK && emitIntegrationEvents && a.emitters != nil {
 		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if ok && block != nil && block.Block != nil && signedEnvelope.Message.Payload != nil {
 			a.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{

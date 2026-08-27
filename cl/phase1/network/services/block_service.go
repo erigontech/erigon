@@ -46,6 +46,7 @@ import (
 
 var ErrInvalidSignature = errors.New("invalid signature")
 var ErrPublishedBlockJobExpired = errors.New("published block integration expired")
+var ErrPublishedBlockJobStopped = errors.New("block service stopped")
 
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
@@ -163,6 +164,8 @@ type blockService struct {
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
+	blockJobsLifecycleMu             sync.RWMutex
+	blockJobsStopped                 bool
 	// store the block in db
 	db kv.RwDB
 }
@@ -191,6 +194,7 @@ func NewBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
+	go b.stopPublishedBlockJobsOnContext(ctx)
 	go b.loop(ctx)
 	return b
 }
@@ -651,14 +655,11 @@ func (b *blockService) ScheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 }
 
 func (b *blockService) SchedulePublishedBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) PublishedBlockJob {
-	job := b.scheduleBlockForLaterProcessing(block, store)
-	job.mu.Lock()
-	handle := &publishedBlockJobHandle{job: job, generation: job.storeGeneration}
-	job.mu.Unlock()
-	return handle
+	job, generation := b.scheduleBlockForLaterProcessing(block, store)
+	return &publishedBlockJobHandle{job: job, generation: generation}
 }
 
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) *blockJob {
+func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) (*blockJob, uint64) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -668,22 +669,42 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
-		return newFailedBlockJob(block, store, err)
+		job := newFailedBlockJob(block, store, err)
+		return job, job.storeGeneration
 	}
 
 	job := newBlockJob(block, store)
-	existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
-	if !loaded {
-		return job
+	jobGeneration := job.storeGeneration
+	b.blockJobsLifecycleMu.RLock()
+	defer b.blockJobsLifecycleMu.RUnlock()
+	if b.blockJobsStopped {
+		job = newFailedBlockJob(block, store, ErrPublishedBlockJobStopped)
+		return job, job.storeGeneration
 	}
-	existing := existingValue.(*blockJob)
-	if store == nil {
-		return existing
+	for {
+		existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
+		if !loaded {
+			return job, jobGeneration
+		}
+		existing, generation := b.reuseScheduledBlockJob(blockRoot, existingValue.(*blockJob), job, store)
+		if existing != nil {
+			return existing, generation
+		}
 	}
+}
+
+func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *blockJob, store func(context.Context) error) (*blockJob, uint64) {
 	existing.mu.Lock()
 	defer existing.mu.Unlock()
+	current, ok := b.blocksScheduledForLaterExecution.Load(key)
+	if !ok || current != existing {
+		return nil, 0
+	}
+	if store == nil {
+		return existing, existing.storeGeneration
+	}
 	if !job.creationTime.After(existing.creationTime) {
-		return existing
+		return existing, existing.storeGeneration
 	}
 	existing.store = store
 	existing.storeGeneration++
@@ -692,7 +713,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		existing.terminal = false
 		existing.attempt = &blockJobAttempt{done: make(chan struct{})}
 	}
-	return existing
+	return existing, existing.storeGeneration
 }
 
 // processAndStoreBlock processes and stores a block
@@ -756,6 +777,7 @@ func (b *blockService) loop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			b.stopPublishedBlockJobs()
 			return
 		case <-ticker.C:
 		}
@@ -764,6 +786,40 @@ func (b *blockService) loop(ctx context.Context) {
 			return true
 		})
 	}
+}
+
+func (b *blockService) stopPublishedBlockJobsOnContext(ctx context.Context) {
+	<-ctx.Done()
+	b.stopPublishedBlockJobs()
+}
+
+func (b *blockService) stopPublishedBlockJobs() {
+	b.blockJobsLifecycleMu.Lock()
+	if b.blockJobsStopped {
+		b.blockJobsLifecycleMu.Unlock()
+		return
+	}
+	b.blockJobsStopped = true
+	b.blockJobsLifecycleMu.Unlock()
+
+	b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+		job := value.(*blockJob)
+		job.mu.Lock()
+		current, ok := b.blocksScheduledForLaterExecution.Load(key)
+		if ok && current == job {
+			if !job.terminal {
+				job.attempt.err = ErrPublishedBlockJobStopped
+				job.attempt.generation = job.storeGeneration
+				job.lastAttempt = job.attempt
+				job.completedGeneration = job.storeGeneration
+				job.terminal = true
+				close(job.attempt.done)
+			}
+			b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		}
+		job.mu.Unlock()
+		return true
+	})
 }
 
 func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, job *blockJob, now time.Time) {
@@ -781,8 +837,8 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 			job.terminal = true
 			close(job.attempt.done)
 		}
-		job.mu.Unlock()
 		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
+		job.mu.Unlock()
 		return
 	}
 	if job.terminal {
@@ -800,6 +856,10 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	err := store(ctx)
 	job.mu.Lock()
 	job.running = false
+	if job.terminal && job.completedGeneration >= generation {
+		job.mu.Unlock()
+		return
+	}
 	attempt.err = err
 	attempt.generation = generation
 	close(attempt.done)
@@ -812,10 +872,10 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	} else {
 		job.attempt = &blockJobAttempt{done: make(chan struct{})}
 	}
-	job.mu.Unlock()
 	if terminal {
 		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
 	}
+	job.mu.Unlock()
 	if err != nil {
 		log.Trace("Failed to process and store block", "block", job.block, "error", err)
 		return

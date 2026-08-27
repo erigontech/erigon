@@ -1096,6 +1096,155 @@ func TestPublishedBlockJobHashFailureWaitIsReplayable(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestPublishedBlockJobDetachedTerminalCannotReplaceCurrentJob(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	detached := newBlockJob(block, func(context.Context) error { return nil })
+	detached.terminal = true
+	current := newBlockJob(block, func(context.Context) error { return nil })
+	service.blocksScheduledForLaterExecution.Store(root, current)
+	candidate := newBlockJob(block, func(context.Context) error { return nil })
+
+	reused, _ := service.reuseScheduledBlockJob(root, detached, candidate, candidate.store)
+
+	require.Nil(t, reused)
+	stored, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, current, stored)
+}
+
+func TestPublishedBlockJobExpiryRescheduleKeepsFreshStore(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	expiredHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	job := serviceJob(t, service, root)
+	job.mu.Lock()
+	expireStarted := make(chan struct{})
+	expireDone := make(chan struct{})
+	go func() {
+		close(expireStarted)
+		service.processScheduledBlock(context.Background(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
+		close(expireDone)
+	}()
+	<-expireStarted
+	freshStoreCalls := 0
+	rescheduleStarted := make(chan struct{})
+	rescheduleDone := make(chan PublishedBlockJob, 1)
+	go func() {
+		close(rescheduleStarted)
+		rescheduleDone <- service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+			freshStoreCalls++
+			return nil
+		})
+	}()
+	<-rescheduleStarted
+	job.mu.Unlock()
+	<-expireDone
+	require.ErrorIs(t, expiredHandle.Wait(t.Context()), ErrPublishedBlockJobExpired)
+	freshHandle := <-rescheduleDone
+	freshJob := serviceJob(t, service, root)
+	require.NotSame(t, job, freshJob)
+	service.processScheduledBlock(context.Background(), root, freshJob, time.Now())
+	require.NoError(t, freshHandle.Wait(t.Context()))
+	require.Equal(t, 1, freshStoreCalls)
+}
+
+func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := clparams.MainnetBeaconConfig
+	service := NewBlockService(ctx, nil, nil, nil, nil, &cfg, nil).(*blockService)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	secondBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	secondBlock.Block.Slot = 1
+	handles := []PublishedBlockJob{
+		service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil }),
+		service.SchedulePublishedBlockForLaterProcessing(secondBlock, func(context.Context) error { return nil }),
+	}
+	cancel()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	for _, handle := range handles {
+		require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+	}
+
+	lateHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	require.ErrorIs(t, lateHandle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+}
+
+func TestPublishedBlockJobShutdownOwnsRunningAttemptAndIgnoresLateResult(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	storeStarted := make(chan struct{})
+	storeRelease := make(chan struct{})
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		close(storeStarted)
+		<-storeRelease
+		return nil
+	})
+	job := serviceJob(t, service, root)
+	processDone := make(chan struct{})
+	go func() {
+		service.processScheduledBlock(context.Background(), root, job, time.Now())
+		close(processDone)
+	}()
+	<-storeStarted
+	service.stopPublishedBlockJobs()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+	close(storeRelease)
+	<-processDone
+	require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, scheduled)
+}
+
+func TestPublishedBlockJobShutdownPreservesCompletedAttempt(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.NoError(t, handle.Wait(t.Context()))
+
+	service.stopPublishedBlockJobs()
+
+	require.NoError(t, handle.Wait(t.Context()))
+}
+
+func TestPublishedBlockJobConcurrentSchedulesReturnWaitableHandles(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	const schedules = 32
+	start := make(chan struct{})
+	handles := make(chan PublishedBlockJob, schedules)
+	var wg sync.WaitGroup
+	for range schedules {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			handles <- service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(handles)
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	for handle := range handles {
+		require.NoError(t, handle.Wait(t.Context()))
+	}
+}
+
 func serviceJob(t *testing.T, service *blockService, root [32]byte) *blockJob {
 	t.Helper()
 	job, ok := service.blocksScheduledForLaterExecution.Load(root)
