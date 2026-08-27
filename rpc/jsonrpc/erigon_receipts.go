@@ -45,29 +45,30 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		return nil, err
 	}
 	defer tx.Rollback()
+	overlayTx := api.filters.WithTemporalOverlay(tx)
 
-	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader, api.filters)
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
 	receipts, ok := api.getCachedReceipts(ctx, hash)
 	if !ok {
-		block, err := api.blockByHashWithSenders(ctx, tx, hash)
+		block, err := api.blockByHashWithSenders(ctx, overlayTx, hash)
 		if err != nil {
 			return nil, err
 		}
 		if block == nil {
 			return nil, nil
 		}
-		receipts, err = api.getReceipts(ctx, tx, block)
+		receipts, err = api.getReceipts(ctx, overlayTx, block)
 		if err != nil {
 			return nil, err
 		}
@@ -115,6 +116,10 @@ func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
+	if err := crit.ValidateTopicPositions(); err != nil {
+		return nil, err
+	}
+
 	var begin, end uint64
 	erigonLogs := types.ErigonLogs{}
 
@@ -140,9 +145,6 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		}
 	}
 
-	if len(crit.Topics) > maxTopics {
-		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
-	}
 	if end < begin {
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("invalid block range: end (%d) < begin (%d)", end, begin), Code: rpc.ErrCodeInvalidParams}
 	}
