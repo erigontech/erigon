@@ -55,7 +55,7 @@ const freelruSlotBytes = freelruElemBytes*5/4 + 1
 
 // maxCacheSlots is the absolute ceiling on a cache's slot array, independent of
 // the configured byte budget.
-const maxCacheSlots = 1 << 24
+const maxCacheSlots = 16_000_000
 
 // fitTableSlots rounds a capacity down to the largest one whose table freelru
 // does not round up. freelru is asked for NextPowerOfTwo(capacity*5/4) elements,
