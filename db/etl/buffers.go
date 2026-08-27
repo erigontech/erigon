@@ -651,6 +651,7 @@ type appendSortableBuffer struct {
 	entries     map[string][]byte
 	sortedBuf   []sortableBufferEntry
 	at          int
+	unsorted    bool // sortedBuf does not hold what entries does
 	size        int
 	optimalSize int
 }
@@ -662,6 +663,7 @@ func (b *appendSortableBuffer) Put(k, v []byte) {
 	}
 	b.size += len(v)
 	b.entries[string(k)] = append(stored, v...)
+	b.unsorted = true
 }
 
 func (b *appendSortableBuffer) Size() int      { return b.size }
@@ -672,7 +674,7 @@ func (b *appendSortableBuffer) Len() int {
 }
 
 func (b *appendSortableBuffer) Sort() {
-	b.sortedBuf, b.at = b.sortedBuf[:0], 0
+	b.sortedBuf, b.at, b.unsorted = b.sortedBuf[:0], 0, false
 	if cap(b.sortedBuf) < len(b.entries) {
 		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
 	}
@@ -691,6 +693,9 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 }
 
 func (b *appendSortableBuffer) Next() ([]byte, []byte, bool) {
+	if b.unsorted {
+		b.Sort()
+	}
 	if b.at >= len(b.sortedBuf) {
 		return nil, nil, false
 	}
@@ -701,7 +706,7 @@ func (b *appendSortableBuffer) Next() ([]byte, []byte, bool) {
 
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = nil
-	b.at = 0
+	b.at, b.unsorted = 0, false
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
@@ -734,6 +739,7 @@ type oldestEntrySortableBuffer struct {
 	entries     map[string][]byte
 	sortedBuf   []sortableBufferEntry
 	at          int
+	unsorted    bool // sortedBuf does not hold what entries does
 	size        int
 	optimalSize int
 }
@@ -747,6 +753,7 @@ func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
 
 	b.size += len(k)*2 + len(v)
 	b.entries[string(k)] = bytes.Clone(v)
+	b.unsorted = true
 }
 
 func (b *oldestEntrySortableBuffer) Size() int      { return b.size }
@@ -757,7 +764,7 @@ func (b *oldestEntrySortableBuffer) Len() int {
 }
 
 func (b *oldestEntrySortableBuffer) Sort() {
-	b.sortedBuf, b.at = b.sortedBuf[:0], 0
+	b.sortedBuf, b.at, b.unsorted = b.sortedBuf[:0], 0, false
 	if cap(b.sortedBuf) < len(b.entries) {
 		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
 	}
@@ -776,6 +783,9 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 }
 
 func (b *oldestEntrySortableBuffer) Next() ([]byte, []byte, bool) {
+	if b.unsorted {
+		b.Sort()
+	}
 	if b.at >= len(b.sortedBuf) {
 		return nil, nil, false
 	}
@@ -786,7 +796,7 @@ func (b *oldestEntrySortableBuffer) Next() ([]byte, []byte, bool) {
 
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
-	b.at = 0
+	b.at, b.unsorted = 0, false
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }

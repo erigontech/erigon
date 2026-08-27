@@ -1991,3 +1991,25 @@ func TestSortableBufferPutAfterSort(t *testing.T) {
 	}
 	require.Equal(t, []byte{1, 3, 5, 7, 9}, got)
 }
+
+// TestBufferNextSortsFirst: every Buffer sorts on read, so a caller that never
+// calls Sort still gets its entries, and one that Puts after Sort gets the new
+// one rather than a stale run.
+func TestBufferNextSortsFirst(t *testing.T) {
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			buf.Put([]byte{3}, []byte("c"))
+			buf.Put([]byte{1}, []byte("a"))
+			require.Len(t, drainBuffer(buf), 2, "Next before Sort must return what was put")
+
+			buf.Sort()
+			buf.Put([]byte{2}, []byte("b"))
+			got := drainBuffer(buf)
+			require.Len(t, got, 3, "Next after a Put must include it")
+			require.Equal(t, []byte{1}, got[0].key)
+			require.Equal(t, []byte{2}, got[1].key)
+			require.Equal(t, []byte{3}, got[2].key)
+		})
+	}
+}
