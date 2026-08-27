@@ -541,9 +541,9 @@ Process:
 			// batch — skip the 30s P2P envelope timeout and fetch directly via HTTP.
 			if pid == "http-fallback" && f.httpFallbackURL != "" {
 				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-				httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
-				if httpEnvs > 0 {
-					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
+				httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
+				if httpResult.fetched > 0 {
+					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
 				}
 			} else {
 				var envErr error
@@ -556,9 +556,9 @@ Process:
 					if envelopes == nil {
 						envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 					}
-					httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
-					if httpEnvs > 0 {
-						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
+					httpResult := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
+					if httpResult.fetched > 0 {
+						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpResult.fetched)
 					}
 				}
 			}
@@ -1038,8 +1038,12 @@ func validateHTTPBlockVersion(beaconCfg *clparams.BeaconChainConfig, slot uint64
 	return nil
 }
 
-// fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API
-// for FULL blocks whose envelopes were not received via P2P.
+type fetchEnvelopeHTTPResult struct {
+	fetched  int
+	notFound map[common.Hash]struct{}
+}
+
+// fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API for FULL blocks missing from P2P.
 func fetchEnvelopesFromBeaconAPI(
 	ctx context.Context,
 	baseURL string,
@@ -1047,7 +1051,7 @@ func fetchEnvelopesFromBeaconAPI(
 	fullRoots [][32]byte,
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	beaconCfg *clparams.BeaconChainConfig,
-) int {
+) fetchEnvelopeHTTPResult {
 	// Build root-to-slot mapping from blocks
 	rootToSlot := make(map[common.Hash]uint64, len(blocks))
 	for _, blk := range blocks {
@@ -1060,6 +1064,7 @@ func fetchEnvelopesFromBeaconAPI(
 	type envResult struct {
 		hash     common.Hash
 		envelope *cltypes.SignedExecutionPayloadEnvelope
+		notFound bool
 	}
 
 	// Filter roots that need fetching
@@ -1083,7 +1088,7 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 
 	if len(toFetch) == 0 {
-		return 0
+		return fetchEnvelopeHTTPResult{}
 	}
 
 	results := make([]envResult, len(toFetch))
@@ -1099,7 +1104,7 @@ func fetchEnvelopesFromBeaconAPI(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/0x%x", baseURL, root)
+			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelopes/0x%x", baseURL, root)
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -1111,7 +1116,14 @@ func fetchEnvelopesFromBeaconAPI(
 				return
 			}
 			body, err := readBeaconAPIResponseBody(resp)
-			if err != nil || resp.StatusCode != http.StatusOK {
+			if err != nil {
+				return
+			}
+			if resp.StatusCode == http.StatusNotFound {
+				results[idx] = envResult{hash: common.Hash(root), notFound: true}
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
 				return
 			}
 			version, err := httpConsensusVersion(resp.Header.Get("Eth-Consensus-Version"))
@@ -1134,14 +1146,17 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 	wg.Wait()
 
-	fetched := 0
+	result := fetchEnvelopeHTTPResult{notFound: make(map[common.Hash]struct{})}
 	for _, r := range results {
 		if r.envelope != nil {
 			received[r.hash] = r.envelope
-			fetched++
+			result.fetched++
+		}
+		if r.notFound {
+			result.notFound[r.hash] = struct{}{}
 		}
 	}
-	return fetched
+	return result
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

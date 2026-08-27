@@ -803,7 +803,7 @@ func TestPostExecutionPayloadEnvelopesReturnsErrorWhenGossipPublishFails(t *test
 	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder = httptest.NewRecorder()
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
-	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	select {
 	case event := <-events:
 		t.Fatalf("retry emitted duplicate event %s", event.Event)
@@ -883,7 +883,8 @@ func TestPostExecutionPayloadEnvelopeConcurrentIdenticalReconcilesPersistedImpor
 	second := post(body)
 	close(releaseFirst)
 	first := <-firstResult
-	require.ElementsMatch(t, []int{http.StatusOK, http.StatusAccepted}, []int{first.Code, second.Code})
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, http.StatusOK, second.Code)
 	eventCounts := map[beaconevents.EventTopic]int{}
 	for range 3 {
 		eventCounts[(<-events).Event]++
@@ -891,6 +892,11 @@ func TestPostExecutionPayloadEnvelopeConcurrentIdenticalReconcilesPersistedImpor
 	require.Equal(t, 1, eventCounts[beaconevents.OpExecutionPayloadGossip])
 	require.Equal(t, 1, eventCounts[beaconevents.OpExecutionPayload])
 	require.Equal(t, 1, eventCounts[beaconevents.OpExecutionPayloadAvailable])
+	select {
+	case event := <-events:
+		t.Fatalf("duplicate import emitted event %s", event.Event)
+	default:
+	}
 
 	forgedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	forgedEnvelope.Message.BeaconBlockRoot = root
