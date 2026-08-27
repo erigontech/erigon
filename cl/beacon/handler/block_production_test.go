@@ -622,7 +622,7 @@ func TestShouldRequestBuilderHeader(t *testing.T) {
 }
 
 func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
-	for _, value := range []string{"", "not-a-number"} {
+	for _, value := range []string{"", "not-a-number", "-1"} {
 		t.Run(value, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)

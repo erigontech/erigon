@@ -48,10 +48,14 @@ func (h ExecutionHeader) BlockValue() *big.Int {
 	if h.Data.Message.Value == "" {
 		return nil
 	}
-	//blockValue := binary.LittleEndian.Uint64([]byte(h.Data.Message.Value))
 	blockValue, ok := new(big.Int).SetString(h.Data.Message.Value, 10)
 	if !ok {
 		log.Warn("cannot parse block value", "value", h.Data.Message.Value)
+		return nil
+	}
+	if blockValue.Sign() < 0 {
+		log.Warn("negative block value", "value", h.Data.Message.Value)
+		return nil
 	}
 	return blockValue
 }
