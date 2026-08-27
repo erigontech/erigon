@@ -259,7 +259,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		doms, err := newCustomTraceSharedDomains(ctx, db, tx, logger)
 		if err != nil {
 			return err
 		}
@@ -523,4 +523,13 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 		}
 	}
 	return tx.Commit()
+}
+
+func newCustomTraceSharedDomains(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx, logger log.Logger) (*execctx.SharedDomains, error) {
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return nil, err
+	}
+	doms.EnableParaTrieDB(db)
+	return doms, nil
 }
