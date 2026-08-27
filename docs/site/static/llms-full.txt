@@ -5118,9 +5118,11 @@ Accepted everywhere a block is selected:
 Rejected everywhere:
 
 * a quoted decimal string — `"3"`, `"100"`
-* a block number above `2^63-1`, in either parameter type — `BlockNumber.UnmarshalJSON`
-  and `BlockNumberOrHash.UnmarshalJSON` both fail with `blocknumber too high`, so
-  `"0x8000000000000000"` and the equivalent bare integer are out of range
+* a block number above `2^63-1` — out of range in both parameter types, though the error
+  differs: a plain **block-number** parameter fails with `block number larger than
+  int64`, while a top-level numeric or hex **block-or-hash** value fails with
+  `blocknumber too high` (`rpc/types.go`). `"0x8000000000000000"` and the equivalent
+  bare integer are rejected either way
 * hex with leading zeros — `"0x01"`
 * hex without the prefix — `"ff"`
 
@@ -6143,7 +6145,7 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
-| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block, uncle or beacon-chain-withdrawal reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases, uncle authors or withdrawal recipients). |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block or uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors; `trace_block` alone also emits beacon-chain-withdrawal rewards, on request). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
 | `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
@@ -6182,13 +6184,13 @@ The `action` object's shape depends on `type`:
 | `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
 | `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
 
-**`type: "reward"`** (block, uncle or withdrawal reward, in `trace_block` and `trace_filter`)
+**`type: "reward"`** (block or uncle reward in `trace_block` and `trace_filter`; withdrawal reward in `trace_block` only)
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `author` | DATA, 20 BYTES | Address receiving the reward — the miner, the uncle author, or the withdrawal recipient when `rewardType` is `"withdrawal"`. |
 | `value` | QUANTITY | Wei amount of the reward. |
-| `rewardType` | String | `"block"` or `"uncle"`, and `"withdrawal"` when `IncludeWithdrawals` is set — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
+| `rewardType` | String | `"block"` or `"uncle"`. `trace_block` also emits `"withdrawal"` when `IncludeWithdrawals` is set; `trace_filter` never does — see [Beacon-chain withdrawals](#beacon-chain-withdrawals). |
 
 ### Result variants
 
@@ -6446,8 +6448,11 @@ params: [
 The one-entry-per-transaction mapping does not hold when withdrawals are requested.
 With `"stateDiff"` in the trace types and `"IncludeWithdrawals": true` in the trace
 settings, a block that has withdrawals gets **one extra entry appended** after the
-last transaction — an empty `trace` and a `stateDiff` carrying only the withdrawal
-balance changes, with no `transactionHash`. Consumers that index results positionally
+last transaction — an empty `trace` and a `stateDiff` carrying only the withdrawal state
+changes, with no `transactionHash`. That diff is a balance change alone only when the
+recipient already existed; a recipient created by the withdrawal also gets `code` and
+`nonce` entries, as described under [Beacon-chain withdrawals](#beacon-chain-withdrawals).
+Consumers that index results positionally
 against the block's transaction list must skip that trailing entry. See [Beacon-chain
 withdrawals](#beacon-chain-withdrawals).
 

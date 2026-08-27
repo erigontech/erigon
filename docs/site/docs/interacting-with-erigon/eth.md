@@ -198,9 +198,11 @@ Accepted everywhere a block is selected:
 Rejected everywhere:
 
 * a quoted decimal string — `"3"`, `"100"`
-* a block number above `2^63-1`, in either parameter type — `BlockNumber.UnmarshalJSON`
-  and `BlockNumberOrHash.UnmarshalJSON` both fail with `blocknumber too high`, so
-  `"0x8000000000000000"` and the equivalent bare integer are out of range
+* a block number above `2^63-1` — out of range in both parameter types, though the error
+  differs: a plain **block-number** parameter fails with `block number larger than
+  int64`, while a top-level numeric or hex **block-or-hash** value fails with
+  `blocknumber too high` (`rpc/types.go`). `"0x8000000000000000"` and the equivalent
+  bare integer are rejected either way
 * hex with leading zeros — `"0x01"`
 * hex without the prefix — `"ff"`
 
