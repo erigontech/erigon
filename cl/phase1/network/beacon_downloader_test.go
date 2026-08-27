@@ -654,6 +654,99 @@ func TestForwardRequestMoreRejectsHTTPFallbackWhenFrontierAdvancesDuringFetch(t 
 	require.Zero(t, processCalls.Load(), "HTTP response was not revalidated before processing")
 }
 
+func TestForwardRequestMoreDropsHTTPPreferenceWhenFrontierAdvancesDuringEnvelopeFetch(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+	})
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	first := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	first.Block.Slot = 11
+	first.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{1}
+	second := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	second.Block.Slot = 12
+	second.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{1}
+	firstEncoded, err := first.EncodeSSZ(nil)
+	require.NoError(t, err)
+	secondEncoded, err := second.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	envelopeStarted := make(chan struct{})
+	releaseEnvelope := make(chan struct{})
+	var envelopeOnce sync.Once
+	var blockSecondHTTP atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/eth/v2/beacon/blocks/11":
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(firstEncoded)
+		case "/eth/v2/beacon/blocks/12":
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(secondEncoded)
+		case "/eth/v1/beacon/execution_payload_envelope/11":
+			envelopeOnce.Do(func() { close(envelopeStarted) })
+			<-releaseEnvelope
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		default:
+			if r.URL.Path == "/eth/v2/beacon/blocks/21" && blockSecondHTTP.Load() {
+				<-r.Context().Done()
+				return
+			}
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, rpcCfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, rpcCfg)
+	downloader.SetHighestProcessedSlot(10)
+	downloader.SetHTTPFallbackURL(server.URL)
+	downloader.httpPreferred.Store(true)
+
+	firstDone := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(firstDone)
+	}()
+	select {
+	case <-envelopeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("preferred HTTP response did not start envelope fetch")
+	}
+	downloader.SetHighestProcessedSlot(20)
+	close(releaseEnvelope)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("stale preferred HTTP request did not finish")
+	}
+	blockSecondHTTP.Store(true)
+
+	secondDone := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(secondDone)
+	}()
+	select {
+	case <-sentinel.started:
+		cancel()
+		<-secondDone
+	case <-secondDone:
+		t.Fatal("next request skipped P2P after the preferred HTTP result became stale")
+	case <-time.After(time.Second):
+		t.Fatal("next request did not choose a transport")
+	}
+}
+
 func TestForwardRequestMoreSynchronizesConcurrentProgressUpdates(t *testing.T) {
 	previousInterval := forwardBeaconRequestInterval
 	previousTimeout := forwardBeaconRequestTimeout

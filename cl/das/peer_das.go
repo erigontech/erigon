@@ -250,6 +250,18 @@ func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 	return count > 0
 }
 
+func (d *peerdas) isBlobRecoveryComplete(ctx context.Context, blockRoot common.Hash, expected int) bool {
+	if expected <= 0 {
+		return false
+	}
+	count, err := d.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
+	if err != nil {
+		log.Warn("failed to get kzg commitments count", "err", err, "blockRoot", blockRoot)
+		return false
+	}
+	return int(count) == expected
+}
+
 func (d *peerdas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
 	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
 	if err != nil {
@@ -691,7 +703,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 			continue
 		}
 
-		if d.IsColumnOverHalf(block.GetSlot(), root) || d.IsBlobAlreadyRecovered(root) {
+		if d.IsColumnOverHalf(block.GetSlot(), root) || d.isBlobRecoveryComplete(ctx, root, kzgCommitments.Len()) {
 			if err := d.TryScheduleRecover(block.GetSlot(), root); err != nil {
 				log.Debug("failed to schedule recover", "err", err)
 			}
@@ -798,7 +810,7 @@ mainloop:
 		case <-halfCheckTicker.C:
 			for _, entry := range req.remainingEntries() {
 				if needToRecoverBlobs {
-					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) || d.IsBlobAlreadyRecovered(entry.blockRoot) {
+					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) || d.isBlobRecoveryComplete(ctx, entry.blockRoot, req.expectedBlobCount(entry.blockRoot)) {
 						// no need to schedule recovery for this block because someone else will do it
 						req.removeBlock(entry.slot, entry.blockRoot)
 					}
@@ -843,7 +855,7 @@ mainloop:
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
 						if needToRecoverBlobs &&
-							(d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
+							(d.IsColumnOverHalf(slot, blockRoot) || d.isBlobRecoveryComplete(ctx, blockRoot, req.expectedBlobCount(blockRoot))) {
 							req.removeBlock(slot, blockRoot)
 							d.TryScheduleRecover(slot, blockRoot)
 						}
@@ -970,6 +982,7 @@ type downloadRequest struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	tableMutex    sync.RWMutex
 	downloadTable map[downloadTableEntry]map[uint64]bool
+	expectedBlobs map[common.Hash]int
 }
 
 // [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
@@ -980,6 +993,7 @@ func initializeDownloadRequest(
 	expectedColumns map[cltypes.CustodyIndex]bool,
 ) (*downloadRequest, error) {
 	downloadTable := make(map[downloadTableEntry]map[uint64]bool)
+	expectedBlobs := make(map[common.Hash]int, len(blocks))
 	blockRootToBeaconBlock := make(map[common.Hash]cltypes.ColumnSyncableSignedBlock)
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
@@ -995,6 +1009,7 @@ func initializeDownloadRequest(
 			return nil, err
 		}
 		blockRootToBeaconBlock[blockRoot] = block
+		expectedBlobs[blockRoot] = kzgCommitments.Len()
 
 		// get the existing columns from the column storage
 		existingColumns, err := columnStorage.GetSavedColumnIndex(context.Background(), block.GetSlot(), blockRoot)
@@ -1027,7 +1042,12 @@ func initializeDownloadRequest(
 	return &downloadRequest{
 		beaconConfig:  beaconConfig,
 		downloadTable: downloadTable,
+		expectedBlobs: expectedBlobs,
 	}, nil
+}
+
+func (d *downloadRequest) expectedBlobCount(blockRoot common.Hash) int {
+	return d.expectedBlobs[blockRoot]
 }
 
 func (d *downloadRequest) remainingEntries() []downloadTableEntry {

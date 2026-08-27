@@ -348,6 +348,7 @@ Process:
 	if resp.fromHTTP {
 		highestSlotProcessed, _, _ := f.progressSnapshot()
 		if highestSlotProcessed != resp.httpSampledHighestSlot {
+			f.httpPreferred.Store(false)
 			return
 		}
 	}
@@ -417,6 +418,7 @@ Process:
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if resp.fromHTTP && f.highestSlotProcessed != resp.httpSampledHighestSlot {
+		f.httpPreferred.Store(false)
 		return
 	}
 

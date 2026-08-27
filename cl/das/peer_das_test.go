@@ -17,6 +17,7 @@
 package das
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -72,6 +73,27 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 			require.Equal(t, test.want, state.GetEarliestAvailableSlot())
 		})
 	}
+}
+
+func TestDownloadColumnsAndRecoverBlobsAdmitsPartialBlobCount(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	cfg := clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, root).Return(nil, nil).Times(2)
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), root).Return(uint32(1), nil)
+	d := &peerdas{beaconConfig: &cfg, columnStorage: columnStorage, blobStorage: blobStorage}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
 }
 
 func TestIsExpectedColumnDownloadMiss(t *testing.T) {
