@@ -652,13 +652,14 @@ func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *
 	return body, err
 }
 
-func TestProduceBeaconBodyRejectsMissingBlobsBundle(t *testing.T) {
-	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
 
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.ElectraVersion).
-		Return(cltypes.NewEth1Block(clparams.ElectraVersion, h.beaconChainCfg), nil, nil, nil, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.CapellaVersion).
+		Return(payload, nil, nil, nil, nil)
 	h.engine = engine
 
 	baseBlock := blocks[len(blocks)-1].Block
@@ -667,6 +668,33 @@ func TestProduceBeaconBodyRejectsMissingBlobsBundle(t *testing.T) {
 
 	body, _, err := h.produceBeaconBody(
 		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Zero(t, body.BlobKzgCommitments.Len())
+}
+
+func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	baseBlock := blocks[len(blocks)-1].Block
+	targetSlot := baseBlock.Slot + 1
+	h.beaconChainCfg.DenebForkEpoch = targetSlot / h.beaconChainCfg.SlotsPerEpoch
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.DenebVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.DenebVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 
