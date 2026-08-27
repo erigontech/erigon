@@ -1011,3 +1011,53 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// end() joins the seed tasks, and a caller that goes away during that join has its queued seeding
+// dropped by the AfterFunc. wait must report that, or DownloadSnapshots publishes chain.toml for
+// snapshots it never seeded.
+func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	markInitialDownloadComplete(t, d)
+	d.seedSem = semaphore.NewWeighted(1)
+	d.incDownloadRequests()
+
+	// Hold the only slot so every goSeed task is parked in Acquire for the whole join.
+	require.NoError(d.seedSem.Acquire(context.Background(), 1))
+	defer d.seedSem.Release(1)
+
+	_, names := writeKeptLocalSnapshots(t, d, 2, 64)
+
+	// No torrents: wait's loop returns at once, so the cancel below lands inside end()'s join.
+	batch := &downloadBatch{d: d}
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+	for _, name := range names {
+		batch.goSeed(func() { d.seedKeptSnapshot(batch.seedCtx, name) })
+	}
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	done := make(chan error, 1)
+	go func() { done <- batch.wait(ctx) }()
+
+	require.Never(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+
+	dropped := errors.New("caller went away during the join")
+	cancel(dropped)
+
+	select {
+	case err := <-done:
+		require.ErrorIs(err, dropped,
+			"seeding dropped mid-join must not report success, or the caller publishes chain.toml for it")
+	case <-time.After(30 * time.Second):
+		t.Fatal("wait did not return after the caller cancelled")
+	}
+}

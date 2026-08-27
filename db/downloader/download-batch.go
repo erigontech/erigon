@@ -132,10 +132,12 @@ func (me *downloadBatch) end(ctx context.Context, cause error) {
 
 func (me *downloadBatch) wait(ctx context.Context) (err error) {
 	// An all-kept-local batch has no torrents, so the loop below never samples ctx: a cancelled
-	// caller must still surface as an error, or seeding it dropped reports success.
+	// caller must still surface as an error, or seeding it dropped reports success. end joins the
+	// seed tasks, so the cause is read again after it: a cancel arriving during that join drops
+	// queued seeding just the same.
 	defer func() {
+		me.end(ctx, cmp.Or(err, context.Cause(ctx)))
 		err = cmp.Or(err, context.Cause(ctx))
-		me.end(ctx, err)
 	}()
 	for _, t := range me.torrents {
 		select {
