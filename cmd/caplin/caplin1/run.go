@@ -107,6 +107,9 @@ func OpenCaplinDatabase(ctx context.Context,
 	if err := os.MkdirAll(dataDirIndexer, 0700); err != nil {
 		return nil, nil, err
 	}
+	if err := os.MkdirAll(blobDbPath, 0700); err != nil {
+		return nil, nil, err
+	}
 
 	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig

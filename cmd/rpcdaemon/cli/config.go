@@ -813,9 +813,11 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		}
 		go func() {
-			// Serve returns nil once GracefulStop/Stop is called below, so any
-			// non-nil error here is a genuine listener failure worth logging.
-			if err := grpcServer.Serve(grpcListener); err != nil {
+			// ErrServerStopped can surface here if GracefulStop/Stop (deferred
+			// below) runs before this goroutine gets scheduled into Serve, since
+			// both check/clear the same listener state under one mutex; that is
+			// an ordinary shutdown race, not a listener failure.
+			if err := grpcServer.Serve(grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 				logger.Error("GRPC Server Fatal Error", "err", err)
 			}
 		}()
