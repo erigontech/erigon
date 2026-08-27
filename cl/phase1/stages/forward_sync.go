@@ -178,7 +178,7 @@ func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, stor
 	err := store.OnExecutionPayload(ctx, envelope, false, validate)
 	if err != nil && !(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope)) {
 		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
-		return nil
+		return err
 	}
 	if shouldInsert {
 		if err := collector.AddGloasBlock(block, envelope); err != nil {

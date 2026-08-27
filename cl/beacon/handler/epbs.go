@@ -179,7 +179,6 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 // ---- Payload Attestation Data ----
 
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
-// GET /eth/v1/validator/payload_attestation_data?slot={slot}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.syncedData.Syncing() {

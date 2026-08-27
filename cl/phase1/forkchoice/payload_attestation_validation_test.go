@@ -25,12 +25,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -83,6 +85,42 @@ func TestOnPayloadAttestationMessageIgnoresUnavailableKnownBlockState(t *testing
 	err = f.OnPayloadAttestationMessage(context.Background(), msg, true)
 
 	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestOnPayloadAttestationMessageAcceptsClockDisparityBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		slot uint64
+	}{
+		{name: "lower", slot: 99},
+		{name: "upper", slot: 101},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(tc.slot).Return(true)
+
+			root := common.Hash{byte(tc.slot)}
+			contexts, err := newPayloadAttestationValidationContexts()
+			require.NoError(t, err)
+			f := &ForkChoiceStore{
+				ethClock: clock,
+				forkGraph: &getFinalizedExecutionHashForkGraph{
+					headers: map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: tc.slot}},
+					states:  map[common.Hash]*state.CachingBeaconState{},
+				},
+				payloadAttestationContexts: contexts,
+			}
+			msg := &cltypes.PayloadAttestationMessage{
+				Data: &cltypes.PayloadAttestationData{Slot: tc.slot, BeaconBlockRoot: root},
+			}
+
+			err = f.OnPayloadAttestationMessage(context.Background(), msg, false)
+
+			require.ErrorIs(t, err, ErrIgnore)
+			require.NotContains(t, err.Error(), "not current slot")
+		})
+	}
 }
 
 func TestApplyValidatedPayloadAttestationAcceptsOnlyFirstGossipVote(t *testing.T) {

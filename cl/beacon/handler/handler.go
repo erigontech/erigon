@@ -66,7 +66,6 @@ type BlobBundle struct {
 	KzgProofs  []common.Bytes48
 }
 
-// selfBuildPayload holds local payload data retained for the validator's signed envelope.
 type selfBuildPayload struct {
 	Payload           *cltypes.Eth1Block
 	ExecutionRequests *cltypes.ExecutionRequests
@@ -145,8 +144,7 @@ type ApiHandler struct {
 	executionPayloadBidService services.ExecutionPayloadBidService
 	payloadAttestationService  services.PayloadAttestationService
 	proposerPreferencesService services.ProposerPreferencesService
-	// selfBuildPayloads retains locally built payload data until the validator signs and publishes its envelope.
-	selfBuildPayloads *lru.Cache[common.Hash, *selfBuildPayload]
+	selfBuildPayloads          *lru.Cache[common.Hash, *selfBuildPayload]
 	// selfBuildEnvelopes caches the unsigned ExecutionPayloadEnvelope by slot so
 	// the validator client can retrieve it via
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
