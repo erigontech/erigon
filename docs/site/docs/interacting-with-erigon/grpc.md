@@ -130,6 +130,10 @@ The Downloader interface provides access to snapshot downloading and torrent man
 
 ## Polygon Bridge Backend gRPC API
 
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These services are still built in this release, but they are unmaintained and untested.
+:::
+
 These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism and are only active when running Erigon with Polygon network configuration. The services provide essential functionality for bridge event processing and validator management required by the Polygon network architecture.
 
 ### Bridge Backend Methods
@@ -154,6 +158,10 @@ The server implementation is found in `polygon/bridge/server.go` where the `Back
 * The `BorEvents` method retrieves bridge events for a given block.
 
 ## Heimdall Backend gRPC API
+
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These services are still built in this release, but they are unmaintained and untested.
+:::
 
 The Heimdall Backend service provides APIs for validator and consensus-related functionality.
 
