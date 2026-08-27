@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
@@ -86,6 +87,135 @@ func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 }
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
+
+type publishingBlockKey struct {
+	proposer uint64
+	slot     uint64
+}
+
+type publishingSeenBlock struct {
+	signedRoot    common.Hash
+	replayAllowed bool
+}
+
+type replayableBlockService struct {
+	*network_services_mock.MockBlockService
+	mu        sync.Mutex
+	pending   map[publishingBlockKey]common.Hash
+	seen      map[publishingBlockKey]publishingSeenBlock
+	scheduled chan struct{}
+}
+
+func (s *replayableBlockService) ValidateGossip(_ context.Context, block *cltypes.SignedBeaconBlock) error {
+	root, err := block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	key := publishingBlockKey{proposer: block.Block.ProposerIndex, slot: block.Block.Slot}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seen, ok := s.seen[key]; ok {
+		if seen.signedRoot == common.Hash(root) && seen.replayAllowed {
+			seen.replayAllowed = false
+			s.seen[key] = seen
+			return nil
+		}
+		return fmt.Errorf("%w: block already seen for proposer and slot", clservices.ErrIgnore)
+	}
+	if _, ok := s.pending[key]; ok {
+		return fmt.Errorf("%w: block reservation pending for proposer and slot", clservices.ErrIgnore)
+	}
+	s.pending[key] = common.Hash(root)
+	return nil
+}
+
+func (s *replayableBlockService) CommitGossipReservation(block *cltypes.SignedBeaconBlock) {
+	key := publishingBlockKey{proposer: block.Block.ProposerIndex, slot: block.Block.Slot}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if root, ok := s.pending[key]; ok {
+		s.seen[key] = publishingSeenBlock{signedRoot: root}
+		delete(s.pending, key)
+	}
+}
+
+func (s *replayableBlockService) ReleaseGossipReservation(block *cltypes.SignedBeaconBlock) {
+	root, err := block.HashSSZ()
+	if err != nil {
+		return
+	}
+	key := publishingBlockKey{proposer: block.Block.ProposerIndex, slot: block.Block.Slot}
+	s.mu.Lock()
+	if _, ok := s.pending[key]; ok {
+		delete(s.pending, key)
+	} else if seen, ok := s.seen[key]; ok && seen.signedRoot == common.Hash(root) {
+		seen.replayAllowed = true
+		s.seen[key] = seen
+	}
+	s.mu.Unlock()
+}
+
+func (s *replayableBlockService) ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock) {
+	s.scheduled <- struct{}{}
+}
+
+func (s *replayableBlockService) SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) {
+	s.scheduled <- struct{}{}
+}
+
+type failFirstSidecarGossip struct {
+	*gossip_mock.MockGossip
+	mu              sync.Mutex
+	blockPublishes  int
+	failBlockAt     int
+	sidecarAttempts int
+}
+
+type unavailableUpdateDB struct {
+	kv.RwDB
+}
+
+func (db unavailableUpdateDB) Update(context.Context, func(kv.RwTx) error) error {
+	return errors.New("database unavailable")
+}
+
+type installingForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	headers      map[common.Hash]*cltypes.BeaconBlockHeader
+	onBlockCalls int
+}
+
+func (f *installingForkchoice) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	header, ok := f.headers[root]
+	return header, ok
+}
+
+func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedBeaconBlock, _, _, _ bool) error {
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	f.onBlockCalls++
+	return nil
+}
+
+func (g *failFirstSidecarGossip) Publish(_ context.Context, topic string, _ []byte) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if topic == gossip.TopicNameBeaconBlock {
+		g.blockPublishes++
+		if g.blockPublishes == g.failBlockAt {
+			return errors.New("block unavailable")
+		}
+		return nil
+	}
+	g.sidecarAttempts++
+	if g.sidecarAttempts == 1 {
+		return errors.New("sidecar unavailable")
+	}
+	return nil
+}
 
 type acceptingExecutionPayloadBidService struct{}
 
@@ -122,20 +252,6 @@ func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 	require.Error(t, (&ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))}).storeDataColumnSidecars(
 		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
 	))
-}
-
-func TestRetryPublishedBlockStoreRecoversFromTransientFailure(t *testing.T) {
-	calls := 0
-	err := retryPublishedBlockStore(t.Context(), 3, time.Millisecond, func(context.Context) error {
-		calls++
-		if calls == 1 {
-			return errors.New("transient storage failure")
-		}
-		return nil
-	})
-
-	require.NoError(t, err)
-	require.Equal(t, 2, calls)
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -950,7 +1066,7 @@ func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
 	}
 }
 
-func TestBroadcastBlockKeepsGossipReservationAfterBlockPublication(t *testing.T) {
+func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	block := blocks[1]
@@ -965,11 +1081,17 @@ func TestBroadcastBlockKeepsGossipReservationAfterBlockPublication(t *testing.T)
 	blockService := network_services_mock.NewMockBlockService(ctrl)
 	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
 	blockService.EXPECT().CommitGossipReservation(block)
-	scheduled := make(chan struct{})
-	blockService.EXPECT().ScheduleBlockForLaterProcessing(block).Do(func(*cltypes.SignedBeaconBlock) { close(scheduled) })
+	blockService.EXPECT().ReleaseGossipReservation(block)
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(block).Times(0)
+	scheduledStore := make(chan func(context.Context) error, 1)
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).Do(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) {
+		scheduledStore <- store
+	})
 	handler.blockService = blockService
 	blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+		return errors.New("storage unavailable")
+	}).Times(1)
 	handler.blobStoage = blobStorage
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
@@ -979,9 +1101,149 @@ func TestBroadcastBlockKeepsGossipReservationAfterBlockPublication(t *testing.T)
 	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
 	require.ErrorContains(t, err, "sidecar unavailable")
 	select {
-	case <-scheduled:
+	case store := <-scheduledStore:
+		require.ErrorContains(t, store(t.Context()), "storage unavailable")
 	case <-time.After(time.Second):
-		t.Fatal("block was not scheduled after terminal local storage failure")
+		t.Fatal("full published-block storage was not scheduled")
+	}
+}
+
+func TestBroadcastBlockSchedulesRecoveryAfterSidecarsAndForkchoiceSucceed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	block := blocks[1]
+	commitment := &cltypes.KZGCommitment{1}
+	block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](1, 48)
+	block.Block.Body.BlobKzgCommitments.Append(commitment)
+	handler.blobBundles.Add(common.Bytes48(*commitment), BlobBundle{
+		Commitment: common.Bytes48(*commitment),
+		Blob:       &cltypes.Blob{},
+		KzgProofs:  []common.Bytes48{{1}},
+	})
+	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	fcu.OnTickFn = func(uint64) {}
+
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(block)
+	scheduledStore := make(chan func(context.Context) error, 1)
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).Do(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) { scheduledStore <- store })
+	handler.blockService = blockService
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(uint64(0)), gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	require.NoError(t, handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip))
+	select {
+	case store := <-scheduledStore:
+		require.ErrorContains(t, store(t.Context()), "database unavailable")
+	case <-time.After(time.Second):
+		t.Fatal("post-forkchoice database failure was not scheduled")
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	sidecars, found, err := handler.blobStoage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, sidecars, 1)
+}
+
+func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	fcu.OnTickFn = func(uint64) {}
+	installing := &installingForkchoice{
+		ForkChoiceStorage: fcu,
+		headers:           make(map[common.Hash]*cltypes.BeaconBlockHeader),
+	}
+	handler.forkchoiceStore = installing
+	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+
+	for range 2 {
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, false)
+		require.ErrorContains(t, err, "database unavailable")
+	}
+	require.Equal(t, 1, installing.onBlockCalls)
+}
+
+func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			cfg := clparams.MainnetBeaconConfig
+			if clparams.GetBeaconConfig() == nil {
+				clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+			}
+			block := cltypes.NewSignedBeaconBlock(&cfg, version)
+			block.Block.Slot = cfg.SlotsPerEpoch
+			commitment := &cltypes.KZGCommitment{1}
+			block.Block.Body.BlobKzgCommitments.Append(commitment)
+			blobBundles, err := lru.New[common.Bytes48, BlobBundle]("test-replay-blobs", 1)
+			require.NoError(t, err)
+			proofs := []common.Bytes48{{1}}
+			if version >= clparams.FuluVersion {
+				proofs = make([]common.Bytes48, cfg.NumberOfColumns)
+			}
+			blobBundles.Add(common.Bytes48(*commitment), BlobBundle{
+				Commitment: common.Bytes48(*commitment),
+				Blob:       &cltypes.Blob{},
+				KzgProofs:  proofs,
+			})
+
+			blockService := &replayableBlockService{
+				MockBlockService: network_services_mock.NewMockBlockService(ctrl),
+				pending:          make(map[publishingBlockKey]common.Hash),
+				seen:             make(map[publishingBlockKey]publishingSeenBlock),
+				scheduled:        make(chan struct{}, 2),
+			}
+			gossipManager := &failFirstSidecarGossip{MockGossip: gossip_mock.NewMockGossip(ctrl)}
+			handler := &ApiHandler{
+				beaconChainCfg: &cfg,
+				blockService:   blockService,
+				blobBundles:    blobBundles,
+				gossipManager:  gossipManager,
+				logger:         log.Root(),
+			}
+			if version < clparams.FuluVersion {
+				blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
+				blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+				handler.blobStoage = blobStorage
+			} else {
+				columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+				columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+				handler.columnStorage = columnStorage
+			}
+
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorContains(t, err, "sidecar unavailable")
+			gossipManager.mu.Lock()
+			gossipManager.failBlockAt = 2
+			gossipManager.mu.Unlock()
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorContains(t, err, "block unavailable")
+			require.NoError(t, handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip))
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorIs(t, err, errPublishedBlockValidation)
+			require.ErrorIs(t, err, clservices.ErrIgnore)
+
+			block.Block.StateRoot[0] ^= 1
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorIs(t, err, errPublishedBlockValidation)
+			require.ErrorIs(t, err, clservices.ErrIgnore)
+
+			for range 2 {
+				select {
+				case <-blockService.scheduled:
+				case <-time.After(time.Second):
+					t.Fatal("sidecar storage failure did not schedule full recovery")
+				}
+			}
+			gossipManager.mu.Lock()
+			require.Equal(t, 3, gossipManager.blockPublishes)
+			require.GreaterOrEqual(t, gossipManager.sidecarAttempts, 2)
+			gossipManager.mu.Unlock()
+		})
 	}
 }
 

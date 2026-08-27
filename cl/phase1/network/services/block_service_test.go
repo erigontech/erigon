@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -43,13 +44,28 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type attesterSlashingErrorStore struct {
 	forkchoice.ForkChoiceStorage
 	err error
+}
+
+type failFirstUpdateDB struct {
+	kv.RwDB
+	failed bool
+}
+
+func (db *failFirstUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	if !db.failed {
+		db.failed = true
+		return errors.New("database unavailable")
+	}
+	return db.RwDB.Update(ctx, f)
 }
 
 func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
@@ -334,6 +350,174 @@ func TestBlockServiceGossipReservationCanBeReleased(t *testing.T) {
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
 
+func TestBlockServiceCommittedReservationAllowsExactRESTReplayOnly(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.CommitGossipReservation(child)
+	require.ErrorIs(t, service.ValidateGossip(t.Context(), child), ErrIgnore)
+	service.ReleaseGossipReservation(child)
+
+	child.Block.StateRoot[0] ^= 1
+	err := service.ValidateGossip(t.Context(), child)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "already seen")
+	child.Block.StateRoot[0] ^= 1
+
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	require.ErrorIs(t, service.ValidateGossip(t.Context(), child), ErrIgnore)
+	child.Signature[0] ^= 1
+	require.ErrorIs(t, service.ValidateGossip(t.Context(), child), ErrIgnore)
+}
+
+func TestBlockServiceExactRESTReplayClaimIsAtomic(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.CommitGossipReservation(child)
+	service.ReleaseGossipReservation(child)
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { errs <- service.ValidateGossip(t.Context(), child) })
+	}
+	wg.Wait()
+	close(errs)
+	accepted := 0
+	ignored := 0
+	for err := range errs {
+		if err == nil {
+			accepted++
+		} else if errors.Is(err, ErrIgnore) {
+			ignored++
+		}
+	}
+	require.Equal(t, 1, accepted)
+	require.Equal(t, 1, ignored)
+}
+
+func TestBlockServiceFailedExactRESTReplayRestoresClaim(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.CommitGossipReservation(child)
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceValidateGossipRejectsMissingBodyBeforeHashing(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Body = nil
+	require.ErrorContains(t, service.ValidateGossip(t.Context(), block), "missing beacon block")
+}
+
+func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
+	underlying := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := &failFirstUpdateDB{RwDB: underlying}
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	service := &blockService{db: db, forkchoiceStore: fcu}
+
+	service.ScheduleBlockForLaterProcessing(block)
+	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	job := jobValue.(*blockJob)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	require.True(t, db.failed)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+
+	require.NoError(t, underlying.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, root))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
+		return nil
+	}))
+}
+
+func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	service := &blockService{}
+	attempts := 0
+	storedSidecars := false
+	imported := false
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("sidecar storage unavailable")
+		}
+		storedSidecars = true
+		imported = true
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, block, false)
+		})
+	})
+	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	job := jobValue.(*blockJob)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.False(t, storedSidecars)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+	require.True(t, storedSidecars)
+	require.True(t, imported)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, root))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
+		return nil
+	}))
+}
+
+func TestPublishedBlockJobUpgradesBlockOnlyRecovery(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	service.ScheduleBlockForLaterProcessing(block)
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.NotNil(t, jobValue.(*blockJob).store)
+}
+
+func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	service := &blockService{db: db, forkchoiceStore: fcu}
+	service.ScheduleBlockForLaterProcessing(block)
+	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	staleJob := staleValue.(*blockJob)
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	service.processScheduledBlock(t.Context(), root, staleJob, staleJob.creationTime)
+	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.NotSame(t, staleJob, currentValue)
+	require.NotNil(t, currentValue.(*blockJob).store)
+}
+
 func TestBlockServicePendingGossipReservationHandsOffToP2P(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
@@ -417,8 +601,8 @@ func TestBlockServiceUnrelatedReservationDoesNotRevalidateP2P(t *testing.T) {
 	}()
 	<-validationEntered
 	otherKey := proposerIndexAndSlot{proposerIndex: child.Block.ProposerIndex + 1, slot: child.Block.Slot}
-	require.NoError(t, service.(*blockService).reserveGossipKey(otherKey))
-	service.(*blockService).releaseGossipKey(otherKey)
+	require.NoError(t, service.(*blockService).reserveGossipKey(otherKey, common.Hash{1}))
+	service.(*blockService).releaseGossipKey(otherKey, common.Hash{1})
 	close(finishValidation)
 	require.NoError(t, <-errCh)
 	require.Equal(t, 1, validationCalls)

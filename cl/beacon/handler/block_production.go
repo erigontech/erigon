@@ -82,6 +82,7 @@ const (
 
 var errBuilderNotEnabled = errors.New("builder is not enabled")
 var errPublishedBlockValidation = errors.New("published block validation failed")
+var errPublishedBlockDataStorage = errors.New("published block data storage failed")
 
 const (
 	caplinClientCode = "CN"
@@ -2502,13 +2503,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	}
 	if validation == BlockPublishingValidationGossip {
 		a.blockService.CommitGossipReservation(blk)
-		releaseGossipReservation = false
-		go func() {
-			if err := retryPublishedBlockStore(context.Background(), 3, 100*time.Millisecond, store); err != nil {
-				log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
-				a.blockService.ScheduleBlockForLaterProcessing(blk)
-			}
-		}()
+		a.blockService.SchedulePublishedBlockForLaterProcessing(blk, store)
 	}
 
 	if blk.Version() < clparams.FuluVersion {
@@ -2524,7 +2519,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
 				a.logger.Error("Failed to encode column sidecar", "err", err)
-				continue
+				return err
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
 			if err := a.publishGossip(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
@@ -2538,6 +2533,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			a.logger.Error("Self-build payload unavailable for validator envelope", "err", err)
 		}
 	}
+	releaseGossipReservation = false
 
 	return nil
 }
@@ -2550,26 +2546,6 @@ func (a *ApiHandler) publishGossip(ctx context.Context, topic string, data []byt
 		return fmt.Errorf("publish %s: %w", topic, err)
 	}
 	return nil
-}
-
-func retryPublishedBlockStore(ctx context.Context, attempts int, delay time.Duration, store func(context.Context) error) error {
-	var err error
-	for attempt := range attempts {
-		if err = store(ctx); err == nil {
-			return nil
-		}
-		if attempt+1 == attempts {
-			break
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return err
 }
 
 func collectPublishedPayloadData(
@@ -2638,24 +2614,26 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return err
 	}
 	if err := a.storeDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
 	}
 
 	if block.Version() < clparams.FuluVersion {
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
-			return err
+			return fmt.Errorf("%w: %w", errPublishedBlockDataStorage, err)
 		}
 	}
 	currentSlot := a.ethClock.GetCurrentSlot()
 	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
-	var blockErr error
-	if rejectEquivocation {
-		blockErr = a.forkchoiceStore.OnBlockWithEquivocationCheck(ctx, block, true, true, false)
-	} else {
-		blockErr = a.forkchoiceStore.OnBlock(ctx, block, true, true, false)
-	}
-	if blockErr != nil {
-		return fmt.Errorf("%w: %w", errPublishedBlockValidation, blockErr)
+	if _, exists := a.forkchoiceStore.GetHeader(blockRoot); !exists {
+		var blockErr error
+		if rejectEquivocation {
+			blockErr = a.forkchoiceStore.OnBlockWithEquivocationCheck(ctx, block, true, true, false)
+		} else {
+			blockErr = a.forkchoiceStore.OnBlock(ctx, block, true, true, false)
+		}
+		if blockErr != nil {
+			return fmt.Errorf("%w: %w", errPublishedBlockValidation, blockErr)
+		}
 	}
 
 	// Cache the execution payload body before writing to DB so the beacon API

@@ -266,6 +266,42 @@ func (c *MockBlockServiceScheduleBlockForLaterProcessingCall) DoAndReturn(f func
 	return c
 }
 
+// SchedulePublishedBlockForLaterProcessing mocks base method.
+func (m *MockBlockService) SchedulePublishedBlockForLaterProcessing(arg0 *cltypes.SignedBeaconBlock, arg1 func(context.Context) error) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SchedulePublishedBlockForLaterProcessing", arg0, arg1)
+}
+
+// SchedulePublishedBlockForLaterProcessing indicates an expected call of SchedulePublishedBlockForLaterProcessing.
+func (mr *MockBlockServiceMockRecorder) SchedulePublishedBlockForLaterProcessing(arg0, arg1 any) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SchedulePublishedBlockForLaterProcessing", reflect.TypeOf((*MockBlockService)(nil).SchedulePublishedBlockForLaterProcessing), arg0, arg1)
+	return &MockBlockServiceSchedulePublishedBlockForLaterProcessingCall{Call: call}
+}
+
+// MockBlockServiceSchedulePublishedBlockForLaterProcessingCall wrap *gomock.Call
+type MockBlockServiceSchedulePublishedBlockForLaterProcessingCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) Return() *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) Do(f func(*cltypes.SignedBeaconBlock, func(context.Context) error)) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock, func(context.Context) error)) *MockBlockServiceSchedulePublishedBlockForLaterProcessingCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ValidateGossip mocks base method.
 func (m *MockBlockService) ValidateGossip(arg0 context.Context, arg1 *cltypes.SignedBeaconBlock) error {
 	m.ctrl.T.Helper()
