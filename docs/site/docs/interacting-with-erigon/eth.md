@@ -149,7 +149,11 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
 * `value` — `0` when absent
 * `gas` — from `eth_estimateGas` against `latest`
 * `chainId` — the node's chain ID; a mismatching supplied value is an error
-* fee fields — `gasPrice` before London, otherwise `maxFeePerGas` / `maxPriorityFeePerGas` from the gas oracle
+* fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
+  and cannot be combined with `maxFeePerGas` or `maxPriorityFeePerGas`. When it is absent:
+  before London `gasPrice` comes from the gas oracle; after London the dynamic fields are
+  filled independently, `maxPriorityFeePerGas` from the oracle and `maxFeePerGas` as twice
+  the base fee plus the tip. The dynamic fields are rejected before London
 * `maxFeePerBlobGas` — for blob transactions, twice the current blob gas price
 
 **Returns**

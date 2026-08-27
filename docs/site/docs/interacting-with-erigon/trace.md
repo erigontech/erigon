@@ -123,7 +123,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- |
 | `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
 | `trace_callMany` | `Array<Object>` — one per input call |
-| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash`. One extra trailing entry when withdrawals are requested — see [trace_replayBlockTransactions](#trace_replayblocktransactions) |
+| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash`. One extra trailing entry when `stateDiff` is requested with `"IncludeWithdrawals": true` and the block has withdrawals — see [trace_replayBlockTransactions](#trace_replayblocktransactions) |
 | `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
 | `trace_get` | `TraceEntry` (single call frame at the requested position) |
 
