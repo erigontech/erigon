@@ -132,7 +132,7 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 
 	var view *CacheView
 	if context != nil {
-		view = &CacheView{context: context, getter: context.AsStateGetter(tx)}
+		view = &CacheView{context: context, getter: context.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
@@ -154,14 +154,14 @@ type CacheView struct {
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
 	if len(k) == 20 {
-		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k)
+		v, _, err := c.getter.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 		return v, err
 	}
-	v, _, err := c.getter.GetLatest(kv.StorageDomain, k)
+	v, _, err := c.getter.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
-	v, _, err := c.getter.GetLatest(kv.CodeDomain, k)
+	v, _, err := c.getter.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 

@@ -28,7 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestCanReplaySequentially(t *testing.T) {
@@ -171,7 +171,7 @@ func TestSortedReplayDupSortTable(t *testing.T) {
 	}
 
 	t.Run("put_path", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 
 		fast := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(16*datasize.KB), log.New())
 		defer fast.Close()
@@ -189,7 +189,7 @@ func TestSortedReplayDupSortTable(t *testing.T) {
 	})
 
 	t.Run("append_dup_path", func(t *testing.T) {
-		_, tx := memdb.NewTestTx(t)
+		_, tx := mdbxtest.NewTestTx(t)
 		c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(16*datasize.KB), log.New())
 		defer c.Close()
 		k := make([]byte, 8)

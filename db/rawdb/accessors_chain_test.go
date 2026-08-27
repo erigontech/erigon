@@ -56,6 +56,18 @@ func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimi
 	}
 }
 
+type blockAccessListTrackingGetter struct {
+	kv.Getter
+	read bool
+}
+
+func (g *blockAccessListTrackingGetter) GetOne(table string, key []byte) ([]byte, error) {
+	if table == kv.BlockAccessList {
+		g.read = true
+	}
+	return g.Getter.GetOne(table, key)
+}
+
 func TestWriteRawTransactions(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
@@ -493,7 +505,7 @@ func TestBlockStorage(t *testing.T) {
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
-	})
+	}, nil)
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
@@ -611,7 +623,7 @@ func TestPartialBlockStorage(t *testing.T) {
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
-	})
+	}, nil)
 	header := block.Header() // Not identical to struct literal above, due to other fields
 
 	// Store a header and check that it's not recognized as a block
@@ -745,8 +757,8 @@ func TestHeadStorage2(t *testing.T) {
 	t.Parallel()
 	_, db := mdbxtest.NewTestTx(t)
 
-	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")})
-	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})
+	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header")}, nil)
+	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")}, nil)
 
 	// Check that no head entries are in a pristine database
 	if entry := rawdb.ReadHeadHeaderHash(db); entry != (common.Hash{}) {
@@ -779,8 +791,8 @@ func TestHeadStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: *common.Num1})
-	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: *common.Num1})
+	blockHead := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block header"), Number: *common.Num1}, nil)
+	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: *common.Num1}, nil)
 
 	// Assign separate entries for the head header and block
 	rawdb.WriteHeadHeaderHash(tx, blockHead.Hash())
@@ -1048,7 +1060,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
-	})
+	}, nil)
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
@@ -1154,7 +1166,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Nil(entry)
 }
 
-func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
+func TestReadBlockDoesNotLoadBlockAccessList(t *testing.T) {
 	t.Parallel()
 	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
@@ -1177,15 +1189,15 @@ func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		RequestsHash:          &requestsHash,
 		BlockAccessListHash:   &emptyBALHash,
-	})
+	}, nil)
 	require.NoError(t, rawdb.WriteBlock(tx, block))
-	emptyBALBytes, err := types.EncodeBlockAccessListBytes(nil)
-	require.NoError(t, err)
-	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBALBytes))
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xff}))
 
-	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+	getter := &blockAccessListTrackingGetter{Getter: tx}
+	readBlock := rawdb.ReadBlock(getter, block.Hash(), block.NumberU64())
 	require.NotNil(t, readBlock)
-	require.Equal(t, emptyBALBytes, readBlock.BlockAccessList())
+	require.False(t, getter.read)
+	require.Nil(t, readBlock.BlockAccessList())
 }
 
 func TestBlockAccessListStorage(t *testing.T) {
@@ -1199,7 +1211,7 @@ func TestBlockAccessListStorage(t *testing.T) {
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
-	})
+	}, nil)
 
 	data, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
 	require.NoError(t, err)

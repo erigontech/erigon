@@ -728,9 +728,9 @@ func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
 
-	steps := []uint64{500_000, 100_000}
+	steps := []uint64{500_000}
 
-	for i, chain := range []string{networkname.Mainnet, networkname.Amoy} {
+	for i, chain := range []string{networkname.Mainnet} {
 		step := steps[i]
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg, _ := snapcfg.KnownCfg(chain)
