@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -381,7 +382,15 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
 		return
 	}
-	_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(b.ctx, b.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
+	b.storeDenebBlobs(blocks, req, blobs.Responses)
+}
+
+// storeDenebBlobs verifies a response against the requested identifiers and stores what
+// matches. A nil error does not mean every sidecar landed: the insert stops at the first
+// identifier the response does not match, so the count is the only way to tell a full
+// insert from an empty one.
+func (b *BlobHistoryDownloader) storeDenebBlobs(blocks []*cltypes.SignedBeaconBlock, req *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar) {
+	_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(b.ctx, b.blobStorage, req, sidecars, func(header *cltypes.SignedBeaconBlockHeader) error {
 		// The block is preverified so just check that the signature is correct against the block
 		for _, block := range blocks {
 			if block.Block.Slot != header.Header.Slot {
@@ -398,6 +407,11 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		// Best-effort backfill: log and move on rather than banning a peer from the
 		// shared live-sync pool for a historical-blob verification miss.
 		b.logger.Warn("[BlobHistoryDownloader] Error verifying blobs", "err", err)
+		return
+	}
+	if inserted < uint64(req.Len()) {
+		b.logger.Warn("[BlobHistoryDownloader] Store took fewer blobs than requested",
+			"requested", req.Len(), "stored", inserted, "responses", len(sidecars))
 	}
 }
 
