@@ -1,6 +1,7 @@
 package das
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"math"
@@ -69,7 +70,6 @@ var numOfBlobRecoveryWorkers = 8
 
 const (
 	blobRecoveryValidationRetryInterval = 500 * time.Millisecond
-	maxBlobRecoveryDelayedRetries       = 128
 	maxBlobRecoveryResultBytes          = 16 << 20
 )
 
@@ -95,10 +95,14 @@ type peerdas struct {
 	recoveryResultBytes int
 	recoveryRetryOnce   sync.Once
 	recoveryRetryMutex  sync.Mutex
-	recoveryRetries     map[common.Hash]delayedRecoverBlobsRequest
-	recoveryRetryOrder  []common.Hash
+	recoveryRetries     map[common.Hash]*delayedRecoverBlobsRequest
+	recoveryRetryQueue  blobRecoveryRetryHeap
+	recoveryRetryAfter  time.Time
 	recoveryRetryWake   chan struct{}
 	recoveryPreferRetry bool
+	recoverySlots       map[uint64]*blobRecoverySlot
+	recoverySlotQueue   blobRecoverySlotHeap
+	recoveryPruneFloor  uint64
 	blocksToCheckSync   sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
@@ -143,7 +147,7 @@ func NewPeerDas(
 		recoveryRequests:    make(map[common.Hash]recoverBlobsRequest),
 		recoveryGenerations: make(map[common.Hash]uint64),
 		recoveryResults:     make(map[common.Hash]*blobRecoveryResult),
-		recoveryRetries:     make(map[common.Hash]delayedRecoverBlobsRequest),
+		recoveryRetries:     make(map[common.Hash]*delayedRecoverBlobsRequest),
 		recoveryRetryWake:   make(chan struct{}, numOfBlobRecoveryWorkers),
 		blocksToCheckSync:   sync.Map{},
 
@@ -451,6 +455,7 @@ func (d *peerdas) PruneBelow(slot uint64) error {
 	if errors.Is(err, blob_storage.ErrPruneNotStarted) {
 		return err
 	}
+	d.pruneBlobRecoveriesBelow(slot)
 	// A partial failure still advances the floor: pruneBelow attempts every bucket, so it
 	// leaves stragglers rather than an untouched store, and the floor only understates them.
 	if slot == 0 {
@@ -459,6 +464,36 @@ func (d *peerdas) PruneBelow(slot uint64) error {
 		d.state.SetEarliestAvailableSlot(slot)
 	}
 	return err
+}
+
+func (d *peerdas) pruneBlobRecoveriesBelow(slot uint64) {
+	d.initBlobRecoveryRetries()
+	d.recoveryRetryMutex.Lock()
+	d.recoveringMutex.Lock()
+	d.initBlobRecoveryOwnershipLocked()
+	if slot > d.recoveryPruneFloor {
+		d.recoveryPruneFloor = slot
+	}
+	for d.recoverySlotQueue.Len() > 0 && d.recoverySlotQueue[0].slot < d.recoveryPruneFloor {
+		ownedSlot := heap.Pop(&d.recoverySlotQueue).(*blobRecoverySlot)
+		delete(d.recoverySlots, ownedSlot.slot)
+		for root := range ownedSlot.roots {
+			d.removeBlobRecoveryResultLocked(root)
+			if d.isRecovering[root] {
+				continue
+			}
+			d.removeDelayedBlobRecoveryLocked(root)
+			delete(d.isRecovering, root)
+			delete(d.recoveryRequests, root)
+			delete(d.recoveryGenerations, root)
+		}
+	}
+	d.recoveringMutex.Unlock()
+	d.recoveryRetryMutex.Unlock()
+	select {
+	case d.recoveryRetryWake <- struct{}{}:
+	default:
+	}
 }
 
 type recoverBlobsRequest struct {
@@ -470,6 +505,71 @@ type recoverBlobsRequest struct {
 type delayedRecoverBlobsRequest struct {
 	request   recoverBlobsRequest
 	notBefore time.Time
+	heapIndex int
+}
+
+type blobRecoveryRetryHeap []*delayedRecoverBlobsRequest
+
+func (h blobRecoveryRetryHeap) Len() int { return len(h) }
+
+func (h blobRecoveryRetryHeap) Less(i, j int) bool {
+	return h[i].notBefore.Before(h[j].notBefore)
+}
+
+func (h blobRecoveryRetryHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
+}
+
+func (h *blobRecoveryRetryHeap) Push(value any) {
+	delayed := value.(*delayedRecoverBlobsRequest)
+	delayed.heapIndex = len(*h)
+	*h = append(*h, delayed)
+}
+
+func (h *blobRecoveryRetryHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	delayed := old[last]
+	old[last] = nil
+	delayed.heapIndex = -1
+	*h = old[:last]
+	return delayed
+}
+
+type blobRecoverySlot struct {
+	slot      uint64
+	roots     map[common.Hash]struct{}
+	heapIndex int
+}
+
+type blobRecoverySlotHeap []*blobRecoverySlot
+
+func (h blobRecoverySlotHeap) Len() int { return len(h) }
+
+func (h blobRecoverySlotHeap) Less(i, j int) bool { return h[i].slot < h[j].slot }
+
+func (h blobRecoverySlotHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].heapIndex = i
+	h[j].heapIndex = j
+}
+
+func (h *blobRecoverySlotHeap) Push(value any) {
+	slot := value.(*blobRecoverySlot)
+	slot.heapIndex = len(*h)
+	*h = append(*h, slot)
+}
+
+func (h *blobRecoverySlotHeap) Pop() any {
+	old := *h
+	last := len(old) - 1
+	slot := old[last]
+	old[last] = nil
+	slot.heapIndex = -1
+	*h = old[:last]
+	return slot
 }
 
 type blobRecoveryResult struct {
@@ -528,7 +628,7 @@ func newBlobRecoveryResult(
 func (d *peerdas) initBlobRecoveryRetries() {
 	d.recoveryRetryOnce.Do(func() {
 		if d.recoveryRetries == nil {
-			d.recoveryRetries = make(map[common.Hash]delayedRecoverBlobsRequest)
+			d.recoveryRetries = make(map[common.Hash]*delayedRecoverBlobsRequest)
 		}
 		if d.recoveryRetryWake == nil {
 			d.recoveryRetryWake = make(chan struct{}, numOfBlobRecoveryWorkers)
@@ -549,6 +649,56 @@ func (d *peerdas) initBlobRecoveryOwnershipLocked() {
 	if d.recoveryResults == nil {
 		d.recoveryResults = make(map[common.Hash]*blobRecoveryResult)
 	}
+	if d.recoverySlots == nil {
+		d.recoverySlots = make(map[uint64]*blobRecoverySlot)
+	}
+}
+
+func blobRecoveryRetryServiceInterval() time.Duration {
+	workers := max(numOfBlobRecoveryWorkers, 1)
+	return blobRecoveryValidationRetryInterval / time.Duration(workers)
+}
+
+func (d *peerdas) trackBlobRecoverySlotLocked(request recoverBlobsRequest) {
+	slot := d.recoverySlots[request.slot]
+	if slot == nil {
+		slot = &blobRecoverySlot{slot: request.slot, roots: make(map[common.Hash]struct{})}
+		d.recoverySlots[request.slot] = slot
+		heap.Push(&d.recoverySlotQueue, slot)
+	}
+	slot.roots[request.blockRoot] = struct{}{}
+}
+
+func (d *peerdas) removeBlobRecoverySlotLocked(request recoverBlobsRequest) {
+	slot := d.recoverySlots[request.slot]
+	if slot == nil {
+		return
+	}
+	delete(slot.roots, request.blockRoot)
+	if len(slot.roots) == 0 {
+		heap.Remove(&d.recoverySlotQueue, slot.heapIndex)
+		delete(d.recoverySlots, request.slot)
+	}
+}
+
+func (d *peerdas) removeBlobRecoveryOwnershipLocked(blockRoot common.Hash) {
+	request, exists := d.recoveryRequests[blockRoot]
+	delete(d.isRecovering, blockRoot)
+	delete(d.recoveryRequests, blockRoot)
+	delete(d.recoveryGenerations, blockRoot)
+	d.removeBlobRecoveryResultLocked(blockRoot)
+	if exists {
+		d.removeBlobRecoverySlotLocked(request)
+	}
+}
+
+func (d *peerdas) removeDelayedBlobRecoveryLocked(blockRoot common.Hash) {
+	delayed := d.recoveryRetries[blockRoot]
+	if delayed == nil {
+		return
+	}
+	heap.Remove(&d.recoveryRetryQueue, delayed.heapIndex)
+	delete(d.recoveryRetries, blockRoot)
 }
 
 func (d *peerdas) blobRecoveryResult(blockRoot common.Hash) *blobRecoveryResult {
@@ -573,6 +723,9 @@ func (d *peerdas) cacheBlobRecoveryResult(blockRoot common.Hash, result *blobRec
 	d.recoveringMutex.Lock()
 	defer d.recoveringMutex.Unlock()
 	d.initBlobRecoveryOwnershipLocked()
+	if request, exists := d.recoveryRequests[blockRoot]; exists && request.slot < d.recoveryPruneFloor {
+		return false
+	}
 	d.removeBlobRecoveryResultLocked(blockRoot)
 	for d.recoveryResultBytes+result.encodedBytes > maxBlobRecoveryResultBytes && len(d.recoveryResultOrder) > 0 {
 		evictedRoot := d.recoveryResultOrder[0]
@@ -606,8 +759,9 @@ func (d *peerdas) removeBlobRecoveryResult(blockRoot common.Hash) {
 	d.recoveringMutex.Unlock()
 }
 
-func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) {
+func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) bool {
 	d.initBlobRecoveryRetries()
+	d.recoveryRetryMutex.Lock()
 	d.recoveringMutex.Lock()
 	d.initBlobRecoveryOwnershipLocked()
 	if owned, exists := d.recoveryRequests[request.blockRoot]; exists {
@@ -615,43 +769,34 @@ func (d *peerdas) delayBlobRecovery(request recoverBlobsRequest) {
 	} else {
 		d.recoveryRequests[request.blockRoot] = request
 		d.recoveryGenerations[request.blockRoot] = 1
+		d.trackBlobRecoverySlotLocked(request)
+	}
+	if request.slot < d.recoveryPruneFloor {
+		d.removeDelayedBlobRecoveryLocked(request.blockRoot)
+		d.removeBlobRecoveryOwnershipLocked(request.blockRoot)
+		d.recoveringMutex.Unlock()
+		d.recoveryRetryMutex.Unlock()
+		return false
 	}
 	d.isRecovering[request.blockRoot] = false
 	d.recoveringMutex.Unlock()
-	var evictedRoot common.Hash
-	var evicted bool
-	d.recoveryRetryMutex.Lock()
-	if _, exists := d.recoveryRetries[request.blockRoot]; !exists {
-		if len(d.recoveryRetries) == maxBlobRecoveryDelayedRetries {
-			evictedRoot = d.recoveryRetryOrder[0]
-			d.recoveryRetryOrder = d.recoveryRetryOrder[1:]
-			delete(d.recoveryRetries, evictedRoot)
-			evicted = true
-		}
-		d.recoveryRetryOrder = append(d.recoveryRetryOrder, request.blockRoot)
-	}
-	d.recoveryRetries[request.blockRoot] = delayedRecoverBlobsRequest{
-		request:   request,
-		notBefore: time.Now().Add(blobRecoveryValidationRetryInterval),
-	}
-	if evicted {
-		d.recoveringMutex.Lock()
-		if active := d.isRecovering[evictedRoot]; !active {
-			delete(d.isRecovering, evictedRoot)
-			delete(d.recoveryRequests, evictedRoot)
-			delete(d.recoveryGenerations, evictedRoot)
-			d.removeBlobRecoveryResultLocked(evictedRoot)
-		}
-		d.recoveringMutex.Unlock()
+
+	notBefore := time.Now().Add(blobRecoveryValidationRetryInterval)
+	if existing := d.recoveryRetries[request.blockRoot]; existing != nil {
+		existing.request = request
+		existing.notBefore = notBefore
+		heap.Fix(&d.recoveryRetryQueue, existing.heapIndex)
+	} else {
+		delayed := &delayedRecoverBlobsRequest{request: request, notBefore: notBefore, heapIndex: -1}
+		d.recoveryRetries[request.blockRoot] = delayed
+		heap.Push(&d.recoveryRetryQueue, delayed)
 	}
 	d.recoveryRetryMutex.Unlock()
-	if evicted {
-		log.Warn("evicted delayed blob recovery at capacity", "blockRoot", evictedRoot)
-	}
 	select {
 	case d.recoveryRetryWake <- struct{}{}:
 	default:
 	}
+	return true
 }
 
 func (d *peerdas) nextBlobRecoveryRequest(ctx context.Context) (recoverBlobsRequest, bool) {
@@ -659,25 +804,14 @@ func (d *peerdas) nextBlobRecoveryRequest(ctx context.Context) (recoverBlobsRequ
 	for {
 		now := time.Now()
 		var next time.Time
-		var dueRoot common.Hash
-		var due delayedRecoverBlobsRequest
-		var hasDue bool
-		var dueIndex int
 		d.recoveryRetryMutex.Lock()
-		for index, root := range d.recoveryRetryOrder {
-			delayed := d.recoveryRetries[root]
-			if !hasDue && !delayed.notBefore.After(now) {
-				dueRoot = root
-				due = delayed
-				hasDue = true
-				dueIndex = index
-				continue
-			}
-			if next.IsZero() || delayed.notBefore.Before(next) {
-				next = delayed.notBefore
+		if d.recoveryRetryQueue.Len() > 0 {
+			next = d.recoveryRetryQueue[0].notBefore
+			if d.recoveryRetryAfter.After(next) {
+				next = d.recoveryRetryAfter
 			}
 		}
-		if hasDue {
+		if !next.IsZero() && !next.After(now) {
 			if !d.recoveryPreferRetry {
 				select {
 				case request := <-d.recoverBlobsQueue:
@@ -687,12 +821,12 @@ func (d *peerdas) nextBlobRecoveryRequest(ctx context.Context) (recoverBlobsRequ
 				default:
 				}
 			}
-			delete(d.recoveryRetries, dueRoot)
-			copy(d.recoveryRetryOrder[dueIndex:], d.recoveryRetryOrder[dueIndex+1:])
-			d.recoveryRetryOrder = d.recoveryRetryOrder[:len(d.recoveryRetryOrder)-1]
+			delayed := heap.Pop(&d.recoveryRetryQueue).(*delayedRecoverBlobsRequest)
+			delete(d.recoveryRetries, delayed.request.blockRoot)
+			d.recoveryRetryAfter = now.Add(blobRecoveryRetryServiceInterval())
 			d.recoveryPreferRetry = false
 			d.recoveryRetryMutex.Unlock()
-			return due.request, true
+			return delayed.request, true
 		}
 		d.recoveryRetryMutex.Unlock()
 
@@ -726,6 +860,10 @@ func (d *peerdas) claimBlobRecovery(request recoverBlobsRequest) (recoverBlobsRe
 	d.recoveringMutex.Lock()
 	defer d.recoveringMutex.Unlock()
 	d.initBlobRecoveryOwnershipLocked()
+	if request.slot < d.recoveryPruneFloor {
+		d.removeBlobRecoveryOwnershipLocked(request.blockRoot)
+		return recoverBlobsRequest{}, 0, false
+	}
 	active, exists := d.isRecovering[request.blockRoot]
 	if active {
 		return recoverBlobsRequest{}, 0, false
@@ -734,12 +872,14 @@ func (d *peerdas) claimBlobRecovery(request recoverBlobsRequest) (recoverBlobsRe
 		d.isRecovering[request.blockRoot] = false
 		d.recoveryRequests[request.blockRoot] = request
 		d.recoveryGenerations[request.blockRoot] = 1
+		d.trackBlobRecoverySlotLocked(request)
 	}
 	owned, exists := d.recoveryRequests[request.blockRoot]
 	if !exists {
 		owned = request
 		d.recoveryRequests[request.blockRoot] = request
 		d.recoveryGenerations[request.blockRoot] = 1
+		d.trackBlobRecoverySlotLocked(request)
 	}
 	d.isRecovering[request.blockRoot] = true
 	return owned, d.recoveryGenerations[request.blockRoot], true
@@ -747,55 +887,53 @@ func (d *peerdas) claimBlobRecovery(request recoverBlobsRequest) (recoverBlobsRe
 
 func (d *peerdas) releaseBlobRecovery(blockRoot common.Hash, generation uint64) {
 	d.recoveringMutex.Lock()
+	request, exists := d.recoveryRequests[blockRoot]
+	if !exists {
+		d.recoveringMutex.Unlock()
+		return
+	}
+	if request.slot < d.recoveryPruneFloor {
+		d.removeBlobRecoveryOwnershipLocked(blockRoot)
+		d.recoveringMutex.Unlock()
+		return
+	}
 	if current := d.recoveryGenerations[blockRoot]; current != generation {
-		request := d.recoveryRequests[blockRoot]
 		d.isRecovering[blockRoot] = false
 		d.recoveringMutex.Unlock()
 		d.delayBlobRecovery(request)
 		return
 	}
-	delete(d.isRecovering, blockRoot)
-	delete(d.recoveryRequests, blockRoot)
-	delete(d.recoveryGenerations, blockRoot)
-	d.removeBlobRecoveryResultLocked(blockRoot)
+	d.removeBlobRecoveryOwnershipLocked(blockRoot)
 	d.recoveringMutex.Unlock()
 }
 
 func (d *peerdas) clearDelayedBlobRecoveries() {
 	d.initBlobRecoveryRetries()
 	d.recoveryRetryMutex.Lock()
-	roots := make([]common.Hash, 0, len(d.recoveryRetries))
-	for root := range d.recoveryRetries {
-		roots = append(roots, root)
-		delete(d.recoveryRetries, root)
-	}
-	d.recoveryRetryOrder = nil
-	d.recoveryRetryMutex.Unlock()
 	d.recoveringMutex.Lock()
-	for _, root := range roots {
-		if active := d.isRecovering[root]; !active {
-			delete(d.isRecovering, root)
-			delete(d.recoveryRequests, root)
-			delete(d.recoveryGenerations, root)
-		}
-	}
+	d.recoveryRetries = make(map[common.Hash]*delayedRecoverBlobsRequest)
+	d.recoveryRetryQueue = nil
+	d.recoveryRetryAfter = time.Time{}
+	d.recoveryPreferRetry = false
 	for root, active := range d.isRecovering {
 		if !active {
-			delete(d.isRecovering, root)
-			delete(d.recoveryRequests, root)
-			delete(d.recoveryGenerations, root)
+			d.removeBlobRecoveryOwnershipLocked(root)
 		}
 	}
 	d.recoveryResults = make(map[common.Hash]*blobRecoveryResult)
 	d.recoveryResultOrder = nil
 	d.recoveryResultBytes = 0
 	d.recoveringMutex.Unlock()
+	d.recoveryRetryMutex.Unlock()
 }
 
 func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 	d.recoveringMutex.Lock()
 	defer d.recoveringMutex.Unlock()
 	d.initBlobRecoveryOwnershipLocked()
+	if request.slot < d.recoveryPruneFloor {
+		return nil
+	}
 	if _, ok := d.isRecovering[request.blockRoot]; ok {
 		owned := d.recoveryRequests[request.blockRoot]
 		if owned.metadata == nil && request.metadata != nil {
@@ -807,13 +945,12 @@ func (d *peerdas) enqueueBlobRecovery(request recoverBlobsRequest) error {
 	d.isRecovering[request.blockRoot] = false
 	d.recoveryRequests[request.blockRoot] = request
 	d.recoveryGenerations[request.blockRoot] = 1
+	d.trackBlobRecoverySlotLocked(request)
 	select {
 	case d.recoverBlobsQueue <- request:
 		return nil
 	default:
-		delete(d.isRecovering, request.blockRoot)
-		delete(d.recoveryRequests, request.blockRoot)
-		delete(d.recoveryGenerations, request.blockRoot)
+		d.removeBlobRecoveryOwnershipLocked(request.blockRoot)
 		return errors.New("failed to schedule recover: capacity reached")
 	}
 }
@@ -999,8 +1136,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			validation, _ := d.storedBlobRecoveryValidation(ctx, toRecover.metadata)
 			if validation == blobRecoveryUnavailable && ctx.Err() == nil {
 				d.cacheBlobRecoveryResult(blockRoot, result)
-				d.delayBlobRecovery(toRecover)
-				return true
+				return d.delayBlobRecovery(toRecover)
 			}
 			if validation != blobRecoveryInvalid {
 				return
@@ -1009,8 +1145,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			count, err := d.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 			if err != nil && ctx.Err() == nil {
 				d.cacheBlobRecoveryResult(blockRoot, result)
-				d.delayBlobRecovery(toRecover)
-				return true
+				return d.delayBlobRecovery(toRecover)
 			}
 			if err != nil || count > 0 {
 				return
@@ -1124,8 +1259,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			switch validation {
 			case blobRecoveryUnavailable:
 				if ctx.Err() == nil {
-					d.delayBlobRecovery(toRecover)
-					retryScheduled = true
+					retryScheduled = d.delayBlobRecovery(toRecover)
 				}
 			case blobRecoveryInvalid:
 				retryScheduled = recover(toRecover)
@@ -1134,8 +1268,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			count, err := d.blobStorage.KzgCommitmentsCount(ctx, toRecover.blockRoot)
 			if err != nil {
 				if ctx.Err() == nil {
-					d.delayBlobRecovery(toRecover)
-					retryScheduled = true
+					retryScheduled = d.delayBlobRecovery(toRecover)
 				}
 			} else if count == 0 && ctx.Err() == nil {
 				retryScheduled = recover(toRecover)
