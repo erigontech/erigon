@@ -505,7 +505,7 @@ func TestHasBlockChildAtOrAfterUsesValidatedChildren(t *testing.T) {
 	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
 }
 
-func TestHasBlockEquivocation(t *testing.T) {
+func TestHasBlockEquivocationUsesValidatedHeaders(t *testing.T) {
 	f := &forkGraphDisk{}
 	root := common.Hash{1}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
@@ -513,21 +513,18 @@ func TestHasBlockEquivocation(t *testing.T) {
 	block.Block.ProposerIndex = 9
 	f.blocks.Store(root, block)
 
+	require.False(t, f.HasBlockEquivocation(64, 9, common.Hash{2}))
+	f.headers.Store(root, &cltypes.BeaconBlockHeader{Slot: 64, ProposerIndex: 9})
 	require.True(t, f.HasBlockEquivocation(64, 9, common.Hash{2}))
 	require.False(t, f.HasBlockEquivocation(64, 9, root))
 	require.False(t, f.HasBlockEquivocation(64, 8, common.Hash{2}))
+	require.False(t, f.HasBlockEquivocation(65, 9, common.Hash{2}))
 }
 
 func TestHasBlockEquivocationUsesPruneBoundary(t *testing.T) {
 	f := &forkGraphDisk{}
-	retained := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-	retained.Block.Slot = 64
-	retained.Block.ProposerIndex = 9
-	pruned := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-	pruned.Block.Slot = 63
-	pruned.Block.ProposerIndex = 9
-	f.blocks.Store(common.Hash{1}, retained)
-	f.blocks.Store(common.Hash{2}, pruned)
+	f.headers.Store(common.Hash{1}, &cltypes.BeaconBlockHeader{Slot: 64, ProposerIndex: 9})
+	f.headers.Store(common.Hash{2}, &cltypes.BeaconBlockHeader{Slot: 63, ProposerIndex: 9})
 	f.lowestAvailableBlock.Store(65)
 
 	require.True(t, f.HasBlockEquivocation(64, 9, common.Hash{3}))
