@@ -18,6 +18,7 @@ package seg
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -29,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
@@ -454,4 +456,16 @@ func TestCompressorCloseReleasesWorkers(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close() returned while pattern workers are still running")
 	}
+}
+
+// TestCompressorRejectsOversizedPatternLen: patterns become etl keys, and etl
+// panics on a key it cannot index. MaxPatternLen is operator-overridable, so
+// the bound has to be checked rather than discovered mid-compression.
+func TestCompressorRejectsOversizedPatternLen(t *testing.T) {
+	logger := log.New()
+	cfg := DefaultCfg
+	cfg.MaxPatternLen = etl.MaxKeyLen + 1
+	_, err := NewCompressor(context.Background(), t.Name(), filepath.Join(t.TempDir(), "out.seg"), t.TempDir(), cfg, log.LvlDebug, logger)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "MaxPatternLen")
 }
