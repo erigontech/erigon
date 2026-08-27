@@ -161,12 +161,12 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query bind.Filte
 				close(closec)
 				return nil
 			case res := <-resc:
-				log, ok := res.(*types.Log)
+				log, ok := res.(*types.RPCLog)
 				if !ok {
 					return fmt.Errorf("unexpected type %T in SubscribeFilterLogs", res)
 				}
 
-				ch <- *log
+				ch <- log.Log
 			}
 		}
 	})

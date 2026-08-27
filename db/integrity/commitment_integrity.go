@@ -512,32 +512,47 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
-// commitmentReferencingMemo caches commitmentFileReferencing per file path. Integrity checks run
+// commitmentFileScan is what the referencing full-scan learned about one file. counts is complete
+// only when referenced is false: the scan stops at the first shortened key and leaves the tally to
+// the dereferencing pass, which walks the whole file anyway.
+type commitmentFileScan struct {
+	referenced bool
+	counts     derefCounts
+}
+
+// commitmentReferencingMemo caches scanCommitmentFile per file path. Integrity checks run
 // over an immutable file set within a process and several phases query the same file, so the full
 // content scan is done once per file.
-var commitmentReferencingMemo sync.Map // string -> bool
+var commitmentReferencingMemo sync.Map // string -> commitmentFileScan
+
+var errShortenedKeyFound = errors.New("shortened key found")
 
 // commitmentFileReferencing reports whether a commitment file carries shortened key references.
-// The integrity tool full-scans the content (not the file's version stamp) to catch a mis-stamped
-// file; any read error returns true rather than under-report as plain. Memoized per path.
 func commitmentFileReferencing(file state.VisibleFile) bool {
+	return scanCommitmentFile(file).referenced
+}
+
+// scanCommitmentFile full-scans the content (not the file's version stamp) to catch a mis-stamped
+// file; any read error reports referenced rather than under-report as plain. Memoized per path.
+func scanCommitmentFile(file state.VisibleFile) commitmentFileScan {
 	if v, ok := commitmentReferencingMemo.Load(file.Fullpath()); ok {
-		return v.(bool)
+		return v.(commitmentFileScan)
 	}
-	r := computeCommitmentFileReferencing(file)
+	r := computeCommitmentFileScan(file)
 	commitmentReferencingMemo.Store(file.Fullpath(), r)
 	return r
 }
 
-func computeCommitmentFileReferencing(file state.VisibleFile) bool {
+func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 	decomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
 		log.Root().Warn("[integrity] commitmentFileReferencing: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
-		return true
+		return commitmentFileScan{referenced: true}
 	}
 	defer decomp.Close()
 
 	g := seg.NewReader(decomp.MakeGetter(), statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
+	var counts derefCounts
 	var k, v []byte
 	for g.HasNext() {
 		k, _ = g.Next(k[:0])
@@ -548,11 +563,26 @@ func computeCommitmentFileReferencing(file state.VisibleFile) bool {
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			continue
 		}
-		if commitment.BranchData(v).HasShortenedKeys() {
-			return true
+		counts.branchKeys++
+		_, err := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			if isStorage {
+				if len(key) != length.Addr+length.Hash {
+					return nil, errShortenedKeyFound
+				}
+				counts.plainStorages++
+				return nil, nil
+			}
+			if len(key) != length.Addr {
+				return nil, errShortenedKeyFound
+			}
+			counts.plainAccounts++
+			return nil, nil
+		})
+		if err != nil {
+			return commitmentFileScan{referenced: true}
 		}
 	}
-	return false
+	return commitmentFileScan{counts: counts}
 }
 
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
@@ -560,15 +590,18 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !commitmentFileReferencing(file) {
+	if scan := scanCommitmentFile(file); !scan.referenced {
 		logger.Info(
 			"[integrity] CommitmentKvDeref skipped, no shortened keys found (full scan)",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
 			"steps", (endTxNum-startTxNum)/stepSize,
+			"branchKeys", scan.counts.branchKeys,
+			"plainAccounts", scan.counts.plainAccounts,
+			"plainStorages", scan.counts.plainStorages,
 		)
-		return derefCounts{}, nil
+		return scan.counts, nil
 	}
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	workers := max(dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4), 1)

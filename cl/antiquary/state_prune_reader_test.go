@@ -78,7 +78,7 @@ func runStateAntiquaryWithSnapshots(t *testing.T, ctx context.Context, blocks []
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	sd := synced_data.NewSyncedDataManager(cfg, true)
-	sd.OnHeadState(postState)
+	require.NoError(t, sd.OnHeadState(postState))
 	vt := state_accessors.NewStaticValidatorTable()
 	dirs := datadir.New(t.TempDir())
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, cfg, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
