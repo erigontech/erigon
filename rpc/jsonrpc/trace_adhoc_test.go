@@ -479,7 +479,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 
-			statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			require.NoError(t, err)
 			txContext := protocol.NewEVMTxContext(msg)

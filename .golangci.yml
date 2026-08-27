@@ -90,40 +90,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cl/aggregation\
-          |cl/antiquary\
-          |cl/beacon/beaconhttp\
-          |cl/beacon/handler\
-          |cl/cltypes\
-          |cl/cltypes/solid\
-          |cl/das\
-          |cl/merkle_tree\
-          |cl/p2p\
-          |cl/persistence/blob_storage\
-          |cl/persistence/state\
-          |cl/persistence/state/historical_states_reader\
-          |cl/phase1/core/state\
-          |cl/phase1/core/state/raw\
-          |cl/phase1/core/state/shuffling\
-          |cl/phase1/execution_client/block_collector\
-          |cl/phase1/forkchoice\
-          |cl/phase1/forkchoice/fork_graph\
-          |cl/phase1/network\
-          |cl/phase1/network/gossip\
-          |cl/phase1/network/services\
-          |cl/phase1/stages\
-          |cl/rpc\
-          |cl/sentinel\
-          |cl/sentinel/communication/ssz_snappy\
-          |cl/sentinel/handlers\
-          |cl/sentinel/httpreqresp\
-          |cl/sentinel/service\
-          |cl/spectest/consensus_tests\
-          |cl/transition/impl/eth2\
-          |cl/transition/impl/eth2/statechange\
-          |cl/utils/bls\
-          |cl/validator/devvalidator\
-          |cmd/capcli\
+          cmd/capcli\
           |cmd/caplin/caplin1\
           |cmd/evm\
           |cmd/evm/internal/t8ntool\
@@ -193,7 +160,6 @@ linters:
           |p2p/rlpx\
           |p2p/sentry\
           |p2p/sentry/libsentry\
-          |plugins/auth\
           |rpc\
           |rpc/jsonrpc\
           |rpc/rpchelper\

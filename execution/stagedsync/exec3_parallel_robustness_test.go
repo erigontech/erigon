@@ -24,7 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -1231,13 +1236,31 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 	}
 }
 
-// TestCommitmentBarrierCtxSurvivesTerminalCancel pins the barrier's context
-// choice. decideStop publishes the stopCause — cancelling the exec-loop ctx —
-// before completeBlock reaches the COMMITMENT_AFTER_EXEC barrier, so a barrier
-// that waits on that ctx returns immediately and completeBlock errors out
-// before triggerBatchCommitment. That silently drops the batch-end commitment:
-// state flushes for the whole range while the commitment domain stays at the
-// previous boundary.
+// TestCustomTraceSharedDomainsUsesParallelTrie pins custom_trace on the same
+// commitment trie the rest of the process selects. The variant is only upgraded
+// once a DB is wired in, so a construction that skips that step keeps the
+// sequential trie no matter what the flag says.
+func TestCustomTraceSharedDomainsUsesParallelTrie(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
+	statecfg.ExperimentalParallelCommitment = true
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
+
+	require.Equal(t, commitment.VariantParallelHexPatricia, doms.GetCommitmentCtx().Trie().Variant(),
+		"custom_trace commits on the sequential trie while the flag selects the parallel one")
+}
+
+// TestCommitmentBarrierCtxSurvivesTerminalCancel pins the context choice
+// commitmentBarrierCtx documents: a terminal block must outlive the stopCause
+// so triggerBatchCommitment still runs.
 func TestCommitmentBarrierCtxSurvivesTerminalCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1249,11 +1272,8 @@ func TestCommitmentBarrierCtxSurvivesTerminalCancel(t *testing.T) {
 }
 
 // TestWaitProcessedWithoutCommitStreamReturns covers exec-only
-// (DISCARD_COMMITMENT): commitResults is nil, so the calculator's loop never
-// runs and nothing ever calls markProcessed. Every escape in WaitProcessed is
-// then unreachable — processedWake is never closed, done needs Stop() (deferred
-// behind the parked exec loop) and ctx needs decideStop — so the barrier must
-// not wait at all.
+// (DISCARD_COMMITMENT), where WaitProcessed's in == nil fast path is the only
+// escape: see its comment for why every other one is unreachable there.
 func TestWaitProcessedWithoutCommitStreamReturns(t *testing.T) {
 	cc := &commitmentCalculator{
 		in:            nil,
