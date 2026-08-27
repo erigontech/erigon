@@ -24,7 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -1229,4 +1234,26 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			tc.check(t, wrapAsExecAbort(tc.origErr, tc.depTxIndex))
 		})
 	}
+}
+
+// TestCustomTraceSharedDomainsUsesParallelTrie pins custom_trace on the same
+// commitment trie the rest of the process selects. The variant is only upgraded
+// once a DB is wired in, so a construction that skips that step keeps the
+// sequential trie no matter what the flag says.
+func TestCustomTraceSharedDomainsUsesParallelTrie(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
+	statecfg.ExperimentalParallelCommitment = true
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
+
+	require.Equal(t, commitment.VariantParallelHexPatricia, doms.GetCommitmentCtx().Trie().Variant(),
+		"custom_trace commits on the sequential trie while the flag selects the parallel one")
 }
