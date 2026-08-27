@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -126,7 +125,11 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	// The stack is never Start()ed, so the deferred stack.Close() skips
 	// lifecycle Stop — stop the backend explicitly to close chaindata on exit.
-	defer ethereum.Stop()
+	defer func() {
+		if err := ethereum.Stop(); err != nil {
+			logger.Error("failed to stop ethereum backend", "err", err)
+		}
+	}()
 
 	err = ethereum.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
@@ -229,8 +232,10 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			return errInterrupted
 		}
 
-		br, _ := ethereum.BlockIO()
-		missing := missingBlocks(chainDB, blocks[:i], br)
+		missing, err := missingBlocks(chainDB, blocks[:i])
+		if err != nil {
+			return err
+		}
 		if len(missing) == 0 {
 			logger.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
@@ -249,39 +254,31 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 	return nil
 }
 
-func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
+func ChainHasBlock(chainDB kv.RwDB, block *types.Block) (bool, error) {
 	var chainHasBlock bool
 
-	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+	if err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
 		chainHasBlock = rawdb.HasBlock(tx, block.Hash(), block.NumberU64())
 		return nil
-	})
+	}); err != nil {
+		return false, err
+	}
 
-	return chainHasBlock
+	return chainHasBlock, nil
 }
 
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservices.FullBlockReader) []*types.Block {
-	var headBlock *types.Block
-	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		headBlock, err = blockReader.CurrentBlock(tx)
-		return err
-	})
-
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) ([]*types.Block, error) {
 	for i, block := range blocks {
-		// If we're behind the chain head, only check block, state is available at head
-		if headBlock.NumberU64() > block.NumberU64() {
-			if !ChainHasBlock(chainDB, block) {
-				return blocks[i:]
-			}
-			continue
+		has, err := ChainHasBlock(chainDB, block)
+		if err != nil {
+			return nil, err
 		}
-
-		if !ChainHasBlock(chainDB, block) {
-			return blocks[i:]
+		if !has {
+			return blocks[i:], nil
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {

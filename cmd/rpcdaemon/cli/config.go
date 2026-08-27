@@ -449,7 +449,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.LogStat("remote")
 			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
 
-			rawDB.View(context.Background(), func(tx kv.Tx) error {
+			if err := rawDB.View(context.Background(), func(tx kv.Tx) error {
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
 				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
@@ -457,7 +457,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					return histBlockNumProgress, err
 				})
 				return nil
-			})
+			}); err != nil {
+				logger.Error("[rpc] log stats", "err", err)
+			}
 		} else {
 			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 		}
@@ -477,7 +479,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					rawDB.View(context.Background(), func(tx kv.Tx) error {
+					if err := rawDB.View(context.Background(), func(tx kv.Tx) error {
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
 						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
@@ -485,7 +487,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 							return histBlockNumProgress, err
 						})
 						return nil
-					})
+					}); err != nil {
+						logger.Error("[rpc] log stats", "err", err)
+					}
 				}
 				return nil
 			})
@@ -808,7 +812,13 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			healthServer = grpcHealth.NewServer()
 			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		}
-		go grpcServer.Serve(grpcListener)
+		go func() {
+			// Serve returns nil once GracefulStop/Stop is called below, so any
+			// non-nil error here is a genuine listener failure worth logging.
+			if err := grpcServer.Serve(grpcListener); err != nil {
+				logger.Error("GRPC Server Fatal Error", "err", err)
+			}
+		}()
 		info = append(info, "grpc.port", cfg.GRPCPort)
 
 		defer func() {

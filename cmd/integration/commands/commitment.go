@@ -1342,7 +1342,11 @@ func visualizeCommitmentFiles(files []string) {
 		panic(err)
 	}
 	defer f.Close()
-	defer f.Sync()
+	defer func() {
+		if err := f.Sync(); err != nil {
+			panic(err)
+		}
+	}()
 
 	if err := page.Render(io.MultiWriter(f)); err != nil {
 		panic(err)
