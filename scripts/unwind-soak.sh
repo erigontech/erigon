@@ -234,17 +234,19 @@ inventory_drift() {
         echo "0 0"
         return
     fi
-    # Scope: top-level block snapshots (v1.1-*.seg) only. chain.toml
-    # also lists consensus-layer state under caplin/ but the disk scan
-    # is non-recursive so those never match — every caplin entry looks
-    # "missing" and drift deltas fire spuriously when Caplin advertises
-    # a new state-slot boundary during a run (routine, unrelated to
-    # setHead). setHead's assertion cares about EL block snapshots, so
-    # filter both sides to that scope with a matching predicate.
+    # Scope: EL block snapshots only (headers|bodies|transactions.seg).
+    # chain.toml also lists Caplin state under caplin/ (excluded by the
+    # scope regex on the toml side) and bare-name beaconblocks.seg
+    # (published without a caplin/ prefix but stored outside the
+    # top-level snapshots dir — also excluded by the scope regex).
+    # setHead correctness only depends on EL blocks; a Caplin
+    # advertising a new .seg mid-scenario would otherwise fire a
+    # spurious "missing on disk" delta unrelated to setHead.
+    local scope_re='(headers|bodies|transactions)\.seg$'
     local toml_files disk_files missing_on_disk on_disk_not_in_toml
     toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
-        | tr -d '"' | grep -v '/' | sort -u || true)
-    disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
+        | tr -d '"' | grep -v '/' | grep -E "$scope_re" | sort -u || true)
+    disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E "$scope_re" | sort -u || true)
     missing_on_disk=$(comm -23 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
     on_disk_not_in_toml=$(comm -13 <(echo "$toml_files") <(echo "$disk_files") | wc -l)
     echo "$missing_on_disk $on_disk_not_in_toml"
@@ -266,10 +268,11 @@ inventory_drift_names() {
         return
     fi
     local tag="$1"
+    local scope_re='(headers|bodies|transactions)\.seg$'
     local toml_files disk_files
     toml_files=$(grep -oE '^"[^"]+\.seg"' "$SNAP_DIR/chain.toml" 2>/dev/null \
-        | tr -d '"' | grep -v '/' | sort -u || true)
-    disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E '\.seg$' | sort -u || true)
+        | tr -d '"' | grep -v '/' | grep -E "$scope_re" | sort -u || true)
+    disk_files=$(ls "$SNAP_DIR" 2>/dev/null | grep -E "$scope_re" | sort -u || true)
     local extras missing
     extras=$(comm -13 <(echo "$toml_files") <(echo "$disk_files"))
     missing=$(comm -23 <(echo "$toml_files") <(echo "$disk_files"))
