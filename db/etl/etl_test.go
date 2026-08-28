@@ -1108,6 +1108,9 @@ func BenchmarkMergeSortFiles(b *testing.B) {
 	}
 }
 
+// BenchmarkSortableBufferSort covers the whole ordering cost: Sort orders each
+// chunk, and the merge that puts the chunks back in one key order runs in Next,
+// so timing Sort alone would miss half the work.
 func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
@@ -1149,6 +1152,8 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 				ref := makeBuffer(tc.count, tc.sorted)
 				b.StartTimer()
 				ref.Sort()
+				for _, _, ok := ref.Next(); ok; _, _, ok = ref.Next() {
+				}
 			}
 		})
 	}
