@@ -64,9 +64,20 @@ func SynthesizeBranchRow(mask uint16, maskKnown bool, records [16][]byte, record
 		return BranchRecordRead{Data: bytes.Clone(legacy)}, nil
 	}
 
+	var tombstoneMask uint16
+	for bitset := recordsPresent; bitset != 0; bitset &= bitset - 1 {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		if len(records[nibble]) == 0 {
+			tombstoneMask |= bit
+		}
+	}
+
 	effectiveMask := mask
 	if !maskKnown {
-		effectiveMask = recordsPresent | legacyMaps.AfterMap
+		effectiveMask = (recordsPresent | legacyMaps.AfterMap) &^ tombstoneMask
+	} else {
+		effectiveMask &^= tombstoneMask
 	}
 	if effectiveMask == 0 {
 		return BranchRecordRead{}, nil

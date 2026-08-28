@@ -140,6 +140,9 @@ func TestHexPatriciaHashedV3WritesFoldedMasksToParentEdges(t *testing.T) {
 	for key, record := range ms.cm {
 		v3Key := []byte(key)
 		require.True(t, nibbles.IsChildKeyV3(v3Key), "commitment key %x must be a v3 child key", v3Key)
+		if BranchData(record).IsTombstone() {
+			continue
+		}
 		var decoded cell
 		mask, err := DecodeRecordInto(record, &decoded)
 		require.NoError(t, err, "record %x", v3Key)

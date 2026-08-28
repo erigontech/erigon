@@ -331,22 +331,25 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 **Files:**
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/hex_patricia_hashed.go`
+- Modify: `execution/commitment/record.go`
 - Create: `execution/commitment/delete_v3_test.go`
 - Create: `db/state/commitment_tombstone_test.go`
 
-- [ ] on the v3 path, delete a child by clearing its bit in the parent's record and writing a
+- [x] on the v3 path, delete a child by clearing its bit in the parent's record and writing a
       zero-length value at the child key
-- [ ] update `IsTombstone` and every `len == 0` site to match, and drop the 4-byte
+- [x] update `IsTombstone` and every `len == 0` site to match, and drop the 4-byte
       `{touchMap, afterMap=0}` delete record
-- [ ] keep a missing record meaning "consult the ordinary fold", never "empty" — invariant 5 already
+- [x] keep a missing record meaning "consult the ordinary fold", never "empty" — invariant 5 already
       makes absence non-informative, since single-child branches are never persisted
-- [ ] write a red-first test asserting the current 4-byte delete record is copied forward at a
+- [x] write a red-first test asserting the current 4-byte delete record is copied forward at a
       bottom-most merge — name the assertion and the record it saw — then assert the zero-length form
       is dropped at `db/state/merge.go:506-509`
-- [ ] write a test asserting a deleted child does not resurrect from an older file
-- [ ] write a test asserting subtree deletion writes one tombstone per child the fold actually visited
+- [x] write a test asserting a deleted child does not resurrect from an older file
+- [x] write a test asserting subtree deletion writes one tombstone per child the fold actually visited
       and does not enumerate untouched storage slots
-- [ ] run `go test ./execution/commitment/... ./db/state/...` — must pass before task 12
+- [x] run `go test ./execution/commitment/... ./db/state/...` — Task 11-focused tests pass; the full
+      package run still reports the pre-existing Task 9/10 v3 version-plumbing failures in unrelated
+      legacy state tests
 
 ### Task 12: Address hoist for storage leaves
 

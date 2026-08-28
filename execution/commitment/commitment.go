@@ -359,7 +359,7 @@ func (be *BranchEncoder) ClearDeferred() {
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
-	if len(upd.prev) > 0 {
+	if upd.prev != nil {
 		if bytes.Equal(upd.prev, upd.raw) {
 			upd.encoded = nil
 			return nil
@@ -482,7 +482,7 @@ func (be *BranchEncoder) CollectUpdate(
 	isNew bool,
 ) error {
 	if be.edgeRecords {
-		return be.collectEdgeRecords(ctx, prefix, bitmap, cells)
+		return be.collectEdgeRecords(ctx, prefix, bitmap, touchMap, afterMap, cells)
 	}
 
 	var prev []byte
@@ -525,22 +525,27 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, bitmap uint16, cells *[16]cellEncodeData) error {
-	if bitmap == 0 {
+func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) error {
+	changed := bitmap | (touchMap &^ afterMap)
+	if changed == 0 {
 		return nil
 	}
 
 	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
-	for bitset := bitmap; bitset != 0; {
+	for bitset := changed; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		cell := &cells[nibble]
 		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
 		var record []byte
-		if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
-			record = EncodeLeafChild(cell)
+		if afterMap&bit == 0 {
+			record = make([]byte, 0)
 		} else {
-			record = EncodeBranchChild(cell.branchMask, cell)
+			cell := &cells[nibble]
+			if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+				record = EncodeLeafChild(cell)
+			} else {
+				record = EncodeBranchChild(cell.branchMask, cell)
+			}
 		}
 		if err := ctx.PutBranch(key, record, nil); err != nil {
 			return err
@@ -578,21 +583,26 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if be.edgeRecords {
-		if bitmap == 0 {
+		changed := bitmap | (touchMap &^ afterMap)
+		if changed == 0 {
 			return nil
 		}
 		be.pendingPrefixes.Set(prefix, struct{}{})
 		nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
-		for bitset := bitmap; bitset != 0; {
+		for bitset := changed; bitset != 0; {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
-			cell := &cells[nibble]
 			key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
 			var record []byte
-			if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
-				record = EncodeLeafChild(cell)
+			if afterMap&bit == 0 {
+				record = make([]byte, 0)
 			} else {
-				record = EncodeBranchChild(cell.branchMask, cell)
+				cell := &cells[nibble]
+				if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+					record = EncodeLeafChild(cell)
+				} else {
+					record = EncodeBranchChild(cell.branchMask, cell)
+				}
 			}
 			be.deferred = append(be.deferred, getDeferredUpdate(key, record, nil))
 			bitset ^= bit
@@ -728,10 +738,10 @@ func (branchData BranchData) ChildCount() (int, error) {
 	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4])), nil
 }
 
-func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+func (branchData BranchData) IsTombstone() bool { return branchData != nil && len(branchData) == 0 }
 
 func (branchData BranchData) String() string {
-	if branchData.IsTombstone() {
+	if branchData == nil || branchData.IsTombstone() {
 		return ""
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
@@ -973,7 +983,10 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	if branchData2 == nil {
 		return branchData, nil
 	}
-	if branchData == nil {
+	if branchData2.IsTombstone() {
+		return branchData2, nil
+	}
+	if branchData == nil || branchData.IsTombstone() {
 		return branchData2, nil
 	}
 
@@ -1168,10 +1181,13 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 
 // branch2 shadows branch1 where both touch the same cell.
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
-	if len(branch2) == 0 {
+	if branch2 == nil {
 		return branch1, nil
 	}
-	if len(branch1) == 0 {
+	if branch2.IsTombstone() {
+		return branch2, nil
+	}
+	if branch1 == nil || branch1.IsTombstone() {
 		return branch2, nil
 	}
 

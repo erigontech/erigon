@@ -2007,10 +2007,14 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 	return hph.collectDeleteUpdate(updateKey, row)
 }
 
-// collectDeleteUpdate encodes a branch deletion if a branch existed before at this row.
+// collectDeleteUpdate removes the child records of a branch that is no longer persisted.
 func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int) error {
-	if hph.branchBefore[row] {
-		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil, false); err != nil {
+	if hph.branchBefore[row] || hph.cfg.EdgeRecords {
+		touchMap := hph.touchMap[row]
+		if hph.cfg.EdgeRecords {
+			touchMap |= hph.afterMap[row]
+		}
+		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, touchMap, 0, nil, false); err != nil {
 			return fmt.Errorf("failed to encode branch deletion: %w", err)
 		}
 	}
