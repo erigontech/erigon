@@ -295,11 +295,23 @@ const (
 // predictable iterations instead of one data-dependent branch per label.
 // labels carries eight bytes of tail padding to keep the last word in bounds;
 // a hit in that padding, or in the next state's labels, lands at k >= hi.
+// wmul, wadd and wsub are this package's deliberately modular arithmetic. The
+// wraparound is load-bearing, so it is expressed here once rather than at each
+// use — the same operations Rust spells wrapping_mul/wrapping_add/wrapping_sub.
+// Package-level -overflowdetect exemption does not cover these, because they
+// are inlined into instrumented callers.
+
+// overflow_false_positive
+func wmul(a, b uint64) uint64 { return a * b }
+
+// overflow_false_positive
+func wsub(a, b uint64) uint64 { return a - b }
+
 func swarEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
-	bcast := uint64(b) * swarOnes
+	bcast := wmul(uint64(b), swarOnes)
 	for i := lo; i < hi; i += 8 {
 		v := binary.LittleEndian.Uint64(labels[i:]) ^ bcast
-		if z := (v - swarOnes) &^ v & swarHighs; z != 0 {
+		if z := wsub(v, swarOnes) &^ v & swarHighs; z != 0 {
 			// borrows only propagate up, so the lowest flagged byte is a real hit
 			if k := i + int32(bits.TrailingZeros64(z)>>3); k < hi {
 				return children[k]
