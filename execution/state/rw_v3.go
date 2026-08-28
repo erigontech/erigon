@@ -225,19 +225,13 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			}
 
 			// Contract creation: clear stale storage before writing new account.
-			//
-			// An address with no committed account holds no committed storage:
-			// storage is only written for an account that exists, and deleting
-			// an account wipes its storage prefix. So probe the account first —
-			// that read is served by the per-file existence filters, while the
-			// prefix walk has to seek the .bt index of every storage .kv file.
 			if d.createContract {
-				prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+				hasAcc, err := hasCommittedAccount(domains, roTx, address[:])
 				if err != nil {
 					return err
 				}
-				if len(prevAcc) == 0 {
-					if err := assertNoCommittedStorage(domains, roTx, address[:]); err != nil {
+				if !hasAcc {
+					if err := assertNoCommittedStorage(domains, roTx, address[:], "createContract"); err != nil {
 						return err
 					}
 				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
@@ -851,10 +845,25 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 	return nil, nil, nil, nil
 }
 
+// hasCommittedAccount probes the account domain for addr. An address with no
+// committed account holds no committed storage: storage is only written for an
+// account that exists, and deleting an account wipes its storage prefix. The
+// probe is served by the per-file existence filters, while a storage-prefix walk
+// has to seek the .bt index of every storage .kv file — the same price whether
+// the address owns a thousand slots or none.
+func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
+	if err != nil {
+		return false, err
+	}
+	return len(enc) > 0, nil
+}
+
 // assertNoCommittedStorage panics when addr has committed storage but no
-// committed account, so a violation of that invariant surfaces instead of
-// silently skipping a storage wipe. No-op unless asserts are enabled.
-func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) error {
+// committed account, so a violation of the hasCommittedAccount invariant
+// surfaces instead of silently skipping a storage wipe. what names the caller so
+// a trip points at the right path. No-op unless asserts are enabled.
+func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {
 		return nil
 	}
@@ -866,7 +875,7 @@ func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		return err
 	}
 	if found > 0 {
-		panic(fmt.Sprintf("createContract: %x has storage but no account", addr))
+		panic(fmt.Sprintf("%s: %x has storage but no account", what, addr))
 	}
 	return nil
 }
@@ -1201,19 +1210,6 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	delete(c.currentStorage, addr)
 	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpDeleteAccount, addr: addr, txNum: txNum})
 	c.mu.Unlock()
-}
-
-// deletedInBlock reports an address destroyed earlier in this block. DeleteAccount
-// records that as a present-but-nil current entry, which the block-end flush turns
-// into the domain deletes. Nil receiver: no cache, so no such window.
-func (c *BlockStateCache) deletedInBlock(addr accounts.Address) bool {
-	if c == nil {
-		return false
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	enc, present := c.currentAccounts[addr]
-	return present && enc == nil
 }
 
 // GetCurrentAccountDecoded returns the latest account (including intra-block

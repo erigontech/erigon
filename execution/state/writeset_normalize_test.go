@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -260,11 +259,8 @@ func TestAssertSelfDestructNormalized(t *testing.T) {
 }
 
 // TestCommittedStorageKeys pins the account probe that guards the self-destruct
-// storage walk. The walk seeks the .bt index of every storage .kv file, so its
-// cost is set by the file count rather than by how much storage the address
-// owns -- an address that owns none pays full price. A contract created and
-// destroyed inside one batch never has a committed account, which is what makes
-// the probe worth its own read.
+// storage walk. A contract created and destroyed inside one batch never has a
+// committed account, which is what makes the probe worth its own read.
 func TestCommittedStorageKeys(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	slot := common.HexToHash("0x01")
@@ -283,7 +279,7 @@ func TestCommittedStorageKeys(t *testing.T) {
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 0, nil))
 		putStorage(t, addr)
 
-		keys, err := CommittedStorageKeys(domains, tx, nil, addr)
+		keys, err := CommittedStorageKeys(domains, tx, addr)
 		require.NoError(t, err)
 		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys)
 	})
@@ -296,27 +292,19 @@ func TestCommittedStorageKeys(t *testing.T) {
 		addr := accounts.InternAddress(common.HexToAddress("0xbb"))
 		putStorage(t, addr)
 
-		keys, err := CommittedStorageKeys(domains, tx, nil, addr)
+		keys, err := CommittedStorageKeys(domains, tx, addr)
 		require.NoError(t, err)
 		require.Empty(t, keys, "walked the storage prefix for an address with no committed account")
 	})
 
-	t.Run("walks when the account was destroyed in this block", func(t *testing.T) {
-		// The self-destruct apply path leaves the storage prefix in the domain
-		// until the block-end flush when a block cache is active, so an absent
-		// account no longer implies absent storage. Skipping here loses the
-		// cascade the trie needs and the root goes wrong.
+	t.Run("skips silently when neither account nor storage is committed", func(t *testing.T) {
 		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
-		dbg.AssertEnabled = false
-		addr := accounts.InternAddress(common.HexToAddress("0xdd"))
-		putStorage(t, addr)
-		cache := NewBlockStateCache()
-		cache.DeleteAccount(addr, 0)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xee"))
 
-		keys, err := CommittedStorageKeys(domains, tx, cache, addr)
+		keys, err := CommittedStorageKeys(domains, tx, addr)
 		require.NoError(t, err)
-		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys,
-			"skipped the walk for an address destroyed earlier in this block")
+		require.Empty(t, keys)
 	})
 
 	t.Run("asserts on storage without an account", func(t *testing.T) {
@@ -325,55 +313,7 @@ func TestCommittedStorageKeys(t *testing.T) {
 		addr := accounts.InternAddress(common.HexToAddress("0xcc"))
 		putStorage(t, addr)
 
-		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, nil, addr) },
+		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, addr) },
 			"the skip rests on this invariant, so breaking it must not stay silent")
 	})
-}
-
-// TestSelfDestructCascade_PerTxnHistory pins per-txn history granularity across a
-// self-destruct. Erigon records history per transaction, so an RPC re-exec of a
-// later transaction must see the destroyed contract's storage already gone while
-// a read at the destroying txNum still sees it. Those history records exist only
-// because the cascade enumerates the committed slots -- a walk that is skipped
-// when it should not be leaves the deletes out of history, which a trie-root
-// check cannot see since it only compares the block's final state.
-func TestSelfDestructCascade_PerTxnHistory(t *testing.T) {
-	_, tx, domains := NewTestRwTx(t)
-	addr := accounts.InternAddress(common.HexToAddress("0x5d"))
-	slot := common.HexToHash("0x07")
-	av := addr.Value()
-	composite := append(append([]byte{}, av[:]...), slot[:]...)
-
-	const preTxNum, sdTxNum = uint64(1), uint64(4)
-
-	acc := accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
-	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), preTxNum, nil))
-	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{0xaa}, preTxNum, nil))
-
-	ws := &WriteSet{}
-	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
-		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}},
-		Val:         true,
-	})
-	domainKeys := func(a accounts.Address) []accounts.StorageKey {
-		keys, err := CommittedStorageKeys(domains, tx, nil, a)
-		require.NoError(t, err)
-		return keys
-	}
-	out, err := ws.Normalize(NewVersionMap(nil), 1, 0, &minimalStateReader{}, domainKeys, false, false, false)
-	require.NoError(t, err)
-	_, cascaded := out.GetStorage(addr, accounts.InternKey(slot))
-	require.True(t, cascaded, "the cascade dropped the committed slot, so history never records its delete")
-
-	require.NoError(t, out.Apply(domains, tx, 0, sdTxNum, nil, &chain.Rules{}, nil, false))
-	// History is queried through the tx, so the batch has to reach it first.
-	require.NoError(t, domains.Flush(t.Context(), tx))
-
-	before, _, err := tx.GetAsOf(kv.StorageDomain, composite, sdTxNum)
-	require.NoError(t, err)
-	require.Equal(t, []byte{0xaa}, before, "history lost the slot value the destroying txn read")
-
-	after, _, err := tx.GetAsOf(kv.StorageDomain, composite, sdTxNum+1)
-	require.NoError(t, err)
-	require.Empty(t, after, "a later txNum still sees the destroyed contract's storage")
 }

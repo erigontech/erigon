@@ -241,7 +241,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		blockRules := blockCtx.Rules(cfg.chainConfig)
 		var domainKeysErr error
 		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-			keys, err := state.CommittedStorageKeys(sd, tx, nil, addr)
+			keys, err := state.CommittedStorageKeys(sd, tx, addr)
 			if err != nil {
 				domainKeysErr = err
 				return nil
