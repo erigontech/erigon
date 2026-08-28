@@ -394,10 +394,12 @@ func (ctx *PrecompileContext) CallCode(gas *PrecompileGas, addr accounts.Address
 }
 
 // DelegateCall runs a nested DELEGATECALL out of the precompile's frame, which
-// keeps this frame's own identity and caller.
-func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) ([]byte, error) {
+// keeps this frame's own identity, caller and value. DELEGATECALL has no value
+// operand — the callee observes the calling frame's msg.value — so there is
+// deliberately no value parameter here.
+func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
 	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.Evm.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, orZero(value), handed)
+		return ctx.Evm.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, orZero(ctx.Value), handed)
 	})
 }
 

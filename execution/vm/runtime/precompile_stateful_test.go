@@ -692,7 +692,7 @@ func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas
 	case "callcode":
 		_, p.callErr = ctx.CallCode(gas, p.inner, nil, 50_000, nil)
 	case "delegatecall":
-		_, p.callErr = ctx.DelegateCall(gas, p.inner, nil, 50_000, nil)
+		_, p.callErr = ctx.DelegateCall(gas, p.inner, nil, 50_000)
 	default:
 		_, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, nil)
 	}
@@ -788,4 +788,32 @@ func TestStatefulPrecompileHandoffCoversEveryReentryKind(t *testing.T) {
 			require.Equal(t, int64(charge), gasUsed.State)
 		})
 	}
+}
+
+// TestStatefulPrecompileDelegateCallKeepsFrameValue pins that a nested
+// DELEGATECALL out of a precompile preserves the calling frame's msg.value.
+// DELEGATECALL takes no value operand, so a helper that let the caller supply
+// one would hand the delegate frame a value the opcode never could.
+func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
+	const chainID = 900430
+	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa8}))
+	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa9}))
+	inner := &recordingStatefulPrecompile{}
+	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall"}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, outerAddr)
+
+	value := *uint256.NewInt(7)
+	_, _, _, err := vmenv.Call(cfg.Origin, outerAddr, nil,
+		mdgas.MdGas{Execution: 100_000}, value, false)
+	require.NoError(t, err)
+	require.NoError(t, outer.callErr)
+	require.Len(t, inner.calls, 1)
+	require.True(t, inner.calls[0].Value.Eq(&value),
+		"the delegate frame must observe the calling frame's value")
 }
