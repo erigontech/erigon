@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -996,7 +997,7 @@ func TestFlushErrorDoesNotBuffer(t *testing.T) {
 	s := New(goneWriter{}).(*StackStream)
 
 	chunk := strings.Repeat("x", 4096)
-	for range 2000 {
+	for range 128 * FlushThreshold / len(chunk) {
 		s.WriteRaw(chunk)
 	}
 
@@ -1156,4 +1157,59 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 			require.NotContains(t, string(inner.Buffer()), `"result":`)
 		})
 	}
+}
+
+// Put clears the writer as well as the bytes. A pooled stream that kept one
+// would pin the connection it came from until the next Get.
+func TestPutReleasesWriterAndBytes(t *testing.T) {
+	var out bytes.Buffer
+	s := Get(&out).(*StackStream)
+	s.WriteString("pending")
+	Put(s)
+
+	require.Empty(t, s.Buffer())
+	require.NoError(t, s.Flush())
+	require.Empty(t, out.String())
+}
+
+// A response above the bound is dropped rather than pooled, so one outsized
+// value cannot pin its peak per goroutine.
+func TestPutDropsOversizedBuffer(t *testing.T) {
+	s := Get(nil).(*StackStream)
+	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
+	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
+
+	Put(s)
+	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
+	require.NotSame(t, s, Get(nil).(*StackStream))
+}
+
+func BenchmarkStreamAcquire(b *testing.B) {
+	result := strings.Repeat("0xabcdef", 512)
+	write := func(s Stream) {
+		s.WriteObjectStart()
+		s.WriteObjectField("jsonrpc")
+		s.WriteString("2.0")
+		s.WriteMore()
+		s.WriteObjectField("result")
+		s.WriteString(result)
+		s.WriteObjectEnd()
+	}
+	b.Run("impl=new", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			s := New(io.Discard)
+			write(s)
+			_ = s.Flush()
+		}
+	})
+	b.Run("impl=pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			s := Get(io.Discard)
+			write(s)
+			_ = s.Flush()
+			Put(s)
+		}
+	})
 }
