@@ -52,6 +52,8 @@ type TxEvent struct {
 	BlockNum   uint64
 	BlockTime  uint64 // header timestamp (0 if unavailable on this exec path)
 	TxNum      uint64
+	TxHash     common.Hash // this tx's hash (zero for the synthetic block-end task)
+	Status     uint64      // receipt status: 1 success, 0 reverted (undefined when TxHash is zero)
 	Logs       []*types.Log
 	Senders    []common.Address // trace "froms" (callers, at the top and nested frames)
 	Callers    []common.Address // trace "tos" (callees)

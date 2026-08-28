@@ -431,6 +431,13 @@ func (rs *StateV3) ApplyTxIndexes(
 			ChainID: chainID, BlockNum: blockNum, BlockTime: blockTime, TxNum: txNum,
 			Logs: logs, IsBlockEnd: isBlockEnd, Tx: roTx,
 		}
+		// Carry the tx identity + status so an observer can CONFIRM its own tx directly off the
+		// exec feed (no fork-choice / receipts-subscription round-trip). receipt is nil for the
+		// synthetic block-end task; TxHash stays zero there.
+		if receipt != nil {
+			ev.TxHash = receipt.TxHash
+			ev.Status = receipt.Status
+		}
 		if len(traceFroms) > 0 {
 			ev.Senders = make([]common.Address, 0, len(traceFroms))
 			for a := range traceFroms {
