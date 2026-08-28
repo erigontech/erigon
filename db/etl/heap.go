@@ -154,11 +154,9 @@ func keyHead(k []byte) uint64 {
 	if len(k) >= 8 {
 		return binary.BigEndian.Uint64(k)
 	}
-	var h uint64
-	for _, c := range k {
-		h = h<<8 | uint64(c)
-	}
-	return h << (8 * (8 - len(k))) //nolint:gosec
+	var b [8]byte // len(k) < 8
+	copy(b[:], k)
+	return binary.BigEndian.Uint64(b[:])
 }
 
 // rewind puts the cursor on the first entry in key order.
