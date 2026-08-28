@@ -260,6 +260,29 @@ func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
 	}
 }
 
+// A step recorded after a frame exit must land in the array that exit opened.
+// The separator has to follow the steps written, not the prologue: keyed on the
+// prologue it would put a comma into an array still empty.
+func TestJsonStreamLogger_SeparatorFollowsStepsNotPrologue(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	l.OnExit(1, nil, 0, nil, false)
+	l.OnOpcode(0, byte(vm.MLOAD), 100, 3, &mockOpContext{}, nil, 1, nil)
+	l.OnExit(0, nil, 0, nil, false)
+
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var decoded struct {
+		StructLogs []map[string]any `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "produced %s", buf.Bytes())
+	require.Len(t, decoded.StructLogs, 1)
+}
+
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
 // 0x-prefixed 64-char hex strings and that a partial last word is padded to 32 bytes.
 func TestJsonStreamLogger_MemoryEncoding(t *testing.T) {
