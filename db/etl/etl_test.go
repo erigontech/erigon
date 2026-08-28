@@ -929,7 +929,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 }
 
 // TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
-// memoryDataProvider (Get) are not corrupted by subsequent Next() calls.
+// memoryDataProvider (Next) are not corrupted by subsequent Next() calls.
 func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -939,7 +939,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
 	require.NoError(t, err)
 
-	// Memory provider with multiple keys - Get returns slices into sortableBuffer.chunks
+	// Memory provider with multiple keys - Next returns slices into sortableBuffer.chunks
 	memBuf := NewSortableBuffer(BufferOptimalSize)
 	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
 	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
@@ -1652,7 +1652,7 @@ func TestSortableBufferSortAcrossChunks(t *testing.T) {
 }
 
 // TestSortableBufferOversizedEntry: an entry bigger than one chunk gets a chunk
-// of its own - Get must still return one contiguous slice per key and value.
+// of its own - Next must still return one contiguous slice per key and value.
 func TestSortableBufferOversizedEntry(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
@@ -1856,18 +1856,18 @@ func TestSortableBufferChunkBoundary(t *testing.T) {
 func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
-	require.Panics(t, func() { buf.Put(make([]byte, maxKeyLen+1), []byte("v")) })
+	require.Panics(t, func() { buf.Put(make([]byte, MaxKeyLen+1), []byte("v")) })
 
-	// maxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
-	buf.Put(make([]byte, maxKeyLen), []byte("v"))
+	// MaxKeyLen is what keeps keyLen inside entryLoc, so read the edge back.
+	buf.Put(make([]byte, MaxKeyLen), []byte("v"))
 	buf.Put([]byte{0x01}, make([]byte, dataChunkSize+7))
 	buf.Put(nil, nil)
 	require.Equal(t, 3, buf.Len())
 
-	// Sorted: the nil key, then the all-zero key of maxKeyLen, then 0x01.
+	// Sorted: the nil key, then the all-zero key of MaxKeyLen, then 0x01.
 	buf.Sort()
 	got := drainBuffer(buf)
-	require.Len(t, got[1].key, maxKeyLen)
+	require.Len(t, got[1].key, MaxKeyLen)
 	require.Nil(t, got[0].key)
 }
 
@@ -2294,13 +2294,13 @@ func TestBufferSortPositionsCursor(t *testing.T) {
 	}
 }
 
-// TestCollectRejectsOversizedKey: Put panics past maxKeyLen, but Collect sits
+// TestCollectRejectsOversizedKey: Put panics past MaxKeyLen, but Collect sits
 // under Load and the stage loop, which return errors.
 func TestCollectRejectsOversizedKey(t *testing.T) {
 	c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1*datasize.MB), log.New())
 	defer c.Close()
-	require.NoError(t, c.Collect(make([]byte, maxKeyLen), []byte("v")))
-	err := c.Collect(make([]byte, maxKeyLen+1), []byte("v"))
+	require.NoError(t, c.Collect(make([]byte, MaxKeyLen), []byte("v")))
+	err := c.Collect(make([]byte, MaxKeyLen+1), []byte("v"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds")
 }
@@ -2381,16 +2381,16 @@ func TestSpillNilKeyRoundTrip(t *testing.T) {
 	require.Equal(t, []byte("one"), got[1][1])
 }
 
-// TestSpillValueLengthCeiling pins why maxValLen exists: one byte past it the
+// TestSpillValueLengthCeiling pins why MaxValLen exists: one byte past it the
 // length wraps negative, which readValField takes for nil without consuming the
 // value's bytes, so every later record is parsed out of value payload.
 func TestSpillValueLengthCeiling(t *testing.T) {
 	var buf [valLenSize]byte
 
-	putValLen(buf[:], int32(maxValLen))
-	require.EqualValues(t, maxValLen, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
+	putValLen(buf[:], int32(MaxValLen))
+	require.EqualValues(t, MaxValLen, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
 
-	over := int32(maxValLen)
+	over := int32(MaxValLen)
 	over++ // wraps; a constant expression would not compile
 	putValLen(buf[:], over)
 	require.Negative(t, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec

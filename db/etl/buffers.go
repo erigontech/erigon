@@ -52,22 +52,23 @@ const (
 
 // A spill file prefixes each field with its length. Fixed width rather than a
 // varint: the file never leaves the machine that wrote it. A key is capped at
-// maxKeyLen so two bytes hold it, a value at maxValLen so four do.
+// MaxKeyLen so two bytes hold it, a value at MaxValLen so four do.
 const (
 	keyLenSize = 2
 	valLenSize = 4
 	nilKeyLen  = math.MaxUint16 // no key reaches this, so it can mean nil
 
-	// A longer value would write a length that reads back negative, which the
-	// reader takes for nil without consuming the bytes - desyncing the rest of
-	// the file rather than failing. appendSortableBuffer grows a value across
-	// Puts, so the writers check it and not Put.
-	maxValLen = math.MaxInt32
+	// MaxValLen is the largest value Collect accepts. A longer one would write a
+	// length that reads back negative, which the reader takes for nil without
+	// consuming the bytes - desyncing the rest of the file rather than failing.
+	// appendSortableBuffer grows a value across Puts, so the writers check it
+	// and not Put.
+	MaxValLen = math.MaxInt32
 )
 
 func checkValLen(v []byte) error {
-	if len(v) > maxValLen {
-		return fmt.Errorf("etl: value of %d bytes exceeds %d", len(v), maxValLen)
+	if len(v) > MaxValLen {
+		return fmt.Errorf("etl: value of %d bytes exceeds %d", len(v), MaxValLen)
 	}
 	return nil
 }
@@ -147,11 +148,11 @@ const (
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
-	// What is left of entryLoc's uint32 once the offset has dataChunkBits,
-	// less one for the bias. Sort slices a key out of its chunk, so only a
-	// value may outgrow one. Collect turns a longer key into an error before
-	// it reaches Put, which panics.
-	maxKeyLen = 1<<(32-dataChunkBits) - 2
+	// MaxKeyLen is the largest key Collect accepts: what is left of entryLoc's
+	// uint32 once the offset has dataChunkBits, less one for the bias. Sort
+	// slices a key out of its chunk, so only a value may outgrow one. Collect
+	// turns a longer key into an error before it reaches Put, which panics.
+	MaxKeyLen = 1<<(32-dataChunkBits) - 2
 )
 
 // dataChunks are shared by all sortableBuffer instances: a buffer takes chunks as
@@ -297,8 +298,8 @@ func chunkSizeFor(n int) int {
 	return dataChunkSize
 }
 
-// nextChunk starts a chunk able to hold an entry of n bytes and its index
-// slot. An entry never straddles chunks, so Next hands out direct references.
+// nextChunk starts a chunk able to hold an entry of n bytes and its index slot.
+// An entry never straddles chunks, so entryData can hand out direct references.
 func (b *sortableBuffer) nextChunk(n int) {
 	size := chunkSizeFor(n)
 	if size == 0 {
@@ -335,7 +336,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	off := int(b.currentChunk.end)
 	// One test for all three, so the fast path holds no call and Put keeps
 	// its arguments in registers.
-	if kLen > maxKeyLen || off+n+entryLocSize > int(b.currentChunk.entTop) || b.sortedN == b.n {
+	if kLen > MaxKeyLen || off+n+entryLocSize > int(b.currentChunk.entTop) || b.sortedN == b.n {
 		b.putSlow(k, v)
 		return
 	}
@@ -368,8 +369,8 @@ func (b *sortableBuffer) putSlow(k, v []byte) {
 	if b.sortedN == b.n {
 		panic("etl: Put after Sort")
 	}
-	if len(k) > maxKeyLen {
-		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
+	if len(k) > MaxKeyLen {
+		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), MaxKeyLen))
 	}
 	b.nextChunk(entryHeaderSize + len(k) + len(v))
 	b.Put(k, v)
