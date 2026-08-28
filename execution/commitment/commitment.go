@@ -338,7 +338,8 @@ func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
@@ -1754,6 +1755,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)
