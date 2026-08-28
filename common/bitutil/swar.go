@@ -25,19 +25,21 @@ package bitutil
 // which no borrow can reach from below, so bits.TrailingZeros64(z)>>3 does give
 // the first matching lane.
 const (
-	SWARLow  uint64 = 0x0101010101010101 // low bit of every lane
+	swarLow  uint64 = 0x0101010101010101 // low bit of every lane
 	swarHigh uint64 = 0x8080808080808080 // high bit of every lane
 )
 
+// Broadcast returns b in every lane. In a loop over one fixed byte, hoist it and
+// call HasZero(x ^ pat): Go does not move the multiply out of the loop for you.
+func Broadcast(b byte) uint64 { return swarLow * uint64(b) }
+
 // HasZero returns a nonzero value if any lane of x is zero, and 0 otherwise.
-func HasZero(x uint64) uint64 { return (x - SWARLow) &^ x & swarHigh }
+func HasZero(x uint64) uint64 { return (x - swarLow) &^ x & swarHigh }
 
 // HasByte returns a nonzero value if any lane of x equals b, and 0 otherwise.
-// In a loop over a fixed b, hoist SWARLow*uint64(b) and call HasZero: Go does
-// not move the multiply out for you.
-func HasByte(x uint64, b byte) uint64 { return HasZero(x ^ SWARLow*uint64(b)) }
+func HasByte(x uint64, b byte) uint64 { return HasZero(x ^ Broadcast(b)) }
 
 // HasLess returns a nonzero value if any lane of x is below n, and 0 otherwise.
 // n must be at most 128. Above that, a lane below n-128 wraps to a value with
 // its high bit clear and goes unreported: HasLess(0, 129) is 0.
-func HasLess(x uint64, n byte) uint64 { return (x - SWARLow*uint64(n)) &^ x & swarHigh }
+func HasLess(x uint64, n byte) uint64 { return (x - Broadcast(n)) &^ x & swarHigh }
