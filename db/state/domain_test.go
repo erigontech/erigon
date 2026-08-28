@@ -874,6 +874,7 @@ func TestCommitmentKvWriteVersion(t *testing.T) {
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
 
+	d.EdgeRecordsInCommitment = false
 	d.ReferencesInCommitmentBranches = true
 	require.Equal(t, version.V2_1, d.kvWriteVersion())
 	require.Contains(t, d.kvNewFilePath(0, 1), "v2.1-commitment.0-1.kv")

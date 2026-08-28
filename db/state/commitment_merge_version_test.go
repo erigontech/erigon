@@ -43,6 +43,7 @@ func TestCommitmentMergeFlagOffExpandsReferencedInputs(t *testing.T) {
 	setB := mkAddrs(0xf0, 12)
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	dirs := agg.Dirs()
 
 	// phase 1: flag on -> referenced (v2.1) files
@@ -108,6 +109,7 @@ func TestMergedCommitmentFileVersionStampedInMemory(t *testing.T) {
 	keys := mkAddrs(0x20, 16)
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	writeStepsKeys(t, db, agg, keys, 0, 8)

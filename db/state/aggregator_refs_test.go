@@ -49,6 +49,7 @@ func openTestAggForRefs(t *testing.T, dirs datadir.Dirs, settings *ErigonDBSetti
 	t.Cleanup(db.Close)
 	agg := NewTest(dirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	return agg
 }
 

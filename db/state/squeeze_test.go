@@ -154,6 +154,7 @@ func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logge
 func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
 	db, agg := testDbAndAggregatorv3(tb, cfg.stepSize)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, !cfg.disableCommitmentBranchTransform)
 
 	ctx := tb.Context()

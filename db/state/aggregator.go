@@ -289,6 +289,10 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 	a.d[domain].ReferencesInCommitmentBranches = v
 }
 
+func (a *Aggregator) ForTestEdgeRecordsInCommitment(domain kv.Domain, v bool) {
+	a.d[domain].EdgeRecordsInCommitment = v
+}
+
 // referencesInCommitmentBranches reads the live commitment flag under the lock; merge and
 // squeeze paths must use it instead of touching the field directly.
 func (a *Aggregator) referencesInCommitmentBranches() bool {

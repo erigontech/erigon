@@ -400,14 +400,14 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/state/execctx/domain_shared.go`
 - Create: `db/state/changeset_commitment_v3_test.go`
 
-- [ ] verify `DomainPut`'s `prevVal` flows into `kv.DomainEntryDiff` correctly for edge records
-- [ ] confirm unwind replays per-record diffs to a byte-identical pre-state
-- [ ] assert per-block changeset **bytes** do not regress against the bundled-row path over the same
+- [x] verify `DomainPut`'s `prevVal` flows into `kv.DomainEntryDiff` correctly for edge records
+- [x] confirm unwind replays per-record diffs to a byte-identical pre-state
+- [x] assert per-block changeset **bytes** do not regress against the bundled-row path over the same
       update set, and that entry count rises by at most the record-count multiplier — a threshold, not
       a printout, since a bullet with no pass/fail is not a test
-- [ ] write tests unwinding across a block that changed one child, several children, and a whole node
-- [ ] write a test unwinding across a step boundary
-- [ ] run `go test ./db/state/...` — must pass before task 15
+- [x] write tests unwinding across a block that changed one child, several children, and a whole node
+- [x] write a test unwinding across a step boundary
+- [x] run `go test ./db/state/...` — must pass before task 15
 
 ### Task 15: Integrity checks and CLI consumers
 
