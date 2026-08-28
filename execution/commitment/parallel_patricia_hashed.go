@@ -238,7 +238,7 @@ func (p *ParallelPatriciaHashed) Process(
 		for _, upd := range pu.deferredCombined {
 			putDeferredUpdate(upd)
 		}
-		pu.deferredCombined = pu.deferredCombined[:0]
+		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
 		return nil, mErr
 	}
