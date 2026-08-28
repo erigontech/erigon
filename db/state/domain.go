@@ -1965,20 +1965,30 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 	}
 
 	done := prg.KeyProgress == prune.Done && prg.ValueProgress == prune.Done && untilTx <= prg.TxTo
-	minStep := kv.Step(dt.d.minStepInDB(tx))
-	delta := float64(max(maxStepToPrune, minStep) - min(maxStepToPrune, minStep)) // maxStep could be 0
-	switch dt.d.FilenameBase {
-	case "account":
+
+	// Backlog comes from the values table's own prune progress: the history keys
+	// table tracks separate progress, and stays empty when history is disabled -
+	// as it is for commitment by default. prg.TxTo is the rotation's target,
+	// stored even when the scan was cut short, so only a completed rotation proves
+	// the values below it are gone; txFrom is 0, so an unfinished one bounds nothing.
+	prunedThrough := uint64(0)
+	if prg.ValueProgress == prune.Done {
+		prunedThrough = prg.TxTo
+	}
+	delta := 0.0
+	if filesEnd := dt.files.EndTxNum(); filesEnd > prunedThrough {
+		delta = float64(filesEnd-prunedThrough) / float64(dt.stepSize)
+	}
+	switch dt.name {
+	case kv.AccountsDomain:
 		mxPrunableDAcc.Set(delta)
-	case "storage":
+	case kv.StorageDomain:
 		mxPrunableDSto.Set(delta)
-	case "code":
+	case kv.CodeDomain:
 		mxPrunableDCode.Set(delta)
-	case "commitment":
+	case kv.CommitmentDomain:
 		mxPrunableDComm.Set(delta)
 	}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
-	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
 	return !done, maxStepToPrune
 }
 
