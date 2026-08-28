@@ -1229,12 +1229,10 @@ func TestPublishedBlockJobConcurrentSchedulesReturnWaitableHandles(t *testing.T)
 	handles := make(chan PublishedBlockJob, schedules)
 	var wg sync.WaitGroup
 	for range schedules {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			handles <- service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
