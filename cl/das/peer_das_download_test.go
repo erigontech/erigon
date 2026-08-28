@@ -207,8 +207,8 @@ func TestRunDownloadRejectsResponseForkDigestMismatchBeforeStorage(t *testing.T)
 		},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
@@ -222,7 +222,7 @@ func TestRunDownloadRejectsResponseForkDigestMismatchBeforeStorage(t *testing.T)
 		t.Fatal("fork-digest mismatch was neither rejected nor processed")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
@@ -277,8 +277,8 @@ func TestRunDownloadRejectsStaleBPOForkDigestBeforeStorage(t *testing.T) {
 		},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
@@ -292,7 +292,7 @@ func TestRunDownloadRejectsStaleBPOForkDigestBeforeStorage(t *testing.T) {
 		t.Fatal("stale BPO fork digest was neither rejected nor processed")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
@@ -358,8 +358,8 @@ func TestRunDownloadAcceptsExactBPOForkDigest(t *testing.T) {
 				validatedBlobCount: map[common.Hash]uint32{root: 0},
 			}
 			ctx, cancel := context.WithCancel(t.Context())
-			done := make(chan error, 1)
-			go func() { done <- d.runDownload(ctx, req, true) }()
+			done := make(chan struct{})
+			go func() { defer close(done); d.runDownload(ctx, req, true) }()
 
 			select {
 			case sidecar := <-storage.writes:
@@ -374,7 +374,7 @@ func TestRunDownloadAcceptsExactBPOForkDigest(t *testing.T) {
 				t.Fatal("exact BPO fork digest did not reach storage")
 			}
 			cancel()
-			require.NoError(t, <-done)
+			<-done
 			require.Equal(t, 0, req.remainingEntriesCount())
 		})
 	}
@@ -422,8 +422,8 @@ func TestRunDownloadRejectsFuluSignatureMismatchBeforeStorage(t *testing.T) {
 		validatedBlobCount: map[common.Hash]uint32{root: 0},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, true) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, true) }()
 
 	select {
 	case <-sentinel.banned:
@@ -448,7 +448,7 @@ func TestRunDownloadRejectsFuluSignatureMismatchBeforeStorage(t *testing.T) {
 		t.Fatal("signature mismatch was neither rejected nor processed")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
 	_, remaining := req.requestData()
 	require.Len(t, remaining, 2)
@@ -510,8 +510,8 @@ func TestRunDownloadAcceptsGloasSidecarWithRecoveryMetadata(t *testing.T) {
 		validatedBlobCount: map[common.Hash]uint32{root: 0},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, true) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, true) }()
 
 	select {
 	case sidecar := <-storage.writes:
@@ -526,7 +526,7 @@ func TestRunDownloadAcceptsGloasSidecarWithRecoveryMetadata(t *testing.T) {
 		t.Fatal("valid Gloas sidecar did not reach storage")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 0, req.remainingEntriesCount())
 }
 
@@ -575,8 +575,8 @@ func TestRunDownloadRejectsColumnFilteredOutOfWireRequest(t *testing.T) {
 		},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
@@ -590,7 +590,7 @@ func TestRunDownloadRejectsColumnFilteredOutOfWireRequest(t *testing.T) {
 		t.Fatal("column excluded from the wire request was neither rejected nor stored")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
@@ -627,8 +627,8 @@ func TestRunDownloadRejectsValidUnrequestedFuluIdentityBeforeStorage(t *testing.
 		},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
@@ -642,7 +642,7 @@ func TestRunDownloadRejectsValidUnrequestedFuluIdentityBeforeStorage(t *testing.
 		t.Fatal("unrequested sidecar was neither rejected nor stored")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount(), "intended root was removed by an unrelated response")
 }
 
@@ -678,8 +678,8 @@ func TestRunDownloadRejectsOverCardinalityBeforeStorage(t *testing.T) {
 		},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
@@ -693,7 +693,7 @@ func TestRunDownloadRejectsOverCardinalityBeforeStorage(t *testing.T) {
 		t.Fatal("over-cardinality response was neither rejected nor stored")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
@@ -729,8 +729,8 @@ func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
 		},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
@@ -744,7 +744,7 @@ func TestRunDownloadRejectsDuplicateRequestedTupleBeforeStorage(t *testing.T) {
 		t.Fatal("duplicate response tuple was neither rejected nor processed")
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
@@ -784,8 +784,8 @@ func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 		recoveryDetails: map[common.Hash]*blobRecoveryMetadata{root: metadata},
 	}
 	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	written := map[uint64]bool{}
 	for len(written) < 2 {
@@ -803,7 +803,7 @@ func TestRunDownloadAcceptsPartialReorderedRequestedSubset(t *testing.T) {
 		}
 	}
 	cancel()
-	require.NoError(t, <-done)
+	<-done
 	require.Equal(t, map[uint64]bool{0: true, 2: true}, written)
 	_, remaining := req.requestData()
 	require.Equal(t, map[requestedDataColumn]struct{}{
@@ -846,8 +846,8 @@ func TestRunDownloadAcceptsLateSnapshotMemberAfterConcurrentCompletion(t *testin
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.columnRequested:
@@ -866,8 +866,7 @@ func TestRunDownloadAcceptsLateSnapshotMemberAfterConcurrentCompletion(t *testin
 		t.Fatal("late response was not processed")
 	}
 	select {
-	case err := <-done:
-		require.NoError(t, err)
+	case <-done:
 	case <-sentinel.banned:
 		t.Fatal("late response member was falsely banned")
 	case <-time.After(30 * time.Second):
@@ -923,11 +922,10 @@ func TestRunDownloadDoesNotRevalidateBlobStorageWhileWaitingForColumns(t *testin
 		validatedBlobCount: map[common.Hash]uint32{root: 1},
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, true) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, true) }()
 	select {
-	case err := <-done:
-		require.NoError(t, err)
+	case <-done:
 	case <-time.After(30 * time.Second):
 		t.Fatal("download did not stop after its context was canceled")
 	}
@@ -974,7 +972,7 @@ func TestRunDownloadValidatesBlobStorageAfterCountChanges(t *testing.T) {
 		validatedBlobCount: map[common.Hash]uint32{root: 1},
 	}
 
-	require.NoError(t, d.runDownload(ctx, req, true))
+	d.runDownload(ctx, req, true)
 	require.Equal(t, int32(1), durableReads.Load(), "a changed durable count must trigger one validation event")
 }
 
@@ -1021,7 +1019,7 @@ func TestRunDownloadRetriesTransientBlobReadAtUnchangedCount(t *testing.T) {
 		validatedBlobCount: map[common.Hash]uint32{root: 1},
 	}
 
-	require.NoError(t, d.runDownload(ctx, req, true))
+	d.runDownload(ctx, req, true)
 	require.Equal(t, int32(2), durableReads.Load(), "transient validation failure must retry without a count mutation")
 	require.NoError(t, ctx.Err(), "valid storage must finish the request before lifecycle cancellation")
 }
@@ -1063,11 +1061,10 @@ func TestRunDownloadPacesPermanentBlobReadErrorsUntilCancellation(t *testing.T) 
 		validatedBlobCount: map[common.Hash]uint32{root: 0},
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, true) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, true) }()
 	select {
-	case err := <-done:
-		require.NoError(t, err)
+	case <-done:
 	case <-time.After(30 * time.Second):
 		t.Fatal("permanent read errors were not paced by the download lifecycle")
 	}
@@ -1118,7 +1115,7 @@ func TestRunDownloadDoesNotRepeatConclusiveInvalidBlobValidation(t *testing.T) {
 		validatedBlobCount: map[common.Hash]uint32{root: 0},
 	}
 
-	require.NoError(t, d.runDownload(ctx, req, true))
+	d.runDownload(ctx, req, true)
 	require.Equal(t, int32(1), durableReads.Load(), "conclusively invalid storage must stay cached until its count changes")
 }
 
@@ -1195,8 +1192,8 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		},
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:

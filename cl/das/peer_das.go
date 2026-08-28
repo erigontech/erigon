@@ -1019,7 +1019,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 							return
 						}
 						if errors.Is(err, os.ErrNotExist) {
-							d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
+							if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
+								log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
+							}
 						} else {
 							retryScheduled = d.delayBlobRecovery(toRecover)
 						}
@@ -1425,7 +1427,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	return nil
 }
 
-func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
+func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) {
 	type resolvedColumn struct {
 		slot      uint64
 		blockRoot common.Hash
@@ -1438,7 +1440,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		err       error
 	}
 	if req.remainingEntriesCount() == 0 {
-		return nil
+		return
 	}
 
 	stopChan := make(chan struct{})
@@ -1498,7 +1500,9 @@ mainloop:
 					metadata := req.recovery(entry.blockRoot)
 					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) {
 						req.removeBlock(entry.slot, entry.blockRoot)
-						d.tryScheduleRecover(entry.slot, entry.blockRoot, metadata)
+						if err := d.tryScheduleRecover(entry.slot, entry.blockRoot, metadata); err != nil {
+							log.Debug("failed to schedule recover", "err", err)
+						}
 					} else if metadata != nil {
 						count, err := d.blobStorage.KzgCommitmentsCount(ctx, entry.blockRoot)
 						if err == nil && req.blobCountNeedsValidation(entry.blockRoot, count) {
@@ -1588,7 +1592,9 @@ mainloop:
 						// check if need to schedule recover whenever we download a column sidecar
 						if needToRecoverBlobs && d.IsColumnOverHalf(slot, blockRoot) {
 							req.removeBlock(slot, blockRoot)
-							d.tryScheduleRecover(slot, blockRoot, req.recovery(blockRoot))
+							if err := d.tryScheduleRecover(slot, blockRoot, req.recovery(blockRoot)); err != nil {
+								log.Debug("failed to schedule recover", "err", err)
+							}
 						}
 					}()
 
@@ -1663,8 +1669,6 @@ mainloop:
 			}
 		}
 	}
-
-	return nil
 }
 
 // resolveColumnSidecarSlotAndRoot rejects malformed sidecars and response fork versions that are not active at the claimed slot.

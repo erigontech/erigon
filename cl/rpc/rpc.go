@@ -368,7 +368,9 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 }
 
 func (b *BeaconRpcP2P) BanPeer(pid string) {
-	b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid})
+	if _, err := b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
+		log.Debug("failed to ban peer", "pid", pid, "err", err)
+	}
 }
 
 // responseData stores decoded response metadata and raw container bytes.

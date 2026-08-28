@@ -83,3 +83,53 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
 }
+
+func Test_TrieContext_BranchReusesBufferAcrossReads(t *testing.T) {
+	t.Parallel()
+
+	reader := &testStateReader{branchData: []byte{1, 2, 3}, step: 7}
+	ctx := NewTrieContextRo(reader, 1)
+
+	got1, _, err := ctx.Branch([]byte{0xaa})
+	require.NoError(t, err)
+	require.Equal(t, []byte{1, 2, 3}, got1)
+
+	reader.branchData = []byte{4, 5, 6}
+	got2, _, err := ctx.Branch([]byte{0xbb})
+	require.NoError(t, err)
+	require.Equal(t, []byte{4, 5, 6}, got2)
+
+	// The contract Branch's callers rely on: the returned bytes live only until the
+	// next read on this context. A caller that keeps them sees the newer branch.
+	require.Equal(t, []byte{4, 5, 6}, got1, "second read must land in the same buffer")
+	require.Equal(t, &got1[0], &got2[0], "second read must not allocate a new buffer")
+}
+
+func Test_TrieContext_BranchKeepsNilAndEmptyDistinct(t *testing.T) {
+	t.Parallel()
+
+	// A nil branch means "absent"; callers test it with == nil, so reusing a buffer
+	// must not turn it into an empty non-nil slice.
+	reader := &testStateReader{}
+	ctx := NewTrieContextRo(reader, 1)
+
+	got, _, err := ctx.Branch([]byte{0xaa})
+	require.NoError(t, err)
+	require.Nil(t, got, "absent branch must stay nil")
+
+	reader.branchData = []byte{1, 2, 3}
+	if _, _, err = ctx.Branch([]byte{0xbb}); err != nil {
+		t.Fatal(err)
+	}
+
+	reader.branchData = []byte{}
+	got, _, err = ctx.Branch([]byte{0xcc})
+	require.NoError(t, err)
+	require.NotNil(t, got, "present-but-empty branch must stay non-nil after the buffer is warm")
+	require.Empty(t, got)
+
+	reader.branchData = nil
+	got, _, err = ctx.Branch([]byte{0xdd})
+	require.NoError(t, err)
+	require.Nil(t, got, "absent branch must stay nil after the buffer is warm")
+}

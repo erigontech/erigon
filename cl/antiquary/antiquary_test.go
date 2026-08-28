@@ -63,10 +63,10 @@ func newTestCompressor(buf *bytes.Buffer) *zstd.Encoder {
 func collectAll(t *testing.T, c *etl.Collector) map[string][]byte {
 	t.Helper()
 	result := make(map[string][]byte)
-	c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
 		result[string(k)] = bytes.Clone(v)
 		return next(nil, nil, nil)
-	}, etl.TransformArgs{})
+	}, etl.TransformArgs{}))
 	return result
 }
 

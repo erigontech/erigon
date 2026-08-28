@@ -116,11 +116,11 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 	}
 	tmp := file + tmpSuffix
 	if err := b.encodeTo(tmp, v); err != nil {
-		b.fs.Remove(tmp)
+		b.removeTemp(tmp)
 		return false, err
 	}
 	if err := b.fs.Rename(tmp, file); err != nil {
-		b.fs.Remove(tmp)
+		b.removeTemp(tmp)
 		if created || !isSharingViolation(err) {
 			return false, err
 		}
@@ -134,6 +134,14 @@ func (b *bucketStore) writeAdmitted(slot uint64, root common.Hash, idx uint64, v
 		return false, nil
 	}
 	return created, nil
+}
+
+// removeTemp best-effort deletes the temp file; the caller already holds the
+// real error.
+func (b *bucketStore) removeTemp(tmp string) {
+	if err := b.fs.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Debug("failed to remove temp file after write failure", "path", tmp, "err", err)
+	}
 }
 
 func (b *bucketStore) encodeTo(path string, v ssz.Marshaler) error {

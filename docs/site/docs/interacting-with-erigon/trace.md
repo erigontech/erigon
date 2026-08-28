@@ -102,7 +102,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- | --- |
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
-| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. See **TraceEntry fields** below. |
+| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
 | `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
@@ -199,11 +199,11 @@ Executes the given call and returns a number of possible traces for it.
 
 1. `Object` - \[Transaction object] where `from` field is optional and `nonce` field is omitted.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported: the call is executed against committed state, so there is no pending block to execute on top of.
 
 #### Returns
 
-`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
+`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; `stateDiff` and `vmTrace` are `null` when not requested, while `trace` is an empty array. See [Response Fields Reference](#response-fields-reference) for full field semantics.
 
 #### Example
 
@@ -247,7 +247,7 @@ Performs multiple call traces on top of the same block. i.e. transaction `n` wil
 #### Parameters
 
 1. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'` (default block parameter).
+2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'` or `'earliest'` (default block parameter). `'pending'` is not supported: the calls are executed against committed state, so there is no pending block to execute on top of.
 
 ```js
 params: [
@@ -405,7 +405,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported: tracing replays committed state, so there is no pending block to replay.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
 ```js
@@ -519,7 +519,7 @@ Returns traces created at given block.
 
 #### Parameters
 
-1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'` or `'latest'`. `'pending'` is not supported: tracing replays committed state, so there is no pending block to replay.
 
 ```js
 params: [
@@ -590,6 +590,7 @@ Returns traces matching given filter
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
    * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
 
+   The `'pending'` tag is not supported for either block bound: `trace_filter` scans committed trace history, which has no pending block.
 
 ```js
 params: [{
