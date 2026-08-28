@@ -519,7 +519,7 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 	dirs := datadir.New(tb.TempDir())
 
 	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
 	tb.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)
