@@ -202,10 +202,6 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateReader StateReader) {
-	sdc.SetStateReader(stateReader)
-}
-
 func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
 	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
 	// writer: concurrent workers trace branch reads/writes without racing.
