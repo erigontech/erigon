@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -228,7 +227,7 @@ func execV3(ctx context.Context,
 			isApplyingBlocks:  isApplyingBlocks,
 			logger:            logger,
 			logPrefix:         logPrefix,
-			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, logPrefix, logger),
+			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, logPrefix, logger),
 			enableChaosMonkey: initialCycle,
 			hooks:             hooks,
 			blockSrc:          blockSrc,
@@ -342,7 +341,7 @@ func execV3Serial(ctx context.Context,
 			applyTx:           applyTx,
 			logger:            logger,
 			logPrefix:         execStage.LogPrefix(),
-			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
+			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, execStage.LogPrefix(), logger),
 			enableChaosMonkey: initialCycle,
 			hooks:             hooks,
 		}}
@@ -382,7 +381,7 @@ func execV3Serial(ctx context.Context,
 				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
 
 				if initialCycle {
-					se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
+					se.LogCommitments(committedTransactions, stepsInDb, se.LastCommitProgress())
 				}
 			case errors.Is(execErr, ErrWrongTrieRoot):
 				execErr = handleIncorrectRootHashError(

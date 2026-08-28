@@ -477,12 +477,12 @@ var (
 	}
 	RpcGetLogsMaxResults = cli.IntFlag{
 		Name:  "rpc.logs.maxresults",
-		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
+		Usage: "Maximum number of logs returned by eth_getLogs, eth_getFilterLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
 	}
 	RpcLogQueryLimit = cli.IntFlag{
 		Name:  "rpc.logs.querylimit",
-		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs and eth_getFilterLogs filter criteria (<=0 = unlimited)",
 		Value: 1_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
@@ -1060,8 +1060,8 @@ var (
 	}
 	CaplinColumnKeepSlotsFlag = cli.Uint64Flag{
 		Name:  "caplin.columns-keep-slots",
-		Usage: "number of slots to retain PeerDAS data column sidecars (default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH = 131072, ~18 days); increase for DA oracle or rollup nodes that need longer column history",
-		Value: 131072,
+		Usage: "number of slots to retain PeerDAS data column sidecars; 0 uses the chain's spec window (MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH), increase for DA oracle or rollup nodes that need longer column history",
+		Value: 0,
 	}
 	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
 		Name:  "caplin.checkpoint-sync.disable",
