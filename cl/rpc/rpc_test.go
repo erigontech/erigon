@@ -197,6 +197,100 @@ func TestColumnSidecarsRequestRejectsOverCardinalityBeforeSidecarDecode(t *testi
 	require.Equal(t, "cap-ignoring-peer", sentinel.bannedPeer)
 }
 
+func TestColumnSidecarsRequestAcceptsExactGloasForkDigest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	sidecar.Slot = cfg.GloasForkEpoch * cfg.SlotsPerEpoch
+	sidecar.BeaconBlockRoot = common.HexToHash("0x1234")
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, sidecar, digest[:]...))
+
+	sentinel := &emptyColumnResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{
+		sentinel:     sentinel,
+		beaconConfig: &cfg,
+		ethClock:     clock,
+		columnDataPeers: &columnDataPeers{
+			beaconConfig: &cfg,
+			peersQueue: []peerData{{
+				pid:  "gloas-peer",
+				mask: map[uint64]bool{0: true},
+			}},
+		},
+	}
+	request := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	identifier := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: sidecar.BeaconBlockRoot,
+		Columns:   solid.NewUint64ListSSZ(int(cfg.NumberOfColumns)),
+	}
+	identifier.Columns.Append(0)
+	request.Append(identifier)
+
+	sidecars, pid, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, "gloas-peer", pid)
+	require.Equal(t, 1, snapshot.Len())
+	require.Len(t, sidecars, 1)
+	require.Equal(t, clparams.GloasVersion, sidecars[0].Version())
+	require.Equal(t, sidecar.Slot, sidecars[0].Slot)
+	require.Empty(t, sentinel.bannedPeer)
+}
+
+func TestColumnSidecarsRequestRejectsUnknownForkDigest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	unknownDigest := common.Bytes4{0xde, 0xad, 0xbe, 0xef}
+	_, err := clock.StateVersionByForkDigest(unknownDigest)
+	require.Error(t, err)
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, rawSSZBytes{0}, unknownDigest[:]...))
+
+	sentinel := &emptyColumnResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{
+		sentinel:     sentinel,
+		beaconConfig: &cfg,
+		ethClock:     clock,
+		columnDataPeers: &columnDataPeers{
+			beaconConfig: &cfg,
+			peersQueue: []peerData{{
+				pid:  "unknown-digest-peer",
+				mask: map[uint64]bool{0: true},
+			}},
+		},
+	}
+	request := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](1)
+	identifier := &cltypes.DataColumnsByRootIdentifier{
+		BlockRoot: common.HexToHash("0x1234"),
+		Columns:   solid.NewUint64ListSSZ(int(cfg.NumberOfColumns)),
+	}
+	identifier.Columns.Append(0)
+	request.Append(identifier)
+
+	sidecars, pid, snapshot, err := client.SendColumnSidecarsByRootIdentifierReqWithSnapshot(t.Context(), request)
+	require.ErrorContains(t, err, "unknown fork digest deadbeef")
+	require.Nil(t, sidecars)
+	require.Equal(t, "unknown-digest-peer", pid)
+	require.Equal(t, 1, snapshot.Len())
+}
+
 func TestColumnSidecarsSparseMultiRootCapPreservesFilteredOrderAndWrapper(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	if clparams.GetBeaconConfig() == nil {

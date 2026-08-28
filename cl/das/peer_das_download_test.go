@@ -226,6 +226,142 @@ func TestRunDownloadRejectsResponseForkDigestMismatchBeforeStorage(t *testing.T)
 	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
+func TestRunDownloadRejectsStaleBPOForkDigestBeforeStorage(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	require.GreaterOrEqual(t, len(cfg.BlobSchedule), 2)
+	earlierEpoch := cfg.BlobSchedule[0].Epoch
+	laterEpoch := cfg.BlobSchedule[1].Epoch
+	currentSlot := laterEpoch * cfg.SlotsPerEpoch
+
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-currentSlot*cfg.SecondsPerSlot, common.Hash{}, &cfg)
+	earlierDigest, err := clock.ComputeForkDigest(earlierEpoch)
+	require.NoError(t, err)
+	laterDigest, err := clock.ComputeForkDigest(laterEpoch)
+	require.NoError(t, err)
+	require.NotEqual(t, earlierDigest, laterDigest)
+	earlierVersion, err := clock.StateVersionByForkDigest(earlierDigest)
+	require.NoError(t, err)
+	laterVersion, err := clock.StateVersionByForkDigest(laterDigest)
+	require.NoError(t, err)
+	require.Equal(t, clparams.FuluVersion, earlierVersion)
+	require.Equal(t, clparams.FuluVersion, laterVersion)
+
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, currentSlot)
+	rpcClient, sentinel := newColumnResponseRPCWithPeerAndForkEpoch(
+		t,
+		&cfg,
+		currentSlot,
+		"",
+		cfg.NumberOfColumns,
+		earlierEpoch,
+		[]*cltypes.DataColumnSidecar{columns[0]},
+	)
+
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-storage.lookups:
+		cancel()
+		<-done
+		t.Fatal("stale BPO fork digest reached storage lookup")
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("stale BPO fork digest was neither rejected nor processed")
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, 1, req.remainingEntriesCount())
+}
+
+func TestRunDownloadAcceptsExactBPOForkDigest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	require.GreaterOrEqual(t, len(cfg.BlobSchedule), 2)
+
+	for _, test := range []struct {
+		name  string
+		epoch uint64
+	}{
+		{name: "first BPO epoch", epoch: cfg.BlobSchedule[0].Epoch},
+		{name: "second BPO epoch", epoch: cfg.BlobSchedule[1].Epoch},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			currentSlot := test.epoch * cfg.SlotsPerEpoch
+			block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, currentSlot)
+			rpcClient, sentinel := newColumnResponseRPCWithPeerAndForkEpoch(
+				t,
+				&cfg,
+				currentSlot,
+				"",
+				cfg.NumberOfColumns,
+				test.epoch,
+				[]*cltypes.DataColumnSidecar{columns[0]},
+			)
+
+			storage := &writeObservingColumnStorage{
+				DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+				lookups:           make(chan struct{}, 1),
+				writes:            make(chan *cltypes.DataColumnSidecar, 1),
+			}
+			d := &peerdas{
+				rpc:           rpcClient,
+				beaconConfig:  &cfg,
+				state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+				columnStorage: storage,
+			}
+			req := &downloadRequest{
+				beaconConfig: &cfg,
+				downloadTable: map[downloadTableEntry]map[uint64]bool{
+					{blockRoot: root, slot: block.GetSlot()}: {0: true},
+				},
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			go func() { done <- d.runDownload(ctx, req, false) }()
+
+			select {
+			case sidecar := <-storage.writes:
+				require.Equal(t, uint64(0), sidecar.Index)
+			case <-sentinel.banned:
+				cancel()
+				<-done
+				t.Fatal("exact BPO fork digest was banned")
+			case <-time.After(30 * time.Second):
+				cancel()
+				<-done
+				t.Fatal("exact BPO fork digest did not reach storage")
+			}
+			cancel()
+			require.NoError(t, <-done)
+			require.Equal(t, 0, req.remainingEntriesCount())
+		})
+	}
+}
+
 func TestRunDownloadRejectsColumnFilteredOutOfWireRequest(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0

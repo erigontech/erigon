@@ -180,6 +180,24 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, filteredReq, err
 		}
+		var slot uint64
+		if data.version >= clparams.GloasVersion {
+			slot = columnSidecar.Slot
+		} else {
+			if columnSidecar.SignedBlockHeader == nil || columnSidecar.SignedBlockHeader.Header == nil {
+				b.BanPeer(pid)
+				return nil, pid, filteredReq, errors.New("column sidecar is missing its signed block header")
+			}
+			slot = columnSidecar.SignedBlockHeader.Header.Slot
+		}
+		expectedForkDigest, err := b.ethClock.ComputeForkDigest(slot / b.beaconConfig.SlotsPerEpoch)
+		if err != nil {
+			return nil, pid, filteredReq, err
+		}
+		if data.forkDigest != expectedForkDigest {
+			b.BanPeer(pid)
+			return nil, pid, filteredReq, fmt.Errorf("column sidecar fork digest %x disagrees with slot %d fork digest %x", data.forkDigest, slot, expectedForkDigest)
+		}
 		ColumnSidecars = append(ColumnSidecars, columnSidecar)
 	}
 
@@ -353,10 +371,11 @@ func (b *BeaconRpcP2P) BanPeer(pid string) {
 	b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid})
 }
 
-// responseData is a helper struct to store the version and the raw data of the response for each data container.
+// responseData stores decoded response metadata and raw container bytes.
 type responseData struct {
-	version clparams.StateVersion
-	raw     []byte
+	version    clparams.StateVersion
+	forkDigest common.Bytes4
+	raw        []byte
 }
 
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
@@ -412,13 +431,15 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			return nil, message.Peer.Pid, errors.New("null fork digest")
 		}
 
-		version, err := b.ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
+		responseForkDigest := utils.Uint32ToBytes4(respForkDigest)
+		version, err := b.ethClock.StateVersionByForkDigest(responseForkDigest)
 		if err != nil {
 			return nil, message.Peer.Pid, fmt.Errorf("unknown fork digest %x: %w", respForkDigest, err)
 		}
 		responsePacket = append(responsePacket, responseData{
-			version: version,
-			raw:     raw,
+			version:    version,
+			forkDigest: responseForkDigest,
+			raw:        raw,
 		})
 
 		// read next result byte
