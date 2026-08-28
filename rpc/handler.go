@@ -234,28 +234,56 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		}
 		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
-		out := jsonstream.Get(nil)
-		out.WriteArrayStart()
-		wrote := false
-		for _, answer := range answersWithNils {
-			if answer == nil {
-				continue
-			}
-			if wrote {
-				out.WriteMore()
-			}
-			wrote = true
-			out.WriteRawBytes(answer)
-		}
-		out.WriteArrayEnd()
-		if wrote {
-			h.conn.WriteJSON(cp.ctx, rawResponse(out.Buffer()))
-		}
-		jsonstream.Put(out)
+		h.sendBatchAnswers(cp.ctx, answersWithNils)
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
 	})
+}
+
+// sendBatchAnswers joins the per-item answers into one JSON array and sends it.
+// It owns the stream for the whole call, so the pool gets it back on any exit.
+func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
+	out := jsonstream.Get(nil)
+	defer jsonstream.Put(out)
+
+	out.WriteArrayStart()
+	wrote := false
+	for _, answer := range answers {
+		if answer == nil {
+			continue
+		}
+		if wrote {
+			out.WriteMore()
+		}
+		wrote = true
+		out.WriteRawBytes(answer)
+	}
+	out.WriteArrayEnd()
+	if wrote {
+		h.conn.WriteJSON(ctx, rawResponse(out.Buffer()))
+	}
+}
+
+// answerBuffered serves a call for a transport that has no stream to write
+// through: the whole response is built in a pooled stream and sent in one piece.
+// It owns the stream, so the pool gets it back on any exit.
+func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
+	stream := jsonstream.Get(nil)
+	defer jsonstream.Put(stream)
+
+	h.answerInto(cp, msg, stream)
+	h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
+}
+
+// answerInto runs the call and leaves its response in stream. A streamed method
+// writes its own; anything else is encoded here.
+func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
+	answer := h.handleCallMsg(cp, msg, stream)
+	h.addSubscriptions(cp.notifiers)
+	if answer != nil {
+		answer.writeTo(stream)
+	}
 }
 
 func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
@@ -279,20 +307,10 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		needWriteStream := false
 		if stream == nil {
-			stream = jsonstream.Get(nil)
-			needWriteStream = true
-		}
-		answer := h.handleCallMsg(cp, msg, stream)
-		h.addSubscriptions(cp.notifiers)
-		if answer != nil {
-			answer.writeTo(stream)
-		}
-		if needWriteStream {
-			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
-			jsonstream.Put(stream)
+			h.answerBuffered(cp, msg)
 		} else {
+			h.answerInto(cp, msg, stream)
 			stream.WriteRaw("\n")
 		}
 		for _, n := range cp.notifiers {
