@@ -5065,8 +5065,21 @@ deviates from it in the return shape, which keeps the `raw` field the spec dropp
 
 The standard `type` field is ignored. `CallArgs` has no field for it and unknown JSON
 properties are accepted silently, so the envelope is inferred from whichever fee,
-access-list and blob fields are present. On a post-London head, `{"type": "0x0"}` with no
-`gasPrice` comes back as a type `0x2` transaction rather than the legacy type requested.
+access-list and blob fields are present. On a post-London head, a request such as
+
+```json
+{
+  "from": "0x71562b71999873db5b286df957af199ec94617f7",
+  "to": "0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e",
+  "gas": "0x5208",
+  "type": "0x0"
+}
+```
+
+comes back as a type `0x2` transaction rather than the legacy type requested, because no
+`gasPrice` was supplied. The `to` field is not decoration: a fill with neither `to` nor
+contract-creation data fails with `contract creation without any data provided` before a
+transaction is built at all.
 
 **Fills in**
 
@@ -5097,12 +5110,18 @@ RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followe
 encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
 result carries only `tx`; the extra `raw` field is the geth-compatible shape.
 
-A typed result also carries `gasPrice: null`. `FillTransaction` passes no base fee to the
-response encoder, so `computeGasPrice` returns nothing and the missing key is filled with
-`null` — deliberate geth parity, pinned by `rpc/ethapi/api_test.go`. The standardized
-type-2 unsigned schema requires `gasPrice` to be a hex quantity, so a schema-validating
-client will reject the result; read `maxFeePerGas` and `maxPriorityFeePerGas` instead.
-Legacy results carry a real `gasPrice`.
+A dynamic-fee result — types `0x2`, `0x3` and `0x4` — also carries `gasPrice: null`.
+`FillTransaction` passes no base fee to the response encoder, so `computeGasPrice`
+returns nothing and the missing key is filled with `null` — deliberate geth parity,
+pinned by `rpc/ethapi/api_test.go`. The standardized type-2 unsigned schema requires
+`gasPrice` to be a hex quantity, so a schema-validating client will reject the result;
+read `maxFeePerGas` and `maxPriorityFeePerGas` instead.
+
+Legacy (`0x0`) and access-list (`0x1`) results are not affected: `NewRPCTransaction`
+takes their `gasPrice` from the tip cap, so it is a real hex quantity. Those two carry
+`maxFeePerGas: null` and `maxPriorityFeePerGas: null` instead, filled in by the same
+rule. A type `0x1` fill is reached by supplying `gasPrice` together with an
+`accessList` — Erigon keeps the list where geth drops it to a legacy transaction.
 
 :::info
 KZG commitment and proof generation from raw blobs is not implemented. Blob
@@ -5120,7 +5139,16 @@ themselves and reattach it before submitting.
 Erigon accepts more block-number forms than the standard schema, which allows only a
 `0x`-prefixed hex quantity string or a named tag.
 
-Accepted everywhere a block is selected:
+The rules below govern parameters decoded as `BlockNumber` or `BlockNumberOrHash` — the
+selector of `eth_getBlockByNumber`, `eth_getBalance`, `eth_call`, `trace_block` and the
+rest of that family. They do not apply to methods that select a block through a fixed
+`common.Hash` parameter: `eth_getBlockTransactionCountByHash`,
+`eth_getTransactionByBlockHashAndIndex`, `eth_getRawTransactionByBlockHashAndIndex`,
+`eth_getUncleByBlockHashAndIndex` and `eth_getUncleCountByBlockHash` take a 32-byte hash
+and nothing else. `eth_getBlockByHash` is not one of them — despite the name its
+parameter is a `BlockNumberOrHash`, so it follows the rules here.
+
+Accepted:
 
 * a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
 * a bare, unquoted JSON integer — `3`
@@ -5138,7 +5166,7 @@ Accepted everywhere a block is selected:
     `eth_getBlockReceipts`, `eth_getBlockAccessList`, `eth_simulateV1`, `eth_getWitness`,
     `eth_getTxWitness`, `eth_getBlockByHash` and `trace_replayBlockTransactions`
 
-Rejected everywhere:
+Rejected by both parameter types:
 
 * a quoted decimal string — `"3"`, `"100"`
 * a block number above `2^63-1` — out of range in both parameter types, though the error
