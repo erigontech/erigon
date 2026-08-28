@@ -1286,7 +1286,7 @@ func detectCollapseSiblings(
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
 		if mode == witnessModeCanonical {
-			childCount, err := sdCtx.BranchChildCount(splitStateReader, c.branchPrefix)
+			childCount, err := sdCtx.BranchChildCount(c.branchPrefix)
 			if err != nil {
 				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
 			}

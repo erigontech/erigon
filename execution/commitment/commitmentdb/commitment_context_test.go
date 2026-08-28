@@ -120,9 +120,10 @@ func TestBranchChildCountReadsPostComputeView(t *testing.T) {
 		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
 		sdc := &SharedDomainsCommitmentContext{
 			sharedDomains: domains,
+			stateReader:   reader,
 		}
 
-		count, err := sdc.BranchChildCount(reader, prefix)
+		count, err := sdc.BranchChildCount(prefix)
 		require.NoError(t, err)
 		require.Equal(t, 3, count)
 		require.Equal(t, 1, domains.calls)
@@ -130,14 +131,15 @@ func TestBranchChildCountReadsPostComputeView(t *testing.T) {
 		require.Zero(t, reader.readStepSize)
 	})
 
-	t.Run("unchanged branch comes from compute reader", func(t *testing.T) {
+	t.Run("unchanged branch comes from installed reader", func(t *testing.T) {
 		domains := &branchChildCountDomains{}
 		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
 		sdc := &SharedDomainsCommitmentContext{
 			sharedDomains: domains,
+			stateReader:   reader,
 		}
 
-		count, err := sdc.BranchChildCount(reader, prefix)
+		count, err := sdc.BranchChildCount(prefix)
 		require.NoError(t, err)
 		require.Equal(t, 2, count)
 		require.Equal(t, 1, domains.calls)
@@ -159,17 +161,18 @@ func TestBranchChildCountRejectsIncompleteComputedView(t *testing.T) {
 			sharedDomains: &branchChildCountDomains{},
 		}
 
-		_, err := sdc.BranchChildCount(nil, prefix)
-		require.ErrorContains(t, err, "compute state reader")
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "installed state reader")
 	})
 
 	t.Run("history reader suppresses branch writes", func(t *testing.T) {
 		reader := &testStateReader{branchData: branch, withHistory: true}
 		sdc := &SharedDomainsCommitmentContext{
 			sharedDomains: &branchChildCountDomains{},
+			stateReader:   reader,
 		}
 
-		_, err := sdc.BranchChildCount(reader, prefix)
+		_, err := sdc.BranchChildCount(prefix)
 		require.ErrorContains(t, err, "reader that permits branch writes")
 	})
 
@@ -177,10 +180,11 @@ func TestBranchChildCountRejectsIncompleteComputedView(t *testing.T) {
 		reader := &testStateReader{branchData: branch}
 		sdc := &SharedDomainsCommitmentContext{
 			sharedDomains: &branchChildCountDomains{},
+			stateReader:   reader,
 			pendingUpdate: &commitment.PendingCommitmentUpdate{},
 		}
 
-		_, err := sdc.BranchChildCount(reader, prefix)
+		_, err := sdc.BranchChildCount(prefix)
 		require.ErrorContains(t, err, "deferred branch updates are pending")
 	})
 
@@ -188,9 +192,10 @@ func TestBranchChildCountRejectsIncompleteComputedView(t *testing.T) {
 		reader := &testStateReader{branchData: branch}
 		sdc := &SharedDomainsCommitmentContext{
 			sharedDomains: &branchChildCountDomains{bound: true, maxStep: 1},
+			stateReader:   reader,
 		}
 
-		_, err := sdc.BranchChildCount(reader, prefix)
+		_, err := sdc.BranchChildCount(prefix)
 		require.ErrorContains(t, err, "staged unwind")
 	})
 }

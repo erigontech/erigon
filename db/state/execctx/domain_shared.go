@@ -297,10 +297,7 @@ type SharedDomains struct {
 	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
 	changesetMu sync.Mutex
 
-	// branchCache is the aggregator-scoped commitment branch cache consulted
-	// after local and parent memory. Its entries are not view-bound, so callers
-	// whose commitment reads can reach it while another transaction updates it
-	// must disable it. It is nil when disabled or unavailable.
+	// branchCache is nil when shared commitment caching is disabled or unavailable.
 	branchCache *commitment.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator

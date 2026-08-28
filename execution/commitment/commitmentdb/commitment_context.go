@@ -422,13 +422,12 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 }
 
 // BranchChildCount returns a branch's child count from the post-compute view.
-// It checks domain memory first, then uses computeReader for a branch absent
-// from memory.
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(computeReader StateReader, nibblePrefix []byte) (int, error) {
-	if computeReader == nil {
-		return 0, errors.New("BranchChildCount requires the compute state reader")
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte) (int, error) {
+	stateReader := sdc.stateReader
+	if stateReader == nil {
+		return 0, errors.New("BranchChildCount requires an installed state reader")
 	}
-	if computeReader.WithHistory() {
+	if stateReader.WithHistory() {
 		return 0, errors.New("BranchChildCount requires a reader that permits branch writes")
 	}
 	if sdc.pendingUpdate != nil {
@@ -444,7 +443,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(computeReader StateR
 		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
 	}
 
-	enc, _, err := computeReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
+	enc, _, err := stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
