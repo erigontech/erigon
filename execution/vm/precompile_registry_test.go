@@ -109,8 +109,8 @@ func TestRegisterPrecompilesPanics(t *testing.T) {
 }
 
 // TestRegisteredProviderWideChainID pins that the registry keys on the whole
-// 256-bit chain ID. Truncating to 64 bits aliased 2^64+1 onto chain 1, which
-// would hand one chain's precompiles to another in a multi-chain embed.
+// 256-bit chain ID. A key truncated to 64 bits would alias 2^64+1 onto chain 1
+// and hand one chain's precompiles to another in a multi-chain embed.
 func TestRegisteredProviderWideChainID(t *testing.T) {
 	wide := new(uint256.Int).AddUint64(new(uint256.Int).Lsh(uint256.NewInt(1), 64), 1) // 2^64 + 1
 	narrow := uint256.NewInt(1)
@@ -292,5 +292,17 @@ func TestPrecompilesNilChainID(t *testing.T) {
 	require.NotPanics(t, func() {
 		require.NotEmpty(t, Precompiles(rules))
 		require.NotEmpty(t, ActivePrecompiles(rules))
+	})
+}
+
+// BenchmarkActivePrecompilesParallel guards the no-provider fast path. Rules
+// resolution runs a few times per transaction on every worker, so taking
+// registryMu here anti-scales with core count.
+func BenchmarkActivePrecompilesParallel(b *testing.B) {
+	rules := &chain.Rules{ChainID: uint256.NewInt(1), IsOsaka: true}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = ActivePrecompiles(rules)
+		}
 	})
 }

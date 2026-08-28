@@ -202,6 +202,16 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
+// gasChangeDimension picks the dimension a gas change is reported in: a state
+// charge the EIP-8037 reservoir covers in full moves state gas, and anything
+// that spilled moves execution gas.
+func gasChangeDimension(before, after mdgas.MdGas, t mdgas.MdGasType, spilled uint64) (from, to uint64) {
+	if t == mdgas.StateGas && spilled == 0 {
+		return before.State, after.State
+	}
+	return before.Execution, after.Execution
+}
+
 func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, uint64, bool) {
 	remaining := initial
 	var used mdgas.MdGasUsage
@@ -209,10 +219,7 @@ func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracin
 		return initial, 0, false
 	}
 	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		before, after := initial.Execution, remaining.Execution
-		if t == mdgas.StateGas && used.StateSpill == 0 {
-			before, after = initial.State, remaining.State
-		}
+		before, after := gasChangeDimension(initial, remaining, t, used.StateSpill)
 		tracer.OnGasChange(before, after, reason)
 	}
 	return remaining, used.StateSpill, true

@@ -86,12 +86,7 @@ const (
 	forkTierCount
 )
 
-type forkSet struct {
-	contracts PrecompiledContracts
-	addresses []accounts.Address
-}
-
-var forkSets [forkTierCount]forkSet
+var forkSets [forkTierCount]mergedPrecompileSet
 
 func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
@@ -112,18 +107,22 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 	}
 }
 
-// Precompiles returns the fork-selected built-in precompiles for chainRules,
-// overlaid with any provider registered via RegisterPrecompiles for
-// chainRules.ChainID. With no registered provider it returns the built-in
-// map exactly as before.
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+// activeSet resolves the fork-selected built-ins for chainRules, overlaid with
+// any provider registered for chainRules.ChainID. With no registered provider
+// it is the built-in set itself.
+func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
 	fork := forkTierFor(chainRules)
 	chainID := rulesChainID(chainRules)
 	provider, gen, ok := lookupProvider(chainID)
 	if !ok {
-		return forkSets[fork].contracts
+		return &forkSets[fork]
 	}
-	return mergedSetFor(chainRules, forkSets[fork].contracts, fork, chainID, provider, gen).contracts
+	return mergedSetFor(chainRules, fork, chainID, provider, gen)
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return activeSet(chainRules).contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -240,20 +239,14 @@ func init() {
 		forkPrague:    PrecompiledContractsPrague,
 		forkOsaka:     PrecompiledContractsOsaka,
 	} {
-		forkSets[tier] = forkSet{contracts, slices.Collect(maps.Keys(contracts))}
+		forkSets[tier] = mergedPrecompileSet{contracts, slices.Collect(maps.Keys(contracts))}
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current
-// configuration, reflecting any provider registered for rules.ChainID.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	fork := forkTierFor(rules)
-	chainID := rulesChainID(rules)
-	provider, gen, ok := lookupProvider(chainID)
-	if !ok {
-		return forkSets[fork].addresses
-	}
-	return mergedSetFor(rules, forkSets[fork].contracts, fork, chainID, provider, gen).addresses
+	return activeSet(rules).addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

@@ -45,14 +45,13 @@ import (
 // recordingStatefulPrecompile implements vm.StatefulPrecompile and records
 // the PrecompileContext of every RunStateful call for assertion.
 type recordingStatefulPrecompile struct {
+	vm.NoStatelessRun
 	calls []*vm.PrecompileContext
 }
 
 var _ vm.StatefulPrecompile = (*recordingStatefulPrecompile)(nil)
 
-func (r *recordingStatefulPrecompile) RequiredGas([]byte) uint64        { return 0 }
-func (r *recordingStatefulPrecompile) Run(input []byte) ([]byte, error) { return nil, nil }
-func (r *recordingStatefulPrecompile) Name() string                     { return "RECORDING" }
+func (r *recordingStatefulPrecompile) Name() string { return "RECORDING" }
 
 func (r *recordingStatefulPrecompile) RunStateful(input []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
 	r.calls = append(r.calls, ctx)
@@ -178,25 +177,19 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 }
 
 type reenteringStatefulPrecompile struct {
+	vm.NoStatelessRun
 	self  accounts.Address
 	calls int
 }
 
-func (r *reenteringStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (r *reenteringStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (r *reenteringStatefulPrecompile) Name() string               { return "REENTER" }
+func (r *reenteringStatefulPrecompile) Name() string { return "REENTER" }
 
 func (r *reenteringStatefulPrecompile) RunStateful(input []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
 	r.calls++
 	if r.calls > 1100 {
 		return nil, nil
 	}
-	handed := gas.Remaining()
-	if !gas.ChargeExecution(handed.Execution) {
-		return nil, vm.ErrOutOfGas
-	}
-	_, leftover, _, err := ctx.Evm.Call(ctx.Caller, r.self, input, handed, uint256.Int{}, false)
-	gas.RefundExecution(leftover.Execution)
+	_, err := ctx.Call(gas, r.self, input, gas.Remaining().Execution, nil)
 	return nil, err
 }
 
@@ -219,11 +212,9 @@ func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	require.LessOrEqual(t, rec.calls, 1030, "recursion must be cut off by the depth limit")
 }
 
-type stateGasStatefulPrecompile struct{}
+type stateGasStatefulPrecompile struct{ vm.NoStatelessRun }
 
-func (stateGasStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (stateGasStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (stateGasStatefulPrecompile) Name() string               { return "STATEGAS" }
+func (stateGasStatefulPrecompile) Name() string { return "STATEGAS" }
 
 func (stateGasStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if !gas.ChargeExecution(100) || !gas.ChargeState(40) {
@@ -255,20 +246,14 @@ func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 }
 
 type nestedCallStatefulPrecompile struct {
+	vm.NoStatelessRun
 	target accounts.Address
 }
 
-func (nestedCallStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (nestedCallStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (nestedCallStatefulPrecompile) Name() string               { return "NESTED" }
+func (nestedCallStatefulPrecompile) Name() string { return "NESTED" }
 
 func (p nestedCallStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-	handed := gas.Remaining()
-	if !gas.ChargeExecution(handed.Execution) {
-		return nil, vm.ErrOutOfGas
-	}
-	_, leftover, _, err := ctx.Evm.Call(ctx.Caller, p.target, nil, handed, uint256.Int{}, false)
-	gas.RefundExecution(leftover.Execution)
+	_, err := ctx.Call(gas, p.target, nil, gas.Remaining().Execution, nil)
 	return nil, err
 }
 
@@ -323,11 +308,12 @@ func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
 
 // spillingStatefulPrecompile charges more state gas than the frame's EIP-8037
 // reservoir holds, so the excess spills into execution gas.
-type spillingStatefulPrecompile struct{ execution, state uint64 }
+type spillingStatefulPrecompile struct {
+	vm.NoStatelessRun
+	execution, state uint64
+}
 
-func (spillingStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (spillingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (spillingStatefulPrecompile) Name() string               { return "SPILL" }
+func (spillingStatefulPrecompile) Name() string { return "SPILL" }
 
 func (p spillingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if !gas.ChargeExecution(p.execution) || !gas.ChargeState(p.state) {
@@ -361,11 +347,9 @@ func TestStatefulPrecompileStateGasSpill(t *testing.T) {
 }
 
 // revertingSpillPrecompile spills state gas and then reverts.
-type revertingSpillPrecompile struct{}
+type revertingSpillPrecompile struct{ vm.NoStatelessRun }
 
-func (revertingSpillPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (revertingSpillPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (revertingSpillPrecompile) Name() string               { return "REVERTSPILL" }
+func (revertingSpillPrecompile) Name() string { return "REVERTSPILL" }
 
 func (revertingSpillPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if !gas.ChargeExecution(100) || !gas.ChargeState(40) {
@@ -397,11 +381,9 @@ func TestStatefulPrecompileSpillRestoredOnRevert(t *testing.T) {
 
 // clearingStatefulPrecompile refunds more state gas than it charged, the way a
 // frame that clears state an ancestor created does.
-type clearingStatefulPrecompile struct{}
+type clearingStatefulPrecompile struct{ vm.NoStatelessRun }
 
-func (clearingStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (clearingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (clearingStatefulPrecompile) Name() string               { return "CLEAR" }
+func (clearingStatefulPrecompile) Name() string { return "CLEAR" }
 
 func (clearingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if !gas.ChargeState(40) {
@@ -437,19 +419,17 @@ func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 // staticEscapePrecompile reaches back into the EVM the way an integrator's
 // precompile would, and records what each entry point returned.
 type staticEscapePrecompile struct {
+	vm.NoStatelessRun
 	target    accounts.Address
 	callErr   error
 	createErr error
 }
 
-func (*staticEscapePrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (*staticEscapePrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (*staticEscapePrecompile) Name() string               { return "ESCAPE" }
+func (*staticEscapePrecompile) Name() string { return "ESCAPE" }
 
 func (p *staticEscapePrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-	handed := gas.Remaining()
-	_, _, _, p.callErr = ctx.Evm.Call(ctx.Self, p.target, nil, handed, *uint256.NewInt(5), false)
-	_, _, _, _, p.createErr = ctx.Evm.Create(ctx.Self, []byte{0x00}, handed, uint256.Int{}, nil, false)
+	_, p.callErr = ctx.Call(gas, p.target, nil, gas.Remaining().Execution, uint256.NewInt(5))
+	_, _, _, _, p.createErr = ctx.Evm.Create(ctx.Self, []byte{0x00}, gas.Remaining(), uint256.Int{}, nil, false)
 	return nil, nil
 }
 
@@ -494,11 +474,12 @@ func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 	require.Equal(t, uint64(5), balance.Uint64())
 }
 
-type reservoirChargeStatefulPrecompile struct{ amount uint64 }
+type reservoirChargeStatefulPrecompile struct {
+	vm.NoStatelessRun
+	amount uint64
+}
 
-func (reservoirChargeStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (reservoirChargeStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (reservoirChargeStatefulPrecompile) Name() string               { return "RESERVOIR" }
+func (reservoirChargeStatefulPrecompile) Name() string { return "RESERVOIR" }
 
 func (p reservoirChargeStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if !gas.ChargeState(p.amount) {
@@ -540,11 +521,12 @@ func TestStatefulPrecompileStateChargeIsTraced(t *testing.T) {
 		"a reservoir-covered state charge must still reach the tracer")
 }
 
-type overRefundStatefulPrecompile struct{ refundErr error }
+type overRefundStatefulPrecompile struct {
+	vm.NoStatelessRun
+	refundErr error
+}
 
-func (*overRefundStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (*overRefundStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (*overRefundStatefulPrecompile) Name() string               { return "OVERREFUND" }
+func (*overRefundStatefulPrecompile) Name() string { return "OVERREFUND" }
 
 func (p *overRefundStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if gas.RefundExecution(1) {
@@ -589,11 +571,9 @@ func TestStatefulPrecompileCannotMintExecutionGas(t *testing.T) {
 	require.Zero(t, gasUsed.Execution)
 }
 
-type wrappedRevertStatefulPrecompile struct{}
+type wrappedRevertStatefulPrecompile struct{ vm.NoStatelessRun }
 
-func (wrappedRevertStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (wrappedRevertStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (wrappedRevertStatefulPrecompile) Name() string               { return "WRAPREVERT" }
+func (wrappedRevertStatefulPrecompile) Name() string { return "WRAPREVERT" }
 
 func (wrappedRevertStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
 	if !gas.ChargeExecution(100) {
@@ -624,16 +604,15 @@ func TestStatefulPrecompileWrappedRevertKeepsFrameGas(t *testing.T) {
 }
 
 type refusedCallStatefulPrecompile struct {
+	vm.NoStatelessRun
 	target  accounts.Address
 	callErr error
 }
 
-func (*refusedCallStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
-func (*refusedCallStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
-func (*refusedCallStatefulPrecompile) Name() string               { return "REFUSED" }
+func (*refusedCallStatefulPrecompile) Name() string { return "REFUSED" }
 
 func (p *refusedCallStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-	_, _, _, p.callErr = ctx.Evm.Call(ctx.Self, p.target, nil, gas.Remaining(), *uint256.NewInt(5), false)
+	_, p.callErr = ctx.Call(gas, p.target, nil, gas.Remaining().Execution, uint256.NewInt(5))
 	return nil, nil
 }
 
@@ -695,4 +674,47 @@ func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 	_, _, _, err = vmenv.Call(cfg.Origin, precompileAddr, nil, gas, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.Len(t, rec.calls, 1, "nil restores the chain's own set")
+}
+
+type reservoirHandoffPrecompile struct {
+	vm.NoStatelessRun
+	inner   accounts.Address
+	callErr error
+}
+
+func (*reservoirHandoffPrecompile) Name() string { return "HANDOFF" }
+
+func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	_, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, nil)
+	return nil, p.callErr
+}
+
+// TestStatefulPrecompileNestedCallMovesTheReservoir pins the EIP-8037 handoff.
+// MdGas passes by value, so a nested call handed gas.Remaining() directly would
+// leave the reservoir standing in both frames and let each nesting level spend
+// it again.
+func TestStatefulPrecompileNestedCallMovesTheReservoir(t *testing.T) {
+	const chainID = 900416
+	const reservoir, charge = uint64(5_000), uint64(400)
+	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x95}))
+	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x96}))
+	outer := &reservoirHandoffPrecompile{inner: innerAddr}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{
+			outerAddr: outer,
+			innerAddr: reservoirChargeStatefulPrecompile{amount: charge},
+		}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, outerAddr)
+
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
+		mdgas.MdGas{Execution: 100_000, State: reservoir}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.NoError(t, outer.callErr)
+	require.Equal(t, reservoir-charge, remaining.State,
+		"the child's charge must come out of the one reservoir, not a copy of it")
+	require.Equal(t, int64(charge), gasUsed.State)
 }
