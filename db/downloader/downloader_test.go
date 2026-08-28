@@ -853,6 +853,26 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
 }
 
+// Registering is not seeding: makeAddTorrentOpts disallows upload on every torrent it adds,
+// and afterAdd is the only thing that lifts it and attaches the trackers. AddNewSeedableFile
+// is the sole route for a kept snapshot without metainfo, so it has to finish the add too.
+func TestKeptLocalSnapshotIsAnnouncedAndUploadable(t *testing.T) {
+	require := require.New(t)
+	d, _, name, _ := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	require.NoError(d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), name))
+
+	d.lock.RLock()
+	tor := d.torrentsByName[name]
+	d.lock.RUnlock()
+	require.NotNil(tor)
+	require.NotEmpty(tor.Metainfo().AnnounceList,
+		"kept snapshot registered without trackers, so no peer can discover it")
+}
+
 // Deriving a metainfo hashes a whole data file, so the seeding tasks are bounded and wait for a
 // slot. That wait must observe the downloader shutting down, or a stop has to hash every remaining
 // kept snapshot before it can finish.
