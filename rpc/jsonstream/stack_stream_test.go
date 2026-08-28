@@ -996,7 +996,7 @@ func TestFlushErrorDoesNotBuffer(t *testing.T) {
 	s := New(goneWriter{}).(*StackStream)
 
 	chunk := strings.Repeat("x", 4096)
-	for range 2000 {
+	for range 128 * FlushThreshold / len(chunk) {
 		s.WriteRaw(chunk)
 	}
 
