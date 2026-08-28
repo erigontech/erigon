@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -76,8 +76,6 @@ type Aggregator struct {
 	// Note: this is a SOFT limit applied during the merge process. If you apply a smaller limit to
 	// an existing datadir, the existing domain files containing more steps will be unaffected.
 	erigondbDomainStepsInFrozenFile uint64
-
-	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
@@ -146,7 +144,7 @@ type Aggregator struct {
 	commitmentRefsOverride *bool
 }
 
-func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &Aggregator{
 		ctx:                ctx,
@@ -154,7 +152,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		onFilesChange:      func(frozenFileNames []string) {},
 		onFilesDelete:      func(frozenFileNames []string) {},
 		dirs:               dirs,
-		reorgBlockDepth:    reorgBlockDepth,
 		db:                 db,
 		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		backgroundProgress: background.NewProgressSet(),
@@ -1012,7 +1009,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
+func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step, finalityCtx dbfinality.Context) error {
 	// Pin worker counts for the duration of buildFiles. The collate/build phases
 	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
 	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
@@ -1020,7 +1017,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
+	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step, finalityCtx)
 	if err != nil {
 		return err
 	}
@@ -1037,7 +1034,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			"lastBlockInStep", lastBlockInStep,
 			"lastBlockInDB", lastBlockInDB,
 			"lastTxInDB", lastTxInDB,
-			"reorgBlockDepth", a.reorgBlockDepth,
+			"reorgBlockDepth", finalityCtx.MaxReorgDepth(),
 			"lastCollatableStepInDB", lastCollatableStepInDB,
 		)
 		return errStepNotReady
@@ -1148,38 +1145,14 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
-	if a.reorgBlockDepth == 0 {
-		return 0, 0, 0, 0, true, nil
-	}
+func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step, finalityCtx dbfinality.Context) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
-	err = a.db.View(ctx, func(tx kv.Tx) error {
-		finalisedBlockNum = rawdb.ReadForkchoiceFinalizedNum(tx)
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, step.LastTxNum(a.stepSize.Load()))
-		if err != nil {
-			return err
-		}
-		if !ok {
-			lastBlockInStep = 0
-		}
-		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
-		return err
-	})
-	var ready bool
-	if finalisedBlockNum > 0 {
-		ready = lastBlockInStep <= finalisedBlockNum
-	} else {
-		ready = lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
-	}
-	ok = err == nil && ready
-	return
+	return finalityCtx.ReadyForCollation(ctx, a.db, step.LastTxNum(a.stepSize.Load()))
 }
 
-// reorgSafeBlockAndStep reports the highest block that is safe to freeze
-// (lastBlockInDB - reorgBlockDepth) and the fractional step that block maps to.
-func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock uint64, reorgSafeStep float64, ok bool) {
-	if a.reorgBlockDepth == 0 {
+func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, maxReorgDepth uint64) (reorgSafeBlock uint64, reorgSafeStep float64, ok bool) {
+	if maxReorgDepth == 0 {
 		return 0, 0, false
 	}
 	a.commitGate.RLock()
@@ -1189,10 +1162,10 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock 
 		if err != nil {
 			return err
 		}
-		if lastBlockInDB <= a.reorgBlockDepth {
+		if lastBlockInDB <= maxReorgDepth {
 			return nil
 		}
-		reorgSafeBlock = lastBlockInDB - a.reorgBlockDepth
+		reorgSafeBlock = lastBlockInDB - maxReorgDepth
 		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, reorgSafeBlock)
 		if err != nil {
 			return err
@@ -1207,8 +1180,8 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock 
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
-func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	finished, _ := a.buildFilesInBackground(toTxNum, true)
+func (a *Aggregator) BuildFiles(toTxNum uint64, finalityCtx dbfinality.Context) error {
+	finished, _ := a.buildFilesInBackground(toTxNum, true, finalityCtx)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
@@ -1236,7 +1209,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, doMerge bool) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, finalityCtx dbfinality.Context, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -1246,7 +1219,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 			log.Info("[agg] build", "fromStep", fromStep, "toStep", toStep)
 		}
 		for step := fromStep; step < toStep; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(ctx, step); err != nil {
+			if err := a.buildFiles(ctx, step, finalityCtx); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}
@@ -1789,18 +1762,20 @@ func (a *Aggregator) UnlockCollation() { a.commitGate.Unlock() }
 // around BeginTemporalRw to drain old readers.
 func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
 
-// CollateAndPrune runs a single prune pass and kicks background file
-// building. The block-snapshot-boundary gate inside readyForCollation
-// keeps state files from extending past block files, so no external cap
-// is needed. It returns whether file building started and its completion channel.
-func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) (bool, <-chan struct{}, error) {
+// CollateAndPrune commits a prune pass before starting bounded file building.
+func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) (dbfinality.Context, error), logger log.Logger) (bool, <-chan struct{}, error) {
+	var finalityCtx dbfinality.Context
 	a.commitGate.Lock()
-	err := db.UpdateTemporal(ctx, pruneFn)
+	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		var err error
+		finalityCtx, err = pruneFn(tx)
+		return err
+	})
 	a.commitGate.Unlock()
 	if err != nil {
 		return false, nil, err
 	}
-	finished, started := a.buildFilesInBackground(a.EndTxNumMinimax()+a.StepSize(), true)
+	finished, started := a.buildFilesInBackground(a.EndTxNumMinimax()+a.StepSize(), true, finalityCtx)
 	return started, finished, nil
 }
 func (a *Aggregator) FilesAmount() (res []int) {
@@ -2233,13 +2208,13 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
-	finished, _ := a.buildFilesInBackground(txNum, true)
+func (a *Aggregator) BuildFilesInBackground(txNum uint64, finalityCtx dbfinality.Context) chan struct{} {
+	finished, _ := a.buildFilesInBackground(txNum, true, finalityCtx)
 	return finished
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
-func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) (chan struct{}, bool) {
+func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool, finalityCtx dbfinality.Context) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
@@ -2292,7 +2267,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) (chan st
 				lastIdInDB(a.db, a.d[kv.StorageDomain]),
 				lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		}()
-		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx)
+		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx, finalityCtx.MaxReorgDepth())
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
 			"reorgSafeBlock", reorgSafeBlock, "reorgSafeStep", fmt.Sprintf("%.2f", reorgSafeStep), "reorgSafeOK", reorgSafeOK)
 
@@ -2368,7 +2343,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) (chan st
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for ; step < lastInDB; step++ { //`step` must be fully-written - means `step+1` records must be visible
-			if err := a.buildFiles(a.ctx, step); err != nil {
+			if err := a.buildFiles(a.ctx, step, finalityCtx); err != nil {
 				if errors.Is(err, errStepNotReady) {
 					break
 				}

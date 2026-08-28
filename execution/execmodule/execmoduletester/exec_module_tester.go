@@ -524,7 +524,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	dbOpts := []temporaltest.Option{temporaltest.WithReorgBlockDepth(cfg.Sync.MaxReorgDepth)}
+	var dbOpts []temporaltest.Option
 	if opt.stepSize != nil {
 		dbOpts = append(dbOpts, temporaltest.WithStepSize(*opt.stepSize))
 	}

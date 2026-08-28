@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -885,10 +886,10 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
 			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 			pruneTimeout := min(baseTimeout+time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
-			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
 				if e.codeStore != nil {
 					if err := e.codeStore.Evict(tx); err != nil {
-						return err
+						return nil, err
 					}
 				}
 				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)

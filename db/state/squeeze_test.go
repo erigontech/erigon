@@ -50,7 +50,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRw
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
 
 	// build files out of db
-	err := agg.BuildFiles(uint64(txCount))
+	err := agg.BuildFiles(uint64(txCount), unboundedFinalityCtx)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -570,7 +570,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -788,7 +788,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Build files
 	t.Logf("Building files for %d txs...", totalTxs)
-	err = agg.BuildFiles(totalTxs)
+	err = agg.BuildFiles(totalTxs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	// Validate
