@@ -108,17 +108,17 @@ type BeaconStateSSZ interface {
 //go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mutator_mock.go -package=mock_services . BeaconStateMutator
 type BeaconStateMutator interface {
 	SetVersion(version clparams.StateVersion)
-	SetSlot(slot uint64)
+	SetSlot(slot uint64) error
 	SetFork(fork *cltypes.Fork)
 	SetLatestBlockHeader(header *cltypes.BeaconBlockHeader)
-	SetBlockRootAt(index int, root common.Hash)
-	SetStateRootAt(index int, root common.Hash)
-	SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash)
-	SetExitEpochForValidatorAtIndex(index int, epoch uint64)
+	SetBlockRootAt(index int, root common.Hash) error
+	SetStateRootAt(index int, root common.Hash) error
+	SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) error
+	SetExitEpochForValidatorAtIndex(index int, epoch uint64) error
 	SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) error
-	SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64)
-	SetActivationEpochForValidatorAtIndex(index int, epoch uint64)
-	SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64)
+	SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) error
+	SetActivationEpochForValidatorAtIndex(index int, epoch uint64) error
+	SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) error
 	SetEth1Data(eth1Data *cltypes.Eth1Data)
 	SetEth1DepositIndex(eth1DepositIndex uint64)
 	SetValidatorSlashed(index int, slashed bool) error
@@ -131,8 +131,8 @@ type BeaconStateMutator interface {
 	SetValidatorIsPreviousMatchingTargetAttester(index int, value bool) error
 	SetValidatorIsPreviousMatchingHeadAttester(index int, value bool) error
 	SetValidatorBalance(index int, balance uint64) error
-	SetRandaoMixAt(index int, mix common.Hash)
-	SetSlashingSegmentAt(index int, segment uint64)
+	SetRandaoMixAt(index int, mix common.Hash) error
+	SetSlashingSegmentAt(index int, segment uint64) error
 	SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags)
 	SetValidatorAtIndex(index int, validator solid.Validator)
 
@@ -140,8 +140,8 @@ type BeaconStateMutator interface {
 	SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint solid.Checkpoint)
 	SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint solid.Checkpoint)
 	SetFinalizedCheckpoint(finalizedCheckpoint solid.Checkpoint)
-	SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee)
-	SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee)
+	SetCurrentSyncCommittee(currentSyncCommittee *solid.SyncCommittee) error
+	SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommittee) error
 	SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header)
 	SetNextWithdrawalIndex(index uint64)
 	SetNextWithdrawalValidatorIndex(index uint64)
@@ -168,8 +168,8 @@ type BeaconStateMutator interface {
 	SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid)
 	SetPtcWindow(ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ])
 
-	AddEth1DataVote(vote *cltypes.Eth1Data)
-	AddValidator(validator solid.Validator, balance uint64)
+	AddEth1DataVote(vote *cltypes.Eth1Data) error
+	AddValidator(validator solid.Validator, balance uint64) error
 	AddHistoricalSummary(summary *cltypes.HistoricalSummary)
 	AddHistoricalRoot(root common.Hash)
 	AddInactivityScore(score uint64)
@@ -185,7 +185,7 @@ type BeaconStateMutator interface {
 	AppendPendingConsolidation(consolidation *solid.PendingConsolidation)
 
 	ResetEth1DataVotes()
-	ResetEpochParticipation()
+	ResetEpochParticipation() error
 	ResetHistoricalSummaries()
 	ResetCurrentEpochAttestations()
 	ResetPreviousEpochAttestations()

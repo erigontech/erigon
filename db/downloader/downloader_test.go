@@ -19,12 +19,14 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,10 +35,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -354,6 +358,169 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 	}
 }
 
+func TestDownloaderCompletedAndResetProgress(t *testing.T) {
+	var d Downloader
+
+	_, total := d.Completed()
+	require.Zero(t, total, "no sample yet")
+
+	d.lastStats.Store(&AggStats{BytesCompleted: 30, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2})
+	done, total := d.Completed()
+	require.Equal(t, uint64(30), done)
+	require.Equal(t, uint64(100), total)
+
+	d.ResetProgress()
+	_, total = d.Completed()
+	require.Zero(t, total, "reset drops the sample")
+}
+
+// Torrents whose metainfo has not arrived are excluded from both byte counters,
+// so an early sample counts the already-complete header files against a partial
+// total and reports near-completion.
+func TestDownloaderCompletedIgnoresIncompleteMetadata(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 25_000, BytesTotal: 26_000, MetadataReady: 3, NumTorrents: 10})
+
+	done, total := d.Completed()
+	require.Zero(t, total)
+	require.Zero(t, done)
+}
+
+func TestDownloaderCompletedReportsOnceMetadataArrives(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 25_000, BytesTotal: 26_000, MetadataReady: 3, NumTorrents: 10})
+	d.storeStats(AggStats{BytesCompleted: 26_000, BytesTotal: 900_000, MetadataReady: 10, NumTorrents: 10})
+
+	done, total := d.Completed()
+	require.Equal(t, uint64(26_000), done)
+	require.Equal(t, uint64(900_000), total)
+}
+
+// BytesCompleted counts dirty bytes, which can go back down.
+func TestDownloaderCompletedNeverRegressesWithinSession(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 500, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+	d.storeStats(AggStats{BytesCompleted: 400, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+
+	done, _ := d.Completed()
+	require.Equal(t, uint64(500), done)
+}
+
+// The high-water mark is per download session, or a retry after a failure would
+// stick at the previous session's high.
+func TestDownloaderResetProgressClearsHighWaterMark(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 900, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+	d.ResetProgress()
+	d.storeStats(AggStats{BytesCompleted: 100, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+
+	done, _ := d.Completed()
+	require.Equal(t, uint64(100), done)
+}
+
+// A same-name torrent retained under a different infohash (an existing local
+// file kept over the preverified one) must still count toward stats: resolving
+// batch entries only by the requested hash would keep MetadataReady short for
+// the whole session and gate Completed() at (0, 0).
+func TestNewStatsCountsRetainedSameNameTorrent(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	ctx := t.Context()
+
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	test.downloader.lock.RLock()
+	localT := test.downloader.torrentsByName["a.seg"]
+	test.downloader.lock.RUnlock()
+	require.NotNil(localT)
+
+	preverifiedHash := snaptype.Hex2InfoHash("bb")
+	require.NotEqual(preverifiedHash, localT.InfoHash())
+	require.NoError(test.downloader.testStartSingleDownloadNoWait(ctx, preverifiedHash, "a.seg"))
+
+	stats := test.downloader.newStats(AggStats{}, []snapshot{{InfoHash: preverifiedHash, Name: "a.seg"}})
+	require.Equal(1, stats.NumTorrents)
+	require.Equal(1, stats.MetadataReady)
+	require.Positive(stats.BytesTotal)
+
+	test.downloader.storeStats(stats)
+	_, total := test.downloader.Completed()
+	require.Positive(total)
+}
+
+// The download's logging loop is the only production writer of the progress
+// sample: drive a real batch and require the sample to reach Completed(), so
+// a change gating that loop cannot silently kill the download progress.
+func TestDownloaderCompletedFedByDownloadBatch(t *testing.T) {
+	test := newDownloaderTest(t)
+	ctx := t.Context()
+
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
+	require.NoError(t, test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	test.downloader.lock.RLock()
+	localT := test.downloader.torrentsByName["a.seg"]
+	test.downloader.lock.RUnlock()
+	require.NotNil(t, localT)
+
+	require.NoError(t, test.downloader.testStartSingleDownloadNoWait(ctx, localT.InfoHash(), "a.seg"))
+
+	require.Eventually(t, func() bool {
+		_, total := test.downloader.Completed()
+		return total > 0
+	}, 2*time.Second, 10*time.Millisecond, "the download's logging loop must feed Completed()")
+}
+
+// Progress samples carry no batch identity, so a batch must wait for the one in
+// flight instead of blending two disjoint file sets into one sample.
+func TestDownloadSnapshotsSerializesBatches(t *testing.T) {
+	test := newDownloaderTest(t)
+
+	test.downloader.downloadBatchLock.Lock()
+	done := make(chan error, 1)
+	go func() { done <- test.downloader.DownloadSnapshots(t.Context(), nil, "queued batch") }()
+
+	select {
+	case <-done:
+		t.Fatal("a batch must not run while another one is in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	test.downloader.downloadBatchLock.Unlock()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the queued batch must run once the one in flight is done")
+	}
+}
+
+// noProgressDownloaderClient stands in for an external downloader reached over
+// gRPC, which cannot report progress.
+type noProgressDownloaderClient struct {
+	downloaderproto.DownloaderClient
+}
+
+// The capability travels through two wrapping clients: each must unwrap to the
+// in-process downloader itself, not report on its behalf.
+func TestRpcClientProgressUnwrapsToInProcessDownloader(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	client := NewRpcClient(DirectGrpcServerClient(grpcServer), test.dirs.Snap)
+
+	require.Equal(t, dbservices.DownloadProgressReport(test.downloader), client.DownloadProgress())
+}
+
+func TestRpcClientProgressNilWithoutCapability(t *testing.T) {
+	client := NewRpcClient(noProgressDownloaderClient{}, t.TempDir())
+
+	require.Nil(t, client.DownloadProgress())
+}
+
 // logBuffer is a log sink readable while the Downloader's goroutines write to it.
 type logBuffer struct {
 	mu  sync.Mutex
@@ -658,6 +825,20 @@ func TestGrpcDownloadKeepsLocalDataAfterInitialDownload(t *testing.T) {
 	require.NoFileExists(path + ".part")
 }
 
+// testStartSingleDownloadAndWait starts a snapshot download and waits for it with a live context,
+// bounded so a hang fails this test instead of the whole package.
+func (d *Downloader) testStartSingleDownloadAndWait(ctx context.Context, infoHash metainfo.Hash, name string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	wait, err := d.startSnapshotsDownload(ctx, []preverifiedSnapshot{
+		{infoHash, name},
+	}, "testing")
+	if err != nil {
+		return err
+	}
+	return wait(ctx)
+}
+
 // A kept snapshot still has to be seeded. With no torrent registered the name is absent from
 // torrentsByName, so allActiveSnapshots and PublishLocalChainToml never see it, and a seedbox
 // silently stops serving a file it holds.
@@ -665,10 +846,8 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	require := require.New(t)
 	d, _, name, path := newLocalSnapshotTest(t)
 	markInitialDownloadComplete(t, d)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
 
-	require.NoError(d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), name))
+	require.NoError(d.testStartSingleDownloadAndWait(t.Context(), snaptype.Hex2InfoHash("aa"), name))
 
 	require.FileExists(path)
 	require.NoFileExists(path + ".part")
@@ -676,6 +855,313 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	_, registered := d.torrentsByName[name]
 	d.lock.RUnlock()
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
+}
+
+// goSeed must never exceed the seed semaphore's capacity.
+func TestGoSeedBoundsConcurrency(t *testing.T) {
+	require := require.New(t)
+	const limit = 3
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+
+	const n = 10
+	var current, peak atomic.Int64
+	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
+	for range n {
+		batch.goSeed(func() error {
+			c := current.Add(1)
+			for {
+				p := peak.Load()
+				if c <= p || peak.CompareAndSwap(p, c) {
+					break
+				}
+			}
+			<-release
+			current.Add(-1)
+			return nil
+		})
+	}
+
+	require.Eventually(func() bool { return current.Load() == limit }, time.Second, time.Millisecond,
+		"only %d of %d tasks should be able to run concurrently", limit, n)
+	closeRelease()
+	batch.all.Wait()
+	require.EqualValues(limit, peak.Load())
+}
+
+// Cancelling seedCtx is genuine abandonment: it must drop queued goSeed tasks instead of running
+// them, independently of the batch's own cancellation.
+func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
+	require := require.New(t)
+	const limit = 2
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	// Guaranteed even if the require.Eventually below fails and testify unwinds this goroutine
+	// with FailNow, which would otherwise strand every goroutine dispatched below.
+	defer batch.seedCancel(nil)
+
+	const n = 50
+	var started atomic.Int64
+	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
+	for range n {
+		batch.goSeed(func() error {
+			started.Add(1)
+			<-release
+			return nil
+		})
+	}
+
+	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
+		"the first %d tasks should have started", limit)
+	batch.seedCancel(nil)
+	require.EqualValues(limit, started.Load(), "queued tasks must abandon rather than wait for a slot")
+	closeRelease()
+
+	done := make(chan struct{})
+	go func() {
+		batch.all.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelling seedCtx did not release goSeed tasks still waiting for a slot")
+	}
+	require.EqualValues(n-limit, batch.seedDropped.Load(),
+		"every task that never seeded must be counted, or the warn under-reports")
+}
+
+// A cancel landing after a task has started seeds nothing either, and only the task's own outcome
+// shows it: a ctx check taken before the call races the cancel and misses the drop.
+func TestGoSeedCountsCancelAfterStart(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(1)}}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+
+	started, release := make(chan struct{}), make(chan struct{})
+	batch.goSeed(func() error {
+		close(started)
+		<-release
+		// The wrapped cause the real seed path returns when it bails after the cancel.
+		return fmt.Errorf("building metainfo: %w", context.Cause(batch.seedCtx))
+	})
+
+	<-started
+	batch.seedCancel(errors.New("caller went away"))
+	close(release)
+	batch.all.Wait()
+
+	require.EqualValues(1, batch.seedDropped.Load(),
+		"a cancel arriving after the task started must still count as a drop")
+}
+
+// goSeed waits on seedCtx, not the batch's own cancellation, so cancelling the batch alone must
+// not drop seed work still queued behind a full semaphore — it must all eventually run.
+func TestGoSeedRunsAllOnSuccess(t *testing.T) {
+	require := require.New(t)
+	const limit = 2
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
+	_, batch.cancel = context.WithCancelCause(context.Background())
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+
+	const n = 50
+	var started, ran atomic.Int64
+	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
+	for range n {
+		batch.goSeed(func() error {
+			started.Add(1)
+			<-release
+			ran.Add(1)
+			return nil
+		})
+	}
+
+	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
+		"only %d of %d tasks should be able to run concurrently", limit, n)
+
+	batch.cancel(nil)
+	closeRelease()
+
+	done := make(chan struct{})
+	go func() {
+		batch.all.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batch.all.Wait() did not return once the release gate opened")
+	}
+	require.EqualValues(n, ran.Load(), "all queued seed work must run when the batch succeeds")
+}
+
+// writeKeptLocalSnapshots writes n snapshot files that keep-local under startSnapshotsDownload (no
+// metainfo backs their preverified hash). Content embeds the name so distinct items hash to
+// distinct infohashes; identical content would collide and one would appear to lose the race for a
+// reason unrelated to the seed bound.
+func writeKeptLocalSnapshots(t *testing.T, d *Downloader, n, size int) (items []preverifiedSnapshot, names []string) {
+	t.Helper()
+	for i := range n {
+		name := fmt.Sprintf("domain/v2.0-accounts.%d-%d.kv", i, i+1)
+		path := d.filePathForName(name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		buf := make([]byte, size)
+		copy(buf, name)
+		require.NoError(t, os.WriteFile(path, buf, 0o644))
+		names = append(names, name)
+		items = append(items, preverifiedSnapshot{snaptype.Hex2InfoHash("aa"), name})
+	}
+	return
+}
+
+// startSnapshotsDownload wires d.seedSem into the real seeding path: at most that many kept-local
+// snapshots seed concurrently, and abandoning the batch (a cancelled wait ctx) drops whatever is
+// still queued behind the bound instead of leaking it past the batch's own lifetime.
+func TestKeptLocalSeedingRespectsBoundAndAbandonCause(t *testing.T) {
+	const bound = 2
+	const n = bound + 4
+
+	t.Run("success", func(t *testing.T) {
+		require := require.New(t)
+		d := newDownloaderTest(t).downloader
+		d.seedSem = semaphore.NewWeighted(bound)
+		markInitialDownloadComplete(t, d)
+
+		items, names := writeKeptLocalSnapshots(t, d, n, 64)
+
+		wait, err := d.startSnapshotsDownload(t.Context(), items, "testing")
+		require.NoError(err)
+		require.NoError(wait(t.Context()))
+
+		d.lock.RLock()
+		defer d.lock.RUnlock()
+		for _, name := range names {
+			_, registered := d.torrentsByName[name]
+			require.True(registered, name)
+		}
+	})
+
+	t.Run("abandoned", func(t *testing.T) {
+		require := require.New(t)
+		d := newDownloaderTest(t).downloader
+		d.seedSem = semaphore.NewWeighted(bound)
+		markInitialDownloadComplete(t, d)
+
+		// Hold every seed slot so each goSeed task deterministically queues behind the bound,
+		// whatever the scheduler does, instead of racing file hashing against the cancel below.
+		require.NoError(d.seedSem.Acquire(context.Background(), bound))
+		defer d.seedSem.Release(bound)
+
+		items, names := writeKeptLocalSnapshots(t, d, n, 64)
+
+		wait, err := d.startSnapshotsDownload(t.Context(), items, "testing")
+		require.NoError(err)
+
+		ctx, cancel := context.WithCancelCause(t.Context())
+		dropped := errors.New("abandon queued kept-local seeding")
+		cancel(dropped)
+
+		done := make(chan error, 1)
+		go func() { done <- wait(ctx) }()
+		select {
+		case err := <-done:
+			require.ErrorIs(err, dropped,
+				"dropping queued seeding must not report success, or the caller publishes chain.toml for it")
+		case <-time.After(30 * time.Second):
+			t.Fatal("wait did not return after the caller cancelled")
+		}
+
+		d.lock.RLock()
+		defer d.lock.RUnlock()
+		for _, name := range names {
+			_, registered := d.torrentsByName[name]
+			require.False(registered, "abandonment must drop seeding still queued behind the held bound: %s", name)
+		}
+	})
+}
+
+// A batch that fails for its own reasons — here, one of its torrents closing — must still seed
+// kept-local items it already queued: only the caller's own ctx may drop queued seeding.
+func TestKeptLocalSeedingSurvivesTorrentClosed(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	markInitialDownloadComplete(t, d)
+	d.seedSem = semaphore.NewWeighted(1)
+	d.incDownloadRequests()
+
+	_, names := writeKeptLocalSnapshots(t, d, 2, 64)
+
+	pendingName := "a.seg"
+	snapshotTorrent, _, _, keptLocal, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("bb"), pendingName)
+	require.NoError(err)
+	require.False(keptLocal)
+	require.True(snapshotTorrent.Ok)
+
+	batch := &downloadBatch{d: d}
+	batch.torrents = append(batch.torrents, snapshotTorrent.Value)
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+
+	// Only one of the two can hold the seed semaphore's single slot; the other queues behind it,
+	// gated the same way so it stays queued until end()'s cancel-or-not decision has been made.
+	gate := make(chan struct{})
+	for _, name := range names {
+		batch.goSeed(func() error {
+			<-gate
+			return d.seedKeptSnapshot(batch.seedCtx, name)
+		})
+	}
+
+	require.NoError(d.Delete(pendingName))
+
+	done := make(chan error, 1)
+	go func() { done <- batch.wait(t.Context()) }()
+
+	require.Never(func() bool { return batch.seedCtx.Err() != nil }, 100*time.Millisecond, time.Millisecond,
+		"a torrent closing for its own reasons must not cancel queued kept-local seeding")
+	close(gate)
+
+	select {
+	case err := <-done:
+		require.ErrorContains(err, "unexpectedly closed")
+	case <-time.After(30 * time.Second):
+		t.Fatal("wait did not return after the gate opened")
+	}
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	for _, name := range names {
+		_, registered := d.torrentsByName[name]
+		require.True(registered, "kept-local seeding must survive an unrelated torrent closing: %s", name)
+	}
+}
+
+// A second end() call must be a no-op: activeDownloadRequests tracks one increment per
+// startSnapshotsDownload call and must not go negative from a duplicate decrement.
+func TestEndIsIdempotent(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	d.incDownloadRequests()
+
+	batch := &downloadBatch{d: d}
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+
+	batch.end(t.Context(), errors.New("first end"))
+	batch.end(t.Context(), errors.New("second end"))
+
+	d.activeDownloadRequestsLock.Lock()
+	defer d.activeDownloadRequestsLock.Unlock()
+	require.Zero(d.activeDownloadRequests, "a second end call must not decrement activeDownloadRequests again")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from
@@ -718,4 +1204,54 @@ func TestInvalidateDataRefusesAfterInitialDownload(t *testing.T) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// end() joins the seed tasks, and a caller that goes away during that join has its queued seeding
+// dropped by the AfterFunc. wait must report that, or DownloadSnapshots publishes chain.toml for
+// snapshots it never seeded.
+func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	markInitialDownloadComplete(t, d)
+	d.seedSem = semaphore.NewWeighted(1)
+	d.incDownloadRequests()
+
+	// Hold the only slot so every goSeed task is parked in Acquire for the whole join.
+	require.NoError(d.seedSem.Acquire(context.Background(), 1))
+	defer d.seedSem.Release(1)
+
+	_, names := writeKeptLocalSnapshots(t, d, 2, 64)
+
+	// No torrents: wait's loop returns at once, so the cancel below lands inside end()'s join.
+	batch := &downloadBatch{d: d}
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+	for _, name := range names {
+		batch.goSeed(func() error { return d.seedKeptSnapshot(batch.seedCtx, name) })
+	}
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	done := make(chan error, 1)
+	go func() { done <- batch.wait(ctx) }()
+
+	require.Never(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, 100*time.Millisecond, time.Millisecond, "wait must still be joining the parked seed tasks")
+
+	dropped := errors.New("caller went away during the join")
+	cancel(dropped)
+
+	select {
+	case err := <-done:
+		require.ErrorIs(err, dropped,
+			"seeding dropped mid-join must not report success, or the caller publishes chain.toml for it")
+	case <-time.After(30 * time.Second):
+		t.Fatal("wait did not return after the caller cancelled")
+	}
 }
