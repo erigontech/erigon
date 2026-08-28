@@ -55,6 +55,30 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	return db
 }
 
+func TestChaindataReadahead(t *testing.T) {
+	tests := []struct {
+		name            string
+		value           string
+		wantNoReadahead bool
+	}{
+		{name: "default", wantNoReadahead: false},
+		{name: "disabled", value: "false", wantNoReadahead: true},
+		{name: "enabled", value: "true", wantNoReadahead: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CHAINDATA_READAHEAD", test.value)
+			opts := mdbx.New(dbcfg.ChainDB, log.New())
+			require.Equal(t, test.wantNoReadahead, opts.HasFlag(mdbxgo.NoReadahead))
+		})
+	}
+
+	t.Setenv("CHAINDATA_READAHEAD", "true")
+	opts := mdbx.New(dbcfg.TxPoolDB, log.New())
+	require.True(t, opts.HasFlag(mdbxgo.NoReadahead))
+}
+
 func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
 	b.Helper()
 	path := b.TempDir()
