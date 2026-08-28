@@ -2830,9 +2830,9 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	}
 }
 
-// slotIndexMin is where scanning StorageChanges stops being cheaper than a map
-// probe. Most accounts touch a handful of slots; a storage-bloated block puts
-// thousands on one account, and every access looks the slot up.
+// slotIndexMin is where scanning the slot lists stops being cheaper than a map
+// probe. A storage-bloated block puts thousands of slots on one account and
+// looks every one of them up.
 const slotIndexMin = 16
 
 // storageWriteIndex returns the position of slot in changes.StorageChanges, or -1.
@@ -2857,8 +2857,7 @@ func (account *accountState) hasStorageWrite(slot accounts.StorageKey) bool {
 
 // addStorageUpdate records a write at slot, which storageWriteIndex already
 // located as at (-1 when the slot is new). It is the only writer of
-// changes.StorageChanges, so slotWrites cannot drift from it; Normalize
-// reorders the slice, but only after the build.
+// changes.StorageChanges, so the index cannot drift from it.
 func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, val uint256.Int, txIndex uint32) {
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	account.removeStorageRead(slot)

@@ -1160,7 +1160,6 @@ func validateHashOrdering(hashes []accounts.StorageKey, maxCount int, typeName s
 	return nil
 }
 
-// validateSlotChangeList validates a slice of SlotChanges with hash ordering and nil checks
 func validateSlotChanges(slots []SlotChanges) error {
 	if len(slots) == 0 {
 		return nil
