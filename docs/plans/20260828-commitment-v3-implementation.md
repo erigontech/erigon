@@ -377,20 +377,22 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Create: `execution/commitment/deferred_v3_test.go`
 
-- [ ] **precondition** — check the state of the in-flight parallel-commitment branch before starting;
-      it is restructuring exactly this code, and the design doc calls for coordinating rather than
-      landing on top of it. Record what it is mid-change and stop with a ⚠️ if they conflict
-- [ ] rework prefix-granular pending tracking: `CollectDeferredUpdate`, the per-goroutine
+- [x] ⚠️ **precondition** — checked `origin/alex/all_dbg5_37_diff_etl` at `61f8780a67` (2026-08-27);
+      its unmerged explicit-diff, trie-context, and collector changes overlap this task's deferred
+      and concurrent plumbing. It is 22 commits ahead and 288 behind this worktree. Coordination
+      with that unmerged branch is external to this iteration (not automatable); this implementation
+      remains self-contained and does not cherry-pick it.
+- [x] rework prefix-granular pending tracking: `CollectDeferredUpdate`, the per-goroutine
       `localCollector` ETL, and `readBranchAndCheckForFlushing`/`HasPendingPrefix` are keyed on the
       whole prefix, and a pending prefix now spans a run of records
-- [ ] make last-write-wins in the ETL resolve per record rather than per row
-- [ ] preserve invariant 9: prefix ownership stays disjoint, the coordinator owns `P`, and a worker
+- [x] make last-write-wins in the ETL resolve per record rather than per row
+- [x] preserve invariant 9: prefix ownership stays disjoint, the coordinator owns `P`, and a worker
       owning `P‖n` returns exactly one cell whose mask and hash the coordinator writes
-- [ ] write tests for concurrent workers writing disjoint child sets under one parent
-- [ ] write a test for the auto-flush at `DefaultMaxDeferredUpdates` mid-fold
-- [ ] write a test asserting deferred updates still commute and newest-wins resolves same-key
+- [x] write tests for concurrent workers writing disjoint child sets under one parent
+- [x] write a test for the auto-flush at `DefaultMaxDeferredUpdates` mid-fold
+- [x] write a test asserting deferred updates still commute and newest-wins resolves same-key
       duplicates
-- [ ] run `go test ./execution/commitment/...` — must pass before task 14
+- [x] run `go test ./execution/commitment/...` — must pass before task 14
 
 ### Task 14: Changeset shape on the reorg path
 

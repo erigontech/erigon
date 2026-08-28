@@ -233,10 +233,11 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 }
 
 type DeferredBranchUpdate struct {
-	prefix  []byte
-	raw     BranchData
-	prev    []byte
-	encoded BranchData
+	prefix     []byte
+	raw        BranchData
+	prev       []byte
+	encoded    BranchData
+	edgeRecord bool
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -266,7 +267,14 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	// recycled buffer's capacity rather than from the input is not worth one allocation.
 	upd.prev = bytes.Clone(prev)
 	upd.encoded = nil
+	upd.edgeRecord = false
 
+	return upd
+}
+
+func getDeferredRecordUpdate(prefix []byte, raw []byte) *DeferredBranchUpdate {
+	upd := getDeferredUpdate(prefix, raw, nil)
+	upd.edgeRecord = true
 	return upd
 }
 
@@ -297,6 +305,7 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
 		upd.prev = nil
 		upd.encoded = nil
+		upd.edgeRecord = false
 		deferredUpdatePool.Put(upd)
 	}
 }
@@ -418,6 +427,7 @@ func ApplyDeferredBranchUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) (int, error) {
+	deferred = latestDeferredRecords(deferred)
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -486,6 +496,34 @@ func ApplyDeferredBranchUpdates(
 	}
 	mxTrieBranchesUpdated.AddInt(written)
 	return written, nil
+}
+
+func latestDeferredRecords(deferred []*DeferredBranchUpdate) []*DeferredBranchUpdate {
+	var hasEdgeRecords bool
+	for _, upd := range deferred {
+		if upd.edgeRecord {
+			hasEdgeRecords = true
+			break
+		}
+	}
+	if !hasEdgeRecords {
+		return deferred
+	}
+
+	last := make(map[string]int, len(deferred))
+	for i, upd := range deferred {
+		if upd.edgeRecord {
+			last[string(upd.prefix)] = i
+		}
+	}
+
+	result := make([]*DeferredBranchUpdate, 0, len(last))
+	for i, upd := range deferred {
+		if !upd.edgeRecord || last[string(upd.prefix)] == i {
+			result = append(result, upd)
+		}
+	}
+	return result
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
@@ -589,7 +627,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		limit = DefaultMaxDeferredUpdates
 	}
 	needsFlush := len(be.deferred) >= limit
-	if !needsFlush {
+	if !be.edgeRecords && !needsFlush {
 		_, needsFlush = be.pendingPrefixes.Get(prefix)
 	}
 
@@ -622,7 +660,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 					record = EncodeBranchChild(cell.branchMask, cell)
 				}
 			}
-			be.deferred = append(be.deferred, getDeferredUpdate(key, record, nil))
+			be.deferred = append(be.deferred, getDeferredRecordUpdate(key, record))
 			bitset ^= bit
 		}
 		return nil

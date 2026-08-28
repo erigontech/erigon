@@ -596,9 +596,18 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			}
 		}()
 		for _, c := range collectors {
-			if loadErr := c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			load := func(k, v []byte) error {
 				return trieContext.PutBranch(k, v, nil)
-			}, etl.TransformArgs{}); loadErr != nil {
+			}
+			var loadErr error
+			if sdc.edgeRecords {
+				loadErr = loadLatestCollectorRecords(c, load)
+			} else {
+				loadErr = c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+					return load(k, v)
+				}, etl.TransformArgs{})
+			}
+			if loadErr != nil {
 				return nil, loadErr
 			}
 		}
@@ -724,6 +733,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
+			localWrites:    make(map[string][]byte),
 			traceW:         sdc.traceW,
 			edgeRecords:    sdc.edgeRecords,
 		}
@@ -997,6 +1007,7 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+	localWrites    map[string][]byte
 	edgeRecords    bool
 }
 
@@ -1023,6 +1034,12 @@ func (sdc *TrieContext) BranchWithMask(pref []byte, mask uint16, maskKnown bool)
 }
 
 func (sdc *TrieContext) branchLegacy(pref []byte) ([]byte, kv.Step, error) {
+	if data, ok := sdc.localWrites[string(pref)]; ok {
+		if sdc.traceW != nil {
+			fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, data)
+		}
+		return cloneBytesPreserveNil(data), 0, nil
+	}
 	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, err
@@ -1047,13 +1064,14 @@ func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]
 	var records [16][]byte
 	var recordsPresent uint16
 	var recordsStep kv.Step
+	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
 	if reader, ok := sdc.stateReader.(CommitmentRecordsReader); ok {
-		nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
 		records, recordsPresent, recordsStep, err = reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
 		if err != nil {
 			return nil, 0, [16]uint16{}, 0, err
 		}
 	}
+	sdc.applyLocalEdgeWrites(nodeKey, mask, maskKnown, &records, &recordsPresent)
 	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, legacy)
 	if err != nil {
 		return nil, 0, [16]uint16{}, 0, err
@@ -1075,9 +1093,80 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 		fmt.Fprintf(sdc.traceW, "[SDC] PutBranch %x: %x\n", prefix, data)
 	}
 	if sdc.localCollector != nil {
-		return sdc.localCollector.Collect(prefix, data)
+		if err := sdc.localCollector.Collect(prefix, data); err != nil {
+			return err
+		}
+		if sdc.localWrites == nil {
+			sdc.localWrites = make(map[string][]byte)
+		}
+		sdc.localWrites[string(prefix)] = cloneBytesPreserveNil(data)
+		return nil
 	}
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
+}
+
+func (sdc *TrieContext) applyLocalEdgeWrites(nodeKey []byte, mask uint16, maskKnown bool, records *[16][]byte, present *uint16) {
+	if len(sdc.localWrites) == 0 {
+		return
+	}
+	wanted := ^uint16(0)
+	if maskKnown {
+		wanted = mask
+	}
+	for nibble := range 16 {
+		bit := uint16(1) << nibble
+		if wanted&bit == 0 {
+			continue
+		}
+		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+		data, ok := sdc.localWrites[string(key)]
+		if !ok {
+			continue
+		}
+		records[nibble] = cloneBytesPreserveNil(data)
+		*present |= bit
+	}
+}
+
+func cloneBytesPreserveNil(data []byte) []byte {
+	if data == nil {
+		return nil
+	}
+	clone := make([]byte, len(data))
+	copy(clone, data)
+	return clone
+}
+
+func loadLatestCollectorRecords(collector *etl.Collector, putBranch func([]byte, []byte) error) error {
+	var key, value []byte
+	haveRecord := false
+	flush := func() error {
+		if !haveRecord {
+			return nil
+		}
+		if err := putBranch(key, value); err != nil {
+			return err
+		}
+		key = nil
+		value = nil
+		haveRecord = false
+		return nil
+	}
+	load := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if haveRecord && !bytes.Equal(key, k) {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		key = cloneBytesPreserveNil(k)
+		value = cloneBytesPreserveNil(v)
+		haveRecord = true
+		return nil
+	}
+	if err := collector.Load(nil, "", load, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	return flush()
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
