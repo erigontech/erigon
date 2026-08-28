@@ -6166,6 +6166,37 @@ reported. How they appear depends on the method:
   entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either
   way. Multiple withdrawals to the same address are merged into a single balance change.
 
+## The gasBailOut option
+
+`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
+`trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
+`trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
+`trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and
+always enable it internally, so everything below applies to them unconditionally.
+
+:::warning
+`gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
+changes replayed state in ways that make the output unsuitable for reconstructing
+balances:
+
+* **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
+  calls whenever the flag is set, for *every* replayed transaction — funded senders
+  included, not only underfunded ones.
+* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout`.
+* **The producer is still paid.** The block producer's tip is credited as usual.
+* **An unaffordable value transfer is credited anyway.** When the sender cannot cover a
+  non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
+  while still crediting the recipient. Value appears from nowhere, so a trace can show
+  what looks like balance creation.
+:::
+
+Whether one transaction's altered state is visible to the next depends on the execution
+path. Replaying a historical block for traces alone runs each transaction in parallel
+against its own canonical pre-state, so nothing propagates. The sequential path — taken
+when `stateDiff` or `vmTrace` is requested, for Bor state-sync transactions, and for
+single-transaction blocks — carries the altered state forward to every later transaction
+in the block.
+
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing
@@ -6302,6 +6333,8 @@ Executes the given call and returns a number of possible traces for it.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Quantity` or `Tag` - (optional) Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
 
+This method takes no `gasBailOut` parameter — it always replays with the bailout enabled. See [The gasBailOut option](#the-gasbailout-option).
+
 #### Returns
 
 `Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
@@ -6348,6 +6381,8 @@ Performs multiple call traces on top of the same block. i.e. transaction `n` wil
 
 1. `Array` - List of trace calls with the type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 2. `Quantity` or `Tag` - (optional) integer block number, or the string `'latest'`, `'earliest'` or `'pending'` (default block parameter).
+
+This method takes no `gasBailOut` parameter — it always replays with the bailout enabled. See [The gasBailOut option](#the-gasbailout-option).
 
 ```js
 params: [
@@ -6451,6 +6486,8 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
 1. `Data` - Raw transaction data.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 
+This method takes no `gasBailOut` parameter — it always replays with the bailout enabled. See [The gasBailOut option](#the-gasbailout-option).
+
 ```js
 params: [
   "0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675",
@@ -6504,17 +6541,8 @@ Replays all transactions in a block returning the requested traces for each tran
 
 1. `Quantity`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: an integer block number, a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call. It does more than bypass that check — see the warning below.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call. It does more than bypass that check — see [The gasBailOut option](#the-gasbailout-option).
 4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
-
-:::warning
-`gasBailOut` alters replayed state for **every** transaction, not only underfunded ones.
-`TxnExecutor.buyGas` skips the sender's gas and blob-fee deductions whenever it is set,
-the gas-refund path is skipped along with them, and the block producer's tip is still
-credited. The resulting `stateDiff`, and the state each later transaction in the block
-sees, therefore differ from a normal replay — do not use the output to reconstruct
-balances.
-:::
 
 ```js
 params: [
@@ -6584,6 +6612,7 @@ Replays a transaction, returning the traces.
 
 1. `Hash` - Transaction hash.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
 
 ```js
 params: [
@@ -6637,17 +6666,8 @@ Returns traces created at given block.
 #### Parameters
 
 1. `Quantity`, `Tag` or `null` - A plain block number: an integer (hex string or bare JSON integer), a named tag (`'earliest'`, `'latest'`, `'pending'`, `'safe'`, `'finalized'`, or the Erigon-specific `'latestExecuted'`), or `null` / `"null"`, both of which mean `latest`. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
-2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour. It does more than bypass that check — see the warning below.
+2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour. It does more than bypass that check — see [The gasBailOut option](#the-gasbailout-option).
 3. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to append a `"reward"` entry per beacon-chain withdrawal. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
-
-:::warning
-`gasBailOut` alters replayed state for **every** transaction, not only underfunded ones.
-`TxnExecutor.buyGas` skips the sender's gas and blob-fee deductions whenever it is set,
-the gas-refund path is skipped along with them, and the block producer's tip is still
-credited. The resulting `stateDiff`, and the state each later transaction in the block
-sees, therefore differ from a normal replay — do not use the output to reconstruct
-balances.
-:::
 
 ```js
 params: [
@@ -6716,6 +6736,7 @@ Returns traces matching given filter
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
    * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+2. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
 
 ```js
 params: [{
@@ -6729,7 +6750,7 @@ params: [{
 
 #### Returns
 
-`Array` — flat list of call frames that match the filter, including any `"reward"` entries when the filter matches block coinbases or uncle authors. Each entry has block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
+`Array` — flat list of call frames that match the filter, including any `"reward"` entries when the filter matches block coinbases or uncle authors. Call frames carry `blockHash`, `blockNumber`, `transactionHash` and `transactionPosition`; `"reward"` entries are block-level and carry only `blockHash` and `blockNumber` — `newRewardTrace` sets no transaction fields at all. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -6782,6 +6803,7 @@ Returns trace at given position.
 
 1. `Hash` - Transaction hash.
 2. `Array` - Index positions of the traces.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
 
 ```js
 params: [
@@ -6843,6 +6865,7 @@ Returns all traces of given transaction
 #### Parameters
 
 1. `Hash` - Transaction hash
+2. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
 
 ```js
 params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
