@@ -239,15 +239,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	if ibs.IsVersioned() {
 		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
 		blockRules := blockCtx.Rules(cfg.chainConfig)
-		var domainKeysErr error
-		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-			keys, err := state.CommittedStorageKeys(sd, tx, addr)
-			if err != nil {
-				domainKeysErr = err
-				return nil
-			}
-			return keys
-		}
+		domainStorageKeys := state.CommittedStorageKeysFn(sd, tx)
 		emptyRemoval := blockHeight != 0 && cfg.chainConfig.IsEIP161Enabled(blockHeight)
 		isAura := cfg.chainConfig.Aura != nil
 		for i, ws := range ba.BalIO().Outputs() {
@@ -255,9 +247,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 				continue
 			}
 			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
-			if domainKeysErr != nil {
-				return fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-			}
 			if normErr != nil {
 				return fmt.Errorf("normalize block writes: %w", normErr)
 			}

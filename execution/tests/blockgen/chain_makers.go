@@ -572,15 +572,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				// finalize) is applied in order; applying a phase before normalizing
 				// the next lets the next phase's stateReader fallback see it.
 				blockNum := b.header.Number.Uint64()
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					keys, err := state.CommittedStorageKeys(domains, tx, addr)
-					if err != nil {
-						domainKeysErr = err
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
 				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
 				isAura := config.Aura != nil
 				for i, ws := range b.blockIO.Outputs() {
@@ -588,9 +580,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 						continue
 					}
 					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if domainKeysErr != nil {
-						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}

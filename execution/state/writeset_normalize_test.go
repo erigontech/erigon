@@ -84,11 +84,11 @@ func TestNormalize_SelfDestructDeletesVmAndDomainStorageSlots(t *testing.T) {
 	kDomain := accounts.InternKey(common.HexToHash("0x02")) // pre-block, in domain only
 	vm := NewVersionMap(nil)
 	vm.WriteStorage(addr, kVM, Version{TxIndex: 0}, *uint256.NewInt(9), true)
-	domainKeys := func(a accounts.Address) []accounts.StorageKey {
+	domainKeys := func(a accounts.Address) ([]accounts.StorageKey, error) {
 		if a == addr {
-			return []accounts.StorageKey{kDomain}
+			return []accounts.StorageKey{kDomain}, nil
 		}
-		return nil
+		return nil, nil
 	}
 
 	ws := &WriteSet{}
@@ -316,4 +316,28 @@ func TestCommittedStorageKeys(t *testing.T) {
 		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, addr) },
 			"the skip rests on this invariant, so breaking it must not stay silent")
 	})
+}
+
+// A storage-key lookup failure must reach the caller as an error, not be
+// swallowed into an empty slot list that silently drops the self-destruct
+// cascade.
+func TestNormalizeReturnsStorageKeysError(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	want := errors.New("domain read failed")
+	vm := NewVersionMap(nil)
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}},
+		Val:         true,
+	})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}},
+		Val:         *uint256.NewInt(0),
+	})
+
+	_, err := ws.Normalize(vm, 1, 0, &minimalStateReader{}, func(accounts.Address) ([]accounts.StorageKey, error) {
+		return nil, want
+	}, false, false, false)
+	require.ErrorIs(t, err, want)
 }
