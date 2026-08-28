@@ -450,18 +450,14 @@ func BenchmarkGzipOneShotThroughput(b *testing.B) {
 const stepsPerTracedTxn = 250
 
 // BenchmarkGzipStreamingThroughput drives the streaming path the way
-// debug_trace* does: a jsonstream writing through the gzip middleware. It
-// varies the jsoniter buffer, which is InitialBufferSize=4096 in production
-// (rpc/jsonstream/factory.go) -- on a several-hundred-MB trace that is tens of
-// thousands of write calls through the middleware.
+// debug_trace* does: a jsonstream writing through the gzip middleware. On a
+// several-hundred-MB trace that is tens of thousands of write calls through the
+// middleware.
 func BenchmarkGzipStreamingThroughput(b *testing.B) {
 	for _, gz := range []bool{false, true} {
-		for _, bufSize := range []int{4096, 256 << 10} {
+		{
 			for _, entries := range []int{2000, 60000} {
-				name := fmt.Sprintf("gzip=%v/jsonbuf=%dKB/entries=%d", gz, bufSize>>10, entries)
-				if bufSize < 1024 {
-					name = fmt.Sprintf("gzip=%v/jsonbuf=%dB/entries=%d", gz, bufSize, entries)
-				}
+				name := fmt.Sprintf("gzip=%v/entries=%d", gz, entries)
 				b.Run(name, func(b *testing.B) {
 					// Precomputed: formatting inside the write loop would make the
 					// benchmark measure fmt rather than the streaming path.
@@ -471,7 +467,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					}
 					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						w.Header().Set("Content-Type", "application/json")
-						stream := jsonstream.NewSized(w, bufSize)
+						stream := jsonstream.New(w)
 						stream.WriteArrayStart()
 						for i := range entries {
 							if i > 0 {

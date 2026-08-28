@@ -51,20 +51,21 @@ func escapeIndex(val string) int {
 	return i
 }
 
+func isEscape(c byte) bool { return c < 0x20 || c == '"' || c == '\\' }
+
 // appendJSONString appends val as a JSON string, copying each escape-free run in
 // one go where jsoniter's WriteString appends a byte at a time. The output is
-// byte for byte what jsoniter produces, including the HTML characters it leaves
-// alone: Erigon writes through WriteString, not WriteStringWithHTMLEscaped.
+// byte for byte what jsoniter produces, HTML characters included: Erigon writes
+// through WriteString, not WriteStringWithHTMLEscaped.
 func appendJSONString(buf []byte, val string) []byte {
 	buf = append(buf, '"')
 	for len(val) > 0 {
-		// Escapes come in runs (a quoted phrase, a stretch of control bytes), so
-		// test the next byte before paying for the word scan: on dense input the
-		// scanner costs a load and three broadword ops to report a byte already
-		// in hand.
+		// Escapes come in runs, so test the next byte before paying for the word
+		// scan: on dense input the scanner costs a load and three broadword ops
+		// to report a byte already in hand.
 		c := val[0]
-		if c >= 0x20 && c != '"' && c != '\\' {
-			i := escapeIndex(val)
+		if !isEscape(c) {
+			i := 1 + escapeIndex(val[1:])
 			buf = append(buf, val[:i]...)
 			val = val[i:]
 			continue
@@ -86,17 +87,12 @@ func appendJSONString(buf []byte, val string) []byte {
 	return append(buf, '"')
 }
 
-// writeStringFast is jsoniter's WriteString over appendJSONString. It borrows
-// the stream buffer for the whole value rather than calling WriteRaw per piece:
-// an escape is two to six bytes, and passing those as a string makes each one a
-// memmove call, which is what a dense-escape value pays for.
 func writeStringFast(stream *jsoniter.Stream, val string) {
 	stream.SetBuffer(appendJSONString(stream.Buffer(), val))
 }
 
-// writeObjectFieldFast writes a field name and its colon. jsoniter follows the
-// colon with a space while indenting, which no stream here ever does: newStackStream
-// is the only way in and it fixes the config at a zero indention step.
+// writeObjectFieldFast writes a field name and its colon. The bare colon is
+// correct only at a zero indention step, which newStackStream fixes.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
 	stream.SetBuffer(append(appendJSONString(stream.Buffer(), fieldName), ':'))
 }

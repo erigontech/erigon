@@ -48,12 +48,7 @@ func flushIfFull(stream *jsoniter.Stream) {
 
 // New builds an unpooled stream. Request paths use Get.
 func New(out io.Writer) Stream {
-	return NewSized(out, InitialBufferSize)
-}
-
-// NewSized is New with an explicit initial buffer size.
-func NewSized(out io.Writer, bufSize int) Stream {
-	return newStackStream(out, bufSize)
+	return newStackStream(out, InitialBufferSize)
 }
 
 var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}

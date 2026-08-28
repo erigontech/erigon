@@ -47,8 +47,7 @@ type StackStream struct {
 
 // newStackStream creates a new StackStream writing to out. Building the
 // jsoniter.Stream here rather than taking one is what fixes the indention step
-// at zero, which writeObjectFieldFast relies on.
-// The stack is pre-allocated with a capacity of InitialStackSize
+// at zero.
 func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
 		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
@@ -296,8 +295,8 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 		case ItemComma:
 			if i > 0 && s.stack[i-1] == ItemObject {
 				// a trailing comma inside an object needs a placeholder field to stay valid
-				s.stream.WriteObjectField("")
-				s.stream.WriteString("")
+				writeObjectFieldFast(s.stream, "")
+				writeStringFast(s.stream, "")
 			} else {
 				s.stream.WriteNil()
 			}

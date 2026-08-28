@@ -28,7 +28,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -127,7 +126,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -158,7 +157,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 		}
 	}
 	var buf bytes.Buffer
-	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, s)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
@@ -178,7 +177,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -263,7 +262,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.Equal(t, uint256.MustFromHex("0x14a5faf390e46c23696"), &coinbaseBalance)
 	tracer := "prestateTracer"
 	var buf bytes.Buffer
-	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	stream := jsonstream.New(&buf)
 	api := newDebugApiForTest(m)
 	require.NoError(t, api.TraceBlockByHash(m.Ctx, generated.TopBlock.Hash(), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
 	require.NoError(t, stream.Flush())
@@ -295,7 +294,7 @@ func TestTraceTransaction(t *testing.T) {
 	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
@@ -324,7 +323,7 @@ func TestTraceTransactionNotFound(t *testing.T) {
 	api := newDebugApiForTest(m)
 
 	var buf bytes.Buffer
-	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	err := api.TraceTransaction(m.Ctx, common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), &tracersConfig.TraceConfig{}, s)
 	require.ErrorContains(t, err, "transaction not found")
 }
@@ -338,7 +337,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 
 	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
 		var buf bytes.Buffer
-		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		return &buf, jsonstream.New(&buf)
 	}
 
 	t.Run("TraceBlockByNumber_genesis", func(t *testing.T) {
@@ -427,7 +426,7 @@ func callDebugTraceCall(t *testing.T, api *DebugAPIImpl, args ethapi.CallArgs, o
 	t.Helper()
 
 	var buf bytes.Buffer
-	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	err := api.TraceCall(context.Background(), args, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), &tracersConfig.TraceConfig{
 		BlockOverrides: overrides,
 	}, s)
@@ -483,7 +482,7 @@ func TestDebugTraceCallBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 func TestTxResultFieldStreamLazy(t *testing.T) {
 	newInner := func() (*bytes.Buffer, jsonstream.Stream) {
 		var buf bytes.Buffer
-		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		return &buf, jsonstream.New(&buf)
 	}
 
 	t.Run("no_writes_when_unused", func(t *testing.T) {
@@ -596,7 +595,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		var norefunds = true
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, s)
 		if err != nil {
