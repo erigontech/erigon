@@ -849,31 +849,27 @@ func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx
 	if !dbg.AssertEnabled {
 		return nil
 	}
-	// IteratePrefix reads sd.mem alone, while the account probe resolves through
-	// sd.parent too, so a row this walk returns may already be tombstoned there.
-	// Re-read each hit the way the probe reads, or a parent-deleted address trips
-	// the assert on a state that is valid.
-	found := 0
-	var iterErr error
+	// IteratePrefix does not resolve through sd.parent, while the account probe
+	// does, so a row this walk returns may already be tombstoned there. Re-read
+	// each hit the way the probe reads, or a parent-deleted address trips the
+	// assert on a state that is valid. The re-reads happen after the walk:
+	// IteratePrefix holds the domain's RLock across the callback, and GetLatest
+	// takes it again, which a writer queued between the two turns into a deadlock.
+	var candidates [][]byte
 	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
-		cur, _, err := domains.GetLatest(kv.StorageDomain, roTx, k)
-		if err != nil {
-			iterErr = err
-			return false, err
-		}
-		if len(cur) == 0 {
-			return true, nil
-		}
-		found++
-		return false, nil
+		candidates = append(candidates, bytes.Clone(k))
+		return true, nil
 	}); err != nil {
 		return err
 	}
-	if iterErr != nil {
-		return iterErr
-	}
-	if found > 0 {
-		panic(fmt.Sprintf("%s: %x has storage but no account", what, addr))
+	for _, k := range candidates {
+		cur, _, err := domains.GetLatest(kv.StorageDomain, roTx, k)
+		if err != nil {
+			return err
+		}
+		if len(cur) > 0 {
+			panic(fmt.Sprintf("%s: %x has storage but no account", what, addr))
+		}
 	}
 	return nil
 }
