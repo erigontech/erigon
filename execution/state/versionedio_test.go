@@ -1752,7 +1752,7 @@ func TestAddStorageUpdate_IndexCrossoverFindsSlots(t *testing.T) {
 func BenchmarkAccountStateStorageWrites(b *testing.B) {
 	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
 	val := *uint256.NewInt(1)
-	for _, slots := range []int{4, 64, 512, 4096} {
+	for _, slots := range []int{4, 64, 512, 4096, 32768} {
 		keys := make([]accounts.StorageKey, slots)
 		for i := range keys {
 			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))

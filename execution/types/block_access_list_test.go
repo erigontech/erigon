@@ -19,7 +19,7 @@ import (
 func TestBlockAccessListCopy(t *testing.T) {
 	bal := BlockAccessList{{
 		Address: accounts.InternAddress(common.Address{1}),
-		StorageChanges: []*SlotChanges{{
+		StorageChanges: []SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{2}),
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
@@ -33,7 +33,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 	if !reflect.DeepEqual(bal, cpy) {
 		t.Fatalf("copy differs: got %v, want %v", cpy, bal)
 	}
-	if bal[0] == cpy[0] || bal[0].StorageChanges[0] == cpy[0].StorageChanges[0] ||
+	if bal[0] == cpy[0] || &bal[0].StorageChanges[0] == &cpy[0].StorageChanges[0] ||
 		bal[0].StorageChanges[0].Changes[0] == cpy[0].StorageChanges[0].Changes[0] ||
 		bal[0].BalanceChanges[0] == cpy[0].BalanceChanges[0] ||
 		bal[0].NonceChanges[0] == cpy[0].NonceChanges[0] ||
@@ -255,7 +255,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			name: "empty slot changes",
 			bal: BlockAccessList{{
 				Address: accounts.InternAddress(common.Address{1}),
-				StorageChanges: []*SlotChanges{{
+				StorageChanges: []SlotChanges{{
 					Slot: accounts.InternKey(common.Hash{1}),
 				}},
 			}},
@@ -299,17 +299,10 @@ func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 		bal  BlockAccessList
 	}{
 		{
-			name: "slot changes",
-			bal: BlockAccessList{{
-				Address:        accounts.InternAddress(common.Address{1}),
-				StorageChanges: []*SlotChanges{nil},
-			}},
-		},
-		{
 			name: "storage change",
 			bal: BlockAccessList{{
 				Address: accounts.InternAddress(common.Address{1}),
-				StorageChanges: []*SlotChanges{{
+				StorageChanges: []SlotChanges{{
 					Slot:    accounts.InternKey(common.Hash{1}),
 					Changes: []*StorageChange{nil},
 				}},
@@ -350,7 +343,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	bal := BlockAccessList{
 		{
 			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
-			StorageChanges: []*SlotChanges{
+			StorageChanges: []SlotChanges{
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
@@ -442,7 +435,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 
 	ac := &AccountChanges{
 		Address: accounts.InternAddress(addr),
-		StorageChanges: []*SlotChanges{
+		StorageChanges: []SlotChanges{
 			{
 				Slot:    accounts.InternKey(slot),
 				Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
@@ -557,7 +550,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 
 	ac := &AccountChanges{
 		Address: accounts.InternAddress(addr),
-		StorageChanges: []*SlotChanges{
+		StorageChanges: []SlotChanges{
 			{
 				Slot:    accounts.InternKey(slot),
 				Changes: []*StorageChange{}, // Intentionally empty list

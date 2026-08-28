@@ -16,7 +16,7 @@ func TestMarshalBlockAccessList(t *testing.T) {
 	bal := types.BlockAccessList{
 		{
 			Address: accounts.InternAddress(common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
-			StorageChanges: []*types.SlotChanges{
+			StorageChanges: []types.SlotChanges{
 				{
 					Slot: accounts.InternKey(common.Hash{}),
 					Changes: []*types.StorageChange{

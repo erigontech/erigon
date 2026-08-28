@@ -296,7 +296,7 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 		// Verify at least one storage slot was written at the mint tx index
 		foundStorageChange := false
 		for _, slotChange := range contractChanges.StorageChanges {
-			if findStorageChange(slotChange, balIndex) != nil {
+			if findStorageChange(&slotChange, balIndex) != nil {
 				foundStorageChange = true
 				break
 			}
@@ -476,7 +476,7 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 		require.NotNilf(t, contractChanges, "missing contract changes\n%s", bal.DebugString())
 		foundStorageChange := false
 		for _, slotChange := range contractChanges.StorageChanges {
-			if findStorageChange(slotChange, mintIdx) != nil {
+			if findStorageChange(&slotChange, mintIdx) != nil {
 				foundStorageChange = true
 				break
 			}
@@ -609,7 +609,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 		require.NotNilf(t, changerChanges, "missing changer contract\n%s", bal.DebugString())
 		foundStorageAtChange := false
 		for _, slotChange := range changerChanges.StorageChanges {
-			if findStorageChange(slotChange, changeIdx) != nil {
+			if findStorageChange(&slotChange, changeIdx) != nil {
 				foundStorageAtChange = true
 				break
 			}

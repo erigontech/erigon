@@ -2832,8 +2832,8 @@ func (account *accountState) storageWriteIndex(slot accounts.StorageKey) int {
 		}
 		return -1
 	}
-	for i, sc := range account.changes.StorageChanges {
-		if sc != nil && sc.Slot == slot {
+	for i := range account.changes.StorageChanges {
+		if account.changes.StorageChanges[i].Slot == slot {
 			return i
 		}
 	}
@@ -2854,26 +2854,26 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 
 	ac := account.changes
 	if at >= 0 {
-		slotChange := ac.StorageChanges[at]
+		changes := ac.StorageChanges[at].Changes
 		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
-		if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
+		if n := len(changes); n > 0 && val.Eq(&changes[n-1].Value) {
 			return
 		}
-		slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
+		ac.StorageChanges[at].Changes = append(changes, &types.StorageChange{Index: txIndex, Value: val})
 		return
 	}
 
 	if account.slotWrites != nil {
 		account.slotWrites[slot] = len(ac.StorageChanges)
 	}
-	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
+	ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
 	if account.slotWrites == nil && len(ac.StorageChanges) >= slotIndexMin {
 		account.slotWrites = make(map[accounts.StorageKey]int, len(ac.StorageChanges))
-		for i, sc := range ac.StorageChanges {
-			account.slotWrites[sc.Slot] = i
+		for i := range ac.StorageChanges {
+			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
 	}
 }

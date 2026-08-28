@@ -160,7 +160,7 @@ const (
 
 type AccountChanges struct {
 	Address        accounts.Address
-	StorageChanges []*SlotChanges
+	StorageChanges []SlotChanges
 	StorageReads   []accounts.StorageKey
 	BalanceChanges []*BalanceChange
 	NonceChanges   []*NonceChange
@@ -204,19 +204,16 @@ func (bal BlockAccessList) Copy() BlockAccessList {
 		}
 		accountCopy := *account
 		accountCopy.StorageChanges = slices.Clone(account.StorageChanges)
-		for j, slot := range account.StorageChanges {
-			if slot == nil {
-				continue
-			}
-			slotCopy := *slot
-			slotCopy.Changes = make([]*StorageChange, len(slot.Changes))
+		for j := range account.StorageChanges {
+			slot := &account.StorageChanges[j]
+			changes := make([]*StorageChange, len(slot.Changes))
 			for k, change := range slot.Changes {
 				if change != nil {
 					changeCopy := *change
-					slotCopy.Changes[k] = &changeCopy
+					changes[k] = &changeCopy
 				}
 			}
-			accountCopy.StorageChanges[j] = &slotCopy
+			accountCopy.StorageChanges[j].Changes = changes
 		}
 		accountCopy.StorageReads = slices.Clone(account.StorageReads)
 		accountCopy.BalanceChanges = slices.Clone(account.BalanceChanges)
@@ -258,9 +255,31 @@ func (nc *NonceChange) GetIndex() uint32   { return nc.Index }
 func (cc *CodeChange) GetIndex() uint32    { return cc.Index }
 func (sc *StorageChange) GetIndex() uint32 { return sc.Index }
 
+func encodingSizeSlotChanges(list []SlotChanges) int {
+	size := 0
+	for i := range list {
+		s := list[i].EncodingSize()
+		size += rlp.ListPrefixLen(s) + s
+	}
+	return size
+}
+
+func encodeSlotChanges(list []SlotChanges, w io.Writer, b []byte) error {
+	total := encodingSizeSlotChanges(list)
+	if err := rlp.EncodeListPrefix(total, w, b); err != nil {
+		return err
+	}
+	for i := range list {
+		if err := list[i].EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (ac *AccountChanges) EncodingSize() int {
 	size := 21 // address (1 prefix + 20 bytes)
-	storageChangesLen := encodingSizeBlockAccessList(ac.StorageChanges)
+	storageChangesLen := encodingSizeSlotChanges(ac.StorageChanges)
 	size += rlp.ListPrefixLen(storageChangesLen) + storageChangesLen
 	storageReadsLen := encodingSizeHashList(ac.StorageReads)
 	balanceChangesLen := encodingSizeBlockAccessList(ac.BalanceChanges)
@@ -291,7 +310,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := encodeBlockAccessList(ac.StorageChanges, w, b[:]); err != nil {
+	if err := encodeSlotChanges(ac.StorageChanges, w, b[:]); err != nil {
 		return err
 	}
 	if err := encodeHashList(ac.StorageReads, w, b[:]); err != nil {
@@ -322,7 +341,14 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	ac.StorageChanges = list
+	if len(list) > 0 {
+		ac.StorageChanges = make([]SlotChanges, len(list))
+		for i, sc := range list {
+			if sc != nil {
+				ac.StorageChanges[i] = *sc
+			}
+		}
+	}
 
 	reads, err := decodeStorageKeys(s)
 	if err != nil {
@@ -353,15 +379,15 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 
 func (ac *AccountChanges) Normalize() {
 	if len(ac.StorageChanges) > 1 {
-		slices.SortFunc(ac.StorageChanges, func(a, b *SlotChanges) int {
+		slices.SortFunc(ac.StorageChanges, func(a, b SlotChanges) int {
 			return a.Slot.Cmp(b.Slot)
 		})
 	}
 
-	for _, slotChange := range ac.StorageChanges {
-		if len(slotChange.Changes) > 1 {
-			sortByIndex(slotChange.Changes)
-			slotChange.Changes = dedupByIndex(slotChange.Changes)
+	for i := range ac.StorageChanges {
+		if len(ac.StorageChanges[i].Changes) > 1 {
+			sortByIndex(ac.StorageChanges[i].Changes)
+			ac.StorageChanges[i].Changes = dedupByIndex(ac.StorageChanges[i].Changes)
 		}
 	}
 
@@ -1009,7 +1035,7 @@ func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
 	}
-	if err := validateSlotChangeList(ac.StorageChanges); err != nil {
+	if err := validateSlotChanges(ac.StorageChanges); err != nil {
 		return fmt.Errorf("storage_changes: %w", err)
 	}
 	if err := validateStorageReads(ac.StorageReads); err != nil {
@@ -1116,18 +1142,15 @@ func validateHashOrdering(hashes []accounts.StorageKey, maxCount int, typeName s
 }
 
 // validateSlotChangeList validates a slice of SlotChanges with hash ordering and nil checks
-func validateSlotChangeList(slots []*SlotChanges) error {
+func validateSlotChanges(slots []SlotChanges) error {
 	if len(slots) == 0 {
 		return nil
 	}
 	if len(slots) > maxSlotChangesPerAccount {
 		return fmt.Errorf("too many storage slot entries (%d > %d)", len(slots), maxSlotChangesPerAccount)
 	}
-	for i, slot := range slots {
-		if slot == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if err := validateStorageChangeEntries(slot.Changes); err != nil {
+	for i := range slots {
+		if err := validateStorageChangeEntries(slots[i].Changes); err != nil {
 			return fmt.Errorf("entry %d: %w", i, err)
 		}
 	}
@@ -1240,9 +1263,9 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(acc.Address)),
 		}
 		if acc.StorageChanges != nil {
-			bal[i].StorageChanges = make([]*SlotChanges, len(acc.StorageChanges))
+			bal[i].StorageChanges = make([]SlotChanges, len(acc.StorageChanges))
 			for j, sc := range acc.StorageChanges {
-				bal[i].StorageChanges[j] = &SlotChanges{
+				bal[i].StorageChanges[j] = SlotChanges{
 					Slot: accounts.InternKey(gointerfaces.ConvertH256ToHash(sc.Slot)),
 				}
 				if sc.Changes != nil {
@@ -1311,10 +1334,8 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 		balAccount := &typesproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
-		for _, storageChange := range account.StorageChanges {
-			if storageChange == nil {
-				continue
-			}
+		for si := range account.StorageChanges {
+			storageChange := &account.StorageChanges[si]
 			slotChanges := &typesproto.BlockAccessListSlotChanges{
 				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
 			}
@@ -1395,10 +1416,8 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 		rpcAccount := &executionproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
-		for _, storageChange := range account.StorageChanges {
-			if storageChange == nil {
-				continue
-			}
+		for si := range account.StorageChanges {
+			storageChange := &account.StorageChanges[si]
 			slotChanges := &executionproto.BlockAccessListSlotChanges{
 				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
 			}
@@ -1488,7 +1507,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 					Value: *val,
 				})
 			}
-			accountChanges.StorageChanges = append(accountChanges.StorageChanges, slotChanges)
+			accountChanges.StorageChanges = append(accountChanges.StorageChanges, *slotChanges)
 		}
 		for readIdx, read := range account.StorageReads {
 			if read == nil {
