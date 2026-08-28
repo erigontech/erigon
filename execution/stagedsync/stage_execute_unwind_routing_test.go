@@ -152,7 +152,7 @@ func TestUnwindOnExecError(t *testing.T) {
 		// temporal tx: one 40-byte ChangeSets3 key pins the lowest unwindable block
 		// to 4, so CanUnwindToBlockNum = 3 <= 10 and the target is not clamped.
 		dirs := datadir.New(t.TempDir())
-		db := temporaltest.NewTestDBWithStepSize(t, dirs, 10_000)
+		db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
 		tx, err := db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()

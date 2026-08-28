@@ -58,11 +58,15 @@ var testDependentRoot = common.HexToHash("0xabcdef0123456789abcdef0123456789abcd
 
 func newProposerPreferencesState(cfg *clparams.BeaconChainConfig, proposers map[uint64]uint64) *state2.CachingBeaconState {
 	s := state2.New(cfg)
-	s.SetSlot(64)
+	if err := s.SetSlot(64); err != nil {
+		panic(err)
+	}
 	for i := range 100 {
 		var pk common.Bytes48
 		pk[0] = byte(i)
-		s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), 0)
+		if err := s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), 0); err != nil {
+			panic(err)
+		}
 	}
 	lookahead := solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch))
 	for slot, validatorIndex := range proposers {
@@ -269,7 +273,7 @@ func TestProposerPreferencesServiceAdvancesDependentRootStateToBoundary(t *testi
 	service, _, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
 
 	depState := newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 42})
-	depState.SetSlot(63)
+	require.NoError(t, depState.SetSlot(63))
 	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = depState
 
 	msg := newTestSignedProposerPreferences(100, 0)

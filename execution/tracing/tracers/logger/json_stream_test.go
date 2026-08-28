@@ -207,6 +207,59 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	}
 }
 
+// closeStreamLikeCaller writes the tail ExecuteTraceTx appends once execution is
+// over: exactly one array end and one object end, whatever the logger emitted.
+func closeStreamLikeCaller(stream jsonstream.Stream) {
+	stream.WriteArrayEnd()
+	stream.WriteMore()
+	stream.WriteObjectField("gas")
+	stream.WriteUint64(0)
+	stream.WriteMore()
+	stream.WriteObjectField("failed")
+	stream.WriteBool(false)
+	stream.WriteObjectEnd()
+}
+
+// The structLogs prologue must be written at most once. OnExit opens it too, for
+// traces that captured no step, and the caller closes exactly one object and one
+// array however many frames exited.
+func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name    string
+		cfg     *LogConfig
+		ctx     context.Context
+		opcodes int
+	}{
+		{"a negative limit suppresses every step", &LogConfig{Limit: -1}, context.Background(), 3},
+		{"a dead context suppresses every step", &LogConfig{}, dead, 3},
+		{"nothing to capture", &LogConfig{}, context.Background(), 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			l := NewJsonStreamLogger(tt.cfg, tt.ctx, stream)
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			scope := &mockOpContext{}
+			for i := range tt.opcodes {
+				l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+			}
+			// Two frames exit, as in any trace of a transaction that makes a call.
+			l.OnExit(1, nil, 0, nil, false)
+			l.OnExit(0, nil, 0, nil, false)
+
+			closeStreamLikeCaller(stream)
+			require.NoError(t, stream.Flush())
+			require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+		})
+	}
+}
+
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
 // 0x-prefixed 64-char hex strings and that a partial last word is padded to 32 bytes.
 func TestJsonStreamLogger_MemoryEncoding(t *testing.T) {
@@ -510,6 +563,69 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 	for b.Loop() {
 		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
 		i++
+	}
+}
+
+// countingWriter discards but records how much a response actually produced,
+// and how many separate Write calls it took to deliver it.
+type countingWriter struct {
+	n      int64
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	w.writes++
+	return len(p), nil
+}
+
+// largeTrace drives the logger over enough opcodes to produce a response far
+// larger than any buffer, reporting the bytes written, the peak buffer, and
+// how many separate writes reached the underlying io.Writer.
+func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakBuffer, writes int) {
+	tb.Helper()
+	var out countingWriter
+	stream := jsonstream.New(&out)
+	l := NewJsonStreamLogger(cfg, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 4096),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+	for i := range steps {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		if n := len(stream.Buffer()); n > peakBuffer {
+			peakBuffer = n
+		}
+	}
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(tb, stream.Flush())
+	return out.n, peakBuffer, out.writes
+}
+
+// TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
+// for: one transaction whose trace dwarfs any buffer. Nothing in the RPC layer
+// flushes inside a transaction, so the stream has to do it. Memory tracing used
+// to bound it by accident, because writeMemoryWordRaw went through Write, which
+// flushed per 32-byte word; with memory off nothing drained at all.
+func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
+	for name, cfg := range map[string]*LogConfig{
+		"storage only":   {},
+		"memory enabled": {EnableMemory: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			steps := 20_000
+			produced, peak, writes := largeTrace(t, steps, cfg)
+			require.Greater(t, produced, int64(1<<20), "the trace must dwarf the buffer to mean anything")
+			require.Less(t, peak, 4*jsonstream.FlushThreshold,
+				"buffer peaked at %d for a %dMB response", peak, produced>>20)
+			require.Less(t, writes, steps,
+				"%d writes for %d steps: memory words must batch through the buffer, not forward one write per word", writes, steps)
+		})
 	}
 }
 

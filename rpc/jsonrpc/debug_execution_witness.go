@@ -714,6 +714,9 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	resolvedMode, err := resolveWitnessMode(mode)
 	if err != nil {
 		return nil, err
@@ -777,7 +780,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, api.filters)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false
@@ -822,10 +825,9 @@ var (
 	errWitnessCanonicalUnavailable = errors.New("canonical witness mode is unavailable on a cache-only node (serves legacy only)")
 )
 
-// headCaptureSource carries the pinned-parent commitment plane for a minimal-node
-// witness build: pinnedParentTx's commitment-latest is parent(B) commitment, read
-// directly via tx.GetLatest so it bypasses the build's own commitment fold and the
-// aggregator-shared branch cache (which the fold mutates).
+// headCaptureSource carries the pinned parent's commitment state for a minimal-node
+// witness build. Direct tx.GetLatest reads keep it independent of the build's
+// in-memory commitment fold.
 type headCaptureSource struct {
 	pinnedParentTx kv.TemporalTx
 }
@@ -855,9 +857,8 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // from a pinned RO snapshot (pinnedParentTx's commitment-latest) instead of commitment
 // history, for minimal nodes that keep no commitment history. Plain account/storage/code
 // state is read from committedTx's history exactly as the durable path does; only the
-// commitment source changes. The pinned commitment plane is read directly via
-// tx.GetLatest so the build's own fold and the aggregator-shared branch cache cannot
-// perturb it.
+// commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
+// state independent of the build's in-memory commitment fold.
 func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
@@ -900,7 +901,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -1285,7 +1286,7 @@ func detectCollapseSiblings(
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
 		if mode == witnessModeCanonical {
-			childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+			childCount, err := sdCtx.BranchChildCount(splitStateReader, c.branchPrefix)
 			if err != nil {
 				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
 			}
@@ -1356,8 +1357,12 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	tx kv.TemporalTx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// TxNums and commitment history must describe the same block view.
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
 

@@ -66,7 +66,7 @@ func TestGetPTCFromWindow(t *testing.T) {
 
 	slotsPerEpoch := cfg.SlotsPerEpoch
 	slot := 2*slotsPerEpoch + 5
-	s.SetSlot(slot)
+	require.NoError(t, s.SetSlot(slot))
 
 	ptcWindow := solid.NewUint64VectorOfVectors(int(3*slotsPerEpoch), 4)
 	windowIndex := slotsPerEpoch + slot%slotsPerEpoch
@@ -88,7 +88,7 @@ func TestGetPTCFromWindowRejectsSlotOutsideWindow(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	s := state2.New(cfg)
 	s.SetVersion(clparams.GloasVersion)
-	s.SetSlot(2*cfg.SlotsPerEpoch + 5)
+	require.NoError(t, s.SetSlot(2*cfg.SlotsPerEpoch+5))
 	s.SetPtcWindow(solid.NewUint64VectorOfVectors(int(3*cfg.SlotsPerEpoch), 4))
 
 	_, err := s.GetPTCFromWindow(0)
