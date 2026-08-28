@@ -237,60 +237,73 @@ func (a *AccessListTracer) Hooks() *tracing.Hooks {
 }
 
 func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	stackData := scope.StackData()
-	stackLen := len(stackData)
-	op := vm.OpCode(opcode)
-	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
+	// StackData crosses an interface, so it cannot inline: keep it off the
+	// opcodes that don't read the stack.
+	switch op := vm.OpCode(opcode); op {
+	case vm.SLOAD, vm.SSTORE:
+		stackData := scope.StackData()
+		if len(stackData) < 1 {
+			return
+		}
 		addr := scope.Address()
-
-		slot := common.Hash(stackData[stackLen-1].Bytes32())
+		slot := common.Hash(stackData[len(stackData)-1].Bytes32())
 		a.list.addSlot(addr.Value(), slot)
 		if _, ok := a.createdContracts[addr.Value()]; !ok {
 			a.markUsedBeforeCreation(addr.Value())
 		}
-	}
-	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
-		addr := common.Address(stackData[stackLen-1].Bytes20())
-		if _, ok := a.excl[addr]; !ok {
-			a.list.addAddress(addr)
-			if _, ok := a.createdContracts[addr]; !ok {
-				a.markUsedBeforeCreation(addr)
-			}
+
+	case vm.EXTCODECOPY, vm.EXTCODEHASH, vm.EXTCODESIZE, vm.BALANCE, vm.SELFDESTRUCT:
+		stackData := scope.StackData()
+		if len(stackData) < 1 {
+			return
 		}
-	}
-	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
-		addr := common.Address(stackData[stackLen-2].Bytes20())
-		if _, ok := a.excl[addr]; !ok {
-			a.list.addAddress(addr)
-			if _, ok := a.createdContracts[addr]; !ok {
-				a.markUsedBeforeCreation(addr)
-			}
+		a.addTouchedAddress(common.Address(stackData[len(stackData)-1].Bytes20()))
+
+	case vm.DELEGATECALL, vm.CALL, vm.STATICCALL, vm.CALLCODE:
+		stackData := scope.StackData()
+		if len(stackData) < 5 {
+			return
 		}
-	}
-	if op == vm.CREATE {
+		a.addTouchedAddress(common.Address(stackData[len(stackData)-2].Bytes20()))
+
+	case vm.CREATE:
 		// contract address for CREATE can only be generated with state
-		if a.state != nil {
-			nonce, _ := a.state.GetNonce(scope.Address())
-			addr := types.CreateAddress(scope.Address().Value(), nonce)
-			if _, ok := a.excl[addr]; !ok {
-				a.markCreated(addr)
-			}
+		if a.state == nil {
+			return
 		}
-	}
-	if op == vm.CREATE2 && stackLen >= 4 {
-		offset := stackData[stackLen-2]
-		size := stackData[stackLen-3]
+		nonce, _ := a.state.GetNonce(scope.Address())
+		addr := types.CreateAddress(scope.Address().Value(), nonce)
+		if _, ok := a.excl[addr]; !ok {
+			a.markCreated(addr)
+		}
+
+	case vm.CREATE2:
+		stackData := scope.StackData()
+		if len(stackData) < 4 {
+			return
+		}
+		offset := stackData[len(stackData)-2]
+		size := stackData[len(stackData)-3]
 		init, err := tracers.GetMemoryCopyPadded(scope.MemoryData(), int64(offset.Uint64()), int64(size.Uint64()))
 		if err != nil {
-			// t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
 		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
-		salt := stackData[stackLen-4]
+		salt := stackData[len(stackData)-4]
 		addr := types.CreateAddress2(scope.Address().Value(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
 			a.markCreated(addr)
 		}
+	}
+}
+
+func (a *AccessListTracer) addTouchedAddress(addr common.Address) {
+	if _, ok := a.excl[addr]; ok {
+		return
+	}
+	a.list.addAddress(addr)
+	if _, ok := a.createdContracts[addr]; !ok {
+		a.markUsedBeforeCreation(addr)
 	}
 }
 
