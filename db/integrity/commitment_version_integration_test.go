@@ -63,7 +63,7 @@ func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool) {
 	const txs = 80 // 8 steps -> merge produces a >= threshold commitment file
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, referencesInCommitmentBranches)
 

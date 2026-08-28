@@ -285,6 +285,18 @@ func ReadForkchoiceFinalized(db kv.Getter) common.Hash {
 	return common.BytesToHash(data)
 }
 
+func ReadForkchoiceFinalizedNum(db kv.Getter) uint64 {
+	h := ReadForkchoiceFinalized(db)
+	if h == (common.Hash{}) {
+		return 0
+	}
+	n := ReadHeaderNumber(db, h)
+	if n == nil {
+		return 0
+	}
+	return *n
+}
+
 // WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
 func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
 	if err := db.Put(kv.LastForkchoice, []byte("finalizedBlockHash"), hash[:]); err != nil {
