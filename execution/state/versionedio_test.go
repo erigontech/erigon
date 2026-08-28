@@ -19,6 +19,9 @@ package state
 import (
 	"errors"
 	"fmt"
+	"math/big"
+	"math/rand"
+	"slices"
 	"sort"
 	"testing"
 
@@ -1185,24 +1188,24 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 }
 
 // EIP-7928 net-zero guard: a slot that is read and then written back to the
-// same value must stay a read in the BAL, not become a write. The filter
-// lives in accountState.applyWriteStorage (the helper addStorageUpdate only
-// appends). This locks the behaviour down across the typed-vio refactor.
+// same value must stay a read in the BAL, not become a write. The filter lives
+// in accountState.applyWriteStorage.
 func TestUpdateWrite_StorageReadThenWriteBackSameValue_StaysRead(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
 	slot := accounts.InternKey(common.HexToHash("0x07"))
 	orig := *uint256.NewInt(42)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	account := newAccountState(addr)
 
 	account.updateReadStorage(slot, orig)
 	require.Contains(t, account.changes.StorageReads, slot, "the read must be recorded")
 
 	account.applyWriteStorage(slot, orig, 0)
 
-	require.Empty(t, account.changes.StorageChanges,
+	changes := account.changes
+	require.Empty(t, changes.StorageChanges,
 		"write-back to the originally-read value is net-zero and must NOT be recorded as a storage write")
-	require.Contains(t, account.changes.StorageReads, slot,
+	require.Contains(t, changes.StorageReads, slot,
 		"the net-zero write-back must remain a read")
 }
 
@@ -1214,16 +1217,17 @@ func TestUpdateWrite_StorageReadThenWriteDifferentValue_BecomesWrite(t *testing.
 	orig := *uint256.NewInt(42)
 	changed := *uint256.NewInt(99)
 
-	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	account := newAccountState(addr)
 
 	account.updateReadStorage(slot, orig)
 
 	account.applyWriteStorage(slot, changed, 0)
 
-	require.Len(t, account.changes.StorageChanges, 1,
+	changes := account.changes
+	require.Len(t, changes.StorageChanges, 1,
 		"a write to a different value is a real state change and must be recorded")
-	require.Equal(t, slot, account.changes.StorageChanges[0].Slot)
-	require.NotContains(t, account.changes.StorageReads, slot,
+	require.Equal(t, slot, changes.StorageChanges[0].Slot)
+	require.NotContains(t, changes.StorageReads, slot,
 		"a real write supersedes the recorded read")
 }
 
@@ -1708,4 +1712,235 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 		}
 	}
 	require.True(t, found, "authority account must appear in BAL")
+}
+
+// Slots recorded on either side of the slotIndexMin crossover must stay
+// findable, in both directions: a missed write index opens a second SlotChanges
+// for the same slot, and a missed read index leaves a superseded read behind.
+func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	account := newAccountState(addr)
+	key := func(n int64) accounts.StorageKey {
+		return accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(n)))
+	}
+
+	early := key(1)
+	account.applyWriteStorage(early, *uint256.NewInt(1), 0)
+	for i := range 4 * slotIndexMin {
+		account.updateReadStorage(key(int64(i+1000)), uint256.Int{})
+		account.applyWriteStorage(key(int64(i+100)), *uint256.NewInt(1), uint32(i))
+	}
+	require.NotNil(t, account.slotWrites, "the index must be built past the threshold")
+	require.NotNil(t, account.slotReads)
+
+	late := key(9999)
+	account.updateReadStorage(late, uint256.Int{})
+	account.applyWriteStorage(late, *uint256.NewInt(1), 50)
+	account.applyWriteStorage(early, *uint256.NewInt(2), 98)
+	account.applyWriteStorage(late, *uint256.NewInt(2), 99)
+
+	changes := account.changes
+	for _, slot := range []accounts.StorageKey{early, late} {
+		seen := 0
+		for _, sc := range changes.StorageChanges {
+			if sc.Slot == slot {
+				seen++
+				require.Len(t, sc.Changes, 2, "the second write must append to the existing slot")
+			}
+		}
+		require.Equal(t, 1, seen, "the slot must appear exactly once")
+		require.NotContains(t, changes.StorageReads, slot, "a write supersedes the recorded read")
+	}
+	require.Len(t, changes.StorageReads, 4*slotIndexMin)
+}
+
+// TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
+// cross slotIndexMin in both lists and compares the normalized result against a
+// straightforward builder. The indexes are pure bookkeeping, so any divergence
+// is a bug in them.
+func TestAccountState_MatchesReferenceBuilder(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	r := rand.New(rand.NewSource(11))
+	for range 300 {
+		nSlots := 1 + r.Intn(4*slotIndexMin)
+		keys := make([]accounts.StorageKey, nSlots)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+
+		account := newAccountState(addr)
+		ref := newReferenceAccount(addr)
+		for op := range 4 * nSlots {
+			k := keys[r.Intn(nSlots)]
+			v := *uint256.NewInt(uint64(r.Intn(3)))
+			if r.Intn(2) == 0 {
+				account.updateReadStorage(k, v)
+				ref.read(k, v)
+				continue
+			}
+			account.applyWriteStorage(k, v, uint32(op))
+			ref.write(k, v, uint32(op))
+		}
+
+		got, want := account.changes, ref.changes
+		got.Normalize()
+		want.Normalize()
+		require.Equal(t, want.StorageReads, got.StorageReads, "slots=%d", nSlots)
+		require.Equal(t, want.StorageChanges, got.StorageChanges, "slots=%d", nSlots)
+	}
+}
+
+// referenceAccount is the BAL storage bookkeeping written the obvious way.
+type referenceAccount struct {
+	changes  *types.AccountChanges
+	origVals map[accounts.StorageKey]uint256.Int
+}
+
+func newReferenceAccount(addr accounts.Address) *referenceAccount {
+	return &referenceAccount{
+		changes:  &types.AccountChanges{Address: addr},
+		origVals: map[accounts.StorageKey]uint256.Int{},
+	}
+}
+
+func (a *referenceAccount) written(slot accounts.StorageKey) int {
+	for i := range a.changes.StorageChanges {
+		if a.changes.StorageChanges[i].Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (a *referenceAccount) read(slot accounts.StorageKey, val uint256.Int) {
+	if _, seen := a.origVals[slot]; !seen {
+		a.origVals[slot] = val
+	}
+	if a.written(slot) >= 0 {
+		return
+	}
+	a.changes.StorageReads = append(a.changes.StorageReads, slot)
+}
+
+func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx uint32) {
+	at := a.written(slot)
+	if at < 0 {
+		if orig, seen := a.origVals[slot]; seen && val.Eq(&orig) {
+			return
+		}
+	}
+	kept := a.changes.StorageReads[:0]
+	for _, s := range a.changes.StorageReads {
+		if s != slot {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == 0 {
+		a.changes.StorageReads = nil
+	} else {
+		a.changes.StorageReads = kept
+	}
+	if at >= 0 {
+		sc := &a.changes.StorageChanges[at]
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
+			return
+		}
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: idx, Value: val})
+		return
+	}
+	a.changes.StorageChanges = append(a.changes.StorageChanges, types.SlotChanges{
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: idx, Value: val}},
+	})
+}
+
+// BenchmarkBALReadsThenWrites is the shape removeStorageRead is quadratic in:
+// an account accumulates reads, then writes disjoint slots, and every write
+// used to rescan the whole read list.
+func BenchmarkBALReadsThenWrites(b *testing.B) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	val := *uint256.NewInt(1)
+	for _, n := range []int{64, 512, 4096} {
+		reads := make([]accounts.StorageKey, n)
+		writes := make([]accounts.StorageKey, n)
+		for i := range reads {
+			reads[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+			writes[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i + 1<<20))))
+		}
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				account := newAccountState(addr)
+				for _, k := range reads {
+					account.updateReadStorage(k, uint256.Int{})
+				}
+				for i, k := range writes {
+					account.applyWriteStorage(k, val, uint32(i))
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*n), "ns/slot")
+		})
+	}
+}
+
+// BenchmarkBALAccounts covers the other shape of a block: many accounts, few
+// slots each. It ends where asBlockAccessList does, with the encoded list
+// assembled and ordered.
+func BenchmarkBALAccounts(b *testing.B) {
+	const slotsPerAccount = 4
+	for _, nAccounts := range []int{64, 1024, 8192} {
+		addrs := make([]accounts.Address, nAccounts)
+		for i := range addrs {
+			addrs[i] = accounts.InternAddress(common.BigToAddress(new(big.Int).SetInt64(int64(i))))
+		}
+		keys := make([]accounts.StorageKey, slotsPerAccount)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+		val := *uint256.NewInt(1)
+		b.Run(fmt.Sprintf("accounts=%d", nAccounts), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				bal := make(types.BlockAccessList, 0, nAccounts)
+				for _, addr := range addrs {
+					account := newAccountState(addr)
+					for i, k := range keys {
+						account.updateReadStorage(k, uint256.Int{})
+						account.applyWriteStorage(k, val, uint32(i))
+					}
+					account.finalize()
+					account.changes.Normalize()
+					bal = append(bal, *account.changes)
+				}
+				slices.SortFunc(bal, func(a, b types.AccountChanges) int { return a.Address.Cmp(b.Address) })
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*nAccounts), "ns/account")
+		})
+	}
+}
+
+// BenchmarkAccountStateStorageWrites drives the EIP-7928 BAL builder the way a
+// storage-bloated block does: one account, many distinct slots, each read then
+// written once. The per-slot work must not grow with the number of slots
+// already recorded for the account.
+func BenchmarkAccountStateStorageWrites(b *testing.B) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	val := *uint256.NewInt(1)
+	for _, slots := range []int{4, 64, 512, 4096, 32768} {
+		keys := make([]accounts.StorageKey, slots)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				account := newAccountState(addr)
+				for i, k := range keys {
+					account.updateReadStorage(k, uint256.Int{})
+					account.applyWriteStorage(k, val, uint32(i))
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*slots), "ns/slot")
+		})
+	}
 }
