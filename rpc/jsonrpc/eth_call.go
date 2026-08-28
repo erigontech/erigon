@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -486,7 +485,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, roTx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, roTx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -785,7 +784,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		it.Close()
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}

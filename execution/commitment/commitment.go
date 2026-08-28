@@ -210,6 +210,9 @@ type DeferredBranchUpdate struct {
 	raw     BranchData
 	prev    []byte
 	encoded BranchData
+	// Backing store for a merged encoded value. encoded either aliases raw or points
+	// here, so it is never itself reused — this is the buffer that survives pooling.
+	encodedBuf []byte
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -234,10 +237,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
 	upd.raw = reuseBytes(upd.raw, raw)
-	// prev stays cloned: it is the one argument that is legitimately nil or empty, and
-	// callers read a nil prev as "look up the previous value". Deriving that shape from a
-	// recycled buffer's capacity rather than from the input is not worth one allocation.
-	upd.prev = bytes.Clone(prev)
+	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
 
 	return upd
@@ -268,7 +268,8 @@ func capLen(b []byte) []byte {
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prev = nil
+		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
+		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
@@ -337,7 +338,8 @@ func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
@@ -354,7 +356,8 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = bytes.Clone(merged)
+		upd.encodedBuf = reuseBytes(upd.encodedBuf, merged)
+		upd.encoded = upd.encodedBuf
 		return nil
 	}
 	upd.encoded = upd.raw
@@ -1752,6 +1755,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)
