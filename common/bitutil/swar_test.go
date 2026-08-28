@@ -31,7 +31,9 @@ func swarWords() []uint64 {
 	words := []uint64{0, ^uint64(0), swarLow, swarHigh}
 	for lane := range 8 {
 		for _, b := range []byte{0x00, 0x01, 0x1f, 0x20, '"', '\\', 0x7f, 0x80, 0xff} {
-			words = append(words, uint64(b)<<(8*lane), ^uint64(0)^(0xff<<(8*lane))|uint64(b)<<(8*lane))
+			mask := uint64(0xff) << (8 * lane)
+			v := uint64(b) << (8 * lane)
+			words = append(words, v, ^mask|v)
 		}
 	}
 	r := rand.New(rand.NewSource(7))
@@ -83,9 +85,14 @@ func TestHasLess(t *testing.T) {
 	}
 }
 
-func TestHasLessAboveBoundMissesLowLanes(t *testing.T) {
+// Above n == 128 the reported window narrows to [n-128, 128): both classes
+// outside it go unreported, which is why the bound is a hard one.
+func TestHasLessAboveBoundReportsOnlyTheMiddleWindow(t *testing.T) {
 	require.Zero(t, HasLess(0, 129), "every lane is 0 < 129, and none is reported above n == 128")
-	require.Zero(t, HasLess(0x47, 200), "lanes below n-128 wrap with the high bit clear")
+	require.Zero(t, HasLess(0x47, 200), "71 < 200, but below n-128 it wraps with the high bit clear")
+	require.Zero(t, HasLess(0xc7, 200), "199 < 200, but the &^ x term drops every lane at or above 128")
+	require.NotZero(t, HasLess(0x48, 200), "72 is inside [n-128, 128) and is reported")
+	require.NotZero(t, HasLess(0x7f, 200), "127 is inside [n-128, 128) and is reported")
 }
 
 // The lowest set bit is the one exception to the aggregate-only rule: no borrow

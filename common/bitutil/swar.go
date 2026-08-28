@@ -40,6 +40,7 @@ func HasZero(x uint64) uint64 { return (x - swarLow) &^ x & swarHigh }
 func HasByte(x uint64, b byte) uint64 { return HasZero(x ^ Broadcast(b)) }
 
 // HasLess returns a nonzero value if any lane of x is below n, and 0 otherwise.
-// n must be at most 128. Above that, a lane below n-128 wraps to a value with
-// its high bit clear and goes unreported: HasLess(0, 129) is 0.
+// n must be at most 128. Above that only lanes in [n-128, 128) are reported: a
+// lane below n-128 wraps with its high bit clear, and the &^ x term drops every
+// lane at or above 128. So for n == 200 neither 0 nor 199 is reported.
 func HasLess(x uint64, n byte) uint64 { return (x - Broadcast(n)) &^ x & swarHigh }

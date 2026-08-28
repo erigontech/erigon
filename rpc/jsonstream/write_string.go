@@ -44,7 +44,7 @@ func escapeIndex(val string) int {
 		}
 	}
 	for ; i < len(val); i++ {
-		if c := val[i]; c < 0x20 || c == '"' || c == '\\' {
+		if isEscape(val[i]) {
 			break
 		}
 	}
