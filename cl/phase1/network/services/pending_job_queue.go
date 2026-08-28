@@ -135,6 +135,24 @@ func (q *pendingJobQueue[K, M]) stopAndWait() {
 	q.loopWG.Wait()
 }
 
+// enqueueKey checks for a duplicate before reserving capacity. Callers that
+// already know the key can therefore merge state even when the queue is full.
+func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult {
+	for {
+		value, ok := q.jobs.Load(key)
+		if !ok {
+			break
+		}
+		if q.mergeStoredDuplicate(key, value.(*pendingJob[M]), msg) {
+			return pendingJobDuplicate
+		}
+	}
+	if !q.reserve() {
+		return pendingJobQueueFull
+	}
+	return q.storeReserved(key, msg)
+}
+
 // enqueueLazy reserves capacity before building the key so a full queue skips
 // potentially expensive work. A duplicate arriving at capacity is therefore
 // reported as full because detecting it would require building the key. Storage
