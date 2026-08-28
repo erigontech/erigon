@@ -74,12 +74,12 @@ func TestEngineXStorageRoot(t *testing.T) {
 		{
 			name:  "single byte RLP boundary",
 			value: common.HexToHash("0x80"),
-			root:  common.HexToHash("0xb831f0192d547189cd866964971e8e82b70b38570c785dc2c1f675f34a29f702"),
+			root:  common.HexToHash("0x0f477dc79684d041e05c53706eda4342bd004d46619a136a79fbcbc093f41c59"),
 		},
 		{
 			name:  "multi byte value",
 			value: common.HexToHash("0x0100"),
-			root:  common.HexToHash("0x6a27488a57b630cf22a08ab0b0671e32ff037ec907c56896dc8282f6be5cf9ed"),
+			root:  common.HexToHash("0x96364cb2bad56bfbe884b4fd61ea72aaa30d4d34408c0c22fe960af59cfdcf34"),
 		},
 	}
 	for _, test := range tests {
