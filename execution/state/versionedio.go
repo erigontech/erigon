@@ -2886,10 +2886,19 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 		for i := range ac.StorageChanges {
 			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
+		// StorageReads can hold the same slot twice: below the threshold reads are
+		// appended unchecked, and Normalize is what dedups them. The index needs
+		// one entry per slot, so drop the repeats while building it.
 		account.slotReads = make(map[accounts.StorageKey]int, len(ac.StorageReads))
-		for i, slot := range ac.StorageReads {
-			account.slotReads[slot] = i
+		deduped := ac.StorageReads[:0]
+		for _, slot := range ac.StorageReads {
+			if _, seen := account.slotReads[slot]; seen {
+				continue
+			}
+			account.slotReads[slot] = len(deduped)
+			deduped = append(deduped, slot)
 		}
+		ac.StorageReads = deduped
 	}
 }
 

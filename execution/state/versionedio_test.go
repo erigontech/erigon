@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"slices"
 	"sort"
 	"testing"
@@ -1751,6 +1752,106 @@ func TestAccountState_IndexCrossoverKeepsSlotsFindable(t *testing.T) {
 		require.NotContains(t, changes.StorageReads, slot, "a write supersedes the recorded read")
 	}
 	require.Len(t, changes.StorageReads, 4*slotIndexMin)
+}
+
+// TestAccountState_MatchesReferenceBuilder fuzzes read/write sequences that
+// cross slotIndexMin in both lists and compares the normalized result against a
+// straightforward builder. The indexes are pure bookkeeping, so any divergence
+// is a bug in them.
+func TestAccountState_MatchesReferenceBuilder(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	r := rand.New(rand.NewSource(11))
+	for range 300 {
+		nSlots := 1 + r.Intn(4*slotIndexMin)
+		keys := make([]accounts.StorageKey, nSlots)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+
+		account := newAccountState(addr)
+		ref := newReferenceAccount(addr)
+		for op := range 4 * nSlots {
+			k := keys[r.Intn(nSlots)]
+			v := *uint256.NewInt(uint64(r.Intn(3)))
+			if r.Intn(2) == 0 {
+				account.updateReadStorage(k, v)
+				ref.read(k, v)
+				continue
+			}
+			account.applyWriteStorage(k, v, uint32(op))
+			ref.write(k, v, uint32(op))
+		}
+
+		got, want := account.changes, ref.changes
+		got.Normalize()
+		want.Normalize()
+		require.Equal(t, want.StorageReads, got.StorageReads, "slots=%d", nSlots)
+		require.Equal(t, want.StorageChanges, got.StorageChanges, "slots=%d", nSlots)
+	}
+}
+
+// referenceAccount is the BAL storage bookkeeping written the obvious way.
+type referenceAccount struct {
+	changes  *types.AccountChanges
+	origVals map[accounts.StorageKey]uint256.Int
+}
+
+func newReferenceAccount(addr accounts.Address) *referenceAccount {
+	return &referenceAccount{
+		changes:  &types.AccountChanges{Address: addr},
+		origVals: map[accounts.StorageKey]uint256.Int{},
+	}
+}
+
+func (a *referenceAccount) written(slot accounts.StorageKey) int {
+	for i := range a.changes.StorageChanges {
+		if a.changes.StorageChanges[i].Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (a *referenceAccount) read(slot accounts.StorageKey, val uint256.Int) {
+	if _, seen := a.origVals[slot]; !seen {
+		a.origVals[slot] = val
+	}
+	if a.written(slot) >= 0 {
+		return
+	}
+	a.changes.StorageReads = append(a.changes.StorageReads, slot)
+}
+
+func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx uint32) {
+	at := a.written(slot)
+	if at < 0 {
+		if orig, seen := a.origVals[slot]; seen && val.Eq(&orig) {
+			return
+		}
+	}
+	kept := a.changes.StorageReads[:0]
+	for _, s := range a.changes.StorageReads {
+		if s != slot {
+			kept = append(kept, s)
+		}
+	}
+	if len(kept) == 0 {
+		a.changes.StorageReads = nil
+	} else {
+		a.changes.StorageReads = kept
+	}
+	if at >= 0 {
+		changes := a.changes.StorageChanges[at].Changes
+		if n := len(changes); n > 0 && val.Eq(&changes[n-1].Value) {
+			return
+		}
+		a.changes.StorageChanges[at].Changes = append(changes, &types.StorageChange{Index: idx, Value: val})
+		return
+	}
+	a.changes.StorageChanges = append(a.changes.StorageChanges, types.SlotChanges{
+		Slot:    slot,
+		Changes: []*types.StorageChange{{Index: idx, Value: val}},
+	})
 }
 
 // BenchmarkBALReadsThenWrites is the shape removeStorageRead is quadratic in:
