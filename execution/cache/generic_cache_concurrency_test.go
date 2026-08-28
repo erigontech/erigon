@@ -68,7 +68,7 @@ func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 			// Only the overhead share of the reserve may cover the table. Comparing
 			// the whole per-slot charge would let the payload estimate -- which pays
 			// for values the table does not hold -- mask an undercharged table.
-			overhead := (c.avgEntryBytes - int64(avgStorageEntryBytes)) * int64(slots)
+			overhead := shardArrayBytes(slots, shards)
 			require.Positive(t, allocated)
 			require.GreaterOrEqual(t, overhead, allocated,
 				"envelope reserves %d B of slot overhead for %d slots across %d shards but the table allocates %d B",
@@ -646,4 +646,41 @@ func TestGenericCache_CloseSettlesAgainstConcurrentGrow(t *testing.T) {
 		wg.Wait()
 	}
 	require.Equal(t, before, cachebudget.Global.Used(), "envelope not restored after Close raced a grow")
+}
+
+// TestGenericCache_EnvelopeCoversIntermediateGeneration walks the grow ladder
+// rather than only the fitted ceiling. A generation's capacity is a power of
+// two, which freelru rounds to a 2x table, so a charge fitted to the ceiling's
+// 5/4 under-reserves every step below it.
+func TestGenericCache_EnvelopeCoversIntermediateGeneration(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	for _, perShardCap := range []uint32{256, 1024, 4096} {
+		t.Run(fmt.Sprintf("perShard=%d", perShardCap), func(t *testing.T) {
+			slots := perShardCap * c.shardCount
+
+			// TotalAlloc rather than HeapAlloc: a collection inside the window would
+			// swamp a heap-size delta.
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+			gen := c.newShards(slots, slots, c.shardCount)
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(gen)
+
+			allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+			// generationBytes charges the payload estimate too, which buys values the
+			// table does not hold, so compare only its slot-array share.
+			charged := c.generationBytes(slots) - int64(slots)*c.payloadBytes
+			require.Positive(t, allocated)
+			require.GreaterOrEqual(t, charged, allocated,
+				"envelope reserves %d B of slot overhead for %d slots across %d shards but the generation allocates %d B",
+				charged, slots, c.shardCount, allocated)
+		})
+	}
 }

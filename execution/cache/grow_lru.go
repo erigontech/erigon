@@ -65,10 +65,7 @@ func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, 
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	maxCap := max(min(maxEntries, maxCacheSlots), 1)
-	table := math.NextPowerOfTwo(uint64(maxCap) * 5 / 4)
-	perSlot := int64(avgBytes) + int64(uint64(freelruElemBytes)*table/uint64(maxCap))
-	return newGrowLRUWith(maxCap, perSlot, onEvict)
+	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes), onEvict)
 }
 
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
@@ -77,16 +74,27 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	}
 	perSlot := int64(avgBytes) + freelruSlotBytes
 	maxCap := max(fitTableSlots(min(uint32(uint64(maxBytes)/uint64(perSlot)), maxCacheSlots)), 1)
-	return newGrowLRUWith(maxCap, perSlot, onEvict)
+	return newGrowLRUWith(maxCap, int64(avgBytes), onEvict)
 }
 
-func newGrowLRUWith[V any](maxCap uint32, perSlot int64, onEvict func(uint64, V)) *growLRU[V] {
+// growLRUBytes is what a generation costs. freelru.NewSharded rounds capacity
+// plus 25% up to a power of two once for the whole cache, so the table is 2x the
+// capacity at a power-of-two generation and 5/4 only on the fitted boundary.
+func growLRUBytes(capacity uint32, payloadBytes int64) int64 {
+	if capacity == 0 {
+		return 0
+	}
+	table := math.NextPowerOfTwo(uint64(capacity) * 5 / 4)
+	return int64(capacity)*payloadBytes + int64(table)*freelruElemBytes
+}
+
+func newGrowLRUWith[V any](maxCap uint32, payloadBytes int64, onEvict func(uint64, V)) *growLRU[V] {
 	// Start small (bounded by the ceiling); the floor is on the start size, not
 	// the ceiling -- a tiny configured budget yields a tiny, still-evicting cap.
 	start := min(uint32(genericCacheStartCapacity), maxCap)
-	g := &growLRU[V]{onEvict: onEvict, avgBytes: perSlot, startCap: start, maxCap: maxCap}
+	g := &growLRU[V]{onEvict: onEvict, avgBytes: payloadBytes, startCap: start, maxCap: maxCap}
 	g.curCap.Store(start)
-	g.reserved = int64(start) * g.avgBytes
+	g.reserved = growLRUBytes(start, g.avgBytes)
 	cachebudget.Global.Take(g.reserved)
 	g.cur.Store(g.newShards(start))
 	return g
@@ -123,7 +131,7 @@ func (g *growLRU[V]) maybeGrow() {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
-	delta := int64(newCap-curCap) * g.avgBytes
+	delta := growLRUBytes(newCap, g.avgBytes) - growLRUBytes(curCap, g.avgBytes)
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
@@ -146,8 +154,9 @@ func (g *growLRU[V]) Len() int          { return g.cur.Load().Len() }
 func (g *growLRU[V]) Purge() {
 	g.resizeMu.Lock()
 	defer g.resizeMu.Unlock()
-	cachebudget.Global.Release(g.reserved - int64(g.startCap)*g.avgBytes)
-	g.reserved = int64(g.startCap) * g.avgBytes
+	start := growLRUBytes(g.startCap, g.avgBytes)
+	cachebudget.Global.Release(g.reserved - start)
+	g.reserved = start
 	g.curCap.Store(g.startCap)
 	g.cur.Store(g.newShards(g.startCap))
 }
