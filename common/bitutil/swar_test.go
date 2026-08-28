@@ -28,7 +28,7 @@ import (
 // swarWords covers the shapes a lane predicate can trip on: all-zero, all-set,
 // a single lane at each of the eight offsets, and random noise.
 func swarWords() []uint64 {
-	words := []uint64{0, ^uint64(0), SWARLow, swarHigh}
+	words := []uint64{0, ^uint64(0), swarLow, swarHigh}
 	for lane := range 8 {
 		for _, b := range []byte{0x00, 0x01, 0x1f, 0x20, '"', '\\', 0x7f, 0x80, 0xff} {
 			words = append(words, uint64(b)<<(8*lane), ^uint64(0)^(0xff<<(8*lane))|uint64(b)<<(8*lane))
