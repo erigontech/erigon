@@ -242,11 +242,13 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
 	name := testNameFromContext(ctx)
+	fcuVersion := engineXResetFcuVersion(tester.ChainConfig, tester.GenesisBlock.Time())
 	if len(test.NewPayloads) > 0 {
-		err := processFcu(ctx, tester, tester.GenesisBlock.Hash(), test.NewPayloads[0].FcuVersion, name, extr.profileHook)
-		if err != nil {
-			return fmt.Errorf("reset head to genesis: %w", err)
-		}
+		fcuVersion = test.NewPayloads[0].FcuVersion
+	}
+	err := processFcu(ctx, tester, tester.GenesisBlock.Hash(), fcuVersion, name, extr.profileHook)
+	if err != nil {
+		return fmt.Errorf("reset head to genesis: %w", err)
 	}
 	for _, newPayload := range test.NewPayloads {
 		err := processNewPayload(ctx, tester, newPayload, name, extr.profileHook)
@@ -255,6 +257,19 @@ func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTest
 		}
 	}
 	return verifyEngineXResult(ctx, tester.RpcApiClient, test)
+}
+
+func engineXResetFcuVersion(config *chain.Config, timestamp uint64) string {
+	switch {
+	case config.IsAmsterdam(timestamp):
+		return "4"
+	case config.IsCancun(timestamp):
+		return "3"
+	case config.IsShanghai(timestamp):
+		return "2"
+	default:
+		return "1"
+	}
 }
 
 type engineXResultReader interface {
