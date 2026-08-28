@@ -1035,3 +1035,65 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	require.Error(t, res.err, "a divergent computed-ahead root must fail the block")
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
 }
+
+// A block spanning several step edges. Each checkpoint drops the dirty keys it
+// folded, so the later checkpoints see only what changed since the previous edge
+// and must still leave every branch consistent with the accounts written through
+// the last edge.
+func TestHandleMessage_StepBoundaryCheckpointsAcrossManyEdges(t *testing.T) {
+	ctx := context.Background()
+	const block1End = uint64(10)
+	const block2End = uint64(60) // interior step edges at 15, 31 and 47
+	const lastEdge = uint64(47)
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 128)
+	out := make(chan commitmentResult, 128)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+
+	rnd := rand.New(rand.NewSource(42))
+	accountValues := make(map[string][]byte)
+	writeAccount := func(txNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		if txNum <= lastEdge {
+			accountValues[string(addrBytes)] = buf
+		}
+		blockNum := uint64(1)
+		if txNum > block1End {
+			blockNum = 2
+		}
+		cc.handleMessage(ctx, &txResult{
+			blockNum: blockNum,
+			txNum:    txNum,
+			rules:    &chain.Rules{},
+			writes:   nonceBalanceWrites(addr, txNum, bal),
+		})
+	}
+
+	for txNum := uint64(1); txNum <= block1End; txNum++ {
+		writeAccount(txNum)
+	}
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
+	for txNum := block1End + 1; txNum <= block2End; txNum++ {
+		writeAccount(txNum)
+	}
+	cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, block2End, false))
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16)
+	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, lastEdge, gotTxNum, "the latest checkpoint must be the last interior step edge")
+	require.Equal(t, uint64(2), gotBlockNum)
+
+	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
+}

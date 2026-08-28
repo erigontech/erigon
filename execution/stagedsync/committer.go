@@ -875,6 +875,11 @@ func targetOf(br *blockResult) commitTarget {
 	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
 }
 
+// incrementalStepCheckpoints drops a mid-block step checkpoint's dirty flags
+// once it has folded. Off restores the previous behaviour, where every
+// checkpoint re-folds the block from its first tx.
+var incrementalStepCheckpoints = dbg.EnvBool("INCREMENTAL_STEP_CKPT", true)
+
 // computeMode selects compute's per-call behaviour; isolation is otherwise
 // decided by ownsChangeset.
 type computeMode struct {
@@ -928,6 +933,14 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.midBlock {
 		cc.lastComputedBlock = t.blockNum
 		cc.hasComputed = true
+	}
+
+	// A midBlock checkpoint has already folded these keys into the trie at the
+	// edge, so leaving them dirty makes every later checkpoint and the block-end
+	// fold re-emit the whole block prefix — quadratic in the number of step edges
+	// a block spans, and the reason a smaller step size costs disproportionately.
+	if m.midBlock && incrementalStepCheckpoints {
+		cc.state.ResetBlockFlags()
 	}
 
 	if !m.checkRoot {
