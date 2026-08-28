@@ -642,12 +642,19 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
+	var blockPruneTo uint64
+	finalisedBlockNum := rawdb.ReadForkchoiceFinalizedNum(tx)
+	if finalisedBlockNum > 0 {
+		blockPruneTo = finalisedBlockNum
+	} else if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+		blockPruneTo = s.ForwardProgress - cfg.syncCfg.MaxReorgDepth
+	}
 	// AlwaysGenerateChangesets disables this prune so the node retains
 	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
 	// tool / explicit --experimental.always-generate-changesets flag).
 	// Without the guard, the flag still controls *generation* but every
 	// generated changeset is pruned 96 blocks later, defeating the point.
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some chains produce blocks with 400 chunks of diff = 3mb
 		if pruneChangeSetsTimeout := remainingPruneTimeout(); pruneChangeSetsTimeout > 0 {
@@ -655,7 +662,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 			if err := rawdb.PruneTable(
 				tx,
 				kv.ChangeSets3,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+				blockPruneTo,
 				ctx,
 				pruneDiffsLimit,
 				pruneChangeSetsTimeout,
@@ -675,20 +682,18 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		}
 	}
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
-			if err := rawdb.PruneTable(
-				tx,
-				kv.BlockAccessList,
-				s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-				ctx,
-				pruneBalLimit,
-				pruneTimeout,
-				logger,
-				s.LogPrefix(),
-			); err != nil {
-				return err
-			}
+	if pruneTimeout := remainingPruneTimeout(); pruneTimeout > 0 {
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			blockPruneTo,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 	}
 
