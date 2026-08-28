@@ -139,9 +139,8 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 	// step never seals into a file and the range never forms.
 	writeShardTombstoneGuard(t, db, range1TxCount+range2TxCount)
 	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount+shardTombstoneStepSize))
-	_, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
-	return db, dirs
+	return trimShardTombstoneCommitment(t, agg, rawDB, dirs), dirs
 }
 
 func shardTombstoneGuardAddr() []byte {
@@ -216,14 +215,39 @@ func writeShardTombstoneRange(t *testing.T, db kv.TemporalRwDB, rangeFrom, range
 	require.NoError(t, rwTx.Commit())
 }
 
-// reopenShardTombstoneAgg drops the commitment domain file BuildFiles seals even
-// with commitment writes discarded, and reopens against the trimmed folder: a
-// resumed rebuild takes any file covering a range as that range already done.
+func openShardTombstoneDB(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs) (*state.Aggregator, kv.TemporalRwDB) {
+	t.Helper()
+	agg := shardTombstoneAgg(t, rawDB, dirs)
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	return agg, db
+}
+
+// reopenShardTombstoneAgg empties the snapshot folder between build rounds and
+// reopens against it, so the next BuildFiles rebuilds every step from MDBX. The
+// commitment file BuildFiles seals even with commitment writes discarded has to go,
+// or SharedDomains rejects the next round's writes over a stale commitment step.
+// Dropping it alone takes the aggregator's minimax tx num to zero, so the next
+// BuildFiles re-collates and re-merges steps it already wrote, renaming over files
+// the reopened aggregator holds mapped — which Windows refuses.
 func reopenShardTombstoneAgg(t *testing.T, prev *state.Aggregator, rawDB kv.RwDB, dirs datadir.Dirs) (*state.Aggregator, kv.TemporalRwDB) {
 	t.Helper()
-	// Full Close, not just an unmap: BuildFiles can return while mergeLoop is
-	// still running (its early-out reads buildingFiles/mergingFiles in the window
-	// between the two goroutines), and Windows refuses to unlink an open file.
+	prev.Close()
+	for _, d := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
+		paths, err := dir.ListFiles(d)
+		require.NoError(t, err)
+		for _, p := range paths {
+			require.NoError(t, dir.RemoveFile(p))
+		}
+	}
+	return openShardTombstoneDB(t, rawDB, dirs)
+}
+
+// trimShardTombstoneCommitment drops the commitment files from the finished folder:
+// a resumed rebuild takes any file covering a range as that range already done.
+func trimShardTombstoneCommitment(t *testing.T, prev *state.Aggregator, rawDB kv.RwDB, dirs datadir.Dirs) kv.TemporalRwDB {
+	t.Helper()
 	prev.Close()
 	paths, err := dir.ListFiles(dirs.SnapDomain)
 	require.NoError(t, err)
@@ -232,12 +256,8 @@ func reopenShardTombstoneAgg(t *testing.T, prev *state.Aggregator, rawDB kv.RwDB
 			require.NoError(t, dir.RemoveFile(p))
 		}
 	}
-
-	agg := shardTombstoneAgg(t, rawDB, dirs)
-	db, err := temporal.New(rawDB, agg, nil)
-	require.NoError(t, err)
-	t.Cleanup(db.Close)
-	return agg, db
+	_, db := openShardTombstoneDB(t, rawDB, dirs)
+	return db
 }
 
 // Shards slice a range in plain-key order while the trie is ordered by tree key,
