@@ -125,23 +125,23 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Create: `execution/commitment/nibbles/nibbles_v3.go`
 - Create: `execution/commitment/nibbles/nibbles_v3_test.go`
 
-- [ ] add `EncodeKeyV3(nibbles []byte) []byte` producing `pack(P) || term`, `term = 0x00` for even
+- [x] add `EncodeKeyV3(nibbles []byte) []byte` producing `pack(P) || term`, `term = 0x00` for even
       length and `0xf0|last` for odd; length `floor(d/2)+1`
-- [ ] add `DecodeKeyV3(k []byte) ([]byte, error)` with sentinel errors for an illegal terminal byte and
+- [x] add `DecodeKeyV3(k []byte) ([]byte, error)` with sentinel errors for an illegal terminal byte and
       for length out of range; there is no pad nibble, so no non-canonical-pad error
-- [ ] add `ChildKeyV3(nodeKey []byte, nibble byte) []byte` appending `0x80|nibble`, plus
+- [x] add `ChildKeyV3(nodeKey []byte, nibble byte) []byte` appending `0x80|nibble`, plus
       `IsChildKeyV3`, `ChildNibbleV3`, and `ChildKeyLenForDepth(d int) int` returning `floor(d/2)+2`
-- [ ] add an exact key-length predicate a run scan uses to reject foreign-subtree keys inside a child
+- [x] add an exact key-length predicate a run scan uses to reject foreign-subtree keys inside a child
       range, and `ChildRangeBoundsV3(nodeKey []byte) (lo, hi []byte)`
-- [ ] write round-trip tests over depths 0..128, both parities, including depth 0 (root) and depth 128
-- [ ] write tests asserting the three terminal byte classes are disjoint: `0x00`/`0xf0..0xff` end a
+- [x] write round-trip tests over depths 0..128, both parities, including depth 0 (root) and depth 128
+- [x] write tests asserting the three terminal byte classes are disjoint: `0x00`/`0xf0..0xff` end a
       node key, `0x80..0x8f` ends a child key, and no canonical key ends anything else
-- [ ] write a test for the documented intrusion cases — a descendant key sorting inside a parent's
+- [x] write a test for the documented intrusion cases — a descendant key sorting inside a parent's
       child range is rejected by the length filter, for even P (`subtree(P‖0‖0‖8)`) and odd P
       (`subtree(P'‖15‖a‖8)`)
-- [ ] write a test asserting `EncodeKeyV3` is one byte shorter than `EncodeKeyV2` at every odd depth
+- [x] write a test asserting `EncodeKeyV3` is one byte shorter than `EncodeKeyV2` at every odd depth
       and equal at every even depth
-- [ ] run `go test ./execution/commitment/nibbles/...` — must pass before task 2
+- [x] run `go test ./execution/commitment/nibbles/...` — must pass before task 2
 
 ### Task 2: RSeek and LSeek on the btindex cursor
 
