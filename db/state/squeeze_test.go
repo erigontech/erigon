@@ -233,9 +233,13 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	err = state.SqueezeCommitmentFiles(t.Context(), state.AggTx(rwTx), log.New())
 	require.NoError(t, err)
 
-	//agg.recalcVisibleFiles(matgh.MaxUint64)
 	err = rwTx.Commit()
 	require.NoError(t, err)
+
+	// Squeeze leaves the rewritten files without accessors, so every production
+	// caller reloads and rebuilds before reading them again.
+	require.NoError(t, agg.ReloadFiles())
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 4))
 
 	rwTx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

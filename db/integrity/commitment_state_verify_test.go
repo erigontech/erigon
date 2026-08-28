@@ -55,7 +55,9 @@ func TestCheckStateVerify(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
+	// Sequential: the parallel trie leaves the last step's storage keys unreferenced by any
+	// commitment branch, which is what CheckStateVerify inspects here.
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	require.NoError(t, err)
 	defer domains.Close()
 
