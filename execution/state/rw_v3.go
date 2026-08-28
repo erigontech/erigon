@@ -848,12 +848,28 @@ func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx
 	if !dbg.AssertEnabled {
 		return nil
 	}
+	// IteratePrefix reads sd.mem alone, while the account probe resolves through
+	// sd.parent too, so a row this walk returns may already be tombstoned there.
+	// Re-read each hit the way the probe reads, or a parent-deleted address trips
+	// the assert on a state that is valid.
 	found := 0
+	var iterErr error
 	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
+		cur, _, err := domains.GetLatest(kv.StorageDomain, roTx, k)
+		if err != nil {
+			iterErr = err
+			return false, err
+		}
+		if len(cur) == 0 {
+			return true, nil
+		}
 		found++
 		return false, nil
 	}); err != nil {
 		return err
+	}
+	if iterErr != nil {
+		return iterErr
 	}
 	if found > 0 {
 		panic(fmt.Sprintf("%s: %x has storage but no account", what, addr))
