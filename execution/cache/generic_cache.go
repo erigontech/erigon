@@ -116,7 +116,7 @@ func fitTableSlots(perShard uint32) uint32 {
 // the 5/4 boundary.
 func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32) (maxCap, shards uint32) {
 	perSlot := uint64(payloadBytes) + freelruSlotBytes
-	approx := min(uint32(uint64(capacityBytes)/perSlot), maxCacheSlots)
+	approx := uint32(min(uint64(capacityBytes)/perSlot, maxCacheSlots))
 	shards = initialShardCount(approx, shardCeil())
 	if shards == 0 {
 		shards = 1

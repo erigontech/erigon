@@ -61,10 +61,9 @@ type growLRU[V any] struct {
 // follows freelru.NewSharded's real geometry: it rounds capacity*5/4 up to a
 // power of two for the whole cache, so the overhead per slot is that table over
 // the capacity, not a constant.
+// avgBytes is the payload held outside the freelru element; a layer whose value
+// is stored inline passes 0, since freelruElemBytes already covers it.
 func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
-	if avgBytes == 0 {
-		avgBytes = avgBytesPerEntry
-	}
 	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes), onEvict)
 }
 
@@ -73,7 +72,7 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 		avgBytes = avgBytesPerEntry
 	}
 	perSlot := int64(avgBytes) + freelruSlotBytes
-	maxCap := max(fitTableSlots(min(uint32(uint64(maxBytes)/uint64(perSlot)), maxCacheSlots)), 1)
+	maxCap := max(fitTableSlots(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots))), 1)
 	return newGrowLRUWith(maxCap, int64(avgBytes), onEvict)
 }
 
