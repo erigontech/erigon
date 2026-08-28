@@ -427,15 +427,15 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 
 ### Task 16: Verify acceptance criteria
 
-- [ ] verify every settled decision in the Solution Overview is implemented
-- [ ] assert stored-record byte parity against the sequential trie over N>=3 incremental batches
+- [x] verify every settled decision in the Solution Overview is implemented
+- [x] assert stored-record byte parity against the sequential trie over N>=3 incremental batches
       including at least one `.kv` merge — batch-2 damage only surfaces as batch-3 divergence
-- [ ] run `StateRootVerifyByHistory` over a sampled block range and confirm it rebuilds from
+- [x] run `StateRootVerifyByHistory` over a sampled block range and confirm it rebuilds from
       accounts/storage history in a fresh `SharedDomains`
-- [ ] verify a mixed-version datadir reads per file
-- [ ] run the full suite:
+- [x] verify a mixed-version datadir reads per file
+- [x] run the full suite:
       `go test ./execution/commitment/... ./db/state/... ./db/integrity/... ./db/datastruct/... ./execution/stagedsync/...`
-- [ ] run `golangci-lint run ./execution/commitment/... ./db/state/... ./db/datastruct/...`
+- [x] run `golangci-lint run ./execution/commitment/... ./db/state/... ./db/datastruct/...` using the repository-pinned tool
 
 ### Task 17: [Final] Update documentation
 

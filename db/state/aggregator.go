@@ -139,10 +139,11 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 
 	// Domain configuration state: ConfigureDomains() is a no-op once configured is true.
-	configured             bool
-	savedSalt              *uint32
-	disableFsync           bool
-	commitmentRefsOverride *bool
+	configured                    bool
+	savedSalt                     *uint32
+	disableFsync                  bool
+	commitmentRefsOverride        *bool
+	commitmentEdgeRecordsOverride *bool
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -315,6 +316,16 @@ func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
 	}
 }
 
+func (a *Aggregator) applyEdgeRecordsInCommitment(edgeRecords bool) {
+	if !a.configured {
+		a.commitmentEdgeRecordsOverride = &edgeRecords
+		return
+	}
+	if a.d[kv.CommitmentDomain] != nil {
+		a.d[kv.CommitmentDomain].EdgeRecordsInCommitment = edgeRecords
+	}
+}
+
 // SetDomainStepsInFrozenFile sets the domain merge cap from a flag spec: empty means
 // no override (the domain uses the erigondb.toml cap), "Inf" means unbounded, otherwise
 // a positive integer step count.
@@ -415,6 +426,9 @@ func (a *Aggregator) ConfigureDomains() error {
 	schema := statecfg.Schema
 	if a.commitmentRefsOverride != nil {
 		schema.CommitmentDomain.ReferencesInCommitmentBranches = *a.commitmentRefsOverride
+	}
+	if a.commitmentEdgeRecordsOverride != nil {
+		schema.CommitmentDomain.EdgeRecordsInCommitment = *a.commitmentEdgeRecordsOverride
 	}
 	if err := statecfg.Configure(schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
@@ -2649,6 +2663,14 @@ func (at *AggregatorRoTx) BranchCache() *commitment.BranchCache {
 		return nil
 	}
 	return at.d[kv.CommitmentDomain].d.branchCache
+}
+
+// Cfg returns the domain configuration visible to this transaction.
+func (at *AggregatorRoTx) Cfg(domain kv.Domain) statecfg.DomainCfg {
+	if at.d[domain] == nil {
+		return statecfg.DomainCfg{}
+	}
+	return at.d[domain].d.DomainCfg
 }
 
 // AdaptivePinController attached to the commitment domain (implements

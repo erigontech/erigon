@@ -1026,7 +1026,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 }
 
 func (sdc *TrieContext) BranchWithMask(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
-	if !sdc.edgeRecords || commitment.IsCommitmentStateKey(pref) {
+	if !sdc.edgeRecords {
 		enc, step, err := sdc.branchLegacy(pref)
 		return enc, step, [16]uint16{}, 0, err
 	}

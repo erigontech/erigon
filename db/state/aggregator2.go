@@ -29,6 +29,7 @@ type AggOpts struct { //nolint:gocritic
 	reorgBlockDepth                 uint64
 
 	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
+	commitmentEdgeRecordsOverride  *bool
 
 	genSaltIfNeed       bool
 	sanityOldNaming     bool // prevent start directory with old file names
@@ -49,7 +50,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).legacyCommitmentEdgeRecords()
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -83,12 +84,21 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	if opts.referencesInCommitmentBranches != nil {
 		a.applyReferencesInCommitmentBranches(*opts.referencesInCommitmentBranches)
 	}
+	if opts.commitmentEdgeRecordsOverride != nil {
+		a.applyEdgeRecordsInCommitment(*opts.commitmentEdgeRecordsOverride)
+	}
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
 	}
 
 	return a, nil
+}
+
+func (opts AggOpts) legacyCommitmentEdgeRecords() AggOpts {
+	edgeRecords := false
+	opts.commitmentEdgeRecordsOverride = &edgeRecords
+	return opts
 }
 
 func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //nolint:gocritic

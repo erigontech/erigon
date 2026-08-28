@@ -1,12 +1,15 @@
 package commitmentdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type StateReader interface {
@@ -162,7 +165,31 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 }
 
 func (r *HistoryStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
-	return readCommitmentRecordsAt(r.roTx, nodeKey, mask, maskKnown, r.limitReadAsOfTxNum)
+	wanted := mask
+	if !maskKnown {
+		wanted = ^uint16(0)
+	}
+	for bitset := wanted; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := byte(bits.TrailingZeros16(bit))
+		key := nibbles.ChildKeyV3(nodeKey, nibble)
+		value, found, err := r.roTx.HistorySeek(kv.CommitmentDomain, key, r.limitReadAsOfTxNum)
+		if err != nil {
+			return records, present, step, err
+		}
+		if !found {
+			value, _, err = r.roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+			if err != nil {
+				return records, present, step, err
+			}
+		}
+		if len(value) > 0 {
+			records[nibble] = bytes.Clone(value)
+			present |= bit
+		}
+		bitset ^= bit
+	}
+	return records, present, step, nil
 }
 
 // AsOf reports the history txNum this reader resolves state at.
