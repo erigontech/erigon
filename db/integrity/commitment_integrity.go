@@ -311,6 +311,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 		fps  []fileFingerprint // nil when cache is disabled
 	}
 	var works []workItem
+	var cached int
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -332,6 +333,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 			}
 			if cache.has(string(CommitmentKvDeref), fps) {
 				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
+				cached++
 				continue
 			}
 		}
@@ -370,10 +372,14 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 	for _, fps := range successFps {
 		cache.add(string(CommitmentKvDeref), fps)
 	}
+	// cachedFiles contributed no keys to the tally below: without it a warm-cache run and a run
+	// that walked nothing print the same zeros.
 	logger.Info(
 		"[integrity] CommitmentKvDeref",
 		"dur", time.Since(start),
 		"files", len(files),
+		"scannedFiles", len(works),
+		"cachedFiles", cached,
 		"branchKeys", branchKeys.Load(),
 		"referencedAccounts", referencedAccounts.Load(),
 		"plainAccounts", plainAccounts.Load(),
@@ -512,47 +518,66 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
-// commitmentReferencingMemo caches commitmentFileReferencing per file path. Integrity checks run
+// commitmentFileScan is what the referencing full-scan learned about one file. counts is complete
+// only when referenced is false: the scan stops at the first shortened key and leaves the tally to
+// the dereferencing pass, which walks the whole file anyway.
+type commitmentFileScan struct {
+	referenced bool
+	counts     derefCounts
+}
+
+// commitmentReferencingMemo caches scanCommitmentFile per file path. Integrity checks run
 // over an immutable file set within a process and several phases query the same file, so the full
 // content scan is done once per file.
-var commitmentReferencingMemo sync.Map // string -> bool
+var commitmentReferencingMemo sync.Map // string -> commitmentFileScan
 
 // commitmentFileReferencing reports whether a commitment file carries shortened key references.
-// The integrity tool full-scans the content (not the file's version stamp) to catch a mis-stamped
-// file; any read error returns true rather than under-report as plain. Memoized per path.
 func commitmentFileReferencing(file state.VisibleFile) bool {
+	return scanCommitmentFile(file).referenced
+}
+
+// scanCommitmentFile full-scans the content (not the file's version stamp) to catch a mis-stamped
+// file; any read error reports referenced rather than under-report as plain. Memoized per path.
+func scanCommitmentFile(file state.VisibleFile) commitmentFileScan {
 	if v, ok := commitmentReferencingMemo.Load(file.Fullpath()); ok {
-		return v.(bool)
+		return v.(commitmentFileScan)
 	}
-	r := computeCommitmentFileReferencing(file)
+	r := computeCommitmentFileScan(file)
 	commitmentReferencingMemo.Store(file.Fullpath(), r)
 	return r
 }
 
-func computeCommitmentFileReferencing(file state.VisibleFile) bool {
+func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 	decomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
-		log.Root().Warn("[integrity] commitmentFileReferencing: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
-		return true
+		log.Root().Warn("[integrity] scanCommitmentFile: open failed, treating as referenced", "file", file.Fullpath(), "err", err)
+		return commitmentFileScan{referenced: true}
 	}
 	defer decomp.Close()
 
 	g := seg.NewReader(decomp.MakeGetter(), statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression)
+	var counts derefCounts
 	var k, v []byte
 	for g.HasNext() {
 		k, _ = g.Next(k[:0])
 		if !g.HasNext() {
-			break
+			// A dangling key is ErrIntegrity in the deref pass, which only runs on a referencing
+			// file — so report referencing and let it name the fault.
+			return commitmentFileScan{referenced: true}
 		}
 		v, _ = g.Next(v[:0])
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			continue
 		}
-		if commitment.BranchData(v).HasShortenedKeys() {
-			return true
+		counts.branchKeys++
+		plainAccounts, plainStorages, shortened, err := commitment.BranchData(v).CountPlainKeys()
+		if err != nil || shortened > 0 {
+			return commitmentFileScan{referenced: true}
 		}
+		counts.plainAccounts += plainAccounts
+		counts.plainStorages += plainStorages
 	}
-	return false
+	return commitmentFileScan{counts: counts}
 }
 
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
@@ -560,15 +585,18 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !commitmentFileReferencing(file) {
+	if scan := scanCommitmentFile(file); !scan.referenced {
 		logger.Info(
 			"[integrity] CommitmentKvDeref skipped, no shortened keys found (full scan)",
 			"file", fileName,
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
 			"steps", (endTxNum-startTxNum)/stepSize,
+			"branchKeys", scan.counts.branchKeys,
+			"plainAccounts", scan.counts.plainAccounts,
+			"plainStorages", scan.counts.plainStorages,
 		)
-		return derefCounts{}, nil
+		return scan.counts, nil
 	}
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	workers := max(dbg.EnvInt("CHECK_COMMITMENT_KVS_DEREF_WORKERS", 4), 1)
