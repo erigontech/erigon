@@ -281,7 +281,8 @@ func (p *Peer) run() (peerErr *PeerError) {
 			// Allow the next write to start if there was no error.
 			writeStart <- struct{}{}
 		case err := <-readErr:
-			if reason, ok := err.(DiscReason); ok {
+			var reason DiscReason
+			if errors.As(err, &reason) {
 				return NewPeerError(PeerErrorDiscReasonRemote, reason, nil, "Peer.run got a remote DiscReason")
 			} else {
 				return NewPeerError(PeerErrorDiscReason, DiscNetworkError, err, "Peer.run readErr")

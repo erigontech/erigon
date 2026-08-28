@@ -94,12 +94,12 @@ type EthAPI interface {
 	NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]any, error)
-	GetFilterLogs(_ context.Context, index string) ([]*types.Log, error)
+	GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error)
 	Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error)
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.U256, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
 	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
@@ -110,9 +110,9 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (any, error)
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
-	GasPrice(_ context.Context) (*hexutil.Big, error)
-	BaseFee(ctx context.Context) (*hexutil.Big, error)
-	BlobBaseFee(ctx context.Context) (*hexutil.Big, error)
+	GasPrice(_ context.Context) (*hexutil.U256, error)
+	BaseFee(ctx context.Context) (*hexutil.U256, error)
+	BlobBaseFee(ctx context.Context) (*hexutil.U256, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
@@ -156,19 +156,22 @@ type BaseAPI struct {
 	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
-	bridgeReader bridgeReader
+	evmCallTimeout    time.Duration
+	blockRangeLimit   int
+	getLogsMaxResults int
+	logQueryLimit     int
+	dirs              datadir.Dirs
+	receiptsGenerator *receipts.Generator
+	balRegenerator    *bal.Regenerator
 
-	evmCallTimeout      time.Duration
-	blockRangeLimit     int
-	getLogsMaxResults   int
-	logQueryLimit       int
-	dirs                datadir.Dirs
-	receiptsGenerator   *receipts.Generator
-	borReceiptGenerator *receipts.BorGenerator
-	balRegenerator      *bal.Regenerator
+	// witnessCache serves recent legacy-mode debug_executionWitness results from
+	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
+	// It is the single source of truth for head-capture/cache-only serving mode, read
+	// by both the debug and eth_getWitness serve paths.
+	witnessCache *witnessResultCache
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *rpccfg.BaseApiConfig) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
@@ -188,22 +191,20 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	}
 
 	return &BaseAPI{
-		filters:             f,
-		stateCache:          stateCache,
-		blocksLRU:           blocksLRU,
-		_blockReader:        blockReader,
-		_txnReader:          blockReader,
-		_txNumReader:        blockReader.TxnumReader(),
-		evmCallTimeout:      evmCallTimeout,
-		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
-		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
-		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
-		dirs:                conf.Dirs,
-		bridgeReader:        bridgeReader,
-		blockRangeLimit:     conf.BlockRangeLimit,
-		getLogsMaxResults:   conf.GetLogsMaxResults,
-		logQueryLimit:       conf.LogQueryLimit,
+		filters:           f,
+		stateCache:        stateCache,
+		blocksLRU:         blocksLRU,
+		_blockReader:      blockReader,
+		_txnReader:        blockReader,
+		_txNumReader:      blockReader.TxnumReader(),
+		evmCallTimeout:    evmCallTimeout,
+		_engine:           engine,
+		receiptsGenerator: receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		balRegenerator:    bal.NewRegenerator(blockReader, engine, log.Root()),
+		dirs:              conf.Dirs,
+		blockRangeLimit:   conf.BlockRangeLimit,
+		getLogsMaxResults: conf.GetLogsMaxResults,
+		logQueryLimit:     conf.LogQueryLimit,
 	}
 }
 
@@ -218,7 +219,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := api.blockByNumberWithSenders(ctx, tx, 0)
+	genesisBlock, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -242,46 +243,44 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	}
 	return api.filters.LastPendingBlock()
 }
+
+// resolveCommittedBlockNumber resolves a selector only when its canonical block
+// is available in tx. If tx cannot resolve it, the overlay probe distinguishes
+// an unknown selector from a known block that is unavailable in the committed
+// view. The probe never changes the selected transaction.
+func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	var blockNotFound rpc.BlockNotFoundErr
+	if !errors.As(err, &blockNotFound) {
+		return blockNumber, err
+	}
+
+	overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, api.filters.WithOverlay(tx), api._blockReader, nil)
+	if overlayErr != nil {
+		return 0, overlayErr
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, overlayBlockNumber); err != nil {
+		return 0, err
+	}
+
+	// Execution progress alone is insufficient after an overlay reorg because tx
+	// still exposes state for the previously committed canonical block.
+	return 0, fmt.Errorf("block %s is not available in the committed view", blockNrOrHash.String())
+}
+
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }
 
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
-	overlayTx := api.filters.WithOverlay(tx)
-	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
+	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 
-func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
-	if err != nil {
-		return 0, 0, false, false, err
-	}
-	if ok {
-		return blockNum, txNum, false, true, nil
-	}
-	if chainConfig.Bor == nil {
-		return 0, 0, false, false, nil
-	}
-	blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-	if err != nil {
-		return 0, 0, false, false, err
-	}
-	if !ok {
-		return 0, 0, false, false, nil
-	}
-	return blockNum, txNum, true, true, nil
-}
-
-// txnIndexInBlock derives the in-block txn index from a global txNum. Bor state sync
-// txns are not part of the block body, so they yield the -1 sentinel and the consistency
-// check is skipped (their txNum comes from a missed lookup).
-func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
+// txnIndexInBlock derives the in-block txn index from a global txNum.
+func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64) (int, error) {
 	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return 0, err
-	}
-	if isBorStateSyncTxn {
-		return -1, nil
 	}
 	if txNumMin+1 > txNum {
 		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
@@ -290,14 +289,14 @@ func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txN
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
-		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return api.blockWithSenders(ctx, tx, hash, blockNumber)
+	if !ok {
+		return nil, nil
+	}
+	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
@@ -306,8 +305,7 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 			return it, nil
 		}
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -324,8 +322,7 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 			return it, nil
 		}
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	block, _, err := api._blockReader.BlockWithSenders(ctx, overlayTx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +343,26 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil
+}
+
+func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+	if api.blocksLRU != nil {
+		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
+			return block.HeaderNoCopy(), nil
+		}
+	}
+	return api._blockReader.Header(ctx, tx, hash, number)
+}
+
+func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return api.headerByHashAndNumber(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
@@ -383,23 +400,37 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	if err != nil {
 		return nil, false, err
 	}
-	// header can be nil
+	return header, isLatest, nil
+}
+
+// canonicalHeaderByNumberOrHash resolves the selector and header through tx.
+// It never selects an overlay, so callers can keep dependent reads on one view.
+func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return nil, false, nil
+	}
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNum)
+	if err != nil {
+		return nil, false, err
+	}
 	return header, isLatest, nil
 }
 
 func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	// Pending headers are not stored in the block tables; do not substitute latest.
+	if number == rpc.PendingBlockNumber {
+		return nil, nil
+	}
+	overlayTx := api.filters.WithOverlay(tx)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.HeaderNoCopy(), nil
-		}
-	}
-	overlayTx := api.filters.WithOverlay(tx)
-	return api._blockReader.Header(ctx, overlayTx, h, n)
+	return api.headerByHashAndNumber(ctx, overlayTx, h, n)
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
@@ -409,7 +440,8 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 		}
 	}
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	overlayTx := api.filters.WithOverlay(tx)
+	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +449,7 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	if number == nil {
 		return nil, nil
 	}
-	return api._blockReader.Header(ctx, tx, hash, *number)
+	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
 // checks the pruning state to see if we would hold information about this
@@ -503,11 +535,6 @@ func (api *BaseAPI) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
 		api._commitmentHistoryEnabled.Store(&enabled)
 	}
 	return enabled, nil
-}
-
-type bridgeReader interface {
-	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
-	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access

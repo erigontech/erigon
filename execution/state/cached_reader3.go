@@ -51,7 +51,7 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 		return nil, nil
 	}
 	a := accounts.Account{}
-	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, err
 	}
 	return &a, nil

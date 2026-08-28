@@ -22,9 +22,11 @@ STEP_SUMMARY_CAP = 900 * 1024
 LOG_TAIL_MAX_BYTES = 100 * 1024
 ERROR_MSG_MAXLEN = 240
 MAX_FAILURES = 200
+MAX_ATTEMPT_FAILURES = 50
 LOG_TAIL_LINES = 200
 ATTEMPTS_SCAN_MAX_BYTES = 8 * 1024 * 1024
 ATTEMPT_RE = re.compile(r"^Attempt\s+(\d+)\s*$")
+ATTEMPT_DIR_RE = re.compile(r"^results_attempt_(\d+)$")
 
 
 def badge(result):
@@ -62,9 +64,10 @@ def read_log_tail(path, max_lines, max_bytes):
 def summarize_attempts(log_path):
     """Classify each ``Attempt N`` retry block the test runner writes to
     output.log. The suite retries up to a limit, rerunning every test; only the
-    last attempt's counts reach ``test_report.json``, so earlier-attempt
-    failures live only in the log — and the log tail keeps the *end*, dropping
-    them. This scans the whole log so the retry history survives. Informational
+    last attempt's counts reach ``results/test_report.json``. Earlier attempts
+    have their own saved report (see ``attempt_reports``) which takes precedence;
+    this log scan covers attempts without one (e.g. sync failures) and keeps the
+    retry history even though the log tail only shows the *end*. Informational
     only: the pass/fail verdict never comes from here.
     """
     try:
@@ -93,6 +96,55 @@ def summarize_attempts(log_path):
     return attempts
 
 
+def attempt_reports(result_dir):
+    """Load the ``results_attempt_N/test_report.json`` the test-runner script
+    saves for each failed attempt before retrying. Returns {attempt_num: report}.
+    """
+    reports = {}
+    try:
+        entries = os.listdir(result_dir)
+    except OSError:
+        return reports
+    for name in entries:
+        m = ATTEMPT_DIR_RE.match(name)
+        if not m:
+            continue
+        try:
+            with open(os.path.join(result_dir, name, "test_report.json"), encoding="utf-8") as fh:
+                loaded = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if isinstance(loaded, dict):
+            reports[int(m.group(1))] = loaded
+    return reports
+
+
+def failed_rows(report):
+    rows = report.get("test_results")
+    return [r for r in (rows if isinstance(rows, list) else [])
+            if isinstance(r, dict) and str(r.get("result", "")).upper() == "FAILED"]
+
+
+def failed_table(failed, cap):
+    lines = ["| # | Test | Transport | Error |", "| ---: | --- | --- | --- |"]
+    for i, f in enumerate(failed[:cap], 1):
+        name = one_line(f.get("test_name", ""), 120)
+        transport = one_line(f.get("transport_type", ""), 20)
+        err = one_line(f.get("error_message", ""), ERROR_MSG_MAXLEN) or "—"
+        lines.append(f"| {i} | {name} | {transport} | {err} |")
+    return lines
+
+
+def json_attempt_status(report):
+    summary = report.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    fails = summary.get("failed_tests")
+    if isinstance(fails, int) and fails > 0:
+        return f"❌ {fails} failing test{'s' if fails != 1 else ''}"
+    return None
+
+
 def render(args):
     out = [f"# {args.workflow}" + (f" — {args.title_suffix}" if args.title_suffix else ""), ""]
     meta = ([f"**Chain:** {args.chain}"] if args.chain else []) + [f"**Result:** {badge(args.result)}"]
@@ -101,12 +153,29 @@ def render(args):
     report_path = os.path.join(args.result_dir, "results", "test_report.json")
     log_path = os.path.join(args.result_dir, "output.log")
 
-    attempts = summarize_attempts(log_path)
+    saved = attempt_reports(args.result_dir)
+    attempts = []
+    for n, status in summarize_attempts(log_path):
+        rep = saved.get(int(n))
+        attempts.append((int(n), (json_attempt_status(rep) if rep else None) or status))
+    known = {n for n, _ in attempts}
+    attempts += [(n, json_attempt_status(saved[n]) or "❌ failed") for n in saved if n not in known]
+    attempts.sort()
     if len(attempts) > 1:
         if (args.result or "").lower() != "success" and attempts[-1][1] == "✅ passed":
             attempts[-1] = (attempts[-1][0], "❌ failed")
         trail = " → ".join(f"{n} · {s}" for n, s in attempts)
         out += [f"**Attempts** ({len(attempts)} full-suite reruns; the verdict above is the last): {trail}", ""]
+    for n in sorted(saved):
+        failed = failed_rows(saved[n])
+        if not failed:
+            continue
+        plural = "s" if len(failed) != 1 else ""
+        out += [f"<details><summary>Attempt {n} — {len(failed)} failed test{plural}</summary>", ""]
+        out += failed_table(failed, MAX_ATTEMPT_FAILURES)
+        if len(failed) > MAX_ATTEMPT_FAILURES:
+            out += ["", f"> …and {len(failed) - MAX_ATTEMPT_FAILURES} more — see the `test-results` artifact."]
+        out += ["", "</details>", ""]
 
     report = None
     if os.path.isfile(report_path):
@@ -135,9 +204,7 @@ def render(args):
             out += [f"| {name} | {val} |" for name, val in stat_rows]
             out.append("")
 
-        rows = report.get("test_results")
-        failed = [r for r in (rows if isinstance(rows, list) else [])
-                  if isinstance(r, dict) and str(r.get("result", "")).upper() == "FAILED"]
+        failed = failed_rows(report)
         if failed:
             by_transport = {}
             for f in failed:
@@ -145,12 +212,7 @@ def render(args):
                 by_transport[t] = by_transport.get(t, 0) + 1
             out += [f"## ❌ Failed tests ({len(failed)})", ""]
             out += ["By transport: " + ", ".join(f"`{t}` {n}" for t, n in sorted(by_transport.items())), ""]
-            out += ["| # | Test | Transport | Error |", "| ---: | --- | --- | --- |"]
-            for i, f in enumerate(failed[:MAX_FAILURES], 1):
-                name = one_line(f.get("test_name", ""), 120)
-                transport = one_line(f.get("transport_type", ""), 20)
-                err = one_line(f.get("error_message", ""), ERROR_MSG_MAXLEN) or "—"
-                out.append(f"| {i} | {name} | {transport} | {err} |")
+            out += failed_table(failed, MAX_FAILURES)
             out.append("")
             if len(failed) > MAX_FAILURES:
                 out += [f"> …and {len(failed) - MAX_FAILURES} more — see the `test-results` artifact.", ""]

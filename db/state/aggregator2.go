@@ -30,11 +30,11 @@ type AggOpts struct { //nolint:gocritic
 
 	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
 
-	genSaltIfNeed      bool
-	sanityOldNaming    bool // prevent start directory with old file names
-	disableFsync       bool // for tests speed
-	disableHistory     bool // for temp/inmem aggregator instances
-	disableBranchCache bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	genSaltIfNeed       bool
+	sanityOldNaming     bool // prevent start directory with old file names
+	disableFsync        bool // for tests speed
+	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck bool
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -74,9 +74,9 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
 	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
-	a.disableHistory = opts.disableHistory
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
+	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
 
 	a.savedSalt = salt
 
@@ -119,10 +119,11 @@ func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
 	opts.reorgBlockDepth = d
 	return opts
 }
-func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }     //nolint:gocritic
-func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }            //nolint:gocritic
-func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts }   //nolint:gocritic
-func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
+func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
+func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
+func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
+
+func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
@@ -202,12 +203,7 @@ func (w *workersCfg) unlockEditing() {
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
-	directories := []string{
-		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
-		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
-	}
-	for _, dirPath := range directories {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { //skip magically disappeared files

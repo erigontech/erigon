@@ -66,8 +66,9 @@ func (r testResult) String() string {
 
 	out := fmt.Sprintf("%s %s%s", status, r.Name, extra)
 	if r.State != nil {
-		state, _ := json.MarshalIndent(r.State, "", "  ")
-		out += "\n" + string(state)
+		if state, err := json.MarshalIndent(r.State, "", "  "); err == nil {
+			out += "\n" + string(state)
+		}
 	}
 	return out
 }
@@ -79,7 +80,7 @@ func report(ctx *cli.Command, results []testResult) {
 		// MarshalIndent -> string -> Println allocation chain.
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(results) //nolint:errcheck
+		_ = enc.Encode(results) //nolint:errcheck,errchkjson
 		return
 	}
 	pass := 0

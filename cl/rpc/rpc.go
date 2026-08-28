@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -40,11 +39,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxMessageLength = 18 * datasize.MB
+
+var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 
 // blobSidecarRawBytes is the fixed SSZ size of a BlobSidecar (the blob dominates; fork-independent).
 func blobSidecarRawBytes() int { return (&cltypes.BlobSidecar{}).EncodingSizeSSZ() }
@@ -103,6 +105,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
+		}
+		if !b.beaconConfig.ForkSchemaMatchesSlot(responseChunk.Block.Slot, responseChunk.Version()) {
+			b.BanPeer(pid)
+			return nil, pid, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
 		responsePacket = append(responsePacket, responseChunk)
 	}
@@ -325,7 +331,9 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint6
 }
 
 func (b *BeaconRpcP2P) BanPeer(pid string) {
-	b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid})
+	if _, err := b.sentinel.BanPeer(b.ctx, &sentinelproto.Peer{Pid: pid}); err != nil {
+		log.Debug("failed to ban peer", "pid", pid, "err", err)
+	}
 }
 
 // responseData is a helper struct to store the version and the raw data of the response for each data container.
@@ -337,8 +345,9 @@ type responseData struct {
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
 func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
 	if message.Error {
-		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		rd := snappypool.Reader(bytes.NewReader(message.Data))
 		errBytes, _ := io.ReadAll(rd)
+		snappypool.PutReader(rd)
 		errMsg := string(errBytes)
 		log.Trace("received range req error", "err", errMsg, "raw", string(message.Data))
 		return nil, message.Peer.Pid, fmt.Errorf("peer error response: %s", errMsg)
@@ -346,6 +355,8 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 	responsePacket := []responseData{}
 	r := bytes.NewReader(message.Data)
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	for {
 		forkDigest := make([]byte, 4)
 		if n, err := r.Read(forkDigest); err != nil {
@@ -369,7 +380,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(r)
+		sr.Reset(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])

@@ -61,7 +61,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	const batchSize = 100
 	for batchStart := 0; batchStart < numBlocks; batchStart += batchSize {
 		batchEnd := min(batchStart+batchSize, numBlocks)
-		chainResult, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
+		chainResult, err := m.GenerateChainFrom(parent, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 		})
 		require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	nonce := uint64(0)
 	recipient := common.Address{0xDE, 0xAD}
 
-	chainResult, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, numBlocks, func(i int, b *blockgen.BlockGen) {
+	chainResult, err := m.GenerateChain(numBlocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// Add 2 ETH transfers per block.
 		for range 2 {

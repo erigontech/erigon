@@ -147,6 +147,18 @@ func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	return t.root, err
 }
 
+func (t *TransactionsSSZ) HashSSZProgressive() ([32]byte, error) {
+	roots := make([][32]byte, len(t.underlying))
+	for i, transaction := range t.underlying {
+		root, err := merkle_tree.ProgressiveBasicListRoot(transaction, uint64(len(transaction)))
+		if err != nil {
+			return [32]byte{}, err
+		}
+		roots[i] = root
+	}
+	return merkle_tree.ProgressiveListRoot(roots, uint64(len(roots)))
+}
+
 func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {
 	if t == nil {
 		return 0

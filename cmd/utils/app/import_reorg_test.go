@@ -133,16 +133,12 @@ func TestImportClosesChaindataOnInitError(t *testing.T) {
 
 func loadImportFixtureCase(t *testing.T) importFixtureCase {
 	t.Helper()
-	fixturePath := filepath.Join("..", "..", "..", "execution", "tests", "legacy-tests",
-		"BlockchainTests", "InvalidBlocks", "bcMultiChainTest", "UncleFromSideChain.json")
+	fixturePath := filepath.Join("testdata", "import_reorg_unwind_to_genesis.json")
 	raw, err := os.ReadFile(fixturePath)
-	require.NoErrorf(t, err, "read fixture (legacy-tests submodule not initialized?)")
+	require.NoError(t, err)
 
-	var fixture map[string]importFixtureCase
-	require.NoError(t, json.Unmarshal(raw, &fixture))
-	const caseKey = "BlockchainTests/InvalidBlocks/bcMultiChainTest/UncleFromSideChain.json::UncleFromSideChain_Cancun"
-	tc, ok := fixture[caseKey]
-	require.Truef(t, ok, "case %q not found in fixture", caseKey)
+	var tc importFixtureCase
+	require.NoError(t, json.Unmarshal(raw, &tc))
 	require.NotEmpty(t, tc.Blocks)
 	return tc
 }

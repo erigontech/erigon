@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -147,11 +146,11 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	engine := api.engine()
 
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api.stateCache, api._txNumReader, tx, int(txIndex))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, int(txIndex))
 	if err != nil {
@@ -177,7 +176,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
 			tracer.Hooks.OnTxEnd(nil, err)
 		}
-		return nil, fmt.Errorf("tracing failed: %v", err)
+		return nil, fmt.Errorf("tracing failed: %w", err)
 	}
 
 	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
@@ -309,7 +308,7 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	return ret, nil
 }
 
-func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (*big.Int, error) {
+func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
 	var fee, gasUsed, totalFees uint256.Int
 	isLondon := chainConfig.IsLondon(block.NumberU64())
 	baseFee := block.BaseFee()
@@ -329,7 +328,7 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 		totalFees.Add(&totalFees, &fee)
 	}
 
-	return totalFees.ToBig(), nil
+	return totalFees, nil
 }
 
 func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
@@ -345,7 +344,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return nil, nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, n)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, n)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -376,7 +375,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)

@@ -200,6 +200,19 @@ func TestRegisteredTxTypeBinaryRoundTrip(t *testing.T) {
 	require.Equal(t, want.Data, gotFake.Data)
 }
 
+func TestRegisteredTxTypeRejectsTruncatedBlockTransaction(t *testing.T) {
+	registerFakeTxType(t)
+
+	data := buildBlockWithTruncatedTypedTx(t, fakeRegisteredTxType)
+	s := rlp.NewBytesStream(data)
+	defer rlp.PutStream(s)
+
+	var block Block
+	if err := block.DecodeRLP(s); err == nil {
+		t.Fatalf("expected error decoding block with truncated registered transaction, got nil (len(txs)=%d)", len(block.transactions))
+	}
+}
+
 func TestRegisteredTxTypeJSONRoundTrip(t *testing.T) {
 	registerFakeTxType(t)
 

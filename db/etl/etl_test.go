@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,6 +30,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -39,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func decodeHex(in string) []byte {
@@ -98,7 +101,7 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 
 func TestEmptyKeyValue(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	require := require.New(t)
 	table := kv.ChaindataTables[0]
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
@@ -183,7 +186,7 @@ func TestNextKeyErr(t *testing.T) {
 func TestFileDataProviders(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 
 	generateTestData(t, tx, sourceBucket, 10)
@@ -217,7 +220,7 @@ func TestFileDataProviders(t *testing.T) {
 func TestRAMDataProviders(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through memory (1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	generateTestData(t, tx, sourceBucket, 10)
 
@@ -237,7 +240,7 @@ func TestRAMDataProviders(t *testing.T) {
 func TestTransformRAMOnly(t *testing.T) {
 	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
@@ -259,7 +262,7 @@ func TestTransformRAMOnly(t *testing.T) {
 
 func TestEmptySourceBucket(t *testing.T) {
 	logger := log.New()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	err := Transform(
@@ -280,7 +283,7 @@ func TestEmptySourceBucket(t *testing.T) {
 func TestTransformExtractStartKey(t *testing.T) {
 	logger := log.New()
 	// test invariant when we only have one buffer and it fits into RAM (exactly 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -302,7 +305,7 @@ func TestTransformExtractStartKey(t *testing.T) {
 func TestTransformThroughFiles(t *testing.T) {
 	logger := log.New()
 	// test invariant when we go through files (> 1 buffer)
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -326,7 +329,7 @@ func TestTransformThroughFiles(t *testing.T) {
 func TestTransformDoubleOnExtract(t *testing.T) {
 	logger := log.New()
 	// test invariant when extractFunc multiplies the data 2x
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -348,7 +351,7 @@ func TestTransformDoubleOnExtract(t *testing.T) {
 func TestTransformDoubleOnLoad(t *testing.T) {
 	logger := log.New()
 	// test invariant when loadFunc multiplies the data 2x
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	sourceBucket := kv.ChaindataTables[0]
 	destBucket := kv.ChaindataTables[1]
 	generateTestData(t, tx, sourceBucket, 10)
@@ -492,10 +495,10 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 	c.Close()
 
-	// buffers are not lost
-	require.Empty(t, buf.data)
+	// buffer state resets for reuse: entries keep their cap, chunks are cleared
+	require.Empty(t, buf.chunks)
 	require.Empty(t, buf.entries)
-	require.NotZero(t, cap(buf.data))
+	require.Zero(t, buf.Size())
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
@@ -583,11 +586,12 @@ func TestAppend(t *testing.T) {
 	require.NoError(collector.Collect([]byte{3}, nil))
 	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
 		fmt.Printf("%x %x\n", k, v)
-		if k[0] == 1 {
+		switch k[0] {
+		case 1:
 			require.Equal([]byte{1, 2, 3, 4, 5, 6, 7}, v)
-		} else if k[0] == 2 {
+		case 2:
 			require.Equal([]byte{10, 20, 30, 40, 50}, v)
-		} else {
+		default:
 			require.Nil(v)
 		}
 		return nil
@@ -620,9 +624,8 @@ func TestAppendAcrossProviders(t *testing.T) {
 }
 
 // TestAppendAcrossMemProviders tests that value concatenation works correctly
-// when multiple memoryDataProviders have the same key. GetRef returns zero-copy
-// slices into sortableBuffer.data — appending to prevV without copying would
-// corrupt adjacent entries in the buffer.
+// when multiple memoryDataProviders have the same key, across providers backed
+// by different buffer types (file-flushed and in-memory).
 func TestAppendAcrossMemProviders(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -659,7 +662,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	}
 
 	err = mergeSortFiles("test", providers, loadFunc,
-		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+		TransformArgs{BufferType: SortableAppendBuffer})
 	require.NoError(t, err)
 
 	require.Len(t, results, 4)
@@ -835,7 +838,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	// Should have all 10 entries in sorted order
@@ -893,7 +896,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	require.Len(t, keys, 10)
@@ -913,7 +916,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 }
 
 // TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
-// memoryDataProvider (GetRef) are not corrupted by subsequent Next() calls.
+// memoryDataProvider (Get) are not corrupted by subsequent Next() calls.
 func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -923,7 +926,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
 	require.NoError(t, err)
 
-	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
+	// Memory provider with multiple keys - Get returns slices into sortableBuffer.chunks
 	memBuf := NewSortableBuffer(BufferOptimalSize)
 	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
 	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
@@ -946,7 +949,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 		return nil
 	}
 
-	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{})
 	require.NoError(t, err)
 
 	require.Len(t, entries, 4)
@@ -984,7 +987,7 @@ func BenchmarkFileDataProviderNext(b *testing.B) {
 
 				for {
 					_, _, err := provider.Next()
-					if err == io.EOF {
+					if errors.Is(err, io.EOF) {
 						break
 					}
 					if err != nil {
@@ -1436,7 +1439,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
 					for {
 						_, _, err := p.Next()
-						if err == io.EOF {
+						if errors.Is(err, io.EOF) {
 							break
 						}
 						if err != nil {
@@ -1494,7 +1497,7 @@ func TestVmtouchMmap(t *testing.T) {
 
 	vmtouch := func(label string) {
 		fmt.Printf("\n=== %s ===\n", label)
-		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd := exec.Command("vmtouch", "-v", fname) //nolint:noctx
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Run()
@@ -1530,9 +1533,196 @@ func TestVmtouchMmap(t *testing.T) {
 	// Read rest
 	for {
 		_, _, err := provider.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 	}
 	vmtouch("AFTER full scan")
+}
+
+// TestCollectorWithAllocatorDrawsBufferLazily pins the lazy-draw contract:
+// an allocator-backed collector must not take a pooled buffer until the
+// first Collect, so never-written collectors (common when a batch writer
+// set is built upfront) cost no buffer at all.
+func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
+	logger := log.New()
+	_, tx := mdbxtest.NewTestTx(t)
+	require := require.New(t)
+	table := kv.ChaindataTables[0]
+
+	var draws atomic.Int64
+	pool := &sync.Pool{New: func() any {
+		draws.Add(1)
+		return NewSortableBuffer(BufferOptimalSize)
+	}}
+	allocator := NewAllocator(pool)
+
+	empty := NewCollectorWithAllocator(t.Name()+"-empty", "", allocator, logger)
+	defer empty.Close()
+	require.NoError(empty.Flush())
+	require.NoError(empty.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	empty.Close()
+	require.Zero(draws.Load(), "empty collector must not draw from the pool")
+
+	c := NewCollectorWithAllocator(t.Name(), "", allocator, logger)
+	defer c.Close()
+	require.NoError(c.Collect([]byte{1}, []byte{1}))
+	require.EqualValues(1, draws.Load(), "first Collect draws exactly one pooled buffer")
+	require.NoError(c.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	v, err := tx.GetOne(table, []byte{1})
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
+}
+
+// TestSortableBufferChunks pins the chunked layout: key/value bytes live in
+// fixed-size chunks, so a growing buffer never re-allocates and copies the
+// bytes it already holds.
+func TestSortableBufferChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	const entries = 512
+	val := bytes.Repeat([]byte{0xAB}, 16*1024) // 512*16KB = 8MB of values
+	key := make([]byte, 8)
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		buf.Put(key, val)
+	}
+
+	require.Equal(t, entries, buf.Len())
+	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
+	for i, c := range buf.chunks {
+		require.Equal(t, dataChunkSize, cap(c), "chunk %d", i)
+	}
+
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		k, v := buf.Get(i)
+		require.Equal(t, key, k, "entry %d", i)
+		require.Equal(t, val, v, "entry %d", i)
+	}
+}
+
+// TestSortableBufferSortAcrossChunks: the sort comparator has to split a
+// packed offset back into a chunk index and an offset inside it, so entries
+// must still order correctly once they live past chunk 0.
+func TestSortableBufferSortAcrossChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	const entries = 512
+	val := bytes.Repeat([]byte{0xCD}, 16*1024) // 512*16KB = 8MB of values
+	key := make([]byte, 8)
+	for i := range entries {
+		// Scrambled, so IsSortedFunc cannot short-circuit and pdqsort really runs.
+		// 313 is odd, so it permutes a power-of-two range.
+		binary.BigEndian.PutUint64(key, uint64(i*313%entries))
+		buf.Put(key, val)
+	}
+	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
+
+	buf.Sort()
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		k, v := buf.Get(i)
+		require.Equal(t, key, k, "entry %d", i)
+		require.Equal(t, val, v, "entry %d", i)
+	}
+}
+
+// TestSortableBufferOversizedEntry: an entry bigger than one chunk gets a chunk
+// of its own - Get must still return one contiguous slice per key and value.
+func TestSortableBufferOversizedEntry(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	big := bytes.Repeat([]byte{0xCD}, dataChunkSize+7)
+	buf.Put([]byte{0x01}, []byte("small"))
+	buf.Put([]byte{0x02}, big)
+	buf.Put([]byte{0x03}, []byte("after"))
+
+	k, v := buf.Get(1)
+	require.Equal(t, []byte{0x02}, k)
+	require.Equal(t, big, v)
+	k, v = buf.Get(2)
+	require.Equal(t, []byte{0x03}, k)
+	require.Equal(t, []byte("after"), v)
+
+	w := bytes.NewBuffer(nil)
+	require.NoError(t, buf.Write(w))
+	m := &mmapBytesReader{data: w.Bytes()}
+	for i := range buf.Len() {
+		wantK, wantV := buf.Get(i)
+		gotK, err := readField(m)
+		require.NoError(t, err)
+		gotV, err := readField(m)
+		require.NoError(t, err)
+		require.Equal(t, wantK, gotK)
+		require.Equal(t, wantV, gotV)
+	}
+}
+
+// TestSortableBufferResetReleasesChunks: Reset drops the buffer's own chunk
+// slice and size bookkeeping so it can be reused immediately.
+func TestSortableBufferResetReleasesChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	val := bytes.Repeat([]byte{0xEF}, 16*1024)
+	for i := range 512 {
+		buf.Put(binary.BigEndian.AppendUint64(nil, uint64(i)), val)
+	}
+	require.NotEmpty(t, buf.chunks)
+
+	buf.Reset()
+	require.Empty(t, buf.chunks)
+	require.Zero(t, buf.Size())
+	require.Zero(t, buf.Len())
+
+	buf.Put([]byte{0x01}, []byte("reused"))
+	k, v := buf.Get(0)
+	require.Equal(t, []byte{0x01}, k)
+	require.Equal(t, []byte("reused"), v)
+}
+
+// TestPutDataChunkRejectsOversized: an entry's private chunk (bigger than
+// dataChunkSize) must never enter the shared pool — a later getDataChunk
+// handing it out under a normal chunk index would corrupt an unrelated buffer.
+func TestPutDataChunkRejectsOversized(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		length int
+		pooled bool
+	}{
+		{"short", dataChunkSize - 1, false},
+		{"exact", dataChunkSize, true},
+		{"oversized", dataChunkSize + 7, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.pooled, isPooledChunk(make([]byte, tc.length)))
+		})
+	}
+}
+
+// disposeProbe records whether the collector still owned its data chunks when
+// the provider was disposed.
+type disposeProbe struct {
+	buf          *sortableBuffer
+	sawOwnChunks bool
+}
+
+func (p *disposeProbe) Next() ([]byte, []byte, error) { return nil, nil, io.EOF }
+func (p *disposeProbe) Wait() error                   { return nil }
+func (p *disposeProbe) String() string                { return "disposeProbe" }
+func (p *disposeProbe) Dispose()                      { p.sawOwnChunks = len(p.buf.chunks) > 0 }
+
+// TestCloseDisposesProvidersBeforeBuffer: KeepInRAM hands out a provider backed
+// by the collector's own buffer, and Reset gives that buffer's chunks to a pool
+// other collectors draw from. So Close must be done with every provider before
+// it recycles the buffer.
+func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
+	allocator := NewAllocator(&sync.Pool{New: func() any { return NewSortableBuffer(BufferOptimalSize) }})
+	c := NewCollectorWithAllocator(t.Name(), t.TempDir(), allocator, log.New())
+	require.NoError(t, c.Collect([]byte{1}, []byte{2}))
+
+	probe := &disposeProbe{buf: c.buf.(*sortableBuffer)}
+	c.dataProviders = append(c.dataProviders, probe)
+	c.Close()
+
+	require.True(t, probe.sawOwnChunks, "buffer was recycled before its providers were disposed")
 }

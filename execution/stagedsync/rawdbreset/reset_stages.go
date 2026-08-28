@@ -43,9 +43,6 @@ import (
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
-	if err := db.Update(ctx, ResetWitnesses); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
@@ -134,7 +131,7 @@ func ResetBlocks(db kv.RwDB, tx kv.RwTx, br dbservices.FullBlockReader, bw *bloc
 	if err != nil {
 		return err
 	}
-	if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 		return err
 	}
 
@@ -221,19 +218,6 @@ func ResetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetWitnesses(tx kv.RwTx) error {
-	if err := tx.ClearTable(kv.BorWitnesses); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorWitnessSizes); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
 var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {},
 	stages.Finish:      {},
@@ -303,59 +287,61 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		switch stage {
 		case stages.Headers:
-			h2n := etl.NewCollectorWithAllocator(logPrefix, dirs.Tmp, etl.SmallSortableBuffers, logger)
-			defer h2n.Close()
-			h2n.SortAndFlushInBackground(true)
-			h2n.LogLvl(log.LvlDebug)
+			if err := func() error {
+				h2n := etl.NewCollectorWithAllocator(logPrefix, dirs.Tmp, etl.SmallSortableBuffers, logger)
+				defer h2n.Close()
+				h2n.SortAndFlushInBackground(true)
+				h2n.LogLvl(log.LvlDebug)
 
-			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
-			// for now easier just store them in db
-			var td uint256.Int
-			blockNumBytes := make([]byte, 8)
-			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
-				blockNum, blockHash := header.Number.Uint64(), header.Hash()
-				if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
-					return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
-				}
-				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
-				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
-				if blockNum > blocksAvailable {
-					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
-				}
-				if !dbg.PruneTotalDifficulty() {
-					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-						return err
+				// fill some small tables from snapshots, in future we may store this data in snapshots also, but
+				// for now easier just store them in db
+				var td uint256.Int
+				blockNumBytes := make([]byte, 8)
+				if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
+					blockNum, blockHash := header.Number.Uint64(), header.Hash()
+					if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
+						return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
 					}
-				}
-
-				// Write marker for pruning only if we are above our safe threshold
-				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
-					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-						return err
+					// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+					// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
+					if blockNum > blocksAvailable {
+						return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
 					}
-					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
-					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
-						return err
-					}
-					if dbg.PruneTotalDifficulty() {
+					if !dbg.PruneTotalDifficulty() {
 						if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 							return err
 						}
 					}
+
+					// Write marker for pruning only if we are above our safe threshold
+					if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+						if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+							return err
+						}
+						binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+						if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
+							return err
+						}
+						if dbg.PruneTotalDifficulty() {
+							if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+								return err
+							}
+						}
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
+							common.PrettyExact(header.Number.Uint64()), common.PrettyExact(blockReader.FrozenBlocks())))
+					default:
+					}
+					return nil
+				}); err != nil {
+					return err
 				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
-						common.PrettyExact(header.Number.Uint64()), common.PrettyExact(blockReader.FrozenBlocks())))
-				default:
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+				return h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
+			}(); err != nil {
 				return err
 			}
 			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
@@ -365,7 +351,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			if !ok {
 				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
 			}
-			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+			if err := rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err
 			}
 
@@ -426,10 +412,7 @@ const (
 )
 
 func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
-	if blockReader.BorSnapshots() == nil {
-		snapProgress = blockReader.FrozenBlocks()
-	}
+	snapProgress := blockReader.FrozenBlocks()
 	if snapProgress < pruneMarkerSafeThreshold {
 		return 0
 	}
