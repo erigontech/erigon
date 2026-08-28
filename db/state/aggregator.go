@@ -158,7 +158,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:       dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		backgroundProgress: background.NewProgressSet(),
 		logger:             logger,
-		workers:            workersCfg{merge: 1, collateAndBuild: 1},
+		workers:            workersCfg{merge: dbg.MergeWorkers, collateAndBuild: dbg.CollateWorkers},
 
 		produce: true,
 	}
@@ -242,6 +242,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 	}
 	a.d[cfg.Name].salt.Store(salt)
 	a.AddDependencyBtwnHistoryII(cfg.Name)
+	a.applyEnvCompressWorkers()
 	return nil
 }
 
@@ -259,6 +260,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 	}
 	a.iis[a.iisCount] = ii
 	a.iisCount++
+	a.applyEnvCompressWorkers()
 	return nil
 }
 
@@ -785,6 +787,16 @@ func (a *Aggregator) setBuildAccessorsWorkers(i int) {
 			ii.BuildAccessorsWorkers = i
 		}
 	})
+}
+
+// applyEnvCompressWorkers covers the window before the first preset lands: a restart with
+// files on disk merges with whatever the compressor config holds at registration.
+func (a *Aggregator) applyEnvCompressWorkers() {
+	if dbg.CompressWorkers <= 0 {
+		return
+	}
+	a.setCompressWorkers(dbg.CompressWorkers)
+	a.setBuildAccessorsWorkers(dbg.CompressWorkers)
 }
 
 func (a *Aggregator) setCompressWorkers(i int) {

@@ -144,9 +144,10 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 
 type workersCfg struct {
 	mu              sync.Mutex
-	editLocks       int // >0 while background build/merge pins config; Preset* writes are no-ops
+	editLocks       int // >0 while background build/merge pins config
 	merge           int // usually 1
 	collateAndBuild int
+	pending         []func() // requests that arrived while pinned
 }
 
 func (w *workersCfg) getMerge() int {
@@ -156,11 +157,7 @@ func (w *workersCfg) getMerge() int {
 }
 
 func (w *workersCfg) setMerge(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		w.merge = n
-	}
+	w.trySet(func() { w.merge = n })
 }
 
 func (w *workersCfg) getCollateAndBuild() int {
@@ -170,20 +167,19 @@ func (w *workersCfg) getCollateAndBuild() int {
 }
 
 func (w *workersCfg) setCollateAndBuild(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		w.collateAndBuild = n
-	}
+	w.trySet(func() { w.collateAndBuild = n })
 }
 
-// trySet runs fn under mu only while editing is unlocked (no background op holds it).
+// trySet runs fn under mu, or queues it for the last unlockEditing while a background op pins
+// the config: dropping the request loses it for the process — a restart merges before any preset.
 func (w *workersCfg) trySet(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		fn()
+	if w.editLocks > 0 {
+		w.pending = append(w.pending, fn)
+		return
 	}
+	fn()
 }
 
 // lockEditing is reentrant: overlapping build/merge ops each hold a lock, and
@@ -200,6 +196,13 @@ func (w *workersCfg) unlockEditing() {
 	if w.editLocks > 0 {
 		w.editLocks--
 	}
+	if w.editLocks != 0 {
+		return
+	}
+	for _, fn := range w.pending {
+		fn()
+	}
+	w.pending = nil
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
