@@ -41,6 +41,7 @@ type Metrics struct {
 	updateBranch             atomic.Uint64
 	loadDepths               [10]uint64
 	unfolds                  atomic.Uint64
+	folds                    atomic.Uint64
 	spentUnfolding           atomic.Int64
 	spentFolding             atomic.Int64
 	spentProcessing          atomic.Int64
@@ -68,6 +69,7 @@ type MetricValues struct {
 	UpdateBranch    uint64
 	LoadDepths      [10]uint64
 	Unfolds         uint64
+	Folds           uint64
 	SpentUnfolding  time.Duration
 	SpentFolding    time.Duration
 	SpentProcessing time.Duration
@@ -142,6 +144,7 @@ func (m *Metrics) AsValues() MetricValues {
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
+		Folds:           m.folds.Load(),
 		SpentUnfolding:  time.Duration(m.spentUnfolding.Load()),
 		SpentFolding:    time.Duration(m.spentFolding.Load()),
 		SpentProcessing: time.Duration(m.spentProcessing.Load()),
@@ -172,7 +175,7 @@ func (m *Metrics) logMetrics() []any {
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
 		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
 		"ms", common.PrettyCounter(m.missStorage.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(time.Duration(m.spentProcessing.Load()), 0).String(),
+		"fld", common.PrettyCounter(m.folds.Load()), "ufld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(time.Duration(m.spentProcessing.Load()), 0).String(),
 		"fdur", common.Round(time.Duration(m.spentFolding.Load()), 0).String(), "ufdur", common.Round(time.Duration(m.spentUnfolding.Load()), 0),
 	}
 }
@@ -306,7 +309,14 @@ func (m *Metrics) Reset() {
 	m.missBranch.Store(0)
 	m.missAccount.Store(0)
 	m.missStorage.Store(0)
+	m.cacheBranch.Store(0)
+	m.cacheAccount.Store(0)
+	m.cacheStorage.Store(0)
 	m.unfolds.Store(0)
+	m.folds.Store(0)
+	m.spentUnfolding.Store(0)
+	m.spentFolding.Store(0)
+	m.spentProcessing.Store(0)
 
 	if !m.collectCommitmentMetrics {
 		return
@@ -314,9 +324,6 @@ func (m *Metrics) Reset() {
 
 	m.Accounts.Reset()
 	m.Branches.Reset()
-	m.spentUnfolding.Store(0)
-	m.spentFolding.Store(0)
-	m.spentProcessing.Store(0)
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
@@ -375,6 +382,10 @@ func (m *Metrics) BranchLoad(plainKey []byte) {
 	}
 }
 
+// StartUnfolding counts the unfold always — one atomic add on a worker-private
+// line — and returns a timing closure only when per-key metrics are on, since
+// that costs a time.Now() and an escaping closure per call. A nil return means
+// there is nothing to stop.
 func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 	m.unfolds.Add(1)
 	if m.collectCommitmentMetrics {
@@ -387,10 +398,11 @@ func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 			})
 		}
 	}
-	return func() {}
+	return nil
 }
 
 func (m *Metrics) StartFolding(plainKey []byte) func() {
+	m.folds.Add(1)
 	if m.collectCommitmentMetrics {
 		start := time.Now()
 		return func() {
@@ -401,7 +413,33 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 			})
 		}
 	}
-	return func() {}
+	return nil
+}
+
+// Merge folds src's counters into m. The parallel trie gives every mount
+// worker its own Metrics — an atomic add on a shared line in the fold loop
+// would cost more than the counter is worth — and merges once per round.
+func (m *Metrics) Merge(src *Metrics) {
+	if src == nil || m == src {
+		return
+	}
+	m.addressKeys.Add(src.addressKeys.Load())
+	m.storageKeys.Add(src.storageKeys.Load())
+	m.loadBranch.Add(src.loadBranch.Load())
+	m.loadAccount.Add(src.loadAccount.Load())
+	m.loadStorage.Add(src.loadStorage.Load())
+	m.cacheBranch.Add(src.cacheBranch.Load())
+	m.cacheAccount.Add(src.cacheAccount.Load())
+	m.cacheStorage.Add(src.cacheStorage.Load())
+	m.missBranch.Add(src.missBranch.Load())
+	m.missAccount.Add(src.missAccount.Load())
+	m.missStorage.Add(src.missStorage.Load())
+	m.updateBranch.Add(src.updateBranch.Load())
+	m.unfolds.Add(src.unfolds.Load())
+	m.folds.Add(src.folds.Load())
+	m.spentUnfolding.Add(src.spentUnfolding.Load())
+	m.spentFolding.Add(src.spentFolding.Load())
+	m.spentProcessing.Add(src.spentProcessing.Load())
 }
 
 func (m *Metrics) TotalProcessingTimeInc(t time.Time) {

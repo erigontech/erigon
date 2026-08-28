@@ -24,7 +24,6 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-const AutoCloseOnError = true
 const InitialBufferSize = 4096
 
 // FlushThreshold bounds how much of a response is held in memory at once. A
@@ -47,16 +46,9 @@ func flushIfFull(stream *jsoniter.Stream) {
 }
 
 func New(out io.Writer) Stream {
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, out, InitialBufferSize)
-	if AutoCloseOnError {
-		return NewStackStream(stream)
-	}
-	return NewJsoniterStream(stream)
+	return NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, out, InitialBufferSize))
 }
 
 func Wrap(stream *jsoniter.Stream) Stream {
-	if AutoCloseOnError {
-		return NewStackStream(stream)
-	}
-	return NewJsoniterStream(stream)
+	return NewStackStream(stream)
 }
