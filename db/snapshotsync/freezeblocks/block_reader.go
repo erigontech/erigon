@@ -480,6 +480,18 @@ func (r *BlockReader) view(tx kv.Getter) *blocksnapshots.View {
 	return v
 }
 
+// HeaderFromView reads a header from an explicitly supplied block-files view, for
+// startup paths that open their own RoSnapshots before any tx exists. Block files
+// are still only read through a pinned view; this one just isn't carried by a tx.
+func (r *BlockReader) HeaderFromView(view *blocksnapshots.View, blockHeight uint64) (*types.Header, error) {
+	seg, ok := view.Segment(snaptype2.Headers, blockHeight)
+	if !ok {
+		return nil, nil
+	}
+	h, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
+	return h, err
+}
+
 // viewSingleFile returns the segment of type t covering blockNum, from tx's pinned view.
 func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return r.view(tx).Segment(t, blockNum)
