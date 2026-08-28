@@ -49,22 +49,23 @@ const (
 
 // A spill file prefixes each field with its length. Fixed width rather than a
 // varint: the file never leaves the machine that wrote it. A key is capped at
-// maxKeyLen so two bytes hold it, a value at maxValLen so four do.
+// MaxKeyLen so two bytes hold it, a value at MaxValLen so four do.
 const (
 	keyLenSize = 2
 	valLenSize = 4
 	nilKeyLen  = math.MaxUint16 // no key reaches this, so it can mean nil
 
-	// A longer value would write a length that reads back negative, which the
-	// reader takes for nil without consuming the bytes - desyncing the rest of
-	// the file rather than failing. appendSortableBuffer grows a value across
-	// Puts, so the writers check it and not Put.
-	maxValLen = math.MaxInt32
+	// MaxValLen is the largest value Collect accepts. A longer one would write a
+	// length that reads back negative, which the reader takes for nil without
+	// consuming the bytes - desyncing the rest of the file rather than failing.
+	// appendSortableBuffer grows a value across Puts, so the writers check it
+	// and not Put.
+	MaxValLen = math.MaxInt32
 )
 
 func checkValLen(v []byte) error {
-	if len(v) > maxValLen {
-		return fmt.Errorf("etl: value of %d bytes exceeds %d", len(v), maxValLen)
+	if len(v) > MaxValLen {
+		return fmt.Errorf("etl: value of %d bytes exceeds %d", len(v), MaxValLen)
 	}
 	return nil
 }
@@ -144,10 +145,10 @@ const (
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
-	// A key spells its length in keyLenSize bytes with nilKeyLen reserved, so
-	// the ceiling is 65534. 4096 is policy under that ceiling - no caller comes
-	// near it, and Collect rejects the rest.
-	maxKeyLen = 4096
+	// MaxKeyLen is the largest key Collect accepts. A key spells its length in
+	// keyLenSize bytes with nilKeyLen reserved, so the hard ceiling is 65534;
+	// 4096 is policy under it - no caller comes near it.
+	MaxKeyLen = 4096
 
 	// The chunk index takes what is left of a positive int32, so one buffer
 	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
@@ -247,7 +248,7 @@ type sortableBuffer struct {
 }
 
 // nextChunk starts a chunk able to hold n bytes. An entry never straddles
-// chunks, so Get can hand out direct references.
+// chunks, so entryData can hand out direct references.
 func (b *sortableBuffer) nextChunk(n int) {
 	if len(b.chunks) >= maxDataChunks {
 		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))

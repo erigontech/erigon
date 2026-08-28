@@ -925,7 +925,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 }
 
 // TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
-// memoryDataProvider (Get) are not corrupted by subsequent Next() calls.
+// memoryDataProvider (Next) are not corrupted by subsequent Next() calls.
 func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -935,7 +935,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
 	require.NoError(t, err)
 
-	// Memory provider with multiple keys - Get returns slices into sortableBuffer.chunks
+	// Memory provider with multiple keys - Next returns slices into sortableBuffer.chunks
 	memBuf := NewSortableBuffer(BufferOptimalSize)
 	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
 	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
@@ -1640,7 +1640,7 @@ func TestSortableBufferSortAcrossChunks(t *testing.T) {
 }
 
 // TestSortableBufferOversizedEntry: an entry bigger than one chunk gets a chunk
-// of its own - Get must still return one contiguous slice per key and value.
+// of its own - Next must still return one contiguous slice per key and value.
 func TestSortableBufferOversizedEntry(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
@@ -1807,8 +1807,8 @@ func TestSortableBufferStableSortAcrossChunks(t *testing.T) {
 func TestCollectRejectsOversizedKey(t *testing.T) {
 	c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1*datasize.MB), log.New())
 	defer c.Close()
-	require.NoError(t, c.Collect(make([]byte, maxKeyLen), []byte("v")))
-	err := c.Collect(make([]byte, maxKeyLen+1), []byte("v"))
+	require.NoError(t, c.Collect(make([]byte, MaxKeyLen), []byte("v")))
+	err := c.Collect(make([]byte, MaxKeyLen+1), []byte("v"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds")
 }
@@ -1943,16 +1943,16 @@ func TestSpillNilKeyRoundTrip(t *testing.T) {
 	require.Equal(t, []byte("one"), got[1][1])
 }
 
-// TestSpillValueLengthCeiling pins why maxValLen exists: one byte past it the
+// TestSpillValueLengthCeiling pins why MaxValLen exists: one byte past it the
 // length wraps negative, which readValField takes for nil without consuming the
 // value's bytes, so every later record is parsed out of value payload.
 func TestSpillValueLengthCeiling(t *testing.T) {
 	var buf [valLenSize]byte
 
-	putValLen(buf[:], int32(maxValLen))
-	require.EqualValues(t, maxValLen, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
+	putValLen(buf[:], int32(MaxValLen))
+	require.EqualValues(t, MaxValLen, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
 
-	over := int32(maxValLen)
+	over := int32(MaxValLen)
 	over++ // wraps; a constant expression would not compile
 	putValLen(buf[:], over)
 	require.Negative(t, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
