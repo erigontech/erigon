@@ -156,10 +156,11 @@ func TestBlockReaderFrozenHashLookup(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, gotBody, "Body returned the canonical sibling's body")
 
-		// A nil body must not reach peers as an affirmatively empty one.
+		// Must be nil rather than empty: a nil body encodes to an empty list, and
+		// the HasBlock shims read availability off BodyRlp being non-nil.
 		gotBodyRlp, err := m.BlockReader.BodyRlp(m.Ctx, tx, orphanBlock.Hash(), orphanBlock.NumberU64())
 		require.NoError(t, err)
-		require.Empty(t, gotBodyRlp, "BodyRlp encoded a nil body as an empty block body")
+		require.Nil(t, gotBodyRlp, "BodyRlp encoded a nil body as an empty block body")
 
 		hasSenders, err := m.BlockReader.HasSenders(m.Ctx, tx, orphanBlock.Hash(), orphanBlock.NumberU64())
 		require.NoError(t, err)
