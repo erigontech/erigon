@@ -42,7 +42,7 @@ func TestCommitmentV3SchemaVersions(t *testing.T) {
 	t.Parallel()
 
 	cfg := Schema.CommitmentDomain
-	require.False(t, cfg.EdgeRecordsInCommitment, "the schema must not enable edge records before task 9")
+	require.True(t, cfg.EdgeRecordsInCommitment, "the schema enables edge records after task 9")
 	require.Equal(t, commitmentV3, cfg.FileVersion.DataKV.Current)
 	require.Equal(t, version.V1_0, cfg.FileVersion.DataKV.MinSupported)
 	require.Equal(t, version.V2_0, cfg.FileVersion.AccessorBT.Current)

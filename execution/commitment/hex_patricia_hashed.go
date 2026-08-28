@@ -213,6 +213,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext, cfg TrieConf
 func (hph *HexPatriciaHashed) applyConfig(cfg TrieConfig) {
 	hph.cfg = cfg
 	hph.branchEncoder.setDeferUpdates(cfg.DeferBranchUpdates)
+	hph.branchEncoder.setEdgeRecords(cfg.EdgeRecords)
 	hph.branchEncoder.maxDeferredUpdates = DefaultMaxDeferredUpdates
 	hph.leaveDeferredForCaller = cfg.LeaveDeferredForCaller
 	hph.memoizationOff = cfg.MemoizationOff
@@ -287,6 +288,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
 	hph.branchEncoder.setDeferUpdates(false) // will be re-set by applyConfig
+	hph.branchEncoder.setEdgeRecords(false)
 
 	// reset config to zero — caller sets via applyConfig after pool get
 	hph.cfg = TrieConfig{}
@@ -317,6 +319,7 @@ type cell struct {
 	storageAddrLen  int16 // length of the storage plain key
 	hashLen         int16 // Length of the hash (or embedded)
 	stateHashLen    int16 // stateHash length, if > 0 can reuse
+	branchMask      uint16
 	storageMask     uint16
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
@@ -395,6 +398,7 @@ func (cell *cell) reset() {
 	cell.extLen = 0
 	cell.hashLen = 0
 	cell.stateHashLen = 0
+	cell.branchMask = 0
 	cell.storageMask = 0
 	cell.loaded = cellLoadNone
 	clear(cell.hashedExtension[:])
@@ -500,6 +504,7 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	if upCell.hashLen > 0 {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
+	cell.branchMask = upCell.branchMask
 	cell.storageMask = upCell.storageMask
 	cell.loaded = upCell.loaded
 }
@@ -550,6 +555,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
+	cell.branchMask = lowCell.branchMask
 	cell.storageMask = lowCell.storageMask
 	if lowDepth > 64 {
 		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
@@ -1684,6 +1690,7 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if row == 0 {
 		hph.rootMask = hph.afterMap[row]
 	}
+	upCell.branchMask = hph.afterMap[row]
 	if hph.touchMap[row] != 0 { // any modifications
 		if row == 0 {
 			hph.rootTouched = true
@@ -2678,6 +2685,11 @@ func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
 // branchEncoder for the caller to handle (true) or applies them inline (false, default).
 func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	hph.leaveDeferredForCaller = leave
+}
+
+func (hph *HexPatriciaHashed) SetEdgeRecords(edgeRecords bool) {
+	hph.cfg.EdgeRecords = edgeRecords
+	hph.branchEncoder.setEdgeRecords(edgeRecords)
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation.

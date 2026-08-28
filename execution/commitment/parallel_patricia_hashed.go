@@ -119,6 +119,13 @@ func (p *ParallelPatriciaHashed) SetTrieContextFactory(f TrieContextFactory) {
 	p.trieCtxFactory = f
 }
 
+func (p *ParallelPatriciaHashed) SetEdgeRecords(edgeRecords bool) {
+	p.cfg.EdgeRecords = edgeRecords
+	if p.template != nil {
+		p.template.SetEdgeRecords(edgeRecords)
+	}
+}
+
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer

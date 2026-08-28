@@ -256,6 +256,7 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 		copy(root.extension[1:], child.extension[:child.extLen])
 		root.hashLen = child.hashLen
 		copy(root.hash[:], child.hash[:child.hashLen])
+		root.branchMask = child.branchMask
 	} else {
 		root = child
 	}

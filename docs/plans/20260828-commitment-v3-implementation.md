@@ -289,18 +289,18 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 - Create: `execution/commitment/write_v3_test.go`
 
-- [ ] make `CollectUpdate` emit one record per changed child, gated on the v3 format, carrying the
+- [x] make `CollectUpdate` emit one record per changed child, gated on the v3 format, carrying the
       child's mask and hash into the record for the edge reaching it
-- [ ] drop the `ctx.Branch(prefix)` prev read on the v3 path — `hashRow` already emits
+- [x] drop the `ctx.Branch(prefix)` prev read on the v3 path — `hashRow` already emits
       `cellEncodeData` for every present cell, so records re-encode wholly from memory
-- [ ] delete `BranchMerger.Merge` and `MergeHexBranches` and their call sites on the v3 path
-- [ ] stop persisting `touchMap` and the 4-byte row header
-- [ ] write tests asserting a single changed child produces exactly the expected record set and
+- [x] delete `BranchMerger.Merge` and `MergeHexBranches` and their call sites on the v3 path
+- [x] stop persisting `touchMap` and the 4-byte row header
+- [x] write tests asserting a single changed child produces exactly the expected record set and
       touches no other key
-- [ ] write a test asserting no prev read occurs on the v3 write path
-- [ ] write a test asserting a node's mask is written into its parent's record and nowhere else, and
+- [x] write a test asserting no prev read occurs on the v3 write path
+- [x] write a test asserting a node's mask is written into its parent's record and nowhere else, and
       that the root's mask lands in the state blob
-- [ ] run `go test ./execution/commitment/...` — must pass before task 10
+- [x] run `go test ./execution/commitment/...` — must pass before task 10
 
 ### Task 10: Read path assembles a grid row from a node's records
 

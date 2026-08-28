@@ -279,7 +279,7 @@ var Schema = SchemaGen{
 
 		Accessors:                      AccessorBTree | AccessorExistence,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
-		EdgeRecordsInCommitment:        false,
+		EdgeRecordsInCommitment:        true,
 		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{

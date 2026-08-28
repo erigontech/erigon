@@ -94,6 +94,7 @@ type Trie interface {
 
 	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
+	SetEdgeRecords(bool)
 
 	Variant() TrieVariant
 
@@ -182,6 +183,7 @@ type cellEncodeData struct {
 	storageAddr [length.Addr + length.Hash]byte
 	hash        [32]byte
 	stateHash   [32]byte
+	branchMask  uint16
 	storageMask uint16
 
 	extLen         int16
@@ -198,6 +200,7 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	d.storageAddrLen = c.storageAddrLen
 	d.hashLen = c.hashLen
 	d.stateHashLen = c.stateHashLen
+	d.branchMask = c.branchMask
 	d.storageMask = c.storageMask
 	copy(d.extension[:], c.extension[:c.extLen])
 	copy(d.accountAddr[:], c.accountAddr[:c.accountAddrLen])
@@ -293,10 +296,11 @@ func (p *PendingCommitmentUpdate) Clear() {
 
 // BranchCache is populated by SharedDomains.Commit, not by this encoder.
 type BranchEncoder struct {
-	buf       *bytes.Buffer
-	bitmapBuf [binary.MaxVarintLen64]byte
-	merger    *BranchMerger
-	metrics   *Metrics
+	buf         *bytes.Buffer
+	bitmapBuf   [binary.MaxVarintLen64]byte
+	merger      *BranchMerger
+	metrics     *Metrics
+	edgeRecords bool
 
 	deferUpdates       bool
 	maxDeferredUpdates int
@@ -325,6 +329,10 @@ func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
+}
+
+func (be *BranchEncoder) setEdgeRecords(edgeRecords bool) {
+	be.edgeRecords = edgeRecords
 }
 
 func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
@@ -469,6 +477,10 @@ func (be *BranchEncoder) CollectUpdate(
 	cells *[16]cellEncodeData,
 	isNew bool,
 ) error {
+	if be.edgeRecords {
+		return be.collectEdgeRecords(ctx, prefix, bitmap, cells)
+	}
+
 	var prev []byte
 	var err error
 
@@ -509,6 +521,35 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
+func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, bitmap uint16, cells *[16]cellEncodeData) error {
+	if bitmap == 0 {
+		return nil
+	}
+
+	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+	for bitset := bitmap; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		cell := &cells[nibble]
+		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+		var record []byte
+		if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+			record = EncodeLeafChild(cell)
+		} else {
+			record = EncodeBranchChild(cell.branchMask, cell)
+		}
+		if err := ctx.PutBranch(key, record, nil); err != nil {
+			return err
+		}
+		if be.metrics != nil {
+			be.metrics.updateBranch.Add(1)
+		}
+		mxTrieBranchesUpdated.Inc()
+		bitset ^= bit
+	}
+	return nil
+}
+
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -530,6 +571,29 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
+	}
+
+	if be.edgeRecords {
+		if bitmap == 0 {
+			return nil
+		}
+		be.pendingPrefixes.Set(prefix, struct{}{})
+		nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+		for bitset := bitmap; bitset != 0; {
+			bit := bitset & -bitset
+			nibble := bits.TrailingZeros16(bit)
+			cell := &cells[nibble]
+			key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+			var record []byte
+			if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+				record = EncodeLeafChild(cell)
+			} else {
+				record = EncodeBranchChild(cell.branchMask, cell)
+			}
+			be.deferred = append(be.deferred, getDeferredUpdate(key, record, nil))
+			bitset ^= bit
+		}
+		return nil
 	}
 
 	var prev []byte

@@ -90,6 +90,10 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 // SetCommitmentEdgeRecords selects the state-key format used by new writes.
 func (sdc *SharedDomainsCommitmentContext) SetCommitmentEdgeRecords(v bool) {
 	sdc.edgeRecords = v
+	sdc.pendingCfg.EdgeRecords = v
+	if sdc.patriciaTrie != nil {
+		sdc.patriciaTrie.SetEdgeRecords(v)
+	}
 }
 
 // StateReader returns the currently installed custom state reader, or nil when
