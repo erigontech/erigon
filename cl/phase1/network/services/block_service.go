@@ -155,7 +155,10 @@ type blockService struct {
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksMu    sync.Mutex
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, common.Hash]
-	emitter         *beaconevents.EventEmitter
+	// Reservations must not be evicted while a block is being validated or queued;
+	// otherwise a later equivocation could replace the first validly signed block.
+	seenBlockReservations map[proposerIndexAndSlot]common.Hash
+	emitter               *beaconevents.EventEmitter
 
 	// Blocks waiting for their slot or a processing dependency.
 	blocksScheduledForLaterExecution *pendingJobQueue[common.Hash, *pendingBlockJob]
@@ -177,13 +180,14 @@ func NewBlockService(
 		panic(err)
 	}
 	b := &blockService{
-		forkchoiceStore: forkchoiceStore,
-		syncedData:      syncedData,
-		ethClock:        ethClock,
-		beaconCfg:       beaconCfg,
-		seenBlocksCache: seenBlocksCache,
-		emitter:         emitter,
-		db:              db,
+		forkchoiceStore:       forkchoiceStore,
+		syncedData:            syncedData,
+		ethClock:              ethClock,
+		beaconCfg:             beaconCfg,
+		seenBlocksCache:       seenBlocksCache,
+		seenBlockReservations: make(map[proposerIndexAndSlot]common.Hash, maxPendingBlocks),
+		emitter:               emitter,
+		db:                    db,
 	}
 	b.blocksScheduledForLaterExecution = b.newPendingBlockQueue(ctx)
 	return b
@@ -199,7 +203,7 @@ func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueu
 		b.tryProcessPendingBlock,
 		nil,
 		func(blockRoot common.Hash, job *pendingBlockJob) {
-			b.forgetSeenBlock(pendingBlockSeenKey(job.block), blockRoot)
+			b.releaseSeenBlockReservation(pendingBlockSeenKey(job.block), blockRoot)
 			log.Trace("Pending block expired", "blockRoot", blockRoot)
 		},
 		mergePendingBlockJobs)
@@ -265,33 +269,36 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 	root := common.Hash(blockRoot)
-	if _, alreadySeen := b.loadOrAddSeenBlock(seenKey, root); alreadySeen {
+	if _, alreadySeen := b.loadOrReserveSeenBlock(seenKey, root); alreadySeen {
 		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
 	}
 
 	if err := b.validateBlockAfterSignature(msg); err != nil {
 		if errors.Is(err, ErrIgnore) {
 			if scheduleErr := b.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: msg}); scheduleErr != nil {
-				b.forgetSeenBlock(seenKey, root)
+				b.releaseSeenBlockReservation(seenKey, root)
 				return scheduleErr
 			}
+		} else {
+			b.completeSeenBlock(seenKey, root)
 		}
 		return err
 	}
 	if b.forkchoiceStore.Slot() < msg.Block.Slot {
 		if err := b.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: msg}); err != nil {
-			b.forgetSeenBlock(seenKey, root)
+			b.releaseSeenBlockReservation(seenKey, root)
 			return err
 		}
 		return fmt.Errorf("%w: block queued until fork choice reaches slot %d", ErrIgnore, msg.Block.Slot)
 	}
 	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
+		b.completeSeenBlock(seenKey, root)
 		b.publishBlockGossipEvent(root, msg.Block.Slot)
 		return nil
 	}
 	if err := b.storeBlock(ctx, msg); err != nil {
 		if scheduleErr := b.schedulePendingBlockWithRoot(root, &pendingBlockJob{block: msg}); scheduleErr != nil {
-			b.forgetSeenBlock(seenKey, root)
+			b.releaseSeenBlockReservation(seenKey, root)
 			return scheduleErr
 		}
 		return fmt.Errorf("%w: block queued after a local storage failure: %v", ErrIgnore, err) //nolint:errorlint // converting a local failure to IGNORE
@@ -300,13 +307,15 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if err := b.processStoredBlock(ctx, msg, true); err != nil {
 		if isPendingBlockRetryableError(err) {
 			if scheduleErr := b.scheduleBlockAfterProcessingFailure(root, msg, err); scheduleErr != nil {
-				b.forgetSeenBlock(seenKey, root)
+				b.releaseSeenBlockReservation(seenKey, root)
 				return scheduleErr
 			}
 			return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %v", ErrIgnore, err) //nolint:errorlint // fork-choice sentinels must not stay matchable
 		}
+		b.completeSeenBlock(seenKey, root)
 		return err
 	}
+	b.completeSeenBlock(seenKey, root)
 	b.publishBlockGossipEvent(root, msg.Block.Slot)
 	return nil
 }
@@ -374,32 +383,54 @@ func pendingBlockSeenKey(block *cltypes.SignedBeaconBlock) proposerIndexAndSlot 
 func (b *blockService) hasSeenBlock(key proposerIndexAndSlot) bool {
 	b.seenBlocksMu.Lock()
 	defer b.seenBlocksMu.Unlock()
-	return b.seenBlocksCache.Contains(key)
+	_, ok := b.seenBlockRootLocked(key)
+	return ok
 }
 
-// loadOrAddSeenBlock atomically reserves a proposer and slot for the first block
-// with a valid signature. Its root lets that block continue deferred processing
-// while a different root is treated as an equivocation.
-func (b *blockService) loadOrAddSeenBlock(
+func (b *blockService) seenBlockRootLocked(key proposerIndexAndSlot) (common.Hash, bool) {
+	if blockRoot, ok := b.seenBlockReservations[key]; ok {
+		return blockRoot, true
+	}
+	return b.seenBlocksCache.Peek(key)
+}
+
+// loadOrReserveSeenBlock atomically reserves a proposer and slot for the first
+// block with a valid signature. Active reservations stay outside the evicting
+// history cache until validation and any deferred processing finish.
+func (b *blockService) loadOrReserveSeenBlock(
 	key proposerIndexAndSlot,
 	blockRoot common.Hash,
 ) (seenRoot common.Hash, alreadySeen bool) {
 	b.seenBlocksMu.Lock()
 	defer b.seenBlocksMu.Unlock()
-	if seenRoot, ok := b.seenBlocksCache.Peek(key); ok {
+	if seenRoot, ok := b.seenBlockRootLocked(key); ok {
 		return seenRoot, true
 	}
-	b.seenBlocksCache.Add(key, blockRoot)
+	b.seenBlockReservations[key] = blockRoot
 	return blockRoot, false
 }
 
-// forgetSeenBlock releases only the matching reservation when its pending job
-// cannot be retained. Matching the root protects a later reservation for the slot.
-func (b *blockService) forgetSeenBlock(key proposerIndexAndSlot, blockRoot common.Hash) {
+// completeSeenBlock moves a matching active reservation into bounded history.
+func (b *blockService) completeSeenBlock(key proposerIndexAndSlot, blockRoot common.Hash) {
 	b.seenBlocksMu.Lock()
 	defer b.seenBlocksMu.Unlock()
-	if seenRoot, ok := b.seenBlocksCache.Peek(key); ok && seenRoot == blockRoot {
-		b.seenBlocksCache.Remove(key)
+	if reservedRoot, ok := b.seenBlockReservations[key]; ok {
+		if reservedRoot != blockRoot {
+			return
+		}
+		delete(b.seenBlockReservations, key)
+	} else if seenRoot, ok := b.seenBlocksCache.Peek(key); ok && seenRoot != blockRoot {
+		return
+	}
+	b.seenBlocksCache.Add(key, blockRoot)
+}
+
+// releaseSeenBlockReservation removes only the matching active reservation.
+func (b *blockService) releaseSeenBlockReservation(key proposerIndexAndSlot, blockRoot common.Hash) {
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	if reservedRoot, ok := b.seenBlockReservations[key]; ok && reservedRoot == blockRoot {
+		delete(b.seenBlockReservations, key)
 	}
 }
 
@@ -514,11 +545,13 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 
 func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot common.Hash, job *pendingBlockJob) pendingJobDecision {
 	block := job.block
-	seenRoot, alreadySeen := b.loadOrAddSeenBlock(pendingBlockSeenKey(block), blockRoot)
+	seenKey := pendingBlockSeenKey(block)
+	seenRoot, alreadySeen := b.loadOrReserveSeenBlock(seenKey, blockRoot)
 	if alreadySeen && seenRoot != blockRoot {
 		return pendingJobRemove
 	}
 	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
+		b.completeSeenBlock(seenKey, blockRoot)
 		b.publishBlockGossipEvent(blockRoot, block.Block.Slot)
 		return pendingJobRemove
 	}
@@ -530,6 +563,7 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 			return pendingJobKeep
 		}
 		log.Trace("Pending block failed validation", "block", block, "error", err)
+		b.completeSeenBlock(seenKey, blockRoot)
 		return pendingJobRemove
 	}
 	if b.forkchoiceStore.Slot() < block.Block.Slot {
@@ -556,8 +590,10 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 			job.recordProcessingFailure(time.Now(), err)
 			return pendingJobKeep
 		}
+		b.completeSeenBlock(seenKey, blockRoot)
 		return pendingJobRemove
 	}
+	b.completeSeenBlock(seenKey, blockRoot)
 	b.publishBlockGossipEvent(blockRoot, block.Block.Slot)
 	return pendingJobRemove
 }

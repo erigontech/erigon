@@ -278,7 +278,7 @@ func TestBlockServiceIgnoresAndQueuesValidBlockBeforeForkChoiceReachesSlot(t *te
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Zero(t, processingStore.calls)
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
-	require.True(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+	require.True(t, service.hasSeenBlock(pendingBlockSeenKey(block)))
 	select {
 	case event := <-events:
 		t.Fatalf("block emitted gossip event before topic validation completed: %v", event)
@@ -322,7 +322,7 @@ func TestBlockServiceIgnoresBlockWhenPendingQueueIsFull(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.count.Load())
-	require.False(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+	require.False(t, service.hasSeenBlock(pendingBlockSeenKey(block)))
 }
 
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
@@ -494,7 +494,7 @@ func TestBlockServiceIgnoresAndQueuesInitialDatabaseFailure(t *testing.T) {
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Zero(t, processingStore.calls)
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
-	require.True(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+	require.True(t, service.hasSeenBlock(pendingBlockSeenKey(block)))
 }
 
 func TestBlockServiceAcceptsAfterFinalizedIndexDatabaseFailure(t *testing.T) {
@@ -591,7 +591,9 @@ func TestBlockServicePendingQueueExpiryForgetsSeenSignature(t *testing.T) {
 	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
 	service := serviceAPI.(*blockService)
 	blockRoot := pendingBlockRoot(t, block)
-	service.seenBlocksCache.Add(pendingBlockSeenKey(block), blockRoot)
+	seenRoot, alreadySeen := service.loadOrReserveSeenBlock(pendingBlockSeenKey(block), blockRoot)
+	require.False(t, alreadySeen)
+	require.Equal(t, blockRoot, seenRoot)
 	require.NoError(t, service.schedulePendingBlockWithRoot(blockRoot, &pendingBlockJob{block: block}))
 	stored, exists := service.blocksScheduledForLaterExecution.jobs.Load(blockRoot)
 	require.True(t, exists)
@@ -599,7 +601,38 @@ func TestBlockServicePendingQueueExpiryForgetsSeenSignature(t *testing.T) {
 
 	service.blocksScheduledForLaterExecution.processPending(t.Context())
 
-	require.False(t, service.seenBlocksCache.Contains(pendingBlockSeenKey(block)))
+	require.False(t, service.hasSeenBlock(pendingBlockSeenKey(block)))
+}
+
+func TestBlockServicePendingReservationSurvivesSeenCacheEviction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	seenKey := pendingBlockSeenKey(block)
+	blockRoot := pendingBlockRoot(t, block)
+	seenRoot, alreadySeen := service.loadOrReserveSeenBlock(seenKey, blockRoot)
+	require.False(t, alreadySeen)
+	require.Equal(t, blockRoot, seenRoot)
+	require.NoError(t, service.schedulePendingBlockWithRoot(blockRoot, &pendingBlockJob{block: block}))
+
+	for i := range seenBlockCacheSize {
+		service.seenBlocksCache.Add(proposerIndexAndSlot{
+			proposerIndex: uint64(i),
+			slot:          block.Block.Slot + 1,
+		}, common.Hash{byte(i), byte(i >> 8)})
+	}
+	require.False(t, service.seenBlocksCache.Contains(seenKey))
+
+	conflictingRoot := common.Hash{0xff}
+	require.NotEqual(t, blockRoot, conflictingRoot)
+	seenRoot, alreadySeen = service.loadOrReserveSeenBlock(seenKey, conflictingRoot)
+	require.True(t, alreadySeen)
+	require.Equal(t, blockRoot, seenRoot)
+	require.Equal(t, pendingJobKeep, service.tryProcessPendingBlock(t.Context(), blockRoot, &pendingBlockJob{block: block}))
 }
 
 func TestBlockServicePendingQueueMergesDuplicateExecutionFailureState(t *testing.T) {
