@@ -39,7 +39,7 @@ import (
 
 var (
 	ErrNoHead      = errors.New("ReadChainHead: ReadCurrentHeader error")
-	ErrNoSnapshots = errors.New("ReadChainHeadFromSnapshots: no snapshot data available")
+	ErrNoSnapshots = errors.New("readChainHeadFromSnapshots: no snapshot data available")
 )
 
 type ChainHead struct {

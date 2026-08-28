@@ -1355,15 +1355,12 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	br, agg := res.BlockRetire, res.Aggregator
+	br := res.BlockRetire
 	if err != nil {
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Close()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1627,7 +1624,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockRetire, agg := res.BlockRetire, res.Aggregator
+	blockRetire := res.BlockRetire
 	if err != nil {
 		return err
 	}
@@ -1636,10 +1633,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	defer blockRetire.MadvNormal().DisableReadAhead()
 
 	blockReader, _ := blockRetire.IO()
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 
@@ -1820,16 +1814,13 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockRetire, agg := res.BlockRetire, res.Aggregator
+	blockRetire := res.BlockRetire
 	if err != nil {
 		return err
 	}
 	defer clean()
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
@@ -1847,15 +1838,12 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	blockRetire, agg := res.BlockRetire, res.Aggregator
+	blockRetire := res.BlockRetire
 	if err != nil {
 		return err
 	}
 	defer clean()
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
@@ -1894,12 +1882,9 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 		return err
 	}
 	defer clean()
-	blockRetire, agg := res.BlockRetire, res.Aggregator
+	blockRetire := res.BlockRetire
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
@@ -1922,12 +1907,9 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 		return err
 	}
 	defer clean()
-	blockRetire, agg := res.BlockRetire, res.Aggregator
+	blockRetire := res.BlockRetire
 	defer blockRetire.MadvNormal().DisableReadAhead()
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
@@ -2007,11 +1989,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 
 	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps)
 
-	agg := snaps.Aggregator
-	db, err := temporal.New(chainDB, agg, snaps.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := snaps.TemporalDB
 	defer db.Close()
 
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
@@ -2722,16 +2700,13 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	br, agg := res.BlockRetire, res.Aggregator
+	br := res.BlockRetire
 	if err != nil {
 		return err
 	}
 	defer clean()
 
-	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := res.TemporalDB
 	defer db.Close()
 
 	tx, err := db.BeginTemporalRo(ctx)
@@ -3004,10 +2979,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 		return err
 	}
 
-	temporalDb, err := temporal.New(chainDB, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	temporalDb := res.TemporalDB
 
 	err = temporalDb.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers())
 	if err != nil {
@@ -3076,6 +3048,9 @@ type OpenSnapsResult struct {
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
 	BlockRetire      *freezeblocks.BlockRetire
 	Aggregator       *state.Aggregator
+	// TemporalDB wraps the caller's chainDB with BlockSnaps, so its txs pin a
+	// block-files view. Block reads panic on a tx from the bare chainDB.
+	TemporalDB *temporal.DB
 }
 
 func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
@@ -3121,10 +3096,15 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
+
+	res.TemporalDB, err = temporal.New(chainDB, res.Aggregator, res.BlockSnaps)
+	if err != nil {
+		return
+	}
+	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, res.TemporalDB, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	clean = func() {
 		defer res.BlockSnaps.Close()
@@ -3132,7 +3112,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		defer res.Aggregator.Close()
 		defer res.BlockRetire.Close() // LIFO: drain the retire before agg/snaps close
 	}
-	err = chainDB.View(ctx, func(tx kv.Tx) error {
+	err = res.TemporalDB.View(ctx, func(tx kv.Tx) error {
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
@@ -3518,10 +3498,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	logger.Info("Pruning has ended", "deletedBlocks", allDeletedBlocks)
 
-	temporalDb, err := temporal.New(db, agg, res.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	temporalDb := res.TemporalDB
 	db = temporalDb
 
 	logger.Info("Work on state history snapshots")

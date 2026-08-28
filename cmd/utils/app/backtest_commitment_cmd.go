@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/execution/commitment/backtester"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -141,10 +140,7 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	}
 	defer clean()
 	blockReader, _ := snaps.BlockRetire.IO()
-	db, err := temporal.New(chainDB, snaps.Aggregator, snaps.BlockSnaps)
-	if err != nil {
-		return err
-	}
+	db := snaps.TemporalDB
 	defer db.Close()
 	var opts []backtester.Opt
 	if args.paraTrie {

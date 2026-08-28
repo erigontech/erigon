@@ -494,7 +494,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).HeaderByNumber(blk=%d) -> ", r.FrozenBlocksInView(tx), blockHeight)
 	}
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
@@ -653,7 +653,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
@@ -785,7 +785,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
