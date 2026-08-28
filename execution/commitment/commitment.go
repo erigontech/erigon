@@ -634,11 +634,30 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 
 type BranchData []byte
 
-func (branchData BranchData) ChildCount() int {
-	if len(branchData) < 4 {
-		return 0
+func (branchData BranchData) IsEdgeRecord() bool {
+	if len(branchData) == 0 {
+		return false
 	}
-	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
+	var c cell
+	_, err := DecodeRecordInto(branchData, &c)
+	return err == nil
+}
+
+func (branchData BranchData) ensureLegacyRow(parser string) error {
+	if branchData.IsEdgeRecord() {
+		return fmt.Errorf("%w: %s received %d-byte value", ErrEdgeRecord, parser, len(branchData))
+	}
+	return nil
+}
+
+func (branchData BranchData) ChildCount() (int, error) {
+	if err := branchData.ensureLegacyRow("ChildCount"); err != nil {
+		return 0, err
+	}
+	if len(branchData) < 4 {
+		return 0, nil
+	}
+	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4])), nil
 }
 
 func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
@@ -719,6 +738,9 @@ func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, sho
 
 // If fn returns nil, the original key is kept.
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
+	if err := branchData.ensureLegacyRow("ReplacePlainKeys"); err != nil {
+		return nil, err
+	}
 	if len(branchData) < 4 {
 		return branchData, nil
 	}
@@ -866,13 +888,16 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	return newData, nil
 }
 
-func (branchData BranchData) IsComplete() bool {
+func (branchData BranchData) IsComplete() (bool, error) {
+	if err := branchData.ensureLegacyRow("IsComplete"); err != nil {
+		return false, err
+	}
 	if len(branchData) < 4 {
-		return false
+		return false, nil
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
-	return ^touchMap&afterMap == 0
+	return ^touchMap&afterMap == 0, nil
 }
 
 // branch2 shadows branch1 where both touch the same cell.
@@ -955,6 +980,12 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 }
 
 func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
+	if parseErr := branchData.ensureLegacyRow("decodeCells"); parseErr != nil {
+		return 0, 0, row, parseErr
+	}
+	if len(branchData) < 4 {
+		return 0, 0, row, errors.New("decodeCells: branch data too short for maps")
+	}
 	touchMap = binary.BigEndian.Uint16(branchData[0:])
 	afterMap = binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -962,6 +993,9 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		if afterMap&bit != 0 {
+			if pos >= len(branchData) {
+				return touchMap, afterMap, row, fmt.Errorf("decodeCells: missing cell fields at nibble %x", nibble)
+			}
 			fields := cellFields(branchData[pos])
 			pos++
 			row[nibble] = new(cell)
@@ -1230,10 +1264,10 @@ func (bs *BranchStat) Collect(other *BranchStat) {
 	bs.LeafHashCount += other.LeafHashCount
 }
 
-func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat {
+func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) (*BranchStat, error) {
 	stat := &BranchStat{}
 	if len(key) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	stat.KeySize = uint64(len(key))
@@ -1245,7 +1279,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 
 		tm, am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
-			return nil
+			return nil, err
 		}
 		stat.TAMapsSize = uint64(2 + 2)
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
@@ -1306,7 +1340,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			}
 		}
 	}
-	return stat
+	return stat, nil
 }
 
 type Mode uint

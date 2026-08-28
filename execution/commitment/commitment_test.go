@@ -411,20 +411,30 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 func TestBranchData_ChildCount(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, 0, BranchData(nil).ChildCount())
-	require.Equal(t, 0, BranchData{}.ChildCount())
-	require.Equal(t, 0, BranchData{0xff, 0xff, 0x00}.ChildCount(), "buffer shorter than 4 bytes has no afterMap")
+	count, err := BranchData(nil).ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
+	count, err = BranchData{}.ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 0, count)
+	count, err = BranchData{0xff, 0xff, 0x00}.ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 0, count, "buffer shorter than 4 bytes has no afterMap")
 
 	for _, size := range []int{1, 2, 5, 16} {
 		_, bm, enc := encodeCellRow(t, size)
 		require.Equal(t, size, bits.OnesCount16(bm))
-		require.Equal(t, size, enc.ChildCount(), "ChildCount must equal the number of afterMap children")
+		count, err := enc.ChildCount()
+		require.NoError(t, err)
+		require.Equal(t, size, count, "ChildCount must equal the number of afterMap children")
 	}
 
 	var buf BranchData = make([]byte, 4)
 	binary.BigEndian.PutUint16(buf[0:], 0xffff)
 	binary.BigEndian.PutUint16(buf[2:], 0b0000_0000_0000_0111)
-	require.Equal(t, 3, buf.ChildCount())
+	count, err = buf.ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 3, count)
 }
 
 func TestBranchData_IsComplete(t *testing.T) {
@@ -432,20 +442,32 @@ func TestBranchData_IsComplete(t *testing.T) {
 
 	// Buffers shorter than the 4-byte touchMap+afterMap header are not complete
 	// and must not panic. Empty values are deletion tombstones kept across merges.
-	require.False(t, BranchData(nil).IsComplete())
-	require.False(t, BranchData{}.IsComplete())
-	require.False(t, BranchData{0x00}.IsComplete())
-	require.False(t, BranchData{0xff, 0xff, 0x00}.IsComplete())
+	completeStatus, err := BranchData(nil).IsComplete()
+	require.NoError(t, err)
+	require.False(t, completeStatus)
+	completeStatus, err = BranchData{}.IsComplete()
+	require.NoError(t, err)
+	require.False(t, completeStatus)
+	completeStatus, err = BranchData{0x00}.IsComplete()
+	require.NoError(t, err)
+	require.False(t, completeStatus)
+	completeStatus, err = BranchData{0xff, 0xff, 0x00}.IsComplete()
+	require.NoError(t, err)
+	require.False(t, completeStatus)
 
 	complete := make(BranchData, 4)
 	binary.BigEndian.PutUint16(complete[0:], 0xffff)
 	binary.BigEndian.PutUint16(complete[2:], 0b0000_0000_0000_0111)
-	require.True(t, complete.IsComplete())
+	isComplete, err := complete.IsComplete()
+	require.NoError(t, err)
+	require.True(t, isComplete)
 
 	incomplete := make(BranchData, 4)
 	binary.BigEndian.PutUint16(incomplete[0:], 0b0000_0000_0000_0001)
 	binary.BigEndian.PutUint16(incomplete[2:], 0b0000_0000_0000_0011)
-	require.False(t, incomplete.IsComplete())
+	isComplete, err = incomplete.IsComplete()
+	require.NoError(t, err)
+	require.False(t, isComplete)
 }
 
 func TestBranchData_MergeHexBranchesEmptyBranches(t *testing.T) {

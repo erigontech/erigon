@@ -247,15 +247,15 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/state/squeeze.go`
 - Create: `execution/commitment/legacy_parse_guard_test.go`
 
-- [ ] add an explicit refusal in `ReplacePlainKeys` for edge records — its only guard today is
+- [x] add an explicit refusal in `ReplacePlainKeys` for edge records — its only guard today is
       `len < 4`, so a 35-byte branch record is silently misparsed as `touchMap|afterMap|cells`
-- [ ] audit and guard the other row parsers: `decodeCells`, `Validate`, `IsComplete`, `ChildCount`,
+- [x] audit and guard the other row parsers: `decodeCells`, `Validate`, `IsComplete`, `ChildCount`,
       `VerifyBranchHashes`, `DecodeBranchAndCollectStat` (`commitment.go:1231`)
-- [ ] audit `db/state/squeeze.go`'s row parsing for the same misparse hazard
-- [ ] write a red-first test feeding a 35-byte branch record to `ReplacePlainKeys` — name the
+- [x] audit `db/state/squeeze.go`'s row parsing for the same misparse hazard
+- [x] write a red-first test feeding a 35-byte branch record to `ReplacePlainKeys` — name the
       assertion that fired and the value it saw before the guard exists
-- [ ] write tests for each guarded parser rejecting edge-record input with a distinguishable error
-- [ ] run `go test ./execution/commitment/... ./db/state/...` — must pass before task 8
+- [x] write tests for each guarded parser rejecting edge-record input with a distinguishable error
+- [x] run `go test ./execution/commitment/... ./db/state/...` — must pass before task 8
 
 ### Task 8: Root state blob — re-key, slim, carry the root mask
 

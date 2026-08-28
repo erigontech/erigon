@@ -398,7 +398,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, ni
 	if err != nil {
 		return 0, err
 	}
-	return commitment.BranchData(enc).ChildCount(), nil
+	return commitment.BranchData(enc).ChildCount()
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.

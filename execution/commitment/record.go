@@ -34,7 +34,10 @@ const (
 	recordFlagsAll              = recordFlagLeaf | recordFlagExtensionOdd | recordFlagStorageLeaf | recordFlagHasStorage | recordFlagHash
 )
 
-var ErrMalformedRecord = errors.New("commitment: malformed edge record")
+var (
+	ErrMalformedRecord = errors.New("commitment: malformed edge record")
+	ErrEdgeRecord      = errors.New("commitment: edge record is not a legacy branch row")
+)
 
 func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {
 	extLen := recordExtensionLength(cell)

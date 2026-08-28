@@ -1397,7 +1397,17 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 
 		// Check completeness
-		if !branchData.IsComplete() {
+		complete, parseErr := branchData.IsComplete()
+		if parseErr != nil {
+			err := fmt.Errorf("%w: cannot parse branch at key=%x: %w in %s", ErrIntegrity, branchKey, parseErr, fileName)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+		if !complete {
 			touchMap := uint16(0)
 			afterMap := uint16(0)
 			if len(branchData) >= 4 {
@@ -1609,7 +1619,17 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			continue
 		}
 
-		if !branchData.IsComplete() {
+		complete, parseErr := branchData.IsComplete()
+		if parseErr != nil {
+			err := fmt.Errorf("%w: cannot parse branch at key=%x: %w in %s", ErrIntegrity, branchKey, parseErr, fileName)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+		if !complete {
 			touchMap := uint16(0)
 			afterMap := uint16(0)
 			if len(branchData) >= 4 {
@@ -1983,7 +2003,12 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 		}
 
 		branchData := commitment.BranchData(branchValue)
-		if !branchData.IsComplete() {
+		complete, parseErr := branchData.IsComplete()
+		if parseErr != nil {
+			logger.Warn("[integrity] unable to parse commitment branch", "key", fmt.Sprintf("%x", branchKey), "err", parseErr)
+			continue
+		}
+		if !complete {
 			continue
 		}
 
@@ -2173,7 +2198,11 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			}
 
 			branchData := commitment.BranchData(branchValue)
-			if !branchData.IsComplete() {
+			complete, parseErr := branchData.IsComplete()
+			if parseErr != nil {
+				return fmt.Errorf("parse commitment branch %x: %w", branchKey, parseErr)
+			}
+			if !complete {
 				continue
 			}
 

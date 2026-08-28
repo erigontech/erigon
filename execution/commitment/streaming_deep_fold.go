@@ -66,7 +66,11 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		// A stored branch always carries touchMap+afterMap (4 bytes); shorter means corrupt, not missing.
 		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
-	if BranchData(branch).ChildCount() == 0 {
+	childCount, err := BranchData(branch).ChildCount()
+	if err != nil {
+		return fmt.Errorf("unfoldStorageBase: %w", err)
+	}
+	if childCount == 0 {
 		return errStorageBaseNotBranch
 	}
 	base.branchBefore[0] = true

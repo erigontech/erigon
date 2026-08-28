@@ -341,6 +341,9 @@ func ExpandShortenedKeysInBranch(
 	accountFile, storageFile *FilesItem,
 	startTxNum, endTxNum uint64,
 ) (commitment.BranchData, error) {
+	if branch.IsEdgeRecord() {
+		return nil, fmt.Errorf("expand shortened keys: %w", commitment.ErrEdgeRecord)
+	}
 	storageGetter := storage.dataReader(storageFile.decompressor)
 	accountGetter := accounts.dataReader(accountFile.decompressor)
 	logger := log.Root()
