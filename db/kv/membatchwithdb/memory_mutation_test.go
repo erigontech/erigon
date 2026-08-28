@@ -581,6 +581,26 @@ func TestMemoryMutationReadViewUsesPlainTx(t *testing.T) {
 	require.Equal(t, []byte("value"), gotValue)
 }
 
+func TestMemoryMutationReadViewRollbackDoesNotCloseOverlay(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("key"), []byte("value")))
+
+	for name, view := range map[string]kv.Tx{
+		"read view":          batch.NewReadView(nonTemporalTx{Tx: rwTx}),
+		"temporal read view": batch.NewTemporalReadView(rwTx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NotPanics(t, view.Rollback)
+			got, err := batch.GetOne(kv.HeaderNumber, []byte("key"))
+			require.NoError(t, err)
+			require.Equal(t, []byte("value"), got)
+		})
+	}
+}
+
 func TestMemoryMutationDetachedReadViewUsesPlainTx(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))

@@ -1205,6 +1205,12 @@ func (a *ApiHandler) produceBeaconBody(
 				executionErr = errors.New("produceBeaconBody: invalid peerdas bundle")
 				return
 			}
+			for _, proof := range bundles.Proofs {
+				if len(proof) != length.Bytes48 {
+					executionErr = errors.New("produceBeaconBody: invalid proof length")
+					return
+				}
+			}
 		}
 
 		for i := range bundles.Blobs {
@@ -2452,8 +2458,9 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				attData = att.Data
 			}
 			signatures = append(signatures, att.Signature[:])
-			// set commitee bit
-			commiteeBits.SetBitAt(int(cIndex), true)
+			// set committee bit; cIndex is always < MaxCommitteesPerSlot, the
+			// vector's cap, so this cannot error.
+			_ = commiteeBits.SetBitAt(int(cIndex), true)
 			// append aggregation bits
 			for i := 0; i < att.AggregationBits.Bits(); i++ {
 				bitSlice.AppendBit(att.AggregationBits.GetBitAt(i))

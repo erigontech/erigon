@@ -396,7 +396,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
 				log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
-				d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
+				if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
+					log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
+				}
 				return
 			}
 			if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {
@@ -731,7 +733,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	return nil
 }
 
-func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
+func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) {
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
@@ -739,7 +741,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		err       error
 	}
 	if req.remainingEntriesCount() == 0 {
-		return nil
+		return
 	}
 
 	stopChan := make(chan struct{})
@@ -845,7 +847,9 @@ mainloop:
 						if needToRecoverBlobs &&
 							(d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
 							req.removeBlock(slot, blockRoot)
-							d.TryScheduleRecover(slot, blockRoot)
+							if err := d.TryScheduleRecover(slot, blockRoot); err != nil {
+								log.Debug("failed to schedule recover", "err", err)
+							}
 						}
 					}()
 
@@ -920,8 +924,6 @@ mainloop:
 			}
 		}
 	}
-
-	return nil
 }
 
 // resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
