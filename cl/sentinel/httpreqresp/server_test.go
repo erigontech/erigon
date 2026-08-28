@@ -188,6 +188,58 @@ func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestRequestContextCancelClosesEstablishedStream(t *testing.T) {
+	const topic = protocol.ID("/erigon/test/cancel/1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	victim, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { victim.Close() })
+	peerHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { peerHost.Close() })
+
+	established := make(chan struct{})
+	releasePeer := make(chan struct{})
+	peerHost.SetStreamHandler(topic, func(s network.Stream) {
+		close(established)
+		<-releasePeer
+		s.Close()
+	})
+	t.Cleanup(func() { close(releasePeer) })
+	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set(PeerIdHeader, peerHost.ID().String())
+	req.Header.Set(TopicHeader, string(topic))
+	errCh := make(chan error, 1)
+	go func() {
+		resp, doErr := Do(NewRequestHandler(victim), req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		errCh <- doErr
+	}()
+
+	select {
+	case <-established:
+	case <-time.After(5 * time.Second):
+		t.Fatal("libp2p stream was not established")
+	}
+	cancel()
+	require.ErrorIs(t, <-errCh, context.Canceled)
+	require.Eventually(t, func() bool {
+		for _, conn := range victim.Network().ConnsToPeer(peerHost.ID()) {
+			if len(conn.GetStreams()) != 0 {
+				return false
+			}
+		}
+		return true
+	}, time.Second, 10*time.Millisecond, "request cancellation left the underlying libp2p stream active")
+}
+
 type signalCloser struct{ closed chan struct{} }
 
 func (s *signalCloser) Read([]byte) (int, error) { return 0, io.EOF }
