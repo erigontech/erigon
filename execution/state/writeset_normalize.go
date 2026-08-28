@@ -496,16 +496,13 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 // domainStorageKeys input Normalize needs to emit a full self-destruct cascade.
 // The prefix walk is skipped for an address with no committed account -- see
 // hasCommittedAccount for why that probe is worth its own read.
-func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, blockCache *BlockStateCache, addr accounts.Address) ([]accounts.StorageKey, error) {
+func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr accounts.Address) ([]accounts.StorageKey, error) {
 	av := addr.Value()
 	hasAcc, err := hasCommittedAccount(domains, tx, av[:])
 	if err != nil {
 		return nil, err
 	}
-	// A destroy recorded in the block cache only reaches the domain at the
-	// block-end flush, so until then the account reads absent while its
-	// pre-block storage is still there and still owed a trie delete.
-	if !hasAcc && !blockCache.deletedInBlock(addr) {
+	if !hasAcc {
 		return nil, assertNoCommittedStorage(domains, tx, av[:], "selfDestruct")
 	}
 	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash

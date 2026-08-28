@@ -1193,19 +1193,6 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Unlock()
 }
 
-// deletedInBlock reports an address destroyed earlier in this block. DeleteAccount
-// records that as a present-but-nil current entry, which the block-end flush turns
-// into the domain deletes. Nil receiver: no cache, so no such window.
-func (c *BlockStateCache) deletedInBlock(addr accounts.Address) bool {
-	if c == nil {
-		return false
-	}
-	c.mu.RLock()
-	enc, present := c.currentAccounts[addr]
-	c.mu.RUnlock()
-	return present && enc == nil
-}
-
 // GetCurrentAccountDecoded returns the latest account (including intra-block
 // writes), avoiding GetCurrentAccount's re-encode of the committed entry.
 func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool, error) {
