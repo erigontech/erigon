@@ -1,4 +1,5 @@
 {
-  "hive_ref": "3184ac37d3dfbb9b8b0348ae70ea98bb61fa6f13",
+  "hive_repository": "taratorio/hive",
+  "hive_ref": "fix/withdrawals-clmock-config",
   "execution_apis_ref": "f74de4b86e3b011384808c294c3d71f2854729a2"
 }
