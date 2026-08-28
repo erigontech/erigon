@@ -370,3 +370,52 @@ func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnat
 		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
 	}
 }
+
+// Identical bytecode deployed twice must share one backing array: that sharing
+// is the point of interning, and it is only sound because Code.Bytes is a
+// non-mutating borrow.
+func TestNewCodeSharesBytesForIdenticalCode(t *testing.T) {
+	code := make([]byte, 4096)
+	for i := range code {
+		code[i] = byte(i)
+	}
+	a := NewCode(append([]byte(nil), code...))
+	b := NewCode(append([]byte(nil), code...))
+
+	if a.Hash != b.Hash {
+		t.Fatalf("identical code hashed differently")
+	}
+	if !bytes.Equal(a.Bytes, b.Bytes) {
+		t.Fatalf("interning changed the bytes")
+	}
+	if &a.Bytes[0] != &b.Bytes[0] {
+		t.Fatalf("identical code did not share a backing array")
+	}
+}
+
+// The cache must not alias the caller's slice: callers pass buffers that are
+// reused, or that alias a mapping a background merge can drop.
+func TestNewCodeDoesNotAliasCallerSlice(t *testing.T) {
+	src := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	c := NewCode(src)
+	if &c.Bytes[0] == &src[0] {
+		t.Fatalf("interned code aliases the caller's slice")
+	}
+	src[0] = 0xff
+	if c.Bytes[0] != 1 {
+		t.Fatalf("mutating the caller's slice changed the interned code")
+	}
+}
+
+// Code above the per-entry cap is passed through rather than cached, so the
+// budget cannot be consumed by one outlier.
+func TestNewCodeSkipsCacheForOversizedCode(t *testing.T) {
+	big := make([]byte, codeCacheMaxEntryBytes+1)
+	for i := range big {
+		big[i] = byte(i)
+	}
+	c := NewCode(big)
+	if &c.Bytes[0] != &big[0] {
+		t.Fatalf("oversized code was copied into the cache")
+	}
+}
