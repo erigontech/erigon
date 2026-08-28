@@ -295,12 +295,10 @@ type SharedDomains struct {
 	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
 	changesetMu sync.Mutex
 
-	// branchCache is the aggregator-scope commitment-branch cache. It sits
-	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
-	// both miss, before the aggTx files/MDBX read), so writers' in-flight
-	// bytes always mask the cache and cross-SD pollution is impossible.
-	// May be nil for test setups whose AggTx doesn't implement
-	// commitment.BranchCacheProvider.
+	// branchCache is the aggregator-scoped commitment branch cache consulted
+	// after local and parent memory. Its entries are not view-bound, so callers
+	// whose commitment reads can reach it while another transaction updates it
+	// must disable it. It is nil when disabled or unavailable.
 	branchCache *commitment.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator
@@ -881,6 +879,13 @@ func (sd *SharedDomains) stageCacheUnwind(txNumUnwindTo uint64) {
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
 func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
+
+// GetLatestFromMemory reads local and parent memory. On a miss, maxStep is the
+// upper bound that a fallback read must honor.
+func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool) {
+	v, _, maxStep, ok = sd.latestFromMem(domain, key)
+	return v, maxStep, ok
+}
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before
