@@ -397,14 +397,17 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.collector = p.MetricsCollector()
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
-	if o.paraTrieDB != nil {
-		sd.sdCtx.EnableParaTrieDB(o.paraTrieDB)
-	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
 	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
 		sd.adaptivePinController = p.AdaptivePinController()
+	}
+
+	// After adaptivePinController is assigned: the wrapper binds it, and the
+	// bare sdCtx call would not.
+	if o.paraTrieDB != nil {
+		sd.EnableParaTrieDB(o.paraTrieDB)
 	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)

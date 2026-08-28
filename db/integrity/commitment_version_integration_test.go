@@ -94,7 +94,7 @@ func writeAndBuild(t *testing.T, ctx context.Context, db kv.TemporalRwDB, agg *s
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
