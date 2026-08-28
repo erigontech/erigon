@@ -175,7 +175,7 @@ func ReadAheadWorkerReaders() int {
 	if !ReadAhead {
 		return 0
 	}
-	return max(ReadAheadWorkers, 0)
+	return max(ReadAheadWorkers, 1)
 }
 
 func init() {

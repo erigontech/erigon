@@ -63,7 +63,9 @@ func TestReadAheadWorkerReaders(t *testing.T) {
 	ReadAhead, ReadAheadWorkers = false, 6
 	require.Zero(t, ReadAheadWorkerReaders())
 	ReadAhead, ReadAheadWorkers = true, -1
-	require.Zero(t, ReadAheadWorkerReaders())
+	require.Equal(t, 1, ReadAheadWorkerReaders())
+	ReadAheadWorkers = 0
+	require.Equal(t, 1, ReadAheadWorkerReaders())
 	ReadAheadWorkers = 6
 	require.Equal(t, 6, ReadAheadWorkerReaders())
 }
