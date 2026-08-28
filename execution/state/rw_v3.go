@@ -842,8 +842,9 @@ func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, add
 
 // assertNoCommittedStorage panics when addr has committed storage but no
 // committed account, so a violation of the hasCommittedAccount invariant
-// surfaces instead of silently skipping a storage wipe. what names the caller so
-// a trip points at the right path. No-op unless asserts are enabled.
+// surfaces instead of silently skipping a storage wipe. The what argument names
+// the caller so a trip points at the right path. No-op unless asserts are
+// enabled.
 func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {
 		return nil
