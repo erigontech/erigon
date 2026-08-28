@@ -350,8 +350,14 @@ func isSystemCall(caller accounts.Address) bool {
 }
 
 // SetPrecompiles replaces the active set for state-override RPC calls. The
-// next ResetBetweenBlocks restores the chain's own set.
+// next ResetBetweenBlocks restores the chain's own set. A nil map means the
+// chain's own set; pass an empty non-nil map to disable every precompile.
+// Resolved here rather than in precompile(), which is on the call path and
+// would otherwise have to take registryMu.
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
+	if precompiles == nil {
+		precompiles = Precompiles(evm.chainRules)
+	}
 	evm.precompiles = precompiles
 }
 
@@ -373,6 +379,16 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		defer func() {
 			fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, ret, gasRemaining, err)
 		}()
+	}
+
+	// The interpreter rejects a value-bearing CALL from a static frame while
+	// charging gas, so that frame never reaches here. A stateful precompile
+	// calling back in through PrecompileContext.Evm does, and has to be refused
+	// on the same terms — above the tracer and BAL hooks below, or a refusal
+	// would record an address access (consensus-relevant under EIP-7928) and an
+	// Enter/Exit pair that the opcode path never produces.
+	if evm.readOnly && typ == CALL && !value.IsZero() {
+		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
 	}
 
 	p, isPrecompile := evm.precompile(addr)
@@ -403,14 +419,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrDepth
 	}
 	syscall := isSystemCall(caller)
-
-	// The interpreter rejects a value-bearing CALL from a static frame while
-	// charging gas (statelessGasCall). A stateful precompile calling back in
-	// through PrecompileContext.Evm never passes through that, so the frame
-	// entry has to hold the same line or the transfer below runs.
-	if evm.readOnly && typ == CALL && !value.IsZero() {
-		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
-	}
 
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
@@ -501,6 +509,12 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				defer evm.enterFrame(ctx.ReadOnly)()
 				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
+			// Frame-level classification compares the bare sentinel, so an
+			// idiomatically wrapped revert would burn the frame's gas and skip
+			// the return-data copy while the receipt still read as reverted.
+			if err != nil && errors.Is(err, ErrExecutionReverted) {
+				err = ErrExecutionReverted
+			}
 		} else {
 			ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
 		}
@@ -670,9 +684,7 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
 
-	// Same reason as evm.call: gasCreate holds this line for the opcodes, and a
-	// stateful precompile reaching CREATE through PrecompileContext.Evm does not
-	// go through it.
+	// Write protection, for the same reason as in evm.call.
 	if evm.readOnly {
 		return nil, accounts.Address{}, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
 	}

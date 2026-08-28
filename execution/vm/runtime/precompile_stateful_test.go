@@ -22,6 +22,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -35,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -126,10 +126,7 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	// Value transfer to the not-yet-existing precompile account triggers the
-	// EIP-2780 top-level NEW_ACCOUNT state charge; budget it in the State
-	// dimension so it doesn't spill into Execution.
-	gas := mdgas.MdGas{Execution: 100000, State: params.StateGasNewAccount}
+	gas := mdgas.MdGas{Execution: 100000}
 	value := *uint256.NewInt(7)
 
 	ret, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, []byte{0x01}, gas, value, false)
@@ -301,7 +298,7 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 // A CALLCODE'd precompile has to write to the calling contract's address, not
 // its own.
 func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
-	const chainID = 900410
+	const chainID = 900406
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x91}))
 	rec := &recordingStatefulPrecompile{}
 	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
@@ -590,4 +587,112 @@ func TestStatefulPrecompileCannotMintExecutionGas(t *testing.T) {
 	require.NoError(t, p.refundErr)
 	require.Equal(t, handed, remaining.Execution, "the frame must not end holding more execution gas than it was handed")
 	require.Zero(t, gasUsed.Execution)
+}
+
+type wrappedRevertStatefulPrecompile struct{}
+
+func (wrappedRevertStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (wrappedRevertStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (wrappedRevertStatefulPrecompile) Name() string               { return "WRAPREVERT" }
+
+func (wrappedRevertStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeExecution(100) {
+		return nil, vm.ErrOutOfGas
+	}
+	return nil, fmt.Errorf("precompile failed: %w", vm.ErrExecutionReverted)
+}
+
+// TestStatefulPrecompileWrappedRevertKeepsFrameGas pins the classification of a
+// revert wrapped the way Go idiomatically wraps a sentinel. handleFrameRevert
+// compares the bare value, so an unnormalized wrap burns the frame's leftover
+// gas while the receipt still reads as reverted.
+func TestStatefulPrecompileWrappedRevertKeepsFrameGas(t *testing.T) {
+	const chainID = 900413
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x92}))
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: wrappedRevertStatefulPrecompile{}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
+		mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
+	require.ErrorIs(t, err, vm.ErrExecutionReverted)
+	require.Equal(t, uint64(9_900), remaining.Execution, "a revert keeps the frame's leftover gas")
+}
+
+type refusedCallStatefulPrecompile struct {
+	target  accounts.Address
+	callErr error
+}
+
+func (*refusedCallStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (*refusedCallStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (*refusedCallStatefulPrecompile) Name() string               { return "REFUSED" }
+
+func (p *refusedCallStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	_, _, _, p.callErr = ctx.Evm.Call(ctx.Self, p.target, nil, gas.Remaining(), *uint256.NewInt(5), false)
+	return nil, nil
+}
+
+// TestStatefulPrecompileRefusedCallLeavesNoFrameTrace pins where the static
+// write-protection guard sits. The equivalent opcode is rejected while gas is
+// charged and never reaches the frame, so a refused re-entrant CALL must not
+// record an address access (consensus-relevant under EIP-7928) or a tracer
+// Enter/Exit pair of its own.
+func TestStatefulPrecompileRefusedCallLeavesNoFrameTrace(t *testing.T) {
+	const chainID = 900414
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x93}))
+	target := accounts.InternAddress(common.HexToAddress("0x7a50"))
+	p := &refusedCallStatefulPrecompile{target: target}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: p}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	var entered []accounts.Address
+	cfg := newStatefulTestConfig(t, chainID)
+	cfg.EVMConfig.Tracer = &tracing.Hooks{
+		OnEnter: func(_ int, _ byte, _ accounts.Address, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			entered = append(entered, to)
+		},
+	}
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
+
+	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil,
+		mdgas.MdGas{Execution: 1_000_000, State: 1_000_000})
+	require.NoError(t, err)
+	require.ErrorIs(t, p.callErr, vm.ErrWriteProtection)
+	require.NotContains(t, entered, target, "a refused call must not open a frame on the target")
+}
+
+// TestSetPrecompilesNilRestoresChainSet pins both halves of the override
+// contract: an empty non-nil map disables every precompile, nil means the
+// chain's own set. Resolving nil lazily instead would put registryMu on the
+// call path.
+func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
+	const chainID = 900415
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x94}))
+	rec := &recordingStatefulPrecompile{}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: rec}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+	gas := mdgas.MdGas{Execution: 10_000}
+
+	vmenv.SetPrecompiles(vm.PrecompiledContracts{})
+	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, gas, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Empty(t, rec.calls, "an empty non-nil map disables every precompile")
+
+	vmenv.SetPrecompiles(nil)
+	_, _, _, err = vmenv.Call(cfg.Origin, precompileAddr, nil, gas, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, rec.calls, 1, "nil restores the chain's own set")
 }
