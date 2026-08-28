@@ -387,6 +387,13 @@ Flags related to consensus mechanisms and network forks.
   * Default: `false`
 * `--builder.maxblobs value`: Caps the number of blobs included in a locally built block.
   * Default: unset — the protocol maximum applies. Setting it to `0` excludes blob transactions from built blocks entirely.
+
+### Legacy Polygon flags
+
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These flags are still registered in this release and appear in `erigon --help`, but they are unmaintained and untested.
+:::
+
 * `--bor.heimdall value`: The URL of the Heimdall service.
   * Default: `http://localhost:1317`
 * `--bor.withoutheimdall`: Runs without the Heimdall service.

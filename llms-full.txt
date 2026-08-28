@@ -6,7 +6,7 @@ An efficient, modular Ethereum execution layer client built for performance, low
 ## Sections
 
 - [Get Started](https://docs.erigon.tech/get-started): Hardware requirements, installation options, and first-run guides to get your node online fast.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet and Gnosis Chain nodes with sensible defaults.
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Pruning modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
 - [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC Daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
 - [Staking](https://docs.erigon.tech/staking): Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
@@ -25,7 +25,7 @@ Everything you need to go from zero to a running Erigon node — requirements, i
 - [Why Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
 - [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for mainnet, testnets, and archive mode.
 - [Installation](https://docs.erigon.tech/get-started/installation): Binary releases, building from source, Docker images, and upgrade instructions.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum and Gnosis Chain nodes with sensible defaults.
 - [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
 - [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, TxPool, and other namespaces.
 
@@ -74,7 +74,7 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 | --- | --- | --- | --- | --- |
 | Archive | 2.03 TB | 4 TB | 32 GB | 64 GB |
 | Full (Default) | 419.04 GB | 2 TB | 16 GB | 32 GB |
-| Minimal | 378.97 GB | 1 TB | 16 GB | 64 GB |
+| Minimal | 478.40 GB | 1 TB | 16 GB | 64 GB |
 
 _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows._
 
@@ -82,7 +82,7 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | 673.59 GB | 1 TB                        | 16 GB              | 32 GB                 |
 | Full (Default) | 220.10 GB    | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | 204.45 GB | 500 GB                      | 8 GB               | 16 GB                 |
+| Minimal        | 304.67 GB | 500 GB                      | 8 GB               | 16 GB                 |
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
@@ -1806,17 +1806,39 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
-except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
-alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
-working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
-receipts additionally extend receipts and logs availability from the state-history window back to genesis.
+As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
+default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
+`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
+datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency.
+
+`--prune.include-receipts` on its own does **not** extend receipts and logs back to genesis: the receipt cache follows
+the node's state-history window. On an [Archive node](#archive-node) that window is unbounded, so the cache covers the
+whole chain. On a [Full](#full-node), [Minimal](#minimal-node) or [Historical Blocks](#blocks-node) node it is the
+mode's state-history window (262,144 blocks for full and blocks, 100,000 for minimal). To keep the cache in full
+regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
+`--prune.receipts.distance=N` keeps it for the latest `N` blocks instead. Either form requires
+`--prune.include-receipts`. Note that this retains the receipt *cache* only — it does not keep the
+log address and topic indexes a filtered `eth_getLogs` needs. See
+[Historical Blocks Node](#blocks-node).
 :::
 
 :::note[Breaking change in v3.5]
 **`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
 
-`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge), or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge) — the named `keep-post-merge` alias parses only on v3.6 and later; on a v3.5 binary pass the equivalent numeric sentinel `--prune.distance.blocks=18446744073709551615` — or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+:::
+
+:::note[New in v3.6]
+**Pruned nodes now reclaim disk from old snapshot files.** Frozen state-history (`.v`) and inverted-index (`.ef`) files
+that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted (a fresh sync already
+skipped downloading them, in v3.5 too). Before v3.6, files already on disk were retained indefinitely regardless of
+`--prune.mode`, so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still holds the retired
+files. The commitment-history and receipt-cache domains do not behave the same way here. Commitment history is retired
+against its own window, `--prune.commitment-history.distance`; left unset, nothing is retired. The receipt cache
+instead follows the general state-history window by default, and is only retired against an independent window when
+`--prune.receipts.distance` is set explicitly (with `keep-all` retiring nothing).
 :::
 
 ## Archive node
@@ -1833,7 +1855,7 @@ We strongly recommend running a Full Node whenever possible, as its reduced disk
 
 ## Minimal node
 
-The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps only recent blocks and the **latest state** — it does not retain state history, so historical state queries are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
+The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible setup. It keeps blocks and state history only for the last **100,000 blocks** (~14 days) — a deliberately sub-EIP-8252 window — so historical state queries outside that window are not supported. This makes it perfectly suited for **solo staking** and users seeking maximum **privacy** when interacting with the EVM, such as sending transactions directly through their node. This mode is the most suitable for users with severely constrained hardware.
 
 ## Blocks node
 
@@ -1841,11 +1863,21 @@ The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and
 back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
-paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
-(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts** by block
+(`eth_getBlockReceipts` back to genesis), add
 `--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
 follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
 within that same window.
+
+`keep-all` does **not** extend filtered `eth_getLogs` back to genesis. It retains the receipt-cache domain only; the
+log address and topic indexes that a filtered query needs are standalone inverted indexes, retired against the general
+state-history cutoff (`AggregatorRoTx.Retire` applies `RetireCutoffs.Default` to them, and only `RCacheDomain` carries
+the `keep-all` override). An address- or topic-filtered `eth_getLogs` can therefore miss matches older than 262,144
+blocks even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
+read path: with neither `address` nor `topics` set, `applyFiltersV3` consults no bitmap and falls back to a plain
+`stream.Range` over the retained cache, so an unfiltered range query is unaffected. For those older ranges, either query
+by block with `eth_getBlockReceipts` and filter client-side, or use an [Archive node](#archive-node), whose unbounded
+state-history window keeps the log indexes too.
 
 ---
 
@@ -1992,7 +2024,9 @@ Always **back up your `--datadir`** before running snapshot reset, upgrade, or d
 URL: https://docs.erigon.tech/fundamentals/caplin
 
 
-Caplin, the innovative Erigon's embedded Consensus Layer, significantly enhances the performance, efficiency, and reliability of Ethereum infrastructure. Its groundbreaking design minimizes disk usage, facilitating faster transaction processing and bolstering network security. By integrating the consensus layer directly into the EVM-node, Caplin eliminates the need for separate disk storage, thereby reducing system complexity and enhancing overall efficiency.
+Caplin is Erigon's embedded Consensus Layer. It runs inside the Erigon process and keeps all of its data under the same `--datadir` as the execution layer, so a full node needs neither a second client process nor a second datadir to operate.
+
+Caplin does write to disk. It maintains an indexing database at `<datadir>/caplin/indexing`, its own snapshots under `<datadir>/snapshots/caplin`, and further subdirectories for blobs, PeerDAS column data and beacon state. What Caplin removes is the separate process and separate datadir of an external consensus client — not the storage itself.
 
 ## Caplin Usage
 
@@ -2424,6 +2458,13 @@ Flags related to consensus mechanisms and network forks.
   * Default: `false`
 * `--builder.maxblobs value`: Caps the number of blobs included in a locally built block.
   * Default: unset — the protocol maximum applies. Setting it to `0` excludes blob transactions from built blocks entirely.
+
+### Legacy Polygon flags
+
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These flags are still registered in this release and appear in `erigon --help`, but they are unmaintained and untested.
+:::
+
 * `--bor.heimdall value`: The URL of the Heimdall service.
   * Default: `http://localhost:1317`
 * `--bor.withoutheimdall`: Runs without the Heimdall service.
@@ -2752,11 +2793,10 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 
 ## Mainnets
 
-| Chain     | Tag         | ChainId |
-| --------- | ----------- | ------- |
-| Ethereum  | mainnet     | 1       |
-| Polygon\* | bor-mainnet | 137     |
-| Gnosis    | gnosis      | 100     |
+| Chain    | Tag     | ChainId |
+| -------- | ------- | ------- |
+| Ethereum | mainnet | 1       |
+| Gnosis   | gnosis  | 100     |
 
 ## Testnets
 
@@ -2767,20 +2807,18 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Sepolia | sepolia | 11155111 |
 | Hoodi   | hoodi   | 560048   |
 
-### Polygon testnets
-
-| Chain  | Tag  | ChainId |
-| ------ | ---- | ------- |
-| Amoy\* | amoy | 80002   |
-
 ### Gnosis Chain Testnets
 
 | Chain  | Tag    | ChainId |
 | ------ | ------ | ------- |
 | Chiado | chiado | 10200   |
 
+## Polygon (not supported)
+
 :::warning
-\* The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+Erigon does not support Polygon. The final release series that officially supported it is 3.1.\* — for Polygon-supported software see [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+
+The `bor-mainnet` (137) and `amoy` (80002) chain tags remain selectable in this release and the `bor` namespace is still wired, but neither is maintained or tested. Do not plan a new Polygon deployment on Erigon 3.6.
 :::
 
 ---
@@ -3248,9 +3286,6 @@ If using network-attached storage, apply these optimizations:
 # Reduce disk latency impact
 export SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
-
-# For Polygon networks
---sync.loop.block.limit=10000
 ```
 
 ### Memory Locking for Performance
@@ -4413,7 +4448,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 * `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
 * `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
-* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
+* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true`). When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
 * `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
 * `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
@@ -4421,7 +4456,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 ## Command Line Options
 
-To display available options for TxPool digit:
+To display available options for TxPool, run:
 
 ```bash
 ./build/bin/txpool --help
@@ -4545,7 +4580,7 @@ For other information regarding Sentry functionality, configuration, and usage, 
 
 ### Command Line Options
 
-To display available options for Sentry digit:
+To display available options for Sentry, run:
 
 ```bash
 ./build/bin/sentry --help
@@ -4637,7 +4672,7 @@ By referring to the embedded documentation file, you can gain a deeper understan
 
 ## Command line options
 
-To display available options for Downloader digit:
+To display available options for Downloader, run:
 
 ```bash
 ./build/bin/downloader --help
@@ -4736,7 +4771,7 @@ The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/fundamentals/m
 * [`trace`](/interacting-with-erigon/trace): Transaction tracing API.
 * [`txpool`](/interacting-with-erigon/txpool): Transaction pool API.
 * [`admin`](/interacting-with-erigon/admin): Node administration API
-* [`bor`](/interacting-with-erigon/bor): Polygon Bor-specific API (when running on Polygon)
+* [`bor`](/interacting-with-erigon/bor): Bor-specific API — Polygon is not supported, see [Supported Networks](/fundamentals/supported-networks)
 * [`ots`](/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
 * [`internal`](/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
 * [`gRPC`](/interacting-with-erigon/grpc): API for lower-level data access.
@@ -4784,7 +4819,7 @@ erigon --http --http.api eth,net,debug,trace
 rpcdaemon --http.api eth,net,debug,trace
 ```
 
-The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, `bor` (Polygon only), and `internal`.
+The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, `bor` (Polygon only, unsupported), and `internal`.
 
 You can also restrict who can access the HTTP server by specifying domains for Cross-Origin requests using `--http.corsdomain`:
 
@@ -4955,25 +4990,46 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` is an Erigon extension that retrieves multiple storage slots for a given account in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
 
 **Parameters**
 
-| Parameter    | Type             | Description                                          |
-| ------------ | ---------------- | ---------------------------------------------------- |
-| address      | STRING           | The account address to query storage for             |
-| storageKeys  | ARRAY of STRING  | List of 32-byte storage slot keys (hex-encoded)      |
-| blockNumber  | STRING or NUMBER | Block number or tag (`"latest"`, `"earliest"`, etc.) |
+| Parameter   | Type             | Description                                                                                       |
+| ----------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| requests    | OBJECT           | Maps each account address to an array of 32-byte storage slot keys (hex-encoded)                   |
+| blockNumber | STRING or NUMBER | Optional. Block number, block hash or tag (`"latest"`, `"earliest"`, etc.). Defaults to `"latest"` |
 
 **Example**
 
 ```bash
-curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":[{"0xdAC17F958D2ee523a2206206994597C13D831ec7":["0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000000000000000000000000000000000000000000002"],"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48":["0x0000000000000000000000000000000000000000000000000000000000000002"]},"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
 
-An object mapping each requested storage key to its 32-byte value.
+An object mapping each requested address to an array of 32-byte values, in the same order as the slot keys requested for that address. Slots that were never written return zero.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "0xdac17f958d2ee523a2206206994597c13d831ec7": [
+      "0x000000000000000000000000c6cde7c39eb2f0f0095f41570af89efc2c1ea828",
+      "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": [
+      "0x0000000000000000000000000a06be16275b95a7d2567fbdae118b36c7da78f9"
+    ]
+  }
+}
+```
+
+**Limits**
+
+* A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
+* An empty `requests` object returns error code `-32602` with the message `empty request`.
+* When `blockNumber` is a block hash, the block must be canonical.
 
 ---
 
@@ -6863,6 +6919,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_removeTrustedPeer","params":["e
 URL: https://docs.erigon.tech/interacting-with-erigon/bor
 
 
+:::note
+The final Erigon release series that officially supports Polygon is 3.1.\*. The `bor` namespace is still wired and `--chain=bor-mainnet` remains selectable, so this reference is kept for those releases — but see [Supported Networks](/fundamentals/supported-networks) before planning a new Polygon deployment.
+:::
+
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
 
 The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.
@@ -7081,15 +7141,15 @@ Returns the root hash for a range of blocks, used for checkpoint verification an
 
 **Parameters**
 
-| Parameter | Type     | Description           |
-| --------- | -------- | --------------------- |
-| start     | QUANTITY | Starting block number |
-| end       | QUANTITY | Ending block number   |
+| Parameter | Type   | Description                                      |
+| --------- | ------ | ------------------------------------------------ |
+| start     | NUMBER | Starting block number, as a plain decimal number |
+| end       | NUMBER | Ending block number, as a plain decimal number   |
 
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x100"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":[1, 256],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -7102,25 +7162,32 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x
 
 ## **bor\_getVoteOnHash**
 
-Returns voting information for a specific block hash, used in the Bor consensus mechanism.
+Votes on a milestone hash: reports whether the local chain has the given hash at `endBlockNr`. All four parameters are required, and `startBlockNr` and `milestoneId` are ignored by the implementation. The implementation reads block `endBlockNr + 16`, the 16-block confirmation of `endBlockNr`, but does not require it to exist.
 
 **Parameters**
 
-| Parameter | Type           | Description                                     |
-| --------- | -------------- | ----------------------------------------------- |
-| hash      | DATA, 32 BYTES | Hash of the block to get voting information for |
+| Parameter    | Type   | Description                                                            |
+| ------------ | ------ | ---------------------------------------------------------------------- |
+| startBlockNr | NUMBER | First block of the milestone range, as a plain decimal number; ignored |
+| endBlockNr   | NUMBER | Last block of the milestone range, as a plain decimal number           |
+| hash         | STRING | Milestone hash, compared as an exact lowercase `0x`-prefixed string    |
+| milestoneId  | STRING | Heimdall milestone identifier; ignored                                 |
 
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":["0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":[16000000, 16000064, "0x811b9d739a17d5c42904ba97bb9e3449da74000fece0e1ec112f61a11beb7632", "0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
 
-| Type   | Description                                            |
-| ------ | ------------------------------------------------------ |
-| Object | Voting information object for the specified block hash |
+| Type    | Description                                                               |
+| ------- | ------------------------------------------------------------------------- |
+| BOOLEAN | `true` if the local hash of `endBlockNr` equals `hash`, `false` otherwise |
+
+A hash that matches except for letter case returns `false` rather than an error.
+If the node does not have block `endBlockNr`, the call fails with
+`method handler crashed` instead of returning a boolean.
 
 ---
 
@@ -7294,6 +7361,10 @@ The Downloader interface provides access to snapshot downloading and torrent man
 
 ## Polygon Bridge Backend gRPC API
 
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These services are still built in this release, but they are unmaintained and untested.
+:::
+
 These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism and are only active when running Erigon with Polygon network configuration. The services provide essential functionality for bridge event processing and validator management required by the Polygon network architecture.
 
 ### Bridge Backend Methods
@@ -7318,6 +7389,10 @@ The server implementation is found in `polygon/bridge/server.go` where the `Back
 * The `BorEvents` method retrieves bridge events for a given block.
 
 ## Heimdall Backend gRPC API
+
+:::warning
+Erigon does not support Polygon — see [Supported Networks](/fundamentals/supported-networks). These services are still built in this release, but they are unmaintained and untested.
+:::
 
 The Heimdall Backend service provides APIs for validator and consensus-related functionality.
 
@@ -7694,6 +7769,35 @@ If you have existing validator keys, import them:
 lighthouse account validator import --directory <path_to_validator_keys>
 ```
 
+## 3. Block Production Behaviour
+
+### 3.1. Payload Preparation Ahead of the Proposer Slot
+
+Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. There is no flag for this; it is on whenever all of the following hold:
+
+* The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
+* A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
+* Caplin is driving the in-process execution layer. Passing `--caplin.use-engine-api` switches Caplin onto the Engine API and **disables the Beacon API entirely** — Erigon logs `Beacon API is automatically disabled` if you also passed `--beacon.api`. Staking through Caplin is not possible in that mode: there is no `validator` namespace, so block production and duties are unavailable, not just payload preparation.
+
+Preparation looks at most one slot ahead, and it does not alter execution-layer fork choice — it only starts the builder early. To confirm it is running, look for these lines in the Erigon log:
+
+```
+PayloadPreparation: watching for proposals
+PayloadPreparation: primed execution layer
+```
+
+Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids instead, and before Capella.
+
+### 3.2. Fork-Choice Head Published Before the Head-State Copy
+
+Since v3.6, Caplin publishes the head chosen by fork choice as soon as it is selected, rather than after the head beacon state has been copied. Beacon API endpoints that only need the head block identity — such as `/eth/v1/beacon/blocks/head` and `/eth/v2/debug/beacon/heads` — therefore reflect a new head sooner. Endpoints that read the head *state* are unchanged, and a node that is still syncing continues to return `503`. There is no flag for this.
+
+### 3.3. Default Block Graffiti
+
+Since v3.6, when the validator client does not supply a graffiti, Caplin fills it with the proposing node's connected execution and consensus clients, following the [Engine API client-identification standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md). The value is a two-letter execution client code and the first four hex characters of its commit, followed by Caplin's own code `CN` and the first four hex characters of the Erigon commit — for example `EGa53eCNa53e` when Caplin is paired with Erigon. If the execution client does not answer `engine_getClientVersionV1`, or has not answered it yet, the graffiti carries the consensus half only (`CN` plus commit). The graffiti always names the locally connected execution client. An external builder's bid does not change it: the graffiti is written into the beacon body before the payload is chosen, and the winning bid replaces only the execution side of the block — so the value still identifies the proposing node's own clients, not whoever built the payload.
+
+There is no CLI flag for graffiti. The only way to override it is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on a validator block-production endpoint — `GET /eth/v2/validator/blocks/{slot}` (deprecated), `GET /eth/v3/validator/blocks/{slot}` or `GET /eth/v4/validator/blocks/{slot}` — has its value used instead of the default. The parameter is read as a 32-byte hex value, as the Beacon API specification requires. It is not validated: a malformed or empty value is not rejected and does not fall back to the default — it silently produces an all-zero graffiti. A shorter hex value is left-padded with zeros, and a longer one is cropped from the left. Note that a validator client which sets graffiti by default — including its own client string — overrides Caplin's default; to get the client-pair graffiti, leave the validator client's graffiti unset.
+
 ---
 
 # Using an external consensus client as validator
@@ -7967,7 +8071,7 @@ URL: https://docs.erigon.tech/help-center/frequently-asked-questions-faqs
   ['What is a snapshot sync?', 'Snapshot sync downloads pre-made snapshots of the blockchain state to greatly accelerate the initial sync instead of processing from genesis.'],
   ["How do I monitor my node's sync progress?", 'Read the stage prefix in the live log line (e.g. [6/8 Execution]), query eth_syncing on the RPC daemon, or ask an AI assistant through the built-in MCP server.'],
   ['Can I use Erigon with Docker?', 'Yes. Erigon provides official Docker images on Docker Hub; see the Installation guide for setup.'],
-  ['Does Erigon support other chains besides Ethereum?', 'Yes. Erigon is EVM-compatible and supports networks such as Gnosis and Polygon; select the chain with the --chain flag.'],
+  ['Does Erigon support other chains besides Ethereum?', 'Yes, Erigon also supports Gnosis: select the chain with the --chain flag.'],
   ['Where can I find official support?', 'The official Erigon Discord and GitHub repository are the primary channels for support and community discussion.'],
   ['What is Caplin?', "Caplin is Erigon's built-in beacon API server, letting Erigon act as both a consensus and execution client."],
   ['What is OtterSync?', 'OtterSync is a syncing algorithm that shifts most computation to network bandwidth, reducing sync times and improving chain-tip performance, disk footprint, and decentralisation.'],
@@ -8337,9 +8441,10 @@ This section details common error messages and provides clear, actionable steps 
 
 ### Connect: connection refused or dial tcp... failures
 
-* **Error Description:** The node cannot connect to an external service, such as a local or remote Heimdall instance.
-* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
-* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
+* **Error Description:** The node cannot connect to a component it dials out to, such as a
+  separately run sentry or downloader, or the core instance an external RPC daemon talks to.
+* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag naming its address points somewhere wrong.
+* **Solution:** Confirm that the required services are running and that the address flags for the components you run separately are correct — for example `--sentry.api.addr`, `--downloader.api.addr`, or `--private.api.addr` for an external RPC daemon. Note that `--externalcl` is a switch, not an address: it only disables the embedded Caplin, after which the external consensus client connects inbound to Erigon's Engine API (`--authrpc.addr` / `--authrpc.port`) rather than Erigon dialling out to it. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
 
