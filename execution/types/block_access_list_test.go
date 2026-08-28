@@ -33,7 +33,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 	if !reflect.DeepEqual(bal, cpy) {
 		t.Fatalf("copy differs: got %v, want %v", cpy, bal)
 	}
-	if bal[0] == cpy[0] || &bal[0].StorageChanges[0] == &cpy[0].StorageChanges[0] ||
+	if &bal[0] == &cpy[0] || &bal[0].StorageChanges[0] == &cpy[0].StorageChanges[0] ||
 		bal[0].StorageChanges[0].Changes[0] == cpy[0].StorageChanges[0].Changes[0] ||
 		bal[0].BalanceChanges[0] == cpy[0].BalanceChanges[0] ||
 		bal[0].NonceChanges[0] == cpy[0].NonceChanges[0] ||
@@ -287,12 +287,6 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 	}
 }
 
-func TestEncodeBlockAccessListRejectsUnrepresentableNil(t *testing.T) {
-	if _, err := EncodeBlockAccessListBytes(BlockAccessList{nil}); err == nil {
-		t.Fatal("expected nil account encoding error")
-	}
-}
-
 func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 	tests := []struct {
 		name string
@@ -403,7 +397,7 @@ func TestBlockAccessListValidateMaxItems(t *testing.T) {
 				h[31] = byte(j)
 				reads[j] = accounts.InternKey(h)
 			}
-			bal[i] = &AccountChanges{
+			bal[i] = AccountChanges{
 				Address:      accounts.InternAddress(addr),
 				StorageReads: reads,
 			}
@@ -443,7 +437,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 		},
 		StorageReads: []accounts.StorageKey{accounts.InternKey(slot)},
 	}
-	bal := BlockAccessList{ac}
+	bal := BlockAccessList{*ac}
 	if err := bal.Validate(); err == nil {
 		t.Fatal("expected error for slot in both changes and reads")
 	}
@@ -558,7 +552,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 		},
 	}
 
-	bal := BlockAccessList{ac}
+	bal := BlockAccessList{*ac}
 	err := bal.Validate()
 
 	if err == nil {

@@ -167,7 +167,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 				Bytecode: cc.NewCode,
 			})
 		}
-		result[i] = entry
+		result[i] = *entry
 	}
 	return result
 }

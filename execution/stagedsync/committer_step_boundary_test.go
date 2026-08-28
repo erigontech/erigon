@@ -635,7 +635,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 			accountValues[string(addrBytes)] = buf
 		}
 		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
-		bList = append(bList, &types.AccountChanges{
+		bList = append(bList, types.AccountChanges{
 			Address:        accounts.InternAddress([20]byte(addrBytes)),
 			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
 			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},

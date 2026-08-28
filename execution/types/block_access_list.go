@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-type BlockAccessList []*AccountChanges
+type BlockAccessList []AccountChanges
 
 // BlockAccessListSidecar carries immutable decoded and encoded BAL representations.
 type BlockAccessListSidecar struct {
@@ -198,10 +198,8 @@ func (bal BlockAccessList) Copy() BlockAccessList {
 		return nil
 	}
 	cpy := make(BlockAccessList, len(bal))
-	for i, account := range bal {
-		if account == nil {
-			continue
-		}
+	for i := range bal {
+		account := &bal[i]
 		accountCopy := *account
 		accountCopy.StorageChanges = slices.Clone(account.StorageChanges)
 		for j := range account.StorageChanges {
@@ -238,7 +236,7 @@ func (bal BlockAccessList) Copy() BlockAccessList {
 				accountCopy.CodeChanges[j] = &changeCopy
 			}
 		}
-		cpy[i] = &accountCopy
+		cpy[i] = accountCopy
 	}
 	return cpy
 }
@@ -756,7 +754,13 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		*out = make(BlockAccessList, 0)
 		return nil
 	}
-	*out = changes
+	bal := make(BlockAccessList, len(changes))
+	for i, ac := range changes {
+		if ac != nil {
+			bal[i] = *ac
+		}
+	}
+	*out = bal
 	return nil
 }
 
@@ -781,10 +785,27 @@ func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
 	var buf bytes.Buffer
 	encBuf := rlp.NewEncodingBuf()
 	defer encBuf.Release()
-	if err := encodeBlockAccessList(bal, &buf, encBuf[:]); err != nil {
+	if err := encodeAccountChanges(bal, &buf, encBuf[:]); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func encodeAccountChanges(list []AccountChanges, w io.Writer, b []byte) error {
+	var total int
+	for i := range list {
+		size := list[i].EncodingSize()
+		total += rlp.ListPrefixLen(size) + size
+	}
+	if err := rlp.EncodeListPrefix(total, w, b); err != nil {
+		return err
+	}
+	for i := range list {
+		if err := list[i].EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 	var err error
@@ -986,10 +1007,8 @@ func (bal BlockAccessList) Validate() error {
 	}
 	var prev common.Address
 	var hasPrev bool
-	for i, account := range bal {
-		if account == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
+	for i := range bal {
+		account := &bal[i]
 		address := account.Address.Value()
 		if hasPrev && bytes.Compare(prev[:], address[:]) >= 0 {
 			return fmt.Errorf("account addresses must be strictly increasing (index %d)", i)
@@ -1173,11 +1192,8 @@ func (bal BlockAccessList) DebugString() string {
 
 func (bal BlockAccessList) DebugPrint(w io.Writer) {
 	fmt.Fprintf(w, "accounts=%d", len(bal))
-	for i, account := range bal {
-		if account == nil {
-			fmt.Fprintf(w, "\n[%d] <nil>", i)
-			continue
-		}
+	for i := range bal {
+		account := &bal[i]
 		fmt.Fprintf(w, "\n[%d] addr=%s", i, account.Address.Value().Hex())
 		if len(account.StorageChanges) > 0 {
 			fmt.Fprint(w, "\n  storageChanges:")
@@ -1259,7 +1275,7 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 	}
 	bal := make(BlockAccessList, len(protoList))
 	for i, acc := range protoList {
-		bal[i] = &AccountChanges{
+		bal[i] = AccountChanges{
 			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(acc.Address)),
 		}
 		if acc.StorageChanges != nil {
@@ -1327,10 +1343,8 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 		return nil
 	}
 	out := make([]*typesproto.BlockAccessListAccount, 0, len(bal))
-	for _, account := range bal {
-		if account == nil {
-			continue
-		}
+	for ai := range bal {
+		account := &bal[ai]
 		balAccount := &typesproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
@@ -1409,10 +1423,8 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 		return nil
 	}
 	out := make([]*executionproto.BlockAccessListAccount, 0, len(bal))
-	for _, account := range bal {
-		if account == nil {
-			continue
-		}
+	for ai := range bal {
+		account := &bal[ai]
 		rpcAccount := &executionproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
@@ -1551,7 +1563,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 				Bytecode: data,
 			})
 		}
-		out = append(out, accountChanges)
+		out = append(out, *accountChanges)
 	}
 	if err := out.Validate(); err != nil {
 		return nil, fmt.Errorf("blockAccessList validate: %w", err)

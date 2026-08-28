@@ -1088,9 +1088,9 @@ func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) 
 }
 
 func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types.AccountChanges {
-	for _, ac := range bal {
-		if ac != nil && ac.Address == addr {
-			return ac
+	for i := range bal {
+		if bal[i].Address == addr {
+			return &bal[i]
 		}
 	}
 	return nil

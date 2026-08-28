@@ -379,7 +379,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 					break
 				}
 				task := tasks[taskIndex]
-				account := bal[task.accountIndex]
+				account := &bal[task.accountIndex]
 				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
 					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
