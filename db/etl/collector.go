@@ -93,17 +93,12 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 	return c
 }
 
-// errKeyTooLong is out of line so that building it does not cost the caller
-// its inlining budget on a path that never runs.
-//
-//go:noinline
-func errKeyTooLong(logPrefix string, n int) error {
-	return fmt.Errorf("%s: key of %d bytes exceeds %d", logPrefix, n, maxKeyLen)
-}
-
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if len(k) > maxKeyLen {
-		return errKeyTooLong(c.logPrefix, len(k))
+		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), maxKeyLen)
+	}
+	if len(v) > maxValLen {
+		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), maxValLen)
 	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
