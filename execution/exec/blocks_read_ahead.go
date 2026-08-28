@@ -352,9 +352,9 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 	group.Go(func() error {
 		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
 	})
-	if dbg.ParallelTrieBALWarmupers > 0 {
+	if dbg.TrieBALWarmupers > 0 {
 		group.Go(func() error {
-			return warmBALCommitment(ctx, db, bal, dbg.ParallelTrieBALWarmupers)
+			return warmBALCommitment(ctx, db, bal, dbg.TrieBALWarmupers)
 		})
 	}
 	return group.Wait()

@@ -30,10 +30,10 @@ func TestBALCommitmentWarmupWorkersDefault(t *testing.T) {
 }
 
 func TestBALCommitmentWarmupReaders(t *testing.T) {
-	previousEnabled, previousWorkers := ReadAhead, ParallelTrieBALWarmupers
+	previousEnabled, previousWorkers := ReadAhead, TrieBALWarmupers
 	t.Cleanup(func() {
 		ReadAhead = previousEnabled
-		ParallelTrieBALWarmupers = previousWorkers
+		TrieBALWarmupers = previousWorkers
 	})
 	ReadAhead = true
 
@@ -45,11 +45,11 @@ func TestBALCommitmentWarmupReaders(t *testing.T) {
 		{workers: 0, want: 0},
 		{workers: 6, want: 6},
 	} {
-		ParallelTrieBALWarmupers = test.workers
+		TrieBALWarmupers = test.workers
 		require.Equal(t, test.want, BALCommitmentWarmupReaders())
 	}
 	ReadAhead = false
-	ParallelTrieBALWarmupers = 6
+	TrieBALWarmupers = 6
 	require.Zero(t, BALCommitmentWarmupReaders())
 }
 
