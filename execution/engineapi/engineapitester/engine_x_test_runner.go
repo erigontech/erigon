@@ -242,9 +242,12 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
 	name := testNameFromContext(ctx)
-	fcuVersion := engineXResetFcuVersion(tester.ChainConfig, tester.GenesisBlock.Time())
+	// reset back to genesis before test new payloads
+	var fcuVersion string
 	if len(test.NewPayloads) > 0 {
 		fcuVersion = test.NewPayloads[0].FcuVersion
+	} else {
+		fcuVersion = fcuVersionFromTimestamp(tester.ChainConfig, tester.GenesisBlock.Time())
 	}
 	err := processFcu(ctx, tester, tester.GenesisBlock.Hash(), fcuVersion, name, extr.profileHook)
 	if err != nil {
@@ -259,7 +262,7 @@ func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTest
 	return verifyEngineXResult(ctx, tester.RpcApiClient, test)
 }
 
-func engineXResetFcuVersion(config *chain.Config, timestamp uint64) string {
+func fcuVersionFromTimestamp(config *chain.Config, timestamp uint64) string {
 	switch {
 	case config.IsAmsterdam(timestamp):
 		return "4"
