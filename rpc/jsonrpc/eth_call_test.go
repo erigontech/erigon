@@ -410,6 +410,25 @@ func TestEstimateGasCallDataFieldDoesNotChangeEstimate(t *testing.T) {
 	require.Equal(t, viaData, viaInput)
 }
 
+// TestEstimateGasZeroFundableAllowance verifies that a sender who cannot fund a
+// single unit of gas is told so, instead of being estimated at the gas cap: the
+// balance recap caps the ceiling to zero, and the trial has to honour it.
+func TestEstimateGasZeroFundableAllowance(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _, receiverAddr := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	unfunded := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From:         &unfunded,
+		To:           &receiverAddr,
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+	}, nil, nil, nil)
+	require.EqualError(t, err, "gas required exceeds allowance (0)")
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
