@@ -155,11 +155,11 @@ func putDataChunk(ref *[]byte) {
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	// Next returns the entries in key order, one goroutine at a time. A
-	// buffer fills, then Sorts, then is read: Put after Sort, and Next or
-	// Write before it, both panic. Sort puts the cursor at the first entry,
-	// so Sorting again is how a buffer is read twice. The slices point into
-	// the buffer's own storage and must not be modified.
+	// Next returns the entries in key order, one goroutine at a time. Sort
+	// puts the cursor at the first entry, so Sorting again is how a buffer is
+	// read twice, and reading a buffer that holds entries before Sort panics.
+	// Whether a Put after Sort is allowed is up to the implementation. The
+	// slices point into the buffer's own storage and must not be modified.
 	Next() (k, v []byte, ok bool)
 	Len() int
 	Reset()

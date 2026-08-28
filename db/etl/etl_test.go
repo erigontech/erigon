@@ -1823,9 +1823,10 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 // stop the fill at a different offset in the last chunk each time.
 func TestSortableBufferChunkBoundary(t *testing.T) {
 	const keyLen = 8
-	// entryHeaderSize+keyLen+valLen divides dataChunkSize for 4, 20, 52, 116 and
-	// 4084, so those land an entry's last byte exactly on a chunk boundary.
-	for _, valLen := range []int{0, 1, 4, 7, 20, 52, 63, 64, 116, 4084, 4095, 4096} {
+	// An entry costs entryHeaderSize+keyLen+valLen bytes of data plus an
+	// entryLocSize index slot, so a chunk fills to the byte when 16+valLen
+	// divides dataChunkSize: 0, 16, 48, 112 and 4080 below.
+	for _, valLen := range []int{0, 1, 4, 7, 16, 20, 48, 52, 63, 64, 112, 116, 4080, 4084, 4095, 4096} {
 		t.Run(fmt.Sprintf("val%d", valLen), func(t *testing.T) {
 			buf := NewSortableBuffer(64 * 1024 * 1024)
 			entrySize := entryHeaderSize + keyLen + valLen
@@ -2010,16 +2011,29 @@ func TestSortableBufferMergesChunks(t *testing.T) {
 	}
 }
 
-func TestSortableBufferPutAfterSort(t *testing.T) {
-	buf := NewSortableBuffer(1 * datasize.MB)
-	defer buf.Reset()
-	for _, k := range []byte{5, 3, 9, 1} {
-		buf.Put([]byte{k}, []byte{k})
+// TestBufferPutAfterSort: sortableBuffer keeps filling and reading apart,
+// because Sort permutes each chunk's index and a later Put has no insertion
+// order left to fall back on. A map-backed buffer has no such order to lose,
+// so it takes the Put and re-flattens on the next Sort.
+func TestBufferPutAfterSort(t *testing.T) {
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			defer buf.Reset()
+			for _, k := range []byte{5, 3, 9, 1} {
+				buf.Put([]byte{k}, []byte{k})
+			}
+			buf.Sort()
+			put := func() { buf.Put([]byte{7}, []byte{7}) }
+			if bt.name == "sortable" {
+				require.Panics(t, put)
+				return
+			}
+			require.NotPanics(t, put)
+			buf.Sort()
+			require.Len(t, drainBuffer(buf), 5)
+		})
 	}
-	buf.Sort()
-	// Sort permutes each chunk's index, so a later Put has no insertion order
-	// left to fall back on. Filling and reading are separate phases.
-	require.Panics(t, func() { buf.Put([]byte{7}, []byte{7}) })
 }
 
 // TestBufferNextBeforeSort: reading a buffer that was never sorted must be
@@ -2189,9 +2203,9 @@ func TestSortableBufferReadIsAllocFree(t *testing.T) {
 	require.Zero(t, n, "Sort and a full read must not allocate")
 }
 
-// TestMapBufferSortIsIdempotent: sortAndFlush calls Sort and then Write, and
-// Write sorts too. Flattening the map and re-sorting it on the second call
-// would do every flush's work twice.
+// TestMapBufferSortIsIdempotent: Sort is also the rewind, so a caller reading
+// a buffer twice Sorts twice. Flattening the map again on the second call
+// would do that work twice.
 func TestMapBufferSortIsIdempotent(t *testing.T) {
 	for _, bt := range allBufferTypes {
 		if bt.name == "sortable" {
