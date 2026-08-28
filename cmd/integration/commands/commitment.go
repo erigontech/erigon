@@ -18,13 +18,13 @@ package commands
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"math/rand"
 	"os"
 	"path"
@@ -237,6 +237,25 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	Info(msg string, ctx ...any)
 }) error {
 	compactKey := nibbles.HexToCompact(prefix)
+	if recordsReader, ok := stateReader.(commitmentdb.CommitmentRecordsReader); ok {
+		nodeKey := nibbles.EncodeKeyV3(prefix)
+		records, present, step, err := recordsReader.ReadCommitmentRecords(nodeKey, 0, false)
+		if err != nil {
+			return fmt.Errorf("failed to get edge records for prefix %x: %w", prefix, err)
+		}
+		if present != 0 {
+			fmt.Printf("Prefix: 0x%s\n", hex.EncodeToString(prefix))
+			fmt.Printf("Step: %d\n", step)
+			fmt.Printf("Edge records (present mask: 0x%04x):\n", present)
+			rendered, err := formatCommitmentEdgeRecords(nodeKey, records, present)
+			if err != nil {
+				return err
+			}
+			fmt.Print(rendered)
+			return nil
+		}
+	}
+
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
@@ -249,15 +268,42 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 		fmt.Println("Branch data: <empty>")
 		return nil
 	}
+	if slices.Equal(compactKey, commitmentdb.KeyCommitmentState) && commitmentdb.IsCommitmentStateValue(val) {
+		fmt.Println("Branch data: <empty>")
+		return nil
+	}
 
 	fmt.Printf("Branch data (hex): %s\n", hex.EncodeToString(val))
 	fmt.Printf("Branch data length: %d bytes\n", len(val))
+	if commitment.BranchData(val).IsEdgeRecord() {
+		fmt.Printf("Edge record (hex): %s\n", hex.EncodeToString(val))
+		return nil
+	}
 
 	// Parse and display the branch data in human-readable format
 	branchData := commitment.BranchData(val)
 	fmt.Printf("\nParsed branch data:\n%s\n", branchData.String())
 
 	return nil
+}
+
+func formatCommitmentEdgeRecords(nodeKey []byte, records [16][]byte, present uint16) (string, error) {
+	var b strings.Builder
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+		fmt.Fprintf(&b, "  child %x (key: 0x%s): ", nibble, hex.EncodeToString(key))
+		if len(records[nibble]) == 0 {
+			b.WriteString("<tombstone>\n")
+			continue
+		}
+		if !commitment.BranchData(records[nibble]).IsEdgeRecord() {
+			return "", fmt.Errorf("edge record at child %x has an invalid encoding", nibble)
+		}
+		fmt.Fprintf(&b, "0x%s\n", hex.EncodeToString(records[nibble]))
+	}
+	return b.String(), nil
 }
 
 // integration commitment rebuild
@@ -450,7 +496,10 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	for _, f := range commitmentFiles {
 		name := filepath.Base(f.Fullpath())
 		count := acRo.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
-		rootNodePrefix := []byte("state")
+		rootNodePrefix := commitmentdb.LegacyKeyCommitmentState
+		if statecfg.CommitmentEdgeRecords(f.Version()) {
+			rootNodePrefix = commitmentdb.KeyCommitmentState
+		}
 		rootNode, _, _, _, err := acRo.DebugGetLatestFromFiles(kv.CommitmentDomain, rootNodePrefix, f.EndRootNum()-1)
 		if err != nil {
 			return fmt.Errorf("failed to get root node from files: %w", err)
@@ -1136,8 +1185,7 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 				}
 				getter.Skip() // skip value
 
-				// Skip the "state" key
-				if bytes.Equal(key, []byte("state")) {
+				if commitmentdb.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(f.Version())) {
 					continue
 				}
 
@@ -1391,14 +1439,14 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if !getter.HasNext() {
 			return errors.New("invalid key/value pair during decompression")
 		}
-		if visualizePrintState && !bytes.Equal(key, []byte("state")) {
-			getter.Skip()
+		val, afterValPos = getter.Next(val[:0])
+		isStateKey := slices.Equal(key, commitmentdb.LegacyKeyCommitmentState) ||
+			(slices.Equal(key, commitmentdb.KeyCommitmentState) && commitmentdb.IsCommitmentStateValue(val))
+		if visualizePrintState && !isStateKey {
 			continue
 		}
-
-		val, afterValPos = getter.Next(val[:0])
 		cpair++
-		if bytes.Equal(key, []byte("state")) {
+		if isStateKey {
 			str, err := commitment.HexTrieStateToString(val)
 			if err != nil {
 				fmt.Printf("[ERR] failed to decode state: %v", err)

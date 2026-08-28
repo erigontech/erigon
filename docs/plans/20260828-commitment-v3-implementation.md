@@ -415,15 +415,15 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/integrity/commitment_integrity.go`
 - Modify: `cmd/integration/commands/commitment.go`
 
-- [ ] update the `db/integrity` scans to verify edge records — read a record, derive the target path
+- [x] update the `db/integrity` scans to refuse edge records explicitly — read a record, derive the target path
       from its key plus `ext`, read the target's run, recompute the branch hash, compare — or refuse
       them explicitly with a clear message where support is out of scope
-- [ ] update the branch dump at `cmd/integration/commands/commitment.go:257` to render edge records
-- [ ] make ordered scans skip the state key explicitly rather than assuming every key in range is a
+- [x] update the branch dump at `cmd/integration/commands/commitment.go:257` to render edge records
+- [x] make ordered scans skip the state key explicitly rather than assuming every key in range is a
       trie record
-- [ ] write tests for each updated check over an edge-record fixture
-- [ ] write tests asserting refusals are explicit rather than silent misparses
-- [ ] run `go test ./db/integrity/... ./cmd/integration/... ./db/state/...` — must pass before task 16
+- [x] write tests for each updated check over an edge-record fixture
+- [x] write tests asserting refusals are explicit rather than silent misparses
+- [x] run `go test ./db/integrity/... ./cmd/integration/... ./db/state/...` — must pass before task 16
 
 ### Task 16: Verify acceptance criteria
 

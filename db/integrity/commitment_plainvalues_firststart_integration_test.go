@@ -91,6 +91,7 @@ func newTestDBWithSettings(t *testing.T, ctx context.Context, dirs datadir.Dirs,
 	t.Helper()
 	rawDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	agg := state.NewTest(dirs).WithErigonDBSettings(settings).MustOpen(ctx, rawDB)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	require.NoError(t, agg.OpenFolder())
 	t.Cleanup(agg.Close)
 	db, err := temporal.New(rawDB, agg, nil)
