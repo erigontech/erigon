@@ -1784,16 +1784,22 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	buf.Put(nil, []byte{})
 	buf.Put([]byte{}, nil)
 
+	// After Sort: the chunk being filled only publishes its index on Sort, so
+	// before it the loop below reads nothing.
+	buf.Sort()
+
 	seen := map[int32]bool{}
+	entryCount := 0
 	for i := range buf.chunks {
 		for _, e := range buf.chunks[i].entries() {
 			require.False(t, seen[e.offset()],
 				"Sort orders equal keys by offset, so every entry needs one of its own")
 			seen[e.offset()] = true
+			entryCount++
 		}
 	}
+	require.Equal(t, buf.Len(), entryCount)
 
-	buf.Sort()
 	type nilness struct{ key, val bool }
 	entries := drainBuffer(buf)
 	got := make([]nilness, 4)
@@ -2264,4 +2270,51 @@ func TestCollectRejectsOversizedKey(t *testing.T) {
 	err := c.Collect(make([]byte, maxKeyLen+1), []byte("v"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds")
+}
+
+// TestSortableBufferMatchesStableSort compares the per-chunk sort plus merge
+// against a reference stable sort, over key and value sizes that mix duplicate
+// keys, empty keys and values larger than a chunk.
+func TestSortableBufferMatchesStableSort(t *testing.T) {
+	type pair struct{ k, v []byte }
+	var seed uint64
+	next := func() uint64 { // splitmix64, so a failure reproduces from the round
+		seed += 0x9E3779B97F4A7C15
+		z := seed
+		z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
+		z = (z ^ (z >> 27)) * 0x94D049BB133111EB
+		return z ^ (z >> 31)
+	}
+
+	for round := range 20 {
+		seed = uint64(round) //nolint:gosec
+		buf := NewSortableBuffer(256 * datasize.MB)
+		var ref []pair
+		for range 200 + int(next()%2000) {
+			k := make([]byte, next()%6) // short, so keys repeat often
+			for j := range k {
+				k[j] = byte(next() % 4)
+			}
+			vLen := int(next() % 200)
+			if next()%20 == 0 {
+				vLen = dataChunkSize + int(next()%1000)
+			}
+			v := make([]byte, vLen)
+			for j := range v {
+				v[j] = byte(next())
+			}
+			buf.Put(k, v)
+			ref = append(ref, pair{k, v})
+		}
+		slices.SortStableFunc(ref, func(x, y pair) int { return bytes.Compare(x.k, y.k) })
+
+		buf.Sort()
+		got := drainBuffer(buf)
+		require.Len(t, got, len(ref), "round %d", round)
+		for i := range ref {
+			require.Equal(t, ref[i].k, got[i].key, "round %d entry %d", round, i)
+			require.Equal(t, ref[i].v, got[i].value, "round %d entry %d", round, i)
+		}
+		buf.Reset()
+	}
 }

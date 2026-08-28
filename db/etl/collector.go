@@ -110,7 +110,6 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
-// Collect does copy `k` and `v`
 // errKeyTooLong is out of line so that building it does not cost the caller
 // its inlining budget on a path that never runs.
 //
@@ -119,6 +118,7 @@ func errKeyTooLong(logPrefix string, n int) error {
 	return fmt.Errorf("%s: key of %d bytes exceeds %d", logPrefix, n, maxKeyLen)
 }
 
+// Collect does copy `k` and `v`
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }

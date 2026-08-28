@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bytes"
+	"encoding/binary"
 	"slices"
 )
 
@@ -141,6 +142,21 @@ type cursor struct {
 	buf  []byte
 	at   int32
 	key  []byte
+	// head is the key's first 8 bytes, big-endian and zero-padded, so most
+	// comparisons stay in registers instead of touching the chunk.
+	head uint64
+}
+
+// keyHead packs a key's first 8 bytes so that ordering by the uint64 matches
+// bytes.Compare for keys that differ inside those 8 bytes. A short key pads
+// with zeros, which is where bytes.Compare puts it too.
+func keyHead(k []byte) uint64 {
+	if len(k) >= 8 {
+		return binary.BigEndian.Uint64(k)
+	}
+	var b [8]byte
+	copy(b[:], k)
+	return binary.BigEndian.Uint64(b[:])
 }
 
 // rewind puts the cursor on the first entry in key order.
@@ -211,6 +227,7 @@ func (m *merger) release() {
 func (m *merger) load(id int32) {
 	c := &m.cur[id]
 	c.key = keyOf(c.buf, c.ents[c.at])
+	c.head = keyHead(c.key)
 }
 
 // chunksInOrder reports whether every chunk's last key comes before the next
@@ -236,7 +253,11 @@ func (m *merger) chunksInOrder() bool {
 // less orders two cursors by the key they sit on. Chunks fill in insertion
 // order, so the lower id wins a tie and equal keys keep the order they went in.
 func (m *merger) less(x, y int32) bool {
-	if r := bytes.Compare(m.cur[x].key, m.cur[y].key); r != 0 {
+	cx, cy := &m.cur[x], &m.cur[y]
+	if cx.head != cy.head {
+		return cx.head < cy.head
+	}
+	if r := bytes.Compare(cx.key, cy.key); r != 0 {
 		return r < 0
 	}
 	return x < y
