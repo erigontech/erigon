@@ -6191,10 +6191,13 @@ balances:
   while still crediting the recipient. Value appears from nowhere, so a trace can show
   what looks like balance creation.
 * **On Gnosis and Chiado, the burn contract is credited too.** Where the chain
-  configures a `burntContract` — Gnosis and Chiado do, most chains do not — a London
-  transaction credits it `gasUsed * baseFee`, plus the blob fee on Aura from Prague. The
-  sender was never debited, so this is a second source of apparent balance creation in
-  `stateDiff` on those chains. Chains that simply burn the base fee are unaffected.
+  configures a `burntContract` — Gnosis and Chiado do, most chains do not — a **non-free**
+  London transaction credits it `gasUsed * baseFee`, plus the blob fee on Aura from
+  Prague. The sender was never debited, so this is a second source of apparent balance
+  creation in `stateDiff` on those chains. Aura marks zero-fee certified service
+  transactions as free, and the credit is guarded by `!msg.IsFree()`, so those are
+  excluded. Chains that simply burn the base fee never receive this extra credit — every
+  other effect above still applies to them.
 :::
 
 Whether one transaction's altered state is visible to the next depends on the execution
@@ -6620,6 +6623,7 @@ Replays a transaction, returning the traces.
 1. `Hash` - Transaction hash.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+4. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: [
@@ -6744,6 +6748,7 @@ Returns traces matching given filter
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
    * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
 2. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+3. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: [{
@@ -6811,6 +6816,7 @@ Returns trace at given position.
 1. `Hash` - Transaction hash.
 2. `Array` - Index positions of the traces.
 3. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+4. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: [
@@ -6873,6 +6879,7 @@ Returns all traces of given transaction
 
 1. `Hash` - Transaction hash
 2. `Boolean` - Optional, default `false`. `gasBailOut`. See [The gasBailOut option](#the-gasbailout-option).
+3. `Object` - Optional trace settings (`TraceConfig`), the same object the other `trace` methods accept.
 
 ```js
 params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
