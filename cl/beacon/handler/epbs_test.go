@@ -47,6 +47,7 @@ import (
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -1687,7 +1688,10 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
-	slot := handler.ethClock.GetCurrentSlot()
+	slot := uint64(64)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	handler.ethClock = clock
 	root := common.HexToHash("0x1234")
 	envelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
 	envelope.BeaconBlockRoot = root

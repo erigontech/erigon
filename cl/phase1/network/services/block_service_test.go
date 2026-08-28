@@ -519,6 +519,23 @@ func TestPublishedBlockJobUpgradesBlockOnlyRecovery(t *testing.T) {
 	require.NotNil(t, jobValue.(*blockJob).store)
 }
 
+func TestPublishedBlockJobUpgradeWithEqualCreationTime(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	existing := newBlockJob(block, nil)
+	candidate := newBlockJob(block, func(context.Context) error { return nil })
+	candidate.creationTime = existing.creationTime
+	service.blocksScheduledForLaterExecution.Store(root, existing)
+
+	reused, generation := service.reuseScheduledBlockJob(root, existing, candidate, candidate.store)
+
+	require.Same(t, existing, reused)
+	require.Equal(t, uint64(1), generation)
+	require.NotNil(t, existing.store)
+}
+
 func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
@@ -537,18 +554,18 @@ func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	newer := &blockJob{
-		block:        block,
-		store:        func(context.Context) error { return nil },
-		creationTime: time.Now().Add(time.Minute),
-	}
+	older := newBlockJob(block, func(context.Context) error {
+		return errors.New("older store should not replace newer store")
+	})
+	newer := newBlockJob(block, func(context.Context) error { return nil })
+	older.creationTime = newer.creationTime
 	service := &blockService{}
 	service.blocksScheduledForLaterExecution.Store(root, newer)
 
-	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
-		return errors.New("older store should not replace newer store")
-	})
+	reused, generation := service.reuseScheduledBlockJob(root, newer, older, older.store)
 
+	require.Same(t, newer, reused)
+	require.Equal(t, newer.storeGeneration, generation)
 	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
 	require.Same(t, newer, currentValue)
@@ -1122,35 +1139,44 @@ func TestPublishedBlockJobExpiryRescheduleKeepsFreshStore(t *testing.T) {
 	require.NoError(t, err)
 	expiredHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
 	job := serviceJob(t, service, root)
-	job.mu.Lock()
-	expireStarted := make(chan struct{})
-	expireDone := make(chan struct{})
-	go func() {
-		close(expireStarted)
-		service.processScheduledBlock(context.Background(), root, job, job.creationTime.Add(blockJobExpiry+time.Second))
-		close(expireDone)
-	}()
-	<-expireStarted
-	freshStoreCalls := 0
-	rescheduleStarted := make(chan struct{})
-	rescheduleDone := make(chan PublishedBlockJob, 1)
-	go func() {
-		close(rescheduleStarted)
-		rescheduleDone <- service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
-			freshStoreCalls++
-			return nil
-		})
-	}()
-	<-rescheduleStarted
-	job.mu.Unlock()
-	<-expireDone
+	job.creationTime = time.Now().Add(-blockJobExpiry - time.Second)
+	service.processScheduledBlock(context.Background(), root, job, time.Now())
 	require.ErrorIs(t, expiredHandle.Wait(t.Context()), ErrPublishedBlockJobExpired)
-	freshHandle := <-rescheduleDone
+
+	freshStoreCalls := 0
+	freshHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		freshStoreCalls++
+		return nil
+	})
 	freshJob := serviceJob(t, service, root)
 	require.NotSame(t, job, freshJob)
 	service.processScheduledBlock(context.Background(), root, freshJob, time.Now())
 	require.NoError(t, freshHandle.Wait(t.Context()))
 	require.Equal(t, 1, freshStoreCalls)
+}
+
+func TestPublishedBlockJobRefreshSurvivesEarlierExpirySample(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	firstHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	job := serviceJob(t, service, root)
+	job.creationTime = time.Now().Add(-blockJobExpiry - time.Second)
+	expiryNow := time.Now()
+	freshStoreCalls := 0
+	freshHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		freshStoreCalls++
+		return nil
+	})
+
+	service.processScheduledBlock(context.Background(), root, job, expiryNow)
+
+	require.NoError(t, firstHandle.Wait(t.Context()))
+	require.NoError(t, freshHandle.Wait(t.Context()))
+	require.Equal(t, 1, freshStoreCalls)
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, scheduled)
 }
 
 func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *testing.T) {

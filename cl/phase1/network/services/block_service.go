@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -48,14 +49,17 @@ var ErrInvalidSignature = errors.New("invalid signature")
 var ErrPublishedBlockJobExpired = errors.New("published block integration expired")
 var ErrPublishedBlockJobStopped = errors.New("block service stopped")
 
+var publishedBlockJobSequence atomic.Uint64
+
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
 	slot          uint64
 }
 
 type blockJob struct {
-	block        *cltypes.SignedBeaconBlock
-	creationTime time.Time
+	block            *cltypes.SignedBeaconBlock
+	creationTime     time.Time
+	scheduleSequence uint64
 
 	mu                  sync.Mutex
 	store               func(context.Context) error
@@ -119,11 +123,12 @@ func newBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Context) e
 		generation = 1
 	}
 	return &blockJob{
-		block:           block,
-		store:           store,
-		storeGeneration: generation,
-		creationTime:    time.Now(),
-		attempt:         &blockJobAttempt{done: make(chan struct{})},
+		block:            block,
+		store:            store,
+		storeGeneration:  generation,
+		creationTime:     time.Now(),
+		scheduleSequence: publishedBlockJobSequence.Add(1),
+		attempt:          &blockJobAttempt{done: make(chan struct{})},
 	}
 }
 
@@ -703,11 +708,12 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	if store == nil {
 		return existing, existing.storeGeneration
 	}
-	if !job.creationTime.After(existing.creationTime) {
+	if job.scheduleSequence <= existing.scheduleSequence {
 		return existing, existing.storeGeneration
 	}
 	existing.store = store
 	existing.storeGeneration++
+	existing.scheduleSequence = job.scheduleSequence
 	existing.creationTime = time.Now()
 	if existing.terminal {
 		existing.terminal = false
