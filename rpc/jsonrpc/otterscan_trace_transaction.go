@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -53,7 +52,7 @@ type TraceEntry struct {
 	Depth  int            `json:"depth"`
 	From   common.Address `json:"from"`
 	To     common.Address `json:"to"`
-	Value  *hexutil.Big   `json:"value"`
+	Value  *hexutil.U256  `json:"value"`
 	Input  hexutil.Bytes  `json:"input"`
 	Output hexutil.Bytes  `json:"output"`
 }
@@ -89,33 +88,31 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Addres
 	typ := vm.OpCode(typRaw)
 
 	inputCopy := bytes.Clone(input)
-	_value := new(big.Int)
-	_value.Set(value.ToBig())
 
 	var entry *TraceEntry
 	switch typ {
 	case vm.CALL:
-		entry = &TraceEntry{"CALL", t.depth, from.Value(), to.Value(), (*hexutil.Big)(_value), inputCopy, nil}
+		entry = &TraceEntry{"CALL", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), inputCopy, nil}
 	case vm.STATICCALL:
 		entry = &TraceEntry{"STATICCALL", t.depth, from.Value(), to.Value(), nil, inputCopy, nil}
 	case vm.DELEGATECALL:
 		entry = &TraceEntry{"DELEGATECALL", t.depth, from.Value(), to.Value(), nil, inputCopy, nil}
 	case vm.CALLCODE:
-		entry = &TraceEntry{"CALLCODE", t.depth, from.Value(), to.Value(), (*hexutil.Big)(_value), inputCopy, nil}
+		entry = &TraceEntry{"CALLCODE", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), inputCopy, nil}
 	case vm.CREATE:
-		entry = &TraceEntry{"CREATE", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
+		entry = &TraceEntry{"CREATE", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), inputCopy, nil}
 	case vm.CREATE2:
-		entry = &TraceEntry{"CREATE2", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
+		entry = &TraceEntry{"CREATE2", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), inputCopy, nil}
 	case vm.SELFDESTRUCT:
 		selfDestructDepth := depth
 		if len(t.Results) > 0 {
 			selfDestructDepth = t.Results[len(t.Results)-1].Depth + 1
 		}
-		entry = &TraceEntry{"SELFDESTRUCT", selfDestructDepth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), nil, nil}
+		entry = &TraceEntry{"SELFDESTRUCT", selfDestructDepth, from.Value(), to.Value(), (*hexutil.U256)(&value), nil, nil}
 	default:
 		// safeguard in case new CALL-like opcodes are introduced but not handled,
 		// otherwise CaptureExit/stack will get out of sync
-		entry = &TraceEntry{"UNKNOWN", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
+		entry = &TraceEntry{"UNKNOWN", t.depth, from.Value(), to.Value(), (*hexutil.U256)(&value), inputCopy, nil}
 	}
 
 	// Ignore precompiles in the returned trace (maybe we shouldn't?)

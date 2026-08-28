@@ -283,7 +283,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
 		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: ommerN}
 	}
-	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
+	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals, nil)
 
 	var missingBlockHash bool
 	getHash := func(num uint64) (common.Hash, error) {
@@ -313,7 +313,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := newT8nSharedDomains(context.Background(), db, tx)
 	if err != nil {
 		return err
 	}
@@ -662,4 +662,13 @@ func CalculateStateRoot(sd *execctx.SharedDomains, tx kv.TemporalRwTx, blockNum 
 	hashRoot.SetBytes(root)
 
 	return &hashRoot, nil
+}
+
+func newT8nSharedDomains(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sd.EnableParaTrieDB(db)
+	return sd, nil
 }

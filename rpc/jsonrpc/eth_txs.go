@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -43,24 +42,24 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 	defer tx.Rollback()
+	overlayTx := api.filters.WithOverlay(tx)
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, isBorStateSyncTx, ok, err := api.txnLookupWithBorFallback(ctx, tx, txnHash, chainConfig)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, overlayTx, txnHash)
 	if err != nil {
 		return nil, err
 	}
 	if ok {
-		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
+		err = api.BaseAPI.checkPruneBlocks(ctx, overlayTx, blockNum)
 		if err != nil {
 			return nil, err
 		}
 
-		overlayTx := api.filters.WithOverlay(tx)
-		txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
+		txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -82,17 +81,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			baseFee = header.BaseFee
 		}
 
-		// if no transaction was found then we return nil
-		if isBorStateSyncTx {
-			borTx := bortypes.NewBorTransaction()
-			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
-		}
-
-		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, overlayTx, blockNum, txnIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -103,7 +92,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
+	curHeader := rawdb.ReadCurrentHeader(overlayTx)
 	if curHeader == nil {
 		return nil, nil
 	}
@@ -138,9 +127,10 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, err
 	}
 	defer tx.Rollback()
+	overlayTx := api.filters.WithOverlay(tx)
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -148,16 +138,16 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
+	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
-	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, overlayTx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -186,10 +176,6 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
 	if err != nil {
@@ -202,7 +188,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockHashAndIndex
-	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -213,17 +199,8 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	txs := block.Transactions()
 	idx := uint64(txIndex)
 	n := uint64(len(txs))
-	if idx > n {
+	if idx >= n {
 		return nil, nil // not error
-	} else if idx == n {
-		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil // not error
-		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), idx, chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee()), nil
@@ -247,7 +224,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -265,10 +242,6 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	if blockNr == rpc.PendingBlockNumber {
 		b, err := api.blockByNumber(ctx, blockNr, tx)
@@ -299,7 +272,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -310,17 +283,8 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	txs := block.Transactions()
 	idx := uint64(txIndex)
 	n := uint64(len(txs))
-	if idx > n {
+	if idx >= n {
 		return nil, nil // not error
-	} else if idx == n {
-		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, blockNum, hash)
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil
-		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, hash, blockNum, idx, chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee()), nil
@@ -358,7 +322,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645

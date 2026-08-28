@@ -175,7 +175,7 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 			return &emptypb.Empty{}, nil
 		}).
 		Times(1)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer), nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
 	require.NoError(t, err)
 
 	pool := seedBlobKZGTestPool(t, ctx)

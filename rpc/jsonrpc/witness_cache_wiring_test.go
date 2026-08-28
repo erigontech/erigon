@@ -93,7 +93,7 @@ func TestNewWitnessCacheBuilderAPIDisabled(t *testing.T) {
 	t.Parallel()
 	// enable=false must short-circuit to (nil, nil) before touching any wiring arg,
 	// so the disabled path is a genuine no-op and APIList receives a nil cache.
-	cache, impl := NewWitnessCacheBuilderAPI(false, false, nil, nil, nil, nil, nil, nil, nil, nil)
+	cache, impl := NewWitnessCacheBuilderAPI(false, false, nil, nil, nil, nil, nil, nil, nil)
 	if cache != nil {
 		t.Fatalf("disabled builder returned non-nil cache")
 	}
@@ -110,7 +110,7 @@ func TestWitnessCacheWiringSharedFeed(t *testing.T) {
 		EvmCallTimeout:     rpccfg.DefaultEvmCallTimeout,
 		Dirs:               m.Dirs,
 	}
-	cache, builder := NewWitnessCacheBuilderAPI(true, false, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine, nil)
+	cache, builder := NewWitnessCacheBuilderAPI(true, false, m.DB, nil, nil, m.StateCache, m.BlockReader, cfg, m.Engine)
 	require.NotNil(t, cache, "enabled builder must return a cache")
 	require.NotNil(t, builder, "enabled builder must return an impl")
 	require.Same(t, cache, builder.witnessCache, "builder impl shares the returned cache")

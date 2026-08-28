@@ -48,9 +48,11 @@ func BenchmarkErigonShuffledIndex(b *testing.B) {
 	seed := [32]byte{2, 35, 6}
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
 
+	var err error
 	for b.Loop() {
-		shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, crypto.Sha256)
+		_, err = shuffling.ComputeShuffledIndex(s.BeaconConfig(), 10, 1000, seed, preInputs, crypto.Sha256)
 	}
+	require.NoError(b, err)
 }
 
 func TestShuffling(t *testing.T) {

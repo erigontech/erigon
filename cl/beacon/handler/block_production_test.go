@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -67,7 +68,7 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, false)
 
 	// Attestation deadline is 4s; polling stops a quarter of it (1s) earlier, at 3s.
 	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
@@ -82,7 +83,7 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, false)
 
 	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
 	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
@@ -335,7 +336,7 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(2950 * time.Millisecond)
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, false)
 
 	// A late request clamps the first poll up to now but still stops at 3s, preserving the margin.
 	require.Equal(t, now, window.firstGetAt)
@@ -350,7 +351,7 @@ func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(5 * time.Second)
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, false)
 
 	require.Equal(t, now, window.firstGetAt)
 	require.Equal(t, now, window.pollUntil)
@@ -373,7 +374,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 		{"gloas", clparams.GloasVersion, 3 * time.Second, 2250 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version)
+			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version, false)
 			require.Equal(t, slotStart.Add(tc.wantPollUntil), window.pollUntil)
 			require.True(t, window.pollUntil.Before(slotStart.Add(tc.deadline)),
 				"polling must stop before the attestation deadline to leave publication margin")
@@ -543,6 +544,96 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
+	proofIndexes := []struct {
+		name  string
+		index int
+	}{
+		{name: "first", index: 0},
+		{name: "last", index: 2*int(clparams.MainnetBeaconConfig.NumberOfColumns) - 1},
+	}
+	for _, proofIndex := range proofIndexes {
+		for _, proofLength := range []int{length.Bytes48 - 1, length.Bytes48 + 1} {
+			t.Run(fmt.Sprintf("%s proof length %d", proofIndex.name, proofLength), func(t *testing.T) {
+				body, err := produceFuluBodyWithProofLength(t, proofIndex.index, proofLength)
+
+				require.Nil(t, body)
+				require.ErrorContains(t, err, "invalid proof length")
+			})
+		}
+	}
+}
+
+func TestProduceBeaconBodyAcceptsExactFuluCellProofLength(t *testing.T) {
+	body, err := produceFuluBodyWithProofLength(t, 0, length.Bytes48)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+}
+
+func TestProduceBeaconBodyPreservesPreFuluValidationOrder(t *testing.T) {
+	bundle := &engine_types.BlobsBundle{
+		Blobs:       []hexutil.Bytes{make([]byte, cltypes.BYTES_PER_BLOB)},
+		Commitments: []hexutil.Bytes{make([]byte, length.Bytes48-1)},
+		Proofs:      []hexutil.Bytes{make([]byte, length.Bytes48-1)},
+	}
+
+	body, err := produceBodyWithBundle(t, clparams.ElectraVersion, bundle)
+
+	require.Nil(t, body)
+	require.ErrorContains(t, err, "invalid commitment length")
+}
+
+func produceFuluBodyWithProofLength(t *testing.T, proofIndex, proofLength int) (*cltypes.BeaconBody, error) {
+	t.Helper()
+	proofs := make([]hexutil.Bytes, 2*int(clparams.MainnetBeaconConfig.NumberOfColumns))
+	for i := range proofs {
+		proofs[i] = make([]byte, length.Bytes48)
+	}
+	proofs[proofIndex] = make([]byte, proofLength)
+	bundle := &engine_types.BlobsBundle{
+		Blobs: []hexutil.Bytes{
+			make([]byte, cltypes.BYTES_PER_BLOB),
+			make([]byte, cltypes.BYTES_PER_BLOB),
+		},
+		Commitments: []hexutil.Bytes{
+			make([]byte, length.Bytes48),
+			make([]byte, length.Bytes48),
+		},
+		Proofs: proofs,
+	}
+	return produceBodyWithBundle(t, clparams.FuluVersion, bundle)
+}
+
+func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *engine_types.BlobsBundle) (*cltypes.BeaconBody, error) {
+	t.Helper()
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	if version.AfterOrEqual(clparams.FuluVersion) {
+		h.beaconChainCfg.FuluForkEpoch = 1
+		h.beaconChainCfg.InitializeForkSchedule()
+	}
+
+	payload := cltypes.NewEth1Block(version, h.beaconChainCfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, version).Return(payload, bundle, nil, nil, nil)
+	h.engine = engine
+
+	baseBlock := blocks[len(blocks)-1].Block
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+	return body, err
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
