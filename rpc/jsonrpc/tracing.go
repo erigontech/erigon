@@ -194,13 +194,13 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			stream.WriteMore()
 		}
 
-		if err := stream.Flush(); err != nil {
+		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}
 	}
 
 	if dbg.AssertEnabled {
-		var refunds = true
+		refunds := true
 		if config.NoRefunds != nil && *config.NoRefunds {
 			refunds = false
 		}
@@ -491,7 +491,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		// ibs.Reset()
 		for txnIndex := range bundle.Transactions {
 			txn := &bundle.Transactions[txnIndex]
-			if txn.Gas == nil || *(txn.Gas) == 0 {
+			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
 			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)

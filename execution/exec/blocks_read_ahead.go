@@ -250,12 +250,13 @@ func balCodeWarmupModeForFlags(warmBALCode, warmTxCode bool) balCodeWarmupMode {
 
 func makeBALWarmupPlan(bal types.BlockAccessList, workers int) ([]balWarmupTask, int) {
 	taskCount := 0
-	for _, account := range bal {
-		slots := len(account.StorageChanges) + len(account.StorageReads)
+	for i := range bal {
+		slots := len(bal[i].StorageChanges) + len(bal[i].StorageReads)
 		taskCount += max(1, (slots+balWarmupStorageChunkSize-1)/balWarmupStorageChunkSize)
 	}
 	tasks := make([]balWarmupTask, 0, taskCount)
-	for accountIndex, account := range bal {
+	for accountIndex := range bal {
+		account := &bal[accountIndex]
 		slots := len(account.StorageChanges) + len(account.StorageReads)
 		if slots == 0 {
 			tasks = append(tasks, balWarmupTask{accountIndex: uint32(accountIndex)})
@@ -379,7 +380,7 @@ func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal t
 					break
 				}
 				task := tasks[taskIndex]
-				account := bal[task.accountIndex]
+				account := &bal[task.accountIndex]
 				if err := warmBALStateTask(stateReader, account, task, codeMode, txCodeDestinations); err != nil {
 					log.Warn("[warmBAL] state task failed", "worker", w, "account", account.Address, "err", err)
 				}
