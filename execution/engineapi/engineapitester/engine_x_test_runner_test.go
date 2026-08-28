@@ -64,6 +64,31 @@ func TestEngineXTestDefinitionV_20_02(t *testing.T) {
 	require.Nil(t, (*definition.PostStateDiff)[common.HexToAddress("0x02")])
 }
 
+func TestEngineXStorageRoot(t *testing.T) {
+	key := common.HexToHash("0x01")
+	tests := []struct {
+		name  string
+		value common.Hash
+		root  common.Hash
+	}{
+		{
+			name:  "single byte RLP boundary",
+			value: common.HexToHash("0x80"),
+			root:  common.HexToHash("0xb831f0192d547189cd866964971e8e82b70b38570c785dc2c1f675f34a29f702"),
+		},
+		{
+			name:  "multi byte value",
+			value: common.HexToHash("0x0100"),
+			root:  common.HexToHash("0x6a27488a57b630cf22a08ab0b0671e32ff037ec907c56896dc8282f6be5cf9ed"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.root, engineXStorageRoot(map[common.Hash]common.Hash{key: test.value}))
+		})
+	}
+}
+
 func TestVerifyEngineXResult(t *testing.T) {
 	head := common.HexToHash("0x11")
 	accountAddress := common.HexToAddress("0x01")
