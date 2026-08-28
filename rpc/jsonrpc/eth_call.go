@@ -265,8 +265,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer caller.Close()
 
-	hasCallData := (args.Input != nil && len(*args.Input) > 0) || (args.Data != nil && len(*args.Data) > 0)
-	plainTransfer := !hasCallData && args.To != nil
+	msg := caller.Message()
+	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil()
 
 	var initialState *state.IntraBlockState
 	if feeCap.Sign() != 0 || plainTransfer {
@@ -284,13 +284,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, err
 		}
 		available := balance.ToBig()
-		if args.Value != nil {
-			value := args.Value.ToInt()
-			if value.Cmp(available) >= 0 {
-				return 0, errors.New("insufficient funds for transfer")
-			}
-			available.Sub(available, value)
+		value := msg.Value().ToBig()
+		if value.Cmp(available) >= 0 {
+			return 0, errors.New("insufficient funds for transfer")
 		}
+		available.Sub(available, value)
 
 		allowance := new(big.Int).Div(available, feeCap)
 

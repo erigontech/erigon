@@ -197,6 +197,8 @@ func (r *ReusableCaller) Close() {
 	}
 }
 
+func (r *ReusableCaller) Message() *types.Message { return r.message }
+
 // InitialState builds a fresh state with the request's overrides applied, the
 // state every call runs against. The precompiles come with it because a
 // MovePrecompileTo override changes them. The caller must Close the state.

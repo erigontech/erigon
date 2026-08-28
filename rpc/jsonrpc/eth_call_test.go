@@ -410,9 +410,10 @@ func TestEstimateGasCallDataFieldDoesNotChangeEstimate(t *testing.T) {
 	require.Equal(t, viaData, viaInput)
 }
 
-// TestEstimateGasZeroFundableAllowance verifies that a sender who cannot fund a
-// single unit of gas is told so, instead of being estimated at the gas cap: the
-// balance recap caps the ceiling to zero, and the trial has to honour it.
+// TestEstimateGasZeroFundableAllowance verifies that a sender whose funds cover
+// the transfer but not a single unit of gas is told so, instead of being
+// estimated at the gas cap: the balance recap caps the ceiling to zero, and the
+// trial has to honour it.
 func TestEstimateGasZeroFundableAllowance(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -420,13 +421,35 @@ func TestEstimateGasZeroFundableAllowance(t *testing.T) {
 	m, _, _, receiverAddr := chainWithDeployedContract(t)
 	api := newTestEthAPIWithFilters(t, m)
 
-	unfunded := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	poor := common.HexToAddress("0x00000000000000000000000000000000000000ab")
+	dust := (*hexutil.Big)(big.NewInt(1000))
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
-		From:         &unfunded,
+		From:         &poor,
+		To:           &receiverAddr,
+		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+	}, nil, &ethapi.StateOverrides{
+		accounts.InternAddress(poor): {Balance: &dust},
+	}, nil)
+	require.EqualError(t, err, "gas required exceeds allowance (0)")
+}
+
+// TestEstimateGasMissingValueCountsAsZero verifies that a request without a
+// "value" field is checked against the sender's funds all the same: ToMessage
+// resolves a missing value to zero, and the recap has to see the resolved one.
+func TestEstimateGasMissingValueCountsAsZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _, receiverAddr := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	broke := common.HexToAddress("0x00000000000000000000000000000000000000ac")
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From:         &broke,
 		To:           &receiverAddr,
 		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}, nil, nil, nil)
-	require.EqualError(t, err, "gas required exceeds allowance (0)")
+	require.EqualError(t, err, "insufficient funds for transfer")
 }
 
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
