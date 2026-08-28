@@ -1207,7 +1207,7 @@ func TestPoolHandsBackACleanStream(t *testing.T) {
 // pooled, so one outsized value cannot pin its peak for the life of the process.
 func TestPoolDropsOversizedBuffers(t *testing.T) {
 	s := Get(nil).(*StackStream)
-	s.WriteString(strings.Repeat("x", 8*FlushThreshold))
+	s.WriteString(strings.Repeat("x", 2*maxPooledBufferSize))
 	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
 	Put(s)
 

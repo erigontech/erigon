@@ -57,10 +57,11 @@ func NewSized(out io.Writer, bufSize int) Stream {
 
 var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}
 
-// maxPooledBufferSize bounds what a stream may carry back into the pool. A value
-// larger than the flush threshold grows the buffer past it in one write, and
-// keeping that would pin one request's peak for the life of the process.
-const maxPooledBufferSize = 4 * FlushThreshold
+// maxPooledBufferSize bounds what a stream may carry back into the pool. A
+// non-streaming response is appended whole, so the buffer ends up the size of
+// the response; the bound keeps ordinary ones and drops the outliers, which the
+// pool would otherwise pin one per running goroutine.
+const maxPooledBufferSize = 4 * int(datasize.MB)
 
 // Get is New over a pool, so a response reuses the previous one's buffer instead
 // of growing a fresh 4KB one up to the flush threshold. Hand the stream back with
