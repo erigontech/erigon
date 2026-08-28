@@ -91,15 +91,27 @@ func builtinTxType(id byte) bool {
 }
 
 // hasStandardReceiptPayload reports whether id's receipts are the typed receipt
-// with the built-in payload. Deliberately its own list rather than builtinTxType:
-// EIP-2718 leaves ReceiptPayload type-specific, so a future built-in that adds a
-// consensus receipt field must stay off this one. Legacy is absent because it
-// carries no type byte; a registered type has to opt in.
+// with the built-in payload. Its own list rather than builtinTxType: EIP-2718
+// leaves ReceiptPayload type-specific, so a built-in that adds a consensus
+// receipt field stays off this one. Legacy carries no type byte; a registered
+// type has to opt in.
+//
+// AccountAbstractionTxType is off it deliberately — it has never had a receipt
+// encoding, so giving it one moves the receipts root of an RIP-7560 block (#23569).
 func hasStandardReceiptPayload(id byte) bool {
 	switch id {
-	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
+	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
 		return true
 	}
 	spec, ok := registeredTxType(id)
 	return ok && spec.StandardReceiptPayload
+}
+
+// storableReceiptType reports whether ReceiptForStorage can hold id's receipts
+// without dropping a field. Wider than hasStandardReceiptPayload: the storage
+// format keeps Type as a plain field, so every built-in round-trips whatever its
+// consensus encoding. A registered type must still claim the standard payload —
+// the format has no room for the extra fields the opt-out exists for.
+func storableReceiptType(id byte) bool {
+	return builtinTxType(id) || hasStandardReceiptPayload(id)
 }

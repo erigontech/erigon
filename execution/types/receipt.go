@@ -238,7 +238,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
 	}
-	if err = r.setStatus(b); err != nil {
+	if err := r.setStatus(b); err != nil {
 		return err
 	}
 	if r.CumulativeGasUsed, err = s.Uint64(); err != nil {
@@ -381,7 +381,7 @@ type ReceiptForStorage Receipt
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
-	if r.Type != LegacyTxType && !hasStandardReceiptPayload(r.Type) {
+	if !storableReceiptType(r.Type) {
 		return fmt.Errorf("invalid receipt type %d", r.Type)
 	}
 	if r.FirstLogIndexWithinBlock == 0 && len(r.Logs) > 0 {
@@ -467,7 +467,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if dec.Type, err = s.Uint8(); err != nil {
 		return fmt.Errorf("read Type: %w", err)
 	}
-	if dec.Type != LegacyTxType && !hasStandardReceiptPayload(dec.Type) {
+	if !storableReceiptType(dec.Type) {
 		return fmt.Errorf("invalid receipt type %d", dec.Type)
 	}
 	kind, size, err := s.Kind()

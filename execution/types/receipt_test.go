@@ -546,51 +546,42 @@ func TestReceiptEncode(t *testing.T) {
 	})
 }
 
-// TestAccountAbstractionReceiptEncoding pins type 5 to the standard typed
-// encoding. Both status values are covered because they encode to different
-// payloads (0x01 against the empty string).
-//
-// The EncodeIndex leaf is the consensus-visible part: before the registry was
-// wired in, type 5 fell to the default arm and contributed zero bytes, so the
-// receipts root of a block carrying an AA transaction changes here.
-func TestAccountAbstractionReceiptEncoding(t *testing.T) {
+// TestAccountAbstractionReceiptStaysUnencoded pins type 5 out of the consensus
+// receipt paths: giving it an encoding it never had moves the receipts root of
+// an RIP-7560 block. Storage is the exception, and already round-trips type 5.
+func TestAccountAbstractionReceiptStaysUnencoded(t *testing.T) {
 	t.Parallel()
 
-	roots := []common.Hash{
-		common.HexToHash("0x1b9e70ed972e759c9b3da0c6393e8c7737bc9a1139481bb8a2876218be238784"),
-		common.HexToHash("0x9d13aed92c9bd29c7d8fcb09dd05d836d7cc0dc8802e6cb30449b6ea3e81f5f7"),
+	r := &Receipt{
+		Type:              AccountAbstractionTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Logs: []*Log{{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead")},
+			Data:    []byte{0xff},
+		}},
 	}
-	for i, status := range []uint64{ReceiptStatusSuccessful, ReceiptStatusFailed} {
-		r := &Receipt{
-			Type:              AccountAbstractionTxType,
-			Status:            status,
-			CumulativeGasUsed: 21000,
-			Logs: []*Log{{
-				Address: common.BytesToAddress([]byte{0x11}),
-				Topics:  []common.Hash{common.HexToHash("dead")},
-				Data:    []byte{0xff},
-			}},
-		}
-		r.Bloom = CreateBloom(Receipts{r})
+	r.Bloom = CreateBloom(Receipts{r})
 
-		binary, err := r.MarshalBinary()
-		require.NoError(t, err)
-		require.Equal(t, byte(AccountAbstractionTxType), binary[0])
+	_, err := r.MarshalBinary()
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP(new(bytes.Buffer)), ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP69(new(bytes.Buffer)), ErrTxTypeNotSupported)
 
-		payload, err := rlp.EncodeToBytes(&receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs})
-		require.NoError(t, err)
-		var buf bytes.Buffer
-		Receipts{r}.EncodeIndex(0, &buf)
-		require.Equal(t, append([]byte{AccountAbstractionTxType}, payload...), buf.Bytes())
-		require.Equal(t, roots[i], DeriveSha(Receipts{r}))
+	var buf bytes.Buffer
+	Receipts{r}.EncodeIndex(0, &buf)
+	require.Empty(t, buf.Bytes())
 
-		got := new(Receipt)
-		require.NoError(t, got.UnmarshalBinary(binary))
-		require.Equal(t, r.Type, got.Type)
-		require.Equal(t, r.Status, got.Status)
-		require.Equal(t, r.CumulativeGasUsed, got.CumulativeGasUsed)
-		require.Equal(t, r.Logs, got.Logs)
-	}
+	// The empty-leaf root main derives for the same receipt.
+	require.Equal(t, common.HexToHash("0x01d05430bbe453102aa0430967e6389b1083ce3e3c04b5653034be32d99e00b6"), DeriveSha(Receipts{r}))
+
+	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(r))
+	require.NoError(t, err)
+	unstored := new(ReceiptForStorage)
+	require.NoError(t, rlp.DecodeBytes(stored, unstored))
+	require.Equal(t, r.Type, unstored.Type)
+	require.Equal(t, r.CumulativeGasUsed, unstored.CumulativeGasUsed)
 }
 
 // TestTypedReceiptDecodersAgree pins UnmarshalBinary and DecodeRLP to the same
