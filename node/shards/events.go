@@ -49,6 +49,8 @@ type Events struct {
 	syncStateSubscriptions      map[int]chan *remoteproto.SyncingReply
 	retirementStartSubscription map[int]chan bool
 	retirementDoneSubscription  map[int]chan struct{}
+	stateRetirementStartSubs    map[int]chan bool
+	stateRetirementDoneSubs     map[int]chan struct{}
 	pendingLogsSubscriptions    map[int]PendingLogsSubscription
 	pendingBlockSubscriptions   map[int]PendingBlockSubscription
 	pendingTxsSubscriptions     map[int]PendingTxsSubscription
@@ -76,6 +78,8 @@ func NewEvents() *Events {
 		syncStateSubscriptions:      map[int]chan *remoteproto.SyncingReply{},
 		retirementStartSubscription: map[int]chan bool{},
 		retirementDoneSubscription:  map[int]chan struct{}{},
+		stateRetirementStartSubs:    map[int]chan bool{},
+		stateRetirementDoneSubs:     map[int]chan struct{}{},
 	}
 }
 
@@ -185,6 +189,36 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 		e.lock.Lock()
 		defer e.lock.Unlock()
 		delete(e.retirementDoneSubscription, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddStateRetirementStartSubscription() (chan bool, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan bool, 8)
+	e.id++
+	id := e.id
+	e.stateRetirementStartSubs[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.stateRetirementStartSubs, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddStateRetirementDoneSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 8)
+	e.id++
+	id := e.id
+	e.stateRetirementDoneSubs[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.stateRetirementDoneSubs, id)
 		close(ch)
 	}
 }
@@ -317,6 +351,22 @@ func (e *Events) OnRetirementDone() {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.retirementDoneSubscription {
+		common.PrioritizedSend(ch, struct{}{})
+	}
+}
+
+func (e *Events) OnStateRetirementStart(started bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.stateRetirementStartSubs {
+		common.PrioritizedSend(ch, started)
+	}
+}
+
+func (e *Events) OnStateRetirementDone() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.stateRetirementDoneSubs {
 		common.PrioritizedSend(ch, struct{}{})
 	}
 }

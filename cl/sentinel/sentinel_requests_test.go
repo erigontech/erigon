@@ -353,6 +353,7 @@ func testSentinelStatusRequest(t *testing.T) {
 	defer stream.Close()
 
 	noErr(ssz_snappy.EncodeAndWrite(stream, req))
+	noErr(stream.CloseWrite())
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
