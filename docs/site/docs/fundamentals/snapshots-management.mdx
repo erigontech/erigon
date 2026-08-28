@@ -194,7 +194,7 @@ Re-encodes the commitment files already on disk instead of re-downloading them. 
 integration commitment convert --datadir /your/datadir --chain mainnet
 ```
 
-Both encoding flags default to `false`, and `false` is the target state that matches what v3.6 writes — so the command above, with no encoding flags, converts referenced files to plain and leaves the key encoding alone.
+Both encoding flags default to `false`, and `false` is the target state that matches what v3.6 writes — so the command above, with no encoding flags, targets plain values **and** V1 keys. Conversion is driven by both axes at once, not only the value axis: a file that is already plain but carries V2 keys is still rewritten, because its key encoding does not match the target.
 
 | Flag | Description |
 |------|-------------|
@@ -205,7 +205,7 @@ Both encoding flags default to `false`, and `false` is the target state that mat
 | `--restore` | Move the originals back from `snapshots/backup/domains/` and remove the converted files. Mutually exclusive with `--squeeze` / `--nibbles.v2` and with `--continue`. |
 | `--continue` | Resume an interrupted run, reusing complete shards left in `snapshots/rebuild/domain/`. Mutually exclusive with `--restore`. |
 
-The flag value is the **target** state, not a direction: the tool detects each file's current encoding and converts only what needs it, skipping files already in the target state.
+The flag value is the **target** state, not a direction: the tool detects each file's current encoding and converts only what needs it. A file is skipped only when **both** axes already match the target — `st.keysV2 == TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze` — so a mismatch on either axis rewrites the file.
 
 **Is it reversible?** Yes — this is the one path with a real undo. The originals are moved to `snapshots/backup/domains/`, and `--restore` puts them back. Restore is filesystem-only and runs even when the datadir is too broken for Erigon to open it. Because a leftover backup blocks a second conversion, restore or clear `snapshots/backup/domains/` before converting again.
 
@@ -235,7 +235,7 @@ erigon seg step-rebase --datadir /your/datadir --new-step-size=390625
 
 What it does: renames every state snapshot file under `snapshots/domain`, `history`, `accessor`, and `idx` so its step numbers are rescaled by the factor; deletes the `.torrent` files in those directories and `snapshots/erigondb.toml.torrent`, which the rebase invalidates; deletes `chaindata/` (or, with `--keep-blocks`, resets its execution-state tables); and rewrites `snapshots/erigondb.toml` with the new `step_size` and a correspondingly rescaled `steps_in_frozen_file`.
 
-The command prints the full rename and delete plan and asks for confirmation (`Proceed with these changes? [y/N]`) before touching anything, and exits as a no-op if the datadir is already at the requested step size. It is **destructive and has no built-in undo**, but it is safe to re-run after an interruption. The node must be **stopped** — it locks the datadir (and, with `--keep-blocks`, additionally opens `chaindata/` exclusively). The v3.4.0 release notes put the rebase itself at roughly ten seconds; the cost that follows is re-acquiring whatever was in `chaindata/`.
+The command prints the full rename and delete plan and asks for confirmation (`Proceed with these changes? [y/N]`) before touching anything, and exits as a no-op if the datadir is already at the requested step size. It is **destructive and has no built-in undo**, and an interrupted run must not simply be re-run: the new step size is written only after every rename has completed, so a crash partway through leaves the old size recorded next to partly renamed files. A second run reads that old size and rescales the already-renamed files again, corrupting their ranges. Recover the datadir from a backup instead. The node must be **stopped** — it locks the datadir (and, with `--keep-blocks`, additionally opens `chaindata/` exclusively). The v3.4.0 release notes put the rebase itself at roughly ten seconds; the cost that follows is re-acquiring whatever was in `chaindata/`.
 
 ---
 
