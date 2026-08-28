@@ -252,7 +252,7 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 }
 
 // txLatestReader reads directly from a pinned RO transaction, bypassing
-// SharedDomains memory so commitment reads stay on the parent view.
+// SharedDomains memory so commitment reads remain on the pinned parent view.
 type txLatestReader struct {
 	tx kv.TemporalTx
 }

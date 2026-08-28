@@ -422,6 +422,8 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 }
 
 // BranchChildCount returns a branch's child count from the post-compute view.
+// It reads branches written during computation from domain memory and falls
+// back to the installed state reader for unchanged branches.
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte) (int, error) {
 	stateReader := sdc.stateReader
 	if stateReader == nil {
