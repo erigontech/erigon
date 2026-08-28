@@ -94,6 +94,12 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
+	if len(k) > MaxKeyLen {
+		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
+	}
+	if len(v) > MaxValLen {
+		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
+	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
@@ -105,7 +111,8 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
-// Collect does copy `k` and `v`
+// Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
+// over MaxValLen - the spill format cannot spell either.
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
