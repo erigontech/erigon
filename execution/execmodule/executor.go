@@ -197,6 +197,29 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	// to roll back the current value at function exit, not the original.
 	defer func() { tx.Rollback() }()
 
+	// Drop the snapshots stage's download-completion pin on every exit (see
+	// Notifications.ClearSnapshotDownloadPin for its lifecycle). Registered
+	// before the stage so a failure inside it, after the pin is published, is
+	// covered too; the publish runs on a non-cancelled ctx because the failure
+	// often IS a cancellation. Skipped when only downloading — execution, and
+	// with it the handoff the pin bridges, happens elsewhere.
+	defer func() {
+		if onlySnapDownload {
+			return
+		}
+		hook.ClearSnapshotDownloadPin()
+		// Publish unconditionally: a publish inside the pipeline reports the pin's
+		// commitment block from an uncommitted Execution bump, which a failure then
+		// rolls back, so subscribers need the honest drop pushed to them either way.
+		// PublishSyncState dedups, so an unchanged reply costs a ro-tx.
+		if viewErr := pe.db.View(context.WithoutCancel(ctx), func(tx kv.Tx) error {
+			hook.NotifySyncState(tx)
+			return nil
+		}); viewErr != nil {
+			pe.logger.Warn("[OtterSync] sync-state publish after dropping the download pin failed", "err", viewErr)
+		}
+	}()
+
 	// Run snapshots stage — downloads block files.
 	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
 		return err

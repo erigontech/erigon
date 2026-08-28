@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -225,11 +224,11 @@ func TestEngineApiForkBounceStateChurn(t *testing.T) {
 	})
 }
 
-// buildChurnChain deploys StateChurn at block 2 on the given tester and then
-// applies one poke per block, using seed(k) for the k-th poke. payloads[0] is
-// the deploy block (height 2) and payloads[k+1] is the block applying poke k
-// (height 3+k). sums[i] is the on-chain trackedSum observed at payloads[i] and
-// is the ground truth a later unwind/reorg must reproduce.
+// buildChurnChain deploys StateChurn in the next block and then applies one
+// poke per block, using seed(k) for the k-th poke. payloads[0] is the deploy
+// block and payloads[k+1] applies poke k. sums[i] is the on-chain trackedSum
+// observed at payloads[i] and is the ground truth a later unwind/reorg must
+// reproduce.
 func buildChurnChain(
 	ctx context.Context,
 	t *testing.T,
@@ -254,15 +253,28 @@ func buildChurnChain(
 	sums = append(sums, recordChurnSum(ctx, t, churn))
 
 	for k := range pokes {
-		txn, err := churn.Poke(transactOpts, big.NewInt(seed(k)))
-		require.NoError(t, err)
-		block, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
+		block := applyStateChurnPoke(ctx, t, eat, churn, transactOpts, seed(k))
 		payloads = append(payloads, block)
 		sums = append(sums, recordChurnSum(ctx, t, churn))
 	}
 	return payloads, addr, churn, sums
+}
+
+func applyStateChurnPoke(
+	ctx context.Context,
+	t *testing.T,
+	eat engineapitester.EngineApiTester,
+	churn *contracts.StateChurn,
+	transactOpts *bind.TransactOpts,
+	seed int64,
+) *engineapitester.MockClPayload {
+	t.Helper()
+	txn, err := churn.Poke(transactOpts, big.NewInt(seed))
+	require.NoError(t, err)
+	block, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
+	return block
 }
 
 // churnAndAssert applies pokes one block at a time on the tester's current
@@ -281,15 +293,7 @@ func churnAndAssert(
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
 	require.NoError(t, err)
 	transactOpts.GasLimit = params.MaxTxnGasLimit
-	coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 	for k := range pokes {
-		// Pin the nonce to the head state: the txpool's own pending-nonce view
-		// can be stale right after a reorg/restart (re-injected dead-fork txns,
-		// https://github.com/erigontech/erigon/issues/22299), and submission is
-		// retried while the pool digests the head change.
-		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.LatestBlock)
-		require.NoError(t, err)
-		transactOpts.Nonce = nonce
 		var txn types.Transaction
 		require.Eventually(t, func() bool {
 			var err error

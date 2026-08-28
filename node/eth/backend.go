@@ -242,9 +242,44 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	return nil
 }
 
+type newOptions struct {
+	stateTransitionObserver execmodule.StateTransitionObserver
+	rpcStateCacheDecorator  func(kvcache.Cache) kvcache.Cache
+}
+
+// NewOption configures Ethereum construction without adding runtime settings.
+type NewOption func(*newOptions)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) NewOption {
+	return func(options *newOptions) {
+		options.stateTransitionObserver = observer
+	}
+}
+
+// WithRPCStateCacheDecorator wraps the embedded RPC state cache during construction.
+func WithRPCStateCacheDecorator(decorator func(kvcache.Cache) kvcache.Cache) NewOption {
+	return func(options *newOptions) {
+		options.rpcStateCacheDecorator = decorator
+	}
+}
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+func New(
+	ctx context.Context,
+	stack *node.Node,
+	config *ethconfig.Config,
+	logger log.Logger,
+	tracer *tracers.Tracer,
+	opts ...NewOption,
+) (*Ethereum, error) {
+	options := newOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	var kzgWarmupDone chan struct{}
 	if config.WarmupKzgCtxOnInit {
 		kzgWarmupDone = make(chan struct{})
@@ -677,8 +712,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	execmoduleCache := &execmodule.Cache{}
 	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
+	var rpcStateCache kvcache.Cache = execmoduleCache
+	if options.rpcStateCacheDecorator != nil {
+		rpcStateCache = options.rpcStateCacheDecorator(rpcStateCache)
+	}
 	httpRpcCfg := stack.Config().Http
-	httpRpcCfg.StateCache.LocalCache = execmoduleCache
+	httpRpcCfg.StateCache.LocalCache = rpcStateCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,
 		backend.chainDB,
@@ -891,6 +930,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
 		backend.stopNode,
+		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 
@@ -1436,13 +1476,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
-	// Wait for any in-flight updateForkChoice goroutine to finish. These are
-	// fire-and-forget goroutines that hold DB read transactions; without this
-	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
+	// Detached forkchoice work can hold a database transaction. Shutdown must
+	// drain it completely before chainDB.Close rather than continue on a timer.
 	if s.execModule != nil {
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		s.execModule.WaitIdle(waitCtx)
-		waitCancel()
+		s.execModule.Drain()
 	}
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read

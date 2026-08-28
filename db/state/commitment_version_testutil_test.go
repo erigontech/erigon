@@ -60,7 +60,7 @@ func writeStepsKeys(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, key
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	var blockNum uint64
@@ -86,7 +86,7 @@ func recomputeRootFromState(t *testing.T, db kv.TemporalRwDB) []byte {
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	acit, err := rwTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
