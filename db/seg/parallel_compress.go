@@ -744,10 +744,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 					uncoveredCount += int(pos) - lastUncovered
 				}
 				lastUncovered = int(pos) + len(patternCode.word)
-				if patternCode != nil {
-					if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
-						return e
-					}
+				if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+					return e
 				}
 			}
 			if int(l) > lastUncovered {
@@ -1135,7 +1133,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 			}
 		}
 
-		superStringsPool.Put(superstring)
+		superStringsPool.Put(superstring) //nolint:staticcheck // boxing one slice header per 16MB superstring is cheaper than an indirection in the scan loop
 	}
 }
 

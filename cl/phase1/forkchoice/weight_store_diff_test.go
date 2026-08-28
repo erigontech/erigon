@@ -240,7 +240,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 	defer f.mu.Unlock()
 
 	full := NewWeightStore(f)
-	tree := f.gloasWeightTree.prepare(justified, cs)
+	f.gloasWeightTree.prepare(justified, cs)
 
 	voters := make([]uint64, 0)
 	for i := 0; i < f.latestMessages.latestMessagesCount(); i++ {
@@ -268,7 +268,7 @@ func TestGloasWeightTreeDeltaMatchesFullScan(t *testing.T) {
 			PayloadPresent: n%2 == 0,
 		})
 	}
-	tree = f.gloasWeightTree.prepare(justified, cs)
+	tree := f.gloasWeightTree.prepare(justified, cs)
 
 	sawNonZero := false
 	for _, root := range roots {

@@ -231,7 +231,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	resultCode := &CreationCode{}
-	if ct.resultCode != nil && len(ct.resultCode) > 0 {
+	if len(ct.resultCode) > 0 {
 		c := hexutil.Bytes(ct.resultCode)
 		resultCode.Code = &c
 		return resultCode, nil

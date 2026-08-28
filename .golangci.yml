@@ -16,6 +16,7 @@ linters:
     - nilnesserr
     - prealloc
     - reassign
+    - staticcheck
     - govet
     - makezero
     - errchkjson
@@ -65,6 +66,14 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
+    staticcheck:
+      # Deliberately narrower than the default (all minus a few ST): the default
+      # set is ~566 findings here, dominated by QF1008 and ST1005. SA1019 waits
+      # on 42 deprecations; ST* and QF* are each their own cleanup.
+      checks:
+        - SA*
+        - S1*
+        - -SA1019
     govet:
       enable:
         - nilness
@@ -168,7 +177,7 @@ linters:
           )/[^/]+\\.go$"
       - linters:
           - staticcheck
-        text: ST1019|ST1029|ST5011|QF1003|SA1019|QF1008|S1021|QF1001|SA6005|S1002|QF1002|QF1012|QF1006|ST1005|SA5011|ST1023|ST1012|QF1011|S1019|S1000|S1000|S1009|ST1008|S1016|S1016|ST1017|SA4009|QF1007|SA6002|QF1010|SA9003|SA4006|SA4010
+        text: ST1019|ST1029|ST5011|QF1003|QF1008|S1021|QF1001|S1002|QF1002|QF1012|QF1006|ST1005|ST1023|ST1012|QF1011|S1019|S1000|S1000|S1009|ST1008|S1016|S1016|ST1017|QF1007|QF1010
       - linters:
           - gosec
           - perfsprint
