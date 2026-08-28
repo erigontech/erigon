@@ -581,3 +581,30 @@ func TestDecodeBlockAccessListBytesRejectsMalformedRLP(t *testing.T) {
 		}
 	}
 }
+
+// A reused AccountChanges receiver must not keep the previous decode's slots
+// when the next payload carries none: every other field is overwritten
+// unconditionally, so StorageChanges has to be too.
+func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
+	withSlots := AccountChanges{
+		Address: accounts.InternAddress(common.Address{1}),
+		StorageChanges: []SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{2}),
+			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
+		}},
+	}
+	empty := AccountChanges{Address: accounts.InternAddress(common.Address{9})}
+
+	var buf bytes.Buffer
+	if err := empty.EncodeRLP(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	ac := withSlots // reuse a receiver that already holds slots
+	if err := ac.DecodeRLP(rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(ac.StorageChanges) != 0 {
+		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
+	}
+}

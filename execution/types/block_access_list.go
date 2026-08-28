@@ -339,6 +339,7 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
+	ac.StorageChanges = nil
 	if len(list) > 0 {
 		ac.StorageChanges = make([]SlotChanges, len(list))
 		for i, sc := range list {
