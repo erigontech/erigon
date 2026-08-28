@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -1179,4 +1180,70 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 			require.NotContains(t, string(inner.Buffer()), `"result":`)
 		})
 	}
+}
+
+// TestPoolHandsBackAcleanStream pins what Put must clear: a reused stream that
+// kept the previous response's bytes would prepend them to the next one, and one
+// that kept the latched error would fail every Flush without draining.
+func TestPoolHandsBackACleanStream(t *testing.T) {
+	s := Get(goneWriter{}).(*StackStream)
+	s.WriteObjectStart()
+	s.WriteObjectField("a")
+	s.WriteString(strings.Repeat("x", 2*FlushThreshold))
+	require.Error(t, s.Flush())
+	Put(s)
+
+	var out bytes.Buffer
+	reused := Get(&out)
+	require.Empty(t, reused.Buffer())
+	require.Equal(t, 0, reused.Depth())
+	reused.WriteString("ok")
+	require.NoError(t, reused.Flush())
+	require.Equal(t, `"ok"`, out.String())
+	Put(reused)
+}
+
+// A response that grew far past the flush threshold is dropped rather than
+// pooled, so one outsized value cannot pin its peak for the life of the process.
+func TestPoolDropsOversizedBuffers(t *testing.T) {
+	s := Get(nil).(*StackStream)
+	s.WriteString(strings.Repeat("x", 8*FlushThreshold))
+	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
+	Put(s)
+
+	for range 8 {
+		got := Get(nil).(*StackStream)
+		require.LessOrEqual(t, cap(got.Buffer()), maxPooledBufferSize)
+		Put(got)
+	}
+}
+
+func BenchmarkStreamAcquire(b *testing.B) {
+	result := strings.Repeat("0xabcdef", 512)
+	write := func(s Stream) {
+		s.WriteObjectStart()
+		s.WriteObjectField("jsonrpc")
+		s.WriteString("2.0")
+		s.WriteMore()
+		s.WriteObjectField("result")
+		s.WriteString(result)
+		s.WriteObjectEnd()
+	}
+	b.Run("impl=new", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			s := New(io.Discard)
+			write(s)
+			_ = s.Flush()
+		}
+	})
+	b.Run("impl=pool", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			s := Get(io.Discard)
+			write(s)
+			_ = s.Flush()
+			Put(s)
+		}
+	})
 }

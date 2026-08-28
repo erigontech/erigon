@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"io"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 
@@ -52,4 +53,31 @@ func New(out io.Writer) Stream {
 // NewSized is New with an explicit initial buffer size.
 func NewSized(out io.Writer, bufSize int) Stream {
 	return newStackStream(out, bufSize)
+}
+
+var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}
+
+// maxPooledBufferSize bounds what a stream may carry back into the pool. A value
+// larger than the flush threshold grows the buffer past it in one write, and
+// keeping that would pin one request's peak for the life of the process.
+const maxPooledBufferSize = 4 * FlushThreshold
+
+// Get is New over a pool, so a response reuses the previous one's buffer instead
+// of growing a fresh 4KB one up to the flush threshold. Hand the stream back with
+// Put once the bytes have left it; not doing so only costs the recycling.
+func Get(out io.Writer) Stream {
+	s := streamPool.Get().(*StackStream)
+	s.Reset(out)
+	return s
+}
+
+// Put returns a stream to the pool. The caller must hold no view of Buffer()
+// afterwards, and must not write to the stream again.
+func Put(s Stream) {
+	ss, ok := s.(*StackStream)
+	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize {
+		return
+	}
+	ss.Reset(nil)
+	streamPool.Put(ss)
 }

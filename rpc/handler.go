@@ -221,7 +221,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				// streamed response: res == nil, already written to the stream.
 				// notification: no response, leaving buf empty (only non-empty buffers reply).
 				buf := bytes.NewBuffer(nil)
-				stream := jsonstream.New(buf)
+				stream := jsonstream.Get(buf)
+				defer jsonstream.Put(stream)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					res.writeTo(stream)
 				}
@@ -233,7 +234,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		}
 		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
-		out := jsonstream.New(nil)
+		out := jsonstream.Get(nil)
+		defer jsonstream.Put(out)
 		out.WriteArrayStart()
 		wrote := false
 		for _, answer := range answersWithNils {
@@ -279,7 +281,8 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	h.startCallProc(func(cp *callProc) {
 		needWriteStream := false
 		if stream == nil {
-			stream = jsonstream.New(nil)
+			stream = jsonstream.Get(nil)
+			defer jsonstream.Put(stream)
 			needWriteStream = true
 		}
 		answer := h.handleCallMsg(cp, msg, stream)
