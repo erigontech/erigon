@@ -41,6 +41,7 @@ var (
 	databaseVerbosity            int
 	referenceChaindata           string
 	block, unwind                uint64
+	limit                        uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
@@ -109,6 +110,10 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
 
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&limit, "limit", 0, "execute at most this many blocks past current progress, then stop (0 = unlimited, overridden by --block if --block is lower)")
+}
+
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
@@ -168,8 +173,13 @@ func withDataDir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 }
 
+// withExperimentalCommitment binds the flag erigon uses to pick the commitment
+// trie. The default ORs erigon's own flag default with the env-derived value so
+// that flipping the default in one binary cannot leave the other on a different
+// trie.
 func withExperimentalCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
+	def := statecfg.ExperimentalParallelCommitment || utils.ExperimentalParallelCommitmentFlag.Value
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
