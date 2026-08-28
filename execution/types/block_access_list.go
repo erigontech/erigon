@@ -1039,10 +1039,10 @@ func (bal BlockAccessList) ValidateForBlock(gasLimit uint64) error {
 func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
 	maxItems := blockGasLimit / BalItemCost
 	var items uint64
-	for _, ac := range bal {
+	for i := range bal {
 		items++ // each address counts as 1 item
-		items += uint64(len(ac.StorageChanges))
-		items += uint64(len(ac.StorageReads))
+		items += uint64(len(bal[i].StorageChanges))
+		items += uint64(len(bal[i].StorageReads))
 	}
 	if items > maxItems {
 		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)

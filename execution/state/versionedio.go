@@ -2864,12 +2864,12 @@ func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, 
 
 	ac := account.changes
 	if at >= 0 {
-		changes := ac.StorageChanges[at].Changes
+		sc := &ac.StorageChanges[at]
 		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
-		if n := len(changes); n > 0 && val.Eq(&changes[n-1].Value) {
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
 			return
 		}
-		ac.StorageChanges[at].Changes = append(changes, &types.StorageChange{Index: txIndex, Value: val})
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: txIndex, Value: val})
 		return
 	}
 

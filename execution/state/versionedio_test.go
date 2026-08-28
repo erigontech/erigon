@@ -1841,11 +1841,11 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		a.changes.StorageReads = kept
 	}
 	if at >= 0 {
-		changes := a.changes.StorageChanges[at].Changes
-		if n := len(changes); n > 0 && val.Eq(&changes[n-1].Value) {
+		sc := &a.changes.StorageChanges[at]
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
 			return
 		}
-		a.changes.StorageChanges[at].Changes = append(changes, &types.StorageChange{Index: idx, Value: val})
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: idx, Value: val})
 		return
 	}
 	a.changes.StorageChanges = append(a.changes.StorageChanges, types.SlotChanges{
