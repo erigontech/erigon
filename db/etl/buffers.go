@@ -44,10 +44,9 @@ const (
 	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
+	entryLocSize = 12 // sizeof(entryLoc): offset(4) + keyLen(4) + valLen(4)
 )
 
-// writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
 // A spill file prefixes each field with its length. Fixed width rather than a
 // varint: the file never leaves the machine that wrote it. A key is capped at
 // maxKeyLen so two bytes hold it; a value has no cap.
@@ -69,6 +68,7 @@ func putValLen(dst []byte, valLen int32) {
 	binary.NativeEndian.PutUint32(dst, uint32(valLen)) //nolint:gosec
 }
 
+// writeSortedEntries writes the entries to w in the spill format above.
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry, numBuf []byte) error {
 	for _, entry := range entries {
 		keyLen, valLen := int32(len(entry.key)), int32(len(entry.value)) //nolint:gosec
@@ -125,11 +125,13 @@ const (
 	// entryLoc.offset can pack the chunk index with the offset inside the chunk
 	// and splitting the two is a shift and a mask. 1MB is also the least a
 	// collector can hold once it takes a chunk at all.
-	// A key must fit a chunk, since Sort slices it straight out of one.
-	maxKeyLen = 4096
-
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
+
+	// A key spells its length in keyLenSize bytes with nilKeyLen reserved, so
+	// the ceiling is 65534. 4096 is policy under that ceiling - no caller comes
+	// near it, and Collect rejects the rest.
+	maxKeyLen = 4096
 
 	// The chunk index takes what is left of a positive int32, so one buffer
 	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
