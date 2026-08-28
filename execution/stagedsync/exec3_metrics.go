@@ -445,7 +445,7 @@ func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvme
 	return prevMetrics
 }
 
-func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMetrics bool, logPrefix string, logger log.Logger) *Progress {
+func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, logPrefix string, logger log.Logger) *Progress {
 	now := time.Now()
 	return &Progress{
 		initialTime:           now,
@@ -477,7 +477,6 @@ type Progress struct {
 	prevAccountReadDuration        time.Duration
 	prevStorageReadDuration        time.Duration
 	prevCodeReadDuration           time.Duration
-	prevTaskReadCount              int64
 	prevTaskGas                    int64
 	prevBlockCount                 int64
 	prevBlockDuration              time.Duration

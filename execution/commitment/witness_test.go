@@ -39,9 +39,6 @@ func nodeSet(nodes [][]byte) map[string]struct{} {
 	return m
 }
 
-// TestWitnessNodesForKeys_ByHashEquivalence asserts the byHash-walk prune returns
-// exactly the same lean node set as RLPDecode + WitnessNodesForKeys, across account,
-// account+storage, and canonical (no exclusion) shapes.
 func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
@@ -97,9 +94,6 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 	}
 }
 
-// RLPDecode rebuilds blinded children as *trie.HashNode; a proved key that steps
-// onto one (an absent slot diverging at a canonical-mode branch) must stop cleanly
-// in both the prune and Prove, never panic on the pointer type.
 func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	ctx := context.Background()
 	ms := NewMockState(t)
@@ -150,14 +144,10 @@ func (r *recordingTracer) onNode(rlp, hash []byte) {
 	r.nodes = append(r.nodes, capturedNode{rlp: string(rlp), hash: string(hash)})
 }
 
-// Test_witness_capture exercises the witness helper directly: an inactive witness
-// passes the keccak writer through untouched and emits nothing, while an active one
-// tees leaf bytes through leafBuf and accumulates a branch from its prefix and slots.
 func Test_witness_capture(t *testing.T) {
 	var w witness
 	var sink bytes.Buffer
 
-	// inactive: passthrough writer, emits are no-ops, no panic on nil tracer
 	require.False(t, w.active())
 	require.Same(t, &sink, w.leafWriter(&sink))
 	w.emitLeaf([]byte("x"))
@@ -187,10 +177,6 @@ func Test_witness_capture(t *testing.T) {
 	require.False(t, w.active())
 }
 
-// Test_WitnessTracer_CapturedNodesReconstructRoot proves the fold-time tap captures
-// the exact consensus node bytes: decoding the full captured node-set rebuilds the
-// commitment root. memoizationOff forces every node to be re-hashed so the capture is
-// complete.
 func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
@@ -226,10 +212,6 @@ func Test_WitnessTracer_CapturedNodesReconstructRoot(t *testing.T) {
 	require.Equal(t, root, tr.Root(), "captured node-set must reconstruct the commitment root")
 }
 
-// witnessResolvesAbsence walks the witness trie following key the way a strict stateless
-// verifier does: every node on the path, including the child of a divergent extension, must
-// be materialized. Unlike trie.Get it does not accept a bare HashNode behind a divergent
-// extension as proof of absence.
 func witnessResolvesAbsence(n trie.Node, key []byte, pos int) bool {
 	switch x := n.(type) {
 	case nil:
@@ -260,10 +242,6 @@ func witnessResolvesAbsence(n trie.Node, key []byte, pos int) bool {
 	}
 }
 
-// witnessNodeAtPath returns the witness node reached after consuming the whole
-// hashed path, descending account→storage and through extension/branch nodes
-// (terminator-aware). It is used to assert what a strict verifier finds at a
-// collapse sibling's prefix — a materialized branch rather than a bare HashNode.
 func witnessNodeAtPath(n trie.Node, key []byte, pos int) trie.Node {
 	if pos == len(key) {
 		return n
@@ -287,10 +265,6 @@ func witnessNodeAtPath(n trie.Node, key []byte, pos int) trie.Node {
 	}
 }
 
-// witnessMaterializesNodeAt reports whether the witness holds a materialized
-// (present, non-blinded) node at the end of the hashed path. A strict verifier
-// descending to a collapse sibling's prefix must find a real branch/leaf there,
-// not a bare HashNode it cannot re-form the collapsing branch from.
 func witnessMaterializesNodeAt(root trie.Node, key []byte) bool {
 	n := witnessNodeAtPath(root, key, 0)
 	if n == nil {
@@ -311,10 +285,6 @@ func touchUpdates(touchAccounts, touchStorage [][]byte) *Updates {
 	return u
 }
 
-// Test_Witnesses_ExclusionAcrossFoldedExtension drives Witnesses() in legacy mode
-// on the #21810 shape (absent slot diverging inside a folded storage extension)
-// and asserts the captured set proves absence — the diverging branch is
-// materialized during positioning.
 func Test_Witnesses_ExclusionAcrossFoldedExtension(t *testing.T) {
 	acctPlains, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 2, 6)
 	acctPlain := acctPlains[0]
@@ -348,10 +318,6 @@ func Test_Witnesses_ExclusionAcrossFoldedExtension(t *testing.T) {
 	require.True(t, witnessResolvesAbsence(decoded.RootNode, KeyToHexNibbleHash(absentStorageKey), 0),
 		"Witnesses must materialize the diverging branch to prove the absent slot")
 }
-
-// Strict (reth-equivalent) witness oracle: root equality is necessary-not-sufficient,
-// so each accessed key must also strictly resolve — present keys fully materialized,
-// absent keys diverging at a materialized node, never a bare HashNode on the path.
 
 func assertPresentStrict(t *testing.T, wt *trie.Trie, plainKey []byte) {
 	t.Helper()

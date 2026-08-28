@@ -105,18 +105,41 @@ jobs:
         env:
           FUZZTIME: ${{ inputs.fuzztime || '120s' }}
           ERIGON_BUILD: ${{ steps.erigon.outputs.build }}
+          PKG: ${{ matrix.pkg }}
+          FN: ${{ matrix.fn }}
+          FUZZ_DIR: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.fn }}
         run: |
           mkdir -p "$ERIGON_BUILD/fuzz"
-          echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
-          go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
+          out="${RUNNER_TEMP}/fuzz.out"
+          echo "::group::go test -fuzz ${FN} (./${PKG}, ${FUZZTIME})"
+          set +e
+          go test "./${PKG}/" -run '^$' -fuzz "^${FN}\$" -fuzztime "${FUZZTIME}" 2>&1 | tee "$out"
+          status="${PIPESTATUS[0]}"
+          set -e
           echo "::endgroup::"
+          if [ "$status" -eq 0 ]; then exit 0; fi
+          # internal/fuzz can misreport the end of the fuzztime window as a failure:
+          # it compares the timeout context's error against the child context it
+          # cancels workers with, and cancellation reaches the parent's Done channel
+          # before the child's Err is set (golang/go#75804, fixed in Go 1.27 — drop
+          # this branch once CI runs 1.27+). That path writes no reproducer and its
+          # only detail is a bare "context deadline exceeded" — unlike a real crash,
+          # which always writes a reproducer, or a failing seed corpus entry, which
+          # names the entry. Suppress only that exact combination.
+          if grep -qE '^[[:space:]]*context deadline exceeded[[:space:]]*$' "$out" \
+            && ! grep -q 'failure while testing seed corpus entry' "$out" \
+            && [ -z "$(git ls-files --others --exclude-standard -- "$FUZZ_DIR" 2>/dev/null)" ]; then
+            echo "::warning::Fuzz ${FN} (${PKG}): engine reported 'context deadline exceeded' at the end of the fuzztime window — upstream race, no defect found"
+            exit 0
+          fi
+          exit "$status"
 
-      # Tell a genuine crash from an engine timeout. On a crash `go test` writes a
-      # minimized reproducer under <pkg>/testdata/fuzz/<Fn>/ as an untracked file
-      # (committed seeds are tracked, so they don't count). A `context deadline
-      # exceeded` at the end of the fuzztime window leaves no such file; that is
-      # noise to verify, not a bug. Record a per-leg marker either way so `notify`
-      # can list exactly what failed.
+      # Reaching here means a real failure. A crash leaves a minimized reproducer
+      # under <pkg>/testdata/fuzz/<Fn>/ as an untracked file (committed seeds are
+      # tracked, so they don't count); anything else — a failing seed corpus entry,
+      # a build error, the runner running out of memory — leaves none and still
+      # needs a human. Record a per-leg marker either way so `notify` can list
+      # exactly what failed.
       - name: Classify failure
         id: classify
         if: failure()
@@ -140,7 +163,7 @@ jobs:
           if [ "$kind" = crash ]; then
             echo "::error::Fuzz crash in $FN ($PKG) — reproducer written under $FUZZ_DIR"
           else
-            echo "::warning::Fuzz $FN ($PKG) failed with no reproducer (likely engine 'context deadline exceeded' at end of fuzztime)"
+            echo "::error::Fuzz $FN ($PKG) failed without writing a reproducer — check the step log"
           fi
 
       - name: Upload crash reproducer
@@ -159,8 +182,11 @@ jobs:
           path: fuzz-failure/${{ matrix.name }}.tsv
           if-no-files-found: ignore
 
+      # Keep $GOCACHE/fuzz: the corpus cache entry above is saved after this step.
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+        with:
+          clean-fuzzcache: 'false'
 
   notify:
     needs: [fuzz]
@@ -194,7 +220,7 @@ jobs:
                 list="${list}- \`${name}\` — ${fn} (${pkg}): **crash, reproducer attached** (artifact \`fuzz-crash-${name}\`)"$'\n'
                 crashes=$((crashes + 1))
               else
-                list="${list}- \`${name}\` — ${fn} (${pkg}): failed with no reproducer (likely engine timeout — verify against the next run)"$'\n'
+                list="${list}- \`${name}\` — ${fn} (${pkg}): **failed without a reproducer** — read the step log"$'\n'
                 norepro=$((norepro + 1))
               fi
             done < "$f"
@@ -228,9 +254,8 @@ jobs:
           ${FAILED_LIST}
           Legs marked **crash** have a minimized reproducer uploaded as a
           \`fuzz-crash-<target>\` artifact on the run. Legs with **no reproducer**
-          most likely hit an engine \`context deadline exceeded\` at the end of the
-          fuzztime window rather than a real defect — confirm they clear on the
-          next scheduled run before spending time on them.
+          failed some other way — a failing seed corpus entry, a build error, the
+          runner running out of memory — and the step log says which.
 
           Per repo policy a fuzz crash must be **investigated and fixed**, not
           skipped. To reproduce locally, drop the reproducer file into the

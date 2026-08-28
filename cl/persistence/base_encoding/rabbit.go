@@ -22,15 +22,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-
-	"github.com/klauspost/compress/zstd"
 )
 
 func WriteRabbits(in []uint64, w io.Writer) error {
 	// Retrieve compressor first.
-	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer putComp(compressor)
-	compressor.Reset(w)
+	compressor := getZstdWriter(w)
+	defer putZstdWriter(compressor)
 
 	var buf [8]byte
 	writeNum := func(v uint64) error {
@@ -77,11 +74,11 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 
 func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 	// Retrieve compressor first
-	decompressor, err := zstd.NewReader(r)
+	decompressor, err := GetZstdReader(r)
 	if err != nil {
 		return nil, err
 	}
-	defer decompressor.Close()
+	defer PutZstdReader(decompressor)
 
 	var buf [8]byte
 	readNum := func() (uint64, error) {

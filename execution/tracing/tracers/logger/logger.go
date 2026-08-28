@@ -57,7 +57,7 @@ type LogConfig struct {
 	DisableStorage   bool `json:"disableStorage"`   // disable storage capture
 	EnableReturnData bool `json:"enableReturnData"` // enable return data capture
 	Debug            bool `json:"debug"`            // print output during capture end
-	Limit            int  `json:"limit"`            // maximum length of output, but zero means unlimited
+	Limit            int  `json:"limit"`            // maximum number of opcode steps to capture, but zero means unlimited
 	// Chain overrides, can be used to execute a trace using future fork rules
 	Overrides *chain.Config `json:"overrides,omitempty"`
 }

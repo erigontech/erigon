@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -44,7 +45,7 @@ func writeRefsToml(t *testing.T, dirs datadir.Dirs, refs bool) {
 func openTestAggForRefs(t *testing.T, dirs datadir.Dirs, settings *ErigonDBSettings) *Aggregator {
 	t.Helper()
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
 	agg := NewTest(dirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)
@@ -58,7 +59,7 @@ func TestReloadErigonDBSettingsAppliesCommitmentRefsFlag(t *testing.T) {
 	writeRefsToml(t, dirs, false)
 
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
 	agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)
