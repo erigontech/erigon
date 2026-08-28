@@ -383,6 +383,33 @@ func TestEstimateGasStateOverrideMovedPrecompile(t *testing.T) {
 	require.Greater(t, uint64(gas), params.TxGas+params.EcrecoverGas)
 }
 
+// TestEstimateGasCallDataFieldDoesNotChangeEstimate verifies that the same
+// calldata estimates the same whether it arrives as "input" or as "data".
+// Input wins in ToMessage, so keying the plain-transfer shortcut on args.Data
+// alone lets the field the caller picked decide which estimation path runs.
+func TestEstimateGasCallDataFieldDoesNotChangeEstimate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	codeless := common.HexToAddress("0x00000000000000000000000000000000000000f1")
+	payload := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef, 0x00, 0x00}
+
+	viaInput, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr, To: &codeless, Input: &payload,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+
+	viaData, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr, To: &codeless, Data: &payload,
+	}, nil, nil, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, viaData, viaInput)
+}
+
 func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
