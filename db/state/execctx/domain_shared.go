@@ -47,9 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var (
-	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
-)
+var mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 
 // CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
 // (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
@@ -535,7 +533,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
 }
 
@@ -1045,7 +1043,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 }
 
 func (sd *SharedDomains) Close() {
-	if sd.sdCtx == nil { //idempotency
+	if sd.sdCtx == nil { // idempotency
 		return
 	}
 
@@ -1780,7 +1778,7 @@ func (sd *SharedDomains) LogMetrics() []any {
 }
 
 func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
-	var logMetrics = map[kv.Domain][]any{}
+	logMetrics := map[kv.Domain][]any{}
 
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
