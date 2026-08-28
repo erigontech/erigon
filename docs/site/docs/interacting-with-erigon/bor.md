@@ -1,6 +1,6 @@
 ---
 title: "bor"
-description: "bor_ namespace: Polygon-specific APIs for Bor consensus layer interaction."
+description: "bor_ namespace: Bor consensus APIs, kept for reference — Polygon is not supported."
 sidebar_position: 10
 ---
 
