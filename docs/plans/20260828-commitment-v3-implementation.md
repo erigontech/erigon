@@ -149,18 +149,18 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/datastruct/btindex/btree_index.go`
 - Create: `db/datastruct/btindex/cursor_seek_test.go`
 
-- [ ] add `RSeek` returning the first key strictly greater than the argument — `Seek` then skip-if-equal
-- [ ] add `LSeek` returning the greatest key strictly less than the argument — `Seek` then step back
+- [x] add `RSeek` returning the first key strictly greater than the argument — `Seek` then skip-if-equal
+- [x] add `LSeek` returning the greatest key strictly less than the argument — `Seek` then step back
       one ordinal via `resetNoRead`, handling the past-the-end case where `Seek` returns `(nil, nil)`
       by positioning at `Count()-1`
-- [ ] add a doc line on `LSeek` stating it must not be used for ancestor lookup: an odd-length
+- [x] add a doc line on `LSeek` stating it must not be used for ancestor lookup: an odd-length
       ancestor's key ends `0xf0|a` while its descendants carry `a<<4|b` at that position, so the
       ancestor sorts after its own subtree
-- [ ] write tests for both against a built index: hit, miss, first key, last key, past the end, before
+- [x] write tests for both against a built index: hit, miss, first key, last key, past the end, before
       the first key, and empty index
-- [ ] write a test asserting `LSeek` on the first key returns no cursor rather than an out-of-bounds
+- [x] write a test asserting `LSeek` on the first key returns no cursor rather than an out-of-bounds
       error
-- [ ] run `go test ./db/datastruct/btindex/...` — must pass before task 3
+- [x] run `go test ./db/datastruct/btindex/...` — must pass before task 3
 
 ### Task 3: Edge record codec
 

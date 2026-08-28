@@ -17,6 +17,7 @@
 package btindex
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -135,8 +136,8 @@ func (c *Cursor) next() bool {
 }
 
 func (c *Cursor) resetNoRead(di uint64, g *seg.Reader) error {
-	if c.d >= c.ef.Count() {
-		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
+	if di >= c.ef.Count() {
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, di, c.ef.Count())
 	}
 
 	c.d = di
@@ -723,6 +724,57 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 		if errors.Is(err, ErrBtIndexLookupBounds) {
 			return nil, nil
 		}
+		return nil, err
+	}
+	return c, nil
+}
+
+// RSeek moves the cursor to the first key strictly greater than x.
+func (b *BtIndex) RSeek(g *seg.Reader, x []byte) (*Cursor, error) {
+	c, err := b.Seek(g, x)
+	if err != nil || c == nil {
+		return c, err
+	}
+	if !bytes.Equal(c.Key(), x) {
+		return c, nil
+	}
+	if !c.Next() {
+		c.Close()
+		return nil, nil
+	}
+	return c, nil
+}
+
+// LSeek moves the cursor to the greatest key strictly less than x. Do not use it for ancestor lookup:
+// an odd-length ancestor ends in 0xf0|a while descendants carry a<<4|b at that position, so the ancestor
+// sorts after its own subtree.
+func (b *BtIndex) LSeek(g *seg.Reader, x []byte) (*Cursor, error) {
+	if b.Empty() {
+		return nil, nil
+	}
+
+	c, err := b.Seek(g, x)
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		c = b.newCursor(nil, nil, b.ef.Count()-1, g)
+		if err := c.readKV(); err != nil {
+			c.Close()
+			return nil, err
+		}
+		return c, nil
+	}
+	if c.d == 0 {
+		c.Close()
+		return nil, nil
+	}
+	if err := c.resetNoRead(c.d-1, g); err != nil {
+		c.Close()
+		return nil, err
+	}
+	if err := c.readKV(); err != nil {
+		c.Close()
 		return nil, err
 	}
 	return c, nil
