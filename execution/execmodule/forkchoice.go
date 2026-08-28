@@ -263,6 +263,12 @@ func (e *ExecModule) unwindIfNeeded(
 		}
 	}
 	unwindTarget := currentParentNumber
+	if canonicalHash != blockHash && unwindTarget < finalisedBlockNum {
+		return &ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusInvalidForkchoice,
+		}, nil
+	}
 	// Determine current canonical tip from TxNums. If unwindTarget is at or
 	// above the canonical tip, there's nothing above to roll back — skip the
 	// unwind path entirely and proceed straight to forward-filling new
