@@ -100,7 +100,7 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	bal := types.BlockAccessList{
 		{Address: readOnlyAddress, StorageReads: []accounts.StorageKey{readSlot}},
 		{Address: accountAddress, BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
-		{Address: storageAddress, StorageChanges: []*types.SlotChanges{{
+		{Address: storageAddress, StorageChanges: []types.SlotChanges{{
 			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
 		}}},
 	}

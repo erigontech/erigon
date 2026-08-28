@@ -33,9 +33,6 @@ import (
 func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 	keyCount := 0
 	for _, account := range bal {
-		if account == nil {
-			continue
-		}
 		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
 			keyCount++
 		}
@@ -43,17 +40,11 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 	}
 	keys := make([][]byte, 0, keyCount)
 	for _, account := range bal {
-		if account == nil {
-			continue
-		}
 		address := account.Address.Value()
 		if len(account.BalanceChanges)+len(account.NonceChanges)+len(account.CodeChanges) > 0 {
 			keys = append(keys, commitment.KeyToHexNibbleHash(address[:]))
 		}
 		for _, storage := range account.StorageChanges {
-			if storage == nil {
-				continue
-			}
 			slot := storage.Slot.Value()
 			plainKey := make([]byte, len(address)+len(slot))
 			copy(plainKey, address[:])
