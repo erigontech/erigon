@@ -328,12 +328,65 @@ type Notifications struct {
 	RecentReceipts       *RecentReceipts
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 
+	// Snapshot download progress. Nil means no download is in progress;
+	// eth_syncing then reports block-based progress.
+	snapDownload atomic.Pointer[snapDownloadState]
+
 	syncStateLock sync.Mutex
 	lastSyncState *remoteproto.SyncingReply
 }
 
 func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
 	n.LastNewBlockSeen.Store(blockNum)
+}
+
+// snapDownloadState is published as a whole: the byte total is recomputed by
+// the downloader every cycle and grows as torrent metadata arrives, so mixing
+// fields from two samples can report more progress than was downloaded.
+type snapDownloadState struct {
+	phase       snapDownloadPhase
+	done, total uint64
+	targetBlock uint64 // highest block covered by the snapshots being downloaded
+	commitBlock uint64 // block where execution resumes once the download is done
+}
+
+type snapDownloadPhase uint8
+
+const (
+	snapDownloading snapDownloadPhase = iota
+	snapHandoff
+)
+
+// SetSnapshotDownloading records an in-flight snapshot-download sample in bytes
+// so eth_syncing can report it as block-based progress.
+func (n *Notifications) SetSnapshotDownloading(done, total, targetBlock uint64) {
+	n.snapDownload.Store(&snapDownloadState{done: done, total: total, targetBlock: targetBlock})
+}
+
+// SetSnapshotDownloadHandoff pins progress at the block where execution
+// resumes, bridging the window between a finished download and the first
+// committed execution progress.
+func (n *Notifications) SetSnapshotDownloadHandoff(commitBlock uint64) {
+	n.snapDownload.Store(&snapDownloadState{phase: snapHandoff, commitBlock: commitBlock})
+}
+
+// ClearSnapshotDownload drops the download state, so eth_syncing goes back to
+// reporting block-based progress.
+func (n *Notifications) ClearSnapshotDownload() {
+	n.snapDownload.Store(nil)
+}
+
+// ClearSnapshotDownloadPin ends the handoff, reporting whether it dropped one.
+// It is the only owner of that end: readers stop reporting the pin once they see
+// execution at the commitment block, but must not drop it, since the tx they read
+// can be ahead of the committed view. An in-flight sample is kept: after a failed
+// download it is the last honest progress the node can report.
+func (n *Notifications) ClearSnapshotDownloadPin() bool {
+	s := n.snapDownload.Load()
+	if s == nil || s.phase != snapHandoff {
+		return false
+	}
+	return n.snapDownload.CompareAndSwap(s, nil)
 }
 
 func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
