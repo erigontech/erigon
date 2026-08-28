@@ -148,7 +148,10 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		// NewPayload is sent to the EL. With false, a mutex-contention race silently
 		// marks the envelope as processed without ever notifying the EL, permanently
 		// breaking the chain.
-		s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
+		if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil {
+			log.Warn("Failed to eagerly store pending execution payload envelope in forkchoice",
+				"beaconBlockRoot", beaconBlockRoot, "builderIndex", builderIndex, "err", err)
+		}
 		log.Trace("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)

@@ -495,10 +495,10 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 	c.Close()
 
-	// buffers are not lost
-	require.Empty(t, buf.data)
+	// buffer state resets for reuse: entries keep their cap, chunks are cleared
+	require.Empty(t, buf.chunks)
 	require.Empty(t, buf.entries)
-	require.NotZero(t, cap(buf.data))
+	require.Zero(t, buf.Size())
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
@@ -624,9 +624,8 @@ func TestAppendAcrossProviders(t *testing.T) {
 }
 
 // TestAppendAcrossMemProviders tests that value concatenation works correctly
-// when multiple memoryDataProviders have the same key. GetRef returns zero-copy
-// slices into sortableBuffer.data — appending to prevV without copying would
-// corrupt adjacent entries in the buffer.
+// when multiple memoryDataProviders have the same key, across providers backed
+// by different buffer types (file-flushed and in-memory).
 func TestAppendAcrossMemProviders(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -917,7 +916,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 }
 
 // TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
-// memoryDataProvider (GetRef) are not corrupted by subsequent Next() calls.
+// memoryDataProvider (Get) are not corrupted by subsequent Next() calls.
 func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -927,7 +926,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
 	require.NoError(t, err)
 
-	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
+	// Memory provider with multiple keys - Get returns slices into sortableBuffer.chunks
 	memBuf := NewSortableBuffer(BufferOptimalSize)
 	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
 	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
@@ -1573,4 +1572,157 @@ func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
 	v, err := tx.GetOne(table, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
+}
+
+// TestSortableBufferChunks pins the chunked layout: key/value bytes live in
+// fixed-size chunks, so a growing buffer never re-allocates and copies the
+// bytes it already holds.
+func TestSortableBufferChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	const entries = 512
+	val := bytes.Repeat([]byte{0xAB}, 16*1024) // 512*16KB = 8MB of values
+	key := make([]byte, 8)
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		buf.Put(key, val)
+	}
+
+	require.Equal(t, entries, buf.Len())
+	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
+	for i, c := range buf.chunks {
+		require.Equal(t, dataChunkSize, cap(c), "chunk %d", i)
+	}
+
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		k, v := buf.Get(i)
+		require.Equal(t, key, k, "entry %d", i)
+		require.Equal(t, val, v, "entry %d", i)
+	}
+}
+
+// TestSortableBufferSortAcrossChunks: the sort comparator has to split a
+// packed offset back into a chunk index and an offset inside it, so entries
+// must still order correctly once they live past chunk 0.
+func TestSortableBufferSortAcrossChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	const entries = 512
+	val := bytes.Repeat([]byte{0xCD}, 16*1024) // 512*16KB = 8MB of values
+	key := make([]byte, 8)
+	for i := range entries {
+		// Scrambled, so IsSortedFunc cannot short-circuit and pdqsort really runs.
+		// 313 is odd, so it permutes a power-of-two range.
+		binary.BigEndian.PutUint64(key, uint64(i*313%entries))
+		buf.Put(key, val)
+	}
+	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
+
+	buf.Sort()
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		k, v := buf.Get(i)
+		require.Equal(t, key, k, "entry %d", i)
+		require.Equal(t, val, v, "entry %d", i)
+	}
+}
+
+// TestSortableBufferOversizedEntry: an entry bigger than one chunk gets a chunk
+// of its own - Get must still return one contiguous slice per key and value.
+func TestSortableBufferOversizedEntry(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	big := bytes.Repeat([]byte{0xCD}, dataChunkSize+7)
+	buf.Put([]byte{0x01}, []byte("small"))
+	buf.Put([]byte{0x02}, big)
+	buf.Put([]byte{0x03}, []byte("after"))
+
+	k, v := buf.Get(1)
+	require.Equal(t, []byte{0x02}, k)
+	require.Equal(t, big, v)
+	k, v = buf.Get(2)
+	require.Equal(t, []byte{0x03}, k)
+	require.Equal(t, []byte("after"), v)
+
+	w := bytes.NewBuffer(nil)
+	require.NoError(t, buf.Write(w))
+	m := &mmapBytesReader{data: w.Bytes()}
+	for i := range buf.Len() {
+		wantK, wantV := buf.Get(i)
+		gotK, err := readField(m)
+		require.NoError(t, err)
+		gotV, err := readField(m)
+		require.NoError(t, err)
+		require.Equal(t, wantK, gotK)
+		require.Equal(t, wantV, gotV)
+	}
+}
+
+// TestSortableBufferResetReleasesChunks: Reset drops the buffer's own chunk
+// slice and size bookkeeping so it can be reused immediately.
+func TestSortableBufferResetReleasesChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	val := bytes.Repeat([]byte{0xEF}, 16*1024)
+	for i := range 512 {
+		buf.Put(binary.BigEndian.AppendUint64(nil, uint64(i)), val)
+	}
+	require.NotEmpty(t, buf.chunks)
+
+	buf.Reset()
+	require.Empty(t, buf.chunks)
+	require.Zero(t, buf.Size())
+	require.Zero(t, buf.Len())
+
+	buf.Put([]byte{0x01}, []byte("reused"))
+	k, v := buf.Get(0)
+	require.Equal(t, []byte{0x01}, k)
+	require.Equal(t, []byte("reused"), v)
+}
+
+// TestPutDataChunkRejectsOversized: an entry's private chunk (bigger than
+// dataChunkSize) must never enter the shared pool — a later getDataChunk
+// handing it out under a normal chunk index would corrupt an unrelated buffer.
+func TestPutDataChunkRejectsOversized(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		length int
+		pooled bool
+	}{
+		{"short", dataChunkSize - 1, false},
+		{"exact", dataChunkSize, true},
+		{"oversized", dataChunkSize + 7, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.pooled, isPooledChunk(make([]byte, tc.length)))
+		})
+	}
+}
+
+// disposeProbe records whether the collector still owned its data chunks when
+// the provider was disposed.
+type disposeProbe struct {
+	buf          *sortableBuffer
+	sawOwnChunks bool
+}
+
+func (p *disposeProbe) Next() ([]byte, []byte, error) { return nil, nil, io.EOF }
+func (p *disposeProbe) Wait() error                   { return nil }
+func (p *disposeProbe) String() string                { return "disposeProbe" }
+func (p *disposeProbe) Dispose()                      { p.sawOwnChunks = len(p.buf.chunks) > 0 }
+
+// TestCloseDisposesProvidersBeforeBuffer: KeepInRAM hands out a provider backed
+// by the collector's own buffer, and Reset gives that buffer's chunks to a pool
+// other collectors draw from. So Close must be done with every provider before
+// it recycles the buffer.
+func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
+	allocator := NewAllocator(&sync.Pool{New: func() any { return NewSortableBuffer(BufferOptimalSize) }})
+	c := NewCollectorWithAllocator(t.Name(), t.TempDir(), allocator, log.New())
+	require.NoError(t, c.Collect([]byte{1}, []byte{2}))
+
+	probe := &disposeProbe{buf: c.buf.(*sortableBuffer)}
+	c.dataProviders = append(c.dataProviders, probe)
+	c.Close()
+
+	require.True(t, probe.sawOwnChunks, "buffer was recycled before its providers were disposed")
 }

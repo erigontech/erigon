@@ -178,13 +178,18 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
 	receipt := rn.Receipt
 	blockNum := receipt.BlockNumber.Uint64()
+	var blockTimestamp uint64
+	if rn.Header != nil {
+		blockTimestamp = rn.Header.Time
+	}
 
 	// Convert logs
 	protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
 	for _, l := range receipt.Logs {
 		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
-			Log:     l,
-			Removed: rn.Removed,
+			Log:            l,
+			BlockTimestamp: blockTimestamp,
+			Removed:        rn.Removed,
 		}))
 	}
 
