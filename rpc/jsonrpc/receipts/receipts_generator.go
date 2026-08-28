@@ -157,6 +157,12 @@ func (g *Generator) TryGetCachedReceipt(blockHash common.Hash, txNum uint64, txI
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+
+// PersistedReceiptsServed reports whether a receipt found in the persistent cache is
+// returned as the answer. Where it is not, the block is re-executed instead and reaches
+// only as far back as state history, whatever the receipt retention is.
+func PersistedReceiptsServed() bool { return !rpcDisableRCache && !dbg.AssertEnabled }
+
 var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
@@ -267,7 +273,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		if err != nil {
 			return nil, err
 		}
-		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		if ok && receiptFromDB != nil && PersistedReceiptsServed() {
 			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
@@ -512,7 +518,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, err
 		}
-		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+		if len(receiptsFromDB) > 0 && PersistedReceiptsServed() {
 			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
 			return receiptsFromDB, nil
 		}

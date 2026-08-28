@@ -19,6 +19,9 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -300,6 +304,7 @@ type chainProbeBlockReader struct {
 	dbservices.FullBlockReader
 	userTxns   []int
 	inflation  []int
+	missing    map[uint64]bool
 	unreadable bool
 	bodyReads  atomic.Int64
 }
@@ -310,7 +315,7 @@ func (r *chainProbeBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv
 
 func (r *chainProbeBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.BodyForStorage, error) {
 	r.bodyReads.Add(1)
-	if blockNum >= uint64(len(r.userTxns)) {
+	if blockNum >= uint64(len(r.userTxns)) || r.missing[blockNum] {
 		return nil, nil
 	}
 	base := 0
@@ -417,26 +422,25 @@ func TestPreMergeVerdictStopsAtTheFirstSampledTransaction(t *testing.T) {
 	require.LessOrEqual(t, reader.bodyReads.Load(), int64(2), "the count and the first sampled block answer")
 }
 
-// TestPreMergeVerdictReadsAnUnconfirmableCountAsArchive pins how far the cumulative
-// count is taken: it is an upper bound, since the database numbers non-canonical bodies
-// from the same sequence, so it can point below the first user transaction and leave the
-// search with no block to confirm. Bodies recording transactions are not evidence of
-// expiry, and expiry is what gates blocks away, so the datadir is read as an archive.
-func TestPreMergeVerdictReadsAnUnconfirmableCountAsArchive(t *testing.T) {
+// TestPreMergeVerdictSearchesPastAnInflatedBound pins how far the cumulative count is
+// taken: it is an upper bound, since the database numbers non-canonical bodies from the
+// same sequence, so the block it points at can hold no transaction while a later one
+// does. The search continues past that block instead of settling the question there.
+func TestPreMergeVerdictSearchesPastAnInflatedBound(t *testing.T) {
 	t.Parallel()
 
 	api := newProbeAPI(inflatedCountArchive())
 
 	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
 	require.NoError(t, err)
-	require.True(t, holds, "a count that confirms nothing does not answer expiry")
-	require.True(t, decided, "the bodies answered; only their count could not point at one")
+	require.True(t, holds, "the search reaches the transaction the bound points below")
+	require.True(t, decided)
 }
 
-// TestPreMergeGateServesAnArchiveItsCountCannotConfirm pins the gate against the shape
-// the probe cannot land on: the datadir serves a pre-merge transaction, so rejecting its
-// blocks as expired is the one answer that costs the caller data it has.
-func TestPreMergeGateServesAnArchiveItsCountCannotConfirm(t *testing.T) {
+// TestPreMergeGateServesAnArchiveOffTheCountedBound pins the gate against the shape the
+// count points below: the datadir serves a pre-merge transaction, so rejecting its blocks
+// as expired is the one answer that costs the caller data it has.
+func TestPreMergeGateServesAnArchiveOffTheCountedBound(t *testing.T) {
 	t.Parallel()
 
 	reader := inflatedCountArchive()
@@ -453,5 +457,119 @@ func TestPreMergeGateServesAnArchiveItsCountCannotConfirm(t *testing.T) {
 
 	for block := uint64(1); block < probeSparseMergeHeight; block++ {
 		require.NoError(t, api.checkPruneBlocks(t.Context(), nil, block))
+	}
+}
+
+// TestPreMergeGateRefusesExpiredDataItsCountCannotConfirm pins the expiry reading of the
+// shape the count points below: the bodies record transactions and none of them can be
+// read, so the search has to reach the block holding one rather than trust the count.
+func TestPreMergeGateRefusesExpiredDataItsCountCannotConfirm(t *testing.T) {
+	t.Parallel()
+
+	reader := inflatedCountArchive()
+	reader.unreadable = true
+	api := preMergeGateAPI(reader, probeSparseMergeHeight)
+
+	for block := uint64(1); block < probeSparseMergeHeight; block++ {
+		require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, block), state.PrunedError,
+			"bodies without their transactions are expiry, whatever the count says")
+	}
+}
+
+// TestPreMergeGateLeavesAMissingSearchBodyUnanswered pins that block data the search
+// cannot read leaves the question open: it is not evidence of an archive, and it is not
+// an observation to remember either, so the gate refuses and asks again.
+func TestPreMergeGateLeavesAMissingSearchBodyUnanswered(t *testing.T) {
+	t.Parallel()
+
+	reader := inflatedCountArchive()
+	reader.missing = map[uint64]bool{6: true}
+	api := preMergeGateAPI(reader, probeSparseMergeHeight)
+
+	require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, 1), state.PrunedError,
+		"a body the search needs and cannot read does not open the gate")
+	require.Nil(t, api._preMergeData.Load(), "a question left open is not an observation")
+}
+
+// TestPreMergeSearchStopsAtItsReadBudget pins that a search walking past its budget
+// leaves the question open. A count inflated on every block and no block confirming one
+// is the shape that walks furthest.
+func TestPreMergeSearchStopsAtItsReadBudget(t *testing.T) {
+	t.Parallel()
+
+	const length = 1024
+	reader := &chainProbeBlockReader{userTxns: make([]int, length), inflation: slices.Repeat([]int{1}, length)}
+	api := newProbeAPI(reader)
+
+	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, length)
+	require.NoError(t, err)
+	require.False(t, holds, "a search that stopped short has not observed an archive")
+	require.False(t, decided, "and has nothing to remember")
+	require.LessOrEqual(t, reader.bodyReads.Load(), int64(earlyTxnSearchBudget+16), "the budget bounds the walk")
+}
+
+// TestPreMergeVerdictReadsAnInflationOnlyCountAsArchive pins the other end the search
+// can reach: every block the count leaves room for a transaction in is readable and none
+// records one, so the count is inflation alone and there is no transaction to be missing.
+func TestPreMergeVerdictReadsAnInflationOnlyCountAsArchive(t *testing.T) {
+	t.Parallel()
+
+	reader := inflatedCountArchive()
+	reader.userTxns[6] = 0
+	api := newProbeAPI(reader)
+
+	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.True(t, holds, "a chain with no pre-merge transaction has none the datadir could be missing")
+	require.True(t, decided, "every body the count pointed into was read")
+}
+
+// TestPreMergeVerdictHoldsAcrossChainShapes sweeps the shapes the named cases pin one at
+// a time: transactions anywhere, counts inflated anywhere, bodies missing anywhere. A
+// datadir whose transactions cannot be read is never an archive, and one holding every
+// block is never refused.
+func TestPreMergeVerdictHoldsAcrossChainShapes(t *testing.T) {
+	t.Parallel()
+
+	rng := rand.New(rand.NewSource(11))
+	for range 20000 {
+		length := 1 + rng.Intn(24)
+		userTxns, inflation := make([]int, length), make([]int, length)
+		missing := map[uint64]bool{}
+		for block := range userTxns {
+			if rng.Intn(4) == 0 {
+				userTxns[block] = 1 + rng.Intn(3)
+			}
+			if rng.Intn(5) == 0 {
+				inflation[block] = 1 + rng.Intn(3)
+			}
+			if rng.Intn(8) == 0 {
+				missing[uint64(block)] = true
+			}
+		}
+		reader := &chainProbeBlockReader{
+			userTxns:   userTxns,
+			inflation:  inflation,
+			missing:    missing,
+			unreadable: rng.Intn(2) == 0,
+		}
+		holds, decided, err := newProbeAPI(reader).probePreMergeBlockData(t.Context(), nil, uint64(length))
+		require.NoError(t, err)
+		shape := func() string {
+			return fmt.Sprintf("user=%v inflation=%v missing=%v unreadable=%v", userTxns, inflation, missing, reader.unreadable)
+		}
+
+		anyTxn := slices.ContainsFunc(userTxns, func(txns int) bool { return txns > 0 })
+		if reader.unreadable && anyTxn && holds {
+			t.Fatalf("expired transaction data read as an archive: %s", shape())
+		}
+		if len(missing) == 0 && !reader.unreadable {
+			if !holds {
+				t.Fatalf("a datadir holding every block refused: %s", shape())
+			}
+			if !decided {
+				t.Fatalf("a datadir holding every block left unanswered: %s", shape())
+			}
+		}
 	}
 }

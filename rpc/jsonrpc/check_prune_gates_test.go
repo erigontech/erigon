@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -198,6 +199,55 @@ func TestReceiptsGateKeepAll(t *testing.T) {
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
 	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, tx, 0), state.PrunedError,
 		"history is still pruned; only the receipts survive")
+}
+
+// TestReceiptsGateFollowsHistoryWhereTheCacheIsNotServed pins the gate against what the
+// generator actually does: with receipt assertions on it reads the cached receipt to
+// compare it, not to answer, so the block is re-executed and reaches only as far back as
+// history whatever the receipt retention says.
+//
+// Not parallel: it flips a process-wide assertion flag.
+func TestReceiptsGateFollowsHistoryWhereTheCacheIsNotServed(t *testing.T) {
+	defer func(enabled bool) { dbg.AssertEnabled = enabled }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0), state.PrunedError,
+		"a cache the generator will not serve does not widen availability")
+}
+
+// TestCapabilitiesFollowHistoryWhereTheCacheIsNotServed pins the same premise in the
+// advertised boundary: it must not offer blocks the receipt endpoints would refuse.
+//
+// Not parallel: it flips a process-wide assertion flag.
+func TestCapabilitiesFollowHistoryWhereTheCacheIsNotServed(t *testing.T) {
+	defer func(enabled bool) { dbg.AssertEnabled = enabled }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+	})
+
+	caps, err := apis.eth.Capabilities(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, uint64(*caps.State.OldestBlock), uint64(*caps.Receipts.OldestBlock),
+		"receipts reach as far as the re-execution that serves them")
+	require.NotZero(t, uint64(*caps.Receipts.OldestBlock))
 }
 
 // TestReceiptsGateFollowsHistoryWherePostStateIsComputed pins the receipt paths that

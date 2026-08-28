@@ -207,9 +207,9 @@ func (r *RemoteBlockReader) FrozenBlocks() uint64 {
 func (r *RemoteBlockReader) fetchFrozenBlocks(fetched chan struct{}, deadline time.Time) uint64 {
 	defer func() {
 		r.frozenBlocksMu.Lock()
-		r.frozenBlocksFetching = false
-		r.frozenBlocksMu.Unlock()
+		defer r.frozenBlocksMu.Unlock()
 		close(fetched)
+		r.frozenBlocksFetching = false
 	}()
 
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)

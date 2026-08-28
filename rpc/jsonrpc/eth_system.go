@@ -196,7 +196,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// Below a window of its own the read falls back to re-execution, which reaches as far
 	// as history, so the wider of the two decides. This mirrors checkReceiptsAvailable.
 	receiptsOldest, receiptsAmount := stateOldest, pruneMode.History
-	if persistReceipts {
+	if persistReceipts && receipts.PersistedReceiptsServed() {
 		switch amount := pruneMode.ReceiptsAmount(); {
 		case amount == prune.KeepAllReceiptsPruneMode:
 			receiptsOldest, receiptsAmount = 0, amount
