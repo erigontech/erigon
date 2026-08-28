@@ -1205,6 +1205,12 @@ func (a *ApiHandler) produceBeaconBody(
 				executionErr = errors.New("produceBeaconBody: invalid peerdas bundle")
 				return
 			}
+			for _, proof := range bundles.Proofs {
+				if len(proof) != length.Bytes48 {
+					executionErr = errors.New("produceBeaconBody: invalid proof length")
+					return
+				}
+			}
 		}
 
 		for i := range bundles.Blobs {
