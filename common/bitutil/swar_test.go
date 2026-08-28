@@ -28,7 +28,7 @@ import (
 // swarWords covers the shapes a lane predicate can trip on: all-zero, all-set,
 // a single lane at each of the eight offsets, and random noise.
 func swarWords() []uint64 {
-	words := []uint64{0, ^uint64(0), SWARLow, SWARHigh}
+	words := []uint64{0, ^uint64(0), SWARLow, swarHigh}
 	for lane := range 8 {
 		for _, b := range []byte{0x00, 0x01, 0x1f, 0x20, '"', '\\', 0x7f, 0x80, 0xff} {
 			words = append(words, uint64(b)<<(8*lane), ^uint64(0)^(0xff<<(8*lane))|uint64(b)<<(8*lane))
@@ -83,13 +83,13 @@ func TestHasLess(t *testing.T) {
 	}
 }
 
-func TestHasLessAboveBoundMissesHighLanes(t *testing.T) {
-	require.Zero(t, HasLess(0x00000000000000a0, 200), "a lane in [128, n) is not reported above n == 128")
+func TestHasLessAboveBoundMissesLowLanes(t *testing.T) {
+	require.Zero(t, HasLess(0, 129), "every lane is 0 < 129, and none is reported above n == 128")
+	require.Zero(t, HasLess(0x47, 200), "lanes below n-128 wrap with the high bit clear")
 }
 
 // The lowest set bit is the one exception to the aggregate-only rule: no borrow
-// reaches it from below, so it names the first matching lane. swarEdge in
-// db/seg/patricia relies on this.
+// reaches it from below, so it names the first matching lane.
 func TestLowestSetBitLocatesFirstLane(t *testing.T) {
 	for _, x := range swarWords() {
 		for _, b := range []byte{0x00, 0x01, '"', 0x80, 0xff} {

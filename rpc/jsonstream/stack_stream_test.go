@@ -36,7 +36,6 @@ func (s *StackStream) closeAllPendingElements() error {
 }
 
 func TestStackStream_BasicOperations(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write a simple object
@@ -53,7 +52,6 @@ func TestStackStream_BasicOperations(t *testing.T) {
 }
 
 func TestStackStream_NestedStructures(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write a nested structure
@@ -82,7 +80,6 @@ func TestStackStream_NestedStructures(t *testing.T) {
 }
 
 func TestStackStream_ArrayOperations(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write an array
@@ -99,7 +96,6 @@ func TestStackStream_ArrayOperations(t *testing.T) {
 }
 
 func TestStackStream_MixedStructures(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write a complex structure
@@ -128,7 +124,6 @@ func TestStackStream_MixedStructures(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Start an object but don't finish it
@@ -153,7 +148,6 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Start an array but don't finish it
@@ -178,7 +172,6 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure but don't complete it
@@ -211,7 +204,6 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure but don't complete it
@@ -245,7 +237,6 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 }
 
 func TestStackStream_BufferAsString(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create incomplete JSON
@@ -263,7 +254,6 @@ func TestStackStream_BufferAsString(t *testing.T) {
 }
 
 func TestStackStream_Reset(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write some data
@@ -290,7 +280,6 @@ func TestStackStream_Reset(t *testing.T) {
 }
 
 func TestStackStream_GetStackSummary(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Empty stack
@@ -314,7 +303,6 @@ func TestStackStream_GetStackSummary(t *testing.T) {
 
 // TestStackStream_SequentialOperations tests sequential operations without chaining
 func TestStackStream_SequentialOperations(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Perform operations without chaining
@@ -333,7 +321,6 @@ func TestStackStream_SequentialOperations(t *testing.T) {
 
 // TestStackStream_RecoveryFromIncompleteState tests recovery from the incomplete state
 func TestStackStream_RecoveryFromIncompleteState(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create an incomplete structure
@@ -409,7 +396,6 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-
 			ss := newStackStream(nil, InitialBufferSize)
 			tc.buildStructure(ss)
 
@@ -429,7 +415,6 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 
 // TestStackStream_ClosePendingObjectsWithEmptyStack tests closePendingObjects with empty stack
 func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Stack is already empty
@@ -443,7 +428,6 @@ func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
 
 // TestStackStream_MultipleFlushCalls tests multiple flush calls
 func TestStackStream_MultipleFlushCalls(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create an incomplete structure
@@ -465,7 +449,6 @@ func TestStackStream_MultipleFlushCalls(t *testing.T) {
 
 // TestStackStream_EmptyStructures tests handling of empty objects and arrays
 func TestStackStream_EmptyStructures(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test empty object
@@ -498,7 +481,6 @@ func TestStackStream_EmptyStructures(t *testing.T) {
 
 // TestStackStream_AllDataTypes tests all data types supported by StackStream
 func TestStackStream_AllDataTypes(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test all primitive data types
@@ -578,7 +560,6 @@ func TestStackStream_AllDataTypes(t *testing.T) {
 
 // TestStackStream_BoundaryValues tests boundary values for numeric types
 func TestStackStream_BoundaryValues(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test boundary values
@@ -640,7 +621,6 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 
 // TestStackStream_ExtremeNesting tests deeply nested structures
 func TestStackStream_ExtremeNesting(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure (50 levels deep)
@@ -712,7 +692,6 @@ func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
 
 // TestStackStream_StackManipulationEdgeCases tests edge cases in stack manipulation
 func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test 1: Popping from an empty stack should not panic
@@ -744,7 +723,6 @@ func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
 
 // TestStackStream_MixedWriteOperations tests mixing different write operations
 func TestStackStream_MixedWriteOperations(t *testing.T) {
-
 	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test mixing WriteRaw with other operations
@@ -857,7 +835,6 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-
 			ss := newStackStream(nil, InitialBufferSize)
 			tc.buildStructure(ss)
 

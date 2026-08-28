@@ -46,10 +46,5 @@ func flushIfFull(stream *jsoniter.Stream) {
 }
 
 func New(out io.Writer) Stream {
-	return NewSized(out, InitialBufferSize)
-}
-
-// NewSized is New with an explicit initial buffer size.
-func NewSized(out io.Writer, bufSize int) Stream {
-	return newStackStream(out, bufSize)
+	return newStackStream(out, InitialBufferSize)
 }

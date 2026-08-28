@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -85,7 +84,7 @@ func TestCallManyEmptyBundles(t *testing.T) {
 		require.EqualError(t, err, "empty bundles", name)
 
 		var buf bytes.Buffer
-		stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		stream := jsonstream.New(&buf)
 		err = debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, stream)
 		require.EqualError(t, err, "empty bundles", name)
 	}
