@@ -187,13 +187,22 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 	return v
 }
 
-// commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
-// default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
+var commitmentKVEdgeRecordsVersion = version.Version{Major: 3, Minor: 0}
+
+// commitmentKVWriteVersion keeps the legacy version selection until edge records are enabled.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.EdgeRecordsInCommitment {
+		return commitmentKVEdgeRecordsVersion
+	}
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
 	return version.V2_2
+}
+
+// CommitmentEdgeRecords reports whether a commitment file uses the v3 edge-record format.
+func CommitmentEdgeRecords(fileVersion version.Version) bool {
+	return !fileVersion.Less(commitmentKVEdgeRecordsVersion)
 }
 
 // ExperimentalParallelCommitment toggles the ParallelPatriciaHashed trie path
@@ -275,6 +284,7 @@ var Schema = SchemaGen{
 
 		Accessors:                      AccessorHashMap,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
+		EdgeRecordsInCommitment:        false,
 		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{

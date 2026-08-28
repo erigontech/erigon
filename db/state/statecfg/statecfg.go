@@ -18,6 +18,8 @@ type DomainCfg struct {
 
 	// Write shortened key references in commitment branch values; commitment domain only.
 	ReferencesInCommitmentBranches bool
+	// Write one record per present child in commitment domain files.
+	EdgeRecordsInCommitment bool
 
 	ExistenceFilter ExistenceFilterMode
 

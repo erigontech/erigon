@@ -192,22 +192,22 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/state/statecfg/state_schema.go`
 - Create: `db/state/statecfg/commitment_v3_version_test.go`
 
-- [ ] add an explicit named write gate on `DomainCfg` — `EdgeRecordsInCommitment`, **defaulting
+- [x] add an explicit named write gate on `DomainCfg` — `EdgeRecordsInCommitment`, **defaulting
       false** — alongside `ReferencesInCommitmentBranches`. There is no "v3 format is active" signal in
       the codebase today; `commitmentKVWriteVersion` (`state_schema.go:192`) branches only on
       `ReferencesInCommitmentBranches`. Task 9 is what turns the gate on; nothing before it may stamp
       v3.0
-- [ ] add `commitment.domain.kv` v3.0 to `versions.yaml` and make `commitmentKVWriteVersion` return it
+- [x] add `commitment.domain.kv` v3.0 to `versions.yaml` and make `commitmentKVWriteVersion` return it
       **only when `EdgeRecordsInCommitment` is set**, leaving current behaviour byte-identical until
       then; add `bt` and `kvei` entries; retire `kvi`; bump `hist.v`, `hist.vi`, `ii.ef`, `ii.efi`
-- [ ] add a read-side gate function next to the existing version gates reporting whether a file holds
+- [x] add a read-side gate function next to the existing version gates reporting whether a file holds
       edge records, keyed on file version
-- [ ] write a test asserting `commitmentKVWriteVersion` still returns v2.2 with the gate off and v3.0
+- [x] write a test asserting `commitmentKVWriteVersion` still returns v2.2 with the gate off and v3.0
       with it on — this is the guard against stamping v3.0 over bundled rows between task 4 and task 9
-- [ ] write tests asserting the read gate returns edge-record for v3.0 and bundled-row for every
+- [x] write tests asserting the read gate returns edge-record for v3.0 and bundled-row for every
       version below it
-- [ ] write a test asserting a mixed-version file set resolves per file, not per datadir
-- [ ] run `go test ./db/state/statecfg/...` — must pass before task 5
+- [x] write a test asserting a mixed-version file set resolves per file, not per datadir
+- [x] run `go test ./db/state/statecfg/...` — must pass before task 5
 
 ### Task 5: Enable the ordered accessor for commitment
 
