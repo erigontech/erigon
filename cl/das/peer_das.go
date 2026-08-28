@@ -1562,6 +1562,11 @@ mainloop:
 					validResponse = false
 					break
 				}
+				metadata := req.recovery(blockRoot)
+				if sidecar.Version() < clparams.GloasVersion && metadata != nil && metadata.hasSignature && sidecar.SignedBlockHeader.Signature != metadata.signature {
+					validResponse = false
+					break
+				}
 				if _, duplicate := seen[key]; duplicate {
 					validResponse = false
 					break

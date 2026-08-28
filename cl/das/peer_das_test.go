@@ -220,9 +220,14 @@ func recoverableFuluData(t *testing.T, cfg *clparams.BeaconChainConfig) (*cltype
 }
 
 func recoverableFuluDataAtSlot(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
+	return recoverableFuluDataAtSlotWithExecutionBlockHash(t, cfg, slot, common.Hash{})
+}
+
+func recoverableFuluDataAtSlotWithExecutionBlockHash(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64, executionBlockHash common.Hash) (*cltypes.SignedBeaconBlock, common.Hash, []*cltypes.BlobSidecar, []*cltypes.DataColumnSidecar) {
 	t.Helper()
 	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
 	block.Block.Slot = slot
+	block.Block.Body.ExecutionPayload.BlockHash = executionBlockHash
 	blobs := []goethkzg.Blob{{1}, {2}}
 	commitments := make([]goethkzg.KZGCommitment, len(blobs))
 	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, len(blobs))
