@@ -839,8 +839,8 @@ func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, e
 	return metainfo.LoadFromFile(miPath)
 }
 
-// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
-// errors.
+// Loads metainfo from disk. Returns Some metainfo if it's valid, None if it is missing. An invalid
+// metainfo is returned as an error and left on disk.
 func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (localMetainfo g.Option[*metainfo.MetaInfo], err error) {
 	miPath := d.metainfoFilePathForName(name)
 	mi, err := metainfo.LoadFromFile(miPath)

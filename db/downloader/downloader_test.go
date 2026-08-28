@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -539,6 +540,18 @@ func (b *logBuffer) String() string {
 	return b.buf.String()
 }
 
+// requireLoggedForName asserts that msg and name appear on the same log line. Asserting them
+// separately cannot fail once any earlier warn has put name in the buffer.
+func requireLoggedForName(t *testing.T, logs *logBuffer, msg, name string) {
+	t.Helper()
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if strings.Contains(line, msg) && strings.Contains(line, name) {
+			return
+		}
+	}
+	require.Failf(t, "log line not found", "no line carries both %q and %q:\n%s", msg, name, logs.String())
+}
+
 func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, path string) {
 	d = newDownloaderTest(t).downloader
 	logs = &logBuffer{}
@@ -562,8 +575,7 @@ func TestInvalidateDataRenamesLocalFile(t *testing.T) {
 
 	require.NoFileExists(path)
 	require.FileExists(path + ".part")
-	require.Contains(logs.String(), "invalidated local snapshot data", "rename must be logged at warn or louder")
-	require.Contains(logs.String(), name)
+	requireLoggedForName(t, logs, "invalidated local snapshot data", name)
 }
 
 // A stale metainfo doesn't rescue the data while the initial download is incomplete.
@@ -597,8 +609,7 @@ func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
 
 			require.FileExists(path)
 			require.NoFileExists(path + ".part")
-			require.Contains(logs.String(), "keeping local snapshot")
-			require.Contains(logs.String(), name)
+			requireLoggedForName(t, logs, "keeping local snapshot", name)
 		})
 	}
 }
@@ -618,8 +629,7 @@ func TestDownloadsLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
 
 	require.FileExists(path, "the client completes in place, so the data must stay where it is")
 	require.NoFileExists(path+".part", "invalidation stays forbidden after the initial download")
-	require.Contains(logs.String(), "local snapshot does not match its own metainfo")
-	require.Contains(logs.String(), name)
+	requireLoggedForName(t, logs, "local snapshot does not match its own metainfo", name)
 }
 
 // Nothing local to protect: the preverified file is still downloaded.
