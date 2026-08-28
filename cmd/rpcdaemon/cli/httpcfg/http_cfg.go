@@ -51,12 +51,12 @@ const dbReadTxsReserved = 16
 
 // RoTxsLimit sizes the MDBX read-tx semaphore for concurrent worker pools and
 // reserved readers.
-func RoTxsLimit(dbReadConcurrency, execWorkers, mountedWorkers, warmupWorkers, blockReadAheadWorkers int) int64 {
+func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int) int64 {
 	limit := DefaultDBReadConcurrency()
 	if dbReadConcurrency > 0 {
 		limit = dbReadConcurrency
 	}
-	workerReaders := max(execWorkers, 0) + max(mountedWorkers, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
+	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
 	return int64(max(limit, workerReaders+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
 }
 

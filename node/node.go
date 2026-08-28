@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -46,8 +45,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -305,6 +306,13 @@ func execWorkerCount(config *nodecfg.Config) int {
 	return cmp.Or(config.ExecWorkerCount, dbg.Exec3Workers)
 }
 
+func parallelCommitmentReaders() int {
+	if !statecfg.ExperimentalParallelCommitment {
+		return 0
+	}
+	return commitment.ParallelCommitmentReadTxs()
+}
+
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -332,7 +340,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
 			config.Http.DBReadConcurrency,
 			execWorkerCount(config),
-			runtime.NumCPU(),
+			parallelCommitmentReaders(),
 			dbg.BALCommitmentWarmupReaders(),
 			dbg.ReadAheadWorkerReaders(),
 		))

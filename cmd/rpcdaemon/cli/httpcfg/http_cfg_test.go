@@ -34,13 +34,13 @@ func TestReadTxLimitCoversExecReaders(t *testing.T) {
 func TestRoTxsLimit(t *testing.T) {
 	t.Parallel()
 	defaultLimit := int64(DefaultDBReadConcurrency())
-	floor := func(execWorkers, mountedWorkers, warmupWorkers, blockReadAheadWorkers int) int64 {
-		return int64(execWorkers + mountedWorkers + warmupWorkers + blockReadAheadWorkers + execPermanentReadTxs + execReadAheadTxs + dbReadTxsReserved)
+	floor := func(execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int) int64 {
+		return int64(execWorkers + parallelCommitmentReaders + warmupWorkers + blockReadAheadWorkers + execPermanentReadTxs + execReadAheadTxs + dbReadTxsReserved)
 	}
 	for _, tc := range []struct {
-		name                                                                   string
-		cfg, execWorkers, mountedWorkers, warmupWorkers, blockReadAheadWorkers int
-		want                                                                   int64
+		name                                                                              string
+		cfg, execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int
+		want                                                                              int64
 	}{
 		{"default passes through when above floor", 0, 4, 4, 4, 4, defaultLimit},
 		{"high explicit value passes through", 5000, 8, 8, 8, 8, 5000},
@@ -51,7 +51,7 @@ func TestRoTxsLimit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			require.Equal(t, tc.want, RoTxsLimit(tc.cfg, tc.execWorkers, tc.mountedWorkers, tc.warmupWorkers, tc.blockReadAheadWorkers))
+			require.Equal(t, tc.want, RoTxsLimit(tc.cfg, tc.execWorkers, tc.parallelCommitmentReaders, tc.warmupWorkers, tc.blockReadAheadWorkers))
 		})
 	}
 }
