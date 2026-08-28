@@ -49,15 +49,19 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 }
 
 type gatedPatriciaContext struct {
-	sleep    time.Duration
-	descend  bool
-	entered  chan struct{}
-	release  chan struct{}
-	gateDone atomic.Bool
+	sleep       time.Duration
+	descend     bool
+	entered     chan struct{}
+	release     chan struct{}
+	startOthers chan struct{}
+	gateDone    atomic.Bool
 }
 
 func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	if (g.entered != nil || g.release != nil) && !g.gateDone.Swap(true) {
+		if g.startOthers != nil {
+			close(g.startOthers)
+		}
 		if g.entered != nil {
 			g.entered <- struct{}{}
 		}
@@ -194,9 +198,14 @@ func TestHashSort_WarmupLap(t *testing.T) {
 
 func gatedStragglerFactory(entered, release chan struct{}) TrieContextFactory {
 	var n atomic.Int32
-	return func(context.Context) (PatriciaContext, func()) {
+	startOthers := make(chan struct{})
+	return func(ctx context.Context) (PatriciaContext, func()) {
 		if n.Add(1) == 1 {
-			return &gatedPatriciaContext{entered: entered, release: release}, nil
+			return &gatedPatriciaContext{entered: entered, release: release, startOthers: startOthers}, nil
+		}
+		select {
+		case <-startOthers:
+		case <-ctx.Done():
 		}
 		return &gatedPatriciaContext{}, nil
 	}
