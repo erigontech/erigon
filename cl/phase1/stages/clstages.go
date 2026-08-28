@@ -77,6 +77,13 @@ type Args struct {
 	targetSlot, seenSlot   uint64
 
 	hasDownloaded bool
+	// soleProducer marks an embedded dev validator with local discovery and no peers to
+	// backfill from (LocalDiscovery && DevValidatorSeed != ""). Such a node produces its
+	// OWN chain; there is nothing to forward-sync, so wall-clock running ahead of its
+	// highest-seen slot (e.g. during a slow multi-chain genesis build) must NOT divert it
+	// into ForwardSync — that stage never completes without peers and the chain never
+	// produces. See MetaCatchingUp.
+	soleProducer bool
 }
 
 func ClStagesCfg(
@@ -154,8 +161,12 @@ func MetaCatchingUp(args Args) StageName {
 		return DownloadHistoricalBlocks
 	}
 	// ForwardSync can work without peers via the beacon API HTTP fallback,
-	// so allow it even when peers == 0.
-	if args.seenEpoch < args.targetEpoch {
+	// so allow it even when peers == 0 — EXCEPT for a sole producer, which has no
+	// source to sync from and must instead resume producing its own chain. Without
+	// this guard a 2s-slot dev L2 whose wall-clock ran an epoch ahead during a slow
+	// boot is diverted here forever (ForwardSync makes no progress with zero peers,
+	// so seenEpoch stays 0 and every transition re-selects ForwardSync).
+	if args.seenEpoch < args.targetEpoch && !args.soleProducer {
 		return ForwardSync
 	}
 	// ChainTipSync relies on gossip for real-time updates, skip it without peers.
@@ -241,6 +252,7 @@ func ConsensusClStages(ctx context.Context,
 				args.peers = 0
 			}
 			args.hasDownloaded = cfg.hasDownloaded
+			args.soleProducer = cfg.caplinConfig.LocalDiscovery && cfg.caplinConfig.DevValidatorSeed != ""
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
