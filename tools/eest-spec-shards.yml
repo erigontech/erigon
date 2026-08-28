@@ -408,11 +408,16 @@
   max-allowed-failures: 0
   commitment-parallel: false
   no-ramdisk: true
+  # 150M-gas blocks peak near 18GB RSS unbounded, over a 16GB runner. About half
+  # of that is Go heap; the rest is reclaimable MDBX mapping, so capping the heap
+  # is what keeps the process out of the OOM killer.
+  gomemlimit: 4GiB
 - shard: enginextests-benchmark-150m-parallel
   workers: 1
   max-allowed-failures: 0
   commitment-parallel: true
   no-ramdisk: true
+  gomemlimit: 4GiB
 - shard: zkevm-witness
   workers: 8
   max-allowed-failures: 0

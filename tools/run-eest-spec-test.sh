@@ -125,13 +125,16 @@ shard_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '
 	.[] | select(.shard == $s)
 	| if (."commitment-parallel" | type) != "boolean"
 		then error("shard \($s) must define boolean commitment-parallel")
-		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(.run // "")"
+		# gomemlimit emits "-" rather than "" because tab is IFS whitespace: `read`
+		# collapses a run of tabs, so an empty interior field would shift `run`
+		# into its slot.
+		else "\(.workers)\t\(."max-allowed-failures")\t\(."commitment-parallel")\t\(."no-ramdisk" // false)\t\(."expected-tests" // 0)\t\(."gomemlimit" // "-")\t\(.run // "")"
 	end')
 if [[ -z "$shard_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests run_regex <<<"$shard_row"
+IFS=$'\t' read -r default_workers default_max commitment_parallel shard_no_ramdisk expected_tests shard_gomemlimit run_regex <<<"$shard_row"
 # Always set ERIGON_COMMITMENT_PARALLEL explicitly (true or false) so the shard's
 # commitment mode is pinned to the manifest, independent of whatever
 # statecfg.ExperimentalParallelCommitment defaults to at runtime. Execution is
@@ -200,12 +203,16 @@ workers="${EEST_SPEC_WORKERS:-$default_workers}"
 max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
 evm_bin="${EVM_BIN:-build/bin/evm}"
 
-# Race-instrumented shards multiply RSS several-fold over the Go heap (TSAN
-# shadow + history). Bound the heap so allocation bursts trigger GC early
-# instead of growing the process into the CI runner's OOM range.
-if [[ "$shard" == *-race* ]]; then
+# Bound the heap so allocation bursts trigger GC early instead of growing the
+# process into the CI runner's OOM range. Race-instrumented shards need it
+# because TSAN shadow + history multiply RSS several-fold over the Go heap; the
+# manifest sets it per shard for the ones whose own heap is the problem.
+if [[ "$shard_gomemlimit" != "-" ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-$shard_gomemlimit}"
+elif [[ "$shard" == *-race* ]]; then
 	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
 fi
+echo "GOMEMLIMIT: ${GOMEMLIMIT:-unset}"
 
 if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
