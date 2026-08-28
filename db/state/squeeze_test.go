@@ -300,7 +300,7 @@ func TestExpandShortenedKeysInBranch_ReadPath(t *testing.T) {
 			require.True(t, reader.HasNext(), "value missing for key in %s", vf.Fullpath())
 			_, _ = reader.Next(nil)
 
-			if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			if bytes.Equal(k, commitmentdb.LegacyKeyCommitmentState) {
 				continue
 			}
 
@@ -359,7 +359,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		ac := state.AggTx(tx)
 
 		// collect latest root from each available file
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.LegacyKeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
 		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)

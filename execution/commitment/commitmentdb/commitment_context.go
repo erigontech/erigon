@@ -58,7 +58,8 @@ type SharedDomainsCommitmentContext struct {
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
 	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
-	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
+	edgeRecords   bool
+	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	traceW        io.Writer
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
@@ -84,6 +85,11 @@ type SharedDomainsCommitmentContext struct {
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+}
+
+// SetCommitmentEdgeRecords selects the state-key format used by new writes.
+func (sdc *SharedDomainsCommitmentContext) SetCommitmentEdgeRecords(v bool) {
+	sdc.edgeRecords = v
 }
 
 // StateReader returns the currently installed custom state reader, or nil when
@@ -761,6 +767,15 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 // truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
+// LegacyKeyCommitmentState aliases the pre-v3 commitment state key.
+var LegacyKeyCommitmentState = commitment.LegacyKeyCommitmentState
+
+// IsCommitmentStateKeyForFormat reports whether prefix is the state key for the
+// selected bundled-row or edge-record format.
+func IsCommitmentStateKeyForFormat(prefix []byte, edgeRecords bool) bool {
+	return commitment.IsCommitmentStateKeyForFormat(prefix, edgeRecords)
+}
+
 var ErrBehindCommitment = errors.New("behind commitment")
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
@@ -774,11 +789,28 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
+	stateKey := LegacyKeyCommitmentState
+	if sdc.edgeRecords {
+		stateKey = KeyCommitmentState
+	}
 	var step kv.Step
 
-	state, step, err = trieContext.Branch(KeyCommitmentState)
+	state, step, err = trieContext.Branch(stateKey)
 	if err != nil {
 		return 0, 0, nil, err
+	}
+	if !isCommitmentStateValue(state) {
+		alternateKey := KeyCommitmentState
+		if sdc.edgeRecords {
+			alternateKey = LegacyKeyCommitmentState
+		}
+		state, step, err = trieContext.Branch(alternateKey)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+	}
+	if !isCommitmentStateValue(state) {
+		return 0, 0, nil, nil
 	}
 
 	if err := trieContext.stateReader.CheckDataAvailable(kv.CommitmentDomain, step); err != nil {
@@ -843,9 +875,20 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if err != nil {
 		return err
 	}
-	prevState, _, err := trieContext.Branch(KeyCommitmentState)
+	stateKey := LegacyKeyCommitmentState
+	if sdc.edgeRecords {
+		stateKey = KeyCommitmentState
+	}
+	prevState, _, err := trieContext.Branch(stateKey)
 	if err != nil {
 		return err
+	}
+	if sdc.edgeRecords && len(prevState) > 0 && !isCommitmentStateValue(prevState) {
+		stateKey = LegacyKeyCommitmentState
+		prevState, _, err = trieContext.Branch(stateKey)
+		if err != nil {
+			return err
+		}
 	}
 	if len(prevState) == 0 && prevState != nil {
 		prevState = nil
@@ -858,7 +901,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 		return nil
 	}
 
-	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
+	return trieContext.PutBranch(stateKey, encodedState, prevState)
 }
 
 // Encodes current trie state and returns it
@@ -1072,21 +1115,38 @@ func NewCommitmentState(txNum uint64, blockNum uint64, trieState []byte) *commit
 }
 
 func (cs *commitmentState) Decode(buf []byte) error {
-	if len(buf) < 10 {
-		return fmt.Errorf("ivalid commitment state buffer size %d, expected at least 10b", len(buf))
+	if len(buf) < 18 {
+		return fmt.Errorf("invalid commitment state buffer size %d, expected at least 18 bytes", len(buf))
 	}
 	pos := 0
 	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])
 	pos += 8
 	cs.blockNum = binary.BigEndian.Uint64(buf[pos : pos+8])
 	pos += 8
-	cs.trieState = make([]byte, binary.BigEndian.Uint16(buf[pos:pos+2]))
+	stateLen := int(binary.BigEndian.Uint16(buf[pos : pos+2]))
 	pos += 2
-	if len(cs.trieState) == 0 && len(buf) == 10 {
-		return nil
+	if stateLen > len(buf)-pos {
+		return fmt.Errorf("commitment state payload size %d exceeds remaining buffer %d", stateLen, len(buf)-pos)
 	}
-	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])
+	cs.trieState = bytes.Clone(buf[pos : pos+stateLen])
 	return nil
+}
+
+func isCommitmentStateValue(value []byte) bool {
+	if len(value) == 0 {
+		return false
+	}
+	var state commitmentState
+	if err := state.Decode(value); err != nil {
+		return false
+	}
+	_, _, _, err := commitment.HexTrieExtractStateRoot(value)
+	return err == nil
+}
+
+// IsCommitmentStateValue reports whether value has the commitment state wrapper format.
+func IsCommitmentStateValue(value []byte) bool {
+	return isCommitmentStateValue(value)
 }
 
 func (cs *commitmentState) Encode() ([]byte, error) {
@@ -1105,7 +1165,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+	stateVal, err := LatestCommitmentStateValue(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -1114,4 +1174,25 @@ func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
 	}
 	_, minUnwindable := DecodeTxBlockNums(stateVal)
 	return minUnwindable, nil
+}
+
+// LatestCommitmentStateValue returns the newest commitment state from either key format.
+func LatestCommitmentStateValue(tx kv.TemporalGetter) ([]byte, error) {
+	newState, newStep, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	legacyState, legacyStep, err := tx.GetLatest(kv.CommitmentDomain, LegacyKeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	newValid := isCommitmentStateValue(newState)
+	legacyValid := isCommitmentStateValue(legacyState)
+	if newValid && (!legacyValid || newStep >= legacyStep) {
+		return newState, nil
+	}
+	if legacyValid {
+		return legacyState, nil
+	}
+	return nil, nil
 }

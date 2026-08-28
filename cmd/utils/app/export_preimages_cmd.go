@@ -120,6 +120,12 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("read commitment state: %w", err)
 	}
+	if !ok || !commitmentdb.IsCommitmentStateValue(commitmentState) {
+		commitmentState, _, ok, err = aggTx.GetLatest(kv.CommitmentDomain, commitmentdb.LegacyKeyCommitmentState, tx, kv.GetLatestOptions{})
+		if err != nil {
+			return fmt.Errorf("read legacy commitment state: %w", err)
+		}
+	}
 	if !ok {
 		return fmt.Errorf("commitment state record not found in %s", dirs.DataDir)
 	}

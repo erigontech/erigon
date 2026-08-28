@@ -49,17 +49,18 @@ type CursorItem struct {
 	cDup    kv.CursorDupSort
 	cNonDup kv.Cursor
 
-	iter         btree2.MapIter[string, []dataWithTxNum]
-	kvReader     *seg.Reader
-	hist         *seg.PagedReader
-	btCursor     *btindex.Cursor
-	key          []byte
-	val          []byte
-	startTxNum   uint64
-	endTxNum     uint64
-	latestOffset uint64     // offset of the latest value in the file
-	t            CursorType // Whether this item represents state file or DB record, or tree
-	reverse      bool       // controls tiebreaker direction of endTxNum between entries with equal keys (not key order itself)
+	iter               btree2.MapIter[string, []dataWithTxNum]
+	kvReader           *seg.Reader
+	hist               *seg.PagedReader
+	btCursor           *btindex.Cursor
+	key                []byte
+	val                []byte
+	startTxNum         uint64
+	endTxNum           uint64
+	commitmentStateKey []byte
+	latestOffset       uint64     // offset of the latest value in the file
+	t                  CursorType // Whether this item represents state file or DB record, or tree
+	reverse            bool       // controls tiebreaker direction of endTxNum between entries with equal keys (not key order itself)
 }
 
 type CursorHeap []*CursorItem

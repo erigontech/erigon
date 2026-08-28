@@ -97,13 +97,14 @@ func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version
 
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
 // by looking them up in the account and storage domain files. It guards the call to
-// ExpandShortenedKeysInBranch with the read-path preconditions (empty branch, KeyCommitmentState
+// ExpandShortenedKeysInBranch with the read-path preconditions (empty branch, state key
 // carve-out, files-not-empty) and the per-file version gate (referenced iff version < v2.2 and range >= threshold).
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.LegacyKeyCommitmentState) ||
+		(bytes.Equal(prefix, commitmentdb.KeyCommitmentState) && commitmentdb.IsCommitmentStateValue(branch)) ||
 		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
 
 		return branch, nil // do not transform, return as is

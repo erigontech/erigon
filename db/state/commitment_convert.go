@@ -94,12 +94,16 @@ type sampledPair struct {
 // V3 child records have a canonical V3 node key before their 0x80..0x8f
 // child suffix. Legacy keys retain the V1/V2 canonicality check.
 func detectKeyEncoding(samples []sampledPair) (keyEncoding, error) {
-	legacy, err := detectLegacyKeyEncoding(samples)
+	return detectKeyEncodingForStateKey(samples, commitmentdb.KeyCommitmentState)
+}
+
+func detectKeyEncodingForStateKey(samples []sampledPair, stateKey []byte) (keyEncoding, error) {
+	legacy, err := detectLegacyKeyEncodingForStateKey(samples, stateKey)
 	if err != nil {
 		return legacy, err
 	}
 	for _, p := range samples {
-		if bytes.Equal(p.k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(p.k, stateKey) {
 			continue
 		}
 		if nibbles.IsChildKeyV3(p.k) {
@@ -109,10 +113,10 @@ func detectKeyEncoding(samples []sampledPair) (keyEncoding, error) {
 	return legacy, nil
 }
 
-func detectLegacyKeyEncoding(samples []sampledPair) (keyEncoding, error) {
+func detectLegacyKeyEncodingForStateKey(samples []sampledPair, stateKey []byte) (keyEncoding, error) {
 	sawAny := false
 	for _, p := range samples {
-		if bytes.Equal(p.k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(p.k, stateKey) {
 			continue
 		}
 		sawAny = true
@@ -154,14 +158,18 @@ func detectFileState(at *AggregatorRoTx, file VisibleFile, samples int) (fileSta
 		return fileState{}, fmt.Errorf("detectFileState: %q is empty", file.Fullpath())
 	}
 
-	keyEncoding, err := detectKeyEncoding(pairs)
+	stateKey := commitmentdb.LegacyKeyCommitmentState
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		stateKey = commitmentdb.KeyCommitmentState
+	}
+	keyEncoding, err := detectKeyEncodingForStateKey(pairs, stateKey)
 	if err != nil {
 		return fileState{}, fmt.Errorf("detectFileState: %q: key-encoding detection: %w", file.Fullpath(), err)
 	}
 	if statecfg.CommitmentEdgeRecords(file.Version()) {
 		keyEncoding = keyEncodingV3
 	} else if keyEncoding == keyEncodingV3 {
-		keyEncoding, err = detectLegacyKeyEncoding(pairs)
+		keyEncoding, err = detectLegacyKeyEncodingForStateKey(pairs, stateKey)
 		if err != nil {
 			return fileState{}, fmt.Errorf("detectFileState: %q: legacy key-encoding detection: %w", file.Fullpath(), err)
 		}
@@ -481,6 +489,10 @@ func convertCommitmentFile(
 	// collateETL's per-pair fromTxNum/endTxNum are derived from stepFrom/stepTo
 	// with a (-1) offset that does not match the source file for stepFrom>0 files.
 	var k, v []byte
+	stateKey := commitmentdb.LegacyKeyCommitmentState
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		stateKey = commitmentdb.KeyCommitmentState
+	}
 	for reader.HasNext() {
 		k, _ = reader.Next(k[:0])
 		if !reader.HasNext() {
@@ -489,7 +501,7 @@ func convertCommitmentFile(
 		v, _ = reader.Next(v[:0])
 		ki++
 
-		isState := bytes.Equal(k, commitmentdb.KeyCommitmentState)
+		isState := bytes.Equal(k, stateKey)
 		var outKey []byte
 		if isState {
 			outKey = append([]byte(nil), k...)

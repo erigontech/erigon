@@ -75,6 +75,18 @@ func composite(k, k2 []byte) []byte {
 	return append(bytes.Clone(k), k2...)
 }
 
+func latestCommitmentState(t testing.TB, tx kv.TemporalGetter) []byte {
+	t.Helper()
+	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	if commitmentdb.IsCommitmentStateValue(stateVal) {
+		return stateVal
+	}
+	stateVal, _, err = tx.GetLatest(kv.CommitmentDomain, commitmentdb.LegacyKeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	return stateVal
+}
+
 func TestSharedDomain_Unwind(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -473,8 +485,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Verify: commitment "state" key is at blockNum ≤ unwindTarget.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(err)
+	stateVal := latestCommitmentState(t, rwTx)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist post-unwind (was forward-populated by executeRange)")
 	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
 	require.LessOrEqualf(postBlock, unwindTarget,
@@ -620,8 +631,7 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	// unwind step — but the value carried by the retained entry is the
 	// pre-step-1-write value (block 9's state), not the unwindTarget's
 	// state (block 4). A later GetLatest then sees blockNum=9 > target=4.
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(err)
+	stateVal := latestCommitmentState(t, rwTx)
 	require.GreaterOrEqual(len(stateVal), 16, "commitment state record must exist after Merge+Flush")
 	postBlock := binary.BigEndian.Uint64(stateVal[8:16])
 	require.LessOrEqualf(postBlock, unwindTarget,
@@ -730,8 +740,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
-	stateVal, _, err := rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(err)
+	stateVal := latestCommitmentState(t, rwTx)
 	require.GreaterOrEqual(len(stateVal), 16)
 	commitTxNum := binary.BigEndian.Uint64(stateVal[:8])
 	commitBlock := binary.BigEndian.Uint64(stateVal[8:16])
@@ -755,8 +764,7 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.NoError(rwTx.Unwind(ctx, unwindTarget, &merged))
 
 	// Phase 5: the commitment "state" key should now decode to blockNum ≤ unwindTarget.
-	stateVal, _, err = rwTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(err)
+	stateVal = latestCommitmentState(t, rwTx)
 	require.GreaterOrEqual(len(stateVal), 16, "post-unwind: commitment state record must exist (was populated in phase 2)")
 	postTxNum := binary.BigEndian.Uint64(stateVal[:8])
 	postBlock := binary.BigEndian.Uint64(stateVal[8:16])

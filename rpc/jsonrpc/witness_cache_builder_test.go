@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -611,7 +611,7 @@ func readCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.Tempo
 	defer tx.Rollback()
 	finish, err := stages.GetStageProgress(tx, stages.Finish)
 	require.NoError(t, err)
-	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	state, err := commitmentdb.LatestCommitmentStateValue(tx)
 	require.NoError(t, err)
 	return finish, bytes.Clone(state)
 }
@@ -641,7 +641,7 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 
 	baseHash, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
 	require.NoError(t, err)
-	baseState, _, err := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	baseState, err := commitmentdb.LatestCommitmentStateValue(pin.tx)
 	require.NoError(t, err)
 	baseState = bytes.Clone(baseState)
 
@@ -675,7 +675,7 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 				errCh <- fmt.Errorf("held pin canonical hash drifted at %d", pinAt)
 				return
 			}
-			s, _, e := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+			s, e := commitmentdb.LatestCommitmentStateValue(pin.tx)
 			if e != nil {
 				errCh <- e
 				return

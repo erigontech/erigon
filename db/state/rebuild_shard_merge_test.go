@@ -64,7 +64,7 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		defer tx.Rollback()
 		ac := state.AggTx(tx)
 
-		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, math.MaxUint64)
+		stateVal, ok, _, _, _ := ac.DebugGetLatestFromFiles(kv.CommitmentDomain, commitmentdb.LegacyKeyCommitmentState, math.MaxUint64)
 		require.True(t, ok)
 		rootInFiles, _, _, err = commitment.HexTrieExtractStateRoot(stateVal)
 		require.NoError(t, err)

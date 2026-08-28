@@ -447,21 +447,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.RootPresent = true
 	s.RootTouched = true
 	s.RootChecked = true
-
-	for i := range len(s.Depths) {
-		s.Depths[i] = int16(rnd.Intn(256))
-	}
-	for i := range len(s.TouchMap) {
-		s.TouchMap[i] = uint16(rnd.Intn(1<<16 - 1))
-	}
-	for i := range len(s.AfterMap) {
-		s.AfterMap[i] = uint16(rnd.Intn(1<<16 - 1))
-	}
-	for i := range len(s.BranchBefore) {
-		if rnd.Intn(100) > 49 {
-			s.BranchBefore[i] = true
-		}
-	}
+	s.RootMask = uint16(rnd.Intn(1 << 16))
 
 	enc, err := s.Encode(nil)
 	require.NoError(t, err)
@@ -472,10 +458,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, s.Root, s1.Root)
-	require.Equal(t, s.Depths[:], s1.Depths[:])
-	require.Equal(t, s.AfterMap[:], s1.AfterMap[:])
-	require.Equal(t, s.TouchMap[:], s1.TouchMap[:])
-	require.Equal(t, s.BranchBefore[:], s1.BranchBefore[:])
+	require.Equal(t, s.RootMask, s1.RootMask)
 	require.Equal(t, s.RootTouched, s1.RootTouched)
 	require.Equal(t, s.RootPresent, s1.RootPresent)
 	require.Equal(t, s.RootChecked, s1.RootChecked)

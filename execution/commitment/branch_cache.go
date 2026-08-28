@@ -33,10 +33,27 @@ import (
 func u64ident(k uint64) uint32 { return uint32(k) }
 
 // KeyCommitmentState must never enter the BranchCache: it changes every block.
-var KeyCommitmentState = []byte("state")
+var KeyCommitmentState = []byte{0x00}
+
+// LegacyKeyCommitmentState is the pre-v3 commitment state key.
+var LegacyKeyCommitmentState = []byte("state")
 
 func isCommitmentStateKey(prefix []byte) bool {
-	return bytes.Equal(prefix, KeyCommitmentState)
+	return IsCommitmentStateKey(prefix)
+}
+
+// IsCommitmentStateKey reports whether prefix identifies a commitment state record.
+func IsCommitmentStateKey(prefix []byte) bool {
+	return bytes.Equal(prefix, KeyCommitmentState) || bytes.Equal(prefix, LegacyKeyCommitmentState)
+}
+
+// IsCommitmentStateKeyForFormat reports whether prefix is the state key for the
+// selected bundled-row or edge-record format.
+func IsCommitmentStateKeyForFormat(prefix []byte, edgeRecords bool) bool {
+	if edgeRecords {
+		return bytes.Equal(prefix, KeyCommitmentState)
+	}
+	return bytes.Equal(prefix, LegacyKeyCommitmentState)
 }
 
 // BranchCache: writer stripes only make stamped publications atomic with

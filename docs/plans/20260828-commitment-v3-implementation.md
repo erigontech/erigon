@@ -264,23 +264,23 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 - Create: `execution/commitment/state_blob_test.go`
 
-- [ ] re-key `KeyCommitmentState` from `[]byte("state")` to `[]byte{0x00}`. The ~29 files that
+- [x] re-key `KeyCommitmentState` from `[]byte("state")` to `[]byte{0x00}`. The ~29 files that
       reference the var pick the new value up automatically; audit only the sites that carry an
       independent assumption about its **length or sort position** — the ordered scans in
       `db/state/merge.go`, `db/state/squeeze.go`, `db/state/commitment_convert.go`,
       `db/integrity/commitment_integrity.go` and `commitmentdb/commitment_context.go`, which tasks 6,
       7 and 15 also touch
-- [ ] drop `Depths`, `TouchMap`, `AfterMap` and `BranchBefore` from `state.Encode`/`state.Decode`;
+- [x] drop `Depths`, `TouchMap`, `AfterMap` and `BranchBefore` from `state.Encode`/`state.Decode`;
       keep root flags and the encoded root cell
-- [ ] add `[mask:2]` for the root's children, which under this model has nowhere else to live
-- [ ] version the blob so a legacy blob still decodes
-- [ ] confirm no path encodes with a row active — `EncodeCurrentState` panics on `currentKeyLen > 0`
+- [x] add `[mask:2]` for the root's children, which under this model has nowhere else to live
+- [x] version the blob so a legacy blob still decodes
+- [x] confirm no path encodes with a row active — `EncodeCurrentState` panics on `currentKeyLen > 0`
       and `SetState` refuses `activeRows != 0`, so such a blob is already unloadable
-- [ ] write tests for round-trip on the new blob and for decoding a legacy blob
-- [ ] write a test asserting the encoded size drops by ~654 bytes
-- [ ] write a test asserting `[0x00]` sorts before every v3 trie key and is classified as neither a
+- [x] write tests for round-trip on the new blob and for decoding a legacy blob
+- [x] write a test asserting the encoded size drops by ~654 bytes
+- [x] write a test asserting `[0x00]` sorts before every v3 trie key and is classified as neither a
       node nor a child key
-- [ ] run `go test ./execution/commitment/... ./execution/stagedsync/...` — must pass before task 9
+- [x] run `go test ./execution/commitment/... ./execution/stagedsync/...` — must pass before task 9
 
 ### Task 9: Write path emits edge records
 

@@ -397,6 +397,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.collector = p.MetricsCollector()
 	}
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
+	if p, ok := tx.AggTx().(interface {
+		Cfg(kv.Domain) statecfg.DomainCfg
+	}); ok {
+		sd.sdCtx.SetCommitmentEdgeRecords(p.Cfg(kv.CommitmentDomain).EdgeRecordsInCommitment)
+	}
 
 	// The pin controller is aggregator-scoped (co-located with branchCache) so pin
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
@@ -1739,7 +1744,11 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
+	v, ok, err = sd.mem.GetAsOf(domain, key, ts)
+	if domain == kv.CommitmentDomain && bytes.Equal(key, commitment.KeyCommitmentState) && !commitmentdb.IsCommitmentStateValue(v) {
+		return sd.mem.GetAsOf(domain, commitment.LegacyKeyCommitmentState, ts)
+	}
+	return v, ok, err
 }
 
 func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

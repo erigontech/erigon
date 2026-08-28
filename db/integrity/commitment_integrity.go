@@ -54,6 +54,17 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+func isCommitmentStateKeyForFile(key []byte, file state.VisibleFile) bool {
+	return commitmentdb.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(file.Version()))
+}
+
+func commitmentStateKeyForFile(file state.VisibleFile) []byte {
+	if statecfg.CommitmentEdgeRecords(file.Version()) {
+		return commitmentdb.KeyCommitmentState
+	}
+	return commitmentdb.LegacyKeyCommitmentState
+}
+
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -147,7 +158,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
 	maxTxNum := endTxNum - 1
-	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
+	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentStateKeyForFile(f), maxTxNum)
 	if err != nil {
 		return info, err
 	}
@@ -566,7 +577,7 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 			return commitmentFileScan{referenced: true}
 		}
 		v, _ = g.Next(v[:0])
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(k, file) {
 			continue
 		}
 		counts.branchKeys++
@@ -668,7 +679,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
-			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			if isCommitmentStateKeyForFile(branchKey, file) {
 				logger.Info("[integrity] CommitmentKvDeref skipping state key", "valueLen", len(branchValue), "file", fileName)
 				continue
 			}
@@ -969,7 +980,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 		if err != nil {
 			return 0, err
 		}
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(k, file) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
@@ -1385,7 +1396,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
 		branchKeys++
@@ -1609,7 +1620,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
 		branchKeys++
@@ -1998,7 +2009,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
 
@@ -2193,7 +2204,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			if isCommitmentStateKeyForFile(branchKey, file) {
 				continue
 			}
 

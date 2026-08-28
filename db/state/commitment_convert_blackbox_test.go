@@ -182,7 +182,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 
 	stateCount := 0
 	for _, k := range newKeys {
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(k, commitmentdb.LegacyKeyCommitmentState) {
 			stateCount++
 			continue
 		}
@@ -237,7 +237,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 	require.NotEmpty(t, newVals)
 	foundShort := false
 	for i, v := range newVals {
-		if bytes.Equal(newKeys[i], commitmentdb.KeyCommitmentState) || len(v) == 0 {
+		if bytes.Equal(newKeys[i], commitmentdb.LegacyKeyCommitmentState) || len(v) == 0 {
 			continue
 		}
 		_, perr := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
@@ -452,7 +452,7 @@ func anyFileHasSqueezedField(t *testing.T, agg *state.Aggregator, paths []string
 	for _, p := range paths {
 		keys, vals := readKVFile(t, agg, p)
 		for i, v := range vals {
-			if bytes.Equal(keys[i], commitmentdb.KeyCommitmentState) || len(v) == 0 {
+			if bytes.Equal(keys[i], commitmentdb.LegacyKeyCommitmentState) || len(v) == 0 {
 				continue
 			}
 			found := false

@@ -116,7 +116,7 @@ func forEachCommitmentBranch(t *testing.T, path string, fn func(prefix, val []by
 	for g.HasNext() {
 		k, _ = g.Next(k[:0])
 		v, _ = g.Next(v[:0])
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if bytes.Equal(k, commitmentdb.LegacyKeyCommitmentState) {
 			continue
 		}
 		fn(k, v)

@@ -51,6 +51,18 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 	return ws
 }
 
+func latestCommitmentStateForTest(t *testing.T, doms *execctx.SharedDomains, tx kv.TemporalTx) []byte {
+	t.Helper()
+	value, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	if commitmentdb.IsCommitmentStateValue(value) {
+		return value
+	}
+	value, _, err = doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.LegacyKeyCommitmentState)
+	require.NoError(t, err)
+	return value
+}
+
 func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
 	header := &types.Header{Number: *uint256.NewInt(blockNum)}
 	return &blockResult{
@@ -140,8 +152,7 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// Batch mode computes commitment only on an explicit request, which this
 	// stream never sends; the sole writer of a checkpoint is the step-boundary
 	// hook at txNum 15, so the latest checkpoint must decode to that edge.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"no commitment checkpoint was saved at the mid-block step edge — the step-boundary hook in handleMessage's txResult case never ran")
 	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
@@ -202,8 +213,7 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
 	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum,
@@ -339,8 +349,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, edgeTxNum, false))
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 
 	require.NoError(t, doms.Flush(ctx, tx))
 	it, err := tx.RangeAsOf(kv.AccountsDomain, nil, nil, edgeTxNum+1, order.Asc, -1)
@@ -434,8 +443,7 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	// The checkpoint must still advance to the step edge: the fix isolates the
 	// changeset, it does not suppress the checkpoint.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
-	require.NoError(t, err)
+	stateBlob := latestCommitmentStateForTest(t, doms, tx)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"step-boundary checkpoint must still be written to sd, only kept out of the changeset")
 	gotTxNum, _ := commitmentdb.DecodeTxBlockNums(stateBlob)

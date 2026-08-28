@@ -137,6 +137,7 @@ type HexPatriciaHashed struct {
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
 	rootTouched   bool
 	rootPresent   bool
+	rootMask      uint16
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte              // buffer to compute cell hash or write hash-related things
@@ -244,12 +245,13 @@ func (hph *HexPatriciaHashed) SetCollapseTracer(tracer CollapseTracer) {
 // The large grid array is NOT zeroed — activeRows=0 means no cells are live,
 // and cells are properly initialized via cell.reset() during unfold/fold.
 func (hph *HexPatriciaHashed) resetForReuse() {
-	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent,
+	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent, rootMask,
 	// currentKeyLen, activeRows, depths, branchBefore, touchMap, afterMap.
 	hph.root.reset()
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = false
+	hph.rootMask = 0
 	hph.currentKeyLen = 0
 	hph.activeRows = 0
 	for i := range hph.depths {
@@ -1679,6 +1681,9 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 
 // foldBranch handles the updateKindBranch case: branch of 2+ cells.
 func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, upCell *cell, updateKey []byte) error {
+	if row == 0 {
+		hph.rootMask = hph.afterMap[row]
+	}
 	if hph.touchMap[row] != 0 { // any modifications
 		if row == 0 {
 			hph.rootTouched = true
@@ -1902,6 +1907,7 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 			// A propagate fold leaves exactly one survivor, so the root exists; without this
 			// the next unfold reads touched && !present and deletes the whole subtree.
 			hph.rootPresent = true
+			hph.rootMask = 0
 		} else {
 			// Modification is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
@@ -1942,6 +1948,7 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 			// Root is deleted because the tree is empty
 			hph.rootTouched = true
 			hph.rootPresent = false
+			hph.rootMask = 0
 		case upDepth == 64:
 			// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 			// Therefore we are not propagating deletion upwards, but turn it into a modification
@@ -2065,6 +2072,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	if hph.activeRows == 0 { // Remove the root
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, false
+		hph.rootMask = 0
 	} else {
 		row := hph.activeRows - 1
 		if hph.depths[row] < int16(len(hashedKey)) {
@@ -2186,6 +2194,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	if hph.activeRows == 0 {
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, true
+		hph.rootMask = 0
 	} else {
 		row := hph.activeRows - 1
 		depth = hph.depths[row]
@@ -2679,6 +2688,7 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = true
+	hph.rootMask = 0
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
@@ -2701,24 +2711,23 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 	return hph.ctx.Storage(plainKey)
 }
 
-type stateRootFlag int8
+type stateRootFlag uint8
 
-var (
-	stateRootPresent stateRootFlag = 1
-	stateRootChecked stateRootFlag = 2
-	stateRootTouched stateRootFlag = 4
+const (
+	stateRootPresent     stateRootFlag = 1
+	stateRootChecked     stateRootFlag = 2
+	stateRootTouched     stateRootFlag = 4
+	stateRootVersionV2   stateRootFlag = 8
+	stateRootVersionMask stateRootFlag = 0xf8
 )
 
 // represents state of the tree
 type state struct {
-	Root         []byte      // encoded root cell
-	Depths       [128]int16  // For each row, the depth of cells in that row
-	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
-	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
-	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
-	RootTouched  bool
-	RootPresent  bool
+	Root        []byte // encoded root cell
+	RootMask    uint16
+	RootChecked bool // Set to false if it is not known whether the root is empty, set to true if it is checked
+	RootTouched bool
+	RootPresent bool
 }
 
 func (s *state) Encode(buf []byte) ([]byte, error) {
@@ -2732,6 +2741,7 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	if s.RootTouched {
 		rootFlags |= stateRootTouched
 	}
+	rootFlags |= stateRootVersionV2
 
 	ee := bytes.NewBuffer(buf)
 	if err := binary.Write(ee, binary.BigEndian, int8(rootFlags)); err != nil {
@@ -2743,45 +2753,27 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 	if n, err := ee.Write(s.Root); err != nil || n != len(s.Root) {
 		return nil, fmt.Errorf("encode root: %w", err)
 	}
-	d := make([]byte, len(s.Depths))
-	for i := range len(s.Depths) {
-		d[i] = byte(s.Depths[i])
-	}
-	if n, err := ee.Write(d); err != nil || n != len(s.Depths) {
-		return nil, fmt.Errorf("encode depths: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.TouchMap); err != nil {
-		return nil, fmt.Errorf("encode touchMap: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, s.AfterMap); err != nil {
-		return nil, fmt.Errorf("encode afterMap: %w", err)
-	}
-
-	var before1, before2 uint64
-	for i := range 64 {
-		if s.BranchBefore[i] {
-			before1 |= 1 << i
-		}
-	}
-	for i, j := 64, 0; i < 128; i, j = i+1, j+1 {
-		if s.BranchBefore[i] {
-			before2 |= 1 << j
-		}
-	}
-	if err := binary.Write(ee, binary.BigEndian, before1); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_1: %w", err)
-	}
-	if err := binary.Write(ee, binary.BigEndian, before2); err != nil {
-		return nil, fmt.Errorf("encode branchBefore_2: %w", err)
+	if err := binary.Write(ee, binary.BigEndian, s.RootMask); err != nil {
+		return nil, fmt.Errorf("encode root mask: %w", err)
 	}
 	return ee.Bytes(), nil
 }
 
 func (s *state) Decode(buf []byte) error {
 	aux := bytes.NewBuffer(buf)
+	s.Root = nil
+	s.RootMask = 0
+	s.RootChecked = false
+	s.RootTouched = false
+	s.RootPresent = false
+
 	var rootFlags stateRootFlag
 	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
 		return fmt.Errorf("rootFlags: %w", err)
+	}
+	version := rootFlags & stateRootVersionMask
+	if version != 0 && version != stateRootVersionV2 {
+		return fmt.Errorf("unsupported state version %x", version)
 	}
 
 	if rootFlags&stateRootPresent != 0 {
@@ -2799,40 +2791,37 @@ func (s *state) Decode(buf []byte) error {
 		return fmt.Errorf("root size: %w", err)
 	}
 	s.Root = make([]byte, rootSize)
-	if _, err := aux.Read(s.Root); err != nil {
+	if _, err := io.ReadFull(aux, s.Root); err != nil {
 		return fmt.Errorf("root: %w", err)
 	}
-	d := make([]byte, len(s.Depths))
-	if err := binary.Read(aux, binary.BigEndian, &d); err != nil {
-		return fmt.Errorf("depths: %w", err)
+
+	if version == stateRootVersionV2 {
+		if err := binary.Read(aux, binary.BigEndian, &s.RootMask); err != nil {
+			return fmt.Errorf("root mask: %w", err)
+		}
+		return nil
 	}
-	for i := range len(s.Depths) {
-		s.Depths[i] = int16(d[i])
+
+	var depths [128]byte
+	if _, err := io.ReadFull(aux, depths[:]); err != nil {
+		return fmt.Errorf("legacy depths: %w", err)
 	}
-	if err := binary.Read(aux, binary.BigEndian, &s.TouchMap); err != nil {
-		return fmt.Errorf("touchMap: %w", err)
+	var touchMap [128]uint16
+	if err := binary.Read(aux, binary.BigEndian, &touchMap); err != nil {
+		return fmt.Errorf("legacy touchMap: %w", err)
 	}
-	if err := binary.Read(aux, binary.BigEndian, &s.AfterMap); err != nil {
-		return fmt.Errorf("afterMap: %w", err)
+	var afterMap [128]uint16
+	if err := binary.Read(aux, binary.BigEndian, &afterMap); err != nil {
+		return fmt.Errorf("legacy afterMap: %w", err)
 	}
 	var branch1, branch2 uint64
 	if err := binary.Read(aux, binary.BigEndian, &branch1); err != nil {
-		return fmt.Errorf("branchBefore1: %w", err)
+		return fmt.Errorf("legacy branchBefore1: %w", err)
 	}
 	if err := binary.Read(aux, binary.BigEndian, &branch2); err != nil {
-		return fmt.Errorf("branchBefore2: %w", err)
+		return fmt.Errorf("legacy branchBefore2: %w", err)
 	}
-
-	for i := range 64 {
-		if branch1&(1<<i) != 0 {
-			s.BranchBefore[i] = true
-		}
-	}
-	for i, j := 64, 0; i < 128; i, j = i+1, j+1 {
-		if branch2&(1<<j) != 0 {
-			s.BranchBefore[i] = true
-		}
-	}
+	s.RootMask = afterMap[0]
 	return nil
 }
 
@@ -2946,16 +2935,13 @@ func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 		RootChecked: hph.rootChecked,
 		RootTouched: hph.rootTouched,
 		RootPresent: hph.rootPresent,
+		RootMask:    hph.rootMask,
 	}
 	if hph.currentKeyLen > 0 {
 		panic("currentKeyLen > 0")
 	}
 
 	s.Root = hph.root.Encode()
-	copy(s.Depths[:], hph.depths[:])
-	copy(s.BranchBefore[:], hph.branchBefore[:])
-	copy(s.TouchMap[:], hph.touchMap[:])
-	copy(s.AfterMap[:], hph.afterMap[:])
 
 	return s.Encode(buf)
 }
@@ -2970,6 +2956,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		hph.rootChecked = false
 		hph.rootTouched = false
 		hph.rootPresent = false
+		hph.rootMask = 0
 		hph.activeRows = 0
 
 		for i := range len(hph.depths) {
@@ -2995,11 +2982,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	hph.rootChecked = s.RootChecked
 	hph.rootTouched = s.RootTouched
 	hph.rootPresent = s.RootPresent
-
-	copy(hph.depths[:], s.Depths[:])
-	copy(hph.branchBefore[:], s.BranchBefore[:])
-	copy(hph.touchMap[:], s.TouchMap[:])
-	copy(hph.afterMap[:], s.AfterMap[:])
+	hph.rootMask = s.RootMask
 
 	if hph.root.accountAddrLen > 0 {
 		if hph.ctx == nil {
@@ -3091,32 +3074,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(sb, "block: %d txn: %d\n", bn, txn)
-	// fmt.Fprintf(sb, " touchMaps: %v\n", s.TouchMap)
-	// fmt.Fprintf(sb, " afterMaps: %v\n", s.AfterMap)
-	// fmt.Fprintf(sb, " depths: %v\n", s.Depths)
-
-	printAfterMap := func(sb *strings.Builder, name string, list []uint16, depths []int16, existedBefore []bool) {
-		fmt.Fprintf(sb, "\t::%s::\n\n", name)
-		lastNonZero := 0
-		for i, l := range slices.Backward(list) {
-			if l != 0 {
-				lastNonZero = i
-				break
-			}
-		}
-		for i, v := range list {
-			newBranchSuf := ""
-			if !existedBefore[i] {
-				newBranchSuf = " NEW"
-			}
-
-			fmt.Fprintf(sb, " d=%3d %016b%s\n", depths[i], v, newBranchSuf)
-			if i == lastNonZero {
-				break
-			}
-		}
-	}
-	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
+	fmt.Fprintf(sb, " rootNode: %x [mask=%016b, touched=%t, present=%t, checked=%t]\n", s.Root, s.RootMask, s.RootTouched, s.RootPresent, s.RootChecked)
 
 	root := new(cell)
 	if err := root.Decode(s.Root); err != nil {
@@ -3124,7 +3082,6 @@ func HexTrieStateToString(enc []byte) (string, error) {
 	}
 
 	fmt.Fprintf(sb, "RootHash: %x\n", root.hash)
-	printAfterMap(sb, "afterMap", s.AfterMap[:], s.Depths[:], s.BranchBefore[:])
 
 	return sb.String(), nil
 }
