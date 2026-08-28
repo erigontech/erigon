@@ -148,6 +148,23 @@ func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, 
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval, sameTxNumUpdate)
 }
 
+// PutCommitmentBranchDiff writes a kv.CommitmentDomain entry with an explicit
+// diff target instead of domainWriters[kv.CommitmentDomain]'s own diff field.
+// The commitment domain has exactly one writer (the parallel commitment
+// calculator, one block at a time), so routing its diff this way needs no
+// lock against SetChangesetAccumulator, unlike DomainPut/DomainDel.
+func (sd *TemporalMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
+	sameTxNumUpdate := sd.putLatest(kv.CommitmentDomain, k, v, txNum)
+	kb := common.ToBytesZeroCopy(k)
+	if sameTxNumUpdate {
+		return sd.domainWriters[kv.CommitmentDomain].addValue(kb, v, kv.Step(txNum/sd.stepSize))
+	}
+	if len(v) == 0 {
+		return sd.domainWriters[kv.CommitmentDomain].DeleteWithPrevDiff(kb, txNum, preval, diff)
+	}
+	return sd.domainWriters[kv.CommitmentDomain].PutWithPrevDiff(kb, v, txNum, preval, diff)
+}
+
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
 	// A same-txNum update only rewrites the value: history and the unwind diff
 	// record the value as of BEFORE txNum, which the first write already did —

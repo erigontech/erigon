@@ -48,14 +48,16 @@ func TestCheckStateVerify(t *testing.T) {
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	// Sequential: the parallel trie leaves the last step's storage keys unreferenced by any
+	// commitment branch, which is what CheckStateVerify inspects here.
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -126,14 +128,14 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -242,13 +244,13 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
