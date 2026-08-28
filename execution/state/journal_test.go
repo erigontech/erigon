@@ -143,3 +143,26 @@ func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 		}
 	}
 }
+
+// revert truncates to a snapshot, so the entries it drops outlive it; a Reset
+// that clears only [0:len] would leave that stretch holding its bytecode.
+func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
+	addr := accounts.InternAddress(common.Address{1})
+	ibs.stateObjects[addr] = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
+
+	j := ibs.journal
+	for range 4 {
+		j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	}
+
+	j.revert(ibs, 2)
+	j.Reset()
+
+	for i, e := range j.entries[:cap(j.entries)] {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
