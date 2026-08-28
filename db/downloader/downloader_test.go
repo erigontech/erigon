@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -352,6 +353,169 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg:        cfg,
 		downloader: d,
 	}
+}
+
+func TestDownloaderCompletedAndResetProgress(t *testing.T) {
+	var d Downloader
+
+	_, total := d.Completed()
+	require.Zero(t, total, "no sample yet")
+
+	d.lastStats.Store(&AggStats{BytesCompleted: 30, BytesTotal: 100, MetadataReady: 2, NumTorrents: 2})
+	done, total := d.Completed()
+	require.Equal(t, uint64(30), done)
+	require.Equal(t, uint64(100), total)
+
+	d.ResetProgress()
+	_, total = d.Completed()
+	require.Zero(t, total, "reset drops the sample")
+}
+
+// Torrents whose metainfo has not arrived are excluded from both byte counters,
+// so an early sample counts the already-complete header files against a partial
+// total and reports near-completion.
+func TestDownloaderCompletedIgnoresIncompleteMetadata(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 25_000, BytesTotal: 26_000, MetadataReady: 3, NumTorrents: 10})
+
+	done, total := d.Completed()
+	require.Zero(t, total)
+	require.Zero(t, done)
+}
+
+func TestDownloaderCompletedReportsOnceMetadataArrives(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 25_000, BytesTotal: 26_000, MetadataReady: 3, NumTorrents: 10})
+	d.storeStats(AggStats{BytesCompleted: 26_000, BytesTotal: 900_000, MetadataReady: 10, NumTorrents: 10})
+
+	done, total := d.Completed()
+	require.Equal(t, uint64(26_000), done)
+	require.Equal(t, uint64(900_000), total)
+}
+
+// BytesCompleted counts dirty bytes, which can go back down.
+func TestDownloaderCompletedNeverRegressesWithinSession(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 500, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+	d.storeStats(AggStats{BytesCompleted: 400, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+
+	done, _ := d.Completed()
+	require.Equal(t, uint64(500), done)
+}
+
+// The high-water mark is per download session, or a retry after a failure would
+// stick at the previous session's high.
+func TestDownloaderResetProgressClearsHighWaterMark(t *testing.T) {
+	var d Downloader
+
+	d.storeStats(AggStats{BytesCompleted: 900, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+	d.ResetProgress()
+	d.storeStats(AggStats{BytesCompleted: 100, BytesTotal: 1000, MetadataReady: 2, NumTorrents: 2})
+
+	done, _ := d.Completed()
+	require.Equal(t, uint64(100), done)
+}
+
+// A same-name torrent retained under a different infohash (an existing local
+// file kept over the preverified one) must still count toward stats: resolving
+// batch entries only by the requested hash would keep MetadataReady short for
+// the whole session and gate Completed() at (0, 0).
+func TestNewStatsCountsRetainedSameNameTorrent(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	ctx := t.Context()
+
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	test.downloader.lock.RLock()
+	localT := test.downloader.torrentsByName["a.seg"]
+	test.downloader.lock.RUnlock()
+	require.NotNil(localT)
+
+	preverifiedHash := snaptype.Hex2InfoHash("bb")
+	require.NotEqual(preverifiedHash, localT.InfoHash())
+	require.NoError(test.downloader.testStartSingleDownloadNoWait(ctx, preverifiedHash, "a.seg"))
+
+	stats := test.downloader.newStats(AggStats{}, []snapshot{{InfoHash: preverifiedHash, Name: "a.seg"}})
+	require.Equal(1, stats.NumTorrents)
+	require.Equal(1, stats.MetadataReady)
+	require.Positive(stats.BytesTotal)
+
+	test.downloader.storeStats(stats)
+	_, total := test.downloader.Completed()
+	require.Positive(total)
+}
+
+// The download's logging loop is the only production writer of the progress
+// sample: drive a real batch and require the sample to reach Completed(), so
+// a change gating that loop cannot silently kill the download progress.
+func TestDownloaderCompletedFedByDownloadBatch(t *testing.T) {
+	test := newDownloaderTest(t)
+	ctx := t.Context()
+
+	require.NoError(t, os.WriteFile(filepath.Join(test.dirs.Snap, "a.seg"), []byte("local snapshot data"), 0o644))
+	require.NoError(t, test.downloader.AddNewSeedableFile(ctx, "a.seg"))
+	test.downloader.lock.RLock()
+	localT := test.downloader.torrentsByName["a.seg"]
+	test.downloader.lock.RUnlock()
+	require.NotNil(t, localT)
+
+	require.NoError(t, test.downloader.testStartSingleDownloadNoWait(ctx, localT.InfoHash(), "a.seg"))
+
+	require.Eventually(t, func() bool {
+		_, total := test.downloader.Completed()
+		return total > 0
+	}, 2*time.Second, 10*time.Millisecond, "the download's logging loop must feed Completed()")
+}
+
+// Progress samples carry no batch identity, so a batch must wait for the one in
+// flight instead of blending two disjoint file sets into one sample.
+func TestDownloadSnapshotsSerializesBatches(t *testing.T) {
+	test := newDownloaderTest(t)
+
+	test.downloader.downloadBatchLock.Lock()
+	done := make(chan error, 1)
+	go func() { done <- test.downloader.DownloadSnapshots(t.Context(), nil, "queued batch") }()
+
+	select {
+	case <-done:
+		t.Fatal("a batch must not run while another one is in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	test.downloader.downloadBatchLock.Unlock()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the queued batch must run once the one in flight is done")
+	}
+}
+
+// noProgressDownloaderClient stands in for an external downloader reached over
+// gRPC, which cannot report progress.
+type noProgressDownloaderClient struct {
+	downloaderproto.DownloaderClient
+}
+
+// The capability travels through two wrapping clients: each must unwrap to the
+// in-process downloader itself, not report on its behalf.
+func TestRpcClientProgressUnwrapsToInProcessDownloader(t *testing.T) {
+	test := newDownloaderTest(t)
+	grpcServer, err := NewGrpcServer(test.downloader)
+	require.NoError(t, err)
+	client := NewRpcClient(DirectGrpcServerClient(grpcServer), test.dirs.Snap)
+
+	require.Equal(t, dbservices.DownloadProgressReport(test.downloader), client.DownloadProgress())
+}
+
+func TestRpcClientProgressNilWithoutCapability(t *testing.T) {
+	client := NewRpcClient(noProgressDownloaderClient{}, t.TempDir())
+
+	require.Nil(t, client.DownloadProgress())
 }
 
 // logBuffer is a log sink readable while the Downloader's goroutines write to it.
