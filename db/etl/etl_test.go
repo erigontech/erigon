@@ -1115,9 +1115,7 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
 
-	makeBuffer := func(n int, sorted bool) *sortableBuffer {
-		buf := NewSortableBuffer(256 * 1024 * 1024)
-		buf.Prealloc(n, n*(keyLen+valLen))
+	fill := func(buf *sortableBuffer, n int, sorted bool) {
 		key := make([]byte, keyLen)
 		val := make([]byte, valLen)
 		for i := range n {
@@ -1132,7 +1130,6 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 			binary.BigEndian.PutUint64(val, uint64(i))
 			buf.Put(key, val)
 		}
-		return buf
 	}
 
 	for _, tc := range []struct {
@@ -1147,9 +1144,14 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
+			// One buffer, Reset between rounds: a fresh one per round would
+			// leave the round timing GC for the buffers before it.
+			ref := NewSortableBuffer(256 * 1024 * 1024)
+			ref.Prealloc(tc.count, tc.count*(keyLen+valLen))
 			for b.Loop() {
 				b.StopTimer()
-				ref := makeBuffer(tc.count, tc.sorted)
+				ref.Reset()
+				fill(ref, tc.count, tc.sorted)
 				b.StartTimer()
 				ref.Sort()
 				for _, _, ok := ref.Next(); ok; _, _, ok = ref.Next() {
