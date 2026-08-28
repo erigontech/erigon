@@ -259,15 +259,26 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = common.Big0
 	}
 
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	if err != nil {
+		return 0, err
+	}
+	defer caller.Close()
+
+	plainTransfer := args.Data == nil && args.To != nil
+
+	var initialState *state.IntraBlockState
+	if feeCap.Sign() != 0 || plainTransfer {
+		initialState, _, err = caller.InitialState()
+		if err != nil {
+			return 0, err
+		}
+		defer initialState.Close()
+	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-
-		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
+		balance, err := initialState.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
@@ -300,26 +311,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
-	if err != nil {
-		return 0, err
-	}
-	defer caller.Close()
-
 	// If the transaction is a plain value transfer, short circuit estimation and
 	// directly try 21000. Returning 21000 without any execution is dangerous as
 	// some tx field combos might bump the price up even for plain transfers (e.g.
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
-	if args.Data == nil && args.To != nil {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
+	if plainTransfer {
+		codeSize, err := initialState.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
-			return 0, errors.New("getCodeSize failed")
+			return 0, fmt.Errorf("get code size for %x: %w", *args.To, err)
 		}
 		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
 		// single trial at the ceiling yields the exact estimate: return its actual gas
