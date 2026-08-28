@@ -235,7 +235,6 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
 		out := jsonstream.Get(nil)
-		defer jsonstream.Put(out)
 		out.WriteArrayStart()
 		wrote := false
 		for _, answer := range answersWithNils {
@@ -252,6 +251,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		if wrote {
 			h.conn.WriteJSON(cp.ctx, rawResponse(out.Buffer()))
 		}
+		jsonstream.Put(out)
 		for _, n := range cp.notifiers {
 			n.activate()
 		}
@@ -282,7 +282,6 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		needWriteStream := false
 		if stream == nil {
 			stream = jsonstream.Get(nil)
-			defer jsonstream.Put(stream)
 			needWriteStream = true
 		}
 		answer := h.handleCallMsg(cp, msg, stream)
@@ -292,6 +291,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		}
 		if needWriteStream {
 			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
+			jsonstream.Put(stream)
 		} else {
 			stream.WriteRaw("\n")
 		}

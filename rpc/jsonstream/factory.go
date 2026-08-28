@@ -46,6 +46,7 @@ func flushIfFull(stream *jsoniter.Stream) {
 	}
 }
 
+// New builds an unpooled stream. Request paths use Get.
 func New(out io.Writer) Stream {
 	return NewSized(out, InitialBufferSize)
 }
@@ -57,15 +58,13 @@ func NewSized(out io.Writer, bufSize int) Stream {
 
 var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}
 
-// maxPooledBufferSize bounds what a stream may carry back into the pool. A
-// non-streaming response is appended whole, so the buffer ends up the size of
-// the response; the bound keeps ordinary ones and drops the outliers, which the
-// pool would otherwise pin one per running goroutine.
-const maxPooledBufferSize = 4 * int(datasize.MB)
+// maxPooledBufferSize bounds what a stream carries back into the pool. A
+// non-streaming response is appended whole, so its buffer ends up as large as
+// the response, and the pool holds one per running goroutine.
+const maxPooledBufferSize = 16 * FlushThreshold
 
-// Get is New over a pool, so a response reuses the previous one's buffer instead
-// of growing a fresh 4KB one up to the flush threshold. Hand the stream back with
-// Put once the bytes have left it; not doing so only costs the recycling.
+// Get is New over a pool. Put the stream back once its bytes have left it;
+// skipping Put only costs the recycling.
 func Get(out io.Writer) Stream {
 	s := streamPool.Get().(*StackStream)
 	s.Reset(out)
@@ -79,6 +78,6 @@ func Put(s Stream) {
 	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize {
 		return
 	}
-	ss.Reset(nil)
+	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
 	streamPool.Put(ss)
 }

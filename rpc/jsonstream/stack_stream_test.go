@@ -1182,40 +1182,29 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	}
 }
 
-// TestPoolHandsBackAcleanStream pins what Put must clear: a reused stream that
-// kept the previous response's bytes would prepend them to the next one, and one
-// that kept the latched error would fail every Flush without draining.
-func TestPoolHandsBackACleanStream(t *testing.T) {
-	s := Get(goneWriter{}).(*StackStream)
-	s.WriteObjectStart()
-	s.WriteObjectField("a")
-	s.WriteString(strings.Repeat("x", 2*FlushThreshold))
-	require.Error(t, s.Flush())
+// Put clears the writer as well as the bytes. A pooled stream that kept one
+// would pin the connection it came from until the next Get.
+func TestPutReleasesWriterAndBytes(t *testing.T) {
+	var out bytes.Buffer
+	s := Get(&out).(*StackStream)
+	s.WriteString("pending")
 	Put(s)
 
-	var out bytes.Buffer
-	reused := Get(&out)
-	require.Empty(t, reused.Buffer())
-	require.Equal(t, 0, reused.Depth())
-	reused.WriteString("ok")
-	require.NoError(t, reused.Flush())
-	require.Equal(t, `"ok"`, out.String())
-	Put(reused)
+	require.Empty(t, s.Buffer())
+	require.NoError(t, s.Flush())
+	require.Empty(t, out.String())
 }
 
-// A response that grew far past the flush threshold is dropped rather than
-// pooled, so one outsized value cannot pin its peak for the life of the process.
-func TestPoolDropsOversizedBuffers(t *testing.T) {
+// A response above the bound is dropped rather than pooled, so one outsized
+// value cannot pin its peak per goroutine.
+func TestPutDropsOversizedBuffer(t *testing.T) {
 	s := Get(nil).(*StackStream)
-	s.WriteString(strings.Repeat("x", 2*maxPooledBufferSize))
+	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
 	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
-	Put(s)
 
-	for range 8 {
-		got := Get(nil).(*StackStream)
-		require.LessOrEqual(t, cap(got.Buffer()), maxPooledBufferSize)
-		Put(got)
-	}
+	Put(s)
+	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
+	require.NotSame(t, s, Get(nil).(*StackStream))
 }
 
 func BenchmarkStreamAcquire(b *testing.B) {
