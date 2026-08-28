@@ -2010,7 +2010,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
@@ -2579,7 +2579,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
-  * Default: `131072` (~18 days)
+  * Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
@@ -4970,25 +4970,46 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` is an Erigon extension that retrieves multiple storage slots for a given account in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
 
 **Parameters**
 
-| Parameter    | Type             | Description                                          |
-| ------------ | ---------------- | ---------------------------------------------------- |
-| address      | STRING           | The account address to query storage for             |
-| storageKeys  | ARRAY of STRING  | List of 32-byte storage slot keys (hex-encoded)      |
-| blockNumber  | STRING or NUMBER | Block number or tag (`"latest"`, `"earliest"`, etc.) |
+| Parameter   | Type             | Description                                                                                       |
+| ----------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| requests    | OBJECT           | Maps each account address to an array of 32-byte storage slot keys (hex-encoded)                   |
+| blockNumber | STRING or NUMBER | Optional. Block number, block hash or tag (`"latest"`, `"earliest"`, etc.). Defaults to `"latest"` |
 
 **Example**
 
 ```bash
-curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":[{"0xdAC17F958D2ee523a2206206994597C13D831ec7":["0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000000000000000000000000000000000000000000002"],"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48":["0x0000000000000000000000000000000000000000000000000000000000000002"]},"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
 
-An object mapping each requested storage key to its 32-byte value.
+An object mapping each requested address to an array of 32-byte values, in the same order as the slot keys requested for that address. Slots that were never written return zero.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "0xdac17f958d2ee523a2206206994597c13d831ec7": [
+      "0x000000000000000000000000c6cde7c39eb2f0f0095f41570af89efc2c1ea828",
+      "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": [
+      "0x0000000000000000000000000a06be16275b95a7d2567fbdae118b36c7da78f9"
+    ]
+  }
+}
+```
+
+**Limits**
+
+* A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
+* An empty `requests` object returns error code `-32602` with the message `empty request`.
+* When `blockNumber` is a block hash, the block must be canonical.
 
 ---
 
@@ -5915,7 +5936,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- | --- |
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
-| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. See **TraceEntry fields** below. |
+| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
 | `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
@@ -6016,7 +6037,7 @@ Executes the given call and returns a number of possible traces for it.
 
 #### Returns
 
-`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
+`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; `stateDiff` and `vmTrace` are `null` when not requested, while `trace` is an empty array. See [Response Fields Reference](#response-fields-reference) for full field semantics.
 
 #### Example
 
