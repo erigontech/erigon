@@ -105,6 +105,9 @@ type Downloader struct {
 	activeDownloadRequests     int
 	zeroActiveDownloadRequests sync.Cond
 
+	// Caps concurrent whole-file hashing by kept-snapshot seeding across all batches.
+	seedSem *semaphore.Weighted
+
 	// Synchronizes state-sensitive changes to things affected by Downloader.Close.
 	lock           sync.RWMutex
 	torrentClient  *torrent.Client
@@ -366,6 +369,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	d.logConfig()
 
 	d.ctx, d.stop = context.WithCancel(context.Background())
+	d.seedSem = semaphore.NewWeighted(int64(defaultSeedConcurrency()))
 
 	return d, nil
 }
@@ -835,8 +839,8 @@ func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, e
 	return metainfo.LoadFromFile(miPath)
 }
 
-// Loads metainfo from disk. Returns Some metainfo if it's valid, None if it is missing. An invalid
-// metainfo is returned as an error and left on disk.
+// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
+// errors.
 func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (localMetainfo g.Option[*metainfo.MetaInfo], err error) {
 	miPath := d.metainfoFilePathForName(name)
 	mi, err := metainfo.LoadFromFile(miPath)
@@ -895,12 +899,13 @@ func (d *Downloader) startSnapshotsDownload(
 	}
 	g.MakeSliceWithCap(&batch.torrents, len(items))
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
-	g.MakeChanWithLen(&batch.seedSlots, maxConcurrentSeedKept())
-	batch.ctx, batch.cancel = context.WithCancelCause(d.ctx)
+	var batchCtx context.Context
+	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 
 	batch.all.Go(func() {
 		d.logDownload(
-			batch.ctx,
+			batchCtx,
 			items,
 			target,
 			func() log.Lvl {
@@ -920,7 +925,7 @@ func (d *Downloader) startSnapshotsDownload(
 
 	defer func() {
 		if err != nil {
-			batch.abandon()
+			err = batch.end(ctx, err)
 		}
 	}()
 	err = batch.addAllItems(ctx, items)
@@ -1109,8 +1114,8 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	snapshotTorrent g.Option[*torrent.Torrent],
 	firstDownloader bool, // First add of this Torrent that asked to download. The caller is responsible for adding download tasks.
 	localMetainfo g.Option[*metainfo.MetaInfo],
-	// Local data was kept and no torrent is registered for it. The caller seeds it off d.lock —
-	// see seedKeptSnapshot.
+	// Local data was kept and no torrent is registered for it. The caller seeds it, off d.lock:
+	// deriving a metainfo hashes the whole file.
 	keptLocal bool,
 	err error,
 ) {
@@ -1251,14 +1256,17 @@ func (d *Downloader) prepareLocalDataForDownload(
 
 // seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
 // none is on disk. Must run without d.lock: addCompleteTorrent takes it and the lock is not
-// reentrant, so calling this under it deadlocks. Deriving also hashes the whole file.
-func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) {
+// reentrant, so calling this under it deadlocks. Deriving also hashes the whole file. A ctx-caused
+// failure is returned but not logged; the batch counts those into one drop total.
+func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
 	if err := d.removeMalformedMetainfo(name); err != nil {
 		d.log(log.LvlWarn, "cannot remove malformed metainfo", "err", err, "name", name)
 	}
-	if err := d.AddNewSeedableFile(ctx, name); err != nil && ctx.Err() == nil {
+	err := d.AddNewSeedableFile(ctx, name)
+	if err != nil && ctx.Err() == nil {
 		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
 	}
+	return err
 }
 
 // BuildTorrentIfNeed only checks that the .torrent path exists, so metainfo that cannot be parsed

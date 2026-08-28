@@ -10,11 +10,17 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
+
+// Seeding a kept snapshot hashes the whole file, so the work is CPU-bound with a sequential read:
+// GOMAXPROCS sets the scale and the doubling covers read stalls. BuildTorrentFilesIfNeed can afford
+// far more because most of its files already have a .torrent and short-circuit; these rarely do.
+func defaultSeedConcurrency() int { return max(1, runtime.GOMAXPROCS(-1)*2) }
 
 type downloadBatch struct {
 	d      *Downloader
-	ctx    context.Context
 	cancel context.CancelCauseFunc
 	// Tasks that must finish before abandoning the batch.
 	all      sync.WaitGroup
@@ -24,11 +30,12 @@ type downloadBatch struct {
 	finishedMetadataTasks atomic.Bool
 	// These must be run even if the batch is abandoned.
 	afterTasks chan func()
-	// Bounds concurrent metainfo derivation, each of which hashes a whole data file.
-	seedSlots chan struct{}
+	// Cancelled only when the caller goes away, unlike cancel which also fires on ordinary completion.
+	seedCancel  context.CancelCauseFunc
+	seedCtx     context.Context
+	seedDropped atomic.Int64
+	ended       sync.Once
 }
-
-func maxConcurrentSeedKept() int { return runtime.GOMAXPROCS(-1) * 16 }
 
 // Waits for all the fetches to complete then fires off the thread-safe Torrent methods to configure
 // for downloading appropriately.
@@ -50,7 +57,7 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 		return err
 	}
 	if keptLocal {
-		me.all.Go(func() { me.seedKeptSnapshot(item.Name) })
+		me.goSeed(func() error { return me.d.seedKeptSnapshot(me.seedCtx, item.Name) })
 	}
 	if !snapshotTorrent.Ok {
 		return nil
@@ -68,18 +75,21 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 	return nil
 }
 
-// seedKeptSnapshot waits for a slot before deriving a metainfo: that hashes the whole data file
-// with a piece buffer per hash in flight, and a datadir of rsync'd snapshots needs one per item.
-// The wait watches d.ctx rather than the batch, because abandon cancels the batch on every path
-// including success, and a kept snapshot that is never registered is never seeded.
-func (me *downloadBatch) seedKeptSnapshot(name string) {
-	select {
-	case me.seedSlots <- struct{}{}:
-	case <-me.d.ctx.Done():
-		return
-	}
-	defer func() { <-me.seedSlots }()
-	me.d.seedKeptSnapshot(me.d.ctx, name)
+// goSeed runs f under the downloader's seeding cap. The cap is on concurrent hashing, not on
+// goroutines: every kept item still gets one, parked in Acquire until a slot frees or seedCtx goes.
+func (me *downloadBatch) goSeed(f func() error) {
+	me.all.Go(func() {
+		if me.d.seedSem.Acquire(me.seedCtx, 1) != nil {
+			me.seedDropped.Add(1)
+			return
+		}
+		defer me.d.seedSem.Release(1)
+		// Only f's outcome shows abandonment. A pre-call ctx check races the cancel: f can pass it
+		// and then bail at its own entry check, seeding nothing and never being counted.
+		if err := f(); err != nil && errors.Is(err, context.Cause(me.seedCtx)) {
+			me.seedDropped.Add(1)
+		}
+	})
 }
 
 func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSnapshot) error {
@@ -108,14 +118,32 @@ func (me *downloadBatch) doMetainfoTask(task func() func()) {
 	}
 }
 
-func (me *downloadBatch) abandon() {
-	me.cancel(errors.New("download batch abandoned"))
-	me.all.Wait()
-	me.d.decDownloadRequests()
+var errBatchEnded = errors.New("download batch ended")
+
+// end joins the batch and returns the cause it ended with. Queued seeding is dropped only when ctx
+// goes away, including a cancel arriving during the join, which is why the cause is read after it.
+// A batch that failed for its own reasons still seeds what it holds.
+func (me *downloadBatch) end(ctx context.Context, cause error) error {
+	me.ended.Do(func() {
+		ended := cmp.Or(cause, errBatchEnded)
+		me.cancel(ended)
+		stop := context.AfterFunc(ctx, func() { me.seedCancel(context.Cause(ctx)) })
+		defer stop()
+		// seedCtx is a d.ctx child, so it outlives the batch unless it is always released.
+		defer me.seedCancel(ended)
+		me.all.Wait()
+		if dropped := me.seedDropped.Load(); dropped > 0 {
+			me.d.log(log.LvlWarn, "dropped queued kept-local seeding", "count", dropped)
+		}
+		me.d.decDownloadRequests()
+	})
+	return cmp.Or(cause, context.Cause(ctx))
 }
 
-func (me *downloadBatch) wait(ctx context.Context) error {
-	defer me.abandon()
+func (me *downloadBatch) wait(ctx context.Context) (err error) {
+	// An all-kept-local batch has no torrents, so the loop below never samples ctx: a cancelled
+	// caller must still surface as an error, or seeding it dropped reports success.
+	defer func() { err = me.end(ctx, err) }()
 	for _, t := range me.torrents {
 		select {
 		case <-t.Complete().On():
