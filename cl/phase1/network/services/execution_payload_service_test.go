@@ -37,7 +37,8 @@ import (
 func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_services.ForkChoiceStorageMock) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service := NewExecutionPayloadService(canceledPendingQueueContext(t), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
+	service.(*executionPayloadService).pending.stopAndWait()
 	return service, forkchoiceMock
 }
 
@@ -218,13 +219,13 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx := t.Context()
 
-	// Create service directly to access internals; the background loop is not started
+	// Use a stopped queue so expiry is processed explicitly.
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -239,11 +240,7 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope,
-		creationTime: time.Now().Add(-pendingEnvelopeExpiry - time.Second), // expired
-	})
-	impl.pending.count.Store(1)
+	storePendingJob(t, impl.pending, key, envelope, time.Now().Add(-(pendingEnvelopeExpiry + time.Second)))
 
 	// Process pending - should remove expired
 	impl.pending.processPending(ctx)
@@ -258,13 +255,13 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx := t.Context()
 
-	// Create service directly to access internals; the background loop is not started
+	// Use a stopped queue so pending jobs are processed explicitly.
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -279,11 +276,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope,
-		creationTime: time.Now(),
-	})
-	impl.pending.count.Store(1)
+	storePendingJob(t, impl.pending, key, envelope, time.Now())
 
 	// Block not yet available - should keep pending
 	impl.pending.processPending(ctx)
@@ -316,7 +309,7 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -331,15 +324,8 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	hash2, _ := envelope2.HashSSZ()
 
 	// Add both as pending
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash1}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope1,
-		creationTime: time.Now(),
-	})
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash2}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope2,
-		creationTime: time.Now(),
-	})
-	impl.pending.count.Store(2)
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, hash1}, envelope1, time.Now())
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, hash2}, envelope2, time.Now())
 
 	// Add block
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -368,8 +354,7 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 		emitters:           beaconevents.NewEventEmitter(),
 		seenEnvelopesCache: seenCache,
 	}
-	impl.pending = impl.newPendingQueue()
-
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 	impl.pending.count.Store(maxPendingEnvelopes)
 
 	blockRoot := common.HexToHash("0xffff")
@@ -396,7 +381,7 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		emitters:           beaconevents.NewEventEmitter(),
 		seenEnvelopesCache: seenCache,
 	}
-	impl.pending = impl.newPendingQueue()
+	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
 
 	impl.pending.count.Store(maxPendingEnvelopes - 5)
 

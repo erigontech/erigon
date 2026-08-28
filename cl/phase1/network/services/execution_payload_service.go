@@ -39,12 +39,9 @@ type seenEnvelopeKey struct {
 	builderIndex    uint64
 }
 
-// pendingEnvelopeKey tracks envelopes waiting for their block to arrive.
-// We use (blockRoot, envelopeHash) as key instead of just blockRoot because:
-//   - Multiple envelopes (including forged ones) may arrive before the block
-//   - Using only blockRoot would cause later arrivals to overwrite earlier ones
-//   - If a forged envelope overwrites the valid one, we lose the valid envelope
-//   - With envelopeHash, all candidates are kept and validated when block arrives
+// pendingEnvelopeKey identifies one envelope candidate for a block. Including
+// envelopeHash keeps competing candidates separate until validation, so an
+// invalid candidate cannot prevent a valid candidate from being queued.
 type pendingEnvelopeKey struct {
 	blockRoot    common.Hash
 	envelopeHash common.Hash
@@ -86,17 +83,23 @@ func NewExecutionPayloadService(
 		emitters:           emitters,
 		seenEnvelopesCache: seenEnvelopesCache,
 	}
-	s.pending = s.newPendingQueue()
-	go s.pending.loop(ctx)
+	s.pending = s.newPendingQueue(ctx)
 	return s
 }
 
-func (s *executionPayloadService) newPendingQueue() *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
-	return newPendingJobQueue(maxPendingEnvelopes, pendingEnvelopeExpiry, pendingEnvelopeCheckInterval,
+func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "execution_payload_envelope",
+		capacity:      maxPendingEnvelopes,
+		expiry:        pendingEnvelopeExpiry,
+		checkInterval: pendingEnvelopeCheckInterval,
+	},
 		s.tryProcessPendingEnvelope,
-		func(key pendingEnvelopeKey) {
+		s.processPendingEnvelope,
+		func(key pendingEnvelopeKey, _ *cltypes.SignedExecutionPayloadEnvelope) {
 			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)
-		})
+		},
+		nil)
 }
 
 func (s *executionPayloadService) Names() []string {
@@ -200,9 +203,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	return nil
 }
 
-// queuePendingEnvelope adds an envelope to the pending queue for later processing
+// queuePendingEnvelope defers an envelope until its referenced block is available.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
+	_, err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
 		if err != nil {
 			return pendingEnvelopeKey{}, err
@@ -217,16 +220,16 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 	}
 }
 
-// tryProcessPendingEnvelope re-runs full validation via ProcessMessage once the block has arrived.
-func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, envelope *cltypes.SignedExecutionPayloadEnvelope) (func(), bool) {
+func (s *executionPayloadService) tryProcessPendingEnvelope(_ context.Context, key pendingEnvelopeKey, _ *cltypes.SignedExecutionPayloadEnvelope) pendingJobDecision {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
 	if !ok || block == nil {
-		return nil, false // Block still not here, keep waiting
+		return pendingJobKeep
 	}
+	return pendingJobRemoveThenProcess
+}
 
-	return func() {
-		if err := s.ProcessMessage(ctx, nil, envelope); err != nil {
-			log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
-		}
-	}, true
+func (s *executionPayloadService) processPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	if err := s.ProcessMessage(ctx, nil, envelope); err != nil {
+		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
+	}
 }
