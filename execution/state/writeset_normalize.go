@@ -494,24 +494,19 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 
 // CommittedStorageKeys returns every storage slot committed for addr, the
 // domainStorageKeys input Normalize needs to emit a full self-destruct cascade.
-//
-// An address with no committed account holds no committed storage: storage is
-// only written for an account that exists, and deleting an account wipes its
-// storage prefix. So probe the account first -- that read is served by the
-// per-file existence filters, while the prefix walk has to seek the .bt index of
-// every storage .kv file, paying the same price whether the address owns a
-// thousand slots or none.
+// The prefix walk is skipped for an address with no committed account -- see
+// hasCommittedAccount for why that probe is worth its own read.
 func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, blockCache *BlockStateCache, addr accounts.Address) ([]accounts.StorageKey, error) {
 	av := addr.Value()
-	prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
+	hasAcc, err := hasCommittedAccount(domains, tx, av[:])
 	if err != nil {
 		return nil, err
 	}
 	// A destroy recorded in the block cache only reaches the domain at the
 	// block-end flush, so until then the account reads absent while its
 	// pre-block storage is still there and still owed a trie delete.
-	if len(prevAcc) == 0 && !blockCache.deletedInBlock(addr) {
-		return nil, assertNoCommittedStorage(domains, tx, av[:])
+	if !hasAcc && !blockCache.deletedInBlock(addr) {
+		return nil, assertNoCommittedStorage(domains, tx, av[:], "selfDestruct")
 	}
 	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
 	var keys []accounts.StorageKey

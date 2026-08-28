@@ -260,11 +260,8 @@ func TestAssertSelfDestructNormalized(t *testing.T) {
 }
 
 // TestCommittedStorageKeys pins the account probe that guards the self-destruct
-// storage walk. The walk seeks the .bt index of every storage .kv file, so its
-// cost is set by the file count rather than by how much storage the address
-// owns -- an address that owns none pays full price. A contract created and
-// destroyed inside one batch never has a committed account, which is what makes
-// the probe worth its own read.
+// storage walk. A contract created and destroyed inside one batch never has a
+// committed account, which is what makes the probe worth its own read.
 func TestCommittedStorageKeys(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	slot := common.HexToHash("0x01")
@@ -319,6 +316,16 @@ func TestCommittedStorageKeys(t *testing.T) {
 			"skipped the walk for an address destroyed earlier in this block")
 	})
 
+	t.Run("skips silently when neither account nor storage is committed", func(t *testing.T) {
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xee"))
+
+		keys, err := CommittedStorageKeys(domains, tx, nil, addr)
+		require.NoError(t, err)
+		require.Empty(t, keys)
+	})
+
 	t.Run("asserts on storage without an account", func(t *testing.T) {
 		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
 		dbg.AssertEnabled = true
@@ -355,12 +362,17 @@ func TestSelfDestructCascade_PerTxnHistory(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}},
 		Val:         true,
 	})
+	var domainKeysErr error
 	domainKeys := func(a accounts.Address) []accounts.StorageKey {
 		keys, err := CommittedStorageKeys(domains, tx, nil, a)
-		require.NoError(t, err)
+		if err != nil {
+			domainKeysErr = err
+			return nil
+		}
 		return keys
 	}
 	out, err := ws.Normalize(NewVersionMap(nil), 1, 0, &minimalStateReader{}, domainKeys, false, false, false)
+	require.NoError(t, domainKeysErr)
 	require.NoError(t, err)
 	_, cascaded := out.GetStorage(addr, accounts.InternKey(slot))
 	require.True(t, cascaded, "the cascade dropped the committed slot, so history never records its delete")
