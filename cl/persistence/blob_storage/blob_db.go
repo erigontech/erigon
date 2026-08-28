@@ -203,7 +203,12 @@ type sidecarsPayload struct {
 
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
 
-// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
+// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion.
+// Returns the slot of the last sidecar it processed and how many it stored.
+//
+// It stops at the first identifier a response does not match and returns a nil error, so a
+// nil error does not mean every sidecar landed — callers must compare the stored count
+// against what they asked for.
 func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
 	kzgCtx := kzg.Ctx()
 	inserted := atomic.Uint64{}
