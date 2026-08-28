@@ -46,8 +46,8 @@ type StackStream struct {
 }
 
 // newStackStream creates a new StackStream writing to out. Building the
-// jsoniter.Stream here rather than taking one is what fixes the indention step
-// at zero.
+// jsoniter.Stream here rather than taking one is what pins jsoniter's
+// IndentionStep at zero.
 func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
 		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),

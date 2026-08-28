@@ -92,7 +92,7 @@ func writeStringFast(stream *jsoniter.Stream, val string) {
 }
 
 // writeObjectFieldFast writes a field name and its colon. The bare colon is
-// correct only at a zero indention step, which newStackStream fixes.
+// correct only at jsoniter's IndentionStep 0, which newStackStream pins.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
 	stream.SetBuffer(append(appendJSONString(stream.Buffer(), fieldName), ':'))
 }
