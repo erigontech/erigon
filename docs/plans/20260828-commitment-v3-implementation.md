@@ -232,13 +232,13 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/state/commitment_convert.go`
 - Modify: `db/state/commitment_convert_test.go`
 
-- [ ] replace `detectKeyEncoding`'s two-state canonicality vote with an exact three-state test — a v3
+- [x] replace `detectKeyEncoding`'s two-state canonicality vote with an exact three-state test — a v3
       key ends `0x80..0x8f` with `0x00` or `0xf0..0xff` before it, which no canonical V1 or V2 key does
-- [ ] ensure a converted v3.0 file is never classified as unconverted
-- [ ] write a red-first test: sample v3 keys through the current detector, assert the wrong verdict it
+- [x] ensure a converted v3.0 file is never classified as unconverted
+- [x] write a red-first test: sample v3 keys through the current detector, assert the wrong verdict it
       returns today and name the value that produced it, then assert the corrected verdict
-- [ ] write a test over a mixed sample of V1 keys, V2 keys, v3 keys and the state key
-- [ ] run `go test ./db/state/...` — must pass before task 7
+- [x] write a test over a mixed sample of V1 keys, V2 keys, v3 keys and the state key
+- [x] run `go test ./db/state/...` — must pass before task 7
 
 ### Task 7: Refuse legacy row parsers on v3 records
 

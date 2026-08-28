@@ -52,9 +52,9 @@ func TestDetectKeyEncoding_AllV1(t *testing.T) {
 		{k: hexCompact(5, 6, 7, 8, 9, 0xa), v: nil}, // ends with 0x9a
 		{k: hexCompact(0xb, 0xc, 0xd, 0xe), v: nil}, // ends with 0xde
 	}
-	v2, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncoding(samples)
 	require.NoError(t, err)
-	require.False(t, v2, "expected V1 vote")
+	require.Equal(t, keyEncodingV1, encoding, "expected V1 encoding")
 }
 
 func TestDetectKeyEncoding_AllV2(t *testing.T) {
@@ -64,9 +64,9 @@ func TestDetectKeyEncoding_AllV2(t *testing.T) {
 		{k: v2Key(0, 0, 0, 0), v: nil},
 		{k: v2Key(0xf, 0xe, 0xd, 0xc, 0xb), v: nil}, // odd-length triggers parity=1 path
 	}
-	v2, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncoding(samples)
 	require.NoError(t, err)
-	require.True(t, v2, "expected V2 vote")
+	require.Equal(t, keyEncodingV2, encoding, "expected V2 encoding")
 }
 
 func TestDetectKeyEncoding_OneV1AmongV2(t *testing.T) {
@@ -78,9 +78,9 @@ func TestDetectKeyEncoding_OneV1AmongV2(t *testing.T) {
 		{k: v2Key(5, 6, 7, 8), v: nil},
 		{k: bad, v: nil},
 	}
-	v2, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncoding(samples)
 	require.NoError(t, err)
-	require.False(t, v2, "any non-canonical sample → V1 vote")
+	require.Equal(t, keyEncodingV1, encoding, "any non-canonical sample must classify the file as V1")
 }
 
 func TestDetectKeyEncoding_StateKeysOnly(t *testing.T) {
@@ -90,6 +90,35 @@ func TestDetectKeyEncoding_StateKeysOnly(t *testing.T) {
 	}
 	_, err := detectKeyEncoding(samples)
 	require.ErrorIs(t, err, errNoNonStateSamples)
+}
+
+func TestDetectKeyEncoding_V3RecordIsNotV1(t *testing.T) {
+	key := nibbles.ChildKeyV3(nibbles.EncodeKeyV3([]byte{0x1, 0x2}), 0x8)
+	detected, err := detectKeyEncoding([]sampledPair{{k: key}})
+	require.NoError(t, err)
+	require.Equal(t, keyEncodingV3, detected, "v3 record key %x was classified as %v", key, detected)
+}
+
+func TestDetectKeyEncoding_MixedSamplesPreferV3(t *testing.T) {
+	v3Key := nibbles.ChildKeyV3(nibbles.EncodeKeyV3([]byte{0xa, 0xb, 0xc}), 0xd)
+	samples := []sampledPair{
+		{k: commitmentdb.KeyCommitmentState, v: []byte{0x01}},
+		{k: hexCompact(1, 2, 3, 4), v: nil},
+		{k: v2Key(5, 6, 7, 8), v: nil},
+		{k: v3Key, v: nil},
+	}
+
+	encoding, err := detectKeyEncoding(samples)
+	require.NoError(t, err)
+	require.Equal(t, keyEncodingV3, encoding, "mixed sample containing v3 key %x must classify as V3", v3Key)
+}
+
+func TestConvertCommitmentFile_V3IsNotSkippedAsLegacyTarget(t *testing.T) {
+	file := fakeV3VisibleFile{path: "/fake/v3-commitment.0-1.kv", start: 0, end: 1}
+	_, _, _, err := convertCommitmentFile(
+		t.Context(), nil, file, t.TempDir(), ConvertOpts{}, 1, 1, 0, 0, nil,
+	)
+	require.ErrorIs(t, err, errV3Conversion)
 }
 
 func TestDetectKeyEncoding_KnownAmbiguous(t *testing.T) {
@@ -113,11 +142,10 @@ func TestDetectKeyEncoding_KnownAmbiguous(t *testing.T) {
 		{k: v1AmbiguousKey, v: nil},
 		{k: hexCompact(0xa, 0xb, 0xc, 0xd, 0xe, 0xf, 0, 0), v: nil},
 	}
-	v2, err := detectKeyEncoding(samples)
+	encoding, err := detectKeyEncoding(samples)
 	require.NoError(t, err)
-	require.True(t, v2,
-		"detector classifies ambiguous V1 file as V2 — known limitation, "+
-			"documented in detectKeyEncoding godoc")
+	require.Equal(t, keyEncodingV2, encoding,
+		"detector classifies ambiguous V1 file as V2 — V1 and V2 legacy keys remain ambiguous")
 }
 
 // nibblePaths covers the keyXform fixtures: a handful of distinct nibble paths
@@ -237,6 +265,17 @@ func (f fakeVisibleFile) Fullpath() string         { return f.path }
 func (f fakeVisibleFile) StartRootNum() uint64     { return f.start }
 func (f fakeVisibleFile) EndRootNum() uint64       { return f.end }
 func (f fakeVisibleFile) Version() version.Version { return version.V1_0 }
+
+type fakeV3VisibleFile struct {
+	path  string
+	start uint64
+	end   uint64
+}
+
+func (f fakeV3VisibleFile) Fullpath() string         { return f.path }
+func (f fakeV3VisibleFile) StartRootNum() uint64     { return f.start }
+func (f fakeV3VisibleFile) EndRootNum() uint64       { return f.end }
+func (f fakeV3VisibleFile) Version() version.Version { return version.Version{Major: 3, Minor: 0} }
 
 // preflightTestStepSize matches the unit step used in these tests: each input
 // "file" spans one step, so StartRootNum=N maps to step range [N, N+1).
