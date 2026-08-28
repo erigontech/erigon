@@ -229,6 +229,20 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+// Deprecated: prefer ActivePrecompiles, which reflects a registered provider's
+// overlay. These are the built-in address sets for a fork and nothing else, and
+// are kept because they are exported API that chains outside this repo compile
+// against.
+var (
+	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesByzantium []accounts.Address
+	PrecompiledAddressesIstanbul  []accounts.Address
+	PrecompiledAddressesBerlin    []accounts.Address
+	PrecompiledAddressesCancun    []accounts.Address
+	PrecompiledAddressesPrague    []accounts.Address
+	PrecompiledAddressesOsaka     []accounts.Address
+)
+
 func init() {
 	for tier, contracts := range map[forkTier]PrecompiledContracts{
 		forkHomestead: PrecompiledContractsHomestead,
@@ -240,6 +254,17 @@ func init() {
 		forkOsaka:     PrecompiledContractsOsaka,
 	} {
 		forkSets[tier] = mergedPrecompileSet{contracts, slices.Collect(maps.Keys(contracts))}
+	}
+	for tier, addrs := range map[forkTier]*[]accounts.Address{
+		forkHomestead: &PrecompiledAddressesHomestead,
+		forkByzantium: &PrecompiledAddressesByzantium,
+		forkIstanbul:  &PrecompiledAddressesIstanbul,
+		forkBerlin:    &PrecompiledAddressesBerlin,
+		forkCancun:    &PrecompiledAddressesCancun,
+		forkPrague:    &PrecompiledAddressesPrague,
+		forkOsaka:     &PrecompiledAddressesOsaka,
+	} {
+		*addrs = forkSets[tier].addresses
 	}
 }
 

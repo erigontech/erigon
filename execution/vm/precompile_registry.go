@@ -201,6 +201,8 @@ type PrecompileGas struct {
 	remaining *mdgas.MdGas
 	used      *mdgas.MdGasUsage
 	tracer    *tracing.Hooks
+	// Before Amsterdam there is no state dimension to charge against.
+	amsterdam bool
 	// Execution gas charged through this handle and not yet given back.
 	chargedExecution uint64
 }
@@ -251,9 +253,17 @@ func (g *PrecompileGas) ChargeExecution(amount uint64) bool {
 // ChargeState deducts state gas, spilling into execution gas when the
 // EIP-8037 reservoir is short. Reports false and charges nothing when
 // neither dimension can cover it.
+//
+// Before Amsterdam it charges execution gas outright. The reservoir is empty
+// then, so a state charge would spill wholesale into execution gas but record
+// itself in used.State — which pre-Amsterdam transaction accounting drops,
+// taking the gas off the frame without it reaching the receipt or the block.
 func (g *PrecompileGas) ChargeState(amount uint64) bool {
 	if !g.live() {
 		return false
+	}
+	if !g.amsterdam {
+		return g.ChargeExecution(amount)
 	}
 	before, spilledBefore := *g.remaining, g.used.StateSpill
 	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.StateGas) {
@@ -291,6 +301,13 @@ func (g *PrecompileGas) RefundState(amount uint64) {
 	if !g.live() {
 		return
 	}
+	if !g.amsterdam {
+		// Mirrors ChargeState: the charge went to execution, so the refund has
+		// to come back from it rather than invent reservoir gas that cannot
+		// exist before Amsterdam.
+		g.RefundExecution(amount)
+		return
+	}
 	before, spilledBefore := *g.remaining, g.used.StateSpill
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.StateGas)
 	g.onGasChange(before, spilledBefore-g.used.StateSpill, mdgas.StateGas, tracing.GasChangeCallLeftOverRefunded)
@@ -316,24 +333,26 @@ type StatefulPrecompile interface {
 	RunStateful(input []byte, gas *PrecompileGas, ctx *PrecompileContext) (ret []byte, err error)
 }
 
-// Call runs a nested CALL out of the precompile's frame, charging executionGas
-// and moving the EIP-8037 state reservoir to the child the way CALL does, then
-// adopting back what the child leaves. A raw ctx.Evm.Call cannot express this:
-// MdGas passes by value, so handing it gas.Remaining() leaves the reservoir
-// standing in this frame as well and duplicates it once per nesting level,
-// and the child's spill is dropped instead of reaching handleFrameRevert.
-func (ctx *PrecompileContext) Call(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) (ret []byte, err error) {
-	if !gas.ChargeExecution(executionGas) {
+// reenter runs one nested frame with the EIP-8037 reservoir handoff: it charges
+// executionGas through the handle, moves the whole reservoir to the child and
+// zeroes this frame's, then restores from the child's leftover and adopts its
+// state usage. A raw ctx.Evm call cannot express this — MdGas passes by value,
+// so handing it gas.Remaining() leaves the reservoir standing in this frame too
+// and duplicates it once per nesting level, and the child's spill is dropped
+// instead of reaching handleFrameRevert.
+func (ctx *PrecompileContext) reenter(gas *PrecompileGas, executionGas uint64,
+	run func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error),
+) ([]byte, error) {
+	if !gas.live() {
 		return nil, ErrOutOfGas
 	}
-	var callValue uint256.Int
-	if value != nil {
-		callValue = *value
+	if !gas.ChargeExecution(executionGas) {
+		return nil, ErrOutOfGas
 	}
 	handed := mdgas.MdGas{Execution: executionGas, State: gas.remaining.State}
 	gas.remaining.State = 0
 
-	ret, leftover, usage, err := ctx.Evm.Call(ctx.ActingAs, addr, input, handed, callValue, false)
+	ret, leftover, usage, err := run(handed)
 
 	// The child's own revert already restored its entry reservoir into
 	// leftover.State, so this is the whole reservoir back on the error path.
@@ -344,6 +363,53 @@ func (ctx *PrecompileContext) Call(gas *PrecompileGas, addr accounts.Address, in
 	}
 	gas.RefundExecution(leftover.Execution)
 	return ret, err
+}
+
+func orZero(v *uint256.Int) uint256.Int {
+	if v == nil {
+		return uint256.Int{}
+	}
+	return *v
+}
+
+// Call runs a nested CALL out of the precompile's frame.
+func (ctx *PrecompileContext) Call(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) ([]byte, error) {
+	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
+		return ctx.Evm.Call(ctx.ActingAs, addr, input, handed, orZero(value), false)
+	})
+}
+
+// StaticCall runs a nested STATICCALL out of the precompile's frame.
+func (ctx *PrecompileContext) StaticCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
+	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
+		return ctx.Evm.StaticCall(ctx.ActingAs, addr, input, handed)
+	})
+}
+
+// CallCode runs a nested CALLCODE out of the precompile's frame.
+func (ctx *PrecompileContext) CallCode(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) ([]byte, error) {
+	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
+		return ctx.Evm.CallCode(ctx.ActingAs, addr, input, handed, orZero(value))
+	})
+}
+
+// DelegateCall runs a nested DELEGATECALL out of the precompile's frame, which
+// keeps this frame's own identity and caller.
+func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64, value *uint256.Int) ([]byte, error) {
+	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
+		return ctx.Evm.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, orZero(value), handed)
+	})
+}
+
+// Create runs a nested CREATE out of the precompile's frame, or CREATE2 when
+// salt is non-nil.
+func (ctx *PrecompileContext) Create(gas *PrecompileGas, code []byte, executionGas uint64, endowment, salt *uint256.Int) (ret []byte, created accounts.Address, err error) {
+	ret, err = ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
+		out, addr, leftover, usage, cerr := ctx.Evm.Create(ctx.ActingAs, code, handed, orZero(endowment), salt, false)
+		created = addr
+		return out, leftover, usage, cerr
+	})
+	return ret, created, err
 }
 
 // NoStatelessRun supplies the stateless half of PrecompiledContract for a

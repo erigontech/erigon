@@ -17,7 +17,9 @@
 package vm
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 
@@ -305,4 +307,25 @@ func BenchmarkActivePrecompilesParallel(b *testing.B) {
 			_ = ActivePrecompiles(rules)
 		}
 	})
+}
+
+// TestDeprecatedForkAddressExportsTrackTheirSets pins the exported per-fork
+// address slices to the sets they name. Chains outside this repo compile
+// against them, so an empty or drifted slice is a break no in-repo grep sees.
+func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
+	for name, tc := range map[string]struct {
+		addrs     []accounts.Address
+		contracts PrecompiledContracts
+	}{
+		"homestead": {PrecompiledAddressesHomestead, PrecompiledContractsHomestead},
+		"byzantium": {PrecompiledAddressesByzantium, PrecompiledContractsByzantium},
+		"istanbul":  {PrecompiledAddressesIstanbul, PrecompiledContractsIstanbul},
+		"berlin":    {PrecompiledAddressesBerlin, PrecompiledContractsBerlin},
+		"cancun":    {PrecompiledAddressesCancun, PrecompiledContractsCancun},
+		"prague":    {PrecompiledAddressesPrague, PrecompiledContractsPrague},
+		"osaka":     {PrecompiledAddressesOsaka, PrecompiledContractsOsaka},
+	} {
+		require.NotEmpty(t, tc.addrs, name)
+		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
+	}
 }

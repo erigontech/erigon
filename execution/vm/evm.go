@@ -504,7 +504,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			// Charging through the handle keeps gasUsed.State and
 			// gasUsed.StateSpill in step with gasRemaining, so the accounting
 			// defer and handleFrameRevert below both read the real figures.
-			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed, tracer: evm.Config().Tracer}
+			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
 			func() {
 				defer evm.enterFrame(ctx.ReadOnly)()
 				ret, err = sp.RunStateful(input, pgas, ctx)
@@ -856,6 +856,12 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 // otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller accounts.Address, code []byte, gas mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	// Refused before the nonce read below, for the same reason as in evm.call:
+	// deriving the CREATE address touches state the opcode path never reaches.
+	if evm.readOnly {
+		return nil, accounts.NilAddress, gas, mdgas.MdGasUsage{}, ErrWriteProtection
+	}
+
 	ch := &codeAndHash{code: code}
 	op := CREATE
 	if salt != nil {

@@ -429,7 +429,7 @@ func (*staticEscapePrecompile) Name() string { return "ESCAPE" }
 
 func (p *staticEscapePrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
 	_, p.callErr = ctx.Call(gas, p.target, nil, gas.Remaining().Execution, uint256.NewInt(5))
-	_, _, _, _, p.createErr = ctx.Evm.Create(ctx.Self, []byte{0x00}, gas.Remaining(), uint256.Int{}, nil, false)
+	_, _, p.createErr = ctx.Create(gas, []byte{0x00}, gas.Remaining().Execution, nil, nil)
 	return nil, nil
 }
 
@@ -679,13 +679,23 @@ func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 type reservoirHandoffPrecompile struct {
 	vm.NoStatelessRun
 	inner   accounts.Address
+	kind    string
 	callErr error
 }
 
 func (*reservoirHandoffPrecompile) Name() string { return "HANDOFF" }
 
 func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-	_, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, nil)
+	switch p.kind {
+	case "staticcall":
+		_, p.callErr = ctx.StaticCall(gas, p.inner, nil, 50_000)
+	case "callcode":
+		_, p.callErr = ctx.CallCode(gas, p.inner, nil, 50_000, nil)
+	case "delegatecall":
+		_, p.callErr = ctx.DelegateCall(gas, p.inner, nil, 50_000, nil)
+	default:
+		_, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, nil)
+	}
 	return nil, p.callErr
 }
 
@@ -717,4 +727,65 @@ func TestStatefulPrecompileNestedCallMovesTheReservoir(t *testing.T) {
 	require.Equal(t, reservoir-charge, remaining.State,
 		"the child's charge must come out of the one reservoir, not a copy of it")
 	require.Equal(t, int64(charge), gasUsed.State)
+}
+
+// TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas pins where a state
+// charge lands before Amsterdam. There is no reservoir then, so charging the
+// state dimension would spill into execution gas but record itself in
+// used.State, which pre-Amsterdam transaction accounting drops — taking the gas
+// off the frame without it reaching the receipt or the block.
+func TestStatefulPrecompileStateChargePreAmsterdamIsExecutionGas(t *testing.T) {
+	const chainID = 900417
+	const charge = uint64(40)
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x97}))
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: reservoirChargeStatefulPrecompile{amount: charge}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	cfg.ChainConfig.AmsterdamTime = nil
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
+		mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, uint64(10_000-charge), remaining.Execution)
+	require.Equal(t, uint64(charge), gasUsed.Execution,
+		"pre-Amsterdam the charge has to reach the execution dimension the receipt reads")
+	require.Equal(t, int64(0), gasUsed.State)
+}
+
+// TestStatefulPrecompileHandoffCoversEveryReentryKind pins the EIP-8037 handoff
+// on the re-entry kinds beyond plain CALL. Each keeps its own caller identity,
+// so they need their own helper, but the reservoir has to move the same way:
+// handing the child gas.Remaining() would leave it standing in both frames.
+func TestStatefulPrecompileHandoffCoversEveryReentryKind(t *testing.T) {
+	const reservoir, charge = uint64(5_000), uint64(400)
+	for i, kind := range []string{"call", "staticcall", "callcode", "delegatecall"} {
+		t.Run(kind, func(t *testing.T) {
+			chainID := uint64(900420 + i)
+			outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa0, byte(i)}))
+			innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa1, byte(i)}))
+			outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: kind}
+			vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+				return vm.PrecompiledContracts{
+					outerAddr: outer,
+					innerAddr: reservoirChargeStatefulPrecompile{amount: charge},
+				}
+			})
+			t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+			cfg := newStatefulTestConfig(t, chainID)
+			vmenv := prepareStatefulCall(t, cfg, outerAddr)
+
+			_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil,
+				mdgas.MdGas{Execution: 100_000, State: reservoir}, uint256.Int{}, false)
+			require.NoError(t, err)
+			require.NoError(t, outer.callErr)
+			require.Equal(t, reservoir-charge, remaining.State,
+				"the child's charge must come out of the one reservoir, not a copy of it")
+			require.Equal(t, int64(charge), gasUsed.State)
+		})
+	}
 }
