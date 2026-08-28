@@ -830,13 +830,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		return agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
+		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
 				return err
 			}
 			return stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
 		}, logger)
+		return err
 	}
 
 	if chainTipMode {
@@ -1273,6 +1274,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	var compatErr *chain2.ConfigCompatError
 	if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 		panic(genesisErr)
+	}
+	if compatErr != nil {
+		logger.Warn("Incompatible chain config, continuing on the rejected one", "err", compatErr)
 	}
 	//logger.Info("Initialised chain configuration", "config", chainConfig)
 
