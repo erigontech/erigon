@@ -445,6 +445,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			return nil, err
 		}
 	}
+	if dbg.MdbxWarmupDB && opts.label == dbcfg.ChainDB {
+		started := time.Now()
+		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).WarmupDB(true) }); err != nil {
+			return nil, err
+		}
+		log.Info("[dbg] warmed db", "label", opts.label, "took", time.Since(started))
+	}
 	return db, nil
 }
 
