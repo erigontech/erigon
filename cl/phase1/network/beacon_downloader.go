@@ -1039,8 +1039,7 @@ func validateHTTPBlockVersion(beaconCfg *clparams.BeaconChainConfig, slot uint64
 }
 
 type fetchEnvelopeHTTPResult struct {
-	fetched  int
-	notFound map[common.Hash]struct{}
+	fetched int
 }
 
 // fetchEnvelopesFromBeaconAPI fetches execution payload envelopes from the beacon API for FULL blocks missing from P2P.
@@ -1064,7 +1063,6 @@ func fetchEnvelopesFromBeaconAPI(
 	type envResult struct {
 		hash     common.Hash
 		envelope *cltypes.SignedExecutionPayloadEnvelope
-		notFound bool
 	}
 
 	// Filter roots that need fetching
@@ -1120,7 +1118,6 @@ func fetchEnvelopesFromBeaconAPI(
 				return
 			}
 			if resp.StatusCode == http.StatusNotFound {
-				results[idx] = envResult{hash: common.Hash(root), notFound: true}
 				return
 			}
 			if resp.StatusCode != http.StatusOK {
@@ -1146,14 +1143,11 @@ func fetchEnvelopesFromBeaconAPI(
 	}
 	wg.Wait()
 
-	result := fetchEnvelopeHTTPResult{notFound: make(map[common.Hash]struct{})}
+	result := fetchEnvelopeHTTPResult{}
 	for _, r := range results {
 		if r.envelope != nil {
 			received[r.hash] = r.envelope
 			result.fetched++
-		}
-		if r.notFound {
-			result.notFound[r.hash] = struct{}{}
 		}
 	}
 	return result
