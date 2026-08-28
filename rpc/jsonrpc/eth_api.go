@@ -533,12 +533,12 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
 // available block answers on its own: expiry keeps pre-merge headers and bodies, and
 // the transaction segment spanning the merge point reaches below it. Only a readable
-// transaction of an early block does, and since expiry is the reading that gates blocks
-// away, bodies the search cannot confirm are read as an archive. The answer is
-// availability rather than policy, so it is cached for a short TTL in both directions
-// instead of being settled once. One probe answers every caller waiting on it: each one
-// costs several backend reads under an open read transaction, so refreshing the TTL must
-// not fan out with the load.
+// transaction of an early block does, so block data the search cannot read leaves the
+// question open rather than settling it, and an open question is not remembered. The
+// answer is availability rather than policy, so a settled one is kept for a short TTL in
+// both directions instead of being decided once. One probe answers every caller waiting
+// on it: each costs several backend reads under an open read transaction, so refreshing
+// the TTL must not fan out with the load.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	for {
 		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
