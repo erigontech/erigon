@@ -68,6 +68,7 @@ type BranchCache struct {
 	tailHits, tailMisses     atomic.Uint64
 	bytesServed              atomic.Uint64
 	staleEvicted             atomic.Uint64
+	publishTick              atomic.Uint64
 
 	onMiss atomic.Pointer[MissCallback]
 
@@ -511,6 +512,8 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
+
+	c.maybePublishMetrics()
 
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
