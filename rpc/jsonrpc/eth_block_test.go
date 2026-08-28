@@ -34,12 +34,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -101,10 +99,8 @@ func newBlockAccessListRPCFixture(t *testing.T) (*blockgen.ChainPack, *rpc.Clien
 	return chainPack, client
 }
 
-func marshalBlockAccessListJSON(t *testing.T, data []byte) json.RawMessage {
+func marshalBlockAccessListJSON(t *testing.T, bal types.BlockAccessList) json.RawMessage {
 	t.Helper()
-	bal, err := types.DecodeBlockAccessListBytes(data)
-	require.NoError(t, err)
 	encoded, err := json.Marshal(ethapi.MarshalBlockAccessList(bal))
 	require.NoError(t, err)
 	return encoded
@@ -115,6 +111,13 @@ func marshalHexBytesJSON(t *testing.T, data []byte) json.RawMessage {
 	encoded, err := json.Marshal(hexutil.Bytes(data))
 	require.NoError(t, err)
 	return encoded
+}
+
+func marshalBlockAccessListBytesJSON(t *testing.T, bal types.BlockAccessList) json.RawMessage {
+	t.Helper()
+	data, err := types.EncodeBlockAccessListBytes(bal)
+	require.NoError(t, err)
+	return marshalHexBytesJSON(t, data)
 }
 
 func runBlockAccessListRPCCases(t *testing.T, client *rpc.Client, method string, cases []blockAccessListRPCCase) {
@@ -170,9 +173,7 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 		blockNum := rpc.BlockNumber(block.NumberU64())
 		got, err := api.GetBlockAccessList(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 		require.NoError(t, err, "block %d", block.NumberU64())
-		canonical, err := types.DecodeBlockAccessListBytes(block.BlockAccessList())
-		require.NoError(t, err)
-		require.Equal(t, ethapi.MarshalBlockAccessList(canonical), got, "block %d", block.NumberU64())
+		require.Equal(t, ethapi.MarshalBlockAccessList(block.BlockAccessList()), got, "block %d", block.NumberU64())
 	}
 }
 
@@ -231,7 +232,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		Number: *uint256.NewInt(uint64(expected)),
 	}
 
-	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header))
+	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header, nil))
 	if err != nil {
 		t.Errorf("failed encoding the block: %s", err)
 	}
@@ -244,7 +245,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
-	expectedNum := (*hexutil.Big)(uint256.NewInt(uint64(expected)).ToBig())
+	expectedNum := (*hexutil.U256)(uint256.NewInt(uint64(expected)))
 	assert.Equal(t, expectedNum, b["number"])
 }
 
@@ -464,70 +465,4 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedAmount, *txCount)
-}
-
-func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	t.Parallel()
-
-	const chainSize = 20
-	const pruneDistance = uint64(10)
-
-	setup := func(t *testing.T, pm prune.Mode) *APIImpl {
-		t.Helper()
-		m := execmoduletester.New(t, execmoduletester.WithPruneMode(pm))
-		c, err := m.GenerateChain(chainSize, func(_ int, _ *blockgen.BlockGen) {})
-		require.NoError(t, err)
-		require.NoError(t, m.InsertChain(c))
-
-		ctx := t.Context()
-		tx, err := m.DB.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
-		_, err = prune.EnsureNotChanged(tx, pm)
-		require.NoError(t, err)
-		require.NoError(t, tx.Commit())
-
-		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	}
-
-	legacyFull := prune.Mode{
-		Initialised: true,
-		History:     prune.Distance(pruneDistance),
-		Blocks:      prune.KeepPostMergeBlocksPruneMode,
-	}
-	minimalMode := prune.Mode{
-		Initialised: true,
-		History:     prune.Distance(pruneDistance),
-		Blocks:      prune.Distance(pruneDistance),
-	}
-
-	// In full mode, block bodies are in snapshots and KeepPostMergeBlocksPruneMode means no block-body
-	// gate — GetBlockByNumber must succeed even for blocks older than the state-history window.
-	t.Run("full_mode_old_block_accessible", func(t *testing.T) {
-		t.Parallel()
-		api := setup(t, legacyFull)
-		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
-		require.NoError(t, err)
-		require.NotNil(t, b)
-	})
-
-	// In minimal mode, Blocks=Distance(pruneDistance) gates access: block 0 < head-pruneDistance.
-	t.Run("minimal_mode_old_block_pruned", func(t *testing.T) {
-		t.Parallel()
-		api := setup(t, minimalMode)
-		_, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
-		require.ErrorIs(t, err, state.PrunedError)
-	})
-
-	// Recent blocks (within the prune window) must always be accessible.
-	t.Run("minimal_mode_recent_block_accessible", func(t *testing.T) {
-		t.Parallel()
-		api := setup(t, minimalMode)
-		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(chainSize), false)
-		require.NoError(t, err)
-		require.NotNil(t, b)
-	})
 }

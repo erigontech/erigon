@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -113,6 +113,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		latestBlock := rpc.LatestBlockNumber
 		blockParameter.BlockNumber = &latestBlock
 	}
+	if err := rejectPendingState(blockParameter); err != nil {
+		return nil, err
+	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -125,16 +128,12 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockParameter, tx, api._blockReader, api.filters)
+	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
-	}
-	if latestBlockNumber < blockNumber {
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlockNumber, blockNumber)
 	}
 
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
@@ -164,7 +163,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +177,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	parent := sim.base
 	blockHashOverrides := ethapi.BlockHashOverrides{}
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber, blockHashOverrides)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], latest, blockHashOverrides)
 		if err != nil {
 			return nil, err
 		}
@@ -275,7 +274,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		}
 		if block.BlockOverrides.Number == nil {
 			nextNumber := prevNumber + 1
-			block.BlockOverrides.Number = (*hexutil.Big)(new(big.Int).SetUint64(nextNumber))
+			block.BlockOverrides.Number = (*hexutil.U256)(uint256.NewInt(nextNumber))
 		}
 		blockNumber := block.BlockOverrides.Number.Uint64()
 		if blockNumber <= prevNumber {
@@ -294,7 +293,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
 					BlockOverrides: &ethapi.BlockOverrides{
-						Number: (*hexutil.Big)(new(big.Int).SetUint64(n)),
+						Number: (*hexutil.U256)(uint256.NewInt(n)),
 						Time:   (*hexutil.Uint64)(&t),
 					},
 				}
@@ -396,28 +395,28 @@ func (s *simulator) sanitizeCall(
 
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
-		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID.ToBig())
+		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
 	} else {
-		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID.ToBig()) != 0 {
+		if have := (*uint256.Int)(args.ChainID); !have.Eq(s.chainConfig.ChainID) {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
 		}
 	}
 	if baseFee == nil {
 		// If there's no base fee, then it must be a non-1559 execution
 		if args.GasPrice == nil {
-			args.GasPrice = new(hexutil.Big)
+			args.GasPrice = new(hexutil.U256)
 		}
 	} else {
 		// A base fee is provided, requiring 1559-type execution
 		if args.MaxFeePerGas == nil {
-			args.MaxFeePerGas = new(hexutil.Big)
+			args.MaxFeePerGas = new(hexutil.U256)
 		}
 		if args.MaxPriorityFeePerGas == nil {
-			args.MaxPriorityFeePerGas = new(hexutil.Big)
+			args.MaxPriorityFeePerGas = new(hexutil.U256)
 		}
 	}
 	if args.MaxFeePerBlobGas == nil && args.BlobVersionedHashes != nil {
-		args.MaxFeePerBlobGas = new(hexutil.Big)
+		args.MaxFeePerBlobGas = new(hexutil.U256)
 	}
 	return nil
 }
@@ -677,7 +676,7 @@ func (s *simulator) newStateReaderForBlock(
 	}
 
 	if latest {
-		return state.NewReaderV3(sharedDomains.AsGetter(tx)), minTxNum, firstMinTxNum, nil
+		return state.NewReaderV3(sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), minTxNum, firstMinTxNum, nil
 	}
 
 	if minTxNum < state.StateHistoryStartTxNum(tx) {
@@ -1137,8 +1136,8 @@ func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomain
 	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
 	return &commitmentdb.CommitmentReplayStateReader{
 		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
-			commitmentdb.NewLatestStateReader(ttx, tsd),
-			commitmentdb.NewLatestStateReader(tx, sd),
+			commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
+			commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{}),
 			false,
 		),
 	}

@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -53,7 +53,17 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
-var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+var (
+	latestNumOrHash             = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	errPendingStateNotSupported = errors.New("pending state is not supported")
+)
+
+func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return errPendingStateNotSupported
+	}
+	return nil
+}
 
 // orLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
@@ -76,14 +86,17 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
+	blockNrOrHash := orLatest(requestedBlock)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
+
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer roTx.Rollback()
 
-	// Use the block overlay if available — reads uncommitted data from the
-	// pre-commit overlay so consumers don't need to wait for DB commit.
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
@@ -93,12 +106,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		}
 	}
 
-	var blockNrOrHash rpc.BlockNumberOrHash
-	if requestedBlock != nil {
-		blockNrOrHash = *requestedBlock
-	} else {
-		blockNrOrHash = latestNumOrHash
-	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -109,7 +116,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -265,10 +272,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		available := balance.ToBig()
 		if args.Value != nil {
-			if args.Value.ToInt().Cmp(available) >= 0 {
+			value := args.Value.ToInt()
+			if value.Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
 			}
-			available.Sub(available, args.Value.ToInt())
+			available.Sub(available, value)
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
@@ -277,7 +285,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
-				transfer = new(hexutil.Big)
+				transfer = new(hexutil.U256)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
@@ -416,6 +424,14 @@ type StorageKeysInfo struct {
 	KeyLength int
 }
 
+func (s StorageKeysInfo) EncodeKey() string {
+	if s.KeyLength == 32 {
+		return hexutil.Encode(s.Hash[:])
+	}
+	u := s.Hash.U256()
+	return u.Hex()
+}
+
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 	blockNrOrHash := orLatest(blockNrOrHashArg)
@@ -425,6 +441,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 			Code:    rpc.ErrCodeInvalidParams,
 		}
 	}
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -432,12 +451,19 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
+	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
+	// A canonical hash exists for blocks the header stage has downloaded but
+	// execution has not reached; the commitment history getProof needs is only
+	// written by execution.
+	if err := rpchelper.CheckBlockExecuted(roTx, blockNumber); err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -447,61 +473,33 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		storageKeysConverted[i].Hash.SetBytes(s)
 		storageKeysConverted[i].KeyLength = len(s)
 	}
-	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.logger)
+	return api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
-
-	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
-	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
-	// JSON-RPC spec for getProof. This behavior exists to preserve backwards
-	// compatibility with older client versions.
-	getKey := func(storageKey StorageKeysInfo) string {
-		var outputKey string
-
-		if storageKey.KeyLength != 32 {
-			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
-		} else {
-			outputKey = hexutil.Encode(storageKey.Hash[:])
-		}
-		return outputKey
-	}
-
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
+	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil {
-		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
+		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, roTx, logger)
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
-	if err != nil {
-		return nil, err
-	}
-	if latestBlock < blockNrOrHash.BlockNumber.Uint64() {
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNrOrHash.BlockNumber.Uint64())
-	}
-	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
+	if !isLatest {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, roTx, blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
 		}
@@ -527,7 +525,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
-		Balance:      new(hexutil.Big),
+		Balance:      new(hexutil.U256),
 		Nonce:        hexutil.Uint64(0),
 		CodeHash:     common.Hash{},
 		StorageHash:  common.Hash{},
@@ -546,8 +544,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   getKey(storageKey),
-				Value: new(hexutil.Big),
+				Key:   storageKey.EncodeKey(),
+				Value: new(hexutil.U256),
 				Proof: []hexutil.Bytes{},
 			}
 		}
@@ -558,7 +556,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return proof, nil
 	}
 
-	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
+	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
@@ -581,7 +579,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -592,11 +590,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		proof.StorageProof[i].Key = getKey(storageKey)
+		proof.StorageProof[i].Key = storageKey.EncodeKey()
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
-			proof.StorageProof[i].Value = new(hexutil.Big)
+			proof.StorageProof[i].Value = new(hexutil.U256)
 			continue
 		}
 
@@ -617,7 +615,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
-		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
+		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -652,13 +650,17 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 }
 
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, logger log.Logger) (hexutil.Bytes, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
+
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -673,6 +675,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// prune-history or hard-gate error, so the caller sees one typed signal.
 	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
 		return nil, errWitnessOutOfWindow
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNr); err != nil {
+		return nil, err
 	}
 
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
@@ -726,7 +731,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
-		return nil, fmt.Errorf("error loading chain config: %v", err)
+		return nil, fmt.Errorf("error loading chain config: %w", err)
 	}
 	engine := api.engine()
 	fullEngine, ok := engine.(rules.Engine)
@@ -780,7 +785,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		it.Close()
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -895,6 +900,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
+	}
+	if err := rejectPendingState(bNrOrHash); err != nil {
+		return nil, err
 	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)
@@ -1027,11 +1035,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
+	// Convergence re-runs the whole message, so the state is reset per iteration
+	// rather than rebuilt: Reset keeps the reader and the pooled maps behind it.
+	ibs := state.New(stateReader)
+	defer ibs.Close()
+
 	// One convergence iteration: a non-nil result means the access list converged,
 	// otherwise the returned tracer seeds the next iteration.
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
-		ibs := state.New(stateReader)
-		defer ibs.Close()
+		ibs.Reset()
 
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
@@ -1040,7 +1052,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			}
 		}
 
-		// Retrieve the current access list to expand
+		// The message needs the list; the next tracer is seeded from the maps.
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
 
@@ -1059,8 +1071,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 
 		// Apply the transaction with the access list tracer
-		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
-		defer tracer.Close()
+		tracer := prevTracer.SeedNew(ibs)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 

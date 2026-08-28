@@ -20,6 +20,7 @@
 package netutil
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -164,7 +165,7 @@ func TestCheckRelayIP(t *testing.T) {
 
 	for _, test := range tests {
 		err := CheckRelayIP(parseIP(test.sender), parseIP(test.addr))
-		if err != test.want {
+		if !errors.Is(err, test.want) {
 			t.Errorf("%s from %s: got %q, want %q", test.addr, test.sender, err, test.want)
 		}
 	}

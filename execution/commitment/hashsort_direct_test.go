@@ -30,8 +30,6 @@ func collectHashSortPairs(t *testing.T, ut *Updates) []sortedPair {
 	return got
 }
 
-// forEachDirectPath runs fn once on the in-memory path and once with collection
-// forced through the etl collector, so both ModeDirect backends stay pinned.
 func forEachDirectPath(t *testing.T, fn func(t *testing.T, newUpdates func() *Updates)) {
 	t.Helper()
 	t.Run("in-memory", func(t *testing.T) {
@@ -46,10 +44,6 @@ func forEachDirectPath(t *testing.T, fn func(t *testing.T, newUpdates func() *Up
 	})
 }
 
-// TestHashSortModeDirect_DuplicateHashedKey pins that a TouchHashedKey path equal to
-// hashKey(plainKey) of a touched plain key yields TWO deliveries under the same hashed
-// key, ordered by touch order (the witness flows depend on seeing the plainKey-bearing
-// one; see eth_call getWitness / debug_executionWitness sibling paths).
 func TestHashSortModeDirect_DuplicateHashedKey(t *testing.T) {
 	t.Parallel()
 
@@ -84,9 +78,6 @@ func TestHashSortModeDirect_DuplicateHashedKey(t *testing.T) {
 	})
 }
 
-// TestHashSortModeDirect_MixedLengthHashedKeys pins bytewise ordering across
-// variable-length TouchHashedKey paths (1..128 nibbles, witness sibling paths)
-// interleaved with full-length hashed plain keys: a prefix sorts before its extensions.
 func TestHashSortModeDirect_MixedLengthHashedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -126,8 +117,6 @@ func TestHashSortModeDirect_MixedLengthHashedKeys(t *testing.T) {
 	})
 }
 
-// TestHashSortModeDirect_MultiBatchOrder pins sorted delivery and exact key count
-// across multiple 10k batches with random keys, including duplicated hashedKeys.
 func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 	t.Parallel()
 
@@ -144,7 +133,6 @@ func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 			addrs[i] = a
 			ut.TouchPlainKey(string(a), []byte("v"), ut.TouchStorage)
 		}
-		// Duplicate a handful of hashedKeys via the hashed-touch path.
 		for i := range 5 {
 			ut.TouchHashedKey(KeyToHexNibbleHash(addrs[i*1000]))
 		}
@@ -156,7 +144,6 @@ func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 		}))
 		require.EqualValues(t, 0, ut.Size(), "HashSort consumes the batch")
 
-		// Duplicated hashedKeys: plain-touched delivery precedes hashed-touched (touch order).
 		for i := range 5 {
 			h := KeyToHexNibbleHash(addrs[i*1000])
 			idx := slices.IndexFunc(got, func(s sortedPair) bool { return bytes.Equal(s.hk, h) })
@@ -168,8 +155,6 @@ func TestHashSortModeDirect_MultiBatchOrder(t *testing.T) {
 	})
 }
 
-// touchRandomCorpus applies an identical touch sequence (plain keys, storage keys,
-// and hashed-only sibling paths, with hashed duplicates of some plain keys) to ut.
 func touchRandomCorpus(ut *Updates, numKeys int) {
 	rnd := rand.New(rand.NewSource(7))
 	for i := range numKeys {
@@ -195,8 +180,6 @@ func touchRandomCorpus(ut *Updates, numKeys int) {
 	}
 }
 
-// TestHashSortModeDirect_PathParity drives the identical touch sequence through the
-// in-memory and etl backends and requires byte-identical delivery sequences.
 func TestHashSortModeDirect_PathParity(t *testing.T) {
 	t.Parallel()
 
@@ -218,16 +201,13 @@ func TestHashSortModeDirect_PathParity(t *testing.T) {
 	}
 }
 
-// TestHashSortInMem_SpillMidCollection crosses a tiny directMemLimit mid-collection so
-// early touches are replayed into the collector and later ones collect there directly;
-// delivery must match the pure in-memory backend.
 func TestHashSortInMem_SpillMidCollection(t *testing.T) {
 	t.Parallel()
 
 	const numKeys = 3_000
 	pure := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
 	crossing := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
-	crossing.directMemLimit = 64 << 10 // crossed after a few hundred keys
+	crossing.directMemLimit = 64 << 10
 
 	touchRandomCorpus(pure, numKeys)
 	touchRandomCorpus(crossing, numKeys)
@@ -240,8 +220,6 @@ func TestHashSortInMem_SpillMidCollection(t *testing.T) {
 	require.Equal(t, gotPure, gotCrossing)
 }
 
-// TestHashSortModeDirect_FnError pins that an fn error aborts HashSort on both backends
-// and that Reset recovers the Updates for a subsequent touch+HashSort cycle.
 func TestHashSortModeDirect_FnError(t *testing.T) {
 	t.Parallel()
 
@@ -268,7 +246,6 @@ func TestHashSortModeDirect_FnError(t *testing.T) {
 	})
 }
 
-// TestHashSortInMem_CtxCancel pins per-key context checks on the in-memory drain loop.
 func TestHashSortInMem_CtxCancel(t *testing.T) {
 	t.Parallel()
 
@@ -288,8 +265,6 @@ func TestHashSortInMem_CtxCancel(t *testing.T) {
 	require.Equal(t, 5, calls)
 }
 
-// TestHashSortInMem_WarmupNoRace runs the in-memory path against live warmup workers;
-// entry memory is stable so no reuse race must exist. -race is the signal.
 func TestHashSortInMem_WarmupNoRace(t *testing.T) {
 	t.Parallel()
 
@@ -314,9 +289,6 @@ func TestHashSortInMem_WarmupNoRace(t *testing.T) {
 	require.NoError(t, warmuper.Wait())
 }
 
-// TestHashSortModeDirect_RetouchBetweenSorts pins the eth_getProof pattern: HashSort,
-// touch more keys on the same Updates, HashSort again — the second call must deliver
-// exactly the new touches.
 func TestHashSortModeDirect_RetouchBetweenSorts(t *testing.T) {
 	t.Parallel()
 

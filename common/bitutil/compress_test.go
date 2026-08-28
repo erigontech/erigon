@@ -63,7 +63,7 @@ func TestEncodingCycle(t *testing.T) {
 func testEncodingCycle(data []byte) error {
 	proc, err := bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
 	if err != nil {
-		return fmt.Errorf("failed to decompress compressed data: %v", err)
+		return fmt.Errorf("failed to decompress compressed data: %w", err)
 	}
 	if !bytes.Equal(data, proc) {
 		return fmt.Errorf("compress/decompress mismatch: have %x, want %x", proc, data)

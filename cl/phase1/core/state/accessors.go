@@ -148,7 +148,9 @@ func EligibleValidatorsIndicies(b abstract.BeaconState) (eligibleValidators []ui
 			return nil
 		})
 	}
-	wp.Execute()
+	// Every job above returns nil unconditionally (the only fallible op inside
+	// panics instead), so Execute can never return a non-nil error here.
+	_ = wp.Execute()
 	// Merge the results from all threads.
 	total := 0
 	for i := range eligibleValidatorsShards {
@@ -186,17 +188,17 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 
 	domain, err := b.GetDomain(b.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
-		return false, fmt.Errorf("unable to get the domain: %v", err)
+		return false, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	signingRoot, err := fork.ComputeSigningRoot(att.Data, domain)
 	if err != nil {
-		return false, fmt.Errorf("unable to get signing root: %v", err)
+		return false, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	valid, err := bls.VerifyAggregate(att.Signature[:], signingRoot[:], pks)
 	if err != nil {
-		return false, fmt.Errorf("error while validating signature: %v", err)
+		return false, fmt.Errorf("error while validating signature: %w", err)
 	}
 	if !valid {
 		return false, errors.New("invalid aggregate signature")

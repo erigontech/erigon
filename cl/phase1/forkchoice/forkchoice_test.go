@@ -116,7 +116,7 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 	cfg := clparams.MainnetBeaconConfig
 	finalizedRoot := common.Hash{0x42}
 	finalizedState := state.New(&cfg)
-	finalizedState.SetSlot(2 * cfg.SlotsPerEpoch)
+	require.NoError(t, finalizedState.SetSlot(2*cfg.SlotsPerEpoch))
 	validator := solid.NewValidatorFromParameters(
 		common.Bytes48{},
 		common.Hash{},
@@ -127,7 +127,7 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 		3,
 		cfg.FarFutureEpoch,
 	)
-	finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	require.NoError(t, finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance))
 
 	operationsPool := pool.NewOperationsPool(&cfg)
 	exit := &cltypes.SignedVoluntaryExit{
@@ -388,6 +388,9 @@ type getFinalizedExecutionHashForkGraph struct {
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
 	addChainSegmentErr    error
 	addChainSegmentCalled bool
+	anchorRoot            common.Hash
+	anchorSlot            uint64
+	currentJustified      solid.Checkpoint
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
@@ -433,7 +436,7 @@ func (g *getFinalizedExecutionHashForkGraph) stateCopyModes() []bool {
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
-	panic("not used")
+	return g.currentJustified, true
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetFinalizedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
@@ -449,11 +452,11 @@ func (g *getFinalizedExecutionHashForkGraph) MarkHeaderAsInvalid(common.Hash) {
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorSlot() uint64 {
-	panic("not used")
+	return g.anchorSlot
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorRoot() common.Hash {
-	panic("not used")
+	return g.anchorRoot
 }
 
 func (g *getFinalizedExecutionHashForkGraph) Prune(uint64) error {

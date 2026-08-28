@@ -199,12 +199,12 @@ var (
 	}
 	RpcSubscriptionFiltersMaxAddressesFlag = cli.IntFlag{
 		Name:  "rpc.subscription.filters.maxaddresses",
-		Usage: "Maximum number of addresses per subscription to filter logs by.",
+		Usage: "Maximum number of addresses accepted per log subscription.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses,
 	}
 	RpcSubscriptionFiltersMaxTopicsFlag = cli.IntFlag{
 		Name:  "rpc.subscription.filters.maxtopics",
-		Usage: "Maximum number of topics per subscription to filter logs by.",
+		Usage: "Maximum number of topic alternatives accepted across all positions per log subscription.",
 		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
 	}
 	RpcSubscriptionFiltersTimeoutFlag = cli.DurationFlag{
@@ -225,6 +225,7 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 }
 
 // ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+//
 // Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	applyRemainingEthFlags(ctx, cfg, logger)

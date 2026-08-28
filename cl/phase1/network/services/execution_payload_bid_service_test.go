@@ -109,13 +109,19 @@ func addPreferencesToPoolWithRoot(epbsPool *pool.EpbsPool, slot uint64, dependen
 func newBidParentState(cfg *clparams.BeaconChainConfig, dependentRoot common.Hash) *state2.CachingBeaconState {
 	s := state2.New(cfg)
 	s.SetVersion(clparams.GloasVersion)
-	s.SetSlot(100)
-	s.SetBlockRootAt(63, dependentRoot)
+	if err := s.SetSlot(100); err != nil {
+		panic(err)
+	}
+	if err := s.SetBlockRootAt(63, dependentRoot); err != nil {
+		panic(err)
+	}
 	s.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 2})
 	for i := range 8 {
 		var pk common.Bytes48
 		pk[0] = byte(i)
-		s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.EffectiveBalanceIncrement)
+		if err := s.AddValidator(solid.NewValidatorFromParameters(pk, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.EffectiveBalanceIncrement); err != nil {
+			panic(err)
+		}
 	}
 	s.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, 8))
 	s.SetCurrentEpochParticipationFlags(make(cltypes.ParticipationFlagsList, 8))
@@ -860,7 +866,7 @@ func TestExecutionPayloadBidServiceRejectsPrevRandaoMismatch(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	parentState := newBidParentState(service.beaconCfg, testDependentRoot)
-	parentState.SetRandaoMixAt(int(state2.Epoch(parentState)%service.beaconCfg.EpochsPerHistoricalVector), common.Hash{0x42})
+	require.NoError(t, parentState.SetRandaoMixAt(int(state2.Epoch(parentState)%service.beaconCfg.EpochsPerHistoricalVector), common.Hash{0x42}))
 	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = parentState
 	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
 	addPreferencesToPool(epbsPool, 100)

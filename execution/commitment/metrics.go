@@ -24,27 +24,27 @@ type CsvMetrics interface {
 }
 
 type Metrics struct {
-	Accounts        *AccountMetrics
-	Branches        *BranchMetrics
-	updates         atomic.Uint64
-	addressKeys     atomic.Uint64
-	storageKeys     atomic.Uint64
-	loadBranch      atomic.Uint64
-	loadAccount     atomic.Uint64
-	loadStorage     atomic.Uint64
-	cacheBranch     atomic.Uint64
-	cacheAccount    atomic.Uint64
-	cacheStorage    atomic.Uint64
-	missBranch      atomic.Uint64
-	missAccount     atomic.Uint64
-	missStorage     atomic.Uint64
-	updateBranch    atomic.Uint64
-	loadDepths      [10]uint64
-	unfolds         atomic.Uint64
-	spentUnfolding  atomic.Int64
-	spentFolding    atomic.Int64
-	spentProcessing atomic.Int64
-	// metric config related
+	Accounts                 *AccountMetrics
+	Branches                 *BranchMetrics
+	updates                  atomic.Uint64
+	addressKeys              atomic.Uint64
+	storageKeys              atomic.Uint64
+	loadBranch               atomic.Uint64
+	loadAccount              atomic.Uint64
+	loadStorage              atomic.Uint64
+	cacheBranch              atomic.Uint64
+	cacheAccount             atomic.Uint64
+	cacheStorage             atomic.Uint64
+	missBranch               atomic.Uint64
+	missAccount              atomic.Uint64
+	missStorage              atomic.Uint64
+	updateBranch             atomic.Uint64
+	loadDepths               [10]uint64
+	unfolds                  atomic.Uint64
+	folds                    atomic.Uint64
+	spentUnfolding           atomic.Int64
+	spentFolding             atomic.Int64
+	spentProcessing          atomic.Int64
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
 	writeCommitmentMetrics   bool
@@ -69,6 +69,7 @@ type MetricValues struct {
 	UpdateBranch    uint64
 	LoadDepths      [10]uint64
 	Unfolds         uint64
+	Folds           uint64
 	SpentUnfolding  time.Duration
 	SpentFolding    time.Duration
 	SpentProcessing time.Duration
@@ -86,9 +87,6 @@ func (m MetricValues) RUnlock() {
 	}
 }
 
-// NewMetrics creates a new Metrics instance. If csvPrefix is non-empty, CSV metrics
-// are enabled with that prefix. Otherwise, falls back to the
-// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX environment variable.
 func NewMetrics(csvPrefix string) *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
@@ -99,10 +97,6 @@ func NewMetrics(csvPrefix string) *Metrics {
 	return metrics
 }
 
-// SetCsvMetrics enables CSV metrics for filePathPrefix, falling back to the
-// ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX env var when it is empty. An
-// empty prefix with no env var disables CSV metrics, so a pooled Metrics reused
-// without a prefix does not keep writing to a stale file.
 var csvMetricsEnvPrefix = sync.OnceValue(func() string {
 	return dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
 })
@@ -150,6 +144,7 @@ func (m *Metrics) AsValues() MetricValues {
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
+		Folds:           m.folds.Load(),
 		SpentUnfolding:  time.Duration(m.spentUnfolding.Load()),
 		SpentFolding:    time.Duration(m.spentFolding.Load()),
 		SpentProcessing: time.Duration(m.spentProcessing.Load()),
@@ -180,7 +175,7 @@ func (m *Metrics) logMetrics() []any {
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
 		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
 		"ms", common.PrettyCounter(m.missStorage.Load()),
-		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(time.Duration(m.spentProcessing.Load()), 0).String(),
+		"fld", common.PrettyCounter(m.folds.Load()), "ufld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(time.Duration(m.spentProcessing.Load()), 0).String(),
 		"fdur", common.Round(time.Duration(m.spentFolding.Load()), 0).String(), "ufdur", common.Round(time.Duration(m.spentUnfolding.Load()), 0),
 	}
 }
@@ -314,7 +309,14 @@ func (m *Metrics) Reset() {
 	m.missBranch.Store(0)
 	m.missAccount.Store(0)
 	m.missStorage.Store(0)
+	m.cacheBranch.Store(0)
+	m.cacheAccount.Store(0)
+	m.cacheStorage.Store(0)
 	m.unfolds.Store(0)
+	m.folds.Store(0)
+	m.spentUnfolding.Store(0)
+	m.spentFolding.Store(0)
+	m.spentProcessing.Store(0)
 
 	if !m.collectCommitmentMetrics {
 		return
@@ -322,9 +324,6 @@ func (m *Metrics) Reset() {
 
 	m.Accounts.Reset()
 	m.Branches.Reset()
-	m.spentUnfolding.Store(0)
-	m.spentFolding.Store(0)
-	m.spentProcessing.Store(0)
 }
 
 func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
@@ -335,12 +334,9 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 	for k := range endTxNumStats {
 		ends = append(ends, k)
 	}
-	// sort by file endTxNum
 	slices.SortFunc(ends, func(a, b uint64) int { return cmp.Compare(b, a) })
 	for i := 0; i < 5 && i < len(ends); i++ {
-		// get stats for specific file depth
 		v := endTxNumStats[ends[i]]
-		// write level i file stats - account and storage loads
 		m.loadDepths[i*2], m.loadDepths[i*2+1] = v.accLoaded, v.storLoaded
 	}
 }
@@ -386,6 +382,10 @@ func (m *Metrics) BranchLoad(plainKey []byte) {
 	}
 }
 
+// StartUnfolding counts the unfold always — one atomic add on a worker-private
+// line — and returns a timing closure only when per-key metrics are on, since
+// that costs a time.Now() and an escaping closure per call. A nil return means
+// there is nothing to stop.
 func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 	m.unfolds.Add(1)
 	if m.collectCommitmentMetrics {
@@ -398,10 +398,11 @@ func (m *Metrics) StartUnfolding(plainKey []byte) func() {
 			})
 		}
 	}
-	return func() {}
+	return nil
 }
 
 func (m *Metrics) StartFolding(plainKey []byte) func() {
+	m.folds.Add(1)
 	if m.collectCommitmentMetrics {
 		start := time.Now()
 		return func() {
@@ -412,7 +413,33 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 			})
 		}
 	}
-	return func() {}
+	return nil
+}
+
+// Merge folds src's counters into m. The parallel trie gives every mount
+// worker its own Metrics — an atomic add on a shared line in the fold loop
+// would cost more than the counter is worth — and merges once per round.
+func (m *Metrics) Merge(src *Metrics) {
+	if src == nil || m == src {
+		return
+	}
+	m.addressKeys.Add(src.addressKeys.Load())
+	m.storageKeys.Add(src.storageKeys.Load())
+	m.loadBranch.Add(src.loadBranch.Load())
+	m.loadAccount.Add(src.loadAccount.Load())
+	m.loadStorage.Add(src.loadStorage.Load())
+	m.cacheBranch.Add(src.cacheBranch.Load())
+	m.cacheAccount.Add(src.cacheAccount.Load())
+	m.cacheStorage.Add(src.cacheStorage.Load())
+	m.missBranch.Add(src.missBranch.Load())
+	m.missAccount.Add(src.missAccount.Load())
+	m.missStorage.Add(src.missStorage.Load())
+	m.updateBranch.Add(src.updateBranch.Load())
+	m.unfolds.Add(src.unfolds.Load())
+	m.folds.Add(src.folds.Load())
+	m.spentUnfolding.Add(src.spentUnfolding.Load())
+	m.spentFolding.Add(src.spentFolding.Load())
+	m.spentProcessing.Add(src.spentProcessing.Load())
 }
 
 func (m *Metrics) TotalProcessingTimeInc(t time.Time) {
@@ -438,10 +465,8 @@ type AccountStats struct {
 }
 
 type AccountMetrics struct {
-	m sync.RWMutex
-	// will be separate value for each key in parallel processing
-	AccountStats map[string]*AccountStats
-	// metric config related
+	m                      sync.RWMutex
+	AccountStats           map[string]*AccountStats
 	writeCommitmentMetrics bool
 }
 
@@ -483,7 +508,7 @@ func accountMetricsHeaders() []string {
 func (am *AccountMetrics) Values() [][]string {
 	am.m.Lock()
 	defer am.m.Unlock()
-	values := make([][]string, len(am.AccountStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(am.AccountStats)+1)
 	headersLen := len(am.Headers())
 	var vi uint64
 	for addr, stat := range am.AccountStats {
@@ -563,10 +588,8 @@ func NewBranches() *BranchMetrics {
 }
 
 type BranchMetrics struct {
-	m sync.RWMutex
-	// will be separate value for each key in parallel processing
-	BranchStats map[string]*BranchStats
-	// metric config related
+	m                      sync.RWMutex
+	BranchStats            map[string]*BranchStats
 	writeCommitmentMetrics bool
 }
 
@@ -584,7 +607,7 @@ func branchMetricsHeaders() []string {
 func (bm *BranchMetrics) Values() [][]string {
 	bm.m.RLock()
 	defer bm.m.RUnlock()
-	values := make([][]string, len(bm.BranchStats)+1) // + 1 to add one empty line between "process" calls
+	values := make([][]string, len(bm.BranchStats)+1)
 	headersLen := len(bm.Headers())
 	var vi uint64
 	for branchKey, stat := range bm.BranchStats {
@@ -656,7 +679,6 @@ func UnmarshallBranchMetricsCsv(filePath string) ([]*BranchMetrics, error) {
 }
 
 func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
-	// Open the file in append mode or create if it doesn't exist
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -668,11 +690,9 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 		}
 	}()
 
-	// Create a new writer
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Optionally write header if file is empty
 	info, err := file.Stat()
 	if err != nil {
 		return err
@@ -682,7 +702,6 @@ func writeMetricsToCSV(metrics CsvMetrics, filePath string) (err error) {
 			return err
 		}
 	}
-	// Write the actual data
 	for _, value := range metrics.Values() {
 		if err := writer.Write(value); err != nil {
 			return err

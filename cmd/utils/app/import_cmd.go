@@ -17,6 +17,7 @@
 package app
 
 import (
+	"bufio"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -133,8 +134,12 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 
-	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
-		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
+	files := cliCtx.Args().Slice()
+	fileIndex := 0
+	return importFiles(files, logger, func(fn string) error {
+		lastFile := fileIndex == len(files)-1
+		fileIndex++
+		return importFile(ethereum, ethereum.ChainDB(), fn, lastFile, logger)
 	})
 }
 
@@ -157,7 +162,7 @@ func importFiles(files []string, logger log.Logger, importOne func(fn string) er
 	return importErr
 }
 
-func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
+func importFile(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, lastFile bool, logger log.Logger) error {
 	// Watch for Ctrl-C while the import is running.
 	// If a signal is received, the import will stop at the next batch.
 	interrupt := make(chan os.Signal, 1)
@@ -195,7 +200,8 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			return err
 		}
 	}
-	stream := rlp.NewStream(reader, 0)
+	bufferedReader := bufio.NewReader(reader)
+	stream := rlp.NewStream(bufferedReader, 0)
 
 	// Run actual the import.
 	blocks := make(types.Blocks, importBatchSize)
@@ -211,7 +217,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			if err := stream.Decode(&b); errors.Is(err, io.EOF) {
 				break
 			} else if err != nil {
-				return fmt.Errorf("at block %d: %v", n, err)
+				return fmt.Errorf("at block %d: %w", n, err)
 			}
 			// don't import first block
 			if b.NumberU64() == 0 {
@@ -223,6 +229,11 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 		if i == 0 {
 			break
+		}
+		lastBatch := i < importBatchSize
+		if !lastBatch {
+			_, err := bufferedReader.Peek(1)
+			lastBatch = errors.Is(err, io.EOF)
 		}
 		// Import the batch.
 		if checkInterrupt() {
@@ -242,7 +253,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			TopBlock: missing[len(missing)-1],
 		}
 
-		if err := InsertChain(ethereum, missingChain, true); err != nil {
+		if err := insertChain(ethereum, missingChain, true, lastFile && lastBatch); err != nil {
 			return err
 		}
 	}
@@ -284,11 +295,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservice
 	return nil
 }
 
-type stateChangesClient interface {
-	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
-}
-
-func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
+func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead, finalize bool) error {
 	if len(chain.Blocks) == 0 {
 		return nil
 	}
@@ -313,9 +320,15 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
 	var parentTd, currentHeadTd *uint256.Int
+	var genesisHash common.Hash
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
+		var err error
+		genesisHash, err = rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return fmt.Errorf("read genesis hash: %w", err)
+		}
 		if firstBlock.NumberU64() > 0 {
 			td, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
 			if readErr != nil {
@@ -402,7 +415,11 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
-	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	safeHash, finalizedHash := genesisHash, genesisHash
+	if finalize {
+		safeHash, finalizedHash = tipHash, tipHash
+	}
+	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, safeHash, finalizedHash)
 	if err != nil {
 		return err
 	}

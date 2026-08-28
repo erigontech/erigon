@@ -25,18 +25,25 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type fixedGetter struct{ val []byte }
+type fixedTemporalTx struct {
+	kv.TemporalTx
+	val []byte
+}
 
-func (g fixedGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
+func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return g.val, 0, nil
 }
-func (g fixedGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+func (g fixedTemporalTx) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
+	return len(g.val), len(g.val) > 0, nil
+}
+func (g fixedTemporalTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return nil, nil, false, nil
 }
-func (g fixedGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step { return 0 }
+func (g fixedTemporalTx) StepsInFiles(entitySet ...kv.Domain) kv.Step { return 0 }
 
 type histMockTx struct {
 	kv.TemporalTx
@@ -52,7 +59,7 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	acc.Nonce = 1
 	accEnc := accounts.SerialiseV3(&acc) // valid encoding so ReadAccountData hits the deserialize path
 
-	r := NewReaderV3(fixedGetter{val: accEnc})
+	r := NewReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: accEnc}))
 	addr := accounts.InternAddress(common.Address{0x11})
 	key := accounts.InternKey(common.Hash{0x22})
 	hr := NewHistoryReaderV3(histMockTx{val: accEnc}, 0)
@@ -60,7 +67,7 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	cache := NewBlockStateCache()
 	cache.PutCommittedStorage(addr, key, make([]byte, 32))
 	cache.PutCommittedAccount(addr, &acc)
-	cr := NewCachedReaderV3(fixedGetter{val: make([]byte, 32)}, cache)
+	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
 
 	for _, tc := range []struct {
 		name string
@@ -188,4 +195,25 @@ func BenchmarkCachedReaderAccountRead(b *testing.B) {
 			}
 		}
 	})
+}
+
+// returnReadList pools the list, so leaving Vals populated keeps every value the
+// transaction read — bytecode included — alive for as long as the pool holds it.
+// Not parallel: it inspects an object it has just handed back to the pool.
+func TestReturnReadListUnpinsWhatTheTxnRead(t *testing.T) {
+	lists := readListPool.Get().(ReadLists)
+	tbl := lists[kv.AccountsDomain.String()]
+	tbl.Push("k1", make([]byte, 4096))
+	tbl.Push("k2", make([]byte, 4096))
+	require.Equal(t, 2, tbl.Len())
+
+	returnReadList(lists)
+
+	require.Zero(t, tbl.Len())
+	for i, v := range tbl.Vals[:cap(tbl.Vals)] {
+		require.Nil(t, v, "Vals[%d] still pins %d bytes the txn read", i, len(v))
+	}
+	for i, k := range tbl.Keys[:cap(tbl.Keys)] {
+		require.Empty(t, k, "Keys[%d] still pins a key", i)
+	}
 }

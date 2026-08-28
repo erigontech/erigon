@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -213,4 +214,50 @@ func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+// A blob call with no maxFeePerBlobGas (debug_traceCall accepts one) must
+// default the cap to zero rather than dereference the missing field.
+func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	args := CallArgs{
+		To:                  &to,
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+
+	txn, err := args.ToTransaction(1_000_000, uint256.NewInt(7))
+	require.NoError(t, err)
+	blobTx, ok := txn.(*types.BlobTx)
+	require.True(t, ok)
+	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
+}
+
+// RPCMarshalHeader aliases the header it is given: the U256 quantities and the
+// extraData slice point straight at it. The block marshallers must therefore
+// hand it a copy — the map they return is mutable and exported, and the block
+// keeps its memoized hash, so a caller writing through the map would otherwise
+// leave the block describing itself wrongly.
+func TestRPCMarshalBlockDoesNotAliasBlockHeader(t *testing.T) {
+	header := &types.Header{
+		Number:     *uint256.NewInt(7),
+		Difficulty: *uint256.NewInt(11),
+		BaseFee:    uint256.NewInt(13),
+		Extra:      []byte{1, 2, 3},
+	}
+	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+	wantHash := block.Hash()
+
+	fields, err := RPCMarshalBlockDeprecated(block, false, false)
+	require.NoError(t, err)
+
+	(*uint256.Int)(fields["number"].(*hexutil.U256)).SetUint64(99)
+	(*uint256.Int)(fields["difficulty"].(*hexutil.U256)).SetUint64(99)
+	(*uint256.Int)(fields["baseFeePerGas"].(*hexutil.U256)).SetUint64(99)
+	fields["extraData"].(hexutil.Bytes)[0] = 0xff
+
+	require.Equal(t, uint64(7), block.NumberU64())
+	require.Equal(t, uint64(11), block.HeaderNoCopy().Difficulty.Uint64())
+	require.Equal(t, uint64(13), block.BaseFee().Uint64())
+	require.Equal(t, []byte{1, 2, 3}, block.Extra())
+	require.Equal(t, wantHash, block.Hash())
 }

@@ -56,7 +56,7 @@ func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } /
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	b.Helper()
 	dirs := datadir.New(b.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
+	db := temporaltest.NewTestDB(b, dirs, temporaltest.WithStepSize(aggStep))
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
@@ -133,7 +133,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		t.ReportAllocs()
 		for ik := 0; ik < t.N; ik++ {
 			for i := range keys {
-				v, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[i])
+				v, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[i], kv.GetLatestOptions{})
 				require.Equalf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)
 				require.NoError(t, err)
 			}

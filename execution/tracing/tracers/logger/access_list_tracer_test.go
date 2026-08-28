@@ -17,12 +17,18 @@
 package logger
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var (
@@ -68,5 +74,301 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 	got := tracer.AccessList()
 	if len(got) != 0 {
 		t.Fatalf("excluded prelude address must not contribute tuples, got %+v", got)
+	}
+}
+
+// TestTracer_AccessList_Equal pins the cases equal() must reject now that it walks
+// only the receiver: a superset on either side, and same-sized sets with different
+// members, at both the address and the slot level.
+func TestTracer_AccessList_Equal(t *testing.T) {
+	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
+
+	build := func(fill func(accessList)) accessList {
+		al := newAccessList()
+		fill(al)
+		return al
+	}
+
+	oneAddrTwoSlots := func(al accessList) {
+		al.addSlot(addr, slot1)
+		al.addSlot(addr, slot2)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		a, b  func(accessList)
+		equal bool
+	}{
+		{"empty", func(accessList) {}, func(accessList) {}, true},
+		{"same slots inserted in a different order",
+			oneAddrTwoSlots,
+			func(al accessList) { al.addSlot(addr, slot2); al.addSlot(addr, slot1) },
+			true},
+		{"other has an extra address",
+			oneAddrTwoSlots,
+			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
+			false},
+		{"receiver has an extra address",
+			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
+			oneAddrTwoSlots,
+			false},
+		{"same address count, different addresses",
+			func(al accessList) { al.addAddress(addr) },
+			func(al accessList) { al.addAddress(addr2) },
+			false},
+		{"same slot count, different slots",
+			oneAddrTwoSlots,
+			func(al accessList) { al.addSlot(addr, slot1); al.addSlot(addr, slot3) },
+			false},
+		{"other has an extra slot",
+			func(al accessList) { al.addSlot(addr, slot1) },
+			oneAddrTwoSlots,
+			false},
+		{"address-only vs address with a slot",
+			func(al accessList) { al.addAddress(addr) },
+			func(al accessList) { al.addSlot(addr, slot1) },
+			false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b := build(tc.a), build(tc.b)
+			require.Equal(t, tc.equal, a.equal(b))
+			require.Equal(t, tc.equal, b.equal(a), "equal must be symmetric")
+		})
+	}
+}
+
+type testOpContext struct {
+	tracing.OpContext
+	stack   []uint256.Int
+	address accounts.Address
+}
+
+func (c *testOpContext) StackData() []uint256.Int  { return c.stack }
+func (c *testOpContext) Address() accounts.Address { return c.address }
+func (c *testOpContext) MemoryData() []byte        { return nil }
+
+// countingOpContext counts stack lookups. Kept out of the benchmark: the counter
+// runs once per opcode before this change and once per stack-using opcode after,
+// so timing it would credit the change with removing its own instrumentation.
+type countingOpContext struct {
+	testOpContext
+	stackReads int
+}
+
+func (c *countingOpContext) StackData() []uint256.Int { c.stackReads++; return c.stack }
+
+func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
+	for _, tc := range []struct {
+		op    vm.OpCode
+		reads int
+	}{
+		{vm.ADD, 0},
+		{vm.PUSH1, 0},
+		{vm.MSTORE, 0},
+		{vm.JUMPDEST, 0},
+		{vm.POP, 0},
+		{vm.CREATE, 0}, // reads the account nonce, not the stack
+		{vm.SLOAD, 1},
+		{vm.SSTORE, 1},
+		{vm.BALANCE, 1},
+		{vm.EXTCODESIZE, 1},
+		{vm.EXTCODEHASH, 1},
+		{vm.EXTCODECOPY, 1},
+		{vm.SELFDESTRUCT, 1},
+		{vm.CALL, 1},
+		{vm.CALLCODE, 1},
+		{vm.DELEGATECALL, 1},
+		{vm.STATICCALL, 1},
+		{vm.CREATE2, 1},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			scope := &countingOpContext{testOpContext: testOpContext{
+				address: accounts.InternAddress(addr),
+				stack:   make([]uint256.Int, 8),
+			}}
+			NewAccessListTracer(nil, nil, nil).OnOpcode(0, byte(tc.op), 100, 3, scope, nil, 1, nil)
+			require.Equal(t, tc.reads, scope.stackReads)
+		})
+	}
+}
+
+// TestTracer_AccessList_LazySlotMap pins that an address touched only as an address
+// carries no slot map, and that promoting it to a slot-carrying entry keeps its order.
+func TestTracer_AccessList_LazySlotMap(t *testing.T) {
+	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
+
+	al := newAccessList()
+	al.addAddress(addr)
+	al.addAddress(addr2)
+	require.Nil(t, al[addr].slots)
+	require.Nil(t, al[addr2].slots)
+
+	al.addSlot(addr, slot1)
+	al.addSlot(addr, slot2)
+	require.Len(t, al[addr].slots, 2)
+	require.Nil(t, al[addr2].slots)
+
+	require.Equal(t, types.AccessList{
+		{Address: addr, StorageKeys: []common.Hash{slot1, slot2}},
+		{Address: addr2, StorageKeys: []common.Hash{}},
+	}, al.accessList())
+}
+
+// TestTracer_AccessList_SlotFirstAddress covers addSlot on an address the list has
+// never seen: it must take the next order slot rather than a zero one.
+func TestTracer_AccessList_SlotFirstAddress(t *testing.T) {
+	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
+
+	al := newAccessList()
+	al.addAddress(addr)
+	al.addSlot(addr2, slot1)
+
+	require.Equal(t, types.AccessList{
+		{Address: addr, StorageKeys: []common.Hash{}},
+		{Address: addr2, StorageKeys: []common.Hash{slot1}},
+	}, al.accessList())
+}
+
+// TestAccessListTracerLazyAddressSets pins that a fresh tracer leaves both
+// contract-address sets nil, and that markCreated/markUsedBeforeCreation
+// allocate them independently on first write.
+func TestAccessListTracerLazyAddressSets(t *testing.T) {
+	tracer := NewAccessListTracer(nil, nil, nil)
+	require.Nil(t, tracer.createdContracts)
+	require.False(t, tracer.UsedBeforeCreation(addr))
+
+	tracer.markUsedBeforeCreation(addr)
+	require.True(t, tracer.UsedBeforeCreation(addr))
+	require.Nil(t, tracer.createdContracts)
+
+	tracer.markCreated(addr)
+	require.Contains(t, tracer.CreatedContracts(), addr)
+}
+
+// TestAccessListTracerCreatedContractsWritable pins that CreatedContracts always
+// returns a writable map, even before any CREATE: callers writing through the
+// returned set must not panic on a nil map.
+func TestAccessListTracerCreatedContractsWritable(t *testing.T) {
+	tracer := NewAccessListTracer(nil, nil, nil)
+	got := tracer.CreatedContracts()
+	require.NotNil(t, got)
+	got[addr] = struct{}{}
+	require.Contains(t, tracer.createdContracts, addr)
+}
+
+// TestAccessListTracerSeedNew pins that seeding directly from the accumulated maps
+// is observationally the same as the types.AccessList round-trip it replaces, and
+// that the two tracers share nothing.
+func TestAccessListTracerSeedNew(t *testing.T) {
+	excluded := common.BytesToAddress([]byte{0x09})
+	excl := map[common.Address]struct{}{excluded: {}}
+
+	prev := NewAccessListTracer(nil, excl, nil)
+	prev.list.addSlot(addr, slot1)
+	prev.list.addSlot(addr, slot2)
+	prev.list.addAddress(common.BytesToAddress([]byte{0x02, 0x72}))
+
+	seeded := prev.SeedNew(nil)
+	roundTripped := NewAccessListTracer(prev.AccessList(), excl, nil)
+
+	require.Equal(t, roundTripped.AccessList(), seeded.AccessList())
+	require.True(t, seeded.Equal(prev))
+
+	seeded.list.addSlot(addr, slot3)
+	seeded.list.addAddress(excluded)
+	require.False(t, seeded.Equal(prev), "the seeded tracer must not write through to its source")
+	require.Equal(t, roundTripped.AccessList(), prev.AccessList())
+}
+
+// TestAccessListTracerSeedNewDropsExcluded pins the filtering cloneExcluding
+// documents: an excluded address can reach the list, and must not survive.
+func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
+	excluded := common.BytesToAddress([]byte{0x77})
+	excl := map[common.Address]struct{}{excluded: {}}
+
+	prev := NewAccessListTracer(nil, excl, nil)
+	prev.list.addSlot(excluded, slot1)
+	prev.list.addSlot(addr, slot2)
+
+	seeded := prev.SeedNew(nil)
+	require.Equal(t, NewAccessListTracer(prev.AccessList(), excl, nil).AccessList(), seeded.AccessList())
+	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot2}}}, seeded.AccessList())
+}
+
+// TestAccessListTracerSeedNewTracesOpcodes drives a seeded tracer through the
+// opcodes that write its contract sets, which the AccessList-only assertions
+// above never reach.
+func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
+	prev := NewAccessListTracer(nil, nil, nil)
+	prev.list.addSlot(addr, slot1)
+
+	seeded := prev.SeedNew(nil)
+	scope := &mockOpContext{
+		address: accounts.InternAddress(addr),
+		stack:   []uint256.Int{*new(uint256.Int).SetBytes(slot2[:])},
+	}
+	seeded.OnOpcode(0, byte(vm.SLOAD), 100, 3, scope, nil, 1, nil)
+
+	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
+	require.True(t, seeded.UsedBeforeCreation(addr))
+	require.Empty(t, seeded.CreatedContracts())
+}
+
+func BenchmarkAccessListTracerSeed(b *testing.B) {
+	// Real eth_createAccessList lists are small: a handful of addresses with a
+	// few slots each. The wide shapes are here for scale.
+	for _, shape := range []struct{ nAddrs, nSlots int }{
+		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
+	} {
+		prev := NewAccessListTracer(nil, nil, nil)
+		for a := range shape.nAddrs {
+			address := common.BytesToAddress([]byte{byte(a + 1)})
+			for s := range shape.nSlots {
+				prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+			}
+		}
+		// AccessList() is built either way, so only the seeding half differs.
+		acl := prev.AccessList()
+		name := fmt.Sprintf("%dx%d", shape.nAddrs, shape.nSlots)
+
+		b.Run(name+"/roundTrip", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = NewAccessListTracer(acl, nil, nil)
+			}
+		})
+		b.Run(name+"/seedNew", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = prev.SeedNew(nil)
+			}
+		})
+	}
+}
+
+// Storage and calls are a small minority of what executes.
+var benchOpcodes = func() []byte {
+	ops := make([]byte, 0, 256)
+	for range 40 {
+		ops = append(ops,
+			byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.DUP1), byte(vm.SWAP1),
+			byte(vm.ADD), byte(vm.MSTORE), byte(vm.JUMPDEST), byte(vm.POP))
+	}
+	ops = append(ops, byte(vm.SLOAD), byte(vm.SSTORE), byte(vm.CALL), byte(vm.BALANCE))
+	return ops
+}()
+
+func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
+	scope := &testOpContext{
+		address: accounts.InternAddress(addr),
+		stack:   make([]uint256.Int, 8),
+	}
+	tracer := NewAccessListTracer(nil, nil, nil)
+
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		tracer.OnOpcode(uint64(i), benchOpcodes[i%len(benchOpcodes)], 100, 3, scope, nil, 1, nil)
+		i++
 	}
 }
