@@ -294,8 +294,9 @@ const swarPad = 8 // tail slack in wideByte so the last word load stays in bound
 // labels carries eight bytes of tail padding to keep the last word in bounds;
 // a hit in that padding, or in the next state's labels, lands at k >= hi.
 func swarEdge(labels []byte, children []int32, lo, hi int32, b byte) int32 {
+	pat := bitutil.SWARLow * uint64(b)
 	for i := lo; i < hi; i += 8 {
-		if z := bitutil.HasByte(binary.LittleEndian.Uint64(labels[i:]), b); z != 0 {
+		if z := bitutil.HasZero(binary.LittleEndian.Uint64(labels[i:]) ^ pat); z != 0 {
 			// borrows only propagate up, so the lowest flagged byte is a real hit
 			if k := i + int32(bits.TrailingZeros64(z)>>3); k < hi {
 				return children[k]

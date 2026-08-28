@@ -49,9 +49,7 @@ func New(out io.Writer) Stream {
 	return NewSized(out, InitialBufferSize)
 }
 
-// NewSized is New with an explicit initial buffer size. Building the
-// jsoniter.Stream here rather than taking one is what keeps the indention step
-// at zero, which writeObjectFieldFast relies on.
+// NewSized is New with an explicit initial buffer size.
 func NewSized(out io.Writer, bufSize int) Stream {
-	return newStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize))
+	return newStackStream(out, bufSize)
 }

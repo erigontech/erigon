@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -18,12 +18,15 @@ package jsonstream
 
 import (
 	"encoding/binary"
+	"math/bits"
 
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/bitutil"
 )
+
+const hexDigits = "0123456789abcdef"
 
 // escapeIndex returns the offset of the first byte a JSON string must escape,
 // or len(val) if there is none. It reads eight bytes at a time: the stdlib has
@@ -34,8 +37,10 @@ func escapeIndex(val string) int {
 	i := 0
 	for ; i+8 <= len(b); i += 8 {
 		x := binary.LittleEndian.Uint64(b[i:])
-		if bitutil.HasLess(x, 0x20)|bitutil.HasByte(x, '"')|bitutil.HasByte(x, '\\') != 0 {
-			break
+		if z := bitutil.HasLess(x, 0x20) | bitutil.HasByte(x, '"') | bitutil.HasByte(x, '\\'); z != 0 {
+			// the lowest set bit of each mask is a real hit, so the lowest of
+			// the three is too, and it names the lane
+			return i + bits.TrailingZeros64(z)>>3
 		}
 	}
 	for ; i < len(val); i++ {
@@ -46,16 +51,12 @@ func escapeIndex(val string) int {
 	return i
 }
 
-// writeStringFast writes val as a JSON string, copying each escape-free run in
+// appendJSONString appends val as a JSON string, copying each escape-free run in
 // one go where jsoniter's WriteString appends a byte at a time. The output is
 // byte for byte what jsoniter produces, including the HTML characters it leaves
 // alone: Erigon writes through WriteString, not WriteStringWithHTMLEscaped.
-//
-// It borrows the stream buffer for the whole value rather than calling WriteRaw
-// per piece: an escape is two to six bytes, and passing those as a string makes
-// each one a memmove call, which is what a dense-escape value pays for.
-func writeStringFast(stream *jsoniter.Stream, val string) {
-	buf := append(stream.Buffer(), '"')
+func appendJSONString(buf []byte, val string) []byte {
+	buf = append(buf, '"')
 	for len(val) > 0 {
 		// Escapes come in runs (a quoted phrase, a stretch of control bytes), so
 		// test the next byte before paying for the word scan: on dense input the
@@ -82,15 +83,20 @@ func writeStringFast(stream *jsoniter.Stream, val string) {
 		}
 		val = val[1:]
 	}
-	stream.SetBuffer(append(buf, '"'))
+	return append(buf, '"')
 }
 
-const hexDigits = "0123456789abcdef"
+// writeStringFast is jsoniter's WriteString over appendJSONString. It borrows
+// the stream buffer for the whole value rather than calling WriteRaw per piece:
+// an escape is two to six bytes, and passing those as a string makes each one a
+// memmove call, which is what a dense-escape value pays for.
+func writeStringFast(stream *jsoniter.Stream, val string) {
+	stream.SetBuffer(appendJSONString(stream.Buffer(), val))
+}
 
 // writeObjectFieldFast writes a field name and its colon. jsoniter follows the
-// colon with a space while indenting, which no stream here ever does: NewSized
+// colon with a space while indenting, which no stream here ever does: newStackStream
 // is the only way in and it fixes the config at a zero indention step.
 func writeObjectFieldFast(stream *jsoniter.Stream, fieldName string) {
-	writeStringFast(stream, fieldName)
-	stream.SetBuffer(append(stream.Buffer(), ':'))
+	stream.SetBuffer(append(appendJSONString(stream.Buffer(), fieldName), ':'))
 }

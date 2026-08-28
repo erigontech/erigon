@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -112,7 +112,8 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		s := New(&out)
 		s.WriteArrayStart()
 		val := strings.Repeat("c", 4096)
-		for i := range 40 {
+		n := 2*FlushThreshold/len(val) + 1
+		for i := range n {
 			if i > 0 {
 				s.WriteMore()
 			}
@@ -124,7 +125,7 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 
 		var decoded []string
 		require.NoError(t, json.Unmarshal(out.Bytes(), &decoded))
-		require.Len(t, decoded, 40)
+		require.Len(t, decoded, n)
 		require.Equal(t, val, decoded[0])
 	})
 
@@ -143,7 +144,7 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 	t.Run("failed writer drops instead of buffering", func(t *testing.T) {
 		s := New(goneWriter{}).(*StackStream)
 		val := strings.Repeat("c", 4096)
-		for range 2000 {
+		for range 20 * FlushThreshold / len(val) {
 			s.WriteString(val)
 		}
 		require.Less(t, len(s.stream.Buffer()), 2*FlushThreshold)
@@ -166,7 +167,8 @@ func benchWriteString(b *testing.B, write func(*jsoniter.Stream, string), val st
 }
 
 // BenchmarkWriteString measures both paths in one binary, so the jsoniter
-// sub-benchmark is the baseline the fast one is compared against.
+// sub-benchmark is the baseline the fast one is compared against:
+// benchstat -col /impl pairs them per shape.
 func BenchmarkWriteString(b *testing.B) {
 	longClean := "0x" + strings.Repeat("ab", 2048)
 	for _, tc := range []struct{ name, val string }{
@@ -182,10 +184,10 @@ func BenchmarkWriteString(b *testing.B) {
 		{"ctrl4k", strings.Repeat("\x00", 4096)},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			b.Run("jsoniter", func(b *testing.B) {
+			b.Run("impl=jsoniter", func(b *testing.B) {
 				benchWriteString(b, (*jsoniter.Stream).WriteString, tc.val)
 			})
-			b.Run("fast", func(b *testing.B) {
+			b.Run("impl=fast", func(b *testing.B) {
 				benchWriteString(b, writeStringFast, tc.val)
 			})
 		})
@@ -198,10 +200,10 @@ func BenchmarkWriteObjectField(b *testing.B) {
 		{"storageKey66", "0x" + strings.Repeat("ab", 32)},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			b.Run("jsoniter", func(b *testing.B) {
+			b.Run("impl=jsoniter", func(b *testing.B) {
 				benchWriteString(b, (*jsoniter.Stream).WriteObjectField, tc.val)
 			})
-			b.Run("fast", func(b *testing.B) {
+			b.Run("impl=fast", func(b *testing.B) {
 				benchWriteString(b, writeObjectFieldFast, tc.val)
 			})
 		})

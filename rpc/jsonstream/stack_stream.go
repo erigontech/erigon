@@ -45,11 +45,13 @@ type StackStream struct {
 	stack  []stackItem
 }
 
-// newStackStream creates a new StackStream with the given jsoniter.Stream
+// newStackStream creates a new StackStream writing to out. Building the
+// jsoniter.Stream here rather than taking one is what fixes the indention step
+// at zero, which writeObjectFieldFast relies on.
 // The stack is pre-allocated with a capacity of InitialStackSize
-func newStackStream(stream *jsoniter.Stream) *StackStream {
+func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
-		stream: stream,
+		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
 		stack:  make([]stackItem, 0, InitialStackSize),
 	}
 }

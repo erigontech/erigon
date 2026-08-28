@@ -27,12 +27,10 @@ type Stream interface {
 
 	Buffer() []byte
 	Reset(out io.Writer)
-	// WriteRawBytes, WriteRaw accepting already-encoded JSON
-	// Nothing is escaped or validated
+	// WriteRawBytes and WriteRaw write already-encoded JSON. Nothing is escaped
+	// or validated, so the caller owns that: a value that is not yet valid JSON
+	// — any unencoded string — must go through WriteString.
 	WriteRawBytes(content []byte)
-	// WriteRaw writes already-encoded JSON. Nothing is escaped or validated, so
-	// the caller owns that: a value that is not yet valid JSON — any unencoded
-	// string — must go through WriteString.
 	WriteRaw(content string)
 	// Flush is where a delivery failure surfaces: value writers cannot fail and
 	// the automatic flush drops the error, so a handler that has to notice the

@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -19,23 +19,25 @@ package bitutil
 // SWAR (SIMD-within-a-register) helpers read a uint64 as eight byte lanes and
 // test all of them with a few ALU ops.
 //
-// Every Has* below answers only zero/nonzero. The subtraction borrows across
-// lane boundaries, so a hit can light up a neighbouring lane too and the set
-// bits do not locate it. The one exception is the lowest set bit, which no
-// borrow can reach from below, so bits.TrailingZeros64(z)>>3 does give the
-// first matching lane.
+// Every Has* below is meaningful only as zero or nonzero. The subtraction
+// borrows across lane boundaries, so a hit can light up a neighbouring lane too
+// and the set bits do not locate it. The one exception is the lowest set bit,
+// which no borrow can reach from below, so bits.TrailingZeros64(z)>>3 does give
+// the first matching lane.
 const (
 	SWARLow  uint64 = 0x0101010101010101 // low bit of every lane
 	SWARHigh uint64 = 0x8080808080808080 // high bit of every lane
 )
 
-// HasZero reports, nonzero, whether any lane of x is zero.
+// HasZero returns a nonzero value if any lane of x is zero, and 0 otherwise.
 func HasZero(x uint64) uint64 { return (x - SWARLow) &^ x & SWARHigh }
 
-// HasByte reports, nonzero, whether any lane of x equals b.
+// HasByte returns a nonzero value if any lane of x equals b, and 0 otherwise.
+// In a loop over one fixed b, hoist SWARLow*uint64(b) and call HasZero: Go does
+// no loop-invariant code motion, so the multiply stays inside the loop here.
 func HasByte(x uint64, b byte) uint64 { return HasZero(x ^ SWARLow*uint64(b)) }
 
-// HasLess reports, nonzero, whether any lane of x is below n. n must be at most
-// 128: the &^ x term drops every lane with its high bit set, so above that
-// bound lanes in [128, n) go unreported.
+// HasLess returns a nonzero value if any lane of x is below n, and 0 otherwise.
+// n must be at most 128: the &^ x term drops every lane with its high bit set,
+// so above that bound lanes in [128, n) go unreported.
 func HasLess(x uint64, n byte) uint64 { return (x - SWARLow*uint64(n)) &^ x & SWARHigh }
