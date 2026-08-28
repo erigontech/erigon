@@ -121,6 +121,17 @@ type Cfg struct {
 	// rollout / recovery); leave default for regular V2 nodes.
 	BootstrapFromPreverified bool
 
+	// PreverifiedFilter narrows the preverified list before it's
+	// merged into the published chain.toml (see PublishChainToml).
+	// Nil means no filter — legacy behaviour. Bootstrap publishers
+	// under a distance-pruning prune mode wire this to
+	// snapshotsync.FilterPreverifiedByPruneMode so the manifest
+	// doesn't advertise files the local node never downloads (e.g.
+	// CL beaconblocks under --prune.mode=minimal). The downloader
+	// itself doesn't know about prune.Mode / chain.Config, so the
+	// filter is supplied by the process wiring layer that does.
+	PreverifiedFilter func(snapcfg.PreverifiedItems) snapcfg.PreverifiedItems
+
 	LogPrefix string
 }
 

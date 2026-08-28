@@ -603,6 +603,18 @@ func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
 // defensive re-assert path in publishLocalChainTomlInner reads that
 // cache to re-emit verbatim rather than reconstructing a bare struct
 // that would drop ContentUCANHash / DomainSteps / MergeDepth.
+// SetPreverifiedFilter installs the callback that narrows preverified
+// entries before they're merged into the published chain.toml. The
+// downloader itself can't compute this filter (it doesn't know about
+// prune.Mode / chain.Config); the process wiring layer supplies it —
+// typically snapshotsync.FilterPreverifiedByPruneMode. Nil clears
+// any previously-set filter.
+func (d *Downloader) SetPreverifiedFilter(fn PreverifiedFilter) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.cfg.PreverifiedFilter = fn
+}
+
 func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
@@ -848,7 +860,7 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 	if inv != nil {
 		publishUpdater = nil
 	}
-	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, servable, publishUpdater); err != nil {
+	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, d.cfg.PreverifiedFilter, servable, publishUpdater); err != nil {
 		return err
 	}
 

@@ -643,6 +643,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.components.Storage != nil && config.Snapshot.P2PManifest {
 		backend.components.Downloader.Downloader.SetInventory(backend.components.Storage.Inventory)
 
+		// Prune-mode-aware preverified filter: keeps the published
+		// chain.toml from advertising files the local node
+		// deliberately never downloads (e.g. CL beaconblocks under
+		// --prune.mode=minimal). Same filter the download-side path
+		// uses (snapshotsync.SyncSnapshots), applied at the emit
+		// seam so the two stay in lockstep.
+		pruneMode := config.Prune
+		chainCfg := chainConfig
+		backend.components.Downloader.Downloader.SetPreverifiedFilter(
+			func(items snapcfg.PreverifiedItems) snapcfg.PreverifiedItems {
+				return snapshotsync.FilterPreverifiedByPruneMode(items, chainCfg, pruneMode)
+			},
+		)
+
 		// Wire the producer-side self-check
 		// (docs/plans/20260515-three-layer-snapshot-distribution.md):
 		// every RollingV2Publisher.Publish flattens its outgoing

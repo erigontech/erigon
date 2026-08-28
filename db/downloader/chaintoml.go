@@ -189,6 +189,35 @@ func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorr
 	return spec.InfoHash, nil
 }
 
+// PreverifiedFilter narrows a preverified item list before it's folded
+// into the published chain.toml. Nil means no filter (advertise every
+// preverified item). Bootstrap publishers under a distance-pruning
+// prune mode wire this to snapshotsync.FilterPreverifiedByPruneMode so
+// the published manifest doesn't claim files the local node
+// deliberately never downloads (e.g. CL beaconblocks under
+// --prune.mode=minimal): advertising them lies to peers who then ask
+// for pieces the local torrent client cannot serve.
+type PreverifiedFilter func(snapcfg.PreverifiedItems) snapcfg.PreverifiedItems
+
+// mergeBootstrapPreverified folds preverified into a local chain.toml.
+// filter is applied to items first when non-nil — a filtered-out entry
+// never reaches the merge.
+func mergeBootstrapPreverified(localTomlBytes []byte, items snapcfg.PreverifiedItems, filter PreverifiedFilter) []byte {
+	if filter != nil {
+		items = filter(items)
+	}
+	if len(items) == 0 {
+		return localTomlBytes
+	}
+	localMap, _ := ParseChainToml(localTomlBytes)
+	preverified := make(map[string]string, len(items))
+	for _, item := range items {
+		preverified[item.Name] = item.Hash
+	}
+	merged, _ := MergeChainToml(localMap, preverified)
+	return BuildTomlFromMap(merged)
+}
+
 // PublishChainToml orchestrates the full chain.toml publish flow:
 // 1. Generate chain.toml from local .torrent files + preverified registry
 // 2. Save chain.toml to disk
@@ -205,7 +234,7 @@ func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorr
 // chain rollout's seed to peers. When false (regular V2 nodes), the
 // published manifest = local files only — preverified is invisible to
 // the network. See completion plan §5b.
-func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, bootstrapFromPreverified bool, servable map[metainfo.Hash]struct{}, enrUpdater func(enr.ChainToml)) error {
+func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, bootstrapFromPreverified bool, preverifiedFilter PreverifiedFilter, servable map[metainfo.Hash]struct{}, enrUpdater func(enr.ChainToml)) error {
 	// Start from local .torrent files. servable filters to only those
 	// the torrent client is ready to seed (validation gate).
 	tomlBytes, err := GenerateChainToml(snapDir, servable)
@@ -221,13 +250,7 @@ func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName stri
 		if cfg, known := snapcfg.KnownCfg(chainName); known {
 			authoritativeTx = cfg.ExpectBlocks
 			if bootstrapFromPreverified {
-				localMap, _ := ParseChainToml(tomlBytes)
-				preverified := make(map[string]string, len(cfg.Preverified.Items))
-				for _, item := range cfg.Preverified.Items {
-					preverified[item.Name] = item.Hash
-				}
-				merged, _ := MergeChainToml(localMap, preverified)
-				tomlBytes = BuildTomlFromMap(merged)
+				tomlBytes = mergeBootstrapPreverified(tomlBytes, cfg.Preverified.Items, preverifiedFilter)
 			}
 		}
 	}

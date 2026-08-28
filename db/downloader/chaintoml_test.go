@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -258,7 +259,7 @@ func TestPublishChainToml(t *testing.T) {
 		receivedENR = ct
 	}
 
-	err := PublishChainToml(snapDir, torrentFS, "", false, nil, updater)
+	err := PublishChainToml(snapDir, torrentFS, "", false, nil, nil, updater)
 	require.NoError(t, err)
 
 	// Verify chain.toml was created.
@@ -278,7 +279,7 @@ func TestPublishChainToml_NilUpdater(t *testing.T) {
 	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
 
 	// Should not panic with nil updater.
-	err := PublishChainToml(snapDir, torrentFS, "", false, nil, nil)
+	err := PublishChainToml(snapDir, torrentFS, "", false, nil, nil, nil)
 	require.NoError(t, err)
 }
 
@@ -450,4 +451,55 @@ func TestIsAcceptedChainTomlName(t *testing.T) {
 			require.Equal(t, tc.accept, isAcceptedChainTomlName(tc.name))
 		})
 	}
+}
+
+// TestMergeBootstrapPreverified_FilterAppliedBeforeMerge pins that the
+// bootstrap-from-preverified merge applies the caller-supplied filter
+// callback before folding preverified entries into local chain.toml.
+// Motivating case: a --prune.mode=minimal publisher must not advertise
+// CL beaconblocks (which it deliberately never downloads and cannot
+// serve). Without the filter, chain.toml claims files the local node
+// doesn't have on disk and peers get denied when they ask for them.
+func TestMergeBootstrapPreverified_FilterAppliedBeforeMerge(t *testing.T) {
+	local := []byte(`"local-file.seg" = "1111111111111111111111111111111111111111"` + "\n")
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-000000-000010-beaconblocks.seg", Hash: "aabbccddeeff00112233445566778899aabbccdd"},
+		{Name: "v1.1-000000-000500-headers.seg", Hash: "112233445566778899aabbccddeeff0011223344"},
+		{Name: "v1.1-000000-000500-bodies.seg", Hash: "223344556677889900aabbccddeeff0011223344"},
+	}
+	filter := func(in snapcfg.PreverifiedItems) snapcfg.PreverifiedItems {
+		var out snapcfg.PreverifiedItems
+		for _, it := range in {
+			if strings.Contains(it.Name, "beaconblocks") {
+				continue
+			}
+			out = append(out, it)
+		}
+		return out
+	}
+
+	got := mergeBootstrapPreverified(local, items, filter)
+	gotStr := string(got)
+
+	assert.Contains(t, gotStr, "local-file.seg", "local entry must survive the merge")
+	assert.Contains(t, gotStr, "v1.1-000000-000500-headers.seg", "non-filtered preverified must land in output")
+	assert.Contains(t, gotStr, "v1.1-000000-000500-bodies.seg", "non-filtered preverified must land in output")
+	assert.NotContains(t, gotStr, "beaconblocks", "filter removed beaconblocks — merged output must not contain them")
+}
+
+// TestMergeBootstrapPreverified_NilFilterPassesEverything: legacy
+// no-filter path stays byte-compatible with the pre-fix behaviour.
+func TestMergeBootstrapPreverified_NilFilterPassesEverything(t *testing.T) {
+	local := []byte(`"local-file.seg" = "1111111111111111111111111111111111111111"` + "\n")
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-000000-000010-beaconblocks.seg", Hash: "aabbccddeeff00112233445566778899aabbccdd"},
+		{Name: "v1.1-000000-000500-headers.seg", Hash: "112233445566778899aabbccddeeff0011223344"},
+	}
+
+	got := mergeBootstrapPreverified(local, items, nil)
+	gotStr := string(got)
+
+	assert.Contains(t, gotStr, "beaconblocks", "nil filter must preserve every preverified entry")
+	assert.Contains(t, gotStr, "headers.seg")
+	assert.Contains(t, gotStr, "local-file.seg")
 }
