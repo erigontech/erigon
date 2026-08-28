@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -44,8 +45,19 @@ const avgBytesPerEntry = 256
 
 // freelruElemBytes is what one slot costs beyond the payload estimate: a freelru
 // element (hashed key, five uint32 list indices, an expiry) plus its uint32
-// bucket index.
+// bucket index. The 112 holds for a value type of at most freelruValueBytes.
 const freelruElemBytes = 112 + 4
+
+// freelruValueBytes is the largest value type freelruElemBytes accounts for.
+// freelru's element is unexported, so the check goes on the value types instead:
+// a larger one grows every element and under-charges every slot.
+const freelruValueBytes = 72
+
+const (
+	_ = uint(freelruValueBytes - unsafe.Sizeof(entry[[]byte]{}))
+	_ = uint(freelruValueBytes - unsafe.Sizeof(codeEntry{}))
+	_ = uint(freelruValueBytes - unsafe.Sizeof(codeSizeEntry{}))
+)
 
 // freelruSlotBytes is that overhead at the 5/4 table ratio fitTableSlots pins,
 // plus a byte: rounding the capacity down to the boundary leaves the real ratio a
