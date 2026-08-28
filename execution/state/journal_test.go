@@ -117,3 +117,28 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 		}
 	}
 }
+
+// Truncation leaves entries above len holding their extra, and a kindCode extra
+// is a whole contract's bytecode. revert truncates too, which is why clearing
+// only [0:len] at Reset is not enough on its own.
+func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
+	j := newJournal()
+	t.Cleanup(j.release)
+
+	addr := accounts.InternAddress(common.Address{1})
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	if len(j.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(j.entries))
+	}
+
+	j.Reset()
+
+	tail := j.entries[:cap(j.entries)]
+	for i, e := range tail {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
