@@ -188,6 +188,10 @@ type PrecompileContext struct {
 	Value    *uint256.Int
 	ReadOnly bool
 	Evm      *EVM
+	// frameValue is the value the frame was entered with. Value is an exported
+	// pointer a precompile can write through, so delegation reads this instead:
+	// DELEGATECALL has no value operand and must not become one.
+	frameValue uint256.Int
 }
 
 // PrecompileGas is the frame's gas, charged through the same helpers the
@@ -399,7 +403,7 @@ func (ctx *PrecompileContext) CallCode(gas *PrecompileGas, addr accounts.Address
 // deliberately no value parameter here.
 func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
 	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.Evm.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, orZero(ctx.Value), handed)
+		return ctx.Evm.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, ctx.frameValue, handed)
 	})
 }
 

@@ -678,14 +678,18 @@ func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 
 type reservoirHandoffPrecompile struct {
 	vm.NoStatelessRun
-	inner   accounts.Address
-	kind    string
-	callErr error
+	inner         accounts.Address
+	kind          string
+	mutateValueTo uint64
+	callErr       error
 }
 
 func (*reservoirHandoffPrecompile) Name() string { return "HANDOFF" }
 
 func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	if p.mutateValueTo != 0 {
+		ctx.Value.SetUint64(p.mutateValueTo)
+	}
 	switch p.kind {
 	case "staticcall":
 		_, p.callErr = ctx.StaticCall(gas, p.inner, nil, 50_000)
@@ -799,7 +803,8 @@ func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa8}))
 	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa9}))
 	inner := &recordingStatefulPrecompile{}
-	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall"}
+	// Writing through the exported pointer must not reach the delegate frame.
+	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall", mutateValueTo: 99}
 	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner}
 	})
@@ -816,4 +821,46 @@ func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 	require.Len(t, inner.calls, 1)
 	require.True(t, inner.calls[0].Value.Eq(&value),
 		"the delegate frame must observe the calling frame's value")
+}
+
+type panickingStatefulPrecompile struct {
+	vm.NoStatelessRun
+	stashed *vm.PrecompileGas
+}
+
+func (*panickingStatefulPrecompile) Name() string { return "PANIC" }
+
+func (p *panickingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	p.stashed = gas
+	panic("precompile blew up")
+}
+
+// TestStatefulPrecompilePanicReleasesTheGasHandle pins the handle's lifetime
+// against a panic. Erigon recovers execution panics on versioned state, so a
+// release that only runs on the normal path leaves a stashed handle pointing at
+// the dead frame's counters and still accepting charges.
+func TestStatefulPrecompilePanicReleasesTheGasHandle(t *testing.T) {
+	const chainID = 900431
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xaa}))
+	p := &panickingStatefulPrecompile{}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: p}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	func() {
+		defer func() {
+			require.NotNil(t, recover(), "the precompile has to have panicked")
+		}()
+		_, _, _, _ = vmenv.Call(cfg.Origin, precompileAddr, nil,
+			mdgas.MdGas{Execution: 100_000, State: 5_000}, uint256.Int{}, false)
+	}()
+
+	require.NotNil(t, p.stashed)
+	require.Equal(t, mdgas.MdGas{}, p.stashed.Remaining(),
+		"a handle that outlived its frame must report nothing")
+	require.False(t, p.stashed.ChargeExecution(1), "and must refuse to charge")
 }

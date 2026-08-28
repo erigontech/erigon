@@ -500,16 +500,20 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Value:    &callValue,
 				ReadOnly: evm.readOnly || typ == STATICCALL,
 				Evm:      evm,
+
+				frameValue: value,
 			}
 			// Charging through the handle keeps gasUsed.State and
 			// gasUsed.StateSpill in step with gasRemaining, so the accounting
 			// defer and handleFrameRevert below both read the real figures.
 			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
 			func() {
+				// Released here, not after the call: a recovered panic out of
+				// RunStateful would otherwise leave a stashed handle live.
+				defer pgas.release()
 				defer evm.enterFrame(ctx.ReadOnly)()
 				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
-			pgas.release()
 			// Frame-level classification compares the bare sentinel, so an
 			// idiomatically wrapped revert would burn the frame's gas and skip
 			// the return-data copy while the receipt still read as reverted.
