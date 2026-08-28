@@ -385,6 +385,7 @@ EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
 EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
 EEST_STABLE_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0
 EEST_GLAMSTERDAM_ERIGON_FLAGS = $(EEST_STABLE_ERIGON_FLAGS) --experimental.bal
+EEST_HIVE_REPOSITORY = $(shell jq -r '.hive_repository' .github/workflows/hive-versions.json)
 EEST_HIVE_REF = $(shell jq -r '.hive_ref' .github/workflows/hive-versions.json)
 HIVE_SIM_PARALLELISM ?= 8
 
@@ -394,7 +395,7 @@ eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone "https://github.com/$(EEST_HIVE_REPOSITORY)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -456,7 +457,7 @@ eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone "https://github.com/$(EEST_HIVE_REPOSITORY)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \

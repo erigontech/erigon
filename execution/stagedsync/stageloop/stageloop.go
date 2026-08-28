@@ -203,6 +203,20 @@ func (h *Hook) NotifySyncState(tx kv.Tx) {
 	}
 }
 
+func (h *Hook) NotifyStateRetirementStart(started bool) {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil {
+		return
+	}
+	h.notifications.Events.OnStateRetirementStart(started)
+}
+
+func (h *Hook) NotifyStateRetirementDone() {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil {
+		return
+	}
+	h.notifications.Events.OnStateRetirementDone()
+}
+
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
 	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
 		return
