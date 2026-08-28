@@ -215,16 +215,16 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `db/state/statecfg/state_schema.go`
 - Create: `db/state/commitment_accessor_test.go`
 
-- [ ] set `Schema.CommitmentDomain.Accessors` to `AccessorBTree | AccessorExistence`. Which index type
+- [x] set `Schema.CommitmentDomain.Accessors` to `AccessorBTree | AccessorExistence`. Which index type
       a domain uses is a schema property, not a per-file version gate — `d.Accessors` is domain-wide
       and existing `BuildMissedAccessors` machinery produces `.bt`/`.kvei` for files that lack them
-- [ ] verify `bindex` is populated for the commitment domain and that `IteratePrefix` and
+- [x] verify `bindex` is populated for the commitment domain and that `IteratePrefix` and
       `bindex.Seek` run against it — every existing call site targets `kv.StorageDomain` today
-- [ ] write a test asserting a child-range scan returns exactly one node's records under the exact
+- [x] write a test asserting a child-range scan returns exactly one node's records under the exact
       key-length filter, with an interleaved foreign-subtree key excluded
-- [ ] write a test asserting the scan bails to a re-`Seek` at the next expected child key rather than
+- [x] write a test asserting the scan bails to a re-`Seek` at the next expected child key rather than
       walking a large foreign subtree
-- [ ] run `go test ./db/state/...` — must pass before task 6
+- [x] run `go test ./db/state/...` — must pass before task 6
 
 ### Task 6: Exact encoding detection for the converter
 

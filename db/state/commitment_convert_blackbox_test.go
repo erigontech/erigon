@@ -161,10 +161,13 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 	_, err = os.Stat(newKVPath)
 	require.NoError(t, err, "expected new .kv in %s", dstDir)
 
-	// Per-domain accessor (commitment uses HashMap → .kvi).
-	matches, err := filepath.Glob(filepath.Join(dstDir, "*.kvi"))
+	// Commitment values use the ordered BTree and existence accessors.
+	matches, err := filepath.Glob(filepath.Join(dstDir, "*.bt"))
 	require.NoError(t, err)
-	require.NotEmpty(t, matches, "expected at least one .kvi accessor in %s", dstDir)
+	require.NotEmpty(t, matches, "expected at least one .bt accessor in %s", dstDir)
+	matches, err = filepath.Glob(filepath.Join(dstDir, "*.kvei"))
+	require.NoError(t, err)
+	require.NotEmpty(t, matches, "expected at least one .kvei accessor in %s", dstDir)
 
 	// Aggregator view of snapshots/domain/ must be untouched.
 	for _, vf := range at.Files(kv.CommitmentDomain) {
@@ -418,18 +421,19 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
 		"rebuild dir must be removed; got err=%v", statErr)
 
-	// Phase 4 invariant: snapshots/domain/ has a fresh .kv + .kvi for each
+	// Phase 4 invariant: snapshots/domain/ has a fresh .kv, .bt, and .kvei for each
 	// converted file. We compare by step-range basename since the new file may
 	// have a different version prefix.
 	newKVs, err := filepath.Glob(filepath.Join(snapDir, "*-commitment.*.kv"))
 	require.NoError(t, err)
 	require.NotEmpty(t, newKVs, "snapshots/domain/ must have commitment .kv files after promote")
 	for _, p := range newKVs {
-		// Each .kv must have a sibling .kvi (commitment domain uses AccessorHashMap).
-		kvi := p[:len(p)-3] + ".kvi"
-		kvi = swapVersionExt(kvi) // version prefix may differ
-		_, err := os.Stat(kvi)
-		require.NoErrorf(t, err, "expected sibling .kvi for %s", p)
+		bt := swapVersionExt(p[:len(p)-3] + ".bt") // version prefix may differ
+		_, err := os.Stat(bt)
+		require.NoErrorf(t, err, "expected sibling .bt for %s", p)
+		kvei := swapVersionExt(p[:len(p)-3] + ".kvei")
+		_, err = os.Stat(kvei)
+		require.NoErrorf(t, err, "expected sibling .kvei for %s", p)
 	}
 
 	// Phase 5 invariant: re-computing the root via the reloaded aggregator
@@ -788,10 +792,14 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 	kvMatches, err := filepath.Glob(kvPattern)
 	require.NoError(t, err)
 	require.Len(t, kvMatches, 1, "rebuildDir must contain file 0's .kv after the cancel: %s", kvPattern)
-	kviPattern := filepath.Join(rebuildDir, fmt.Sprintf("*-commitment.%d-%d.kvi", firstFileStepFrom, firstFileStepTo))
-	kviMatches, err := filepath.Glob(kviPattern)
+	btPattern := filepath.Join(rebuildDir, fmt.Sprintf("*-commitment.%d-%d.bt", firstFileStepFrom, firstFileStepTo))
+	btMatches, err := filepath.Glob(btPattern)
 	require.NoError(t, err)
-	require.Len(t, kviMatches, 1, "rebuildDir must contain file 0's .kvi sibling after the cancel")
+	require.Len(t, btMatches, 1, "rebuildDir must contain file 0's .bt sibling after the cancel")
+	kveiPattern := filepath.Join(rebuildDir, fmt.Sprintf("*-commitment.%d-%d.kvei", firstFileStepFrom, firstFileStepTo))
+	kveiMatches, err := filepath.Glob(kveiPattern)
+	require.NoError(t, err)
+	require.Len(t, kveiMatches, 1, "rebuildDir must contain file 0's .kvei sibling after the cancel")
 
 	// No other shards should be present — the ctx.Err() check at the top of
 	// Phase 1's next iteration returns before convertCommitmentFile is invoked
@@ -854,7 +862,7 @@ func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
 
 	// snapDomain matches the reference run. The on-disk basename set must be
 	// identical; for each .kv file the bytes must match. Accessor siblings
-	// (.kvi / .bt / .kvei) are not byte-compared because recsplit uses a
+	// (.bt / .kvei) are not byte-compared because the accessors use a
 	// per-datadir random salt (see salt-state.txt), so independent fixtures
 	// produce different accessor bytes for the same input — accessor existence
 	// is asserted via the basename match.
@@ -999,13 +1007,13 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 	// Simulate "after partial failure" state:
 	//   - manifest already on disk, listing the full set of 3 backup files;
 	//   - .kv and .bt already moved into SnapDomain on the prior attempt;
-	//   - only .kvi remains in backup (the rename that crashed).
+	//   - only .kvei remains in backup (the rename that crashed).
 	origKV := []byte("ORIG_KV")
 	origBT := []byte("ORIG_BT")
-	origKVI := []byte("ORIG_KVI")
-	manifest := "v2.0-commitment.0-32.kv\nv2.0-commitment.0-32.bt\nv2.0-commitment.0-32.kvi"
+	origKVEI := []byte("ORIG_KVEI")
+	manifest := "v2.0-commitment.0-32.kv\nv2.0-commitment.0-32.bt\nv2.0-commitment.0-32.kvei"
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), []byte(manifest), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kvi"), origKVI, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kvei"), origKVEI, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), origKV, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), origBT, 0o644))
 
@@ -1015,7 +1023,7 @@ func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
 	// sweep must not have deleted the .kv/.bt files already in place.
 	require.Equal(t, origKV, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv")))
 	require.Equal(t, origBT, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt")))
-	require.Equal(t, origKVI, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kvi")))
+	require.Equal(t, origKVEI, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kvei")))
 
 	// Backup tree gone after successful completion.
 	_, statErr := os.Stat(backupDir)
@@ -1077,16 +1085,16 @@ func TestRestoreCommitmentFiles_FailsWhenManifestEntryMissingFromBothSides(t *te
 	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
 
 	// Manifest references three files. Only .kv exists in backup; .bt was moved
-	// to SnapDomain on a prior attempt (legitimate retry state); .kvi exists in
+	// to SnapDomain on a prior attempt (legitimate retry state); .kvei exists in
 	// neither location — that's the missing-data case we must detect.
-	manifest := "v2.0-commitment.0-32.kv\nv2.0-commitment.0-32.bt\nv2.0-commitment.0-32.kvi"
+	manifest := "v2.0-commitment.0-32.kv\nv2.0-commitment.0-32.bt\nv2.0-commitment.0-32.kvei"
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), []byte(manifest), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG_KV"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("ORIG_BT"), 0o644))
 
 	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must fail when a manifest entry is in neither backup nor destination")
-	require.Contains(t, err.Error(), "v2.0-commitment.0-32.kvi",
+	require.Contains(t, err.Error(), "v2.0-commitment.0-32.kvei",
 		"error must name the missing file")
 }
 

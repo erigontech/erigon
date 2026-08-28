@@ -76,12 +76,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
-var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
-
 func init() {
-	if dbgCommBtIndex {
-		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
-	}
 	InitSchemas()
 }
 
@@ -282,7 +277,7 @@ var Schema = SchemaGen{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:                      AccessorHashMap,
+		Accessors:                      AccessorBTree | AccessorExistence,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
 		EdgeRecordsInCommitment:        false,
 		KVWriteVersion:                 commitmentKVWriteVersion,

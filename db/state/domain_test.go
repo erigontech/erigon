@@ -898,15 +898,15 @@ func TestCommitmentKvVersionAcceptance(t *testing.T) {
 	require.True(t, vers.Supports(version.V2_1))
 	require.True(t, vers.Supports(version.V2_2))
 	// A newer minor within the same major is a content-only, backward-readable change.
-	require.True(t, vers.Supports(version.Version{Major: 2, Minor: 3}))
+	require.True(t, vers.Supports(version.Version{Major: 3, Minor: 1}))
 	// A newer major changes read logic and is rejected.
-	require.False(t, vers.Supports(version.Version{Major: 3, Minor: 0}))
+	require.False(t, vers.Supports(version.Version{Major: 4, Minor: 0}))
 
 	require.NotPanics(t, func() { vers.MustSupport(version.V2_0, "v2.0-commitment.0-1.kv") })
 	require.NotPanics(t, func() { vers.MustSupport(version.V2_1, "v2.1-commitment.0-1.kv") })
 	require.NotPanics(t, func() { vers.MustSupport(version.V2_2, "v2.2-commitment.0-1.kv") })
-	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 2, Minor: 3}, "v2.3-commitment.0-1.kv") })
-	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 0}, "v3.0-commitment.0-1.kv") })
+	require.NotPanics(t, func() { vers.MustSupport(version.Version{Major: 3, Minor: 1}, "v3.1-commitment.0-1.kv") })
+	require.Panics(t, func() { vers.MustSupport(version.Version{Major: 4, Minor: 0}, "v4.0-commitment.0-1.kv") })
 }
 
 func TestDomainRoTx_CursorParentCheck(t *testing.T) {
@@ -3135,9 +3135,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 }
 
 // TestCommitmentDomain_DebugRangeLatest tests the DebugRangeLatest iterator
-// for domains using AccessorHashMap (like CommitmentDomain).
-// This exercises the linear scan code path in DomainLatestIterFile.init()
-// and advanceInFiles() for HashMap-based domains.
+// for the commitment domain's ordered accessor.
 func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -3146,8 +3144,7 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	// testDbAndomainRoTxommitmentDomain creates a test domain with CommitmentDomain configuration.
-	// CommitmentDomain uses AccessorHashMap without enums (i.e. elias fano).
+	// testDbAndDomainOfStep creates a test domain with CommitmentDomain configuration.
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, 16, logger)
 	ctx := t.Context()
 
@@ -3200,7 +3197,7 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
 
-	// Test DebugRangeLatest - this exercises the HashMap iteration path
+	// Test DebugRangeLatest through the BTree iteration path.
 	it, err := domainRoTx.DebugRangeLatest(tx, nil, nil, -1)
 	require.NoError(t, err)
 	keys, vals, err := stream.ToArrayKV(it)
