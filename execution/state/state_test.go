@@ -525,7 +525,7 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(tb, err)
 	tb.Cleanup(domains.Close)
 

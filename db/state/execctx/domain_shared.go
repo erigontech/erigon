@@ -402,6 +402,12 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
+	// After adaptivePinController is assigned: the wrapper binds it, and the
+	// bare sdCtx call would not.
+	if o.paraTrieDB != nil {
+		sd.EnableParaTrieDB(o.paraTrieDB)
+	}
+
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return sd, err
