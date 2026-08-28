@@ -115,11 +115,14 @@ func keyPrefix(k []byte) uint64 {
 	return binary.BigEndian.Uint64(pad[:])
 }
 
-// merger walks already-sorted chunks in key order, a cursor per chunk under a
-// heap of the cursors that still have entries.
+// merger walks already-sorted chunks in key order under a loser tree: every
+// internal node holds the loser of its match and tree[0] holds the winner, so
+// advancing a cursor replays one path with a single compare a level.
 type merger struct {
-	heap []*cursor
+	tree []*cursor // [0] the winner, [1:] each match's loser; nil once spent
+	win  []*cursor // build scratch: the winner of each subtree
 	cur  []cursor
+	size int // leaves, a power of two >= len(cur)
 
 	// Chunks already in order end to end, which ascending keys produce, are
 	// read straight through instead of merged.
@@ -164,15 +167,47 @@ func (m *merger) rewind(chunks []dataChunk) {
 		}
 		return
 	}
-	m.heap = m.heap[:0]
-	for i := range m.cur {
-		if c := &m.cur[i]; c.advance() {
-			m.heap = append(m.heap, c)
+	m.build()
+}
+
+// build plays the whole tournament from the leaves up, keeping each match's
+// winner to play again and parking its loser at the node. Leaves past the last
+// chunk hold nil, which loses to everything.
+func (m *merger) build() {
+	m.size = 1
+	for m.size < len(m.cur) {
+		m.size <<= 1
+	}
+	m.tree = slices.Grow(m.tree[:0], m.size)[:m.size]
+	m.win = slices.Grow(m.win[:0], 2*m.size)[:2*m.size]
+	for i := range m.size {
+		var c *cursor
+		if i < len(m.cur) {
+			if p := &m.cur[i]; p.advance() {
+				c = p
+			}
+		}
+		m.win[m.size+i] = c
+	}
+	for i := m.size - 1; i >= 1; i-- {
+		l, r := m.win[2*i], m.win[2*i+1]
+		if beats(r, l) {
+			l, r = r, l
+		}
+		m.win[i], m.tree[i] = l, r
+	}
+	m.tree[0] = m.win[1]
+}
+
+// replay walks the leaf that just moved back up to the root. The smaller key
+// wins each match and carries on; the other stays at the node as its loser.
+func (m *merger) replay(leaf int, s *cursor) {
+	for p := (m.size + leaf) / 2; p > 0; p >>= 1 {
+		if t := m.tree[p]; beats(t, s) {
+			m.tree[p], s = s, t
 		}
 	}
-	for i := len(m.heap)/2 - 1; i >= 0; i-- {
-		m.siftRoot(i)
-	}
+	m.tree[0] = s
 }
 
 // next returns the entry the cursor sits on and moves it to the next in key
@@ -189,27 +224,25 @@ func (m *merger) next() ([]byte, entryLoc, bool) {
 		}
 		return nil, 0, false
 	}
-	if len(m.heap) == 0 {
+	c := m.tree[0]
+	if c == nil {
 		return nil, 0, false
 	}
-	c := m.heap[0]
 	buf, e := c.buf, c.ents[c.at]
+	leaf := int(c.id)
 	if !c.advance() {
-		last := len(m.heap) - 1
-		m.heap[0], m.heap[last] = m.heap[last], nil
-		m.heap = m.heap[:last]
+		c = nil
 	}
-	if len(m.heap) > 0 {
-		m.siftRoot(0)
-	}
+	m.replay(leaf, c)
 	return buf, e, true
 }
 
 func (m *merger) release() {
 	clear(m.cur)
-	clear(m.heap)
-	m.cur, m.heap = m.cur[:0], m.heap[:0]
-	m.chunk, m.concat = 0, false
+	clear(m.tree)
+	clear(m.win)
+	m.cur, m.tree, m.win = m.cur[:0], m.tree[:0], m.win[:0]
+	m.chunk, m.concat, m.size = 0, false, 0
 }
 
 // chunksInOrder reports whether every chunk's last key comes before the next
@@ -244,31 +277,13 @@ func less(a, b *cursor) bool {
 	return a.id < b.id
 }
 
-// siftRoot restores the heap under i, whose cursor just moved: sink the hole
-// to a leaf taking the smaller child, then climb back until the old value
-// fits. One compare a level instead of the usual two, and the cursor that just
-// won usually holds a larger key, so the hole nearly always reaches a leaf.
-// The climb back is also what makes it serve as the heapify step.
-func (m *merger) siftRoot(i int) {
-	x, top := m.heap[i], i
-	for {
-		l := 2*i + 1
-		if l >= len(m.heap) {
-			break
-		}
-		if r := l + 1; r < len(m.heap) && less(m.heap[r], m.heap[l]) {
-			l = r
-		}
-		m.heap[i] = m.heap[l]
-		i = l
+// beats orders two cursors, with a spent one - nil - after every key.
+func beats(a, b *cursor) bool {
+	if b == nil {
+		return a != nil
 	}
-	for i > top {
-		p := (i - 1) / 2
-		if less(m.heap[p], x) {
-			break
-		}
-		m.heap[i] = m.heap[p]
-		i = p
+	if a == nil {
+		return false
 	}
-	m.heap[i] = x
+	return less(a, b)
 }

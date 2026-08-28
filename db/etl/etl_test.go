@@ -2169,10 +2169,10 @@ func TestMergerMatchesReferenceSort(t *testing.T) {
 	// rewind heapifies with the same sift the reads use, so check the
 	// invariant directly - a broken heapify need not show up in the order.
 	m := &buf.mrg
-	require.Greater(t, len(m.heap), 8, "a heap of a few elements proves little")
-	for i := 1; i < len(m.heap); i++ {
-		require.False(t, less(m.heap[i], m.heap[(i-1)/2]),
-			"heap[%d] sorts before its parent %d", i, (i-1)/2)
+	require.Greater(t, len(m.tree), 8, "a tree of a few elements proves little")
+	for i := 1; i < len(m.tree); i++ {
+		require.False(t, beats(m.tree[i], m.tree[0]),
+			"the loser at %d sorts before the winner", i)
 	}
 
 	got := drainBuffer(buf)
