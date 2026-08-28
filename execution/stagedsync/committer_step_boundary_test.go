@@ -616,7 +616,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 
 	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 	require.NoError(t, err)

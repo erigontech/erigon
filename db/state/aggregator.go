@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -1031,7 +1032,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
+	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
 	}
@@ -1041,13 +1042,16 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if lastStepInDB > 0 {
 			lastCollatableStepInDB = lastStepInDB - 1
 		}
-		a.logger.Debug("[snapshots] holding state collation at reorg depth",
+		a.logger.Debug(
+			"[snapshots] holding state collation at reorg depth",
 			"step", step,
+			"finalisedBlockNum", finalisedBlockNum,
 			"lastBlockInStep", lastBlockInStep,
 			"lastBlockInDB", lastBlockInDB,
 			"lastTxInDB", lastTxInDB,
 			"reorgBlockDepth", a.reorgBlockDepth,
-			"lastCollatableStepInDB", lastCollatableStepInDB)
+			"lastCollatableStepInDB", lastCollatableStepInDB,
+		)
 		return errStepNotReady
 	}
 	var (
@@ -1156,13 +1160,14 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	if a.reorgBlockDepth == 0 {
-		return 0, 0, 0, true, nil
+		return 0, 0, 0, 0, true, nil
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 	err = a.db.View(ctx, func(tx kv.Tx) error {
+		finalisedBlockNum = rawdb.ReadForkchoiceFinalizedNum(tx)
 		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, step.LastTxNum(a.stepSize.Load()))
 		if err != nil {
 			return err
@@ -1173,7 +1178,13 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
-	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
+	var ready bool
+	if finalisedBlockNum > 0 {
+		ready = lastBlockInStep <= finalisedBlockNum
+	} else {
+		ready = lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
+	}
+	ok = err == nil && ready
 	return
 }
 
@@ -1209,7 +1220,7 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context) (reorgSafeBlock 
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	finished := a.buildFilesInBackground(toTxNum, true)
+	finished, _ := a.buildFilesInBackground(toTxNum, true)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
@@ -1793,16 +1804,16 @@ func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
 // CollateAndPrune runs a single prune pass and kicks background file
 // building. The block-snapshot-boundary gate inside readyForCollation
 // keeps state files from extending past block files, so no external cap
-// is needed.
-func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
+// is needed. It returns whether file building started and its completion channel.
+func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) (bool, <-chan struct{}, error) {
 	a.commitGate.Lock()
 	err := db.UpdateTemporal(ctx, pruneFn)
 	a.commitGate.Unlock()
 	if err != nil {
-		return err
+		return false, nil, err
 	}
-	a.BuildFilesInBackground(a.EndTxNumMinimax() + a.StepSize())
-	return nil
+	finished, started := a.buildFilesInBackground(a.EndTxNumMinimax()+a.StepSize(), true)
+	return started, finished, nil
 }
 func (a *Aggregator) FilesAmount() (res []int) {
 	a.dirtyFilesLock.Lock()
@@ -2235,35 +2246,36 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 }
 
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
-	return a.buildFilesInBackground(txNum, true)
+	finished, _ := a.buildFilesInBackground(txNum, true)
+	return finished
 }
 
-// Returns channel which is closed when aggregation is done
-func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
+// Returns a channel which is closed when aggregation is done and whether it started.
+func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
 		close(fin)
-		return fin
+		return fin, false
 	}
 
 	if !a.produce {
 		a.logger.Debug("[snapshots] buildFiles: produce=false")
 		close(fin)
-		return fin
+		return fin, false
 	}
 
 	visMin := a.visible.Load().minimaxTxNum
 	if (txNum + 1) <= visMin+a.stepSize.Load() {
 		a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
 		close(fin)
-		return fin
+		return fin, false
 	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		a.logger.Debug("[snapshots] buildFiles: already building")
 		close(fin)
-		return fin
+		return fin, false
 	}
 
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
@@ -2403,7 +2415,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		a.buildingFiles.Store(false)
 		close(fin)
 	}
-	return fin
+	return fin, started
 }
 
 // Returns the first known txNum found in history files of a given domain
