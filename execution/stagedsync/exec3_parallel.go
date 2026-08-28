@@ -118,7 +118,9 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
-	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
+	// calculator is read-only for the exec loop: the COMMITMENT_AFTER_EXEC barrier.
+	calculator  *commitmentCalculator
+	maxBlockNum uint64 // set before execLoop; exec loop exits when reached
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
@@ -366,6 +368,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	if err != nil {
 		return nil, nil, err
 	}
+	pe.calculator = calculator
 	calculator.Start(ctx)
 	defer calculator.Stop()
 
@@ -1150,10 +1153,10 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// blockResults on a separate goroutine) can find this block's
 		// saved changeset via GetChangesetByBlockNum at compute time.
 		// In per-block compute mode (changeset window), the
-		// calculator switches the accumulator to this saved CS for the
-		// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-		// so branch writes land in block N's CS rather than whatever the
-		// exec loop has installed as current. If we saved AFTER sendResult,
+		// calculator passes this saved CS to ComputeCommitment as an explicit
+		// diff (committer.go:computeWithBlockAccumulator) so branch writes land
+		// in block N's CS rather than whatever the exec loop has installed as
+		// current. If we saved AFTER sendResult,
 		// the calculator could race ahead and look up an unsaved CS,
 		// causing branch deltas to leak into the next block's CS and
 		// produce wrong-trie-root chains on subsequent reorg-driven
@@ -1186,6 +1189,12 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// and cancelling would join context.Canceled onto the reported error.
 		if blockResult.Err != nil {
 			return true, nil
+		}
+
+		if dbg.CommitmentAfterExec && pe.calculator != nil {
+			if err := pe.calculator.WaitProcessed(commitmentBarrierCtx(ctx, terminal), blockNum); err != nil {
+				return false, err
+			}
 		}
 
 		pe.Lock()
@@ -1381,6 +1390,18 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	return nil
+}
+
+// commitmentBarrierCtx returns the context the COMMITMENT_AFTER_EXEC barrier
+// waits on. On a terminal block decideStop has already published the stopCause,
+// so ctx is cancelled: waiting on it would return before triggerBatchCommitment
+// and drop the batch-end commitment. The blockResult was sent with mustDeliver,
+// so the calculator always reaches markProcessed and the wait still ends.
+func commitmentBarrierCtx(ctx context.Context, terminal bool) context.Context {
+	if terminal {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
 }
 
 // applyLoopMissingBlocks returns the blockNums in txResultBlocks that
