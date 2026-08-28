@@ -439,10 +439,10 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 
 ### Task 17: [Final] Update documentation
 
-- [ ] update `docs/plans/20260827-commitment-per-slot-records.md` to mark implemented decisions and
+- [x] update `docs/plans/20260827-commitment-per-slot-records.md` to mark implemented decisions and
       record anything the implementation forced to change
-- [ ] note any new invariant discovered during implementation
-- [ ] move this plan to `docs/plans/completed/`
+- [x] note new invariants discovered during implementation
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

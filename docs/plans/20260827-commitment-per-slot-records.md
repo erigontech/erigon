@@ -1,11 +1,60 @@
 # commitment.kv v3.0: one record per trie edge
 
-Design notes, revised 2026-08-28. Verified against `origin/main` @ `0124ab5a0c`. Nothing built yet.
+Design record, revised 2026-08-28. Verified against `origin/main` @ `0124ab5a0c`. The implementation is
+complete in this worktree; this document records the decisions that were implemented and the
+compatibility boundaries that remain.
 
 Supersedes this file's previous revision, which specified node records plus per-slot records under V2
 parity keys. That model does not survive its own key encoding: the ordered scan it assumes is not
 available, and the node record it needs is redundant with the parent's slot record. Also supersedes
 the delta-encoding approach in `20260706-commitment-history-deltas.md`.
+
+## Implementation status
+
+The commitment.kv v3 implementation is complete. These settled decisions are implemented and
+covered by the commitment, state, integrity, and acceptance tests:
+
+- [x] V3 terminator keys and parent-slot child keys replace the V2 parity-byte encoding.
+- [x] Fixed-shape edge records carry the child hash, extension, leaf data, and branch mask.
+- [x] `AccessorBTree | AccessorExistence` is enabled for the commitment domain; the old hashmap
+  accessor is not retained there.
+- [x] New writes use the v3 edge-record gate, while reads select the format per file version.
+- [x] Branch reads synthesize the existing row-shaped API from edge records, including mixed legacy
+  rows and v3 records.
+- [x] Zero-length child tombstones and mask-driven reads prevent deleted records from resurfacing.
+- [x] The root state blob is re-keyed, versioned, slimmed, and carries the root child mask.
+- [x] Storage leaf records omit the account address and recover it from the enclosing account cell.
+- [x] Deferred updates, changesets, unwind, and concurrent ownership operate at record granularity.
+- [x] CLI output renders edge records; legacy row-only integrity checks refuse them explicitly.
+- [x] Stored-record parity is checked across incremental batches and a merged `.kv` file, with fresh
+  state reconstruction used as the root oracle.
+
+The zero-value `DomainCfg` keeps `EdgeRecordsInCommitment` disabled so legacy callers do not stamp
+v3 accidentally. The production commitment schema enables the gate for new writes.
+
+## Implementation-forced changes
+
+The implementation settled several choices that were open in the design notes:
+
+- Mixed-version datadirs are supported. Commitment files keep `min: v1.0`, and the read path uses
+  each file's version to choose its state key and row or edge-record representation. The earlier
+  recommendation to require `min: v3.0` was not adopted.
+- The commitment converter detects v3 keys exactly but refuses to reshape v3 edge records. It
+  remains a legacy V1/V2 converter; edge-record migration and history conversion are separate work.
+- Integrity checks that require bundled rows return an explicit unsupported error for edge-record
+  files. They do not attempt to reinterpret an edge value as a row. The integration branch dump is
+  the diagnostic consumer that supports rendering the edge format.
+- The commitment domain replaces `AccessorHashMap` with the ordered and existence accessors. This
+  is a schema property, not a per-file format choice.
+
+## Invariants added during implementation
+
+- A storage leaf edge record is valid only after its enclosing account cell has been loaded. The
+  decoder returns an explicit error when that context is absent; no depth-64 account record may be
+  assumed to exist.
+- A deferred parent prefix stays pending until its complete edge-record run is applied, while
+  last-write-wins is resolved by the full child key. A partial run must not be exposed as a complete
+  synthesized branch row.
 
 ## Problem
 
@@ -109,13 +158,15 @@ the root and descends. The fold already does; so does the warmuper, per depth pe
 
 - `BranchMerger.Merge` (`commitment.go:1066`) and `MergeHexBranches` (`:877`) **off the v3 write
   path** — `hashRow` already emits `cellEncodeData` for **every** present cell, so records re-encode
-  wholly from memory. They survive only to read and merge pre-v3 files, and die with `min: v3.0`.
+  wholly from memory. They remain for the legacy row path and mixed-version reads.
 - The `ctx.Branch(prefix)` read at `commitment.go:474` — nothing to read-modify-write.
-- `IsComplete` (`:867`) and `touchMap` as a persisted concept.
+- `IsComplete` (`:867`) and `touchMap` as persisted concepts on the v3 path; the guarded helpers
+  remain for legacy bundled rows.
 - The 4-byte row header.
-- The `extension`/`hashedExtension` mirror pair, the desync surface behind invariant 8.
+- The persisted `extension`/`hashedExtension` mirror pair. The in-memory mirror remains because trie
+  hashing and descent still need both forms; v3 records store only the packed extension tail.
 - `deriveHashedKeys` over siblings — per-edge keying knows the next key outright.
-- Every uvarint, and the `fieldHash`/`fieldStateHash` split.
+- Every uvarint in v3 edge values, and the `fieldHash`/`fieldStateHash` split.
 - The V2 parity byte.
 
 **Out of scope: key dereferencing.** Disabled since 3.6 (`DefaultReferencesInCommitmentBranches =
@@ -171,11 +222,10 @@ is a follow-up, deliberately not bundled here.
 
 ### Accessor
 
-`AccessorBTree` is required: commitment is `AccessorHashMap` only today
-(`statecfg/state_schema.go:276`), so `bindex` is nil and there is no `Next` at all. `Cursor.Next` is
-`c.d++` plus one Elias-Fano `Get`; the pivot binary search and interpolation search run only on
-`Seek`. `AGG_COMMITMENT_BT=true` already flips the accessor set, so the A/B is runnable today after an
-accessor rebuild.
+`AccessorBTree` is required and is now part of the commitment schema together with
+`AccessorExistence` (`statecfg/state_schema.go`). `Cursor.Next` is `c.d++` plus one Elias-Fano `Get`;
+the pivot binary search and interpolation search run only on `Seek`. The commitment domain no longer
+uses `AccessorHashMap`, and `BuildMissedAccessors` supplies `.bt` and `.kvei` for files that lack them.
 
 `BtIndex.Seek` is a lower-bound search — `bs()` returns the insertion point, `cur.Reset(l, g)`
 positions by ordinal, and it returns `(nil, nil)` past the last key (`bps_tree.go:350-357`). The
@@ -360,7 +410,8 @@ them.
    consistent and the drop becomes unnecessary. **A read-side win this design enables and the row
    format cannot have.**
 4. **Root state blob slimming** — independent and cheap, ~654 B/block.
-5. **Commitment ordered accessor** — `AGG_COMMITMENT_BT=true` today. Its measurement will not transfer:
+5. **Commitment ordered accessor** — enabled in the v3 commitment schema. Its earlier measurement
+   will not transfer:
    V1 keys are `HexToCompact` with a *leading* flag byte, so every even-length path sorts before every
    odd-length one and a cursor fold needs two cursors per file for the parity split. Treat a number
    from it as a lower bound.
@@ -369,30 +420,14 @@ Do not let the split claim 1-4.
 
 ## Migration
 
-`erigon commitment convert` (`db/state/commitment_convert.go`) already re-encodes keys offline and
-already detects encoding by content vote. Extending it to reshape rows into edge records is the same
-pass over the same files — `convertCommitmentFile` pushes into a `TemporalMemBatch` wal and
-`dumpStepRangeToPath` runs an ETL sort, so a 1-to-many expansion still emits in order. That turns a
-fresh-sync requirement into an offline convert, which is the difference between adoptable and not.
+`erigon commitment convert` (`db/state/commitment_convert.go`) still re-encodes legacy V1/V2 keys
+offline. Its detector now has an exact v3 state, but conversion refuses v3 edge-record files rather
+than attempting a row-to-record reshape. The converter remains `.kv`-only; edge-record migration and
+history conversion require separate tooling.
 
-Three gaps:
-
-- **`detectKeyEncoding` gets simpler, not harder.** It is a two-state canonicality vote on
-  `nibbles.DecodeKeyV2` (`commitment_convert.go:100-115`). Under the new terminator every v3 key ends
-  `0x80..0x8f` with `0x00`/`0xf0..0xff` before it, which no canonical V1 or V2 key does. Replace the
-  vote with an exact three-state test.
-- **History conversion is a new tool.** The converter is `.kv`-only by explicit design
-  (`commitment_convert.go:602-609` filters `.v`/`.ef` out with a comment saying so). Producing
-  per-edge `hist.v` and a multiplied `ii.ef` from bundled-row history means diffing consecutive row
-  versions. Scope separately.
-- **`min: v3.0` plus a `.kv`-only converter strands archive beds.** Either gate `min: v3.0` on
-  `--prune.include-commitment-history` being off, or ship the history converter first.
-
-**Open: does `min` stay v1.0?** `min: v1.0` keeps old files readable, at the cost of a read path
-handling both records and rows under two key encodings, and a merge that bridges them. `min: v3.0`
-refuses old files outright; `MustSupport` already produces that refusal. Recommend `min: v3.0` unless
-mixed-version datadirs are needed for staged rollout — two encodings in one read path is where the
-subtle bugs will be. No downgrade story either way; record that before shipping.
+Mixed-version support is the selected rollout boundary. `min: v1.0` keeps old files readable, while
+the read and merge paths select the state key and value representation from each file's version.
+This avoids requiring a history converter before a staged domain-side rollout.
 
 ### File set
 
@@ -437,38 +472,36 @@ Close #21146 as superseded once the heap question is answered: only the wiring c
 rewrites `unfoldBranchNode`, `fold`, `CanDoConcurrentNext`, `validatePlainKeys` and `verify.go` to
 call `EncodeKeyV2`, every one of which changes shape again here.
 
-## Collides with the deferred/concurrent path
+## Deferred and concurrent path
 
 `CollectDeferredUpdate` (`commitment.go:510`), the per-goroutine `localCollector` ETL in
-`TrieContext.PutBranch`, and `readBranchAndCheckForFlushing`/`HasPendingPrefix` are keyed on the whole
-prefix. Keeping `TrieContext.Branch(prefix)`'s signature keeps them compiling, but a "pending prefix"
-now spans a run of records and a last-write-wins ETL load resolves per record rather than per row.
-Invariant 9 holds — prefix ownership stays disjoint and the coordinator owns `P` — but storage
-granularity now matches concurrency granularity, which is a behaviour change, not a free
-simplification. This is the code the in-flight parallel-commitment work is restructuring; coordinate
-before building.
+`TrieContext.PutBranch`, and `readBranchAndCheckForFlushing`/`HasPendingPrefix` remain keyed on the
+whole prefix. `TrieContext.Branch(prefix)` keeps its signature, while a pending prefix spans a run of
+records and last-write-wins resolves per record rather than per row. Invariant 9 holds: prefix
+ownership stays disjoint, and the coordinator owns `P` while a worker owning `P||n` returns one cell.
 
 ## Changesets and unwind
 
 `DomainPut` carries `prevVal` into a `kv.DomainEntryDiff{Key, Value}` per key
 (`changeset/state_changeset.go:156-165`) and unwind replays those and nothing else
-(`domain.go:1391`). Today that is one entry per touched row carrying a full prev row. Per-edge it
-becomes `1 + T_b` entries of 35-65 B each: total bytes likely fall, entry count rises, per-entry
-overhead is unmeasured. This is the **reorg hot path** over the dense 96-block window. Measure it
-before the task breakdown.
+(`domain.go:1391`). Per-edge changesets therefore contain one entry per changed record; the tests
+assert byte parity stays within the bundled-row budget and entry growth stays within the record
+multiplier for one-child and full-node updates. This remains the **reorg hot path** over the dense
+96-block window and still needs production measurement.
 
 ## Consumers
 
 Records are self-describing in shape but not in position — a record cannot be located without its
-parent, and a storage leaf inherits its address from the enclosing account cell. Every standalone
-decoder needs either the descent context threaded in or an explicit refusal:
+parent, and a storage leaf inherits its address from the enclosing account cell. Standalone row
+decoders now either receive the descent context or refuse edge values explicitly:
 `DecodeBranchAndCollectStat`, `Validate`, `VerifyBranchHashes`, `IsComplete`, `ChildCount`, the
 `db/integrity/` scans, `cmd/integration/commands/commitment.go:257`, `db/state/squeeze.go`, and the
-converter. `ReplacePlainKeys`' only guard today is `len < 4`, so a 35-byte record is silently
-misparsed as `touchMap|afterMap|cells` — that one needs an explicit refusal, red-first.
+converter. In particular, `ReplacePlainKeys` and the other legacy row parsers reject a 35-byte edge
+record instead of treating it as `touchMap|afterMap|cells`.
 
-Integrity verification actually gets easier: read a record, derive the target path from its key plus
-`ext`, read the target's run, recompute the branch hash, compare. No parent needed for that.
+The current integrity consumers that require bundled rows refuse v3 files explicitly with
+`ErrCommitmentEdgeRecordsUnsupported`. Supporting direct edge-record integrity verification remains
+future work; the integration branch dump does decode and render individual edge records.
 
 ## Verification
 
@@ -476,13 +509,13 @@ Root parity is a weak oracle (invariant 14). The in-repo oracle is `StateRootVer
 (`db/integrity/integrity_action_type.go:91`, run by `CheckCommitmentHistAtBlkRange`,
 `commitment_integrity.go:1157`), stronger because it rebuilds state per sampled block
 from accounts/storage history in a fresh `SharedDomains` rather than trusting what the run under test
-persisted. Assert stored-record byte parity over N>=3 incremental batches including a `.kv` merge —
-batch-2 damage only surfaces as batch-3 divergence.
+persisted. The acceptance tests assert stored-record byte parity over three incremental batches,
+including a `.kv` merge, and then rebuild from the fresh state path. Batch-2 damage only surfaces as
+batch-3 divergence.
 
 ## Open
 
 - Reconcile 50-70k branch writes/block against trie geometry. That count implies far more touched
   nodes than ~1k touched accounts x depth predicts; either it includes storage rows and repeated
   folds, or the geometry model is wrong. Whichever it is changes `L` and every per-level number here.
-- Whether commitment keeps `AccessorHashMap` alongside the ordered accessor or replaces it.
 - Whether the node-cursor read path and a `(prefix, nibble)`-keyed `BranchCache` land in v3.0 or after.
