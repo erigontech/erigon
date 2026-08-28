@@ -131,11 +131,15 @@ func newColumnResponseRPC(t *testing.T, cfg *clparams.BeaconChainConfig, current
 }
 
 func newColumnResponseRPCWithPeer(t *testing.T, cfg *clparams.BeaconChainConfig, currentSlot uint64, peerEnodeID string, custodyGroupCount uint64, responses ...[]*cltypes.DataColumnSidecar) (*rpc.BeaconRpcP2P, *maliciousColumnSentinel) {
+	return newColumnResponseRPCWithPeerAndForkEpoch(t, cfg, currentSlot, peerEnodeID, custodyGroupCount, cfg.FuluForkEpoch, responses...)
+}
+
+func newColumnResponseRPCWithPeerAndForkEpoch(t *testing.T, cfg *clparams.BeaconChainConfig, currentSlot uint64, peerEnodeID string, custodyGroupCount, responseForkEpoch uint64, responses ...[]*cltypes.DataColumnSidecar) (*rpc.BeaconRpcP2P, *maliciousColumnSentinel) {
 	t.Helper()
 	genesisTime := uint64(time.Now().Unix()) - currentSlot*cfg.SecondsPerSlot
 	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, cfg)
 	require.GreaterOrEqual(t, clock.StateVersionByEpoch(clock.GetCurrentEpoch()), clparams.FuluVersion)
-	digest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	digest, err := clock.ComputeForkDigest(responseForkEpoch)
 	require.NoError(t, err)
 	encoded := make([][]byte, len(responses))
 	for i, sidecars := range responses {
@@ -167,6 +171,59 @@ func newColumnResponseRPCWithPeer(t *testing.T, cfg *clparams.BeaconChainConfig,
 		t.Fatal("column response peer was not added to the custody-peer queue")
 	}
 	return rpcClient, sentinel
+}
+
+func TestRunDownloadRejectsResponseForkDigestMismatchBeforeStorage(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+	currentSlot := (cfg.FuluForkEpoch + 1) * cfg.SlotsPerEpoch
+	block, root, _, columns := recoverableFuluDataAtSlot(t, &cfg, currentSlot)
+	rpcClient, sentinel := newColumnResponseRPCWithPeerAndForkEpoch(
+		t,
+		&cfg,
+		currentSlot,
+		"",
+		cfg.NumberOfColumns,
+		cfg.DenebForkEpoch,
+		[]*cltypes.DataColumnSidecar{columns[0]},
+	)
+
+	storage := &writeObservingColumnStorage{
+		DataColumnStorage: blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &cfg, beaconevents.NewEventEmitter()),
+		lookups:           make(chan struct{}, 1),
+		writes:            make(chan *cltypes.DataColumnSidecar, 1),
+	}
+	d := &peerdas{
+		rpc:           rpcClient,
+		beaconConfig:  &cfg,
+		state:         peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage: storage,
+	}
+	req := &downloadRequest{
+		beaconConfig: &cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: root, slot: block.GetSlot()}: {0: true},
+		},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- d.runDownload(ctx, req, false) }()
+
+	select {
+	case <-sentinel.banned:
+	case <-storage.lookups:
+		cancel()
+		<-done
+		t.Fatal("fork-digest mismatch reached storage lookup")
+	case <-time.After(30 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("fork-digest mismatch was neither rejected nor processed")
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
 func TestRunDownloadRejectsColumnFilteredOutOfWireRequest(t *testing.T) {

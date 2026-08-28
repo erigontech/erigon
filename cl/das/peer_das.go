@@ -1662,13 +1662,10 @@ mainloop:
 	return nil
 }
 
-// resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
-// block root from the fields populated by the schema it was decoded with. ok is
-// false for a malformed sidecar, or one whose slot disagrees with that schema —
-// see BeaconChainConfig.ForkSchemaMatchesSlot.
+// resolveColumnSidecarSlotAndRoot rejects malformed sidecars and response fork versions that are not active at the claimed slot.
 func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
 	if sidecar.Version() >= clparams.GloasVersion {
-		if !d.beaconConfig.ForkSchemaMatchesSlot(sidecar.Slot, sidecar.Version()) {
+		if d.beaconConfig.GetCurrentStateVersion(sidecar.Slot/d.beaconConfig.SlotsPerEpoch) != sidecar.Version() {
 			return 0, common.Hash{}, false
 		}
 		return sidecar.Slot, sidecar.BeaconBlockRoot, true
@@ -1677,7 +1674,7 @@ func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSid
 	if header == nil || header.Header == nil {
 		return 0, common.Hash{}, false
 	}
-	if !d.beaconConfig.ForkSchemaMatchesSlot(header.Header.Slot, sidecar.Version()) {
+	if d.beaconConfig.GetCurrentStateVersion(header.Header.Slot/d.beaconConfig.SlotsPerEpoch) != sidecar.Version() {
 		return 0, common.Hash{}, false
 	}
 	root, err := header.Header.HashSSZ()
