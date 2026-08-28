@@ -2010,7 +2010,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
@@ -2579,7 +2579,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
-  * Default: `131072` (~18 days)
+  * Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.

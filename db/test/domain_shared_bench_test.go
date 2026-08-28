@@ -56,7 +56,7 @@ func (r *rndGen) Read(p []byte) (n int, err error) { return r.oldGen.Read(p) } /
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	b.Helper()
 	dirs := datadir.New(b.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(b, dirs, aggStep)
+	db := temporaltest.NewTestDB(b, dirs, temporaltest.WithStepSize(aggStep))
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 

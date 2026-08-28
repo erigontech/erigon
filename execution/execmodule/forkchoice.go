@@ -230,6 +230,12 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, err
 		}
 		for !isCanonicalHash {
+			if currentParentNumber < finalisedBlockNum {
+				return &ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusInvalidForkchoice,
+				}, nil
+			}
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -879,15 +885,23 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
 			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 			pruneTimeout := min(baseTimeout+time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
-			if err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
 				if e.codeStore != nil {
 					if err := e.codeStore.Evict(tx); err != nil {
 						return err
 					}
 				}
 				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
-			}, e.logger); err != nil {
+			}, e.logger)
+			if err != nil {
 				return nil, err
+			}
+			e.hook.NotifyStateRetirementStart(started)
+			if started {
+				go func() {
+					<-finished
+					e.hook.NotifyStateRetirementDone()
+				}()
 			}
 		}
 	}

@@ -1375,7 +1375,7 @@ func newResumeTestDB(t *testing.T) kv.TemporalRwDB {
 		t.Skip("mdbx InMem test databases are not supported on windows")
 	}
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	return db
 }
 
