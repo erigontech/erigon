@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -65,11 +66,30 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 }
 
 type balCommitmentContext struct {
-	tx kv.TemporalTx
+	tx         kv.TemporalTx
+	cache      *commitment.BranchCache
+	cacheStats *balCommitmentCacheStats
 }
 
 func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+	if c.cache == nil {
+		return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
+	}
+
+	data, step, ok := c.cache.Get(prefix)
+	if ok {
+		c.cacheStats.hits.Add(1)
+		return data, kv.Step(step), nil
+	}
+	c.cacheStats.misses.Add(1)
+	c.cacheStats.fillRequests.Add(1)
+	return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{}.WithBranchCache())
+}
+
+type balCommitmentCacheStats struct {
+	hits         atomic.Uint64
+	misses       atomic.Uint64
+	fillRequests atomic.Uint64
 }
 
 func (*balCommitmentContext) PutBranch([]byte, []byte, []byte) error {
@@ -90,6 +110,7 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 		return nil
 	}
 	workers = min(workers, len(keys))
+	cacheStats := new(balCommitmentCacheStats)
 	log.Info("[warmBAL] commitment warmup started", "keys", len(keys), "workers", workers)
 	started := time.Now()
 
@@ -106,7 +127,15 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 			factoryErrs <- errors.New("BAL commitment warmup requires a temporal read transaction")
 			return nil, nil
 		}
-		return &balCommitmentContext{tx: txTemporal}, tx.Rollback
+		var cache *commitment.BranchCache
+		if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
+			cache = provider.BranchCache()
+		}
+		return &balCommitmentContext{
+			tx:         txTemporal,
+			cache:      cache,
+			cacheStats: cacheStats,
+		}, tx.Rollback
 	}
 
 	warmuper := commitment.NewWarmuper(ctx, commitment.WarmupConfig{
@@ -134,6 +163,15 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	for factoryErr := range factoryErrs {
 		err = errors.Join(err, factoryErr)
 	}
-	log.Info("[warmBAL] commitment warmup finished", "keys", len(keys), "workers", workers, "elapsed", time.Since(started), "err", err)
+	log.Info(
+		"[warmBAL] commitment warmup finished",
+		"keys", len(keys),
+		"workers", workers,
+		"cacheHits", cacheStats.hits.Load(),
+		"cacheMisses", cacheStats.misses.Load(),
+		"cacheFillRequests", cacheStats.fillRequests.Load(),
+		"elapsed", time.Since(started),
+		"err", err,
+	)
 	return err
 }

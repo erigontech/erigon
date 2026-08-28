@@ -50,6 +50,8 @@ func (tx *commitmentRecordingTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetL
 
 func (*commitmentRecordingTx) Rollback() {}
 
+func (*commitmentRecordingTx) AggTx() any { return nil }
+
 type commitmentBeginErrorDB struct {
 	kv.RoDB
 	errs []error
@@ -58,6 +60,35 @@ type commitmentBeginErrorDB struct {
 
 func (db *commitmentBeginErrorDB) BeginRo(context.Context) (kv.Tx, error) {
 	return nil, db.errs[db.next.Add(1)-1]
+}
+
+type commitmentBranchLookupTx struct {
+	kv.TemporalTx
+	data  []byte
+	step  kv.Step
+	aggTx any
+	opts  kv.GetLatestOptions
+	calls int
+}
+
+func (tx *commitmentBranchLookupTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.opts = opts
+	tx.calls++
+	return tx.data, tx.step, nil
+}
+
+func (tx *commitmentBranchLookupTx) AggTx() any {
+	return tx.aggTx
+}
+
+func (*commitmentBranchLookupTx) Rollback() {}
+
+type commitmentBranchCacheProvider struct {
+	cache *commitment.BranchCache
+}
+
+func (p commitmentBranchCacheProvider) BranchCache() *commitment.BranchCache {
+	return p.cache
 }
 
 func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
@@ -127,4 +158,74 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	err := warmBALCommitment(t.Context(), db, bal, 2)
 	require.ErrorIs(t, err, firstErr)
 	require.ErrorIs(t, err, secondErr)
+}
+
+func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
+	key := []byte{0x12, 0x34, 0x56}
+
+	for _, testCase := range []struct {
+		name               string
+		cacheAvailable     bool
+		cacheHit           bool
+		wantData           string
+		wantStep           kv.Step
+		wantCalls          int
+		wantBranchCacheOpt bool
+		wantHits           uint64
+		wantMisses         uint64
+		wantFillRequests   uint64
+		wantCallbackMisses int
+	}{
+		{name: "cache unavailable", wantData: "database", wantStep: 9, wantCalls: 1},
+		{name: "cache hit", cacheAvailable: true, cacheHit: true, wantData: "cached", wantStep: 7, wantHits: 1},
+		{name: "cache miss", cacheAvailable: true, wantData: "database", wantStep: 9, wantCalls: 1, wantBranchCacheOpt: true, wantMisses: 1, wantFillRequests: 1, wantCallbackMisses: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			var cache *commitment.BranchCache
+			if testCase.cacheAvailable {
+				cache = commitment.NewBranchCache(100)
+				defer cache.Close()
+				if testCase.cacheHit {
+					cache.Put(key, []byte("cached"), 7, 0)
+				}
+			}
+			callbackMisses := 0
+			if cache != nil {
+				cache.SetMissCallback(func([]byte) { callbackMisses++ })
+			}
+			tx := &commitmentBranchLookupTx{data: []byte("database"), step: 9}
+			stats := new(balCommitmentCacheStats)
+			ctx := &balCommitmentContext{tx: tx, cache: cache, cacheStats: stats}
+
+			got, step, err := ctx.Branch(key)
+			require.NoError(t, err)
+			require.Equal(t, testCase.wantData, string(got))
+			require.Equal(t, testCase.wantStep, step)
+			require.Equal(t, testCase.wantCalls, tx.calls)
+			require.Equal(t, testCase.wantBranchCacheOpt, tx.opts.BranchCache())
+			require.Equal(t, testCase.wantHits, stats.hits.Load())
+			require.Equal(t, testCase.wantMisses, stats.misses.Load())
+			require.Equal(t, testCase.wantFillRequests, stats.fillRequests.Load())
+			require.Equal(t, testCase.wantCallbackMisses, callbackMisses)
+		})
+	}
+}
+
+func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
+	cache := commitment.NewBranchCache(100)
+	defer cache.Close()
+	tx := &commitmentBranchLookupTx{
+		data:  []byte("database"),
+		step:  9,
+		aggTx: commitmentBranchCacheProvider{cache: cache},
+	}
+	db := &singleTxRoDB{tx: tx}
+	bal := types.BlockAccessList{{
+		Address:        accounts.InternAddress(common.Address{19: 2}),
+		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+	}}
+
+	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
+	require.Positive(t, tx.calls)
+	require.True(t, tx.opts.BranchCache())
 }
