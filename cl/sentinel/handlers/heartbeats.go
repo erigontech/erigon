@@ -18,7 +18,6 @@ package handlers
 
 import (
 	"encoding/hex"
-	"io"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -34,6 +33,10 @@ import (
 // Since packets are just structs, they can be resent with no issue
 
 func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
+	request := &cltypes.Ping{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, request, clparams.Phase0Version, uint64(request.EncodingSizeSSZ())); err != nil {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: c.me.Seq(),
 	}, SuccessfulResponsePrefix)
@@ -122,12 +125,9 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	// Per eth2 spec the responder must read the peer's Status before replying.
-	// Read and discard the incoming request body so the stream advances correctly.
 	peerStatus := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
-		// If we cannot read the request, drain whatever is left and proceed.
-		_, _ = io.Copy(io.Discard, s)
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, peerStatus, clparams.Phase0Version, uint64(peerStatus.EncodingSizeSSZ())); err != nil {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	status := c.hs.Status()
 	status.EarliestAvailableSlot = nil
@@ -135,10 +135,9 @@ func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
-	// Per eth2 spec the responder must read the peer's Status before replying.
-	peerStatus := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
-		_, _ = io.Copy(io.Discard, s)
+	peerStatus := &cltypes.Status{EarliestAvailableSlot: new(uint64)}
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, peerStatus, clparams.FuluVersion, uint64(peerStatus.EncodingSizeSSZ())); err != nil {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	status := c.hs.Status()
 	forkDigest, err := c.ethClock.CurrentForkDigest()
