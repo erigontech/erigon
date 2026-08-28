@@ -30,6 +30,8 @@ import (
 
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -341,6 +343,30 @@ func sparsePreMergeChain() []int {
 
 const probeSparseMergeHeight = 8
 
+// preMergeGateAPI wires the probe reader into the gate, which reads the prune mode and
+// the chain config the datadir stores.
+func preMergeGateAPI(reader dbservices.FullBlockReader, mergeHeight uint64) *BaseAPI {
+	api := newProbeAPI(reader)
+	api._pruneMode.Store(&prune.Mode{
+		Initialised: true,
+		History:     prune.KeepPostMergeBlocksPruneMode,
+		Blocks:      prune.KeepPostMergeBlocksPruneMode,
+	})
+	api._chainConfig.Store(&chain.Config{MergeHeight: &mergeHeight})
+	api._genesis.Store(&types.Block{})
+	return api
+}
+
+// inflatedCountArchive holds a pre-merge transaction the cumulative count cannot point
+// at: a non-canonical body numbered from the same sequence moves the bound below it.
+func inflatedCountArchive() *chainProbeBlockReader {
+	userTxns := make([]int, probeSparseMergeHeight)
+	userTxns[6] = 1
+	inflation := make([]int, probeSparseMergeHeight)
+	inflation[0] = 1
+	return &chainProbeBlockReader{userTxns: userTxns, inflation: inflation}
+}
+
 // TestPreMergeVerdictFindsATransactionOffTheSampledPath pins that an archive is read as
 // one however its transactions are spread: the sampled blocks prove nothing on a sparse
 // chain, while the cumulative count says an early transaction is there to be found.
@@ -391,23 +417,41 @@ func TestPreMergeVerdictStopsAtTheFirstSampledTransaction(t *testing.T) {
 	require.LessOrEqual(t, reader.bodyReads.Load(), int64(2), "the count and the first sampled block answer")
 }
 
-// TestPreMergeVerdictDoesNotSettleOnAnInflatedCount pins that the cumulative count is
-// taken for what it is, an upper bound: the database numbers non-canonical bodies from
-// the same sequence, so it can point below the first user transaction. A block that
-// holds none cannot say whether the datadir does, and answering from it would settle
-// expiry on an archive.
-func TestPreMergeVerdictDoesNotSettleOnAnInflatedCount(t *testing.T) {
+// TestPreMergeVerdictReadsAnUnconfirmableCountAsArchive pins how far the cumulative
+// count is taken: it is an upper bound, since the database numbers non-canonical bodies
+// from the same sequence, so it can point below the first user transaction and leave the
+// search with no block to confirm. Bodies recording transactions are not evidence of
+// expiry, and expiry is what gates blocks away, so the datadir is read as an archive.
+func TestPreMergeVerdictReadsAnUnconfirmableCountAsArchive(t *testing.T) {
 	t.Parallel()
 
-	userTxns := make([]int, probeSparseMergeHeight)
-	userTxns[6] = 1
-	inflation := make([]int, probeSparseMergeHeight)
-	inflation[0] = 1
-	reader := &chainProbeBlockReader{userTxns: userTxns, inflation: inflation}
-	api := newProbeAPI(reader)
+	api := newProbeAPI(inflatedCountArchive())
 
 	holds, decided, err := api.probePreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
 	require.NoError(t, err)
-	require.False(t, decided, "a count inflated by non-canonical bodies answers nothing")
-	require.False(t, holds)
+	require.True(t, holds, "a count that confirms nothing does not answer expiry")
+	require.True(t, decided, "the bodies answered; only their count could not point at one")
+}
+
+// TestPreMergeGateServesAnArchiveItsCountCannotConfirm pins the gate against the shape
+// the probe cannot land on: the datadir serves a pre-merge transaction, so rejecting its
+// blocks as expired is the one answer that costs the caller data it has.
+func TestPreMergeGateServesAnArchiveItsCountCannotConfirm(t *testing.T) {
+	t.Parallel()
+
+	reader := inflatedCountArchive()
+	txn, ok, err := reader.TxnByIdxInBlock(t.Context(), nil, 6, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, txn, "the fixture must hold a readable pre-merge transaction")
+
+	api := preMergeGateAPI(reader, probeSparseMergeHeight)
+
+	expiry, _, err := api.blocksFollowChainHistoryExpiry(t.Context(), nil)
+	require.NoError(t, err)
+	require.False(t, expiry, "a count that confirms nothing is not an observation of expiry")
+
+	for block := uint64(1); block < probeSparseMergeHeight; block++ {
+		require.NoError(t, api.checkPruneBlocks(t.Context(), nil, block))
+	}
 }

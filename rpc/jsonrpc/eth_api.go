@@ -533,10 +533,12 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
 // available block answers on its own: expiry keeps pre-merge headers and bodies, and
 // the transaction segment spanning the merge point reaches below it. Only a readable
-// transaction of an early block does. The answer is availability rather than policy, so
-// it is cached for a short TTL in both directions instead of being settled once. One
-// probe answers every caller waiting on it: each one costs several backend reads under
-// an open read transaction, so refreshing the TTL must not fan out with the load.
+// transaction of an early block does, and since expiry is the reading that gates blocks
+// away, bodies the search cannot confirm are read as an archive. The answer is
+// availability rather than policy, so it is cached for a short TTL in both directions
+// instead of being settled once. One probe answers every caller waiting on it: each one
+// costs several backend reads under an open read transaction, so refreshing the TTL must
+// not fan out with the load.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	for {
 		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
@@ -614,10 +616,10 @@ func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 	return api.hasEarlyTransaction(ctx, tx, mergeHeight)
 }
 
-// hasEarlyTransaction reports whether a user transaction below limit is readable, and
-// whether the block data it takes to answer was there at all. The last pre-merge body
-// carries the cumulative txnum position: no more than the system entries below limit
-// means there is no user transaction to be missing. Sampling by halving keeps the
+// hasEarlyTransaction reports whether the datadir is read as holding user transactions
+// below limit, and whether the block data it takes to answer was there at all. The last
+// pre-merge body carries the cumulative txnum position: no more than the system entries
+// below limit means there is no user transaction to be missing. Sampling by halving keeps the
 // candidates clear of the transaction segment spanning limit, and only a count that
 // proves one exists pays for a search where the samples missed it.
 func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uint64) (holds, decided bool, err error) {
@@ -648,8 +650,14 @@ func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uin
 		return false, false, nil
 	}
 	candidate, found, err := api.firstBlockWithUserTxn(ctx, tx, limit-1)
-	if err != nil || !found {
+	if err != nil {
 		return false, false, err
+	}
+	if !found {
+		// The bound can sit below every block that holds a transaction, leaving the
+		// search with none to confirm. Rejecting blocks takes evidence of expiry, and
+		// bodies recording transactions are not it.
+		return true, true, nil
 	}
 	return api.readsUserTransaction(ctx, tx, candidate)
 }
