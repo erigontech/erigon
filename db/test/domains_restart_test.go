@@ -59,7 +59,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, stepSize uint64) (kv.Temp
 		path = fpath
 	}
 	dirs := datadir.New(path)
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
