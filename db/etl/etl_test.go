@@ -1626,9 +1626,9 @@ func TestSortableBufferChunks(t *testing.T) {
 	}
 }
 
-// TestSortableBufferSortAcrossChunks: the sort comparator has to split a
-// packed offset back into a chunk index and an offset inside it, so entries
-// must still order correctly once they live past chunk 0.
+// TestSortableBufferSortAcrossChunks: each chunk sorts on its own and the
+// merger orders across them, so entries must still come out sorted once they
+// live past chunk 0.
 func TestSortableBufferSortAcrossChunks(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
@@ -1636,8 +1636,8 @@ func TestSortableBufferSortAcrossChunks(t *testing.T) {
 	val := bytes.Repeat([]byte{0xCD}, 16*1024) // 512*16KB = 8MB of values
 	key := make([]byte, 8)
 	for i := range entries {
-		// Scrambled, so IsSortedFunc cannot short-circuit and pdqsort really runs.
-		// 313 is odd, so it permutes a power-of-two range.
+		// Scrambled, so sort's reversed-run check cannot short-circuit and
+		// SortFunc really runs. 313 is odd, so it permutes a power-of-two range.
 		binary.BigEndian.PutUint64(key, uint64(i*313%entries))
 		buf.Put(key, val)
 	}
