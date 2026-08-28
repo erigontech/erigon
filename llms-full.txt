@@ -4943,6 +4943,15 @@ standard set, or where its behaviour differs from it. They are not an exhaustive
 compliance statement: anything not listed here is expected to follow the spec, but a
 deviation that has not yet been documented may still exist.
 
+:::info
+`execution-apis` is a living specification rather than a frozen standard — methods are
+still being added, and some long-standing `eth` behaviour was never specified at all — so
+parts of what follows are differences from a moving target rather than defects. Erigon
+runs the specification's own conformance vectors in CI (Hive's `rpc-compat` suite against
+a pinned `execution-apis` revision) and works with the other client teams on closing
+these gaps, so this page will change as the two converge.
+:::
+
 ### eth\_getProof
 
 `eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.
