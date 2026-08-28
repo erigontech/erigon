@@ -14,24 +14,33 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package execution_client
+package engineapitester
 
 import (
-	"errors"
+	"context"
 
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/execution/execmodule/chainreader"
-	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/execmodule"
 )
 
-// ErrInvalidGetPayloadResponse marks a terminal response error that payload polling must not retry.
-var ErrInvalidGetPayloadResponse = errors.New("invalid GetPayload response")
+type rpcViewObserverCache struct {
+	kvcache.Cache
+	observer execmodule.StateTransitionObserver
+}
 
-// IsUnknownPayloadError reports an unknown-payload result from local or remote execution clients.
-func IsUnknownPayloadError(err error) bool {
-	if errors.Is(err, chainreader.ErrUnknownPayload) {
-		return true
+func withRPCViewObserver(cache kvcache.Cache, observer execmodule.StateTransitionObserver) kvcache.Cache {
+	if observer == nil {
+		return cache
 	}
-	var rpcErr rpc.Error
-	return errors.As(err, &rpcErr) && rpcErr.ErrorCode() == engine_helpers.UnknownPayloadErr.Code
+	return &rpcViewObserverCache{Cache: cache, observer: observer}
+}
+
+func (c *rpcViewObserverCache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	view, err := c.Cache.View(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	c.observer(ctx, execmodule.StateTransitionRPCViewBound)
+	return view, nil
 }
