@@ -24,12 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
-
-// heimdall.SnapshotTypes() omits Checkpoints and Milestones depending on
-// configuration, so the bor list is spelled out to cover the full enum range.
-var borSnapshotTypes = []snaptype.Type{heimdall.Events, heimdall.Spans, heimdall.Checkpoints, heimdall.Milestones}
 
 // Salt belongs to neither exported snaptype2 slice, so it is listed explicitly.
 var coreSnapshotTypes = slices.Concat(
@@ -41,7 +36,6 @@ var coreSnapshotTypes = slices.Concat(
 func allSnapshotTypes() []snaptype.Type {
 	return slices.Concat(
 		coreSnapshotTypes,
-		borSnapshotTypes,
 		snaptype.CaplinSnapshotTypes,
 		snaptype.CaplinStateSnapshotTypes,
 	)
@@ -159,26 +153,21 @@ func TestEnumRangeDisjointness(t *testing.T) {
 		}
 	}
 	for _, typ := range snaptype.CaplinSnapshotTypes {
-		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MinBorEnum {
-			t.Errorf("caplin type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MinBorEnum)
+		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MaxCaplinEnum {
+			t.Errorf("caplin type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MaxCaplinEnum)
 		}
 	}
 	for _, typ := range snaptype.CaplinStateSnapshotTypes {
-		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MinBorEnum {
-			t.Errorf("caplin state type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MinBorEnum)
-		}
-	}
-	for _, typ := range borSnapshotTypes {
-		if e := typ.Enum(); e < snaptype.MinBorEnum || e >= snaptype.MaxEnum {
-			t.Errorf("bor type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinBorEnum, snaptype.MaxEnum)
+		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MaxCaplinEnum {
+			t.Errorf("caplin state type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MaxCaplinEnum)
 		}
 	}
 }
 
 func TestEnumRangeLayout(t *testing.T) {
 	if !(snaptype.MinCoreEnum < snaptype.MinCaplinEnum &&
-		snaptype.MinCaplinEnum < snaptype.MinBorEnum &&
-		snaptype.MinBorEnum < snaptype.MaxEnum) {
-		t.Fatalf("enum ranges are not ordered: core=%d caplin=%d bor=%d max=%d", snaptype.MinCoreEnum, snaptype.MinCaplinEnum, snaptype.MinBorEnum, snaptype.MaxEnum)
+		snaptype.MinCaplinEnum < snaptype.MaxCaplinEnum &&
+		snaptype.MaxCaplinEnum < snaptype.MaxEnum) {
+		t.Fatalf("enum ranges are not ordered: core=%d caplin=%d caplinMax=%d max=%d", snaptype.MinCoreEnum, snaptype.MinCaplinEnum, snaptype.MaxCaplinEnum, snaptype.MaxEnum)
 	}
 }

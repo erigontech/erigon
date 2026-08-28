@@ -317,7 +317,9 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
+func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter {
+	return dt.newWriter(dt.d.dirs.Tmp, !dt.d.Enabled)
+}
 
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
@@ -345,7 +347,7 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles() {
 }
 
 func (d *Domain) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if d.Disable {
+	if !d.Enabled {
 		return nil, nil
 	}
 	return d.openList(ctx, *r)
@@ -445,6 +447,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 }
 
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
+func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
@@ -726,7 +729,7 @@ func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.St
 //     directory). The in-memory static handles are closed in the !integrate case so they do
 //     not leak; the files themselves remain on disk in dstDir.
 func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string, integrate bool) error {
-	if d.Disable || stepFrom == stepTo {
+	if !d.Enabled || stepFrom == stepTo {
 		return nil
 	}
 	wal := batch.domainWriters[d.Name]
@@ -761,7 +764,7 @@ func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.St
 // In contrast to collate function collateETL puts contents of wal into file.
 // dstDir overrides the output directory; empty means d.dirs.SnapDomain.
 func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *etl.Collector, vt valueTransformer, dstDir string) (coll Collation, err error) {
-	if d.Disable {
+	if !d.Enabled {
 		return Collation{}, err
 	}
 	started := time.Now()
@@ -837,7 +840,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
 func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64, roTx kv.Tx) (coll Collation, err error) {
-	if d.Disable {
+	if !d.Enabled {
 		return Collation{}, nil
 	}
 
@@ -954,7 +957,7 @@ func (sf StaticFiles) CleanupOnError() {
 
 // skips history files; dstDir overrides where index files land (empty = d.dirs.SnapDomain).
 func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, collation Collation, ps *background.ProgressSet, dstDir string) (StaticFiles, error) {
-	if d.Disable {
+	if !d.Enabled {
 		return StaticFiles{}, nil
 	}
 	mxRunningFilesBuilding.Inc()
@@ -1054,7 +1057,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
-	if d.Disable {
+	if !d.Enabled {
 		return StaticFiles{}, nil
 	}
 
@@ -1332,7 +1335,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 }
 
 func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
-	if d.Disable {
+	if !d.Enabled {
 		return
 	}
 	if txNumFrom == txNumTo {
@@ -1572,7 +1575,7 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 }
 
 func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found bool, err error) {
-	if dt.d.Disable {
+	if !dt.d.Enabled {
 		return 0, false, nil
 	}
 	v, _, found, err := dt.getLatestFromDb(key, roTx, kv.NoStepBound)
@@ -1597,7 +1600,7 @@ func (dt *DomainRoTx) HistoryStartFrom(tx kv.Tx) uint64 {
 // GetAsOf does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
 func (dt *DomainRoTx) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if dt.d.Disable {
+	if !dt.d.Enabled {
 		return nil, false, nil
 	}
 
@@ -1668,11 +1671,11 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 		panic("assert: miss-use " + f.FileName())
 	}
 	g := f.MakeGetter()
-	if dbg.FilesAsyncIO {
+	if dbg.FilesBlockingAsyncIO {
 		g.EnableResidencyGate()
 	}
-	if dbg.FilesAsyncIOMultiPage {
-		g.EnableMultiPageAsyncIO()
+	if dbg.FilesBlockingAsyncIOMultiPage {
+		g.EnableMultiPageBlockingAsyncIO()
 	}
 	return seg.NewReader(g, d.Compression)
 }
@@ -1831,7 +1834,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 }
 
 func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions) ([]byte, kv.Step, bool, error) {
-	if dt.d.Disable {
+	if !dt.d.Enabled {
 		return nil, 0, false, nil
 	}
 	metrics, start := opts.Metrics()
@@ -1962,20 +1965,30 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 	}
 
 	done := prg.KeyProgress == prune.Done && prg.ValueProgress == prune.Done && untilTx <= prg.TxTo
-	minStep := kv.Step(dt.d.minStepInDB(tx))
-	delta := float64(max(maxStepToPrune, minStep) - min(maxStepToPrune, minStep)) // maxStep could be 0
-	switch dt.d.FilenameBase {
-	case "account":
+
+	// Backlog comes from the values table's own prune progress: the history keys
+	// table tracks separate progress, and stays empty when history is disabled -
+	// as it is for commitment by default. prg.TxTo is the rotation's target,
+	// stored even when the scan was cut short, so only a completed rotation proves
+	// the values below it are gone; txFrom is 0, so an unfinished one bounds nothing.
+	prunedThrough := uint64(0)
+	if prg.ValueProgress == prune.Done {
+		prunedThrough = prg.TxTo
+	}
+	delta := 0.0
+	if filesEnd := dt.files.EndTxNum(); filesEnd > prunedThrough {
+		delta = float64(filesEnd-prunedThrough) / float64(dt.stepSize)
+	}
+	switch dt.name {
+	case kv.AccountsDomain:
 		mxPrunableDAcc.Set(delta)
-	case "storage":
+	case kv.StorageDomain:
 		mxPrunableDSto.Set(delta)
-	case "code":
+	case kv.CodeDomain:
 		mxPrunableDCode.Set(delta)
-	case "commitment":
+	case kv.CommitmentDomain:
 		mxPrunableDComm.Set(delta)
 	}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
-	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
 	return !done, maxStepToPrune
 }
 

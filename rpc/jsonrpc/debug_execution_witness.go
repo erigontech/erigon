@@ -714,6 +714,9 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	resolvedMode, err := resolveWitnessMode(mode)
 	if err != nil {
 		return nil, err
@@ -777,7 +780,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, api.filters)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false
@@ -1356,8 +1359,12 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	tx kv.TemporalTx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// TxNums and commitment history must describe the same block view.
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
 
@@ -2114,9 +2121,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	allLogs := ibs.Logs()
 	statelessReceipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
-	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
-	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
-	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
+	// only the AuRa engine uses ChainReader, and only to read headers, so its witness may need
+	// augmenting with headers accessed during engine.Finalize(). ChainReader = nil is sufficient
+	// for Ethereum.
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)

@@ -138,6 +138,9 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}); err != nil {
 			panic(err)
 		}
+		// rcache is off in the default schema, and a disabled domain discards writes.
+		// Producing it is an explicit request, so turn it on for this run.
+		cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EnableDomain(kv.RCacheDomain)
 	}
 
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
@@ -256,7 +259,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		doms, err := newCustomTraceSharedDomains(ctx, db, tx, logger)
 		if err != nil {
 			return err
 		}
@@ -318,9 +321,6 @@ func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, db kv.TemporalRoDB,
 	if !dbg.AssertEnabled {
 		return
 	}
-	if cfg.ChainConfig.Bor != nil { //TODO: enable me
-		return nil
-	}
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, db, cfg.BlockReader, true)
 }
 
@@ -355,20 +355,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				var logIndexAfterTx uint32
 				var cumGasUsed uint64
 
-				if txTask.IsBlockEnd() { // block changed
-					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-						// get last receipt and store the last log index + 1
-						lastReceipt := blockResult.Receipts[txTask.TxIndex-1]
-						if lastReceipt == nil {
-							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
-						}
-						if len(lastReceipt.Logs) > 0 {
-							firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-							logIndexAfterTx = uint32(firstIndex) + uint32(len(result.Logs))
-							cumGasUsed = lastReceipt.CumulativeGasUsed
-						}
-					}
-				} else {
+				if !txTask.IsBlockEnd() {
 					if txTask.TxIndex >= 0 {
 						receipt := blockResult.Receipts[txTask.TxIndex]
 						if receipt != nil {
@@ -391,12 +378,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				var receipt *types.Receipt
 				if !txTask.IsBlockEnd() {
 					receipt = result.Receipt
-				} else if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-					// issue: https://github.com/erigontech/erigon/issues/16037
-					receipt = blockResult.Receipts[txTask.TxIndex-1]
-					if receipt == nil {
-						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
-					}
 				}
 				if err := receipts.Append(putter, receipt, txTask.TxNum); err != nil {
 					return err
@@ -542,4 +523,13 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 		}
 	}
 	return tx.Commit()
+}
+
+func newCustomTraceSharedDomains(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx, logger log.Logger) (*execctx.SharedDomains, error) {
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return nil, err
+	}
+	doms.EnableParaTrieDB(db)
+	return doms, nil
 }

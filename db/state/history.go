@@ -445,7 +445,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 }
 
 func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, false)
+	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -1190,7 +1190,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if ht.h.Disable {
+	if !ht.h.Enabled {
 		return nil, false, nil
 	}
 
@@ -1417,6 +1417,9 @@ func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By
 	return stream.MultisetKU64(itOnFiles, itOnDB, limit), nil
 }
 
+// HistoryDump walks every value in the visible files and hands each to dumpTo.
+// val is only valid until dumpTo returns: it points into a page buffer the next
+// value decodes over.
 func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {
 	if len(ht.iit.files) == 0 {
 		return nil
@@ -1425,6 +1428,8 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
 		return nil
 	}
+
+	var histKeyBuf, pageBuf []byte
 
 	for _, item := range ht.iit.files {
 		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
@@ -1436,8 +1441,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 		efGetter := ht.iit.dataReader(item.src.decompressor)
 		efGetter.Reset(0)
-
-		var histKeyBuf []byte
 
 		for efGetter.HasNext() {
 			key, _ := efGetter.Next(nil)
@@ -1478,9 +1481,9 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				val, _ := vReader.Next(nil)
 
-				if compressedPageValuesCount > 0 {
+				if compressedPageValuesCount > 1 {
 					histKeyBuf = historyKey(txNum, key, histKeyBuf)
-					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
+					val, pageBuf = seg.GetFromPage(histKeyBuf, val, pageBuf, true)
 				}
 
 				dumpTo(key, txNum, val)

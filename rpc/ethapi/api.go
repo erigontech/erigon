@@ -365,10 +365,12 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 	return logger.FormatLogs(logs)
 }
 
-// RPCMarshalHeader converts the given header to the RPC output .
+// RPCMarshalHeader converts the given header to the RPC output. The result aliases
+// head: quantities, byte slices and optional hashes go in without a copy, so the
+// caller must pass a header nobody will mutate.
 func RPCMarshalHeader(head *types.Header) map[string]any {
 	result := map[string]any{
-		"number":           (*hexutil.Big)(head.Number.ToBig()),
+		"number":           (*hexutil.U256)(&head.Number),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
 		"nonce":            head.Nonce,
@@ -377,7 +379,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 		"logsBloom":        head.Bloom,
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,
-		"difficulty":       (*hexutil.Big)(head.Difficulty.ToBig()),
+		"difficulty":       (*hexutil.U256)(&head.Difficulty),
 		"extraData":        hexutil.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
@@ -387,7 +389,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 		"receiptsRoot":     head.ReceiptHash,
 	}
 	if head.BaseFee != nil {
-		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee.ToBig())
+		result["baseFeePerGas"] = (*hexutil.U256)(head.BaseFee)
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
@@ -424,10 +426,6 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
 func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]any, error) {
-	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{})
-}
-
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]any, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
@@ -444,19 +442,11 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 			}
 		}
 		txs := block.Transactions()
-		transactions := make([]any, len(txs), len(txs)+1)
+		transactions := make([]any, len(txs))
 		var err error
 		for i, txn := range txs {
 			if transactions[i], err = formatTx(txn, i); err != nil {
 				return nil, err
-			}
-		}
-
-		if borTx != nil {
-			if fullTx {
-				transactions = append(transactions, NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), uint64(len(txs)), nil /* chainID */))
-			} else {
-				transactions = append(transactions, borTxHash)
 			}
 		}
 
@@ -521,8 +511,7 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 }
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
-// Numeric fields may alias the source transaction (and, on the Bor path, the shared chain config's ChainID);
-// they are read-only after construction.
+// Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
 	BlockNumber          *hexutil.U256              `json:"blockNumber"`
@@ -647,34 +636,6 @@ func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int)
 		return (*hexutil.U256)(&price)
 	}
 	return nil
-}
-
-// NewRPCBorTransaction returns a Bor transaction that will serialize to the RPC
-// representation, with the given location metadata set (if available).
-func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *uint256.Int) *RPCTransaction {
-	txn := opaqueTxn.(*types.LegacyTx)
-	result := &RPCTransaction{
-		Type:     hexutil.Uint64(txn.Type()),
-		ChainID:  new(hexutil.U256),
-		GasPrice: (*hexutil.U256)(&txn.GasPrice),
-		Gas:      hexutil.Uint64(txn.GetGasLimit()),
-		Hash:     txHash,
-		Input:    hexutil.Bytes(txn.GetData()),
-		Nonce:    hexutil.Uint64(txn.GetNonce()),
-		From:     common.Address{},
-		To:       txn.GetTo(),
-		Value:    (*hexutil.U256)(txn.GetValue()),
-		V:        new(hexutil.U256),
-		R:        new(hexutil.U256),
-		S:        new(hexutil.U256),
-	}
-	if blockHash != (common.Hash{}) {
-		result.ChainID = (*hexutil.U256)(chainId)
-		result.BlockHash = &blockHash
-		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
-		result.TransactionIndex = (*hexutil.Uint64)(&index)
-	}
-	return result
 }
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.

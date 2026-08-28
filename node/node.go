@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/diskutils"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -251,6 +252,8 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		n.dirLock = l
 		break
 	}
+
+	diskutils.CheckFilesystem(n.logger, n.config.Dirs.All()...)
 	return nil
 }
 
@@ -307,8 +310,6 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "chaindata"
 	case dbcfg.TxPoolDB:
 		name = "txpool"
-	case dbcfg.PolygonBridgeDB:
-		name = "polygon-bridge"
 	case dbcfg.ConsensusDB:
 		if len(name) == 0 {
 			return nil, errors.New("expected a consensus name")
