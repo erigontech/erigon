@@ -97,7 +97,10 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	// sortableBuffer.Put panics past this, and Collect sits under enough
 	// error-returning callers that a long key should fail the stage instead.
 	if len(k) > maxKeyLen {
-		return errKeyTooLong(c.logPrefix, len(k))
+		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), maxKeyLen)
+	}
+	if len(v) > maxValLen {
+		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), maxValLen)
 	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()

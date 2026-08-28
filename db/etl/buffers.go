@@ -52,12 +52,25 @@ const (
 
 // A spill file prefixes each field with its length. Fixed width rather than a
 // varint: the file never leaves the machine that wrote it. A key is capped at
-// maxKeyLen so two bytes hold it; a value has no cap.
+// maxKeyLen so two bytes hold it, a value at maxValLen so four do.
 const (
 	keyLenSize = 2
 	valLenSize = 4
 	nilKeyLen  = math.MaxUint16 // no key reaches this, so it can mean nil
+
+	// A longer value would write a length that reads back negative, which the
+	// reader takes for nil without consuming the bytes - desyncing the rest of
+	// the file rather than failing. appendSortableBuffer grows a value across
+	// Puts, so the writers check it and not Put.
+	maxValLen = math.MaxInt32
 )
+
+func checkValLen(v []byte) error {
+	if len(v) > maxValLen {
+		return fmt.Errorf("etl: value of %d bytes exceeds %d", len(v), maxValLen)
+	}
+	return nil
+}
 
 func putKeyLen(dst []byte, keyLen int32) {
 	n := uint16(keyLen) //nolint:gosec
@@ -75,6 +88,9 @@ func putValLen(dst []byte, valLen int32) {
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 	var numBuf [valLenSize]byte
 	for _, entry := range entries {
+		if err := checkValLen(entry.value); err != nil {
+			return err
+		}
 		keyLen, valLen := int32(len(entry.key)), int32(len(entry.value)) //nolint:gosec
 		if entry.key == nil {
 			keyLen = -1

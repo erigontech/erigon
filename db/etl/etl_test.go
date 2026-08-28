@@ -2380,3 +2380,18 @@ func TestSpillNilKeyRoundTrip(t *testing.T) {
 	require.Equal(t, []byte{1}, got[1][0])
 	require.Equal(t, []byte("one"), got[1][1])
 }
+
+// TestSpillValueLengthCeiling pins why maxValLen exists: one byte past it the
+// length wraps negative, which readValField takes for nil without consuming the
+// value's bytes, so every later record is parsed out of value payload.
+func TestSpillValueLengthCeiling(t *testing.T) {
+	var buf [valLenSize]byte
+
+	putValLen(buf[:], int32(maxValLen))
+	require.EqualValues(t, maxValLen, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
+
+	over := int32(maxValLen)
+	over++ // wraps; a constant expression would not compile
+	putValLen(buf[:], over)
+	require.Negative(t, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
+}
