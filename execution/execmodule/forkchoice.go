@@ -298,11 +298,10 @@ func (e *ExecModule) unwindIfNeeded(
 		}
 		e.observeStateTransition(ctx, StateTransitionUnwindComplete)
 	} else {
-		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return nil, fmt.Errorf("updateForkChoice: %w", err)
-		}
-		if execProgress > unwindTarget {
+		execProgress, progressErr := stages.GetStageProgress(tx, stages.Execution)
+		if progressErr != nil {
+			e.logger.Warn("updateForkChoice: execution progress unavailable for skipped unwind", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "err", progressErr)
+		} else if execProgress > unwindTarget {
 			e.logger.Info("updateForkChoice: unwind skipped with executed state above reorg point", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "execProgress", execProgress)
 		}
 	}
