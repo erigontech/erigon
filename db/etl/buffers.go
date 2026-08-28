@@ -50,7 +50,6 @@ const (
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
-// writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
 // A spill file prefixes each field with its length. Fixed width rather than a
 // varint: the file never leaves the machine that wrote it. A key is capped at
 // maxKeyLen so two bytes hold it; a value has no cap.
@@ -72,6 +71,7 @@ func putValLen(dst []byte, valLen int32) {
 	binary.NativeEndian.PutUint32(dst, uint32(valLen)) //nolint:gosec
 }
 
+// writeSortedEntries writes the entries to w in the spill format above.
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 	var numBuf [valLenSize]byte
 	for _, entry := range entries {

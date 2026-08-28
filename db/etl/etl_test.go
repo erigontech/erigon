@@ -2339,3 +2339,32 @@ func TestSortableBufferMatchesStableSort(t *testing.T) {
 		buf.Reset()
 	}
 }
+
+// TestEntryLocSize pins the constant to the type. Size feeds CheckFlushSize,
+// so a stale entryLocSize makes every collector spill early.
+func TestEntryLocSize(t *testing.T) {
+	require.Equal(t, uintptr(entryLocSize), unsafe.Sizeof(entryLoc(0)))
+}
+
+// TestSpillNilKeyRoundTrip: a nil key crosses a spill file as nilKeyLen, the
+// one length keyLenSize cannot otherwise spell. Read back as a real length it
+// would desynchronise the rest of the file instead of failing.
+func TestSpillNilKeyRoundTrip(t *testing.T) {
+	c := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1*datasize.MB), log.New())
+	defer c.Close()
+	require.NoError(t, c.Collect(nil, []byte("nil-key")))
+	require.NoError(t, c.Collect([]byte{1}, []byte("one")))
+	require.NoError(t, c.Flush()) // spill, so Load reads the file and not RAM
+
+	var got [][2][]byte
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
+		got = append(got, [2][]byte{bytes.Clone(k), bytes.Clone(v)})
+		return nil
+	}, TransformArgs{}))
+
+	require.Len(t, got, 2)
+	require.Nil(t, got[0][0])
+	require.Equal(t, []byte("nil-key"), got[0][1])
+	require.Equal(t, []byte{1}, got[1][0])
+	require.Equal(t, []byte("one"), got[1][1])
+}
