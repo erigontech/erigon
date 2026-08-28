@@ -48,17 +48,38 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	return db, tx
 }
 
-// nolint:thelper
-func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, config3.DefaultStepSize)
+type Option func(*options)
+
+type options struct {
+	stepSize        uint64
+	reorgBlockDepth uint64
 }
 
-func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, stepSize)
+func WithStepSize(stepSize uint64) Option {
+	return func(opts *options) {
+		opts.stepSize = stepSize
+	}
+}
+
+func WithReorgBlockDepth(reorgBlockDepth uint64) Option {
+	return func(opts *options) {
+		opts.reorgBlockDepth = reorgBlockDepth
+	}
 }
 
 // nolint:thelper
-func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
+func NewTestDB(tb testing.TB, dirs datadir.Dirs, opts ...Option) kv.TemporalRwDB {
+	config := options{
+		stepSize: config3.DefaultStepSize,
+	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return newTestDB(tb, dirs, config.stepSize, config.reorgBlockDepth)
+}
+
+// nolint:thelper
+func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize, reorgBlockDepth uint64) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -84,7 +105,7 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 		panic(err)
 	}
 
-	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
+	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).ReorgBlockDepth(reorgBlockDepth).MustOpen(ctx, rawDB)
 	if tb != nil {
 		tb.Cleanup(stateSnapshots.Close)
 	}
