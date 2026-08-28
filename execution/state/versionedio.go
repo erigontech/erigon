@@ -2590,6 +2590,7 @@ type accountState struct {
 	balanceValue            *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	slotWrites              map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
 	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
 	initialCodeEmpty        bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
@@ -2725,12 +2726,13 @@ func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint
 	// Skip intra-tx net-zero storage writes: if this is the first write
 	// to the slot (no prior tx wrote to it) and the written value equals
 	// the original read value, it's a no-op that should remain as a read.
-	if !hasStorageWrite(account.changes, key) {
+	at := account.storageWriteIndex(key)
+	if at < 0 {
 		if origVal, wasRead := account.storageReadValues[key]; wasRead && val.Eq(&origVal) {
 			return
 		}
 	}
-	addStorageUpdate(account.changes, key, val, accessIndex)
+	account.addStorageUpdate(at, key, val, accessIndex)
 }
 
 func (account *accountState) applyWriteNonce(val uint64, accessIndex uint32) {
@@ -2790,7 +2792,7 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 	if _, exists := account.storageReadValues[key]; !exists {
 		account.storageReadValues[key] = val
 	}
-	if hasStorageWrite(account.changes, key) {
+	if account.hasStorageWrite(key) {
 		return
 	}
 	account.changes.StorageReads = append(account.changes.StorageReads, key)
@@ -2817,41 +2819,63 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	}
 }
 
-func addStorageUpdate(ac *types.AccountChanges, slot accounts.StorageKey, val uint256.Int, txIndex uint32) {
-	// If we already recorded a read for this slot, drop it because a write takes precedence.
-	removeStorageRead(ac, slot)
+// slotIndexMin is where scanning StorageChanges stops being cheaper than a map
+// probe. Most accounts touch a handful of slots; a storage-bloated block puts
+// thousands on one account, and every access looks the slot up.
+const slotIndexMin = 16
 
-	if ac.StorageChanges == nil {
-		ac.StorageChanges = []*types.SlotChanges{{
-			Slot:    slot,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
-		}}
+// storageWriteIndex returns the position of slot in changes.StorageChanges, or -1.
+func (account *accountState) storageWriteIndex(slot accounts.StorageKey) int {
+	if account.slotWrites != nil {
+		if i, ok := account.slotWrites[slot]; ok {
+			return i
+		}
+		return -1
+	}
+	for i, sc := range account.changes.StorageChanges {
+		if sc != nil && sc.Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (account *accountState) hasStorageWrite(slot accounts.StorageKey) bool {
+	return account.storageWriteIndex(slot) >= 0
+}
+
+// addStorageUpdate records a write at slot, which storageWriteIndex already
+// located as at (-1 when the slot is new). It is the only writer of
+// changes.StorageChanges, so slotWrites cannot drift from it; Normalize
+// reorders the slice, but only after the build.
+func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, val uint256.Int, txIndex uint32) {
+	// If we already recorded a read for this slot, drop it because a write takes precedence.
+	removeStorageRead(account.changes, slot)
+
+	ac := account.changes
+	if at >= 0 {
+		slotChange := ac.StorageChanges[at]
+		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
+		if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
+			return
+		}
+		slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
 		return
 	}
 
-	for _, slotChange := range ac.StorageChanges {
-		if slotChange.Slot == slot {
-			// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
-			if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
-				return
-			}
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
-			return
-		}
+	if account.slotWrites != nil {
+		account.slotWrites[slot] = len(ac.StorageChanges)
 	}
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
-}
-
-func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
-	for _, sc := range ac.StorageChanges {
-		if sc != nil && sc.Slot == slot {
-			return true
+	if account.slotWrites == nil && len(ac.StorageChanges) >= slotIndexMin {
+		account.slotWrites = make(map[accounts.StorageKey]int, len(ac.StorageChanges))
+		for i, sc := range ac.StorageChanges {
+			account.slotWrites[sc.Slot] = i
 		}
 	}
-	return false
 }
 
 func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {

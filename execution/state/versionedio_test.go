@@ -19,6 +19,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
 	"testing"
 
@@ -1708,4 +1709,64 @@ func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T)
 		}
 	}
 	require.True(t, found, "authority account must appear in BAL")
+}
+
+// Slots recorded on either side of the slotIndexMin crossover must stay
+// findable: a missed index entry opens a second SlotChanges for the same slot,
+// and the BAL then carries it twice.
+func TestAddStorageUpdate_IndexCrossoverFindsSlots(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	account := &accountState{changes: &types.AccountChanges{Address: addr}}
+	key := func(n int64) accounts.StorageKey {
+		return accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(n)))
+	}
+
+	early := key(1)
+	account.applyWriteStorage(early, *uint256.NewInt(1), 0)
+	for i := range 4 * slotIndexMin {
+		account.applyWriteStorage(key(int64(i+100)), *uint256.NewInt(1), uint32(i))
+	}
+	require.NotNil(t, account.slotWrites, "the index must be built past the threshold")
+	late := key(9999)
+	account.applyWriteStorage(late, *uint256.NewInt(1), 50)
+
+	account.applyWriteStorage(early, *uint256.NewInt(2), 98)
+	account.applyWriteStorage(late, *uint256.NewInt(2), 99)
+
+	for _, slot := range []accounts.StorageKey{early, late} {
+		seen := 0
+		for _, sc := range account.changes.StorageChanges {
+			if sc.Slot == slot {
+				seen++
+				require.Len(t, sc.Changes, 2, "the second write must append to the existing slot")
+			}
+		}
+		require.Equal(t, 1, seen, "the slot must appear exactly once")
+	}
+}
+
+// BenchmarkAccountStateStorageWrites drives the EIP-7928 BAL builder the way a
+// storage-bloated block does: one account, many distinct slots, each read then
+// written once. The per-slot work must not grow with the number of slots
+// already recorded for the account.
+func BenchmarkAccountStateStorageWrites(b *testing.B) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	val := *uint256.NewInt(1)
+	for _, slots := range []int{4, 64, 512, 4096} {
+		keys := make([]accounts.StorageKey, slots)
+		for i := range keys {
+			keys[i] = accounts.InternKey(common.BigToHash(new(big.Int).SetInt64(int64(i))))
+		}
+		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				account := &accountState{changes: &types.AccountChanges{Address: addr}}
+				for i, k := range keys {
+					account.updateReadStorage(k, uint256.Int{})
+					account.applyWriteStorage(k, val, uint32(i))
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*slots), "ns/slot")
+		})
+	}
 }
