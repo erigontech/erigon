@@ -404,3 +404,41 @@ func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry
 		b.Fatalf("call chain reached the leaf at %s at depth %d, want %d", leaf, leafDepth, wantDepth)
 	}
 }
+
+// BenchmarkCallReturnData measures calls whose callee returns data. The other
+// call benchmarks use leaves that STOP, so they never exercise the RETURN copy
+// or what the caller does with the returned bytes.
+func BenchmarkCallReturnData(b *testing.B) {
+	const callsPerOp = 200
+	rawLeaf := common.HexToAddress("0x7001")
+	leaf := accounts.InternAddress(rawLeaf)
+
+	for _, retSize := range []int{32, 1024} {
+		for _, op := range []vm.OpCode{vm.CALL, vm.STATICCALL} {
+			b.Run(fmt.Sprintf("%s/ret-%d", op, retSize), func(b *testing.B) {
+				b.ReportAllocs()
+				vmenv := benchConfig(b, 1_000_000_000)
+				statedb := vmenv.IntraBlockState()
+
+				leafCode := program.New().Push(42).Push(0).Op(vm.MSTORE).Return(0, retSize).Bytes()
+				deployContract(b, statedb, leaf, leafCode)
+
+				p := program.New()
+				for range callsPerOp {
+					if op == vm.CALL {
+						p.Call(nil, rawLeaf, 0, 0, 0, 0, retSize)
+					} else {
+						p.StaticCall(nil, rawLeaf, 0, 0, 0, retSize)
+					}
+					p.Op(vm.POP)
+				}
+				deployContract(b, statedb, addrContract, p.Op(vm.STOP).Bytes())
+
+				callComplete(b, vmenv, addrContract, nil)
+				for b.Loop() {
+					callComplete(b, vmenv, addrContract, nil)
+				}
+			})
+		}
+	}
+}

@@ -943,32 +943,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-	for _, traceType := range traceTypes {
-		switch traceType {
-		case TraceTypeTrace:
-			traceTypeTrace = true
-		case TraceTypeStateDiff:
-			traceTypeStateDiff = true
-		case TraceTypeVmTrace:
-			traceTypeVmTrace = true
-		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-		}
-	}
-	result := &TraceCallResult{}
-
-	result.Output = trace.Output
-	if traceTypeTrace {
-		result.Trace = trace.Trace
-	}
-	if traceTypeStateDiff {
-		result.StateDiff = trace.StateDiff
-	}
-	if traceTypeVmTrace {
-		result.VmTrace = trace.VmTrace
-	}
-
 	return trace, nil
 }
 
@@ -1179,9 +1153,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	if traceTypeTrace || traceTypeVmTrace || traceTypeStateDiff {
+	vmConfig := vm.Config{}
+	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
+		vmConfig.Tracer = ot.Tracer().Hooks
 	}
 
 	// Get a new instance of the EVM.
@@ -1216,7 +1192,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
@@ -1225,20 +1201,20 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(blockCtx.BlockNumber, 0)
-	ibs.SetHooks(ot.Tracer().Hooks)
+	ibs.SetHooks(vmConfig.Tracer)
 
-	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
-		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
+		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(nil, err)
+		if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
+			vmConfig.Tracer.OnTxEnd(nil, err)
 		}
 		return nil, err
 	}
-	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
+		vmConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 	}
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1258,6 +1234,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+	}
+
+	if !traceTypeTrace {
+		traceResult.Trace = []*ParityTrace{}
 	}
 
 	return traceResult, nil
@@ -1760,9 +1740,11 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	if traceTypeTrace || traceTypeVmTrace || traceTypeStateDiff {
+	vmConfig := vm.Config{}
+	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
+		vmConfig.Tracer = ot.Tracer().Hooks
 	}
 
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
@@ -1782,26 +1764,26 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	storeEVM(evm)
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(blockCtx.BlockNumber, 0)
-	ibs.SetHooks(ot.Tracer().Hooks)
+	ibs.SetHooks(vmConfig.Tracer)
 
-	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
-		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
+		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(nil, err)
+		if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
+			vmConfig.Tracer.OnTxEnd(nil, err)
 		}
 		return nil, err
 	}
-	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
+		vmConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
