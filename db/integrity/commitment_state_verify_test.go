@@ -48,7 +48,7 @@ func TestCheckStateVerify(t *testing.T) {
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 
 	tx, err := db.BeginTemporalRw(ctx)
@@ -126,7 +126,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 
 	tx, err := db.BeginTemporalRw(ctx)
@@ -242,7 +242,7 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	stepSize := uint64(100)
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
