@@ -118,9 +118,10 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 	}
 }
 
-// Truncation leaves entries above len holding their extra, and a kindCode extra
-// is a whole contract's bytecode. revert truncates too, which is why clearing
-// only [0:len] at Reset is not enough on its own.
+// Reset reslices entries to zero, so anything left in the backing array stays
+// reachable for as long as the journal is reused — and a kindCode entry's extra
+// holds a whole contract's bytecode. The journal outlives the transaction, so
+// that is a block's worth of dead code pinned by a pooled object.
 func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 	j := newJournal()
 	t.Cleanup(j.release)
@@ -136,6 +137,29 @@ func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
 
 	tail := j.entries[:cap(j.entries)]
 	for i, e := range tail {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}
+
+// revert truncates to a snapshot, so the entries it drops outlive it; a Reset
+// that clears only [0:len] would leave that stretch holding its bytecode.
+func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
+	addr := accounts.InternAddress(common.Address{1})
+	ibs.stateObjects[addr] = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
+
+	j := ibs.journal
+	for range 4 {
+		j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	}
+
+	j.revert(ibs, 2)
+	j.Reset()
+
+	for i, e := range j.entries[:cap(j.entries)] {
 		if e.extra != nil {
 			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
 				i, len(e.extra.prevcode))

@@ -111,8 +111,7 @@ func (j *journal) release() {
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
-	// [:cap] not [:len]: revert truncates to a snapshot, leaving live extras above len.
-	clear(j.entries[:cap(j.entries)])
+	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
@@ -135,6 +134,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
+	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
 }
 
