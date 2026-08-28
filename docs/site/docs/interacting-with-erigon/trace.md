@@ -115,7 +115,9 @@ balances:
 * **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
   calls whenever the flag is set, for *every* replayed transaction — funded senders
   included, not only underfunded ones.
-* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout`.
+* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout` — that
+  is the internal Go parameter, spelled with a lowercase `o`, not the JSON-RPC
+  `gasBailOut` this section documents.
 * **The producer is still paid.** The block producer's tip is credited as usual.
 * **An unaffordable value transfer is credited anyway.** When the sender cannot cover a
   non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
@@ -481,7 +483,7 @@ Replays all transactions in a block returning the requested traces for each tran
 
 #### Parameters
 
-1. `Quantity`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: an integer block number, a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
+1. `Quantity`, `Number`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: a hex block number, a bare JSON integer (an Erigon extension — not a standard `QUANTITY`), a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
 3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call. It does more than bypass that check — see [The gasBailOut option](#the-gasbailout-option).
 4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
@@ -609,7 +611,7 @@ Returns traces created at given block.
 
 #### Parameters
 
-1. `Quantity`, `Tag` or `null` - A plain block number: an integer (hex string or bare JSON integer), a named tag (`'earliest'`, `'latest'`, `'pending'`, `'safe'`, `'finalized'`, or the Erigon-specific `'latestExecuted'`), or `null` / `"null"`, both of which mean `latest`. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
+1. `Quantity`, `Number`, `Tag` or `null` - A plain block number: a hex string, or a bare JSON integer as an Erigon extension (not a standard `QUANTITY`), a named tag (`'earliest'`, `'latest'`, `'pending'`, `'safe'`, `'finalized'`, or the Erigon-specific `'latestExecuted'`), or `null` / `"null"`, both of which mean `latest`. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour. It does more than bypass that check — see [The gasBailOut option](#the-gasbailout-option).
 3. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to append a `"reward"` entry per beacon-chain withdrawal. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
