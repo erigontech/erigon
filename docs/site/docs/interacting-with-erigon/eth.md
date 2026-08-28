@@ -176,11 +176,13 @@ transaction is built at all.
 * `value` — `0` when absent
 * `gas` — from `eth_estimateGas` against `latest`
 * `chainId` — the node's chain ID; a mismatching supplied value is an error. It is used
-  for validation and carried by typed transactions, but it does not appear in the
-  returned `tx` for an unsigned legacy transaction: `CallArgs.ToTransaction` builds a
+  for validation and carried by every typed transaction, but it does not appear in the
+  returned `tx` when the fill infers legacy type `0x0`: `CallArgs.ToTransaction` builds a
   `LegacyTx` with no chain-ID field, and the response encoder skips chain-ID derivation
-  while `v` is zero. A pre-London fill, or a post-London fill supplying `gasPrice` with
-  no access list, therefore returns `tx` without `chainId`
+  while `v` is zero. That is the `default` arm of the type switch — reached only when
+  none of `authorizationList`, `blobVersionedHashes`, `maxFeePerGas` or `accessList` is
+  present. An `accessList` fill before London and a blob or authorization-list fill after
+  it are typed and carry `chainId`, even when `gasPrice` is supplied
 * fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
   though after London it must be non-zero (`gasPrice must be non-zero after london fork`);
   before London a zero is accepted. It cannot be combined with `maxFeePerGas` or
@@ -198,6 +200,17 @@ An object with `raw`, the unsigned transaction in its canonical binary encoding,
 RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
 encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
 result carries only `tx`; the extra `raw` field is the geth-compatible shape.
+
+`tx` also carries four fields the standardized unsigned schemas do not define. `v`, `r`
+and `s` are placeholders — `SignTransactionResult.MarshalJSON` writes `"0x0"` for each —
+and a typed result adds `yParity`, likewise `0x0`. Nothing is signed here, so none of
+them is a signature.
+
+:::warning
+The `hash` field is computed before signing and **changes once the transaction is
+signed**. It is not the hash the transaction will have when submitted, so it must not be
+used to track it. Take the hash from `eth_sendRawTransaction` instead.
+:::
 
 A dynamic-fee result — types `0x2`, `0x3` and `0x4` — also carries `gasPrice: null`.
 `FillTransaction` passes no base fee to the response encoder, so `computeGasPrice`

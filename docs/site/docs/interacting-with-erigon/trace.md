@@ -441,8 +441,17 @@ Replays all transactions in a block returning the requested traces for each tran
 
 1. `Quantity`, `Tag`, `Data` or `Object` - A block-number-or-hash selector: an integer block number, a named tag such as `'earliest'`, `'latest'` or `'pending'`, a block hash, or the object form `{"blockNumber": ...}` / `{"blockHash": ...}`. Required — `null` is rejected. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
-3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call.
+3. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still replayed instead of failing the call. It does more than bypass that check — see the warning below.
 4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
+
+:::warning
+`gasBailOut` alters replayed state for **every** transaction, not only underfunded ones.
+`TxnExecutor.buyGas` skips the sender's gas and blob-fee deductions whenever it is set,
+the gas-refund path is skipped along with them, and the block producer's tip is still
+credited. The resulting `stateDiff`, and the state each later transaction in the block
+sees, therefore differ from a normal replay — do not use the output to reconstruct
+balances.
+:::
 
 ```js
 params: [
@@ -567,8 +576,17 @@ Returns traces created at given block.
 #### Parameters
 
 1. `Quantity`, `Tag` or `null` - A plain block number: an integer (hex string or bare JSON integer), a named tag (`'earliest'`, `'latest'`, `'pending'`, `'safe'`, `'finalized'`, or the Erigon-specific `'latestExecuted'`), or `null` / `"null"`, both of which mean `latest`. See [Block number parameter format](/interacting-with-erigon/eth#block-number-parameter-format).
-2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour.
+2. `Boolean` - Optional, default `false`. `gasBailOut`. When `true`, a transaction whose sender cannot afford the gas charge is still traced instead of failing the replay — the OpenEthereum/Parity behaviour. It does more than bypass that check — see the warning below.
 3. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to append a `"reward"` entry per beacon-chain withdrawal. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
+
+:::warning
+`gasBailOut` alters replayed state for **every** transaction, not only underfunded ones.
+`TxnExecutor.buyGas` skips the sender's gas and blob-fee deductions whenever it is set,
+the gas-refund path is skipped along with them, and the block producer's tip is still
+credited. The resulting `stateDiff`, and the state each later transaction in the block
+sees, therefore differ from a normal replay — do not use the output to reconstruct
+balances.
+:::
 
 ```js
 params: [
