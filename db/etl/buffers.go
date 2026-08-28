@@ -262,7 +262,7 @@ type sortableBuffer struct {
 	chunkBytes  int
 	optimalSize int
 
-	// Write's varint scratch. w.Write takes an io.Writer, so a local array
+	// Write's length scratch. w.Write takes an io.Writer, so a local array
 	// escapes and costs an allocation on every Write.
 	numBuf [valLenSize]byte
 }
@@ -460,6 +460,12 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 
 func (b *sortableBuffer) Write(w io.Writer) error {
 	panicIfUnsorted(b.sortedN != b.n)
+	// Write drives the cursor Next does, where the map-backed buffers walk
+	// their own run and leave it alone. Rewinding around the drain keeps the
+	// three the same: writing twice writes the same bytes twice, rather than
+	// handing the second caller an empty file that mergeSortFiles panics on.
+	b.mrg.rewind(b.chunks)
+	defer b.mrg.rewind(b.chunks)
 	numBuf := b.numBuf[:]
 	for {
 		k, v, ok := b.Next()

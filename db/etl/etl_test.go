@@ -1850,8 +1850,9 @@ func TestSortableBufferChunkBoundary(t *testing.T) {
 	}
 }
 
-// TestSortableBufferRejectsOversizedKey: Sort reads keys straight out of a
-// chunk, so a key must fit one. Values may still be any size.
+// TestSortableBufferRejectsOversizedKey: a key length has to fit the 12 bits
+// entryLoc has left once the offset takes dataChunkBits, so it is entryLoc and
+// not the chunk that binds. Values may still outgrow a chunk.
 func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 
@@ -2053,10 +2054,9 @@ func TestBufferNextBeforeSort(t *testing.T) {
 	}
 }
 
-// TestSortableBufferWriteAfterPartialRead: Write drives the same cursor Next
-// does, so a Sort has to come between them - otherwise a flush would silently
-// drop the entries already read and mergeSortFiles would panic on the short
-// file.
+// TestSortableBufferWriteAfterPartialRead: Write rewinds around its drain, so
+// a partial read before it does not shorten the file and a second Write does
+// not come back empty - what mergeSortFiles panics on.
 func TestSortableBufferWriteAfterPartialRead(t *testing.T) {
 	buf := NewSortableBuffer(1 * datasize.MB)
 	defer buf.Reset()
@@ -2067,19 +2067,31 @@ func TestSortableBufferWriteAfterPartialRead(t *testing.T) {
 	buf.Next()
 	buf.Next()
 
-	buf.Sort() // what sortAndFlush does before it writes
-	w := bytes.NewBuffer(nil)
-	require.NoError(t, buf.Write(w))
-	m := &mmapBytesReader{data: w.Bytes()}
-	for i := range 10 {
-		k, err := readKeyField(m)
-		require.NoError(t, err, "entry %d", i)
-		require.Equal(t, []byte{byte(i)}, k)
-		_, err = readValField(m)
-		require.NoError(t, err)
+	readAll := func(w *bytes.Buffer) {
+		t.Helper()
+		m := &mmapBytesReader{data: w.Bytes()}
+		for i := range 10 {
+			k, err := readKeyField(m)
+			require.NoError(t, err, "entry %d", i)
+			require.Equal(t, []byte{byte(i)}, k)
+			_, err = readValField(m)
+			require.NoError(t, err)
+		}
+		_, err := readKeyField(m)
+		require.Equal(t, io.EOF, err)
 	}
-	_, err := readKeyField(m)
-	require.Equal(t, io.EOF, err)
+
+	w1 := bytes.NewBuffer(nil)
+	require.NoError(t, buf.Write(w1)) // no Sort in between: Write rewinds itself
+	readAll(w1)
+
+	w2 := bytes.NewBuffer(nil)
+	require.NoError(t, buf.Write(w2)) // a retried spill writes the same file
+	require.Equal(t, w1.Bytes(), w2.Bytes())
+
+	k, _, ok := buf.Next() // and the cursor is back where Sort left it
+	require.True(t, ok)
+	require.Equal(t, []byte{0}, k)
 }
 
 // TestChunksInOrderAcrossEmptyChunk: an empty chunk must not hide the pair on
