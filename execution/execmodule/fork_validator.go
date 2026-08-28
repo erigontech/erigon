@@ -449,12 +449,11 @@ func (fv *ForkValidator) ensureParked(sd *execctx.SharedDomains, headHash common
 // state is either already durable (canonicalised) or will be re-derived on the next open.
 // Caller must hold fv.lock.
 func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx, upTo uint64, inclusive bool) {
-	// DIAGNOSTIC (user 2026-08-26): in the frontier flow, do NOT close/remove parked SDs here. Keeping them all
-	// alive (a memory leak, accepted for now) takes "an SD was closed too early" off the table as a cause, so
-	// whatever fails next is definitively NOT an SD-removal problem. Legacy (non-frontier) flow unchanged.
-	if fv.frontierMode {
-		return
-	}
+	// Retire parked pre-exec generations so the live-SD count stays FLAT. In frontierMode the caller passes
+	// inclusive=false (retire STRICTLY BELOW the just-canonicalised block, keeping that one block's SD parked as
+	// the successor's read-through parent); legacy passes inclusive=true. (This was temporarily disabled as a
+	// diagnostic in 2026-08 to rule out "SD closed too early"; re-enabled now that the consensus/txpool/L1
+	// issues are fixed — a growing preExecStack is a real SD leak.)
 	kept := fv.preExecStack[:0]
 	for _, g := range fv.preExecStack {
 		// inclusive=true → retire ≤ upTo (legacy). inclusive=false → retire STRICTLY BELOW upTo: the

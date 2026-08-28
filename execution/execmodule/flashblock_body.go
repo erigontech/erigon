@@ -91,6 +91,75 @@ type flashBodyState struct {
 	num  uint64             // block number this body belongs to; 0 = none open
 	body [][]byte           // filtered tx RLPs, in order
 	seen map[snKeyExec]bool // (sender,nonce) already decided (kept OR dropped) — never re-filter/re-add
+	// The in-progress block's IDENTITY + the inputs it was built under, so exec (not the driver) owns the
+	// whole in-progress flashblock. The driver reads these via FlashblockState() instead of caching its own
+	// ib* under ibMu; the OUTPUT root/receipts are the last pre-exec's computed values (the final sealed
+	// values come from the CLOSE — SealBoundary's returned block). Set on a successful PreExecute, cleared on
+	// reset. This is what removes the driver-data-lock-vs-exec-semaphore deadlock class.
+	valid    bool             // a PreExecute has validated for this in-progress block
+	built    FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
+	hash     common.Hash      // the current in-progress header hash
+	root     common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
+	receipts int              // receipts accumulated across rounds (== body txs)
+}
+
+// AssembleInProgress seals the CURRENT in-progress flashblock — block-end over its maintained SD (ValidateChain,
+// ZERO body re-execution) — and returns the sealed header WITHOUT advancing the frontier or re-keying the fork.
+// It is the NON-MUTATING seal a follower uses to verify a delivered newPayload against what it would itself
+// produce (verifyNewPayload's pre-marker fallback). Returns (nil,false) when no valid in-progress flashblock is
+// recorded. Acquires the semaphore. This is the verb that replaced the driver reading FlashblockState/-Body +
+// ValidateChain to seal from mirrored ib* state.
+func (e *ExecModule) AssembleInProgress(ctx context.Context) (*types.Header, bool, error) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return nil, false, err
+	}
+	defer e.semaphore.Release(1)
+	e.flash.mu.Lock()
+	num, hash, valid := e.flash.num, e.flash.hash, e.flash.valid
+	built := e.flash.built
+	body := append([][]byte(nil), e.flash.body...)
+	e.flash.mu.Unlock()
+	if !valid || hash == (common.Hash{}) {
+		return nil, false, nil
+	}
+	res, err := e.validateChainLocked(ctx, hash, num)
+	if err != nil {
+		return nil, false, err
+	}
+	if res.ValidationStatus != ExecutionStatusSuccess {
+		return nil, false, fmt.Errorf("AssembleInProgress: close status=%v err=%q", res.ValidationStatus, res.ValidationError)
+	}
+	sealed := BuildFlashHeader(built, body, FlashblockOutputs{
+		Root:        res.ComputedRoot,
+		GasUsed:     res.GasUsed,
+		ReceiptHash: res.ReceiptHash,
+		Bloom:       res.Bloom,
+	})
+	return sealed, true, nil
+}
+
+// InProgressRoot returns the last pre-exec computed state root of the in-progress flashblock and whether one is
+// valid — a test/inspection hook on exec (the owner of the state), not a driver-orchestration surface.
+func (e *ExecModule) InProgressRoot() (common.Hash, bool) {
+	e.flash.mu.Lock()
+	defer e.flash.mu.Unlock()
+	return e.flash.root, e.flash.valid
+}
+
+// InProgressReceiptCount returns the receipts accumulated across the in-progress flashblock's rounds (== body
+// txs executed so far) — a test/inspection hook on exec.
+func (e *ExecModule) InProgressReceiptCount() int {
+	e.flash.mu.Lock()
+	defer e.flash.mu.Unlock()
+	return e.flash.receipts
+}
+
+// InProgressBlock returns the in-progress flashblock's current header hash + number + whether it is valid — a
+// test/inspection hook on exec (the owner of the in-progress identity), used to drive a ValidateChain close.
+func (e *ExecModule) InProgressBlock() (common.Hash, uint64, bool) {
+	e.flash.mu.Lock()
+	defer e.flash.mu.Unlock()
+	return e.flash.hash, e.flash.num, e.flash.valid
 }
 
 // resetLocked starts a fresh in-progress body for block num.
@@ -98,6 +167,11 @@ func (f *flashBodyState) resetLocked(num uint64) {
 	f.num = num
 	f.body = nil
 	f.seen = make(map[snKeyExec]bool)
+	f.valid = false
+	f.built = FlashblockInputs{}
+	f.hash = common.Hash{}
+	f.root = common.Hash{}
+	f.receipts = 0
 }
 
 // PreExecuteFlashblock is the encapsulated execution half: the driver hands it the UNFILTERED committed tx
@@ -107,6 +181,18 @@ func (f *flashBodyState) resetLocked(num uint64) {
 // body it guards live together, so the inserted/executed/sealed body is always the filtered set — the driver
 // no longer builds a body, computes a header, or calls InsertBlocks.
 func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
+	// Hold the exec semaphore across the WHOLE round (insert + pre-execute) so no other exec op interleaves
+	// mid-round, and so the atomic assemble can reuse preExecuteFlashblockLocked while already holding it.
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return nil, common.Hash{}, ValidationResult{ValidationStatus: ExecutionStatusBusy}, err
+	}
+	defer e.semaphore.Release(1)
+	return e.preExecuteFlashblockLocked(ctx, inputs, newTxRLPs)
+}
+
+// preExecuteFlashblockLocked is PreExecuteFlashblock's body with the caller ALREADY holding e.semaphore, so
+// SealBoundary can open the successor flashblock (empty round) atomically inside its own hold.
+func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
@@ -127,14 +213,37 @@ func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs Flashblock
 	header := BuildFlashHeader(inputs, body, FlashblockOutputs{})
 	hash := header.Hash()
 	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body}}
-	status, err := e.InsertBlocks(ctx, []*types.RawBlock{rawBlock})
+	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
 	if err != nil || status != ExecutionStatusSuccess {
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("PreExecuteFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(body), status, err)
 	}
-	vr, err := e.PreExecute(ctx, hash, inputs.Number)
+	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
 	if err != nil {
 		return nil, common.Hash{}, vr, err
 	}
+	{
+		var forkTxNum, curTxNum uint64
+		if _, _, esd := e.forkValidator.ExtendingFork(); esd != nil {
+			forkTxNum = esd.TxNum()
+		}
+		if e.currentContext != nil {
+			curTxNum = e.currentContext.TxNum()
+		}
+		e.logger.Info("[TRACE-preexec] round", "block", inputs.Number,
+			"roundKept", len(kept), "bodyLen", len(body), "forkTxNum", forkTxNum, "curTxNum", curTxNum,
+			"receipts", vr.FlashblockReceiptCount, "gasUsed", vr.GasUsed, "gasLimit", inputs.GasLimit, "status", vr.ValidationStatus, "root", vr.ComputedRoot)
+	}
+	// Exec OWNS the in-progress state: record identity + outputs so the driver reads them via FlashblockState()
+	// instead of caching ib* under ibMu. (num/body are already maintained above.)
+	e.flash.mu.Lock()
+	if e.flash.num == inputs.Number {
+		e.flash.valid = true
+		e.flash.built = inputs
+		e.flash.hash = hash
+		e.flash.root = vr.ComputedRoot
+		e.flash.receipts = vr.FlashblockReceiptCount
+	}
+	e.flash.mu.Unlock()
 	return &types.RawBody{Transactions: body}, hash, vr, nil
 }
 

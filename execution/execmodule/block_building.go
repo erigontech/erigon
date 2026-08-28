@@ -20,12 +20,14 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -112,6 +114,12 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// pre-executed body (zero re-execution). The marker carrying params gives attribute agreement for free
 	// (pre-exec ran under these same attrs, sourced from this FCU). See [[dag_start_end_system_tx]].
 	if e.boundaryAssembler != nil {
+		// RE-ANCHOR (exec-internal, under this semaphore hold): if the CL is now building on a DIFFERENT parent
+		// than the in-progress flashblock was opened on, Caplin accepted a new head — drop the stale fork and
+		// re-anchor the frontier to that head so the boundary opens FRESH on it. This replaced the driver's
+		// AnchorFrontier callback, which was semaphore-free only because it rode inside this hold (an anti-pattern
+		// on the public interface); the trigger + action now live where the semaphore is genuinely held.
+		e.reanchorFrontierForBoundaryLocked(ctx, params)
 		// Insert the block-end marker NOW (non-blocking) so it starts committing during the CL assembly
 		// delay, and record the params so GetAssembledBlock can AwaitBoundary + seal. MUST NOT wait here —
 		// the CL's ForkChoiceUpdate blocks on AssembleBlock returning a PayloadID.
@@ -191,12 +199,22 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	}
 
 	// CLOSE (seal): block-end over the maintained SD → the output side, zero body re-execution.
+	sealStart := time.Now()
 	res, err := e.validateChainLocked(ctx, oldHash, number)
 	if err != nil {
 		return nil, false, err
 	}
 	if res.ValidationStatus != ExecutionStatusSuccess {
 		return nil, false, fmt.Errorf("assemblePreconfirmed: close status=%v err=%q", res.ValidationStatus, res.ValidationError)
+	}
+	if nTx := len(body.Transactions); nTx > 0 {
+		el := time.Since(sealStart)
+		e.execCost.record(el, res.GasUsed, nTx)
+		uqTime, uqGas := e.execCost.upperQuartile()
+		e.logger.Info("[TPS-seal] close", "block", number, "txs", nTx, "ms", el.Milliseconds(),
+			"txPerSec", int(float64(nTx)/el.Seconds()),
+			"usPerTx", el.Microseconds()/int64(nTx), "gasPerTx", res.GasUsed/uint64(nTx),
+			"uqUsPerTx", uqTime.Microseconds(), "uqGasPerTx", uqGas, "gasUsed", res.GasUsed)
 	}
 
 	// Sealed header = the accumulated in-progress header + the computed output side.
@@ -229,11 +247,20 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 // (zero re-execution) and stores it keyed by the block's PARENT hash, so the CL's GetAssembledBlock (proposer)
 // — riding behind — just RETRIEVES the already-sealed block instead of re-sealing it. Returns the sealed
 // block (or nil if there is no matching preconfirmed flashblock for these params). Acquires the semaphore.
-func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, error) {
+func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
 	defer e.semaphore.Release(1)
+
+	// RECONCILE (was sprawled driver-side, reading FlashblockState): ensure a pre-executed in-progress block for
+	// params.ParentHash exists whose stamped proposer attrs match params, so assemblePreconfirmed can seal it.
+	// forceEmpty (getPayload cut-off) drops the in-flight body and seals an EMPTY block instead.
+	if err := e.reconcileForAssembleLocked(ctx, params, forceEmpty); err != nil {
+		return nil, err
+	}
+
+	// ASSEMBLE (seal N): block-end over the maintained SD → the output side, ZERO body re-execution.
 	br, ok, err := e.assemblePreconfirmed(ctx, params)
 	if err != nil || !ok || br == nil {
 		return nil, err
@@ -241,18 +268,181 @@ func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameter
 	e.pendingBoundaryMu.Lock()
 	e.preconfirmedByParent[params.ParentHash] = br
 	e.pendingBoundaryMu.Unlock()
-	e.logger.Info("[execmodule] boundary sealed at marker", "number", br.Block.NumberU64(), "hash", br.Block.Hash(), "parent", params.ParentHash)
+	sealedHdr := br.Block.Header()
+	// Exec OWNS the frontier: the block just sealed is the head the successor flashblock chains onto.
+	e.frontierHeader.Store(sealedHdr)
+
+	// OPEN N+1 ATOMICALLY on the new frontier ([[dag_block_production_atomic_marker]]): STILL holding the exec
+	// semaphore, open the empty successor parented to N's STILL-LIVE sealed SD, so no FCU can tear down N's SD
+	// between the close and the open (the two-acquisition gap that made this racy when the driver stitched it).
+	// Provisional attrs (from params + the sealed header); N+1's OWN marker re-stamps them via the reconcile.
+	nextInputs := e.flashInputsForChild(sealedHdr, params, sealedHdr.Time+1)
+	if _, _, vr, oerr := e.preExecuteFlashblockLocked(ctx, nextInputs, nil); oerr != nil || vr.ValidationStatus != ExecutionStatusSuccess {
+		e.logger.Warn("[execmodule] boundary open N+1 failed", "err", oerr, "status", vr.ValidationStatus, "num", nextInputs.Number)
+	}
+
+	e.logger.Info("[execmodule] boundary assembled (sealed N, opened N+1)",
+		"number", sealedHdr.Number.Uint64(), "hash", sealedHdr.Hash(), "parent", params.ParentHash, "openedNext", nextInputs.Number)
 	return br, nil
 }
 
-// AbandonExtendingFork discards the active pre-executed in-progress block so the next PreExecute re-opens it
-// from a fresh SD (re-running block-start under corrected attrs). See ForkValidator.AbandonExtendingFork and
-// the ExecutionModule interface. Takes the exec semaphore to serialise against PreExecute/assemble.
-func (e *ExecModule) AbandonExtendingFork() {
-	if err := e.semaphore.Acquire(context.Background(), 1); err != nil {
+// reconcileForAssembleLocked ensures there is a pre-executed in-progress block for params whose stamped proposer
+// attrs match params, so assemblePreconfirmed can seal it. It subsumes the driver's former FlashblockState-driven
+// empty/stale-attrs handling: nothing pre-executed yet ⇒ open empty under params; an empty block eager-opened
+// under provisional attrs at the previous seal whose attrs diverge from THESE CL attrs ⇒ abandon + reopen fresh
+// (so block-start re-runs under the CL attrs and the sealed root matches a follower's re-execution). Caller MUST
+// hold e.semaphore.
+func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *builder.Parameters, forceEmpty bool) error {
+	e.flash.mu.Lock()
+	recorded := e.flash.valid
+	empty := len(e.flash.body) == 0
+	built := e.flash.built
+	e.flash.mu.Unlock()
+
+	openUnderParams := func() error {
+		parent := e.frontierOrHead(ctx)
+		if parent == nil {
+			return fmt.Errorf("reconcileForAssembleLocked: no parent header to open on")
+		}
+		in := e.flashInputsForChild(parent, params, params.Timestamp)
+		_, _, vr, err := e.preExecuteFlashblockLocked(ctx, in, nil)
+		if err != nil {
+			return err
+		}
+		if vr.ValidationStatus != ExecutionStatusSuccess {
+			return fmt.Errorf("reconcileForAssembleLocked: open empty status=%v", vr.ValidationStatus)
+		}
+		return nil
+	}
+
+	// forceEmpty (getPayload cut-off path): the in-progress block could not be produced in time, so DROP whatever
+	// is accumulated and seal an EMPTY block for params instead — abandon the in-flight fork (if any) and re-open
+	// it empty. The dropped txs stay in the pool and re-feed later.
+	if forceEmpty {
+		if recorded {
+			e.abandonExtendingForkLocked()
+		}
+		return openUnderParams()
+	}
+
+	switch {
+	case !recorded:
+		return openUnderParams()
+	case empty && !builtAttrsMatchParams(built, params):
+		e.abandonExtendingForkLocked()
+		return openUnderParams()
+	default:
+		return nil
+	}
+}
+
+// flashInputsForChild builds the FlashblockInputs for the child of parent, taking proposer attrs from params and
+// the supplied timestamp; Number/GasLimit/BaseFee derive from the parent header (base fee via the consensus
+// EIP-1559 rule so a follower's re-execution computes the identical header).
+func (e *ExecModule) flashInputsForChild(parent *types.Header, params *builder.Parameters, timestamp uint64) FlashblockInputs {
+	var pbbr common.Hash
+	if params.ParentBeaconBlockRoot != nil {
+		pbbr = *params.ParentBeaconBlockRoot
+	}
+	return FlashblockInputs{
+		Parent:                parent.Hash(),
+		Number:                parent.Number.Uint64() + 1,
+		GasLimit:              parent.GasLimit,
+		BaseFee:               *misc.CalcBaseFee(e.config, parent),
+		Timestamp:             timestamp,
+		PrevRandao:            params.PrevRandao,
+		FeeRecipient:          params.SuggestedFeeRecipient,
+		ParentBeaconBlockRoot: pbbr,
+		Withdrawals:           params.Withdrawals,
+	}
+}
+
+// frontierOrHead returns the exec-owned run-ahead frontier, or the canonical current header when nothing has been
+// sealed yet (bootstrap). Caller MUST hold e.semaphore (CurrentHeader itself does not take it).
+func (e *ExecModule) frontierOrHead(ctx context.Context) *types.Header {
+	if fr := e.frontierHeader.Load(); fr != nil {
+		return fr
+	}
+	head, err := e.CurrentHeader(ctx)
+	if err != nil {
+		return nil
+	}
+	return head
+}
+
+// ExecCostUpperQuartile returns the running window's 75th-percentile per-tx execution TIME and per-tx GAS. The
+// driver reads it to size the next batch it feeds into exec — time bound ≈ assembleTimeout/uqTime, with per-tx gas
+// as the execution-measured cross-check for the txpool gas estimate. Returns (0,0) until the window has samples.
+func (e *ExecModule) ExecCostUpperQuartile() (time.Duration, uint64) {
+	if e.execCost == nil {
+		return 0, 0
+	}
+	return e.execCost.upperQuartile()
+}
+
+// builtAttrsMatchParams reports whether an in-progress block's stamped inputs carry the same proposer attrs as
+// params (Withdrawals are checked authoritatively by assemblePreconfirmed's WithdrawalsHash comparison).
+func builtAttrsMatchParams(built FlashblockInputs, params *builder.Parameters) bool {
+	if built.Timestamp != params.Timestamp || built.PrevRandao != params.PrevRandao || built.FeeRecipient != params.SuggestedFeeRecipient {
+		return false
+	}
+	var pbbr common.Hash
+	if params.ParentBeaconBlockRoot != nil {
+		pbbr = *params.ParentBeaconBlockRoot
+	}
+	return built.ParentBeaconBlockRoot == pbbr
+}
+
+// FrontierHeader returns the exec-owned run-ahead frontier head — the last sealed block a newly-opening
+// flashblock chains onto — or nil before the first seal. LOCK-FREE (atomic): safe to call while holding the
+// exec semaphore, which AssembleBlock's anchor path does. This is the ownership move that removes the driver's
+// ibMu-guarded d.frontier cache and the ibMu↔exec-semaphore deadlock.
+func (e *ExecModule) FrontierHeader() *types.Header { return e.frontierHeader.Load() }
+
+// reanchorFrontierForBoundaryLocked re-anchors the run-ahead frontier when the CL's FCU (AssembleBlock's params)
+// builds on a DIFFERENT parent than the in-progress flashblock was opened on — Caplin accepted a new head
+// (catch-up/reorg). It drops the stale in-progress fork and re-anchors the frontier to that accepted head, so the
+// boundary opens FRESH on it. Abandoning is what makes a SAME-HEIGHT reorg safe (PreExecuteFlashblock only auto-
+// resets its body on a NUMBER change). No in-progress block, or the CL still on the same parent ⇒ no-op — this
+// must NOT fire during normal run-ahead (frontier legitimately ahead of the accepted head). Caller (AssembleBlock)
+// holds e.semaphore; this is the exec-internal replacement for the driver's former AnchorFrontier callback.
+func (e *ExecModule) reanchorFrontierForBoundaryLocked(ctx context.Context, params *builder.Parameters) {
+	e.flash.mu.Lock()
+	valid := e.flash.valid
+	inProgressParent := e.flash.built.Parent
+	e.flash.mu.Unlock()
+	if !valid || inProgressParent == params.ParentHash {
 		return
 	}
-	defer e.semaphore.Release(1)
+	if fr := e.frontierHeader.Load(); fr == nil || fr.Hash() != params.ParentHash {
+		if hdr := e.headerByHashLocked(ctx, params.ParentHash); hdr != nil {
+			e.frontierHeader.Store(hdr)
+		}
+	}
+	e.abandonExtendingForkLocked()
+}
+
+// headerByHashLocked resolves a header by hash from the DB (canonical/sealed blocks). Returns nil when it can't
+// be resolved (not yet persisted). Caller holds e.semaphore.
+func (e *ExecModule) headerByHashLocked(ctx context.Context, hash common.Hash) *types.Header {
+	tx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil
+	}
+	defer tx.Rollback()
+	h, err := e.blockReader.HeaderByHash(ctx, tx, hash)
+	if err != nil {
+		return nil
+	}
+	return h
+}
+
+// abandonExtendingForkLocked discards the active pre-executed in-progress block so the next PreExecute re-opens
+// it from a fresh SD (re-running block-start under corrected attrs). Caller MUST hold e.semaphore. It is exec-
+// INTERNAL — the reconcile (SealBoundary) and the boundary re-anchor (AssembleBlock) are its only callers, both
+// already under the semaphore; there is no public AbandonExtendingFork on the interface (a semaphore-free public
+// wrapper would be the anti-pattern this refactor removed). See ForkValidator.AbandonExtendingFork.
+func (e *ExecModule) abandonExtendingForkLocked() {
 	e.forkValidator.AbandonExtendingFork()
 	// The driver re-opens the SAME block number FRESH after an abandon, so drop the maintained flashblock body
 	// too — otherwise PreExecuteFlashblock (which only auto-resets on a NEW number) would keep the stale body.

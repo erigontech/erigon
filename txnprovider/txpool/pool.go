@@ -918,6 +918,37 @@ func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uin
 	return onTime, err
 }
 
+// PendingHashes returns the hashes of the currently-includable (pending sub-pool) txns, best-first,
+// up to n. It is the CHEAP summary a hash-only consumer (the DAG round feed) needs: a pure in-memory
+// walk of the pre-sorted pending best-set collecting TxnSlot.IDHash — NO poolDB read and NO RLP
+// materialization (unlike PeekBest/Pending, which getRlpLocked + return full RLP for every txn). Skips
+// over-limit-gas txns, mirroring best(). This lets the DAG feed avoid n DB-reads + n RLP decodes per
+// round — the per-feed O(n) that compounds to O(n²) under a growing backlog and froze round production.
+// The returned bool is false when the pool lock could not be acquired WITHOUT BLOCKING — see the
+// non-blocking rationale below.
+func (p *TxPool) PendingHashes(n int) ([][32]byte, bool) {
+	// NON-BLOCKING (TryLock, not Lock): the DAG round loop calls this INLINE with consensus block
+	// production, so it MUST NOT block on p.lock. A concurrent eth_sendRawTransaction flood holds the lock
+	// for writes (Add); a blocking read here would stall consensus round production for the entire flood —
+	// consensus must be INDEPENDENT of the RPC admission path. If the lock is contended, return ok=false and
+	// let the caller advance the round on the txns it already has; the next feed refreshes once the pool frees.
+	if !p.lock.TryLock() {
+		return nil, false
+	}
+	defer p.lock.Unlock()
+	best := p.pending.best
+	blockGasLimit := p.blockGasLimit.Load()
+	out := make([][32]byte, 0, min(n, len(best.ms)))
+	for i := 0; i < len(best.ms) && len(out) < n; i++ {
+		mt := best.ms[i]
+		if mt.TxnSlot.GetGas() >= blockGasLimit {
+			continue
+		}
+		out = append(out, mt.TxnSlot.IDHash)
+	}
+	return out, true
+}
+
 func (p *TxPool) CountContent() (int, int, int) {
 	p.lock.Lock()
 	defer p.lock.Unlock()

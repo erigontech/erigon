@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -249,6 +250,19 @@ type ExecModule struct {
 	// execution half maintains the filtered block body here so the driver only streams unfiltered txs.
 	flash flashBodyState
 
+	// frontierHeader is the exec-owned run-ahead FRONTIER head — the sealed block a newly-opening flashblock
+	// chains onto (set by SealBoundary at the marker close; also settable when the CL accepts a head). It is
+	// EXECUTION state (a sealed header exec produced), so it lives here, not mirrored under a driver lock. Read
+	// LOCK-FREE via FrontierHeader(): AssembleBlock holds the exec semaphore and its anchor path reads this, so
+	// it must NOT touch the semaphore or a lock the semaphore-holder already contends on (the ibMu↔semaphore
+	// deadlock this ownership move removes). atomic.Pointer gives a consistent, lock-free snapshot.
+	frontierHeader atomic.Pointer[types.Header]
+
+	// execCost is the sliding-window per-tx execution-cost tracker (seal time / txs). The driver reads its
+	// upper-quartile to bound how many txs it feeds into a block, so a block always seals within the CL's assemble
+	// timeout (never miss the boundary / strand work). Lazily created on first use so a nil field is safe.
+	execCost *execCostWindow
+
 	// Changes accumulator
 	hook  *stageloop.Hook
 	accum *Accumulation
@@ -317,6 +331,7 @@ func NewExecModule(
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
+		execCost:                newExecCostWindow(64),
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,

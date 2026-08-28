@@ -64,6 +64,13 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	}
 	defer e.semaphore.Release(1)
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
+	return e.insertBlocksLocked(ctx, blocks)
+}
+
+// insertBlocksLocked is InsertBlocks' body with the caller ALREADY holding e.semaphore. It is the reusable core
+// so the atomic assemble (SealBoundary sealing N then opening N+1) can insert the successor block under its
+// single semaphore hold — re-acquiring here would deadlock. InsertBlocks acquires the semaphore and calls this.
+func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	// Do NOT clear the extending-fork state when this insert is a flashblock UPDATE — a re-insert of
 	// the in-progress block number with a grown body. Clearing would close the accumulated PreExecute
 	// SharedDomains, forcing the next PreExecute to re-execute the whole body from scratch. A normal

@@ -62,7 +62,12 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 	}
 	defer e.semaphore.Release(1)
+	return e.preExecuteLocked(ctx, blockHash, blockNumber)
+}
 
+// preExecuteLocked is PreExecute's body with the caller ALREADY holding e.semaphore. PreExecute TryAcquires and
+// calls this; the atomic assemble path (opening the successor flashblock inside SealBoundary) calls it directly.
+func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	e.currentContext.ResetPendingUpdates()
 
 	var (

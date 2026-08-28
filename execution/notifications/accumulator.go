@@ -73,6 +73,24 @@ func (a *Accumulator) SetStateID(stateID uint64) {
 	a.plainStateID = stateID
 }
 
+// EnsureChangeTxs guarantees the change for block `height` carries `txs`. If a change for that height
+// already exists with no txs (created empty by a run that didn't have the body), it is populated in place;
+// otherwise this is a no-op. Used by the FCU flush to attach the flashblock body — read from the same tx the
+// canonical hash comes from — onto a change that was created empty ("nothing populated it").
+func (a *Accumulator) EnsureChangeTxs(height uint64, txs [][]byte) {
+	if len(txs) == 0 {
+		return
+	}
+	for i := range a.changes {
+		if a.changes[i].BlockHeight == height && len(a.changes[i].Txs) == 0 {
+			a.changes[i].Txs = make([][]byte, len(txs))
+			for j := range txs {
+				a.changes[i].Txs[j] = common.Copy(txs[j])
+			}
+		}
+	}
+}
+
 // StartChange begins accumulation of changes for a new block.
 func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 	a.changes = append(a.changes, StateChange{

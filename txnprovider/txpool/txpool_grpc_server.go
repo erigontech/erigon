@@ -171,6 +171,19 @@ func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpoolproto.TxHashes) 
 	return nil, errors.New("unimplemented")
 }
 
+// PendingHashes exposes the txpool's cheap in-memory pending-hash summary to in-process consumers (the
+// DAG round feed) — hashes only, no poolDB read and no RLP, unlike Pending. Not part of the gRPC
+// TxpoolServer surface; callers reach it by type-asserting the in-proc server. Returns nil if the
+// underlying pool doesn't provide it (e.g. a disabled/mock pool).
+func (s *GrpcServer) PendingHashes(n int) ([][32]byte, bool) {
+	if ph, ok := s.txPool.(interface {
+		PendingHashes(int) ([][32]byte, bool)
+	}); ok {
+		return ph.PendingHashes(n)
+	}
+	return nil, false
+}
+
 func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpoolproto.AddReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {

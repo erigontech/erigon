@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execobserver"
@@ -138,6 +139,33 @@ func (d *Dispatcher) Dispatch(
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if accumulator != nil && currentHeader != nil {
+		// FCU flush: the txpool must learn the FCU'd block's txs so OnNewBlock removes mined txs and advances
+		// canonical nonces (L1 keystone). Read the FCU'd block (finishProgressAfter — the block just committed,
+		// which sits BEHIND any ahead change the accumulator may hold) by its CANONICAL hash from the overlay;
+		// that is where the real sealed body lives. An ahead change's own block is not canonical yet, so reading
+		// by its hash returns an empty body — which is why the change was sent empty. Ensure the change for the
+		// FCU'd block carries these txs: populate an existing empty change, or create the change if none exists.
+		fcuHash, _ := rawdb.ReadCanonicalHash(tx, finishProgressAfter)
+		if fcuHash != (common.Hash{}) {
+			if body, _ := rawdb.ReadBodyWithTransactions(tx, fcuHash, finishProgressAfter); body != nil && len(body.Transactions) > 0 {
+				if rawTxs, merr := types.MarshalTransactionsBinary(body.Transactions); merr == nil {
+					has := false
+					for _, ch := range accumulator.Changes() {
+						if ch.BlockHeight == finishProgressAfter {
+							has = true
+							break
+						}
+					}
+					if has {
+						accumulator.EnsureChangeTxs(finishProgressAfter, rawTxs)
+					} else if fcuHeader := rawdb.ReadHeader(tx, fcuHash, finishProgressAfter); fcuHeader != nil {
+						accumulator.StartChange(fcuHeader, rawTxs, false)
+					}
+				}
+			}
+		}
+		// Genuinely empty flush (no change for the current head) — keep the empty backfill so consumers still
+		// see the head advance. Standard flow: exec already populated the change, so this is a no-op.
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
 			accumulator.StartChange(currentHeader, nil, false)
 		}

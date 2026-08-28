@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -197,14 +198,33 @@ type ExecutionModule interface {
 	// commits in consensus to seal the pre-executed in-progress flashblock (zero re-execution) and store
 	// it by parent hash, so GetAssembledBlock (proposer) / newPayload (follower) retrieve it without
 	// re-sealing. Runs on every node at the marker. See execmodule.SealBoundary.
-	SealBoundary(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, error)
+	SealBoundary(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error)
 
-	// AbandonExtendingFork discards the ACTIVE pre-executed in-progress block (closes+clears the extending
-	// fork SD; parked predecessor gens are untouched) so the next PreExecute re-opens it from a fresh SD.
-	// The DAG producer uses it to correct a PROVISIONALLY eager-opened empty successor whose placeholder
-	// block-start attrs (ParentBeaconBlockRoot/PrevRandao/FeeRecipient) must be re-run under the real CL
-	// attrs — a flashblock re-run alone would REUSE the SD and skip block-start. See execmodule.AbandonExtendingFork.
-	AbandonExtendingFork()
+	// FrontierHeader returns the exec-owned run-ahead FRONTIER head — the last sealed block a newly-opening
+	// flashblock chains onto — or nil before the first seal. This is a LOCK-FREE ATOMIC READ (not a semaphore
+	// operation), the one legitimate cross-boundary read the driver needs for its consensus open-decision — like
+	// CurrentHeader. Exec sets it internally (SealBoundary advances it; AssembleBlock re-anchors it).
+	FrontierHeader() *types.Header
+
+	// ExecCostUpperQuartile returns the running window's 75th-percentile per-tx execution TIME and GAS — the
+	// driver sizes the next batch it feeds into exec from it (time bound; gas cross-check for the txpool estimate).
+	ExecCostUpperQuartile() (time.Duration, uint64)
+
+	// AssembleInProgress seals the CURRENT in-progress flashblock (block-end over its maintained SD, zero body
+	// re-execution) and returns the sealed header WITHOUT advancing the frontier or opening a successor — the
+	// non-mutating seal a follower uses to verify a delivered newPayload. (nil,false) ⇒ no valid in-progress
+	// flashblock. This is the verb that replaced the driver reading in-progress exec state to seal it itself.
+	AssembleInProgress(ctx context.Context) (*types.Header, bool, error)
+
+	// NOTE: the in-progress flashblock INSPECTION hooks (InProgressRoot / InProgressReceiptCount /
+	// InProgressBlock) are deliberately NOT on this interface. They do not take the exec semaphore (they read
+	// flash.mu-guarded state), so they are not real exec operations — they are concrete-only test/inspection
+	// methods on *ExecModule. Tests reach them by asserting the concrete type; production code never needs them.
+
+	// NOTE: discarding a stale in-progress flashblock (the former AbandonExtendingFork) is exec-INTERNAL now —
+	// its only triggers, the SealBoundary reconcile and the AssembleBlock boundary re-anchor, run under the exec
+	// semaphore and call abandonExtendingForkLocked directly. There is no public wrapper (it would be a
+	// semaphore-free mutation on this interface — the anti-pattern this refactor removed).
 
 	// --- Header / body queries --------------------------------------------
 

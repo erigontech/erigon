@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -34,16 +35,22 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 
-	// this has been moved to prior to adding of transactions to capture the
-	// pre-state of the db - which is used for logging in the messages below
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	defer tx.Rollback()
-
-	cc, err := api.chainConfig(ctx, tx)
+	// Read the chain config under a SHORT-LIVED RoTx and RELEASE it immediately — do NOT hold a core-DB
+	// RoTx across api.txPool.Add below. Add opens its OWN core-DB RoTx (AddLocalTxns -> chainDB().BeginTemporalRo),
+	// and the core DB's RoTx limiter is small (roTxLimit, default 32). Holding RoTx#1 here while Add needs a
+	// nested RoTx on the SAME db deadlocks under concurrent submission: once ~cap requests each hold their
+	// outer RoTx, every slot is consumed and no request can acquire its nested one, so none ever releases —
+	// the pool is permanently full and everything that needs a core-DB RoTx (incl. block production) starves.
+	// (Observed: a concurrent eth_sendRawTransaction flood wedged the node — 32 handlers holding RoTx#1 while
+	// blocked acquiring the nested RoTx, 300+ queued behind them, consensus halted.)
+	cc, err := func() (*chain.Config, error) {
+		tx, err := api.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+		return api.chainConfig(ctx, tx)
+	}()
 	if err != nil {
 		return common.Hash{}, err
 	}
