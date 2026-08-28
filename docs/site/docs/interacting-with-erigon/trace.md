@@ -121,6 +121,11 @@ balances:
   non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
   while still crediting the recipient. Value appears from nowhere, so a trace can show
   what looks like balance creation.
+* **On Gnosis and Chiado, the burn contract is credited too.** Where the chain
+  configures a `burntContract` — Gnosis and Chiado do, most chains do not — a London
+  transaction credits it `gasUsed * baseFee`, plus the blob fee on Aura from Prague. The
+  sender was never debited, so this is a second source of apparent balance creation in
+  `stateDiff` on those chains. Chains that simply burn the base fee are unaffected.
 :::
 
 Whether one transaction's altered state is visible to the next depends on the execution
