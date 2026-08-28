@@ -2159,7 +2159,7 @@ func TestMergerMatchesReferenceSort(t *testing.T) {
 	m := &buf.mrg
 	require.Greater(t, len(m.heap), 8, "a heap of a few elements proves little")
 	for i := 1; i < len(m.heap); i++ {
-		require.False(t, less(m.heap[i], m.heap[(i-1)/2]),
+		require.False(t, m.less(m.heap[i], m.heap[(i-1)/2]),
 			"heap[%d] sorts before its parent %d", i, (i-1)/2)
 	}
 
