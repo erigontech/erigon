@@ -48,9 +48,12 @@ var (
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
-	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
-	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
-	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
+	MdbxLockInRam = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxNoSync    = EnvBool("MDBX_NO_FSYNC", false)
+	// Chaindata is the one DB that hands the readahead choice to libmdbx's
+	// size-vs-RAM heuristic; set this to keep MDBX_NORDAHEAD like every other DB.
+	MdbxChaindataNoReadahead = EnvBool("MDBX_CHAINDATA_NO_READAHEAD", false)
+	MdbxNoSyncUnsafe         = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
