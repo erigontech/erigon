@@ -133,11 +133,12 @@ func TestPBinBranchDecodeAcceptsDescentDepthAndDigestCache(t *testing.T) {
 func TestPBinBranchCodecOmitsStoragePrefix(t *testing.T) {
 	t.Parallel()
 
-	keys := pbinDigestCache{sum: pbinBlake3Hash}
 	for _, depth := range []int16{0, 17, 271, 528} {
 		t.Run(fmt.Sprintf("depth %d", depth), func(t *testing.T) {
 			t.Parallel()
 
+			// pbinDigestCache memoizes into its own fields, so a parallel subtest needs its own.
+			keys := pbinDigestCache{sum: pbinBlake3Hash}
 			storage := pbinTestLeafCell(0x5A, 0)
 			storageKey := pbinPathFromBytes(keys.storageKey(storage.storageAddr[:length.Addr], storage.storageAddr[length.Addr:]))
 			storage.prefix = storageKey.slice(depth, storageKey.bitLen)
