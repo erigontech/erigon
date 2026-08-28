@@ -197,6 +197,24 @@ type cellEncodeData struct {
 	stateHashLen   int16
 }
 
+var ErrStorageLeafWithoutAccount = errors.New("commitment: storage leaf has no enclosing account")
+
+func (c *cell) inheritStorageAddress(account *cell) error {
+	if c.accountAddrLen != 0 || c.storageAddrLen != length.Hash {
+		return nil
+	}
+	if account == nil || account.accountAddrLen != length.Addr {
+		return ErrStorageLeafWithoutAccount
+	}
+
+	var slot [length.Hash]byte
+	copy(slot[:], c.storageAddr[:length.Hash])
+	copy(c.storageAddr[:length.Addr], account.accountAddr[:length.Addr])
+	copy(c.storageAddr[length.Addr:], slot[:])
+	c.storageAddrLen = length.Addr + length.Hash
+	return nil
+}
+
 func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	var d cellEncodeData
 	d.extLen = c.extLen

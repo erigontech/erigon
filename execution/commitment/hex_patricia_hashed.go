@@ -1430,6 +1430,11 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		if childDepth > 64 {
 			c.accountAddrLen = 0
 		}
+		if hph.cfg.EdgeRecords {
+			if err := c.inheritStorageAddress(hph.enclosingAccountCell()); err != nil {
+				return nil, fmt.Errorf("[witness] storage leaf at prefix %x: %w", branchPrefix, err)
+			}
+		}
 		if err := c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
@@ -1545,10 +1550,16 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 	}
 	hph.touchMap[row] = maps.TouchMap
 	hph.afterMap[row] = maps.AfterMap
+	account := hph.enclosingAccountCell()
 	for bitset := maps.Bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		cell := &hph.grid[row][nibble]
+		if hph.cfg.EdgeRecords {
+			if err := cell.inheritStorageAddress(account); err != nil {
+				return fmt.Errorf("storage leaf at depth %d nibble %x: %w", depth, nibble, err)
+			}
+		}
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
@@ -1556,6 +1567,23 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 			return err
 		}
 		bitset ^= bit
+	}
+	return nil
+}
+
+func (hph *HexPatriciaHashed) enclosingAccountCell() *cell {
+	if hph.root.accountAddrLen == length.Addr {
+		return &hph.root
+	}
+	for row := 0; row < hph.activeRows; row++ {
+		pathPos := hph.depths[row] - 1
+		if pathPos < 0 || pathPos >= hph.currentKeyLen {
+			continue
+		}
+		ancestor := &hph.grid[row][hph.currentKey[pathPos]]
+		if ancestor.accountAddrLen == length.Addr {
+			return ancestor
+		}
 	}
 	return nil
 }

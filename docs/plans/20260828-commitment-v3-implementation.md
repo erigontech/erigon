@@ -358,17 +358,17 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `execution/commitment/hex_patricia_hashed.go`
 - Create: `execution/commitment/hoist_test.go`
 
-- [ ] stop persisting the 20-byte account address in storage leaf records; store the 32-byte slot only
-- [ ] make storage leaves inherit the plain address from the enclosing account cell during descent,
+- [x] stop persisting the 20-byte account address in storage leaf records; store the 32-byte slot only
+- [x] make storage leaves inherit the plain address from the enclosing account cell during descent,
       which is already in hand because every entry into the trie starts at the root
-- [ ] ensure the round-trip through `EncodeCurrentState`/`SetState` still holds (invariant 8) given a
+- [x] ensure the round-trip through `EncodeCurrentState`/`SetState` still holds (invariant 8) given a
       leaf now depends on its enclosing account cell being loaded first
-- [ ] write tests over accounts whose storage subtree roots at varying depths, including one that
+- [x] write tests over accounts whose storage subtree roots at varying depths, including one that
       diverges below depth 64 so no depth-64 record exists
-- [ ] write a test asserting the hoist is not applied to account leaves
-- [ ] write a test asserting a storage leaf record decoded without its enclosing account cell fails
+- [x] write a test asserting the hoist is not applied to account leaves
+- [x] write a test asserting a storage leaf record decoded without its enclosing account cell fails
       explicitly rather than yielding a wrong plain key
-- [ ] run `go test ./execution/commitment/...` — must pass before task 13
+- [x] run `go test ./execution/commitment/...` — must pass before task 13
 
 ### Task 13: Deferred and concurrent path under edge keys
 
