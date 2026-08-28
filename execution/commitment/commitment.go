@@ -182,6 +182,7 @@ type cellEncodeData struct {
 	storageAddr [length.Addr + length.Hash]byte
 	hash        [32]byte
 	stateHash   [32]byte
+	storageMask uint16
 
 	extLen         int16
 	accountAddrLen int16
@@ -197,6 +198,7 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	d.storageAddrLen = c.storageAddrLen
 	d.hashLen = c.hashLen
 	d.stateHashLen = c.stateHashLen
+	d.storageMask = c.storageMask
 	copy(d.extension[:], c.extension[:c.extLen])
 	copy(d.accountAddr[:], c.accountAddr[:c.accountAddrLen])
 	copy(d.storageAddr[:], c.storageAddr[:c.storageAddrLen])

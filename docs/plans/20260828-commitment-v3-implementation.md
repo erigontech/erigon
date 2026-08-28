@@ -168,22 +168,22 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Create: `execution/commitment/record.go`
 - Create: `execution/commitment/record_test.go`
 
-- [ ] add the `flags` bit constants and `EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte`
+- [x] add the `flags` bit constants and `EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte`
       emitting `[flags][mask:2][hash:32][ext:tail]` with the extension packed two nibbles per byte and
       its parity in bit 1
-- [ ] add `EncodeLeafChild(cell *cellEncodeData) []byte` covering storage leaf, account leaf and
+- [x] add `EncodeLeafChild(cell *cellEncodeData) []byte` covering storage leaf, account leaf and
       account+storage, with bit 3 gating `[sroot:32][mask:2]` so an EOA carries no empty storage root
-- [ ] add `DecodeRecordInto(rec []byte, c *cell) (mask uint16, err error)` filling one grid cell, and
+- [x] add `DecodeRecordInto(rec []byte, c *cell) (mask uint16, err error)` filling one grid cell, and
       make it reject a record whose length disagrees with its flags
-- [ ] set bit 4 from `stateHashLen == 32` so a `canEmbed` leaf is encoded without a hash and the
+- [x] set bit 4 from `stateHashLen == 32` so a `canEmbed` leaf is encoded without a hash and the
       reader knows to reload state
-- [ ] write round-trip tests over each of the four shapes, with and without an extension, at odd and
+- [x] write round-trip tests over each of the four shapes, with and without an extension, at odd and
       even extension lengths
-- [ ] write a property test: a grid row rebuilt from a node's records equals what `DecodeBranchInto`
+- [x] write a property test: a grid row rebuilt from a node's records equals what `DecodeBranchInto`
       produces for the same logical node from the current row format
-- [ ] write tests for malformed input: truncated tail, flags claiming storage with no room for it,
+- [x] write tests for malformed input: truncated tail, flags claiming storage with no room for it,
       extension parity disagreeing with the tail length
-- [ ] run `go test ./execution/commitment/...` — must pass before task 4
+- [x] run `go test ./execution/commitment/...` — must pass before task 4
 
 ### Task 4: Version plumbing for commitment.kv v3.0
 

@@ -309,12 +309,13 @@ type cell struct {
 	storageAddr     [length.Addr + length.Hash]byte // storage plain key
 	hash            common.Hash                     // cell hash
 	stateHash       common.Hash
-	hashedExtLen    int16     // length of the hashed extension, if any
-	extLen          int16     // length of the extension, if any
-	accountAddrLen  int16     // length of account plain key
-	storageAddrLen  int16     // length of the storage plain key
-	hashLen         int16     // Length of the hash (or embedded)
-	stateHashLen    int16     // stateHash length, if > 0 can reuse
+	hashedExtLen    int16 // length of the hashed extension, if any
+	extLen          int16 // length of the extension, if any
+	accountAddrLen  int16 // length of account plain key
+	storageAddrLen  int16 // length of the storage plain key
+	hashLen         int16 // Length of the hash (or embedded)
+	stateHashLen    int16 // stateHash length, if > 0 can reuse
+	storageMask     uint16
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
 }
@@ -392,6 +393,7 @@ func (cell *cell) reset() {
 	cell.extLen = 0
 	cell.hashLen = 0
 	cell.stateHashLen = 0
+	cell.storageMask = 0
 	cell.loaded = cellLoadNone
 	clear(cell.hashedExtension[:])
 	clear(cell.extension[:])
@@ -496,6 +498,7 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 	if upCell.hashLen > 0 {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
+	cell.storageMask = upCell.storageMask
 	cell.loaded = upCell.loaded
 }
 
@@ -545,6 +548,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	if lowCell.hashLen > 0 {
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
+	cell.storageMask = lowCell.storageMask
 	if lowDepth > 64 {
 		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
 	} else {
