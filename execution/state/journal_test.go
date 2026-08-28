@@ -117,3 +117,29 @@ func BenchmarkJournalStorageChange(b *testing.B) {
 		}
 	}
 }
+
+// Reset reslices entries to zero, so anything left in the backing array stays
+// reachable for as long as the journal is reused — and a kindCode entry's extra
+// holds a whole contract's bytecode. The journal outlives the transaction, so
+// that is a block's worth of dead code pinned by a pooled object.
+func TestJournalResetDropsEntriesItReslicesPast(t *testing.T) {
+	j := newJournal()
+	t.Cleanup(j.release)
+
+	addr := accounts.InternAddress(common.Address{1})
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	j.codeChange(addr, make([]byte, 4096), accounts.EmptyCodeHash, false)
+	if len(j.entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(j.entries))
+	}
+
+	j.Reset()
+
+	tail := j.entries[:cap(j.entries)]
+	for i, e := range tail {
+		if e.extra != nil {
+			t.Fatalf("entry %d still pins a journalExtra after Reset (prevcode %d bytes)",
+				i, len(e.extra.prevcode))
+		}
+	}
+}

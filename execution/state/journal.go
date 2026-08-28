@@ -108,10 +108,10 @@ func newJournal() *journal {
 // release returns the journal to the pool after resetting it.
 func (j *journal) release() {
 	j.Reset()
-	clear(j.entries[:cap(j.entries)]) // [:cap] because Reset already resliced to zero
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
+	clear(j.entries[:cap(j.entries)])
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
