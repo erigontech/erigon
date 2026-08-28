@@ -122,6 +122,10 @@ type PatriciaContext interface {
 	Storage(plainKey []byte) (*Update, error)
 }
 
+type BranchMaskReader interface {
+	BranchWithMask(prefix []byte, mask uint16, maskKnown bool) (data []byte, step kv.Step, childMasks [16]uint16, childMasksKnown uint16, err error)
+}
+
 type TrieVariant string
 
 const (

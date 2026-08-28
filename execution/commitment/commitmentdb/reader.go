@@ -22,6 +22,40 @@ type StateReader interface {
 	CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader
 }
 
+type CommitmentRecordsReader interface {
+	ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
+}
+
+type commitmentRecordSource interface {
+	ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error)
+}
+
+type commitmentFileRecordSource interface {
+	ReadCommitmentRecordsFromFiles(nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error)
+}
+
+func readCommitmentRecordsAt(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error) {
+	if tx == nil {
+		return records, 0, 0, nil
+	}
+	source, ok := tx.AggTx().(commitmentRecordSource)
+	if !ok {
+		return records, 0, 0, nil
+	}
+	return source.ReadCommitmentRecords(tx, nodeKey, mask, maskKnown, maxTxNum)
+}
+
+func readCommitmentRecordsFromFiles(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error) {
+	if tx == nil {
+		return records, 0, 0, nil
+	}
+	source, ok := tx.AggTx().(commitmentFileRecordSource)
+	if !ok {
+		return records, 0, 0, nil
+	}
+	return source.ReadCommitmentRecordsFromFiles(nodeKey, mask, maskKnown, maxTxNum)
+}
+
 type LatestStateReader struct {
 	sharedDomains sd
 	getter        execctxapi.StateGetter
@@ -71,6 +105,10 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
 	return enc, step, nil
+}
+
+func (r *LatestStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	return r.sharedDomains.ReadCommitmentRecords(r.srcTx, nodeKey, mask, maskKnown)
 }
 
 func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {
@@ -123,6 +161,10 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
 }
 
+func (r *HistoryStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	return readCommitmentRecordsAt(r.roTx, nodeKey, mask, maskKnown, r.limitReadAsOfTxNum)
+}
+
 // AsOf reports the history txNum this reader resolves state at.
 func (r *HistoryStateReader) AsOf() uint64 { return r.limitReadAsOfTxNum }
 
@@ -165,6 +207,10 @@ func (r *FilesOnlyStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint6
 		return nil, 0, nil
 	}
 	return enc, kv.Step(endTxNum / stepSize), nil
+}
+
+func (r *FilesOnlyStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	return readCommitmentRecordsFromFiles(r.roTx, nodeKey, mask, maskKnown, r.limitTxNum)
 }
 
 func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -222,6 +268,14 @@ func (r *SplitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
+func (r *SplitStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	reader, ok := r.commitmentReader.(CommitmentRecordsReader)
+	if !ok {
+		return records, 0, 0, nil
+	}
+	return reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+}
+
 func (r *SplitStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.withHistory)
 }
@@ -269,6 +323,10 @@ func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]
 		return nil, 0, fmt.Errorf("txLatestReader(GetLatest) %q: %w", d, err)
 	}
 	return enc, step, nil
+}
+
+func (r *txLatestReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	return readCommitmentRecordsAt(r.tx, nodeKey, mask, maskKnown, ^uint64(0))
 }
 
 // Clone/CloneForWorker keep reading the pinned snapshot: the tx passed by
@@ -377,6 +435,14 @@ func (r *RebuildStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 		return r.commitmentReader.Read(d, plainKey, stepSize)
 	}
 	return r.plainStateReader.Read(d, plainKey, stepSize)
+}
+
+func (r *RebuildStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	reader, ok := r.commitmentReader.(CommitmentRecordsReader)
+	if !ok {
+		return records, 0, 0, nil
+	}
+	return reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
 }
 
 func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {

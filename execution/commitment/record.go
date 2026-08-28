@@ -17,9 +17,11 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -38,6 +40,73 @@ var (
 	ErrMalformedRecord = errors.New("commitment: malformed edge record")
 	ErrEdgeRecord      = errors.New("commitment: edge record is not a legacy branch row")
 )
+
+type BranchRecordRead struct {
+	Data            BranchData
+	ChildMasks      [16]uint16
+	ChildMasksKnown uint16
+}
+
+func SynthesizeBranchRow(mask uint16, maskKnown bool, records [16][]byte, recordsPresent uint16, legacy []byte) (BranchRecordRead, error) {
+	if recordsPresent == 0 && !maskKnown {
+		return BranchRecordRead{Data: bytes.Clone(legacy)}, nil
+	}
+
+	var legacyCells [16]cell
+	var legacyMaps BranchMaps
+	if len(legacy) >= 4 {
+		var err error
+		legacyMaps, err = DecodeBranchInto(legacy[2:], false, &legacyCells)
+		if err != nil {
+			return BranchRecordRead{}, err
+		}
+	} else if len(legacy) > 0 && recordsPresent == 0 {
+		return BranchRecordRead{Data: bytes.Clone(legacy)}, nil
+	}
+
+	effectiveMask := mask
+	if !maskKnown {
+		effectiveMask = recordsPresent | legacyMaps.AfterMap
+	}
+	if effectiveMask == 0 {
+		return BranchRecordRead{}, nil
+	}
+
+	var cells [16]cellEncodeData
+	var result BranchRecordRead
+	for bitset := effectiveMask; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		switch {
+		case recordsPresent&bit != 0:
+			if len(records[nibble]) == 0 {
+				return BranchRecordRead{}, malformedRecord("empty record at nibble %d", nibble)
+			}
+			var c cell
+			recordMask, err := DecodeRecordInto(records[nibble], &c)
+			if err != nil {
+				return BranchRecordRead{}, fmt.Errorf("decode edge record at nibble %d: %w", nibble, err)
+			}
+			cells[nibble] = cellEncodeDataFromCell(&c)
+			if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
+				result.ChildMasks[nibble] = recordMask
+				result.ChildMasksKnown |= bit
+			}
+		case legacyMaps.AfterMap&bit != 0:
+			cells[nibble] = cellEncodeDataFromCell(&legacyCells[nibble])
+		default:
+			return BranchRecordRead{}, fmt.Errorf("missing record for mask bit %d", nibble)
+		}
+		bitset ^= bit
+	}
+
+	encoded, err := NewBranchEncoder(1024).EncodeBranch(effectiveMask, effectiveMask, effectiveMask, &cells)
+	if err != nil {
+		return BranchRecordRead{}, err
+	}
+	result.Data = bytes.Clone(encoded)
+	return result, nil
+}
 
 func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {
 	extLen := recordExtensionLength(cell)

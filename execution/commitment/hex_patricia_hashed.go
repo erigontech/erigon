@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -138,6 +139,7 @@ type HexPatriciaHashed struct {
 	rootTouched   bool
 	rootPresent   bool
 	rootMask      uint16
+	rootMaskKnown bool
 	traceW        io.Writer // nil = disabled, non-nil = write trace output
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte              // buffer to compute cell hash or write hash-related things
@@ -253,6 +255,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.rootChecked = false
 	hph.rootPresent = false
 	hph.rootMask = 0
+	hph.rootMaskKnown = false
 	hph.currentKeyLen = 0
 	hph.activeRows = 0
 	for i := range hph.depths {
@@ -320,6 +323,7 @@ type cell struct {
 	hashLen         int16 // Length of the hash (or embedded)
 	stateHashLen    int16 // stateHash length, if > 0 can reuse
 	branchMask      uint16
+	branchMaskKnown bool
 	storageMask     uint16
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
@@ -399,6 +403,7 @@ func (cell *cell) reset() {
 	cell.hashLen = 0
 	cell.stateHashLen = 0
 	cell.branchMask = 0
+	cell.branchMaskKnown = false
 	cell.storageMask = 0
 	cell.loaded = cellLoadNone
 	clear(cell.hashedExtension[:])
@@ -505,6 +510,7 @@ func (cell *cell) fillFromUpperCell(upCell *cell, depth, depthIncrement int16) {
 		copy(cell.hash[:], upCell.hash[:upCell.hashLen])
 	}
 	cell.branchMask = upCell.branchMask
+	cell.branchMaskKnown = upCell.branchMaskKnown
 	cell.storageMask = upCell.storageMask
 	cell.loaded = upCell.loaded
 }
@@ -556,6 +562,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
 	cell.branchMask = lowCell.branchMask
+	cell.branchMaskKnown = lowCell.branchMaskKnown
 	cell.storageMask = lowCell.storageMask
 	if lowDepth > 64 {
 		cell.loaded = cell.loaded.addFlag(lowCell.loaded)
@@ -1457,22 +1464,33 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranchChild(branchPrefix []byte,
 // readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
 // This ensures we read fresh data when a prefix has been modified but not yet written.
 func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
+	data, _, _, _, err := hph.readBranchAndCheckForFlushingWithMask(prefix, 0, false)
+	return data, err
+}
+
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushingWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, err
+			return nil, 0, [16]uint16{}, 0, err
 		}
 		be.ClearDeferred()
 	}
-	return hph.branchFromCacheOrDB(prefix)
+	if hph.cfg.EdgeRecords {
+		if reader, ok := hph.ctx.(BranchMaskReader); ok {
+			return reader.BranchWithMask(prefix, mask, maskKnown)
+		}
+	}
+	data, step, err := hph.ctx.Branch(prefix)
+	return data, step, [16]uint16{}, 0, err
 }
 
 // unfoldBranchNode returns true if unfolding has been done
-func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
+func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, mask uint16, maskKnown bool) error {
 	key := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, err := hph.readBranchAndCheckForFlushing(key)
+	branchData, _, childMasks, childMasksKnown, err := hph.readBranchAndCheckForFlushingWithMask(key, mask, maskKnown)
 	if err != nil {
 		return err
 	}
@@ -1504,6 +1522,13 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	hph.branchBefore[row] = true
 	if err := hph.decodeBranchIntoRow(row, depth, branchData, deleted); err != nil {
 		return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
+	}
+	for bitset := childMasksKnown; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		hph.grid[row][nibble].branchMask = childMasks[nibble]
+		hph.grid[row][nibble].branchMaskKnown = true
+		bitset ^= bit
 	}
 	hph.depths[hph.activeRows] = depth
 	hph.activeRows++
@@ -1574,7 +1599,11 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
-		return hph.unfoldBranchNode(row, depth, touched && !present)
+		mask, maskKnown := hph.rootMask, hph.rootMaskKnown
+		if hph.activeRows > 0 {
+			mask, maskKnown = upCell.branchMask, upCell.branchMaskKnown
+		}
+		return hph.unfoldBranchNode(row, depth, touched && !present, mask, maskKnown)
 	}
 
 	lowest := min(unfolding, upCell.hashedExtLen)
@@ -1689,8 +1718,10 @@ func afterMapUpdateKind(afterMap uint16) (kind updateKind, nibblesAfterUpdate in
 func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, upCell *cell, updateKey []byte) error {
 	if row == 0 {
 		hph.rootMask = hph.afterMap[row]
+		hph.rootMaskKnown = hph.cfg.EdgeRecords
 	}
 	upCell.branchMask = hph.afterMap[row]
+	upCell.branchMaskKnown = hph.cfg.EdgeRecords
 	if hph.touchMap[row] != 0 { // any modifications
 		if row == 0 {
 			hph.rootTouched = true
@@ -1915,6 +1946,7 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 			// the next unfold reads touched && !present and deletes the whole subtree.
 			hph.rootPresent = true
 			hph.rootMask = 0
+			hph.rootMaskKnown = hph.cfg.EdgeRecords
 		} else {
 			// Modification is propagated upwards
 			hph.touchMap[row-1] |= uint16(1) << nibble
@@ -1956,6 +1988,7 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 			hph.rootTouched = true
 			hph.rootPresent = false
 			hph.rootMask = 0
+			hph.rootMaskKnown = hph.cfg.EdgeRecords
 		case upDepth == 64:
 			// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 			// Therefore we are not propagating deletion upwards, but turn it into a modification
@@ -2080,6 +2113,7 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, false
 		hph.rootMask = 0
+		hph.rootMaskKnown = false
 	} else {
 		row := hph.activeRows - 1
 		if hph.depths[row] < int16(len(hashedKey)) {
@@ -2202,6 +2236,7 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 		cell = &hph.root
 		hph.rootTouched, hph.rootPresent = true, true
 		hph.rootMask = 0
+		hph.rootMaskKnown = false
 	} else {
 		row := hph.activeRows - 1
 		depth = hph.depths[row]
@@ -2701,6 +2736,7 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootChecked = false
 	hph.rootPresent = true
 	hph.rootMask = 0
+	hph.rootMaskKnown = false
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
@@ -2995,6 +3031,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	hph.rootTouched = s.RootTouched
 	hph.rootPresent = s.RootPresent
 	hph.rootMask = s.RootMask
+	hph.rootMaskKnown = true
 
 	if hph.root.accountAddrLen > 0 {
 		if hph.ctx == nil {

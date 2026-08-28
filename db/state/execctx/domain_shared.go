@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1267,6 +1269,58 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 // TemporalDomain satisfaction. Direct reads use request metrics when configured.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
+}
+
+func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	wanted := mask
+	if !maskKnown {
+		wanted = ^uint16(0)
+	}
+	for bitset := wanted; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+		value, valueStep, _, ok := sd.latestFromMem(kv.CommitmentDomain, key)
+		if !ok && sd.branchCache != nil {
+			var cacheStep uint64
+			value, cacheStep, ok = sd.branchCache.Get(key)
+			valueStep = kv.Step(cacheStep)
+		}
+		if ok {
+			records[nibble] = bytes.Clone(value)
+			present |= bit
+			if valueStep > step {
+				step = valueStep
+			}
+		}
+		bitset ^= bit
+	}
+
+	remaining := wanted &^ present
+	if remaining == 0 || tx == nil {
+		return records, present, step, nil
+	}
+	source, ok := tx.AggTx().(interface {
+		ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error)
+	})
+	if !ok {
+		return records, present, step, nil
+	}
+	fileRecords, filePresent, fileStep, err := source.ReadCommitmentRecords(tx, nodeKey, remaining, true, ^uint64(0))
+	if err != nil {
+		return records, present, step, err
+	}
+	for bitset := filePresent & remaining; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		records[nibble] = bytes.Clone(fileRecords[nibble])
+		present |= bit
+		bitset ^= bit
+	}
+	if fileStep > step {
+		step = fileStep
+	}
+	return records, present, step, nil
 }
 
 // servableUnderBound gates a value against an in-flight unwind's per-key

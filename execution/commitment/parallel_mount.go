@@ -54,6 +54,7 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 
 	hph.root = root.root
 	hph.rootMask = root.rootMask
+	hph.rootMaskKnown = root.rootMaskKnown
 
 	hph.activeRows = root.activeRows
 	hph.currentKeyLen = root.currentKeyLen

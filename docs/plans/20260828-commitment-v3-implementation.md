@@ -309,22 +309,22 @@ account + storage   [flags][hash:32][sroot:32][mask:2][plain:20][ext:tail]  87..
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Create: `execution/commitment/read_v3_test.go`
 
-- [ ] make `TrieContext.Branch(prefix)` synthesize a row from the node's records while keeping its
+- [x] make `TrieContext.Branch(prefix)` synthesize a row from the node's records while keeping its
       current signature, so `decodeBranchIntoRow`, `BranchCache`, the warmuper,
       `CollectDeferredUpdate` and `HasPendingPrefix` compile unchanged
-- [ ] implement the run scan: one `Seek(key(P) || 0x80)` plus `Next` per file, exact key-length
+- [x] implement the run scan: one `Seek(key(P) || 0x80)` plus `Next` per file, exact key-length
       filter, mask-driven, stopping as soon as `popcount(mask)` slots are covered
-- [ ] make the mask the sole authority on slot existence — a record present for a cleared bit is
+- [x] make the mask the sole authority on slot existence — a record present for a cleared bit is
       ignored, never treated as present
-- [ ] keep the bundled-row path intact for files below v3.0, selected by the task 4 gate
-- [ ] preserve sibling preservation (invariant 4) and fold locality (invariant 2) — untouched siblings
+- [x] keep the bundled-row path intact for files below v3.0, selected by the task 4 gate
+- [x] preserve sibling preservation (invariant 4) and fold locality (invariant 2) — untouched siblings
       still come from disk
-- [ ] write tests asserting a synthesized row is identical in grid terms to the bundled-row decode for
+- [x] write tests asserting a synthesized row is identical in grid terms to the bundled-row decode for
       the same node
-- [ ] write a test for a node whose records span multiple files, asserting the walk stops at mask
+- [x] write a test for a node whose records span multiple files, asserting the walk stops at mask
       coverage rather than at the first hit
-- [ ] write a test asserting a stale record for a cleared mask bit in an older file is not resurrected
-- [ ] run `go test ./execution/commitment/...` — must pass before task 11
+- [x] write a test asserting a stale record for a cleared mask bit in an older file is not resurrected
+- [x] run `go test ./execution/commitment/...` — must pass before task 11
 
 ### Task 11: Native zero-length deletion
 

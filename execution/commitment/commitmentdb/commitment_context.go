@@ -39,6 +39,7 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -220,6 +221,7 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		sharedDomains: sd,
 		tmpDir:        tmpDir,
 		variant:       commitment.VariantHexPatriciaTrie,
+		edgeRecords:   cfg.EdgeRecords,
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
@@ -244,11 +246,12 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
-		putter:   sdc.sharedDomains.AsPutDel(tx),
-		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    txNum,
-		blockNum: blockNum,
-		traceW:   sdc.traceW,
+		putter:      sdc.sharedDomains.AsPutDel(tx),
+		stepSize:    sdc.sharedDomains.StepSize(),
+		txNum:       txNum,
+		blockNum:    blockNum,
+		traceW:      sdc.traceW,
+		edgeRecords: sdc.edgeRecords,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
@@ -671,10 +674,11 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			putter:   sdc.sharedDomains.AsPutDel(roTx),
-			stepSize: stepSize,
-			txNum:    txNum,
-			traceW:   sdc.traceW,
+			putter:      sdc.sharedDomains.AsPutDel(roTx),
+			stepSize:    stepSize,
+			txNum:       txNum,
+			traceW:      sdc.traceW,
+			edgeRecords: sdc.edgeRecords,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -721,6 +725,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 			txNum:          txNum,
 			localCollector: collector,
 			traceW:         sdc.traceW,
+			edgeRecords:    sdc.edgeRecords,
 		}
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
@@ -992,6 +997,7 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+	edgeRecords    bool
 }
 
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
@@ -1001,6 +1007,22 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	if !sdc.edgeRecords || commitment.IsCommitmentStateKey(pref) {
+		return sdc.branchLegacy(pref)
+	}
+	enc, step, _, _, err := sdc.branchEdge(pref, 0, false)
+	return enc, step, err
+}
+
+func (sdc *TrieContext) BranchWithMask(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	if !sdc.edgeRecords || commitment.IsCommitmentStateKey(pref) {
+		enc, step, err := sdc.branchLegacy(pref)
+		return enc, step, [16]uint16{}, 0, err
+	}
+	return sdc.branchEdge(pref, mask, maskKnown)
+}
+
+func (sdc *TrieContext) branchLegacy(pref []byte) ([]byte, kv.Step, error) {
 	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, err
@@ -1014,6 +1036,35 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
 	return bytes.Clone(enc), step, nil
+}
+
+func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	legacy, legacyStep, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, [16]uint16{}, 0, err
+	}
+
+	var records [16][]byte
+	var recordsPresent uint16
+	var recordsStep kv.Step
+	if reader, ok := sdc.stateReader.(CommitmentRecordsReader); ok {
+		nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
+		records, recordsPresent, recordsStep, err = reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+		if err != nil {
+			return nil, 0, [16]uint16{}, 0, err
+		}
+	}
+	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, legacy)
+	if err != nil {
+		return nil, 0, [16]uint16{}, 0, err
+	}
+	if recordsStep > legacyStep {
+		legacyStep = recordsStep
+	}
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, read.Data)
+	}
+	return bytes.Clone(read.Data), legacyStep, read.ChildMasks, read.ChildMasksKnown, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
