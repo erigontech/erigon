@@ -17,10 +17,12 @@
 package stream
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
 	"slices"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -767,4 +769,40 @@ func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
 func (m *UnionDuo[K, V]) Close() {
 	m.x.Close()
 	m.y.Close()
+}
+
+// AssertValid wraps a []byte-keyed stream to enforce invariant 2 in debug builds: a key must
+// stay readable across the following Next(), because combinators pre-fetch and burn one call of
+// validity before the caller ever sees the value. Panics on a producer that recycles sooner.
+// Returns `it` unchanged unless ERIGON_ASSERT is set.
+func AssertValid[V any](it Duo[[]byte, V]) Duo[[]byte, V] {
+	if !dbg.AssertEnabled {
+		return it
+	}
+	return NewValidated(it)
+}
+
+// NewValidated - AssertValid without the ERIGON_ASSERT gate, for callers that want the check
+// unconditionally.
+func NewValidated[V any](it Duo[[]byte, V]) *Validated[V] { return &Validated[V]{it: it} }
+
+type Validated[V any] struct {
+	it       Duo[[]byte, V]
+	prev     []byte // what the caller was handed last time - producer-owned memory
+	prevCopy []byte // its contents back then
+}
+
+func (m *Validated[V]) HasNext() bool { return m.it.HasNext() }
+func (m *Validated[V]) Close()        { m.it.Close() }
+
+func (m *Validated[V]) Next() ([]byte, V, error) {
+	k, v, err := m.it.Next()
+	if err != nil {
+		return k, v, err
+	}
+	if m.prev != nil && !bytes.Equal(m.prev, m.prevCopy) {
+		panic(fmt.Sprintf("stream invariant 2: key %x was recycled after a single Next(), now %x", m.prevCopy, m.prev))
+	}
+	m.prev, m.prevCopy = k, bytes.Clone(k)
+	return k, v, nil
 }

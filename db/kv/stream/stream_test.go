@@ -1278,6 +1278,16 @@ func TestInvariants(t *testing.T) {
 				}
 				require.Equal(t, wantK, gotK, "repeated HasNext changed the sequence")
 			})
+			t.Run("2 a key survives the following Next", func(t *testing.T) {
+				s := stream.NewValidated[[]byte](mk())
+				require.NotPanics(t, func() {
+					for s.HasNext() {
+						if _, _, err := s.Next(); err != nil {
+							t.Fatal(err)
+						}
+					}
+				})
+			})
 			t.Run("3 Close is idempotent", func(t *testing.T) {
 				s := mk()
 				require.NotPanics(t, func() { s.Close(); s.Close() })
@@ -1291,6 +1301,65 @@ func TestInvariants(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestInvariant5 - an error is terminal and repeatable: every combinator must keep surfacing it
+// rather than swallowing it once its own budget or inputs run out.
+func TestInvariant5(t *testing.T) {
+	combinators := map[string]func(stream.KV) stream.KV{
+		"UnionKV":    func(bad stream.KV) stream.KV { return stream.UnionKV(bad, stream.EmptyKV, kv.Unlim) },
+		"UnionKVRHS": func(bad stream.KV) stream.KV { return stream.UnionKV(&countingKV{keys: [][]byte{{9}}}, bad, kv.Unlim) },
+		"MultisetKV": func(bad stream.KV) stream.KV { return stream.MultisetKV(bad, stream.EmptyKV, kv.Unlim) },
+		"FilterKV":   func(bad stream.KV) stream.KV { return stream.FilterKV(bad, func(k, v []byte) bool { return true }) },
+		"TransformKV": func(bad stream.KV) stream.KV {
+			return stream.TransformKV(bad, func(k, v []byte) ([]byte, []byte, error) { return k, v, nil })
+		},
+		"LimitDuo":  func(bad stream.KV) stream.KV { return stream.LimitDuo[[]byte, []byte](bad, 5) },
+		"Validated": func(bad stream.KV) stream.KV { return stream.NewValidated[[]byte](bad) },
+	}
+	for name, mk := range combinators {
+		t.Run(name, func(t *testing.T) {
+			s := mk(PairsWithError(1))
+			_, _, err := stream.ToArrayKV(s)
+			require.Error(t, err)
+			for range 3 {
+				require.True(t, s.HasNext(), "HasNext went false and swallowed the error")
+				_, _, again := s.Next()
+				require.Equal(t, err.Error(), again.Error(), "error is not repeatable")
+			}
+		})
+	}
+}
+
+// recycler hands back one buffer over and over - the producer bug invariant 2 forbids.
+type recycler struct {
+	buf []byte
+	n   int
+}
+
+func (r *recycler) HasNext() bool { return r.n < 4 }
+func (r *recycler) Close()        {}
+func (r *recycler) Next() ([]byte, []byte, error) {
+	r.n++
+	r.buf = append(r.buf[:0], byte(r.n))
+	return r.buf, r.buf, nil
+}
+
+func TestAssertValidCatchesRecycling(t *testing.T) {
+	t.Run("panics on a producer that recycles too early", func(t *testing.T) {
+		s := stream.NewValidated[[]byte](&recycler{})
+		require.Panics(t, func() {
+			for s.HasNext() {
+				if _, _, err := s.Next(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	})
+	t.Run("AssertValid is a no-op when ERIGON_ASSERT is off", func(t *testing.T) {
+		in := &countingKV{keys: [][]byte{{1}}}
+		require.Equal(t, stream.KV(in), stream.AssertValid[[]byte](in))
+	})
 }
 
 func pagesOf(vs ...uint64) stream.NextPageUno[uint64] {
