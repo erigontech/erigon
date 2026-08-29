@@ -807,7 +807,15 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			healthServer = grpcHealth.NewServer()
 			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		}
-		go grpcServer.Serve(grpcListener)
+		go func() {
+			// ErrServerStopped can surface here if GracefulStop/Stop (deferred
+			// below) runs before this goroutine gets scheduled into Serve, since
+			// both check/clear the same listener state under one mutex; that is
+			// an ordinary shutdown race, not a listener failure.
+			if err := grpcServer.Serve(grpcListener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				logger.Error("GRPC Server Fatal Error", "err", err)
+			}
+		}()
 		info = append(info, "grpc.port", cfg.GRPCPort)
 
 		defer func() {

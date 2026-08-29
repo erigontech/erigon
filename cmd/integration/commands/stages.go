@@ -98,7 +98,8 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if debugVerbosity {
-				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+				// The flag name and value are hardcoded and known to be valid, so this cannot fail.
+				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
@@ -140,13 +141,14 @@ var cmdAlloc = &cobra.Command{
 	Use:     "alloc",
 	Example: "integration allocates and holds 1Gb (or given size)",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+		// The flag name and value are hardcoded and known to be valid, so this cannot fail.
+		_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		v, err := datasize.ParseString(args[0])
 		if err != nil {
 			panic(err)
 		}
 		n := make([]byte, v.Bytes())
-		common.Sleep(cmd.Context(), 265*24*time.Hour)
+		_ = common.Sleep(cmd.Context(), 265*24*time.Hour)
 		_ = n
 	},
 }
