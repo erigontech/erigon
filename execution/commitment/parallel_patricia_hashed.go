@@ -28,6 +28,8 @@ import (
 	"time"
 )
 
+var defaultParallelCommitmentWorkers = runtime.NumCPU()
+
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
@@ -59,7 +61,7 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		numWorkers:     runtime.NumCPU(),
+		numWorkers:     defaultParallelCommitmentWorkers,
 		cfg:            cfg,
 	}
 	// Its own, not the template's: the template traverses the skeleton over the
@@ -68,9 +70,17 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 	return p
 }
 
+// ParallelCommitmentReadTxs returns the maximum read transactions held by nested parallel trie workers.
+// Mounted workers retain their own and storage-base transactions while waiting for the shared child-fold pool.
+func ParallelCommitmentReadTxs() int {
+	foldWorkers := maxFoldConcurrency()
+	mountedWorkers := parallelMountConcurrency(defaultParallelCommitmentWorkers)
+	return 2*mountedWorkers + foldWorkers
+}
+
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	if n <= 0 {
-		n = runtime.NumCPU()
+		n = defaultParallelCommitmentWorkers
 	}
 	p.numWorkers = n
 }
@@ -249,7 +259,7 @@ func (p *ParallelPatriciaHashed) Process(
 		for _, upd := range pu.deferredCombined {
 			putDeferredUpdate(upd)
 		}
-		pu.deferredCombined = pu.deferredCombined[:0]
+		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
 		return nil, mErr
 	}

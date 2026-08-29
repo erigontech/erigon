@@ -44,30 +44,66 @@ const (
 	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
+	entryLocSize = 12 // sizeof(entryLoc): offset(4) + keyLen(4) + valLen(4)
 )
 
-// writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
-func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
-	var numBuf [binary.MaxVarintLen64]byte
+// A spill file prefixes each field with its length. Fixed width rather than a
+// varint: the file never leaves the machine that wrote it. A key is capped at
+// MaxKeyLen so two bytes hold it, a value at MaxValLen so four do.
+const (
+	keyLenSize = 2
+	valLenSize = 4
+	nilKeyLen  = math.MaxUint16 // no key reaches this, so it can mean nil
+
+	// MaxValLen is the largest value Collect accepts. A longer one would write a
+	// length that reads back negative, which the reader takes for nil without
+	// consuming the bytes - desyncing the rest of the file rather than failing.
+	// appendSortableBuffer grows a value across Puts, so the writers check it
+	// and not Put.
+	MaxValLen = math.MaxInt32
+)
+
+func checkValLen(v []byte) error {
+	if len(v) > MaxValLen {
+		return fmt.Errorf("etl: value of %d bytes exceeds %d", len(v), MaxValLen)
+	}
+	return nil
+}
+
+func putKeyLen(dst []byte, keyLen int32) {
+	n := uint16(keyLen) //nolint:gosec
+	if keyLen < 0 {
+		n = nilKeyLen
+	}
+	binary.NativeEndian.PutUint16(dst, n)
+}
+
+func putValLen(dst []byte, valLen int32) {
+	binary.NativeEndian.PutUint32(dst, uint32(valLen)) //nolint:gosec
+}
+
+// writeSortedEntries writes the entries to w in the spill format above.
+func writeSortedEntries(w io.Writer, entries []sortableBufferEntry, numBuf []byte) error {
 	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
+		if err := checkValLen(entry.value); err != nil {
+			return err
 		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
+		keyLen, valLen := int32(len(entry.key)), int32(len(entry.value)) //nolint:gosec
+		if entry.key == nil {
+			keyLen = -1
+		}
+		if entry.value == nil {
+			valLen = -1
+		}
+		putKeyLen(numBuf, keyLen)
+		if _, err := w.Write(numBuf[:keyLenSize]); err != nil {
 			return err
 		}
 		if _, err := w.Write(entry.key); err != nil {
 			return err
 		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
+		putValLen(numBuf, valLen)
+		if _, err := w.Write(numBuf[:valLenSize]); err != nil {
 			return err
 		}
 		if _, err := w.Write(entry.value); err != nil {
@@ -109,6 +145,11 @@ const (
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
+	// MaxKeyLen is the largest key Collect accepts. A key spells its length in
+	// keyLenSize bytes with nilKeyLen reserved, so the hard ceiling is 65534;
+	// 4096 is policy under it - no caller comes near it.
+	MaxKeyLen = 4096
+
 	// The chunk index takes what is left of a positive int32, so one buffer
 	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
 	// panics past that. NewSortableBuffer's MaxInt32 bound on optimalSize
@@ -141,9 +182,10 @@ func putDataChunk(c []byte) {
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	// Get returns direct references to the internal key/value storage without copying.
-	// The returned slices must not be modified by the caller.
-	Get(i int) ([]byte, []byte)
+	// Next returns the entries in order, one goroutine at a time. The slices
+	// point into the buffer's own storage and must not be modified. Sort puts
+	// the cursor back at the first entry, so Sorting again re-reads.
+	Next() (k, v []byte, ok bool)
 	Len() int
 	Reset()
 	SizeLimit() int
@@ -169,10 +211,12 @@ var (
 // idx<<dataChunkBits | off. Key occupies chunk[off : off+keyLen], value follows
 // right after it. keyLen/valLen of -1 indicates nil.
 type entryLoc struct {
-	insertionOrder int32 // enables stable sort via unstable SortFunc
-	offset         int32
-	keyLen         int32
-	valLen         int32
+	// offset rises with insertion order, which is what orders duplicate keys
+	// without a stable sort. Put reserves a byte even for an entry with no
+	// bytes, so that holds for those too.
+	offset int32
+	keyLen int32
+	valLen int32
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -186,6 +230,11 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 
 type sortableBuffer struct {
 	entries []entryLoc
+	at      int // Next's cursor into entries
+
+	// Write's length scratch. w.Write takes an io.Writer, so a local array
+	// escapes and costs an allocation on every Write.
+	numBuf [valLenSize]byte
 	// chunks hold the key/value bytes. Growing by chunk instead of by one big
 	// slice keeps Put from re-allocating and copying everything collected so
 	// far. All chunks are dataChunkSize, except the private chunk an entry
@@ -199,7 +248,7 @@ type sortableBuffer struct {
 }
 
 // nextChunk starts a chunk able to hold n bytes. An entry never straddles
-// chunks, so Get can hand out direct references.
+// chunks, so entryData can hand out direct references.
 func (b *sortableBuffer) nextChunk(n int) {
 	if len(b.chunks) >= maxDataChunks {
 		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))
@@ -224,9 +273,8 @@ func (b *sortableBuffer) entryData(e *entryLoc) []byte {
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
 	e := entryLoc{
-		keyLen:         int32(len(k)),         //nolint:gosec
-		valLen:         int32(len(v)),         //nolint:gosec
-		insertionOrder: int32(len(b.entries)), //nolint:gosec
+		keyLen: int32(len(k)), //nolint:gosec
+		valLen: int32(len(v)), //nolint:gosec
 	}
 	if k == nil {
 		e.keyLen = -1
@@ -234,18 +282,19 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	if v == nil {
 		e.valLen = -1
 	}
-	if n := len(k) + len(v); n > 0 {
-		off := b.curOff
-		if int(off)+n > len(b.cur) {
-			b.nextChunk(n)
-			off = 0
-		}
-		data := b.cur[off:]
-		copy(data, k)
-		copy(data[len(k):], v)
-		e.offset = b.curBase | off
-		b.curOff = off + int32(n) //nolint:gosec
+	// An entry with no bytes still takes one, so that no two entries share an
+	// offset - the sort orders duplicate keys by it.
+	n := max(len(k)+len(v), 1)
+	off := b.curOff
+	if int(off)+n > len(b.cur) {
+		b.nextChunk(n)
+		off = 0
 	}
+	data := b.cur[off:]
+	copy(data, k)
+	copy(data[len(k):], v)
+	e.offset = b.curBase | off
+	b.curOff = off + int32(n) //nolint:gosec
 	b.entries = append(b.entries, e)
 }
 
@@ -259,8 +308,12 @@ func (b *sortableBuffer) Len() int {
 	return len(b.entries)
 }
 
-func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
-	e := &b.entries[i]
+func (b *sortableBuffer) Next() ([]byte, []byte, bool) {
+	if b.at >= len(b.entries) {
+		return nil, nil, false
+	}
+	e := &b.entries[b.at]
+	b.at++
 	kLen, vLen := int(e.keyLen), int(e.valLen)
 	var key, val []byte
 	if kLen == 0 {
@@ -270,7 +323,7 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 		val = []byte{}
 	}
 	if kLen <= 0 && vLen <= 0 {
-		return key, val
+		return key, val, true
 	}
 	data := b.entryData(e)
 	if kLen > 0 {
@@ -280,7 +333,7 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	if vLen > 0 {
 		val = data[:vLen:vLen]
 	}
-	return key, val
+	return key, val, true
 }
 
 // Prealloc sizes the entries slice. predictDataSize only reserves room in the
@@ -297,6 +350,7 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 }
 
 func (b *sortableBuffer) Reset() {
+	b.at = 0
 	b.entries = b.entries[:0]
 	for i, c := range b.chunks {
 		putDataChunk(c)
@@ -308,6 +362,7 @@ func (b *sortableBuffer) Reset() {
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
+	b.at = 0
 	chunks := b.chunks
 	// Key extraction stays inside cmp: pdqsortCmpFunc calls the comparator
 	// indirectly, so a separate closure never inlines and costs a call per key.
@@ -324,7 +379,7 @@ func (b *sortableBuffer) Sort() {
 		if c := bytes.Compare(xk, yk); c != 0 {
 			return c
 		}
-		return int(x.insertionOrder - y.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+		return int(x.offset - y.offset) // StableSort: offsets rise with insertion order
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
@@ -337,7 +392,7 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 }
 
 func (b *sortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
+	numBuf := b.numBuf[:]
 	for i := range b.entries {
 		e := &b.entries[i]
 		kLen, vLen := int(e.keyLen), int(e.valLen)
@@ -346,8 +401,8 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			data = b.entryData(e)
 		}
 		// write key
-		n := binary.PutVarint(numBuf[:], int64(e.keyLen))
-		if _, err := w.Write(numBuf[:n]); err != nil {
+		putKeyLen(numBuf, e.keyLen)
+		if _, err := w.Write(numBuf[:keyLenSize]); err != nil {
 			return err
 		}
 		if kLen > 0 {
@@ -357,8 +412,8 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			data = data[kLen:]
 		}
 		// write value
-		n = binary.PutVarint(numBuf[:], int64(e.valLen))
-		if _, err := w.Write(numBuf[:n]); err != nil {
+		putValLen(numBuf, e.valLen)
+		if _, err := w.Write(numBuf[:valLenSize]); err != nil {
 			return err
 		}
 		if vLen > 0 {
@@ -381,6 +436,7 @@ func NewAppendBuffer(bufferOptimalSize datasize.ByteSize) *appendSortableBuffer 
 type appendSortableBuffer struct {
 	entries     map[string][]byte
 	sortedBuf   []sortableBufferEntry
+	at          int // Next's cursor into sortedBuf
 	size        int
 	optimalSize int
 }
@@ -402,7 +458,7 @@ func (b *appendSortableBuffer) Len() int {
 }
 
 func (b *appendSortableBuffer) Sort() {
-	b.sortedBuf = b.sortedBuf[:0]
+	b.sortedBuf, b.at = b.sortedBuf[:0], 0
 	if cap(b.sortedBuf) < len(b.entries) {
 		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
 	}
@@ -420,12 +476,17 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *appendSortableBuffer) Get(i int) ([]byte, []byte) {
-	return b.sortedBuf[i].key, b.sortedBuf[i].value
+func (b *appendSortableBuffer) Next() ([]byte, []byte, bool) {
+	if b.at >= len(b.sortedBuf) {
+		return nil, nil, false
+	}
+	e := b.sortedBuf[b.at]
+	b.at++
+	return e.key, e.value, true
 }
 
 func (b *appendSortableBuffer) Reset() {
-	b.sortedBuf = nil
+	b.sortedBuf, b.at = nil, 0
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
@@ -439,7 +500,8 @@ func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) 
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
-	return writeSortedEntries(w, b.sortedBuf)
+	var numBuf [valLenSize]byte
+	return writeSortedEntries(w, b.sortedBuf, numBuf[:])
 }
 
 func (b *appendSortableBuffer) CheckFlushSize() bool {
@@ -457,6 +519,7 @@ func NewOldestEntryBuffer(bufferOptimalSize datasize.ByteSize) *oldestEntrySorta
 type oldestEntrySortableBuffer struct {
 	entries     map[string][]byte
 	sortedBuf   []sortableBufferEntry
+	at          int // Next's cursor into sortedBuf
 	size        int
 	optimalSize int
 }
@@ -480,7 +543,7 @@ func (b *oldestEntrySortableBuffer) Len() int {
 }
 
 func (b *oldestEntrySortableBuffer) Sort() {
-	b.sortedBuf = b.sortedBuf[:0]
+	b.sortedBuf, b.at = b.sortedBuf[:0], 0
 	if cap(b.sortedBuf) < len(b.entries) {
 		b.sortedBuf = make([]sortableBufferEntry, 0, len(b.entries))
 	}
@@ -498,12 +561,17 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *oldestEntrySortableBuffer) Get(i int) ([]byte, []byte) {
-	return b.sortedBuf[i].key, b.sortedBuf[i].value
+func (b *oldestEntrySortableBuffer) Next() ([]byte, []byte, bool) {
+	if b.at >= len(b.sortedBuf) {
+		return nil, nil, false
+	}
+	e := b.sortedBuf[b.at]
+	b.at++
+	return e.key, e.value, true
 }
 
 func (b *oldestEntrySortableBuffer) Reset() {
-	b.sortedBuf = nil
+	b.sortedBuf, b.at = nil, 0
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
@@ -517,7 +585,8 @@ func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize 
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
-	return writeSortedEntries(w, b.sortedBuf)
+	var numBuf [valLenSize]byte
+	return writeSortedEntries(w, b.sortedBuf, numBuf[:])
 }
 
 func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
