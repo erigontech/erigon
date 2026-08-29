@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -184,6 +185,106 @@ func TestPostExecutionPayloadEnvelopeReturnsAcceptedAfterIntegrationError(t *tes
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadErr = errors.New("integration unavailable")
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+	).Return(nil)
+
+	post := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+
+	first := post()
+	require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
+	second := post()
+	require.Equal(t, http.StatusBadRequest, second.Code, second.Body.String())
+	require.Contains(t, second.Body.String(), "already seen")
+}
+
+func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	injected := errors.New("gossip unavailable")
+	gomock.InOrder(
+		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+			gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+		).Return(injected),
+		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+			gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+		).Return(nil),
+	)
+	var integrations atomic.Int32
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		integrations.Add(1)
+		return nil
+	}
+
+	post := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+
+	first := post()
+	require.Equal(t, http.StatusInternalServerError, first.Code, first.Body.String())
+	second := post()
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	require.EqualValues(t, 1, integrations.Load())
+}
+
+func TestExecutionPayloadEnvelopeAdmissionsCoalesceConcurrentClaims(t *testing.T) {
+	var admissions executionPayloadEnvelopeAdmissions
+	identity := executionPayloadEnvelopeIdentity{
+		beaconBlockRoot: common.HexToHash("0x1234"),
+		builderIndex:    42,
+	}
+	token, err := admissions.claim(identity)
+	require.NoError(t, err)
+
+	const contenders = 32
+	errs := make(chan error, contenders)
+	var ready sync.WaitGroup
+	ready.Add(contenders)
+	start := make(chan struct{})
+	for range contenders {
+		go func() {
+			ready.Done()
+			<-start
+			_, err := admissions.claim(identity)
+			errs <- err
+		}()
+	}
+	ready.Wait()
+	close(start)
+	for range contenders {
+		require.ErrorContains(t, <-errs, "already being published")
+	}
+
+	admissions.finish(token, false)
+	retry, err := admissions.claim(identity)
+	require.NoError(t, err)
+	admissions.finish(retry, true)
+	_, err = admissions.claim(identity)
+	require.ErrorContains(t, err, "already seen")
 }
 
 func TestPostExecutionPayloadEnvelopeRequiresBlobDataIncludedHeader(t *testing.T) {

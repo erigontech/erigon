@@ -74,6 +74,7 @@ type Cfg struct {
 	gloasEnvelopeRecoveryCursor  common.Hash
 	gloasEnvelopeRecoveryHead    common.Hash
 	gloasEnvelopeRecoveryPending []common.Hash
+	gloasEnvelopeRecoveryReplace int
 	gloasHeadEnvelopeRequestMu   sync.Mutex
 	gloasHeadEnvelopeRequestID   uint64
 	gloasHeadEnvelopeRequests    map[common.Hash]uint64

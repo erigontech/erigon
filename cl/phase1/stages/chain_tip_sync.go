@@ -430,6 +430,18 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 
 	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+	pendingBeforePrune := len(cfg.gloasEnvelopeRecoveryPending)
+	cfg.gloasEnvelopeRecoveryPending = retainActionableGloasEnvelopeRecoveryRoots(
+		cfg.gloasEnvelopeRecoveryPending,
+		cfg.forkChoice.HasEnvelope,
+		func(root common.Hash) bool {
+			block, ok := cfg.forkChoice.GetBlock(root)
+			return ok && block != nil && block.Block != nil
+		},
+	)
+	if removed := pendingBeforePrune - len(cfg.gloasEnvelopeRecoveryPending); removed > 0 {
+		log.Debug("[chainTipSync] envelope recovery: released roots absent from fork choice", "count", removed)
+	}
 	var directExtensionParent common.Hash
 	if cfg.gloasEnvelopeRecoveryHead != (common.Hash{}) && cfg.gloasEnvelopeRecoveryHead != headRoot {
 		newHeadBlock, ok := cfg.forkChoice.GetBlock(headRoot)
@@ -518,10 +530,31 @@ func trackGloasEnvelopeRecoveryRoot(cfg *Cfg, root common.Hash) bool {
 		return true
 	}
 	if len(cfg.gloasEnvelopeRecoveryPending) >= maxGloasEnvelopeRecoveryPending {
-		return false
+		idx := cfg.gloasEnvelopeRecoveryReplace % len(cfg.gloasEnvelopeRecoveryPending)
+		cfg.gloasEnvelopeRecoveryPending[idx] = root
+		cfg.gloasEnvelopeRecoveryReplace = (idx + 1) % maxGloasEnvelopeRecoveryPending
+		return true
 	}
 	cfg.gloasEnvelopeRecoveryPending = append(cfg.gloasEnvelopeRecoveryPending, root)
 	return true
+}
+
+func retainActionableGloasEnvelopeRecoveryRoots(
+	pending []common.Hash,
+	hasEnvelope func(common.Hash) bool,
+	hasBlock func(common.Hash) bool,
+) []common.Hash {
+	retained := pending[:0]
+	for _, root := range pending {
+		if hasEnvelope(root) {
+			continue
+		}
+		if !hasBlock(root) {
+			continue
+		}
+		retained = append(retained, root)
+	}
+	return retained
 }
 
 func nextGloasEnvelopeRecoveryBatch(cfg *Cfg) [][32]byte {

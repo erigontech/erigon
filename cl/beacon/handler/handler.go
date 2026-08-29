@@ -160,6 +160,8 @@ type ApiHandler struct {
 	// [New in Gloas:EIP7732]
 	selfBuildEnvelopeUpdatesMu sync.Mutex
 	selfBuildEnvelopes         selfBuildEnvelopeStore
+
+	executionPayloadEnvelopeAdmissions executionPayloadEnvelopeAdmissions
 }
 
 func NewApiHandler(

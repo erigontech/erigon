@@ -478,10 +478,14 @@ func TestGloasRecoveryPendingQueueIsBoundedAndRotatesFailures(t *testing.T) {
 	for i := range maxGloasEnvelopeRecoveryPending {
 		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
 	}
-	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+	newRoot := common.HexToHash("0xffff")
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
 
 	first := nextGloasEnvelopeRecoveryBatch(cfg)
 	require.Len(t, first, maxGloasAncestorVisitsPerCycle)
+	require.Contains(t, first, [32]byte(newRoot))
 	finishGloasEnvelopeRecoveryBatch(cfg, first, func(common.Hash) bool { return false })
 	second := nextGloasEnvelopeRecoveryBatch(cfg)
 	require.NotEqual(t, first[0], second[0])
@@ -490,7 +494,55 @@ func TestGloasRecoveryPendingQueueIsBoundedAndRotatesFailures(t *testing.T) {
 
 	finishGloasEnvelopeRecoveryBatch(cfg, second, func(common.Hash) bool { return true })
 	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending-maxGloasAncestorVisitsPerCycle)
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xfffe")))
+}
+
+func TestGloasRecoveryPendingReleasesOnlyRootsOutsideForkChoiceOwnership(t *testing.T) {
+	finalizedRoot := common.HexToHash("0x01")
+	missingRoot := common.HexToHash("0x02")
+	completeRoot := common.HexToHash("0x03")
+	activeRoot := common.HexToHash("0x04")
+	pending := []common.Hash{finalizedRoot, missingRoot, completeRoot, activeRoot}
+	known := map[common.Hash]bool{
+		finalizedRoot: true,
+		completeRoot:  true,
+		activeRoot:    true,
+	}
+
+	retained := retainActionableGloasEnvelopeRecoveryRoots(
+		pending,
+		func(root common.Hash) bool { return root == completeRoot },
+		func(root common.Hash) bool { return known[root] },
+	)
+
+	require.Equal(t, []common.Hash{finalizedRoot, activeRoot}, retained)
+	for i := len(retained); i < maxGloasEnvelopeRecoveryPending; i++ {
+		retained = append(retained, common.Hash{byte(i), byte(i >> 8)})
+	}
+	cfg := &Cfg{gloasEnvelopeRecoveryPending: retained}
+	cfg.gloasEnvelopeRecoveryPending = retainActionableGloasEnvelopeRecoveryRoots(
+		cfg.gloasEnvelopeRecoveryPending,
+		func(common.Hash) bool { return false },
+		func(root common.Hash) bool { return root == activeRoot },
+	)
 	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+}
+
+func TestGloasRecoveryPendingEvictedRootCanBeRediscovered(t *testing.T) {
+	cfg := &Cfg{}
+	for i := range maxGloasEnvelopeRecoveryPending {
+		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
+	}
+	evicted := cfg.gloasEnvelopeRecoveryPending[0]
+	newRoot := common.HexToHash("0xffff")
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
+	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, evicted)
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
+
+	advanceGloasEnvelopeRecoveryCursor(cfg, common.HexToHash("0x1234"), true)
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, evicted))
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, evicted)
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
 }
 
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {

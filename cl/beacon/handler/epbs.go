@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"sync"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 
@@ -53,7 +54,74 @@ const (
 	maxProposerPreferencesRequestItems     = 2048
 	maxEpbsJSONSize                        = 1 << 20
 	maxExecutionPayloadEnvelopeRequestSize = int64(execparams.MaxRlpBlockSize) * 4
+	maxSeenExecutionPayloadEnvelopes       = 4096
+	maxInflightExecutionPayloadEnvelopes   = 1024
 )
+
+type executionPayloadEnvelopeIdentity struct {
+	beaconBlockRoot common.Hash
+	builderIndex    uint64
+}
+
+type executionPayloadEnvelopeAdmissionToken struct {
+	identity executionPayloadEnvelopeIdentity
+	id       uint64
+}
+
+type executionPayloadEnvelopeAdmissions struct {
+	mu       sync.Mutex
+	nextID   uint64
+	inflight map[executionPayloadEnvelopeIdentity]uint64
+	seen     map[executionPayloadEnvelopeIdentity]struct{}
+	seenFIFO []executionPayloadEnvelopeIdentity
+	seenNext int
+}
+
+func (a *executionPayloadEnvelopeAdmissions) claim(identity executionPayloadEnvelopeIdentity) (executionPayloadEnvelopeAdmissionToken, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.seen[identity]; ok {
+		return executionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+	}
+	if _, ok := a.inflight[identity]; ok {
+		return executionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already being published")
+	}
+	if len(a.inflight) >= maxInflightExecutionPayloadEnvelopes {
+		return executionPayloadEnvelopeAdmissionToken{}, errors.New("too many execution payload envelopes are being published")
+	}
+	if a.inflight == nil {
+		a.inflight = make(map[executionPayloadEnvelopeIdentity]uint64)
+	}
+	a.nextID++
+	a.inflight[identity] = a.nextID
+	return executionPayloadEnvelopeAdmissionToken{identity: identity, id: a.nextID}, nil
+}
+
+func (a *executionPayloadEnvelopeAdmissions) finish(token executionPayloadEnvelopeAdmissionToken, accepted bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inflight[token.identity] != token.id {
+		return
+	}
+	delete(a.inflight, token.identity)
+	if !accepted {
+		return
+	}
+	if a.seen == nil {
+		a.seen = make(map[executionPayloadEnvelopeIdentity]struct{})
+	}
+	if _, ok := a.seen[token.identity]; ok {
+		return
+	}
+	if len(a.seenFIFO) >= maxSeenExecutionPayloadEnvelopes {
+		delete(a.seen, a.seenFIFO[a.seenNext])
+		a.seenFIFO[a.seenNext] = token.identity
+		a.seenNext = (a.seenNext + 1) % maxSeenExecutionPayloadEnvelopes
+	} else {
+		a.seenFIFO = append(a.seenFIFO, token.identity)
+	}
+	a.seen[token.identity] = struct{}{}
+}
 
 func maxSignedExecutionPayloadBidSSZSize() int64 {
 	emptyBidSize := (&cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{}}).EncodingSizeSSZ()
@@ -926,6 +994,18 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
+	admissionToken, err := a.executionPayloadEnvelopeAdmissions.claim(executionPayloadEnvelopeIdentity{
+		beaconBlockRoot: signedEnvelope.Message.BeaconBlockRoot,
+		builderIndex:    signedEnvelope.Message.BuilderIndex,
+	})
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
+	accepted := false
+	defer func() {
+		a.executionPayloadEnvelopeAdmissions.finish(admissionToken, accepted)
+	}()
 	if validation == BlockPublishingValidationConsensusAndEquivocation {
 		equivocating, known := a.forkchoiceStore.HasEquivocatingBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if !known {
@@ -998,6 +1078,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("failed to publish execution payload envelope: %w", err)).WriteTo(w)
 			return
 		}
+		accepted = true
 	}
 
 	var integrationErr error
@@ -1014,6 +1095,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		return
 	}
 
+	accepted = true
 	w.WriteHeader(http.StatusOK)
 }
 
