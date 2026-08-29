@@ -35,21 +35,15 @@ func TestCodeStore_BackingAndEvict(t *testing.T) {
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
 	hash := crypto.Keccak256(code)
 
-	// Write path populates the MDBX backing.
+	// Write path populates the MDBX backing, which every read then serves.
 	cs := NewCodeStore(1 << 20)
 	require.NoError(t, cs.PutByHash(tx, hash, code))
 	got, ok := cs.GetByHash(tx, hash)
-	require.True(t, ok)
-	require.Equal(t, code, got)
-
-	// A fresh store serves the same bytes from the backing.
-	cs2 := NewCodeStore(1 << 20)
-	got, ok = cs2.GetByHash(tx, hash)
 	require.True(t, ok, "must serve from the persistent TblCodeCache backing")
 	require.Equal(t, code, got)
 
 	// Unknown codehash misses cleanly.
-	_, ok = cs2.GetByHash(tx, crypto.Keccak256([]byte{0xff}))
+	_, ok = cs.GetByHash(tx, crypto.Keccak256([]byte{0xff}))
 	require.False(t, ok)
 
 	// Evict prunes the backing when over the table cap.

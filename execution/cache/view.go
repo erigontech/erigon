@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"math"
 
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -232,9 +233,15 @@ func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64
 	if !ok {
 		return
 	}
-	accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
-	if !ok {
-		return
+	// The accounts frontier gates the addr binding, which a codeHash-only fill
+	// does not create — requiring it there would drop the fill for an unrelated
+	// domain's view.
+	accountsEnd := uint64(math.MaxUint64)
+	if len(addr) > 0 {
+		accountsEnd, ok = v.frontier.DomainVisibleEnd(kv.AccountsDomain)
+		if !ok {
+			return
+		}
 	}
 	v.c.fillCodeWithHashIfFresh(addr, code, codeHash, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
 }

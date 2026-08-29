@@ -226,7 +226,8 @@ type ExecModule struct {
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
-	// codeStore is the persistent codehash-keyed code cache (in-mem + MDBX backing).
+	// codeStore is the persistent codehash-keyed code table; its memory tier is
+	// the state cache's codehash layer.
 	codeStore   *cache.CodeStore
 	readAheader *exec.BlockReadAheader
 
