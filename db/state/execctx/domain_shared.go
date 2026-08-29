@@ -1252,13 +1252,12 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			// Both consumers get the same hash; hashing a block's worth of code
-			// twice is the one duplicate they cannot avoid on their own.
+			// Only the code store needs a hash here, where every domain lock is
+			// held, and it needs one as its key. The cache reuses it when it is
+			// already in hand and otherwise hashes after the commit, off the lock.
 			var codeHash []byte
-			if len(v) > 0 {
+			if sd.codeStore != nil && len(v) > 0 {
 				codeHash = crypto.Keccak256(v)
-			}
-			if sd.codeStore != nil && codeHash != nil {
 				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, v})
 			}
 			if sd.stateCache != nil {
@@ -1654,7 +1653,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 			}
 			if sd.codeStore != nil {
 				if cv, ok := sd.codeStore.GetByHash(tx, codeHash); ok {
-					sd.fillCodeCacheByHash(tx, view, cv, codeHash, txNum)
+					sd.fillCodeCacheByHash(tx, view, addr, cv, codeHash, txNum)
 					return cv, true, nil
 				}
 			}
@@ -1675,8 +1674,14 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 // fillCodeCacheByHash promotes a code-store hit into the in-memory code cache,
 // the store's only memory tier. txNum is the reader's, an upper bound on the
 // code's write txNum, so an unwind drops the entry no later than the code.
-func (sd *SharedDomains) fillCodeCacheByHash(tx kv.TemporalTx, view cache.ReadView, code, codeHash []byte, txNum uint64) {
+func (sd *SharedDomains) fillCodeCacheByHash(tx kv.TemporalTx, view cache.ReadView, addr, code, codeHash []byte, txNum uint64) {
 	if sd.stateCache == nil {
+		return
+	}
+	// A bounded read observes a staged unwind rather than stable committed state:
+	// the backing still holds the dying rows inside the bound, so the bytes must
+	// not reach the shared cache. Same gate the addr-keyed fill applies.
+	if _, _, maxStep, _ := sd.latestFromMem(kv.CodeDomain, addr); maxStep != kv.NoStepBound {
 		return
 	}
 	if view.NeedsFrontier() {

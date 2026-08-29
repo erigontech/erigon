@@ -611,9 +611,10 @@ type FlushConfig struct {
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
 	//
-	// k and v are the batch's own storage, not scratch: they stay valid and
-	// unchanged until the batch is closed, so a callback may hold them for the
-	// rest of the flushing call. Anything that outlives the batch copies.
+	// v is the batch's own storage, not scratch: it stays valid and unchanged
+	// until the batch is closed. k is freshly allocated per call and belongs to
+	// the callback. Either may be held for the rest of the flushing call;
+	// anything that outlives the batch copies v.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 

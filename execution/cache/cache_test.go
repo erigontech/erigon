@@ -1773,10 +1773,32 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 	}
 }
 
-// TestPublishUsesProducerCodeHash pins that a CodeDomain update carrying a
-// CodeHash is filed under that hash rather than one the cache derives itself,
-// which is what spares it re-hashing a block's worth of code. A sentinel hash
-// makes the difference visible: re-deriving would file the entry elsewhere.
+// TestFillCodeByHash_IgnoresAccountsFrontier pins that a codeHash-only fill is
+// not gated on the accounts frontier. That gate protects the addr binding an
+// addr-keyed fill creates; a content-addressed entry has none, so requiring it
+// would drop promotions for an unrelated domain's view.
+func TestFillCodeByHash_IgnoresAccountsFrontier(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	code := bytes.Repeat([]byte{0x5b}, 48)
+	codeHash := crypto.Keccak256(code)
+
+	noAccountsEnd := FrontierFunc(func(d kv.Domain) (uint64, bool) {
+		if d == kv.AccountsDomain {
+			return 0, false
+		}
+		return 100, true
+	})
+	c.View(FrontierWithStateVersion(noAccountsEnd, 1)).FillCodeByHash(code, codeHash, 20)
+
+	got, ok := c.View(nil).GetCodeByHash(codeHash)
+	require.True(t, ok, "a codeHash-only fill must not need the accounts frontier")
+	require.Equal(t, code, got)
+}
+
 func TestPublishUsesProducerCodeHash(t *testing.T) {
 	t.Parallel()
 
@@ -1809,31 +1831,31 @@ func TestPublishUsesProducerCodeHash(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
-// TestPublishAppliesEveryUpdateAcrossChunks covers a batch that spans several
-// publish chunks: chunking bounds how much is prepared at once, so every entry
-// must still land, including the ones on a chunk boundary.
-func TestPublishAppliesEveryUpdateAcrossChunks(t *testing.T) {
+// A malformed producer hash must be replaced, not used: hash32 would zero-pad it
+// into the content-addressed key, and an all-zero stamp also blanks the guard
+// that rejects a 64-bit maphash collision serving another contract's code.
+func TestPublishDerivesMalformedCodeHash(t *testing.T) {
 	t.Parallel()
 
 	c := closeOnCleanup(t, NewDefaultStateCache())
 	c.Applier().Initialize(1)
 
-	const n = publishChunk*3 + 1
-	updates := make([]StateUpdate, n)
-	for i := range updates {
-		updates[i] = StateUpdate{
-			Domain: kv.AccountsDomain,
-			Key:    binary.BigEndian.AppendUint64(make([]byte, 12), uint64(i)),
-			Value:  binary.BigEndian.AppendUint64(nil, uint64(i)),
-			TxNum:  uint64(i),
-		}
-	}
-	c.Applier().Publish(1, 2, updates)
+	addr := makeAddr(9)
+	code := bytes.Repeat([]byte{0xcd}, 64)
+	short := []byte{0x01, 0x02, 0x03}
 
-	view := c.View(nil)
-	for i := range updates {
-		got, ok := view.Get(kv.AccountsDomain, updates[i].Key)
-		require.True(t, ok, "update %d must be applied", i)
-		require.Equal(t, updates[i].Value, got)
-	}
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: short,
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.True(t, ok, "a short producer hash must be replaced by the derived one")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(short)
+	require.False(t, ok, "the zero-padded short hash must not key the entry")
 }

@@ -103,3 +103,37 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 		}
 	}
 }
+
+// Flush hands its callbacks the batch's own value buffers, and SharedDomains.Commit
+// borrows them for the whole commit rather than copying. That is only sound while a
+// later write to the same key leaves the earlier bytes alone: an in-place rewrite
+// would corrupt the caches holding them, with nothing else to catch it.
+func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
+	t.Parallel()
+
+	sd := &TemporalMemBatch{
+		stepSize:          16,
+		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		inMemHistoryReads: true,
+	}
+	for d := range sd.domains {
+		sd.domains[d] = map[string][]dataWithTxNum{}
+	}
+
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		key := "k-" + domain.String()
+		sd.putLatest(domain, key, []byte("first"), 1)
+		borrowed, _, ok := sd.GetLatest(domain, []byte(key))
+		require.True(t, ok)
+		require.Equal(t, []byte("first"), borrowed)
+
+		// Same txNum (replaces the entry), a later one (appends), and a longer
+		// value than the first — every shape a rewrite could take.
+		sd.putLatest(domain, key, []byte("second"), 1)
+		sd.putLatest(domain, key, []byte("third-and-longer"), 2)
+
+		require.Equal(t, []byte("first"), borrowed,
+			"%s: a borrowed value must survive later writes to its key", domain)
+	}
+}

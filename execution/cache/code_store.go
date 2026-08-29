@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -27,7 +29,9 @@ import (
 // table keyed by keccak(code) holding DECOMPRESSED code, so a hit skips the
 // CodeDomain btree+decompress cost and survives a restart. The memory tier is
 // CodeCache's codehash layer — a hit here is promoted into it by the caller, so
-// the bytes are resident once. Content-addressed, so entries are immutable and
+// the bytes are resident once. Without a state cache (USE_STATE_CACHE=false)
+// there is no memory tier and every hit costs an MDBX read, still cheaper than
+// the CodeDomain path it replaces. Content-addressed, so entries are immutable and
 // callers must key by the authoritative account codehash — a wrong codehash can
 // only miss, never return wrong bytes.
 type CodeStore struct {
@@ -50,7 +54,7 @@ func (s *CodeStore) Stats() (hits, misses uint64) {
 	return s.hits.Swap(0), s.misses.Swap(0)
 }
 
-const DefaultCodeStoreTableBytes = 1024 * 1024 * 1024
+const DefaultCodeStoreTableBytes = uint64(1 * datasize.GB)
 
 func NewCodeStore(tableCapBytes uint64) *CodeStore {
 	return &CodeStore{tableCapBytes: tableCapBytes}
