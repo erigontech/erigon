@@ -906,13 +906,16 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	rehashPendingOnly := m.midBlock && incrementalStepRehash
-	if rehashPendingOnly {
-		cc.state.FlushPendingRehashToUpdates(cc.updates)
+	flushQueuedOnly := m.midBlock && incrementalStepRehash
+	if flushQueuedOnly {
+		cc.state.FlushQueuedToUpdates(cc.updates)
 	} else {
 		cc.state.FlushToUpdates(cc.updates)
 	}
 	if !m.midBlock {
+		if dbg.AssertEnabled {
+			cc.state.AssertWorkBound(t.blockNum)
+		}
 		cc.state.ResetBlockFlags()
 	}
 
@@ -941,8 +944,8 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	// After the rehash has landed, never before it.
-	if rehashPendingOnly {
-		cc.state.ClearPendingRehash()
+	if flushQueuedOnly {
+		cc.state.DrainQueued()
 	}
 
 	if !m.checkRoot {

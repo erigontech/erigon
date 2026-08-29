@@ -42,7 +42,7 @@ func newTestCalcState() *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
-		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]slotFlags),
 	}
 }
 

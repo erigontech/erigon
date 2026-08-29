@@ -6,6 +6,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -25,9 +26,19 @@ type calcAccountState struct {
 	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
-	// pendingRehash marks an account whose hash has not been recomputed since it
-	// last changed. A mid-block rehash clears it; dirty survives to block end.
-	pendingRehash bool
+	// queued means the address is already in calcState.queuedAccounts, so a
+	// second write before the next commitment pass does not enqueue it twice.
+	queued bool
+}
+
+// slotFlags is storageDirty's value: dirty mirrors calcAccountState.dirty,
+// queued mirrors its queued.
+type slotFlags struct{ dirty, queued bool }
+
+// storageRef names one queued slot.
+type storageRef struct {
+	addr accounts.Address
+	key  accounts.StorageKey
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -92,10 +103,22 @@ type calcState struct {
 	// storageState holds the accumulated value for each slot
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	// storageDirty tracks which slots were modified in the current block
-	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
-	// storagePendingRehash holds the slots whose hash has not been recomputed
-	// since they last changed. A mid-block rehash clears it; storageDirty does not.
-	storagePendingRehash map[accounts.Address]map[accounts.StorageKey]bool
+	storageDirty map[accounts.Address]map[accounts.StorageKey]slotFlags
+
+	// queuedAccounts and queuedStorage are the keys written since the last
+	// commitment pass, in write order. A pass consumes them; block end consumes
+	// them too, having covered a superset via the dirty flags. Holding the work
+	// as a queue rather than a predicate is what keeps a pass proportional to
+	// what changed since the previous one.
+	queuedAccounts []accounts.Address
+	queuedStorage  []storageRef
+
+	// Work-amplification guard (ERIGON_ASSERT): a mid-block rehash may only
+	// cover keys written since the previous one, so its total over a block can
+	// never exceed the writes the block made. Reading `dirty` there instead —
+	// the bug this pass was split to fix — breaks the bound immediately.
+	writesThisBlock uint64
+	coveredMidBlock uint64
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader accountBaselineReader
@@ -123,13 +146,12 @@ func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
 
 func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) *calcState {
 	return &calcState{
-		accounts:             make(map[accounts.Address]*calcAccountState),
-		storageState:         make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
-		storageDirty:         make(map[accounts.Address]map[accounts.StorageKey]bool),
-		storagePendingRehash: make(map[accounts.Address]map[accounts.StorageKey]bool),
-		domainReader:         &calcDomainReader{reader: reader},
-		logger:               logger,
-		logPrefix:            logPrefix,
+		accounts:     make(map[accounts.Address]*calcAccountState),
+		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
+		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]slotFlags),
+		domainReader: &calcDomainReader{reader: reader},
+		logger:       logger,
+		logPrefix:    logPrefix,
 	}
 }
 
@@ -181,14 +203,16 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 // a self-destructed address; for a non-self-destructed address any field write
 // — even zero — means it is alive (clears Deleted).
 func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
+	if dbg.AssertEnabled {
+		cs.writesThisBlock += uint64(writes.Count())
+	}
 	sdThisCall := make(map[accounts.Address]bool)
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
 		if vw.Val {
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
-			acc.dirty = true
-			acc.pendingRehash = true
+			cs.markWritten(addr, acc)
 			cs.deleteStorageSubtree(addr)
 		}
 	}
@@ -198,8 +222,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Balance = vw.Val
-		acc.dirty = true
-		acc.pendingRehash = true
+		cs.markWritten(addr, acc)
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
 		}
@@ -207,8 +230,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Nonces() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Nonce = vw.Val
-		acc.dirty = true
-		acc.pendingRehash = true
+		cs.markWritten(addr, acc)
 		if clearsDeleted(addr, acc.Nonce != 0) {
 			acc.Deleted = false
 		}
@@ -216,8 +238,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.CodeHashes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Value()
-		acc.dirty = true
-		acc.pendingRehash = true
+		cs.markWritten(addr, acc)
 		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
 			acc.Deleted = false
 		}
@@ -225,8 +246,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Codes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
-		acc.dirty = true
-		acc.pendingRehash = true
+		cs.markWritten(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
 			acc.Deleted = false
 		}
@@ -234,8 +254,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Incarnations() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Incarnation = vw.Val
-		acc.dirty = true
-		acc.pendingRehash = true
+		cs.markWritten(addr, acc)
 	}
 	for addr, inner := range writes.Storages() {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
@@ -246,16 +265,9 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			slots = make(map[accounts.StorageKey]uint256.Int)
 			cs.storageState[addr] = slots
 		}
-		dirty := cs.storageDirty[addr]
-		if dirty == nil {
-			dirty = make(map[accounts.StorageKey]bool)
-			cs.storageDirty[addr] = dirty
-		}
-		pendingRehash := cs.pendingRehashSlots(addr)
 		for key, vw := range inner {
 			slots[key] = vw.Val
-			dirty[key] = true
-			pendingRehash[key] = true
+			cs.markSlotWritten(addr, key)
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero
@@ -273,16 +285,30 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	}
 }
 
-func (cs *calcState) pendingRehashSlots(addr accounts.Address) map[accounts.StorageKey]bool {
-	if cs.storagePendingRehash == nil {
-		cs.storagePendingRehash = make(map[accounts.Address]map[accounts.StorageKey]bool)
+// markWritten records an account write: dirty for block end, queued once for
+// the next commitment pass.
+func (cs *calcState) markWritten(addr accounts.Address, acc *calcAccountState) {
+	acc.dirty = true
+	if !acc.queued {
+		acc.queued = true
+		cs.queuedAccounts = append(cs.queuedAccounts, addr)
 	}
-	m := cs.storagePendingRehash[addr]
-	if m == nil {
-		m = make(map[accounts.StorageKey]bool)
-		cs.storagePendingRehash[addr] = m
+}
+
+// markSlotWritten is markWritten for a storage slot.
+func (cs *calcState) markSlotWritten(addr accounts.Address, key accounts.StorageKey) {
+	slots := cs.storageDirty[addr]
+	if slots == nil {
+		slots = make(map[accounts.StorageKey]slotFlags)
+		cs.storageDirty[addr] = slots
 	}
-	return m
+	f := slots[key]
+	f.dirty = true
+	if !f.queued {
+		f.queued = true
+		cs.queuedStorage = append(cs.queuedStorage, storageRef{addr: addr, key: key})
+	}
+	slots[key] = f
 }
 
 // deleteStorageSubtree handles a self-destructed account's storage. Only slots
@@ -294,16 +320,9 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	if len(slots) == 0 {
 		return
 	}
-	dirty := cs.storageDirty[addr]
-	if dirty == nil {
-		dirty = make(map[accounts.StorageKey]bool)
-		cs.storageDirty[addr] = dirty
-	}
-	pendingRehash := cs.pendingRehashSlots(addr)
 	for key := range slots {
 		slots[key] = uint256.Int{}
-		dirty[key] = true
-		pendingRehash[key] = true
+		cs.markSlotWritten(addr, key)
 	}
 }
 
@@ -347,80 +366,119 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // buffer. Only keys modified in this block are emitted. Account updates
 // always include the full current state (all fields) so the trie sees
 // complete values.
-func (cs *calcState) FlushToUpdates(updates *commitment.Updates) { cs.flush(updates, false) }
-
-// FlushPendingRehashToUpdates emits only the keys changed since the previous
-// mid-block rehash. Block end still calls FlushToUpdates, so the set of keys a
-// block reports — and therefore its changeset — is unchanged.
-func (cs *calcState) FlushPendingRehashToUpdates(updates *commitment.Updates) {
-	cs.flush(updates, true)
+func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
+	for addr, acc := range cs.accounts {
+		if !acc.dirty {
+			continue
+		}
+		cs.emitAccount(updates, addr, acc)
+	}
+	for addr, slots := range cs.storageDirty {
+		for key, f := range slots {
+			if !f.dirty {
+				continue
+			}
+			cs.emitSlot(updates, addr, key)
+		}
+	}
 }
 
-func (cs *calcState) flush(updates *commitment.Updates, pendingOnly bool) {
-	for addr, acc := range cs.accounts {
-		if pendingOnly && !acc.pendingRehash {
-			continue
-		}
-		if !pendingOnly && !acc.dirty {
-			continue
-		}
-		address := addr.Value()
-		key := string(address[:])
-
-		// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
-		// when every field is actually zero; a Deleted account that still holds a
-		// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
-		// so emit a regular UPDATE with the real values instead.
-		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
-		switch {
-		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  uint256.Int{},
-				Nonce:    0,
-				CodeHash: empty.CodeHash,
-			})
-		case acc.Deleted && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.DeleteUpdate,
-				CodeHash: empty.CodeHash,
-			})
-		default:
-			// Either not Deleted, or Deleted-with-retained-values.
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash,
-			})
+// FlushQueuedToUpdates emits only the keys written since the previous
+// commitment pass. Block end still calls FlushToUpdates, so the set of keys a
+// block reports — and therefore its changeset — is unchanged.
+func (cs *calcState) FlushQueuedToUpdates(updates *commitment.Updates) {
+	for _, addr := range cs.queuedAccounts {
+		if acc, ok := cs.accounts[addr]; ok {
+			cs.emitAccount(updates, addr, acc)
 		}
 	}
-
-	storageSrc := cs.storageDirty
-	if pendingOnly {
-		storageSrc = cs.storagePendingRehash
+	for _, ref := range cs.queuedStorage {
+		cs.emitSlot(updates, ref.addr, ref.key)
 	}
-	for addr, dirtySlots := range storageSrc {
-		address := addr.Value()
-		slots := cs.storageState[addr]
-		for key := range dirtySlots {
-			val := slots[key]
-			keyVal := key.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, address[:])
-			copy(composite[20:], keyVal[:])
+	if dbg.AssertEnabled {
+		cs.coveredMidBlock += uint64(len(cs.queuedAccounts) + len(cs.queuedStorage))
+	}
+}
 
-			vBytes := val.Bytes()
-			var u commitment.Update
-			if len(vBytes) == 0 {
-				u.Flags = commitment.DeleteUpdate
-			} else {
-				u.Flags = commitment.StorageUpdate
-				u.StorageLen = int8(len(vBytes))
-				copy(u.Storage[:], vBytes)
-			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+func (cs *calcState) emitAccount(updates *commitment.Updates, addr accounts.Address, acc *calcAccountState) {
+	address := addr.Value()
+	key := string(address[:])
+
+	// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
+	// when every field is actually zero; a Deleted account that still holds a
+	// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
+	// so emit a regular UPDATE with the real values instead.
+	isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
+	switch {
+	case acc.Deleted && acc.Incarnation > 0 && isAllZero:
+		updates.TouchPlainKeyDirect(key, &commitment.Update{
+			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+			Balance:  uint256.Int{},
+			Nonce:    0,
+			CodeHash: empty.CodeHash,
+		})
+	case acc.Deleted && isAllZero:
+		updates.TouchPlainKeyDirect(key, &commitment.Update{
+			Flags:    commitment.DeleteUpdate,
+			CodeHash: empty.CodeHash,
+		})
+	default:
+		// Either not Deleted, or Deleted-with-retained-values.
+		updates.TouchPlainKeyDirect(key, &commitment.Update{
+			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+			Balance:  acc.Balance,
+			Nonce:    acc.Nonce,
+			CodeHash: acc.CodeHash,
+		})
+	}
+}
+
+func (cs *calcState) emitSlot(updates *commitment.Updates, addr accounts.Address, key accounts.StorageKey) {
+	address := addr.Value()
+	keyVal := key.Value()
+	composite := make([]byte, 20+32)
+	copy(composite, address[:])
+	copy(composite[20:], keyVal[:])
+
+	val := cs.storageState[addr][key]
+	vBytes := val.Bytes()
+	var u commitment.Update
+	if len(vBytes) == 0 {
+		u.Flags = commitment.DeleteUpdate
+	} else {
+		u.Flags = commitment.StorageUpdate
+		u.StorageLen = int8(len(vBytes))
+		copy(u.Storage[:], vBytes)
+	}
+	updates.TouchPlainKeyDirect(string(composite), &u)
+}
+
+// DrainQueued empties the queue and clears the queued marks. Call it only after
+// the pass has landed: draining first would drop those keys from it.
+func (cs *calcState) DrainQueued() {
+	for _, addr := range cs.queuedAccounts {
+		if acc, ok := cs.accounts[addr]; ok {
+			acc.queued = false
 		}
+	}
+	cs.queuedAccounts = cs.queuedAccounts[:0]
+	for _, ref := range cs.queuedStorage {
+		if slots := cs.storageDirty[ref.addr]; slots != nil {
+			f := slots[ref.key]
+			f.queued = false
+			slots[ref.key] = f
+		}
+	}
+	cs.queuedStorage = cs.queuedStorage[:0]
+}
+
+// AssertWorkBound panics when the mid-block rehashes covered more keys than the
+// block wrote, which means one of them read the block's dirty flags instead of the queue.
+// Call it at block end, before the flags are cleared.
+func (cs *calcState) AssertWorkBound(blockNum uint64) {
+	if cs.coveredMidBlock > cs.writesThisBlock {
+		panic(fmt.Sprintf("calcState: block %d mid-block rehashes covered %d keys but the block wrote %d",
+			blockNum, cs.coveredMidBlock, cs.writesThisBlock))
 	}
 }
 
@@ -428,26 +486,12 @@ func (cs *calcState) flush(updates *commitment.Updates, pendingOnly bool) {
 // accumulated state values. Called after commitment computation to
 // prepare for the next block.
 func (cs *calcState) ResetBlockFlags() {
+	cs.DrainQueued()
 	for _, acc := range cs.accounts {
 		acc.dirty = false
-		acc.pendingRehash = false
 	}
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
-	for addr := range cs.storagePendingRehash {
-		delete(cs.storagePendingRehash, addr)
-	}
-}
-
-// ClearPendingRehash leaves the per-block flags alone, so block end still sees
-// every key the block touched. Call it only after the rehash has landed:
-// clearing first would drop those keys from it.
-func (cs *calcState) ClearPendingRehash() {
-	for _, acc := range cs.accounts {
-		acc.pendingRehash = false
-	}
-	for addr := range cs.storagePendingRehash {
-		delete(cs.storagePendingRehash, addr)
-	}
+	cs.writesThisBlock, cs.coveredMidBlock = 0, 0
 }
