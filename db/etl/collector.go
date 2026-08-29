@@ -316,17 +316,19 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		}
 	}
 
-	h := &Heap{}
-	heapInit(h)
+	h := &Heap{elems: make([]*HeapElem, 0, len(providers))}
 	for i, provider := range providers {
 		if key, value, err := provider.Next(); err == nil {
-			heapPush(h, &HeapElem{key, value, i})
+			e := &HeapElem{Value: value, TimeIdx: i}
+			e.setKey(key)
+			h.elems = append(h.elems, e)
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
 				logPrefix, len(providers), i, provider, err)
 			panic(eee)
 		}
 	}
+	heapInit(h)
 
 	var prevK, prevV []byte
 
@@ -340,7 +342,9 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			}
 		}
 
-		element := heapPop(h)
+		// The root stays in the heap while loadFunc runs, then takes its
+		// provider's next key in place: one sift instead of a pop and a push.
+		element := h.elems[0]
 		provider := providers[element.TimeIdx]
 
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
@@ -372,9 +376,15 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			}
 		}
 
-		if element.Key, element.Value, err = provider.Next(); err == nil {
-			heapPush(h, element)
-		} else if !errors.Is(err, io.EOF) {
+		key, value, err := provider.Next()
+		switch {
+		case err == nil:
+			element.setKey(key)
+			element.Value = value
+			heapFixRoot(h)
+		case errors.Is(err, io.EOF):
+			heapPopRoot(h)
+		default:
 			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)
 		}
 	}
