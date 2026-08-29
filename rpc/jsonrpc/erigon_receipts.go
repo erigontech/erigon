@@ -115,17 +115,17 @@ func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
 }
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
-func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
+func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	if err := crit.ValidateTopicPositions(); err != nil {
 		return nil, err
 	}
 
 	var begin, end uint64
-	erigonLogs := types.ErigonLogs{}
+	rpcLogs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return erigonLogs, beginErr
+		return rpcLogs, beginErr
 	}
 	defer tx.Rollback()
 
@@ -174,7 +174,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 // Examples:
 // {} or nil          matches any topics list
 // {{A}}              matches topic A in any positions. Logs with {{B}, {A}} will be matched
-func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error) {
+func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.RPCLogs, error) {
 	if logOptions.LogCount != 0 && logOptions.BlockCount != 0 {
 		return nil, errors.New("logs count & block count are ambigious")
 	}
@@ -192,10 +192,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: requested %d, maximum %d", errRequestedBlockCountExceedsLimit, logOptions.BlockCount, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	erigonLogs := types.ErigonLogs{}
+	rpcLogs := types.RPCLogs{}
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return erigonLogs, beginErr
+		return rpcLogs, beginErr
 	}
 	defer tx.Rollback()
 
@@ -241,7 +241,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	// The Logs should retrieve from latest to oldest order=Descend
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
-		return erigonLogs, err
+		return rpcLogs, err
 	}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
@@ -296,7 +296,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		var blockLogs types.Logs
 
 		if logOptions.BlockCount != 0 && logOptions.BlockCount < blockCount {
-			return erigonLogs, nil
+			return rpcLogs, nil
 		}
 
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
@@ -349,32 +349,32 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, fmt.Errorf("block not found %d", blockNum)
 		}
 		for _, log := range filtered {
-			if api.getLogsMaxResults != 0 && len(erigonLogs) >= api.getLogsMaxResults {
+			if api.getLogsMaxResults != 0 && len(rpcLogs) >= api.getLogsMaxResults {
 				return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, api.getLogsMaxResults), Code: rpc.ErrCodeInvalidParams}
 			}
-			erigonLog := &types.ErigonLog{}
-			erigonLog.BlockNumber = hexutil.Uint64(blockNum)
-			erigonLog.BlockHash = blockHash
+			rpcLog := &types.RPCLog{}
+			rpcLog.BlockNumber = hexutil.Uint64(blockNum)
+			rpcLog.BlockHash = blockHash
 			txi := int(log.TxIndex)
 			if txi >= len(body.Transactions) {
 				return nil, fmt.Errorf("log txIndex %d out of range in block %d with %d txns", txi, blockNum, len(body.Transactions))
 			}
-			erigonLog.TxHash = body.Transactions[txi].Hash()
-			erigonLog.BlockTimestamp = hexutil.Uint64(timestamp)
-			erigonLog.Address = log.Address
-			erigonLog.Topics = log.Topics
-			erigonLog.Data = log.Data
-			erigonLog.Index = log.Index
-			erigonLog.TxIndex = log.TxIndex
-			erigonLog.Removed = log.Removed
-			erigonLogs = append(erigonLogs, erigonLog)
+			rpcLog.TxHash = body.Transactions[txi].Hash()
+			rpcLog.BlockTimestamp = hexutil.Uint64(timestamp)
+			rpcLog.Address = log.Address
+			rpcLog.Topics = log.Topics
+			rpcLog.Data = log.Data
+			rpcLog.Index = log.Index
+			rpcLog.TxIndex = log.TxIndex
+			rpcLog.Removed = log.Removed
+			rpcLogs = append(rpcLogs, rpcLog)
 		}
 
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
-			return erigonLogs, nil
+			return rpcLogs, nil
 		}
 	}
-	return erigonLogs, nil
+	return rpcLogs, nil
 }
 
 func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]any, error) {

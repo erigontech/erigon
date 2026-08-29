@@ -346,10 +346,10 @@ func TestFilterWithTopicMapEquivalence(t *testing.T) {
 	}
 }
 
-func TestErigonLogJSONBlockTimestamp(t *testing.T) {
+func TestRPCLogJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
-	el := &ErigonLog{
+	el := &RPCLog{
 		Log: Log{
 			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			Topics:  []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
@@ -366,56 +366,67 @@ func TestErigonLogJSONBlockTimestamp(t *testing.T) {
 	require.Contains(t, s, `"blockTimestamp":"0x6553f100"`)
 	require.NotContains(t, s, `"timestamp"`)
 
-	var decoded ErigonLog
+	var decoded RPCLog
 	require.NoError(t, json.Unmarshal(b, &decoded))
 	require.Equal(t, el.BlockTimestamp, decoded.BlockTimestamp)
 	require.Equal(t, el.Address, decoded.Address)
 	require.Equal(t, el.TxHash, decoded.TxHash)
 }
 
-func TestErigonLogUnmarshalJSONBlockTimestamp(t *testing.T) {
+func TestRPCLogUnmarshalJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
 	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
 
-	var log ErigonLog
+	var log RPCLog
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
 	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
 	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
 }
 
-func TestErigonLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
+func TestRPCLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 	t.Parallel()
 
 	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
 
-	var log ErigonLog
+	var log RPCLog
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
 	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
 	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
-func TestErigonAndRPCLogTimestampConsistency(t *testing.T) {
+func TestToRPCLogs(t *testing.T) {
 	t.Parallel()
 
-	log := Log{
-		Address: common.HexToAddress("0x4444444444444444444444444444444444444444"),
-		Topics:  []common.Hash{common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")},
-		Data:    hexutil.Bytes{0x88, 0x99},
-		TxHash:  common.HexToHash("0x7777888899990000aaaabbbbccccddddeeeeffff111122223333444455556666"),
+	logs := Logs{
+		{
+			Address: common.HexToAddress("0x5555555555555555555555555555555555555555"),
+			Topics:  []common.Hash{common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")},
+			Data:    hexutil.Bytes{0xaa},
+			Index:   1,
+		},
+		{
+			Address: common.HexToAddress("0x6666666666666666666666666666666666666666"),
+			Data:    hexutil.Bytes{0xbb},
+			Index:   2,
+		},
 	}
-	ts := hexutil.Uint64(1800000000)
 
-	erigonB, err := json.Marshal(&ErigonLog{Log: log, BlockTimestamp: ts})
-	require.NoError(t, err)
-	rpcB, err := json.Marshal(&RPCLog{Log: log, BlockTimestamp: ts})
-	require.NoError(t, err)
+	rpcLogs := logs.ToRPCLogs(1900000000)
 
-	var erigonMap, rpcMap map[string]any
-	require.NoError(t, json.Unmarshal(erigonB, &erigonMap))
-	require.NoError(t, json.Unmarshal(rpcB, &rpcMap))
+	require.Len(t, rpcLogs, len(logs))
+	for i, rpcLog := range rpcLogs {
+		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
+		require.Equal(t, logs[i].Address, rpcLog.Address)
+		require.Equal(t, logs[i].Topics, rpcLog.Topics)
+		require.Equal(t, logs[i].Data, rpcLog.Data)
+		require.Equal(t, logs[i].Index, rpcLog.Index)
+	}
+}
 
-	require.Equal(t, rpcMap["blockTimestamp"], erigonMap["blockTimestamp"])
-	require.Nil(t, erigonMap["timestamp"])
-	require.Nil(t, rpcMap["timestamp"])
+func TestToRPCLogsEmpty(t *testing.T) {
+	t.Parallel()
+
+	require.Empty(t, Logs{}.ToRPCLogs(1))
+	require.Empty(t, Logs(nil).ToRPCLogs(1))
 }
