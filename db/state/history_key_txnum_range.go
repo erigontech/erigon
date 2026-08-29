@@ -245,11 +245,10 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 
 func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 	if hi.valsCDup == nil {
-		c, err := hi.roTx.CursorDupSort(hi.valsTable)
-		if err != nil {
+		var err error
+		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
 			return err
 		}
-		hi.valsCDup = c
 		k, _, err := hi.valsCDup.First()
 		if err != nil {
 			return err
@@ -277,11 +276,10 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 
 func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
 	if hi.valsC == nil {
-		c, err := hi.roTx.Cursor(hi.valsTable)
-		if err != nil {
+		var err error
+		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
 			return err
 		}
-		hi.valsC = c
 		k, _, err := hi.valsC.First()
 		if err != nil {
 			return err
