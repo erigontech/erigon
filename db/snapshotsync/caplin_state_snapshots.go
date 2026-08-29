@@ -84,8 +84,7 @@ func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
 			v, err := tx.GetOne(tableName, key)
-			value = v
-			value = bytes.Clone(value)
+			value = bytes.Clone(v)
 			return err
 		}); err != nil {
 			return nil, nil, err

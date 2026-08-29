@@ -960,10 +960,10 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 		}
 	} else {
 		k, v, err := ht.valsCDup.NextDup()
+		ht.k, ht.v = k, v
 		if err != nil {
 			return err
 		}
-		ht.k, ht.v = k, v
 	}
 
 	if ht.v == nil {
@@ -1008,10 +1008,10 @@ func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
 	}
 
 	k, v, err := ht.valsC.Next()
+	ht.k, ht.v = k, v
 	if err != nil {
 		return err
 	}
-	ht.k, ht.v = k, v
 	if ht.k == nil || !bytes.Equal(ht.k[:len(ht.k)-8], ht.key) {
 		ht.k = nil
 		return nil
