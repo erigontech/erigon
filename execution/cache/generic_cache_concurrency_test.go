@@ -34,10 +34,9 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-// The envelope must cover what a cache actually allocates. freelru wraps every
-// value in an element carrying a key, five list indices and an expiry, and
-// over-allocates the table by 25% -- none of which the per-entry payload
-// estimate accounts for, so a byte budget used to buy ~2.5x the RAM it charged.
+// The envelope must cover what a cache actually allocates: freelru wraps every
+// value in an element and over-allocates the table by 25%, neither of which the
+// payload estimate accounts for.
 func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 	prevBudget := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
@@ -46,10 +45,8 @@ func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStoragePayloadBytes,
 		func(v []byte) int { return len(v) }, ModeEvictLRU))
 
-	// The production ceiling, not a power of two, across the shard counts a
-	// GOMAXPROCS between 8 and 32 produces. A power-of-two capacity divides into
-	// power-of-two shards and lands on the cheapest table ratio, so it can never
-	// observe the rounding that makes a fixed per-slot charge wrong.
+	// The production ceiling, not a power of two: that would land on the cheapest
+	// table ratio and never observe the rounding a fixed charge gets wrong.
 	for _, shards := range []uint32{128, 256, 512} {
 		t.Run(fmt.Sprintf("shards=%d", shards), func(t *testing.T) {
 			slots := c.maxCap
@@ -65,9 +62,8 @@ func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 			runtime.KeepAlive(gen)
 
 			allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
-			// Only the overhead share of the reserve may cover the table. Comparing
-			// the whole per-slot charge would let the payload estimate -- which pays
-			// for values the table does not hold -- mask an undercharged table.
+			// Only the overhead share may cover the table: the payload estimate pays
+			// for values the table does not hold, and would mask an undercharge.
 			overhead := shardArrayBytes(slots, shards)
 			require.Positive(t, allocated)
 			require.GreaterOrEqual(t, overhead, allocated,
@@ -648,9 +644,8 @@ func TestGenericCache_CloseSettlesAgainstConcurrentGrow(t *testing.T) {
 	require.Equal(t, before, cachebudget.Global.Used(), "envelope not restored after Close raced a grow")
 }
 
-// TestGenericCache_EnvelopeCoversIntermediateGeneration walks the grow ladder
-// rather than only the fitted ceiling. A generation's capacity is a power of
-// two, which freelru rounds to a 2x table, so a charge fitted to the ceiling's
+// Walks the grow ladder, not just the fitted ceiling: a generation's capacity is
+// a power of two, which rounds to a 2x table, so a charge fitted to the ceiling's
 // 5/4 under-reserves every step below it.
 func TestGenericCache_EnvelopeCoversIntermediateGeneration(t *testing.T) {
 	prevBudget := cachebudget.Global
@@ -705,10 +700,9 @@ func TestSlotCeilingClampsAboveUint32(t *testing.T) {
 	require.Equal(t, fitTableSlots(maxCacheSlots), g.maxCap)
 }
 
-// The reservation estimate counts bytes held outside freelru's element; the usage
-// report counts what currentSize tracks, which adds per-entry bookkeeping that
-// lives inside that element. Folding the bookkeeping into the estimate charges it
-// twice and buys fewer slots than the budget affords.
+// The reservation counts bytes outside freelru's element; the usage report counts
+// currentSize, which adds bookkeeping living inside it. Folding that into the
+// estimate charges it twice.
 func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 	t.Parallel()
 
@@ -723,8 +717,7 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 		doubled.generationBytes(doubled.maxCap)-external.generationBytes(external.maxCap),
 		"charging the in-element bookkeeping again takes that much extra from the shared envelope")
 
-	// currentSize is what usage_pct divides, and it counts payload plus that same
-	// bookkeeping — so the report's denominator has to add it back.
+	// usage_pct divides currentSize, so its denominator has to add it back.
 	key := make([]byte, 52)
 	val := make([]byte, avgStoragePayloadBytes-len(key))
 	external.Put(key, val, 1)

@@ -48,10 +48,9 @@ const avgBytesPerEntry = 256
 // bucket index. The 112 holds for a value type of at most freelruValueBytes.
 const freelruElemBytes = 112 + 4
 
-// currentSizeEntryOverhead is the per-entry bookkeeping currentSize adds on top
-// of key and value. It lives inside freelru's element, which freelruElemBytes
-// already charges, so a reservation estimate must exclude it — only the usage
-// report, which counts against currentSize, adds it back.
+// currentSizeEntryOverhead is currentSize's per-entry bookkeeping. It lives
+// inside freelru's element, already charged by freelruElemBytes, so only the
+// usage report adds it — never a reservation estimate.
 const currentSizeEntryOverhead = 24
 
 // freelruValueBytes is the largest value type freelruElemBytes accounts for.
@@ -65,17 +64,14 @@ const (
 	_ = uint(freelruValueBytes - unsafe.Sizeof(codeSizeEntry{}))
 )
 
-// freelruSlotBytes is that overhead at the 5/4 table ratio fitTableSlots pins,
-// plus a byte: rounding the capacity down to the boundary leaves the real ratio a
-// hair above 5/4, and the charge has to stay on the covering side of it. It sizes
-// the ceiling only — every generation below it charges from tableSlots, because a
-// power-of-two capacity rounds to a 2x table rather than 5/4.
-// TestGenericCache_EnvelopeCoversSlotArray measures a real table against it.
+// freelruSlotBytes is that overhead at the 5/4 ratio fitTableSlots pins, plus a
+// byte to stay on the covering side of the rounding. It sizes the ceiling only:
+// a power-of-two capacity rounds to a 2x table, so every generation below the
+// ceiling charges from tableSlots instead.
 const freelruSlotBytes = freelruElemBytes*5/4 + 1
 
-// tableSlots is the array length freelru allocates for a capacity: it takes the
-// capacity plus 25% and rounds up to a power of two, then sizes both the element
-// array and the bucket array at the result.
+// tableSlots is the array length freelru allocates for a capacity. It sizes both
+// the element array and the bucket array at the result.
 func tableSlots(capacity uint32) uint64 {
 	if capacity == 0 {
 		return 0
@@ -83,29 +79,23 @@ func tableSlots(capacity uint32) uint64 {
 	return math.NextPowerOfTwo(uint64(capacity) + uint64(capacity)/4)
 }
 
-// freelruShardBytes covers what a shard costs beyond its two arrays: the LRU
-// struct and the slice headers into them. Measured at 239-359 B across shard
-// counts by TestGenericCache_EnvelopeCoversSlotArray; charged high so the
-// envelope stays on the covering side.
+// freelruShardBytes covers a shard beyond its two arrays: the LRU struct and the
+// slice headers. Measured at 239-359 B; charged high to stay covering.
 const freelruShardBytes = 512
 
-// slotArrayBytes is what one shard's arrays cost at a capacity.
 func slotArrayBytes(capacity uint32) int64 { return int64(tableSlots(capacity)) * freelruElemBytes }
 
-// shardArrayBytes is what a whole generation's shards cost.
 func shardArrayBytes(totalCap, shards uint32) int64 {
 	return int64(shards) * (slotArrayBytes(perShard(totalCap, shards)) + freelruShardBytes)
 }
 
-// maxCacheSlots is the absolute ceiling on a cache's slot array, independent of
-// the configured byte budget.
+// maxCacheSlots caps the slot array whatever the byte budget says.
 const maxCacheSlots = 16_000_000
 
-// fitTableSlots rounds a capacity down to the largest one whose table freelru
-// does not round up. freelru is asked for NextPowerOfTwo(capacity*5/4) elements,
-// so only 4/5 of a power of two leaves the ratio at 5/4; anywhere else it lands
-// somewhere in [5/4, 5/2) and a fixed per-slot charge is wrong by up to that
-// factor in either direction, swinging with GOMAXPROCS via the shard count.
+// fitTableSlots rounds a capacity down to the largest one freelru does not round
+// up. Only 4/5 of a power of two leaves the table ratio at 5/4; anywhere else it
+// lands in [5/4, 5/2), where a fixed per-slot charge is wrong in either
+// direction, swinging with GOMAXPROCS through the shard count.
 func fitTableSlots(perShard uint32) uint32 {
 	if perShard < minShardStart {
 		return perShard
@@ -117,9 +107,8 @@ func fitTableSlots(perShard uint32) uint32 {
 	return perShard
 }
 
-// budgetedSlots converts a byte budget into the slot ceiling it buys and the
-// shard count that ceiling is split across, sized so each shard's table sits on
-// the 5/4 boundary.
+// budgetedSlots splits a byte budget into a slot ceiling and the shard count it
+// is divided by, sized so each shard's table sits on the 5/4 boundary.
 func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32) (maxCap, shards uint32) {
 	perSlot := uint64(payloadBytes) + freelruSlotBytes
 	approx := uint32(min(uint64(capacityBytes)/perSlot, maxCacheSlots))
@@ -240,11 +229,7 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	// A slot costs the payload estimate plus freelru's own per-slot overhead, so
-	// the byte budget buys the RAM it charges for rather than ~2.5x it. Shard
-	// granularity comes out of the same computation: a shard grows on its own, so
-	// its share of maxCap is what bounds one grow's copy, and its table is what
-	// the charge has to match.
+	// A shard grows on its own, so its share of maxCap bounds one grow's copy.
 	budgeted, shards := budgetedSlots(capacityBytes, avgBytes)
 	maxCap := max(budgeted, genericCacheStartCapacity)
 	// The start size is raised to keep each shard off a one-slot table, which a
@@ -317,13 +302,10 @@ func (c *GenericCache[T]) refundGrow(oldCap, newCap uint32) {
 	c.reservedBytes.Add(-delta)
 }
 
-// growBytes is what one shard's step costs: the payload estimate for the slots
-// it gains, plus the difference between the two generations' real slot arrays.
 func (c *GenericCache[T]) growBytes(oldCap, newCap uint32) int64 {
 	return int64(newCap-oldCap)*c.payloadBytes + slotArrayBytes(newCap) - slotArrayBytes(oldCap)
 }
 
-// generationBytes is what a whole generation costs, the shard arrays included.
 func (c *GenericCache[T]) generationBytes(totalCap uint32) int64 {
 	shards := max(c.shardCount, 1)
 	return int64(totalCap)*c.payloadBytes + shardArrayBytes(totalCap, shards)
@@ -631,11 +613,9 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		hitRate = float64(hits) / float64(total) * 100
 	}
 	sizeBytes := c.currentSize.Load()
-	// currentSize counts payload only, so it is reported against the payload the
-	// ceiling buys rather than against capacityB — which also funds the slot
-	// arrays, and would read ~27% on a cache that is already evicting. The
-	// denominator adds currentSize's own bookkeeping, which payloadBytes leaves
-	// to freelruElemBytes. The envelope side is reserved_mb.
+	// Reported against the payload the ceiling buys, not capacityB: that also
+	// funds the slot arrays and would read ~27% on a cache already evicting.
+	// The envelope side is reserved_mb.
 	payloadCap := int64(c.maxCap) * (c.payloadBytes + currentSizeEntryOverhead)
 	var usagePct float64
 	if payloadCap > 0 {
