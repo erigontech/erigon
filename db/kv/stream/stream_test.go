@@ -521,9 +521,9 @@ func TestPaginated(t *testing.T) {
 			i++
 			switch i {
 			case 1:
-				return []uint64{1, 2}, "more", nil
+				return []uint64{1, 2}, "p1", nil
 			case 2:
-				return nil, "more", nil
+				return nil, "p2", nil
 			case 3:
 				return []uint64{3, 4}, "", nil
 			}
@@ -539,6 +539,22 @@ func TestPaginated(t *testing.T) {
 		})
 		_, err := s1.Next()
 		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("a non-advancing token errors instead of spinning", func(t *testing.T) {
+		calls := 0
+		s1 := stream.Paginate[uint64](func(string) ([]uint64, string, error) {
+			calls++
+			return nil, "stuck", nil
+		})
+		_, err := stream.ToArray[uint64](s1)
+		require.ErrorContains(t, err, "made no progress")
+		require.Less(t, calls, 5)
+
+		s2 := stream.PaginateKV(func(string) ([][]byte, [][]byte, string, error) {
+			return nil, nil, "stuck", nil
+		})
+		_, _, err = stream.ToArrayKV(s2)
+		require.ErrorContains(t, err, "made no progress")
 	})
 	t.Run("repeated HasNext does not skip a page", func(t *testing.T) {
 		pages := 0
@@ -633,9 +649,9 @@ func TestPaginatedDual(t *testing.T) {
 			i++
 			switch i {
 			case 1:
-				return [][]byte{{1}}, [][]byte{{1}}, "more", nil
+				return [][]byte{{1}}, [][]byte{{1}}, "p1", nil
 			case 2:
-				return nil, nil, "more", nil
+				return nil, nil, "p2", nil
 			case 3:
 				return [][]byte{{2}}, [][]byte{{2}}, "", nil
 			}
@@ -1345,9 +1361,34 @@ func (r *recycler) Next() ([]byte, []byte, error) {
 	return r.buf, r.buf, nil
 }
 
+// valueRecycler keeps its keys stable and recycles only the value buffer - the half of
+// invariant 2 that db/state's bufRotor exists for.
+type valueRecycler struct {
+	val []byte
+	n   int
+}
+
+func (r *valueRecycler) HasNext() bool { return r.n < 4 }
+func (r *valueRecycler) Close()        {}
+func (r *valueRecycler) Next() ([]byte, []byte, error) {
+	r.n++
+	r.val = append(r.val[:0], byte(r.n))
+	return []byte{byte(r.n)}, r.val, nil
+}
+
 func TestAssertValidCatchesRecycling(t *testing.T) {
 	t.Run("panics on a producer that recycles too early", func(t *testing.T) {
 		s := stream.NewValidated[[]byte](&recycler{})
+		require.Panics(t, func() {
+			for s.HasNext() {
+				if _, _, err := s.Next(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	})
+	t.Run("panics on a recycled value, not just a recycled key", func(t *testing.T) {
+		s := stream.NewValidated[[]byte](&valueRecycler{})
 		require.Panics(t, func() {
 			for s.HasNext() {
 				if _, _, err := s.Next(); err != nil {

@@ -549,14 +549,25 @@ type Paginated[T any] struct {
 }
 
 func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
+
+// errNoPageProgress - an empty page that hands back the token it was given would be requested
+// forever. Only "" terminates a listing, so this cannot be treated as the end.
+func errNoPageProgress(err error, pageLen int, sent, got string) error {
+	if err != nil || pageLen > 0 || got == "" || got != sent {
+		return err
+	}
+	return fmt.Errorf("stream: pagination made no progress, token %q returned an empty page", sent)
+}
 func (it *Paginated[T]) HasNext() bool {
 	for it.err == nil && it.i >= len(it.arr) {
 		if it.initialized && it.nextPageToken == "" {
 			return false
 		}
+		sent := it.nextPageToken
 		it.initialized = true
 		it.i = 0
-		it.arr, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
+		it.arr, it.nextPageToken, it.err = it.nextPage(sent)
+		it.err = errNoPageProgress(it.err, len(it.arr), sent, it.nextPageToken)
 	}
 	return true
 }
@@ -591,9 +602,11 @@ func (it *PaginatedDuo[K, V]) HasNext() bool {
 		if it.initialized && it.nextPageToken == "" {
 			return false
 		}
+		sent := it.nextPageToken
 		it.initialized = true
 		it.i = 0
-		it.keys, it.values, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
+		it.keys, it.values, it.nextPageToken, it.err = it.nextPage(sent)
+		it.err = errNoPageProgress(it.err, len(it.keys), sent, it.nextPageToken)
 	}
 	return true
 }
@@ -787,10 +800,24 @@ func AssertValid[V any](it Duo[[]byte, V]) Duo[[]byte, V] {
 func NewValidated[V any](it Duo[[]byte, V]) *Validated[V] { return &Validated[V]{it: it} }
 
 type Validated[V any] struct {
-	it       Duo[[]byte, V]
-	prev     []byte // what the caller was handed last time - producer-owned memory
-	prevCopy []byte // its contents back then
+	it   Duo[[]byte, V]
+	prev [2]handout // key and value handed out last time: producer memory plus its contents then
 }
+
+// handout - a buffer the producer gave us, alongside a snapshot of what it held at the time.
+type handout struct {
+	buf  []byte
+	snap []byte
+	set  bool
+}
+
+func (h *handout) check(what string) {
+	if h.set && !bytes.Equal(h.buf, h.snap) {
+		panic(fmt.Sprintf("stream invariant 2: %s %x was recycled after a single Next(), now %x", what, h.snap, h.buf))
+	}
+}
+
+func (h *handout) remember(b []byte) { *h = handout{buf: b, snap: bytes.Clone(b), set: true} }
 
 func (m *Validated[V]) HasNext() bool { return m.it.HasNext() }
 func (m *Validated[V]) Close()        { m.it.Close() }
@@ -800,9 +827,11 @@ func (m *Validated[V]) Next() ([]byte, V, error) {
 	if err != nil {
 		return k, v, err
 	}
-	if m.prev != nil && !bytes.Equal(m.prev, m.prevCopy) {
-		panic(fmt.Sprintf("stream invariant 2: key %x was recycled after a single Next(), now %x", m.prevCopy, m.prev))
+	m.prev[0].check("key")
+	m.prev[1].check("value")
+	m.prev[0].remember(k)
+	if vb, ok := any(v).([]byte); ok {
+		m.prev[1].remember(vb)
 	}
-	m.prev, m.prevCopy = k, bytes.Clone(k)
 	return k, v, nil
 }
