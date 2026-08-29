@@ -753,6 +753,7 @@ type QueueWithRetry struct {
 	closed   bool
 	newTasks chan Task
 	parked   chan Task
+	wake     chan struct{}
 	retires  Queue[Task]
 	lock     sync.Mutex
 	capacity int
@@ -761,13 +762,17 @@ type QueueWithRetry struct {
 var queuePool sync.Pool
 
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
-	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
+	return &QueueWithRetry{
+		newTasks: make(chan Task, capacity),
+		wake:     make(chan struct{}, capacity),
+		capacity: capacity,
+	}
 }
 
 func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
 	if v := queuePool.Get(); v != nil {
 		q := v.(*QueueWithRetry)
-		if q.capacity == capacity && q.parked != nil {
+		if q.capacity == capacity && q.parked != nil && q.wake != nil {
 			q.closed = false
 			q.newTasks = q.parked
 			q.parked = nil
@@ -779,8 +784,9 @@ func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
 
 func (q *QueueWithRetry) NewTasksLen() int {
 	q.lock.Lock()
-	defer q.lock.Unlock()
-	return len(q.newTasks)
+	newTasks := q.newTasks
+	q.lock.Unlock()
+	return len(newTasks)
 }
 func (q *QueueWithRetry) Capacity() int { return q.capacity }
 func (q *QueueWithRetry) RetriesLen() (l int) {
@@ -846,10 +852,10 @@ func (q *QueueWithRetry) ReTry(t Task) {
 		return
 	}
 	heap.Push(&q.retires, t)
-	newTasks := q.newTasks
+	wake := q.wake
 	q.lock.Unlock()
 	select {
-	case newTasks <- nil:
+	case wake <- struct{}{}:
 	default:
 	}
 }
@@ -875,12 +881,17 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 	for {
 		q.lock.Lock()
 		newTasks := q.newTasks
+		wake := q.wake
 		q.lock.Unlock()
 		if newTasks == nil {
 			return q.popNoWait()
 		}
 
 		select {
+		case <-wake:
+			if retry, has := q.popNoWait(); has {
+				return retry, true
+			}
 		case inTask, ok := <-newTasks:
 			if !ok {
 				return q.popNoWait()
@@ -955,6 +966,9 @@ func (q *QueueWithRetry) Release() {
 	// Drain channel.
 	for len(q.newTasks) > 0 {
 		<-q.newTasks
+	}
+	for len(q.wake) > 0 {
+		<-q.wake
 	}
 	// Clear retry heap, keep backing array.
 	clear(q.retires)

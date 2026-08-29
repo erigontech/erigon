@@ -274,3 +274,57 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 		})
 	}
 }
+
+type queueStubTask struct {
+	Task
+	txNum uint64
+}
+
+func (s *queueStubTask) Version() state.Version { return state.Version{TxNum: s.txNum} }
+func (s *queueStubTask) isNil() bool            { return s == nil }
+func (s *queueStubTask) compare(other Task) int {
+	switch {
+	case s.txNum > other.Version().TxNum:
+		return 1
+	case s.txNum < other.Version().TxNum:
+		return -1
+	default:
+		return 0
+	}
+}
+
+// Retries live in the unbounded heap, so they must leave the whole input
+// capacity free for fresh tasks - the dispatch budget is derived from it.
+func TestQueueWithRetryRetriesDontConsumeNewTaskCapacity(t *testing.T) {
+	const capacity = 8
+	q := NewQueueWithRetry(capacity)
+	defer q.Close()
+
+	for i := range capacity {
+		q.ReTry(&queueStubTask{txNum: uint64(i)})
+	}
+
+	require.Equal(t, capacity, q.RetriesLen())
+	require.Equal(t, 0, q.NewTasksLen())
+	require.True(t, q.TryAdd(&queueStubTask{txNum: 100}))
+}
+
+func TestQueueWithRetryServesRetriesFirst(t *testing.T) {
+	q := NewQueueWithRetry(8)
+	defer q.Close()
+
+	require.True(t, q.TryAdd(&queueStubTask{txNum: 100}))
+	q.ReTry(&queueStubTask{txNum: 7})
+	q.ReTry(&queueStubTask{txNum: 3})
+
+	ctx := context.Background()
+	var got []uint64
+	for range 3 {
+		task, ok := q.Next(ctx)
+		require.True(t, ok)
+		require.NotNil(t, task)
+		got = append(got, task.Version().TxNum)
+	}
+	require.Equal(t, []uint64{3, 7, 100}, got)
+	require.Equal(t, 0, q.Len())
+}
