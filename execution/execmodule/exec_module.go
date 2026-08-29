@@ -273,7 +273,7 @@ func NewExecModule(
 	execctx.GuardAggregatorForCache(db, domainCache)
 	var codeStore *cache.CodeStore
 	if dbg.UseCodeStore {
-		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
+		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreTableBytes)
 	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
