@@ -35,12 +35,33 @@ var (
 
 	mxPreloadDurationSecondsTotal = metrics.GetOrCreateCounter("commitment_trunk_preload_duration_seconds_total")
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
+
+	// Gauges of the cumulative tier counters: the cache owns the totals, so
+	// publishing them straight avoids a per-tier last-published field.
+	mxRootHits     = metrics.GetOrCreateGauge("commitment_branchcache_root_hits")
+	mxRootMisses   = metrics.GetOrCreateGauge("commitment_branchcache_root_misses")
+	mxTrunkHits    = metrics.GetOrCreateGauge("commitment_branchcache_trunk_hits")
+	mxTrunkMisses  = metrics.GetOrCreateGauge("commitment_branchcache_trunk_misses")
+	mxTailHits     = metrics.GetOrCreateGauge("commitment_branchcache_tail_hits")
+	mxTailMisses   = metrics.GetOrCreateGauge("commitment_branchcache_tail_misses")
+	mxStaleEvicted = metrics.GetOrCreateGauge("commitment_branchcache_stale_evicted")
 )
 
 func recordPreload(started time.Time, bytesPinned int) {
 	mxPreloadDurationSecondsTotal.Add(time.Since(started).Seconds())
 	if bytesPinned > 0 {
 		mxPreloadBytesTotal.AddInt(bytesPinned)
+	}
+}
+
+// publishEvery is a power of two so the sampling test is a mask. Publishing is
+// otherwise driven only by the adaptive-pin controller, which does not run on
+// the engine-API path, leaving the tier counters unpublished there.
+const publishEvery = 1 << 13
+
+func (c *BranchCache) maybePublishMetrics() {
+	if c.publishTick.Add(1)&(publishEvery-1) == 0 {
+		c.PublishMetrics()
 	}
 }
 
@@ -54,4 +75,12 @@ func (c *BranchCache) PublishMetrics() {
 		mxPinnedMisses.AddUint64(delta)
 	}
 	mxPinnedEntries.SetUint64(uint64(c.pinnedEntries.Load()))
+
+	mxRootHits.SetUint64(c.rootHits.Load())
+	mxRootMisses.SetUint64(c.rootMisses.Load())
+	mxTrunkHits.SetUint64(c.trunkHits.Load())
+	mxTrunkMisses.SetUint64(c.trunkMisses.Load())
+	mxTailHits.SetUint64(c.tailHits.Load())
+	mxTailMisses.SetUint64(c.tailMisses.Load())
+	mxStaleEvicted.SetUint64(c.staleEvicted.Load())
 }

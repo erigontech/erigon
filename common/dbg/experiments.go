@@ -50,7 +50,9 @@ var (
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
-	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxLockInRam = EnvBool("MDBX_LOCK_IN_RAM", false)
+	// Synchronous page-in at open, without the mlock LockDBInRam takes.
+	MdbxWarmupDB     = EnvBool("MDBX_WARMUP_DB", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
