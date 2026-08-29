@@ -875,10 +875,10 @@ func targetOf(br *blockResult) commitTarget {
 	return commitTarget{blockNum: br.Block.NumberU64(), blockHash: br.Block.Hash(), lastTxNum: br.lastTxNum, stateRoot: br.Block.Root()}
 }
 
-// incrementalStepCheckpoints makes a mid-block step checkpoint fold only what
-// changed since the previous step end. The block-end fold still emits every key
-// the block touched, so the block's changeset — and unwind — are unaffected.
-var incrementalStepCheckpoints = dbg.EnvBool("INCREMENTAL_STEP_CKPT", true)
+// incrementalStepRehash makes a mid-block rehash cover only the accounts changed
+// since the previous one. Block end still covers every key the block touched, so
+// the block's changeset — and the unwind that reads it — are unaffected.
+var incrementalStepRehash = dbg.EnvBool("INCREMENTAL_STEP_REHASH", true)
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
 // decided by ownsChangeset.
@@ -906,9 +906,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	stepFlush := m.midBlock && incrementalStepCheckpoints
-	if stepFlush {
-		cc.state.FlushStepToUpdates(cc.updates)
+	rehashPendingOnly := m.midBlock && incrementalStepRehash
+	if rehashPendingOnly {
+		cc.state.FlushPendingRehashToUpdates(cc.updates)
 	} else {
 		cc.state.FlushToUpdates(cc.updates)
 	}
@@ -940,9 +940,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		cc.hasComputed = true
 	}
 
-	// Only after this checkpoint's fold has landed.
-	if stepFlush {
-		cc.state.ResetStepFlags()
+	// After the rehash has landed, never before it.
+	if rehashPendingOnly {
+		cc.state.ClearPendingRehash()
 	}
 
 	if !m.checkRoot {
