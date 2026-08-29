@@ -483,6 +483,16 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 }
 
 func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if err := validateEnvelopeAgainstBid(beaconCfg, anchorRoot, bid, env); err != nil {
+		return err
+	}
+	return verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot)
+}
+
+func validateEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, blockRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if beaconCfg == nil {
+		return errors.New("nil beacon chain config")
+	}
 	if bid == nil {
 		return errors.New("nil execution payload bid")
 	}
@@ -491,8 +501,8 @@ func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *
 	}
 	envelope := env.Message
 	payload := envelope.Payload
-	if envelope.BeaconBlockRoot != anchorRoot {
-		return fmt.Errorf("beacon block root mismatch: envelope=%v anchor=%v", envelope.BeaconBlockRoot, anchorRoot)
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("beacon block root mismatch: envelope=%v block=%v", envelope.BeaconBlockRoot, blockRoot)
 	}
 	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
 		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
@@ -536,10 +546,22 @@ func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *
 	if header.Hash() != payload.BlockHash {
 		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
 	}
-	if err := verifyAnchorEnvelopeSignature(beaconCfg, anchorState, env, bid.Slot); err != nil {
-		return err
-	}
 	return nil
+}
+
+func validateDownloadedGloasEnvelope(beaconCfg *clparams.BeaconChainConfig, block *cltypes.SignedBeaconBlock, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("nil Gloas beacon block")
+	}
+	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("nil signed execution payload bid")
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("beacon block root: %w", err)
+	}
+	return validateEnvelopeAgainstBid(beaconCfg, blockRoot, signedBid.Message, env)
 }
 
 func verifyAnchorEnvelopeSignature(beaconCfg *clparams.BeaconChainConfig, anchorState *state.CachingBeaconState, env *cltypes.SignedExecutionPayloadEnvelope, slot uint64) error {

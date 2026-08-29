@@ -166,6 +166,7 @@ const maxConcurrentForwardBeaconRequests = 2
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	requestCtx, cancelRequests := context.WithTimeout(ctx, forwardBeaconRequestTimeout)
 	defer cancelRequests()
+	f.restartGloasScanAtHead()
 
 	count := uint64(32)
 	requestStart, _ := f.nextRequestStart(true)
@@ -202,7 +203,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	if f.httpPreferred.Load() && f.httpFallbackURL != "" {
 		httpStart, hadGloasPending := f.nextRequestStart(false)
 		httpCount := capRequestCount(httpStart, count+10)
-		httpCount = f.capAtCurrentSlot(httpStart, httpCount)
+		httpCount, completedHTTPCount := f.requestCountsAtCurrentSlot(httpStart, httpCount)
 		if httpCount == 0 {
 			waitForForwardRequestRetry(ctx)
 			return
@@ -215,7 +216,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				f.httpPreferred.Store(false)
 			}
 		case httpErr == nil && hadGloasPending:
-			f.recordEmptyRange(httpStart, httpCount, true, "http-fallback")
+			f.recordEmptyRange(httpStart, completedHTTPCount, true, "http-fallback")
 			return
 		default:
 			// HTTP failed — fall back to P2P probing.
@@ -301,7 +302,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				latestHighestSlotProcessed, _, _ := f.progressSnapshot()
 				httpStart, hadGloasPending := f.nextRequestStart(false)
 				httpCount := capRequestCount(httpStart, count+10)
-				httpCount = f.capAtCurrentSlot(httpStart, httpCount)
+				httpCount, completedHTTPCount := f.requestCountsAtCurrentSlot(httpStart, httpCount)
 				if httpCount == 0 {
 					select {
 					case noRequestableRange <- struct{}{}:
@@ -329,10 +330,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					}
 					return
 				}
-				if httpErr == nil && hadGloasPending {
+				if httpErr == nil && hadGloasPending && completedHTTPCount > 0 {
 					emptyResponse = &emptyRangeResult{
-						lastSlot: lastSlotInRange(httpStart, httpCount),
-						apply:    func() { f.recordEmptyRange(httpStart, httpCount, true, "http-fallback") },
+						lastSlot: lastSlotInRange(httpStart, completedHTTPCount),
+						apply:    func() { f.recordEmptyRange(httpStart, completedHTTPCount, true, "http-fallback") },
 					}
 					return
 				}
@@ -389,7 +390,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if f.beaconCfg != nil {
 						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed)
 					}
-					reqCount = f.capAtCurrentSlot(reqSlot, reqCount)
+					reqCount, completedReqCount := f.requestCountsAtCurrentSlot(reqSlot, reqCount)
 					if reqCount == 0 {
 						select {
 						case noRequestableRange <- struct{}{}:
@@ -439,11 +440,14 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						return
 					}
 					if len(responses) == 0 {
-						if hadGloasPending {
+						if hadGloasPending && completedReqCount > 0 {
 							emptyResponse = &emptyRangeResult{
-								lastSlot: lastSlotInRange(reqSlot, reqCount),
-								apply:    func() { f.recordEmptyRange(reqSlot, reqCount, true, peerId) },
+								lastSlot: lastSlotInRange(reqSlot, completedReqCount),
+								apply:    func() { f.recordEmptyRange(reqSlot, completedReqCount, true, peerId) },
 							}
+							return
+						}
+						if hadGloasPending {
 							return
 						}
 						failures := int(consecutiveFailures.Add(1))
@@ -651,17 +655,27 @@ func waitForForwardRequestRetry(ctx context.Context) {
 }
 
 func (f *ForwardBeaconDownloader) capAtCurrentSlot(start, count uint64) uint64 {
+	requestCount, _ := f.requestCountsAtCurrentSlot(start, count)
+	return requestCount
+}
+
+func (f *ForwardBeaconDownloader) requestCountsAtCurrentSlot(start, count uint64) (requestCount, completedCount uint64) {
 	if count == 0 || f.currentSlot == nil {
-		return count
+		return count, count
 	}
 	currentSlot := f.currentSlot()
 	if start > currentSlot {
-		return 0
+		return 0, 0
 	}
+	requestCount = count
 	if count-1 > currentSlot-start {
-		return currentSlot - start + 1
+		requestCount = currentSlot - start + 1
 	}
-	return count
+	if start >= currentSlot {
+		return requestCount, 0
+	}
+	completedCount = min(count, currentSlot-start)
+	return requestCount, completedCount
 }
 
 func (f *ForwardBeaconDownloader) nextRequestStart(overlap bool) (uint64, bool) {
@@ -678,6 +692,18 @@ func (f *ForwardBeaconDownloader) nextRequestStart(overlap bool) (uint64, bool) 
 		start = f.minSlot
 	}
 	return start, false
+}
+
+func (f *ForwardBeaconDownloader) restartGloasScanAtHead() {
+	if f.currentSlot == nil {
+		return
+	}
+	currentSlot := f.currentSlot()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.gloasLookahead != nil && f.gloasNextUnscanned >= currentSlot {
+		f.gloasNextUnscanned = saturatingIncrement(f.gloasLookahead.Block.Slot)
+	}
 }
 
 func (f *ForwardBeaconDownloader) recordEmptyRange(start, count uint64, hadGloasPending bool, peerID string) {

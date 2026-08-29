@@ -772,6 +772,20 @@ func TestValidateAnchorEnvelope(t *testing.T) {
 	}
 }
 
+func TestValidateDownloadedGloasEnvelopeRejectsBidMismatch(t *testing.T) {
+	cfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = bid.Slot
+	block.Block.Body.GetSignedExecutionPayloadBid().Message = bid
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	env.Message.BeaconBlockRoot = blockRoot
+
+	require.NoError(t, validateDownloadedGloasEnvelope(cfg, block, env))
+	env.Message.Payload.BlockHash = common.HexToHash("0x99")
+	require.ErrorContains(t, validateDownloadedGloasEnvelope(cfg, block, env), "block hash mismatch")
+}
+
 func TestAnchorEnvelopeMatches(t *testing.T) {
 	_, _, _, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 
