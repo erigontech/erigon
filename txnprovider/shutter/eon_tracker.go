@@ -191,8 +191,9 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	return nil
 }
 
-func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, error) {
-	var err error
+// err is a named result so the deferred timing trace sees the error the function
+// actually returns, including the ones built inline at the return statement.
+func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool, err error) {
 	var cached bool
 	startTime := time.Now()
 	defer func() {
