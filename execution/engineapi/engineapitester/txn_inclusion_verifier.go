@@ -111,6 +111,11 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 			return err
 		}
 
+		if txn.Hash() != inclusion.TxnHash {
+			markMissing(inclusion)
+			continue
+		}
+
 		// fcu persistance is now asynchronous so this can get called
 		// in the test loop before the tx data is coommited in which
 		// case it will fail and needs to retry
@@ -126,10 +131,6 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 
 		if r.Status != types.ReceiptStatusSuccessful {
 			return fmt.Errorf("txn %d in block %d not successful", inclusion.TxnIndex, r.BlockNumber)
-		}
-
-		if txn.Hash() != inclusion.TxnHash {
-			markMissing(inclusion)
 		}
 	}
 

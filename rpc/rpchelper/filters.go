@@ -221,16 +221,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
-				ff.mu.Lock()
-				ff.receiptsRequestor.Store(send)
-				ff.mu.Unlock()
-				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					if err := ff.sendReceiptsFilterUpdate(); err != nil {
-						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
-					}
-				}
-			}); err != nil {
+			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, ff.onReceiptsRequestorReady); err != nil {
 				select {
 				case <-ctx.Done():
 					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
@@ -738,6 +729,24 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
 	}
 	return true
+}
+
+// onReceiptsRequestorReady installs the requestor of a freshly connected receipts
+// stream and flushes an update that was deferred while no requestor existed.
+func (ff *Filters) onReceiptsRequestorReady(send func(*remoteproto.ReceiptsFilterRequest) error) {
+	ff.mu.Lock()
+	ff.receiptsRequestor.Store(send)
+	ff.mu.Unlock()
+	if !ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
+		return
+	}
+	// off the stream goroutine: sendReceiptsFilterUpdate waits on receiptsRequestMu,
+	// which a stalled send can hold, and the caller must reach its Recv loop.
+	go func() {
+		if err := ff.sendReceiptsFilterUpdate(); err != nil {
+			ff.logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+		}
+	}()
 }
 
 // sendReceiptsFilterUpdate sends the current receipts filter state to the server.

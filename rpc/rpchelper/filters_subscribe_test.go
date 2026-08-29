@@ -199,3 +199,27 @@ func TestSubscribeReceiptsConcurrentSubscribersDoNotSendStaleRequest(t *testing.
 	require.True(t, finalHashes[hash1], "last delivered request lost hash1: %v", finalHashes)
 	require.True(t, finalHashes[hash2], "last delivered request lost hash2: %v", finalHashes)
 }
+
+// A reconnecting receipts stream must be able to start receiving even while another
+// subscriber is stuck in an upstream send: the requestor is installed and the deferred
+// update is flushed without blocking the stream's Recv loop.
+func TestOnReceiptsRequestorReadyDoesNotBlockOnAStalledSend(t *testing.T) {
+	f := newTestFilters(t)
+	f.pendingReceiptsUpdate.Store(true)
+
+	// stand in for a subscriber blocked inside a send on the previous stream
+	f.receiptsRequestMu.Lock()
+	defer f.receiptsRequestMu.Unlock()
+
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		f.onReceiptsRequestorReady(func(*remoteproto.ReceiptsFilterRequest) error { return nil })
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onReceiptsRequestorReady blocked behind the stalled send")
+	}
+}
