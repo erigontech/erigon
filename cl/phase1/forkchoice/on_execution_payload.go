@@ -530,7 +530,10 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 		if readErr != nil || envelope == nil || envelope.Message == nil {
 			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 				f.envelopeGossipAdmissions.Finish(token, false)
-				return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %v", ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
+				if readErr == nil {
+					readErr = errors.New("persisted execution payload envelope is incomplete")
+				}
+				return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %w", ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
 			}
 		} else if envelope.Message.BuilderIndex == builderIndex {
 			f.envelopeGossipAdmissions.Finish(token, true)

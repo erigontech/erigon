@@ -345,6 +345,16 @@ func TestEnvelopeGossipClaimTreatsPersistedReadFailureAsBusy(t *testing.T) {
 	store.FinishExecutionPayloadEnvelopeForGossip(token, false)
 }
 
+func TestEnvelopeGossipClaimDescribesIncompletePersistedEnvelope(t *testing.T) {
+	graph := &admissionEnvelopeReadForkGraph{}
+	graph.hasEnvelope.Store(true)
+	store := &ForkChoiceStore{forkGraph: graph}
+
+	_, err := store.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.HexToHash("0x1234"), 42)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAdmissionBusy)
+	require.ErrorContains(t, err, "persisted execution payload envelope is incomplete")
+}
+
 func TestEnvelopeGossipClaimRepairsPersistedEnvelopeClearedByRead(t *testing.T) {
 	graph := &admissionEnvelopeReadForkGraph{
 		readErr:     errors.New("corrupt envelope"),

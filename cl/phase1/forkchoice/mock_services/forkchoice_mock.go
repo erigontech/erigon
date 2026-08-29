@@ -416,7 +416,10 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 		if readErr != nil || envelope == nil || envelope.Message == nil {
 			if f.HasEnvelope(beaconBlockRoot) {
 				f.EnvelopeGossipAdmissions.Finish(token, false)
-				return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %v", forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
+				if readErr == nil {
+					readErr = errors.New("persisted execution payload envelope is incomplete")
+				}
+				return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
 			}
 		} else if envelope.Message.BuilderIndex == builderIndex {
 			f.EnvelopeGossipAdmissions.Finish(token, true)
