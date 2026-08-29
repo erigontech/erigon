@@ -1581,10 +1581,6 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	require.True(t, c2.FillsEnabled())
 }
 
-// TestPublishUsesProducerCodeHash pins that a CodeDomain update carrying a
-// CodeHash is filed under that hash rather than one the cache derives itself,
-// which is what spares it re-hashing a block's worth of code. A sentinel hash
-// makes the difference visible: re-deriving would file the entry elsewhere.
 func TestPublishUsesProducerCodeHash(t *testing.T) {
 	t.Parallel()
 
