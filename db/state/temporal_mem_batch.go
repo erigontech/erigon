@@ -814,6 +814,11 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 // tuple after the MDBX write succeeds, so a downstream cache can never be left
 // ahead of MDBX. Runs under all domain locks so the callback's snapshot matches
 // flush-time state.
+//
+// The values handed to a callback are the batch's own buffers, owned since
+// putLatest cloned them and never rewritten in place — a later write to the same
+// key appends or replaces the entry rather than editing its bytes. Flush does not
+// drop them either, so they stay valid until the batch is closed.
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
 	sd.lockAllDomains()
 	defer sd.unlockAllDomains()

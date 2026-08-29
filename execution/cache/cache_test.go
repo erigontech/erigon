@@ -1771,3 +1771,68 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 		})
 	}
 }
+
+// TestPublishUsesProducerCodeHash pins that a CodeDomain update carrying a
+// CodeHash is filed under that hash rather than one the cache derives itself,
+// which is what spares it re-hashing a block's worth of code. A sentinel hash
+// makes the difference visible: re-deriving would file the entry elsewhere.
+func TestPublishUsesProducerCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(7)
+	code := bytes.Repeat([]byte{0xab}, 96)
+	var sentinel [32]byte
+	sentinel[0] = 0xc0
+	sentinel[31] = 0xde
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: sentinel[:],
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
+	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.False(t, ok, "the cache must not re-derive a hash of its own")
+
+	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+}
+
+// TestPublishAppliesEveryUpdateAcrossChunks covers a batch that spans several
+// publish chunks: chunking bounds how much is prepared at once, so every entry
+// must still land, including the ones on a chunk boundary.
+func TestPublishAppliesEveryUpdateAcrossChunks(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	const n = publishChunk*3 + 1
+	updates := make([]StateUpdate, n)
+	for i := range updates {
+		updates[i] = StateUpdate{
+			Domain: kv.AccountsDomain,
+			Key:    binary.BigEndian.AppendUint64(make([]byte, 12), uint64(i)),
+			Value:  binary.BigEndian.AppendUint64(nil, uint64(i)),
+			TxNum:  uint64(i),
+		}
+	}
+	c.Applier().Publish(1, 2, updates)
+
+	view := c.View(nil)
+	for i := range updates {
+		got, ok := view.Get(kv.AccountsDomain, updates[i].Key)
+		require.True(t, ok, "update %d must be applied", i)
+		require.Equal(t, updates[i].Value, got)
+	}
+}
