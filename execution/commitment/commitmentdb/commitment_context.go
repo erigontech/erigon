@@ -202,10 +202,6 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateReader StateReader) {
-	sdc.SetStateReader(stateReader)
-}
-
 func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
 	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
 	// writer: concurrent workers trace branch reads/writes without racing.
@@ -422,13 +418,14 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 }
 
 // BranchChildCount returns a branch's child count from the post-compute view.
-// It checks domain memory first, then uses computeReader for a branch absent
-// from memory.
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(computeReader StateReader, nibblePrefix []byte) (int, error) {
-	if computeReader == nil {
-		return 0, errors.New("BranchChildCount requires the compute state reader")
+// It reads branches written during computation from domain memory and falls
+// back to the installed state reader for unchanged branches.
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte) (int, error) {
+	stateReader := sdc.stateReader
+	if stateReader == nil {
+		return 0, errors.New("BranchChildCount requires an installed state reader")
 	}
-	if computeReader.WithHistory() {
+	if stateReader.WithHistory() {
 		return 0, errors.New("BranchChildCount requires a reader that permits branch writes")
 	}
 	if sdc.pendingUpdate != nil {
@@ -444,7 +441,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(computeReader StateR
 		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
 	}
 
-	enc, _, err := computeReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
+	enc, _, err := stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
