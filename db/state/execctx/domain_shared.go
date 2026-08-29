@@ -539,7 +539,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
 }
 
