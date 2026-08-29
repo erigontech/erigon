@@ -21,13 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	jsoniter "github.com/json-iterator/go"
 )
-
-func newStream() *jsoniter.Stream {
-	return jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
-}
 
 // benchmarkSimpleObject is used to compare writing a simple JSON object
 func benchmarkSimpleObject(b *testing.B, s Stream) {
@@ -49,7 +43,7 @@ func benchmarkSimpleObject(b *testing.B, s Stream) {
 }
 
 func BenchmarkSimpleObject_StackStream(b *testing.B) {
-	benchmarkSimpleObject(b, NewStackStream(newStream()))
+	benchmarkSimpleObject(b, newStackStream(nil, InitialBufferSize))
 }
 
 // benchmarkNestedStructure is used to compare writing a nested JSON structure
@@ -84,7 +78,7 @@ func benchmarkNestedStructure(b *testing.B, s Stream) {
 }
 
 func BenchmarkNestedStructure_StackStream(b *testing.B) {
-	benchmarkNestedStructure(b, NewStackStream(newStream()))
+	benchmarkNestedStructure(b, newStackStream(nil, InitialBufferSize))
 }
 
 // benchmarkLargeArray is used to compare writing a large array
@@ -108,7 +102,7 @@ func benchmarkLargeArray(b *testing.B, s Stream) {
 }
 
 func BenchmarkLargeArray_StackStream(b *testing.B) {
-	benchmarkLargeArray(b, NewStackStream(newStream()))
+	benchmarkLargeArray(b, newStackStream(nil, InitialBufferSize))
 }
 
 // benchmarkMixedTypes is used to compare writing mixed data types
@@ -140,7 +134,7 @@ func benchmarkMixedTypes(b *testing.B, s Stream) {
 }
 
 func BenchmarkMixedTypes_StackStream(b *testing.B) {
-	benchmarkMixedTypes(b, NewStackStream(newStream()))
+	benchmarkMixedTypes(b, newStackStream(nil, InitialBufferSize))
 }
 
 // benchmarkWriteToBuffer is used to compare writing to a buffer
@@ -165,7 +159,7 @@ func benchmarkWriteToBuffer(b *testing.B, s Stream) {
 }
 
 func BenchmarkWriteToBuffer_StackStream(b *testing.B) {
-	benchmarkWriteToBuffer(b, NewStackStream(newStream()))
+	benchmarkWriteToBuffer(b, newStackStream(nil, InitialBufferSize))
 }
 
 // benchmarkIncompleteStructure is used to compare handling incomplete structures
@@ -190,5 +184,5 @@ func benchmarkIncompleteStructure(b *testing.B, s Stream) {
 }
 
 func BenchmarkIncompleteStructure_StackStream(b *testing.B) {
-	benchmarkIncompleteStructure(b, NewStackStream(newStream()))
+	benchmarkIncompleteStructure(b, newStackStream(nil, InitialBufferSize))
 }
