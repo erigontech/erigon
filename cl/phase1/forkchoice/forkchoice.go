@@ -190,7 +190,8 @@ type ForkChoiceStore struct {
 	// Due to network timing, the envelope may arrive before its corresponding block.
 	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
-	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin

@@ -152,6 +152,7 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	// Verify envelope was queued (check internal state)
 	impl := service.(*executionPayloadService)
 	require.Equal(t, int32(1), impl.pending.count.Load())
+	fcu.DeleteEnvelope(blockRoot)
 
 	// Now add block to forkchoice
 	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -188,6 +189,22 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
 	require.Contains(t, err.Error(), "already seen envelope")
+}
+
+func TestExecutionPayloadServiceSharesSeenEnvelopeAdmissionWithREST(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), blockRoot, 1)
+	require.NoError(t, err)
+	fcu.FinishExecutionPayloadEnvelopeForGossip(token, true)
+
+	err = service.ProcessMessage(context.Background(), nil, envelope)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "already seen")
+	require.False(t, fcu.OnExecutionPayloadCalled)
 }
 
 func TestExecutionPayloadServiceIgnoresSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {

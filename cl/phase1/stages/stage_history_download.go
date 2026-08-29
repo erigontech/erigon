@@ -61,6 +61,12 @@ type StageHistoryReconstructionCfg struct {
 	blobDownloader           *network.BlobHistoryDownloader
 }
 
+type blobHistoryDownloader interface {
+	SetHeadSlot(uint64)
+	SetNotifyBlobBackfilled(*network.BlobBackfilledNotifier)
+	Start()
+}
+
 const logIntervalTime = 30 * time.Second
 
 const (
@@ -389,12 +395,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 	}()
 
-	if cfg.blobDownloader != nil {
-		cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
-		cfg.blobDownloader.SetNotifyBlobBackfilled(nil)
-		cfg.blobDownloader.Start()
-	}
-
 	go func() {
 		defer close(finishCh)
 
@@ -426,9 +426,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return
 			}
 		}
-		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(cfg.antiquary.NotifyBlobBackfilled))
-		}
+		startBlobHistoryDownload(
+			cfg.downloader.Finished(),
+			cfg.blobDownloader,
+			cfg.startingSlot+1,
+			cfg.antiquary.NotifyBlobBackfilled,
+		)
 
 		if !completeTrackedHistoryBackfill(
 			ctx, cfg.downloader, skippedEnvelopeRecoveryRetryInterval,
@@ -457,6 +460,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
 	return waitForHistoryCompletion(ctx, finishCh, cfg.waitForAllRoutines)
+}
+
+func startBlobHistoryDownload(blockHistoryFinished bool, downloader blobHistoryDownloader, headSlot uint64, notify func(bool)) {
+	if !blockHistoryFinished || downloader == nil {
+		return
+	}
+	downloader.SetHeadSlot(headSlot)
+	downloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(notify))
+	downloader.Start()
 }
 
 func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, waitForAllRoutines bool) error {

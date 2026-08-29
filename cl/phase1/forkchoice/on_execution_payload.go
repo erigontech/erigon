@@ -512,6 +512,42 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	return nil
 }
 
+func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
+	ctx context.Context,
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	token, err := f.envelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		envelope, readErr := f.forkGraph.ReadEnvelopeFromDisk(beaconBlockRoot)
+		if err := ctx.Err(); err != nil {
+			f.envelopeGossipAdmissions.Finish(token, false)
+			return ExecutionPayloadEnvelopeAdmissionToken{}, err
+		}
+		if readErr != nil || envelope == nil || envelope.Message == nil {
+			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+				f.envelopeGossipAdmissions.Finish(token, false)
+				return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %v", ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
+			}
+		} else if envelope.Message.BuilderIndex == builderIndex {
+			f.envelopeGossipAdmissions.Finish(token, true)
+			return ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		f.envelopeGossipAdmissions.Finish(token, false)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	return token, nil
+}
+
+func (f *ForkChoiceStore) FinishExecutionPayloadEnvelopeForGossip(token ExecutionPayloadEnvelopeAdmissionToken, seen bool) {
+	f.envelopeGossipAdmissions.Finish(token, seen)
+}
+
 func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
 		return err

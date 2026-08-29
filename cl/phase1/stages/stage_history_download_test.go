@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +31,45 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
 )
+
+type recordingBlobHistoryDownloader struct {
+	mu       sync.Mutex
+	headSlot uint64
+	notify   *network.BlobBackfilledNotifier
+	started  bool
+}
+
+func (d *recordingBlobHistoryDownloader) SetHeadSlot(slot uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.headSlot = slot
+}
+
+func (d *recordingBlobHistoryDownloader) SetNotifyBlobBackfilled(notify *network.BlobBackfilledNotifier) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.notify = notify
+}
+
+func (d *recordingBlobHistoryDownloader) Start() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.started = true
+}
+
+func TestBlobHistoryDownloadStartsOnlyAfterBlockHistoryFinishes(t *testing.T) {
+	downloader := &recordingBlobHistoryDownloader{}
+
+	startBlobHistoryDownload(false, downloader, 99, func(bool) {})
+	require.False(t, downloader.started)
+	require.Zero(t, downloader.headSlot)
+	require.Nil(t, downloader.notify)
+
+	startBlobHistoryDownload(true, downloader, 99, func(bool) {})
+	require.True(t, downloader.started)
+	require.Equal(t, uint64(99), downloader.headSlot)
+	require.NotNil(t, downloader.notify)
+}
 
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.

@@ -174,6 +174,14 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	if block.Block.Slot < finalizedSlot {
 		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
 	}
+	admissionToken, err := s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
+	}
+	seen := false
+	defer func() {
+		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, seen)
+	}()
 
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
@@ -185,6 +193,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
+	seen = true
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones

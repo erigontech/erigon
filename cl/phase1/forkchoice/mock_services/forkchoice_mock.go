@@ -18,6 +18,8 @@ package mock_services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -85,9 +87,12 @@ type ForkChoiceStorageMock struct {
 	OnExecutionPayloadFunc                             func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	ValidateExecutionPayloadEnvelopeForGossipErr       error
 	ValidateExecutionPayloadEnvelopeForGossipCalled    bool
+	ValidateExecutionPayloadEnvelopeForGossipFunc      func(*cltypes.SignedExecutionPayloadEnvelope) error
 	ValidateExecutionPayloadEnvelopeForConsensusErr    error
 	ValidateExecutionPayloadEnvelopeForConsensusCalled bool
 	ApplyLocalSelfBuildEnvelopeErr                     error
+	EnvelopeGossipAdmissions                           forkchoice.ExecutionPayloadEnvelopeAdmissions
+	ReadEnvelopeFromDiskFunc                           func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	OnBlockFunc                                        func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error
 	OnTickFunc                                         func(uint64)
 	GetBeaconCommitteeMock                             func(slot, committeeIndex uint64) ([]uint64, error)
@@ -385,9 +390,51 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 	return err
 }
 
-func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(_ *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if f.ValidateExecutionPayloadEnvelopeForGossipFunc != nil {
+		return f.ValidateExecutionPayloadEnvelopeForGossipFunc(envelope)
+	}
 	f.ValidateExecutionPayloadEnvelopeForGossipCalled = true
 	return f.ValidateExecutionPayloadEnvelopeForGossipErr
+}
+
+func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
+	ctx context.Context,
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	token, err := f.EnvelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.HasEnvelope(beaconBlockRoot) {
+		envelope, readErr := f.ReadEnvelopeFromDisk(beaconBlockRoot)
+		if err := ctx.Err(); err != nil {
+			f.EnvelopeGossipAdmissions.Finish(token, false)
+			return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+		}
+		if readErr != nil || envelope == nil || envelope.Message == nil {
+			if f.HasEnvelope(beaconBlockRoot) {
+				f.EnvelopeGossipAdmissions.Finish(token, false)
+				return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %v", forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
+			}
+		} else if envelope.Message.BuilderIndex == builderIndex {
+			f.EnvelopeGossipAdmissions.Finish(token, true)
+			return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		f.EnvelopeGossipAdmissions.Finish(token, false)
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	return token, nil
+}
+
+func (f *ForkChoiceStorageMock) FinishExecutionPayloadEnvelopeForGossip(
+	token forkchoice.ExecutionPayloadEnvelopeAdmissionToken,
+	seen bool,
+) {
+	f.EnvelopeGossipAdmissions.Finish(token, seen)
 }
 
 func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -506,6 +553,12 @@ func (f *ForkChoiceStorageMock) SetEnvelope(blockRoot common.Hash, envelope *clt
 	f.envelopes[blockRoot] = envelope
 }
 
+func (f *ForkChoiceStorageMock) DeleteEnvelope(blockRoot common.Hash) {
+	f.envelopesMu.Lock()
+	defer f.envelopesMu.Unlock()
+	delete(f.envelopes, blockRoot)
+}
+
 func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
 	if f.VerifiedPayloads == nil {
 		return false
@@ -514,6 +567,9 @@ func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if f.ReadEnvelopeFromDiskFunc != nil {
+		return f.ReadEnvelopeFromDiskFunc(blockRoot)
+	}
 	f.envelopesMu.RLock()
 	defer f.envelopesMu.RUnlock()
 	return f.envelopes[blockRoot], nil

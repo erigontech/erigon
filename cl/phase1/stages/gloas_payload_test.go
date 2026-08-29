@@ -545,6 +545,56 @@ func TestGloasRecoveryPendingEvictedRootCanBeRediscovered(t *testing.T) {
 	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
 }
 
+func TestGloasRecoveryScanRediscoversEvictedFinalizedRootWhileBlockIsRetained(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.GloasForkEpoch = 0
+	finalizedRoot := common.HexToHash("0x01")
+	headRoot := common.HexToHash("0x02")
+	parentExecutionHash := common.HexToHash("0x03")
+	parentBody := cltypes.NewBeaconBody(&beaconCfg, clparams.GloasVersion)
+	parentBody.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlockHash: parentExecutionHash,
+	}}
+	headBody := cltypes.NewBeaconBody(&beaconCfg, clparams.GloasVersion)
+	headBody.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentExecutionHash,
+	}}
+	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{
+		finalizedRoot: {Block: &cltypes.BeaconBlock{Slot: 10, Body: parentBody}},
+		headRoot: {
+			Block: &cltypes.BeaconBlock{Slot: 11, ParentRoot: finalizedRoot, Body: headBody},
+		},
+	}
+	cfg := &Cfg{beaconCfg: &beaconCfg}
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, finalizedRoot))
+	for i := 1; i < maxGloasEnvelopeRecoveryPending; i++ {
+		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i + 16), byte(i >> 8)}))
+	}
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, finalizedRoot)
+
+	_, completed := scanGloasEnvelopeRecoveryAncestors(
+		cfg,
+		blocks[headRoot],
+		headRoot,
+		func(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+			block, ok := blocks[root]
+			return block, ok
+		},
+		func(common.Hash) bool { return false },
+	)
+
+	require.True(t, completed)
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, finalizedRoot)
+	require.Contains(t, nextGloasEnvelopeRecoveryBatch(cfg), [32]byte(finalizedRoot))
+}
+
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
 	completeBatch := true
 	require.True(t, continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch))
