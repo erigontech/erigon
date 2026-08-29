@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -26,9 +25,7 @@ type AggOpts struct { //nolint:gocritic
 	stepSize                        uint64 // != 0 mean override erigondb.toml settings
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
-	reorgBlockDepth                 uint64
-
-	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
+	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
 	genSaltIfNeed       bool
 	sanityOldNaming     bool // prevent start directory with old file names
@@ -41,7 +38,6 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
-		reorgBlockDepth: dbg.MaxReorgDepth,
 		genSaltIfNeed:   false,
 		sanityOldNaming: false,
 		disableFsync:    false,
@@ -49,7 +45,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -65,7 +61,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.reorgBlockDepth, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -113,10 +109,6 @@ func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 // for domain merges only.
 func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.erigondbDomainStepsInFrozenFile = steps
-	return opts
-}
-func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
-	opts.reorgBlockDepth = d
 	return opts
 }
 func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic

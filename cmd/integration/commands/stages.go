@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
@@ -65,6 +66,7 @@ import (
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -96,7 +98,8 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if debugVerbosity {
-				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+				// The flag name and value are hardcoded and known to be valid, so this cannot fail.
+				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
@@ -138,13 +141,14 @@ var cmdAlloc = &cobra.Command{
 	Use:     "alloc",
 	Example: "integration allocates and holds 1Gb (or given size)",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+		// The flag name and value are hardcoded and known to be valid, so this cannot fail.
+		_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		v, err := datasize.ParseString(args[0])
 		if err != nil {
 			panic(err)
 		}
 		n := make([]byte, v.Bytes())
-		common.Sleep(cmd.Context(), 265*24*time.Hour)
+		_ = common.Sleep(cmd.Context(), 265*24*time.Hour)
 		_ = n
 	},
 }
@@ -830,12 +834,17 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
+		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
+			if err != nil {
+				return nil, err
+			}
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			return stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+			pruneStage.FinalityCtx = finalityCtx
+			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
 		}, logger)
 		return err
 	}

@@ -99,17 +99,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cmd/capcli\
-          |cmd/caplin/caplin1\
-          |cmd/evm\
-          |cmd/evm/internal/t8ntool\
-          |cmd/integration/commands\
-          |cmd/rlpdump\
-          |cmd/rpcdaemon/cli\
-          |cmd/rpcdaemon/health\
-          |cmd/utils/app\
-          |cmd/utils/cmdtest\
-          |common\
+          common\
           |common/crypto\
           |common/crypto/blake2b\
           |common/iouring\
