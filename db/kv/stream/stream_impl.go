@@ -155,6 +155,9 @@ func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
+	if !m.xHasNext && !m.yHasNext {
+		return nil, nil, ErrIteratorExhausted
+	}
 	m.limit--
 	if m.xHasNext && m.yHasNext {
 		cmp := bytes.Compare(m.xNextK, m.yNextK)
@@ -247,6 +250,9 @@ func (m *MultisetDuoIter[V]) Next() ([]byte, V, error) {
 	var zero V
 	if m.err != nil {
 		return nil, zero, m.err
+	}
+	if !m.xHasNext && !m.yHasNext {
+		return nil, zero, ErrIteratorExhausted
 	}
 	m.limit--
 	if m.xHasNext && m.yHasNext {

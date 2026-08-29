@@ -19,6 +19,7 @@ package stream_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"testing"
@@ -737,6 +738,63 @@ func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
 	return fmt.Appendf(nil, "%x", m.i), fmt.Appendf(nil, "%x", m.i), nil
 }
 
+func TestExhaustedCombinators(t *testing.T) {
+	// invariant 4: Next() past the end must not hand back a stale value with a nil error
+	t.Run("union uno", func(t *testing.T) {
+		s := stream.Union[uint64](stream.Array([]uint64{1}), stream.Array([]uint64{2}), order.Asc, kv.Unlim)
+		_, err := stream.ToArray[uint64](s)
+		require.NoError(t, err)
+		_, err = s.Next()
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("union duo", func(t *testing.T) {
+		s := stream.Union2[uint64, uint64](&countingDuo{arr: []uint64{1}}, &countingDuo{arr: []uint64{2}}, order.Asc, kv.Unlim)
+		_, _, err := stream.ToArrayDuo[uint64, uint64](s)
+		require.NoError(t, err)
+		_, _, err = s.Next()
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("union kv", func(t *testing.T) {
+		s := stream.UnionKV(&countingKV{keys: [][]byte{{1}}}, &countingKV{keys: [][]byte{{2}}}, kv.Unlim)
+		_, _, err := stream.ToArrayKV(s)
+		require.NoError(t, err)
+		_, _, err = s.Next()
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("multiset", func(t *testing.T) {
+		s := stream.MultisetKV(&countingKV{keys: [][]byte{{1}}}, &countingKV{keys: [][]byte{{2}}}, kv.Unlim)
+		_, _, err := stream.ToArrayKV(s)
+		require.NoError(t, err)
+		_, _, err = s.Next()
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("intersect", func(t *testing.T) {
+		s := stream.Intersect[uint64](stream.Array([]uint64{1, 2}), stream.Array([]uint64{2}), order.Asc, kv.Unlim)
+		res, err := stream.ToArray[uint64](s)
+		require.NoError(t, err)
+		require.Equal(t, []uint64{2}, res)
+		_, err = s.Next()
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("limit", func(t *testing.T) {
+		s := stream.Limit[uint64](stream.Array([]uint64{1, 2, 3}), 1)
+		_, err := s.Next()
+		require.NoError(t, err)
+		require.False(t, s.HasNext())
+		// past the cap: must not hand out the inner stream's next element
+		_, err = s.Next()
+		require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+	})
+	t.Run("limit does not spend budget on a failed Next", func(t *testing.T) {
+		s := stream.LimitDuo[[]byte, []byte](PairsWithError(0), 2)
+		_, _, err := s.Next()
+		require.Error(t, err)
+		require.True(t, s.HasNext()) // the error is terminal and repeatable, not swallowed by the cap
+		_, _, err = s.Next()
+		require.Error(t, err)
+	})
+}
+
 func TestExhausted(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		_, err := (&stream.Empty[uint64]{}).Next()
@@ -1052,4 +1110,62 @@ func (s *countingKU64) Next() ([]byte, uint64, error) {
 	k := s.keys[s.i]
 	s.i++
 	return k, uint64(k[0]), nil
+}
+
+func benchU64(n int, step uint64) []uint64 {
+	arr := make([]uint64, n)
+	for i := range arr {
+		arr[i] = uint64(i) * step
+	}
+	return arr
+}
+
+// benchKeys - `step` controls overlap between the two sides: coprime steps give the
+// mostly-disjoint merge that history/domain ranges actually perform, rather than two
+// identical key sets, which would send every element down the equal-key branch.
+func benchKeys(n int, step uint64) [][]byte {
+	keys := make([][]byte, n)
+	for i := range keys {
+		keys[i] = binary.BigEndian.AppendUint64(nil, uint64(i)*step)
+	}
+	return keys
+}
+
+func BenchmarkUnionUno(b *testing.B) {
+	x, y := benchU64(2048, 2), benchU64(2048, 3)
+	b.ReportAllocs()
+	for b.Loop() {
+		s := stream.Union[uint64](stream.Array(x), stream.Array(y), order.Asc, kv.Unlim)
+		for s.HasNext() {
+			if _, err := s.Next(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkUnionKV(b *testing.B) {
+	x, y := benchKeys(2048, 2), benchKeys(2048, 3)
+	b.ReportAllocs()
+	for b.Loop() {
+		s := stream.UnionKV(&countingKV{keys: x}, &countingKV{keys: y}, kv.Unlim)
+		for s.HasNext() {
+			if _, _, err := s.Next(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+}
+
+func BenchmarkMultisetKV(b *testing.B) {
+	x, y := benchKeys(2048, 2), benchKeys(2048, 3)
+	b.ReportAllocs()
+	for b.Loop() {
+		s := stream.MultisetKV(&countingKV{keys: x}, &countingKV{keys: y}, kv.Unlim)
+		for s.HasNext() {
+			if _, _, err := s.Next(); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
 }

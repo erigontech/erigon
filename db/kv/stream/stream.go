@@ -152,9 +152,15 @@ type Limited[T any] struct {
 
 func (m *Limited[T]) HasNext() bool { return m.limit > 0 && m.it.HasNext() }
 func (m *Limited[T]) Close()        { m.it.Close() }
-func (m *Limited[T]) Next() (T, error) {
-	m.limit--
-	return m.it.Next()
+func (m *Limited[T]) Next() (v T, err error) {
+	if m.limit <= 0 {
+		return v, ErrIteratorExhausted
+	}
+	v, err = m.it.Next()
+	if err == nil {
+		m.limit--
+	}
+	return v, err
 }
 
 // LimitDuo - caps a stream at `limit` elements. limit<0 (kv.Unlim) means unlimited and returns `it` as-is.
@@ -172,9 +178,15 @@ type LimitedDuo[K, V any] struct {
 
 func (m *LimitedDuo[K, V]) HasNext() bool { return m.limit > 0 && m.it.HasNext() }
 func (m *LimitedDuo[K, V]) Close()        { m.it.Close() }
-func (m *LimitedDuo[K, V]) Next() (K, V, error) {
-	m.limit--
-	return m.it.Next()
+func (m *LimitedDuo[K, V]) Next() (k K, v V, err error) {
+	if m.limit <= 0 {
+		return k, v, ErrIteratorExhausted
+	}
+	k, v, err = m.it.Next()
+	if err == nil {
+		m.limit--
+	}
+	return k, v, err
 }
 
 type UnionUno[T cmp.Ordered] struct {
@@ -241,6 +253,9 @@ func (m *UnionUno[T]) less() bool {
 func (m *UnionUno[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
+	}
+	if !m.xHas && !m.yHas {
+		return res, ErrIteratorExhausted
 	}
 	m.limit--
 	if m.xHas && m.yHas {
@@ -354,6 +369,9 @@ func (m *Intersected[T]) advanceY() {
 func (m *Intersected[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
+	}
+	if !m.xHasNext || !m.yHasNext {
+		return res, ErrIteratorExhausted
 	}
 	m.limit--
 	k := m.xNextK
@@ -705,6 +723,9 @@ func (m *UnionDuo[K, V]) less() bool {
 func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
 	if m.err != nil {
 		return res, resV, m.err
+	}
+	if !m.xHas && !m.yHas {
+		return res, resV, ErrIteratorExhausted
 	}
 	m.limit--
 	if m.xHas && m.yHas {
