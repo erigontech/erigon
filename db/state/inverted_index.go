@@ -184,6 +184,19 @@ func (ii *InvertedIndex) efAccessorFileNameMaskForItem(item *FilesItem) string {
 	return FileNameMaskForItem(item, ii.stepSize, ii.FilenameBase, "efi")
 }
 
+// efAccessorPathForItem returns the .efi destination path for a specific
+// FilesItem — v4 form for raw-txN items, legacy step form otherwise.
+// buildEfAccessor / History.buildFiles call this so a v4-tail item's
+// accessor lands at a name openDirtyFiles' efAccessorFileNameMaskForItem
+// can find on restart.
+func (ii *InvertedIndex) efAccessorPathForItem(item *FilesItem) string {
+	if item.IsRawTxN(ii.stepSize) {
+		return ii.efAccessorNewFilePathV4(item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(ii.stepSize)
+	return ii.efAccessorNewFilePath(fromStep, toStep)
+}
+
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -275,8 +288,10 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) 
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, func(item *FilesItem) []string {
-		fromStep, toStep := item.StepRange(ii.stepSize)
-		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+		// Same rationale as History.missedMapAccessors: v4-tail items
+		// live at raw-txN accessor names; a step-form mask would match
+		// a foreign step-form .efi and falsely mark the accessor present.
+		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMaskForItem(item), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -285,11 +300,12 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) 
 }
 
 func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {
-	fromStep, toStep := item.StepRange(ii.stepSize)
 	if item.decompressor == nil {
+		fromStep, toStep := item.StepRange(ii.stepSize)
 		return fmt.Errorf("buildEfAccessor: passed item with nil decompressor %s %d-%d", ii.FilenameBase, fromStep, toStep)
 	}
-	return ii.buildMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
+	// v4-aware: v4-tail items rebuild their .efi at raw-txN paths.
+	return ii.buildMapAccessorAt(ctx, ii.efAccessorPathForItem(item), item.decompressor, ps)
 }
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".ef") {
@@ -1026,6 +1042,12 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	}
 	coll.writer = seg.NewWriter(comp, ii.Compression)
 
+	// Standalone InvertedIndex never emits v4 tails under the current
+	// design — iiPath here is always step-aligned. If a future feature
+	// adds v4 emission for standalone II, baseTxNum MUST be derived from
+	// iiPath's parsed fromTxN (like History.collate), not step*stepSize,
+	// or Seek returns values shifted by (step_start - tail_start) and
+	// InvertedIndexRoTx.seekInFiles's out-of-bounds guard trips.
 	baseTxNum := uint64(step) * ii.stepSize
 	var (
 		prevEf      []byte

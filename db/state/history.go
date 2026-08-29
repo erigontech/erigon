@@ -171,6 +171,19 @@ func (h *History) vAccessorFileNameMaskForItem(item *FilesItem) string {
 	return FileNameMaskForItem(item, h.stepSize, h.FilenameBase, "vi")
 }
 
+// vAccessorPathForItem returns the .vi destination path for a specific
+// FilesItem — v4 form for raw-txN items, legacy step form otherwise.
+// Sibling of Domain.kviAccessorPathForItem on the write side. buildFiles
+// / buildVi call this so a v4-tail history's accessor lands at a name
+// openDirtyFiles' vAccessorFileNameMaskForItem can find on restart.
+func (h *History) vAccessorPathForItem(item *FilesItem) string {
+	if item.IsRawTxN(h.stepSize) {
+		return h.vAccessorNewFilePathV4(item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(h.stepSize)
+	return h.vAccessorNewFilePath(fromStep, toStep)
+}
+
 func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
 	if err != nil {
@@ -251,8 +264,12 @@ func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*F
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, func(item *FilesItem) []string {
-		fromStep, toStep := item.StepRange(h.stepSize)
-		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
+		// v4-tail items live at raw-txN accessor names; a step-form
+		// mask matches a foreign step-form .vi and falsely reports the
+		// accessor present. Use the *ForItem mask so a v4 tail's
+		// missing .vi gets flagged and BuildMissedAccessors rebuilds it
+		// at the correct v4 path.
+		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMaskForItem(item), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -276,7 +293,8 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 		fromStep, toStep := item.StepRange(h.stepSize)
 		return fmt.Errorf("buildVI: got iiItem with nil decompressor %s %d-%d", h.FilenameBase, fromStep, toStep)
 	}
-	idxPath := h.vAccessorNewFilePath(item.StepRange(h.stepSize))
+	// v4-aware: v4-tail items rebuild their .vi at raw-txN paths.
+	idxPath := h.vAccessorPathForItem(item)
 
 	err = h.buildVI(ctx, idxPath, item.decompressor, iiItem.decompressor, iiItem.startTxNum, ps)
 	if err != nil {
@@ -911,10 +929,19 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
+		// v4-tail: accessors land at raw-txN paths matching the data file's
+		// name so openDirtyFiles + missedMapAccessors' *ForItem masks
+		// resolve them on restart. Step-form accessor next to a v4-form
+		// data file would be invisible after restart and block the
+		// merger from ever composing the v4 pair.
+		efiPath := h.InvertedIndex.efAccessorNewFilePath(step, step+1)
+		if collation.isV4Tail {
+			efiPath = h.InvertedIndex.efAccessorNewFilePathV4(collation.efBaseTxNum, (uint64(step)+1)*h.stepSize)
+		}
+		if err := h.InvertedIndex.buildMapAccessorAt(ctx, efiPath, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.FilenameBase, err)
 		}
-		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
+		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(efiPath); err != nil {
 			return HistoryFiles{}, err
 		}
 	}
@@ -925,6 +952,9 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
+	if collation.isV4Tail {
+		historyIdxPath = h.vAccessorNewFilePathV4(collation.efBaseTxNum, (uint64(step)+1)*h.stepSize)
+	}
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)

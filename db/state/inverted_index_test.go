@@ -1238,3 +1238,35 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	}
 	require.Equal(wantDesc, gotDesc, "descending: rogue DB entry in file range must be invisible")
 }
+
+// TestInvertedIndex_efAccessorPathForItem_V4TailReturnsV4Path pins that
+// the path helper for a v4-tail FilesItem returns the raw-txN v4 .efi
+// filename so retire's accessor lands where openDirtyFiles's
+// efAccessorFileNameMaskForItem can find it. Without this, restart
+// leaves the v4 tail .ef with no accessor and v4PairMergeRange never
+// fires on that side — pair stuck on disk indefinitely.
+func TestInvertedIndex_efAccessorPathForItem_V4TailReturnsV4Path(t *testing.T) {
+	t.Parallel()
+	_, ii := testDbAndInvertedIndex(t, 16, log.New())
+
+	stepStart := uint64(3) * ii.stepSize
+	stepEnd := uint64(4) * ii.stepSize
+	cut := stepStart + 3
+	item := &FilesItem{startTxNum: cut, endTxNum: stepEnd}
+
+	got := ii.efAccessorPathForItem(item)
+	require.Contains(t, got, fmt.Sprintf(".%d-%d.efi", cut, stepEnd),
+		"v4-tail item's .efi must be at raw-txN path so openDirtyFiles' *ForItem mask finds it")
+}
+
+// TestInvertedIndex_efAccessorPathForItem_StepAlignedReturnsStepPath pins
+// the baseline: aligned items still get step-form .efi paths.
+func TestInvertedIndex_efAccessorPathForItem_StepAlignedReturnsStepPath(t *testing.T) {
+	t.Parallel()
+	_, ii := testDbAndInvertedIndex(t, 16, log.New())
+
+	item := &FilesItem{startTxNum: 3 * ii.stepSize, endTxNum: 4 * ii.stepSize}
+	got := ii.efAccessorPathForItem(item)
+	require.Contains(t, got, ".3-4.efi",
+		"step-aligned item's .efi must stay at step-form path")
+}

@@ -2604,3 +2604,37 @@ func TestHistoryRetireDestPaths_StandardAlignedFromTxN(t *testing.T) {
 	require.Equal(t, uint64(3)*h.stepSize, fromTxN,
 		"standard aligned path must return fromTxN = step*stepSize")
 }
+
+// TestHistory_vAccessorPathForItem_V4TailReturnsV4Path pins that the
+// path helper for a v4-tail FilesItem returns the raw-txN v4 .vi
+// filename — so buildFiles / buildVi write the accessor at a location
+// openDirtyFiles' vAccessorFileNameMaskForItem can find on restart.
+// Without this, retire writes .vi at step-form path but openDirtyFiles
+// looks at v4-form path; on restart the accessor is invisible and the
+// v4 tail item stays permanently invalid.
+func TestHistory_vAccessorPathForItem_V4TailReturnsV4Path(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	// v4-tail item: raw start (mid-step), aligned end.
+	stepStart := uint64(3) * h.stepSize
+	stepEnd := uint64(4) * h.stepSize
+	cut := stepStart + 3
+	item := &FilesItem{startTxNum: cut, endTxNum: stepEnd}
+
+	got := h.vAccessorPathForItem(item)
+	require.Contains(t, got, fmt.Sprintf(".%d-%d.vi", cut, stepEnd),
+		"v4-tail item's .vi must be at raw-txN path so openDirtyFiles' *ForItem mask finds it")
+}
+
+// TestHistory_vAccessorPathForItem_StepAlignedReturnsStepPath pins that
+// standard step-aligned items still get step-form .vi paths.
+func TestHistory_vAccessorPathForItem_StepAlignedReturnsStepPath(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	item := &FilesItem{startTxNum: 3 * h.stepSize, endTxNum: 4 * h.stepSize}
+	got := h.vAccessorPathForItem(item)
+	require.Contains(t, got, ".3-4.vi",
+		"step-aligned item's .vi must stay at step-form path")
+}

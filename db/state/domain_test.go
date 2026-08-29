@@ -3769,9 +3769,11 @@ func TestDomainRetireDestPaths_StandardAlignedWhenNoV4One(t *testing.T) {
 	t.Parallel()
 	_, d := testDbAndDomain(t, log.New())
 
-	kvPath, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
+	kvPath, fromTxN, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
 	require.False(t, isV4Tail, "no v4 #1 present — must use step-aligned path")
 	require.Contains(t, kvPath, ".3-4.kv", "step-aligned .kv path shape")
+	require.Equal(t, uint64(3)*d.stepSize, fromTxN,
+		"step-aligned fromTxN must equal step*stepSize")
 }
 
 // TestDomainRetireDestPaths_ChoosesV4TailWhenV4OneExists pins the
@@ -3786,10 +3788,12 @@ func TestDomainRetireDestPaths_ChoosesV4TailWhenV4OneExists(t *testing.T) {
 	cut := stepStart + 3
 	d.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
 
-	kvPath, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
+	kvPath, fromTxN, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
 	require.True(t, isV4Tail, "v4 #1 present at step 3 — must switch to v4 #2 form")
 	require.Contains(t, kvPath, fmt.Sprintf(".%d-%d.kv", cut, stepEnd),
 		"v4 #2 .kv path must span [v4 #1.endTxN, stepEnd)")
+	require.Equal(t, cut, fromTxN,
+		"v4 tail fromTxN must equal v4 #1's endTxN — the raw start baked into the file name")
 }
 
 // TestDomainStepSourcesForCollate_V4TailSkipsV4Files pins the skip

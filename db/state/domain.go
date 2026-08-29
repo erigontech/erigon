@@ -345,12 +345,12 @@ func (d *Domain) v4FilesForStep(step kv.Step) []string {
 // exists for the step, returns the v4 #2 tail path
 // [v4#1.endTxN, stepEnd) so the background merge scheduler can later
 // compose the pair into the aligned .kv.
-func (d *Domain) domainRetireDestPaths(step kv.Step) (kvPath string, isV4Tail bool) {
+func (d *Domain) domainRetireDestPaths(step kv.Step) (kvPath string, fromTxN uint64, isV4Tail bool) {
 	if endTxN, ok := d.dirtyFiles.V4OneEndTxNForStep(d.stepSize, step); ok {
 		stepEnd := (uint64(step) + 1) * d.stepSize
-		return d.kvNewFilePathV4(endTxN, stepEnd), true
+		return d.kvNewFilePathV4(endTxN, stepEnd), endTxN, true
 	}
-	return d.kvNewFilePath(step, step+1), false
+	return d.kvNewFilePath(step, step+1), uint64(step) * d.stepSize, false
 }
 func (d *Domain) retireSubsumedV4Items(step kv.Step) []*FilesItem {
 	stepStart := uint64(step) * d.stepSize
@@ -809,6 +809,12 @@ type Collation struct {
 	valuesPath     string
 	valuesCount    int
 	valuesIsV4Tail bool
+	// valuesFromTxN is the raw fromTxN baked into valuesPath's file name.
+	// For a v4 tail this is v4 #1's endTxN; for a standard aligned build
+	// this is step*stepSize. buildFiles reads it when picking accessor
+	// (.kvi / .bt / .kvei) paths so they land at names openDirtyFiles
+	// can resolve on restart.
+	valuesFromTxN uint64
 }
 
 func (c Collation) Close() {
@@ -971,7 +977,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		}
 	}()
 
-	coll.valuesPath, coll.valuesIsV4Tail = d.domainRetireDestPaths(step)
+	coll.valuesPath, coll.valuesFromTxN, coll.valuesIsV4Tail = d.domainRetireDestPaths(step)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.FilenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.FilenameBase, err)
 	}
@@ -1284,32 +1290,45 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.FilenameBase, err)
 	}
 
+	// v4-tail: accessors land at raw-txN paths matching the data file's
+	// name so openDirtyFiles + missedMapAccessors' *ForItem masks
+	// resolve them on restart. Step-form accessor next to a v4-form
+	// data file would be invisible after restart and orphan the item
+	// (the merger's v4-pair detection walks visibleFiles, so an
+	// invisible v4 tail blocks composition indefinitely).
+	kviPath := d.kviAccessorNewFilePath(step, step+1)
+	kvBtPath := d.kvBtAccessorNewFilePath(step, step+1)
+	kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
+	if collation.valuesIsV4Tail {
+		stepEnd := (uint64(step) + 1) * d.stepSize
+		kviPath = d.kviAccessorNewFilePathV4(collation.valuesFromTxN, stepEnd)
+		kvBtPath = d.kvBtAccessorNewFilePathV4(collation.valuesFromTxN, stepEnd)
+		kveiPath = d.kvExistenceIdxNewFilePathV4(collation.valuesFromTxN, stepEnd)
+	}
+
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
+		if err = d.buildHashMapAccessorAt(ctx, kviPath, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
-		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
+		valuesIdx, err = d.openHashMapAccessor(kviPath)
 		if err != nil {
 			return StaticFiles{}, err
 		}
 	}
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
-		btPath := d.kvBtAccessorNewFilePath(step, step+1)
-		kveiPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(kvBtPath, kveiPath, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
 	}
 	if d.Accessors.Has(statecfg.AccessorExistence) {
-		fPath := d.kvExistenceIdxNewFilePath(step, step+1)
-		exists, err := dir.FileExist(fPath)
+		exists, err := dir.FileExist(kveiPath)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 		}
 		if exists {
-			bloom, err = existence.OpenFilter(fPath, false)
+			bloom, err = existence.OpenFilter(kveiPath, false)
 			if err != nil {
 				return StaticFiles{}, fmt.Errorf("build %s .kvei: %w", d.FilenameBase, err)
 			}
