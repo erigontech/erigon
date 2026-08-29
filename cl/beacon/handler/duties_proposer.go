@@ -279,11 +279,8 @@ func (a *ApiHandler) getHistoricalProposerDependentRoot(tx kv.Tx, stateGetter st
 		}
 		dependentRootSlot--
 	}
-	// The chain has not produced a canonical block down to this epoch yet — a sole-producer dev L2 still at
-	// genesis while wall-clock has run ahead (e.g. a slow/loaded boot). Fall back to the head root (genesis):
-	// proposer selection is RANDAO-seeded and the duties handler advances the head state to the target epoch,
-	// so the genesis root is the correct dependent root for an as-yet-unproduced epoch. Returning 404 here
-	// instead DEADLOCKS the producer — no duties → no proposal → no canonical block → no dependent root.
+	// No canonical block down to this epoch yet (a sole producer still at genesis while wall-clock ran
+	// ahead): fall back to the head/genesis root rather than 404, which would deadlock block production.
 	if hr := a.syncedData.HeadRoot(); hr != (common.Hash{}) {
 		return hr, nil
 	}

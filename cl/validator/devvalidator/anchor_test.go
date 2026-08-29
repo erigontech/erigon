@@ -27,10 +27,7 @@ func headSlotServer(t *testing.T, slot string) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-// A slow/loaded boot stamps genesis_time long before the producer starts, so the wall-clock
-// slot runs far past a chain still at genesis. anchorClockToHead must pull the clock back to the
-// head so the producer resumes at head+1 instead of jumping to a future epoch (which 404s
-// proposer duties and deadlocks the chain at block 0).
+// When wall-clock has run past a chain still at genesis, anchorClockToHead pulls the clock back to head.
 func TestAnchorClockToHead_ReanchorsWhenWallClockAhead(t *testing.T) {
 	srv := headSlotServer(t, "0")
 	defer srv.Close()
@@ -49,8 +46,7 @@ func TestAnchorClockToHead_ReanchorsWhenWallClockAhead(t *testing.T) {
 	require.LessOrEqual(t, wallSlot, uint64(1), "clock must be re-anchored to head slot 0")
 }
 
-// A fast boot (head already tracking wall-clock) must be left untouched, so the chain keeps its
-// real-time slot cadence.
+// A boot already caught up to wall-clock must be left untouched.
 func TestAnchorClockToHead_NoopWhenCaughtUp(t *testing.T) {
 	srv := headSlotServer(t, "1")
 	defer srv.Close()

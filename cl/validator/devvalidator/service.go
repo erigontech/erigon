@@ -126,14 +126,9 @@ func (s *Service) waitForReady(ctx context.Context) {
 	}
 }
 
-// anchorClockToHead re-anchors the slot clock to the chain head before the slot loop starts.
-// The beacon genesis_time is stamped at config time, BEFORE the node finishes booting (port
-// waits, Caplin start, head-state set). On a slow or loaded boot the wall-clock has run many
-// slots past genesis by the time the producer starts, so a raw wall-clock slot jumps far ahead
-// of a chain still at genesis: proposer duties for that future epoch 404 (no canonical block
-// back to the dependent slot), the producer never proposes, and the chain deadlocks at block 0.
-// Anchoring genesis_time to the head makes the sole producer resume at head+1 and advance one
-// slot at a time. A fast boot (head already at the wall-clock slot) is left untouched.
+// anchorClockToHead re-anchors the slot clock to the chain head so a slow-booted sole producer
+// resumes at head+1 rather than a wall-clock slot far past genesis (which would 404 proposer
+// duties and deadlock at block 0). A boot already caught up to wall-clock is left untouched.
 func (s *Service) anchorClockToHead(ctx context.Context) {
 	secPerSlot := s.cfg.SecondsPerSlot
 	if secPerSlot == 0 {
