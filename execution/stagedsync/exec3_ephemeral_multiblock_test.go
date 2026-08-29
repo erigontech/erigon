@@ -51,6 +51,22 @@ func (s *multiBlockSource) header(ctx context.Context, hash common.Hash, number 
 	return &types.Header{}, nil
 }
 
+// loadMultiBlockRange returns the range fixture to replay: an external
+// RANGE_FIXTURE=<range.gob> when set (a real multi-block range), otherwise the
+// committed single-block fixture wrapped as a one-block range so the guard runs
+// off repository data with no external dependency.
+func loadMultiBlockRange(t *testing.T) *blockreplay.RangeFixture {
+	t.Helper()
+	if path := os.Getenv("RANGE_FIXTURE"); path != "" {
+		rf, err := blockreplay.LoadRange(path)
+		require.NoError(t, err)
+		return rf
+	}
+	fx, err := blockreplay.Load(fixturePath(t))
+	require.NoError(t, err)
+	return blockreplay.SingleBlockRange(fx)
+}
+
 // TestEphemeralMultiBlockReplay streams a captured block RANGE through the real
 // parallel executor across one accumulating SharedDomains, verifying the
 // range-final post-state each iteration. Run many iterations at N workers to
@@ -60,15 +76,10 @@ func (s *multiBlockSource) header(ctx context.Context, hash common.Hash, number 
 //	RANGE_FIXTURE=<path> EPHEMERAL_WORKERS=8 MULTIBLOCK_ITERS=200 \
 //	  DISCARD_COMMITMENT=true <gates...> go test -run TestEphemeralMultiBlockReplay
 func TestEphemeralMultiBlockReplay(t *testing.T) {
-	path := os.Getenv("RANGE_FIXTURE")
-	if path == "" {
-		t.Skip("set RANGE_FIXTURE=<range.gob> to run the multi-block replay")
-	}
 	if !dbg.DiscardCommitment() {
-		t.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
+		t.Skip("run with DISCARD_COMMITMENT=true: the witness carries no commitment trie")
 	}
-	rf, err := blockreplay.LoadRange(path)
-	require.NoError(t, err)
+	rf := loadMultiBlockRange(t)
 	require.NotNil(t, rf.Outputs, "range fixture missing captured outputs")
 
 	iters := 100
@@ -177,15 +188,10 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 //	RANGE_FIXTURE=<path> EPHEMERAL_WORKERS=8 DISCARD_COMMITMENT=true <gates...> \
 //	  go test -run TestEphemeralMultiBlockPerBlock
 func TestEphemeralMultiBlockPerBlock(t *testing.T) {
-	path := os.Getenv("RANGE_FIXTURE")
-	if path == "" {
-		t.Skip("set RANGE_FIXTURE=<range.gob> to run the per-block multi-block replay")
-	}
 	if !dbg.DiscardCommitment() {
-		t.Fatal("set DISCARD_COMMITMENT=true: the witness carries no commitment trie")
+		t.Skip("run with DISCARD_COMMITMENT=true: the witness carries no commitment trie")
 	}
-	rf, err := blockreplay.LoadRange(path)
-	require.NoError(t, err)
+	rf := loadMultiBlockRange(t)
 
 	// Generate mode backfills each block's own post-state (projected onto the
 	// range-final key set) from THIS run and saves an enriched fixture; check mode

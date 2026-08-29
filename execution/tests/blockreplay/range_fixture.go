@@ -49,6 +49,13 @@ func LoadRange(path string) (*RangeFixture, error) {
 	return rf, nil
 }
 
+// SingleBlockRange wraps one single-block Fixture as a degenerate one-block
+// RangeFixture (range-final outputs are the block's own), so a committed
+// single-block fixture can drive the range replay with no external artifact.
+func SingleBlockRange(fx *Fixture) *RangeFixture {
+	return &RangeFixture{Blocks: []*Fixture{fx}, Outputs: fx.Outputs}
+}
+
 // MergedWitness collapses the per-block witnesses into a single Fixture whose
 // pre-state maps are the keep-earliest union, suitable for seeding a witness
 // SharedDomains via NewWitnessDomains unchanged. Its Outputs is the range-final
