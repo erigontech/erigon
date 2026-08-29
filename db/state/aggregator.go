@@ -1621,17 +1621,10 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	// subsumed here — the background merger owns composition of the
 	// v4 pair into a step-aligned file. Subsuming at retire time
 	// unlinks v4 #1 before the merger runs, orphaning its
-	// pre-target range.
-	anyV4Tail := false
-	for _, d := range sf.d {
-		if d.valuesDecomp == nil {
-			continue
-		}
-		if _, _, err := parseV4KVBaseName(filepath.Base(d.valuesDecomp.FilePath())); err == nil {
-			anyV4Tail = true
-			break
-		}
-	}
+	// pre-target range. Check every file kind mode-C can produce:
+	// .kv (domain values), .v (history), .ef (paired inverted index
+	// and standalone inverted indices).
+	anyV4Tail := staticFilesContainV4Tail(sf)
 
 	for id, d := range a.d {
 		d.integrateDirtyFiles(sf.d[id], txNumFrom, txNumTo)
@@ -1652,6 +1645,40 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	// leave dead disk + confuse subsequent unwinds.
 	retired := a.subsumedV4ItemsForStepLocked(txNumFrom, txNumTo)
 	a.recalcVisibleFiles(retired)
+}
+
+// staticFilesContainV4Tail reports whether any file in sf has a v4-form
+// basename — i.e. retire produced at least one v4 tail. Checks .kv, .v
+// and .ef across all domains and standalone inverted indices so a
+// broken pair invariant (one family v4, another aligned) still
+// suppresses subsumption on the v4 side.
+func staticFilesContainV4Tail(sf *AggV3StaticFiles) bool {
+	for _, d := range sf.d {
+		if d.valuesDecomp != nil {
+			if _, _, err := parseV4KVBaseName(filepath.Base(d.valuesDecomp.FilePath())); err == nil {
+				return true
+			}
+		}
+		if d.historyDecomp != nil {
+			if _, _, err := parseV4VBaseName(filepath.Base(d.historyDecomp.FilePath())); err == nil {
+				return true
+			}
+		}
+		if d.efHistoryDecomp != nil {
+			if _, _, err := parseV4EFBaseName(filepath.Base(d.efHistoryDecomp.FilePath())); err == nil {
+				return true
+			}
+		}
+	}
+	for _, ivf := range sf.ivfs {
+		if ivf.decomp == nil {
+			continue
+		}
+		if _, _, err := parseV4EFBaseName(filepath.Base(ivf.decomp.FilePath())); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // retireSubsumedV4Family retires every mode-C v4 item — state .kv,
@@ -1831,6 +1858,19 @@ func parseV4EFBaseName(base string) (fromTxN, toTxN uint64, err error) {
 		return 0, 0, fmt.Errorf("parse toTxN from %q: %w", base, err)
 	}
 	return fromTxN, toTxN, nil
+}
+
+// ParseV4EFBaseName extracts (fromTxN, toTxN) from a v4 .ef basename.
+// Exported wrapper over the internal parser so out-of-package callers
+// (mode-C emit assertions) can verify a destination path's encoded
+// range matches the baseTxN they intend to write with.
+func ParseV4EFBaseName(base string) (fromTxN, toTxN uint64, err error) {
+	return parseV4EFBaseName(base)
+}
+
+// ParseV4VBaseName is the .v counterpart of ParseV4EFBaseName.
+func ParseV4VBaseName(base string) (fromTxN, toTxN uint64, err error) {
+	return parseV4VBaseName(base)
 }
 
 // BuildHistoryAccessors builds the .vi sidecar for a v4 .v file. Reads both

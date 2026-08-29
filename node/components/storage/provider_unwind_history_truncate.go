@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -49,6 +50,17 @@ func TruncateStraddlerHistoryFile(
 	tmpDir string,
 	logger log.Logger,
 ) (err error) {
+	// Assert baseTxN agrees with the destination file names for v4
+	// outputs — the reader parses fromTxN back from the file name and
+	// uses it as seq.Reset base. A mismatch here silently produces
+	// out-of-bounds Seek returns downstream (cycle-14 signature).
+	if from, _, perr := state.ParseV4EFBaseName(filepath.Base(newEFPath)); perr == nil && from != baseTxN {
+		return fmt.Errorf("TruncateStraddlerHistoryFile: newEFPath %q fromTxN=%d != baseTxN=%d", newEFPath, from, baseTxN)
+	}
+	if from, _, perr := state.ParseV4VBaseName(filepath.Base(newVPath)); perr == nil && from != baseTxN {
+		return fmt.Errorf("TruncateStraddlerHistoryFile: newVPath %q fromTxN=%d != baseTxN=%d", newVPath, from, baseTxN)
+	}
+
 	efSrc, err := seg.NewDecompressor(oldEFPath)
 	if err != nil {
 		return fmt.Errorf("open ef %s: %w", oldEFPath, err)
