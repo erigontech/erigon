@@ -938,11 +938,12 @@ func (ht *HistoryTraceKeyDB) advance() error {
 }
 
 func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
-	var err error
 	if ht.valsCDup == nil {
-		if ht.valsCDup, err = ht.roTx.CursorDupSort(ht.valsTable); err != nil {
+		c, err := ht.roTx.CursorDupSort(ht.valsTable)
+		if err != nil {
 			return err
 		}
+		ht.valsCDup = c
 		ht.startTxNumBytes = make([]byte, 8)
 		binary.BigEndian.PutUint64(ht.startTxNumBytes, ht.fromTxNum)
 		k, _, err := ht.valsCDup.Seek(ht.key)
@@ -959,10 +960,11 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 			return err
 		}
 	} else {
-		ht.k, ht.v, err = ht.valsCDup.NextDup()
+		k, v, err := ht.valsCDup.NextDup()
 		if err != nil {
 			return err
 		}
+		ht.k, ht.v = k, v
 	}
 
 	if ht.v == nil {
@@ -980,11 +982,12 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 }
 
 func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
-	var err error
 	if ht.valsC == nil {
-		if ht.valsC, err = ht.roTx.Cursor(ht.valsTable); err != nil {
+		c, err := ht.roTx.Cursor(ht.valsTable)
+		if err != nil {
 			return err
 		}
+		ht.valsC = c
 		startTxNumBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(startTxNumBytes, ht.fromTxNum)
 		seek := append([]byte{}, append(ht.key, startTxNumBytes...)...)
@@ -1006,10 +1009,11 @@ func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
 		return nil
 	}
 
-	ht.k, ht.v, err = ht.valsC.Next()
+	k, v, err := ht.valsC.Next()
 	if err != nil {
 		return err
 	}
+	ht.k, ht.v = k, v
 	if ht.k == nil || !bytes.Equal(ht.k[:len(ht.k)-8], ht.key) {
 		ht.k = nil
 		return nil
