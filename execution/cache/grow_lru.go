@@ -58,12 +58,8 @@ type growLRU[V any] struct {
 }
 
 // newGrowLRUEntries builds a growLRU from an entry ceiling rather than a byte
-// budget, for layers whose contract is the entry count. The envelope charge
-// follows freelru.NewSharded's real geometry: it rounds capacity*5/4 up to a
-// power of two for the whole cache, so the overhead per slot is that table over
-// the capacity, not a constant.
-// avgBytes is the payload held outside the freelru element; a layer whose value
-// is stored inline passes 0, since freelruElemBytes already covers it.
+// budget, for layers whose contract is the entry count. avgBytes is the payload
+// held outside the freelru element; a layer with an inline value passes 0.
 func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
 	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes), onEvict)
 }
@@ -77,8 +73,7 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	return newGrowLRUWith(maxCap, int64(avgBytes), onEvict)
 }
 
-// growLRUShards mirrors freelru.NewSharded's shard count: GOMAXPROCS*16 rounded
-// up to a power of two, then divided down until a shard holds at least 16 slots.
+// growLRUShards mirrors freelru.NewSharded's shard count.
 func growLRUShards(tableSlots uint64) uint64 {
 	shards := math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0)) * 16)
 	for shards > tableSlots/16 {
@@ -87,11 +82,11 @@ func growLRUShards(tableSlots uint64) uint64 {
 	return max(shards, 1)
 }
 
-// growLRUBytes is what a generation costs. freelru.NewSharded rounds capacity
-// plus 25% up to a power of two once for the whole cache, so the table is 2x the
-// capacity at a power-of-two generation and 5/4 only on the fitted boundary. A
-// value type that fills freelruValueBytes leaves the table charge no slack, so
-// the per-shard structs are charged separately rather than absorbed.
+// growLRUBytes is what a generation costs. NewSharded rounds capacity plus 25%
+// up to a power of two once for the whole cache, so the table is 2x at a
+// power-of-two generation and 5/4 only on the fitted boundary. The per-shard
+// structs are charged separately: a value filling freelruValueBytes leaves the
+// table charge no slack to absorb them.
 func growLRUBytes(capacity uint32, payloadBytes int64) int64 {
 	if capacity == 0 {
 		return 0

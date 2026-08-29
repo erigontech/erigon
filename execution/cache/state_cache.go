@@ -36,10 +36,9 @@ const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
 	DefaultStorageCacheBytes = 1 * datasize.GB
 
-	// Per-domain avg bytes held outside freelru's element, used to translate the
-	// byte budget into the entry-count cap the underlying sharded LRU is sized
-	// against. Account and storage are near-fixed. Entry bookkeeping is not
-	// included: it sits inside the element, which the slot charge already covers.
+	// Per-domain avg bytes held outside freelru's element, translating the byte
+	// budget into the entry-count cap. Entry bookkeeping is excluded: it sits
+	// inside the element, which the slot charge already covers.
 	avgAccountPayloadBytes = 70 // 20 addr + ~50 account record
 	avgStoragePayloadBytes = 64 // 52 addr+slot + ~12 value
 )
