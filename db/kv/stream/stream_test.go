@@ -1169,3 +1169,148 @@ func BenchmarkMultisetKV(b *testing.B) {
 		}
 	}
 }
+
+// TestInvariants runs every stream this package can build against the documented contract.
+// Per-function coverage does not catch a combinator that quietly breaks an invariant; this does.
+func TestInvariants(t *testing.T) {
+	unos := map[string]func() stream.Uno[uint64]{
+		"Empty":        func() stream.Uno[uint64] { return &stream.Empty[uint64]{} },
+		"Array":        func() stream.Uno[uint64] { return stream.Array([]uint64{1, 2, 3}) },
+		"Range":        func() stream.Uno[uint64] { return stream.Range[uint64](1, 4) },
+		"ReverseRange": func() stream.Uno[uint64] { return stream.ReverseRange[uint64](4, 1) },
+		"Union": func() stream.Uno[uint64] {
+			return stream.Union[uint64](stream.Array([]uint64{1, 3}), stream.Array([]uint64{2}), order.Asc, kv.Unlim)
+		},
+		"UnionOneEmpty": func() stream.Uno[uint64] {
+			return stream.Union[uint64](stream.Array([]uint64{1, 2}), stream.EmptyU64, order.Asc, kv.Unlim)
+		},
+		"UnionLimited": func() stream.Uno[uint64] {
+			return stream.Union[uint64](stream.Array([]uint64{1, 2, 3}), stream.Array([]uint64{4}), order.Asc, 2)
+		},
+		"Intersect": func() stream.Uno[uint64] {
+			return stream.Intersect[uint64](stream.Array([]uint64{1, 2}), stream.Array([]uint64{2}), order.Asc, kv.Unlim)
+		},
+		"Filter": func() stream.Uno[uint64] {
+			return stream.FilterU64(stream.Array([]uint64{1, 2, 3}), func(v uint64) bool { return v != 2 })
+		},
+		"Limit":    func() stream.Uno[uint64] { return stream.Limit[uint64](stream.Array([]uint64{1, 2, 3}), 2) },
+		"Paginate": func() stream.Uno[uint64] { return stream.Paginate(pagesOf(1, 2, 3)) },
+		"Transform": func() stream.Uno[uint64] {
+			return stream.TransformKV2U64(&countingKV{keys: [][]byte{{1}, {2}}}, func(k, v []byte) (uint64, error) {
+				return uint64(k[0]), nil
+			})
+		},
+	}
+	duos := map[string]func() stream.Duo[[]byte, []byte]{
+		"EmptyDuo":  func() stream.Duo[[]byte, []byte] { return &stream.EmptyDuo[[]byte, []byte]{} },
+		"SingleDuo": func() stream.Duo[[]byte, []byte] { return stream.NewSingleDuo([]byte{1}, []byte{2}) },
+		"UnionKV": func() stream.Duo[[]byte, []byte] {
+			return stream.UnionKV(&countingKV{keys: [][]byte{{1}, {3}}}, &countingKV{keys: [][]byte{{2}}}, kv.Unlim)
+		},
+		"MultisetKV": func() stream.Duo[[]byte, []byte] {
+			return stream.MultisetKV(&countingKV{keys: [][]byte{{1}, {3}}}, &countingKV{keys: [][]byte{{2}}}, kv.Unlim)
+		},
+		"FilterKV": func() stream.Duo[[]byte, []byte] {
+			return stream.FilterKV(&countingKV{keys: [][]byte{{1}, {2}}}, func(k, v []byte) bool { return k[0] != 2 })
+		},
+		"TransformKV": func() stream.Duo[[]byte, []byte] {
+			return stream.TransformKV(&countingKV{keys: [][]byte{{1}}}, func(k, v []byte) ([]byte, []byte, error) { return k, v, nil })
+		},
+		"LimitDuo": func() stream.Duo[[]byte, []byte] {
+			return stream.LimitDuo[[]byte, []byte](&countingKV{keys: [][]byte{{1}, {2}, {3}}}, 2)
+		},
+		"PaginateKV": func() stream.Duo[[]byte, []byte] { return stream.PaginateKV(kvPagesOf([]byte{1}, []byte{2})) },
+	}
+
+	for name, mk := range unos {
+		t.Run("uno/"+name, func(t *testing.T) {
+			t.Run("1 HasNext is idempotent", func(t *testing.T) {
+				a, b := mk(), mk()
+				var want []uint64
+				for a.HasNext() {
+					v, err := a.Next()
+					require.NoError(t, err)
+					want = append(want, v)
+				}
+				var got []uint64
+				for {
+					h := b.HasNext()
+					require.Equal(t, h, b.HasNext(), "second HasNext disagrees with the first")
+					if !h {
+						break
+					}
+					v, err := b.Next()
+					require.NoError(t, err)
+					got = append(got, v)
+				}
+				require.Equal(t, want, got, "repeated HasNext changed the sequence")
+			})
+			t.Run("3 Close is idempotent", func(t *testing.T) {
+				s := mk()
+				require.NotPanics(t, func() { s.Close(); s.Close() })
+			})
+			t.Run("4 exhausted returns the sentinel", func(t *testing.T) {
+				s := mk()
+				_, err := stream.ToArray[uint64](s)
+				require.NoError(t, err)
+				_, err = s.Next()
+				require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+			})
+		})
+	}
+
+	for name, mk := range duos {
+		t.Run("duo/"+name, func(t *testing.T) {
+			t.Run("1 HasNext is idempotent", func(t *testing.T) {
+				a, b := mk(), mk()
+				wantK, _, err := stream.ToArrayKV(a)
+				require.NoError(t, err)
+				var gotK [][]byte
+				for {
+					h := b.HasNext()
+					require.Equal(t, h, b.HasNext(), "second HasNext disagrees with the first")
+					if !h {
+						break
+					}
+					k, _, err := b.Next()
+					require.NoError(t, err)
+					gotK = append(gotK, k)
+				}
+				require.Equal(t, wantK, gotK, "repeated HasNext changed the sequence")
+			})
+			t.Run("3 Close is idempotent", func(t *testing.T) {
+				s := mk()
+				require.NotPanics(t, func() { s.Close(); s.Close() })
+			})
+			t.Run("4 exhausted returns the sentinel", func(t *testing.T) {
+				s := mk()
+				_, _, err := stream.ToArrayKV(s)
+				require.NoError(t, err)
+				_, _, err = s.Next()
+				require.ErrorIs(t, err, stream.ErrIteratorExhausted)
+			})
+		})
+	}
+}
+
+func pagesOf(vs ...uint64) stream.NextPageUno[uint64] {
+	done := false
+	return func(string) ([]uint64, string, error) {
+		if done {
+			return nil, "", nil
+		}
+		done = true
+		return vs, "", nil
+	}
+}
+
+func kvPagesOf(ks ...[]byte) stream.NextPageDuo[[]byte, []byte] {
+	done := false
+	return func(string) ([][]byte, [][]byte, string, error) {
+		if done {
+			return nil, nil, "", nil
+		}
+		done = true
+		return ks, ks, "", nil
+	}
+}

@@ -254,7 +254,7 @@ func (m *UnionUno[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
-	if !m.xHas && !m.yHas {
+	if !m.HasNext() {
 		return res, ErrIteratorExhausted
 	}
 	m.limit--
@@ -370,7 +370,7 @@ func (m *Intersected[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
-	if !m.xHasNext || !m.yHasNext {
+	if !m.HasNext() {
 		return res, ErrIteratorExhausted
 	}
 	m.limit--
@@ -463,9 +463,15 @@ func (m *FilteredDuo[K, V]) advance() {
 }
 func (m *FilteredDuo[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
 func (m *FilteredDuo[K, V]) Next() (k K, v V, err error) {
-	k, v, err = m.nextK, m.nextV, m.err
+	if m.err != nil {
+		return k, v, m.err
+	}
+	if !m.hasNext {
+		return k, v, ErrIteratorExhausted
+	}
+	k, v = m.nextK, m.nextV
 	m.advance()
-	return k, v, err
+	return k, v, nil
 }
 func (m *FilteredDuo[K, v]) Close() {
 	m.it.Close()
@@ -507,9 +513,15 @@ func (m *Filtered[T]) advance() {
 }
 func (m *Filtered[T]) HasNext() bool { return m.err != nil || m.hasNext }
 func (m *Filtered[T]) Next() (k T, err error) {
-	k, err = m.nextK, m.err
+	if m.err != nil {
+		return k, m.err
+	}
+	if !m.hasNext {
+		return k, ErrIteratorExhausted
+	}
+	k = m.nextK
 	m.advance()
-	return k, err
+	return k, nil
 }
 func (m *Filtered[T]) Close() {
 	m.it.Close()
@@ -724,7 +736,7 @@ func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
 	if m.err != nil {
 		return res, resV, m.err
 	}
-	if !m.xHas && !m.yHas {
+	if !m.HasNext() {
 		return res, resV, ErrIteratorExhausted
 	}
 	m.limit--

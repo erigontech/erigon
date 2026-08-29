@@ -155,7 +155,7 @@ func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
-	if !m.xHasNext && !m.yHasNext {
+	if !m.HasNext() {
 		return nil, nil, ErrIteratorExhausted
 	}
 	m.limit--
@@ -251,7 +251,7 @@ func (m *MultisetDuoIter[V]) Next() ([]byte, V, error) {
 	if m.err != nil {
 		return nil, zero, m.err
 	}
-	if !m.xHasNext && !m.yHasNext {
+	if !m.HasNext() {
 		return nil, zero, ErrIteratorExhausted
 	}
 	m.limit--
