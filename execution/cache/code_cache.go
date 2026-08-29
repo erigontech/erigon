@@ -52,10 +52,6 @@ const (
 	// average so the cap keeps RAM near the budget instead of several × over; the
 	// persistent (MDBX-backed) cold tier backstops entries the tighter cap evicts.
 	avgCodeEntryBytes = 12 * 1024
-	// codeSizeEntryBytes is the resident cost of one size-layer slot (freelru
-	// element holding size/keyHash/txNum/epoch), used to map the size-layer entry
-	// ceiling to an envelope byte budget.
-	codeSizeEntryBytes = 64
 )
 
 type versionedAddressID struct {
@@ -251,8 +247,10 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 		func(_ uint64, e codeEntry) { cc.codeSize.Add(-(8 + int64(len(e.code)))) })
 	cc.codeHashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
 		func(_ uint64, e codeEntry) { cc.codeHashCodeSize.Add(-(32 + int64(len(e.code)))) })
-	cc.codeSizeByCodeHash = newGrowLRU[codeSizeEntry](
-		datasize.ByteSize(DefaultCodeSizeCacheEntries*codeSizeEntryBytes), codeSizeEntryBytes,
+	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
+	// freelruElemBytes already charges for.
+	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
+		uint32(cc.codeSizeCapEntries), 0,
 		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
 	return cc
 }
