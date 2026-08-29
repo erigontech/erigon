@@ -80,6 +80,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
@@ -3454,9 +3455,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
 
-	var to uint64
+	var to, finalisedBlockNum uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		to, err = stages.GetStageProgress(tx, stages.Senders)
+		finalisedBlockNum = rawdb.ReadForkchoiceFinalizedNum(tx)
 		return err
 	}); err != nil {
 		return err
@@ -3464,7 +3466,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
+	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
+	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
@@ -3518,7 +3521,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles(lastTxNum, finalityCtx); err != nil {
 		return err
 	}
 

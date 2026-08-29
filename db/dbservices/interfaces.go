@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -117,7 +118,7 @@ type BlockRetire interface {
 	BuildFilesInBackground(
 		ctx context.Context,
 		minBlockNum uint64,
-		maxBlockNum uint64,
+		finalityCtx dbfinality.Context,
 		lvl log.Lvl,
 		seeder SeederClient,
 		onFinishRetire func() error,
