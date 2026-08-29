@@ -513,8 +513,6 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	c.maybePublishMetrics()
-
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
 	defer stripe.Unlock()
@@ -548,6 +546,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
+	c.maybePublishMetrics()
 	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
 	if !ok {
