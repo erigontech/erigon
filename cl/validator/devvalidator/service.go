@@ -71,6 +71,8 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 
+	s.anchorClockToHead(ctx)
+
 	s.logger.Info("[dev-validator] started",
 		"validators", len(s.keys),
 		"slotsPerEpoch", s.cfg.SlotsPerEpoch,
@@ -122,6 +124,52 @@ func (s *Service) waitForReady(ctx context.Context) {
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+// anchorClockToHead re-anchors the slot clock to the chain head before the slot loop starts.
+// The beacon genesis_time is stamped at config time, BEFORE the node finishes booting (port
+// waits, Caplin start, head-state set). On a slow or loaded boot the wall-clock has run many
+// slots past genesis by the time the producer starts, so a raw wall-clock slot jumps far ahead
+// of a chain still at genesis: proposer duties for that future epoch 404 (no canonical block
+// back to the dependent slot), the producer never proposes, and the chain deadlocks at block 0.
+// Anchoring genesis_time to the head makes the sole producer resume at head+1 and advance one
+// slot at a time. A fast boot (head already at the wall-clock slot) is left untouched.
+func (s *Service) anchorClockToHead(ctx context.Context) {
+	secPerSlot := s.cfg.SecondsPerSlot
+	if secPerSlot == 0 {
+		return
+	}
+	headSlot, err := s.headSlot(ctx)
+	if err != nil {
+		s.logger.Warn("[dev-validator] head slot unavailable; using config genesis clock", "err", err)
+		return
+	}
+	now := uint64(time.Now().Unix())
+	if now < s.genesisTime {
+		return
+	}
+	wallSlot := (now - s.genesisTime) / secPerSlot
+	if wallSlot <= headSlot+1 {
+		return
+	}
+	s.genesisTime = now - headSlot*secPerSlot
+	s.logger.Info("[dev-validator] re-anchored slot clock to head",
+		"headSlot", headSlot, "wallSlotWas", wallSlot, "genesisTime", s.genesisTime)
+}
+
+// headSlot returns the beacon chain head slot.
+func (s *Service) headSlot(ctx context.Context) (uint64, error) {
+	var resp struct {
+		Header struct {
+			Message struct {
+				Slot string `json:"slot"`
+			} `json:"message"`
+		} `json:"header"`
+	}
+	if err := s.client.get(ctx, "/eth/v1/beacon/headers/head", &resp); err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(resp.Header.Message.Slot, 10, 64)
 }
 
 // resolveIndicesWithRetry calls resolveIndices until it succeeds or the context
@@ -249,7 +297,8 @@ func (s *Service) maybePropose(ctx context.Context, slot uint64) {
 	var duties []proposerDuty
 	path := fmt.Sprintf("/eth/v1/validator/duties/proposer/%d", epoch)
 	if err := s.client.get(ctx, path, &duties); err != nil {
-		return // silently skip — node may not be ready
+		s.logger.Warn("[dev-validator] duties skip", "slot", slot, "epoch", epoch, "spe", s.cfg.SlotsPerEpoch, "err", err)
+		return
 	}
 
 	for _, duty := range duties {
