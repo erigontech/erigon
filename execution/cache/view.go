@@ -283,8 +283,11 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
 
 // FillCodeByHash offers code resolved by codeHash alone, populating the
 // content-addressed layer without binding it to an address.
+// code must already be owned by the caller — CodeStore.GetByHash clones the
+// mmap-backed value it returns, and the cache stores that one clone rather than
+// copying every cold contract a second time.
 func (v ReadView) FillCodeByHash(code, codeHash []byte, readTxNum uint64) {
-	v.fillCodeWithHash(nil, bytes.Clone(code), codeHash, readTxNum)
+	v.fillCodeWithHash(nil, code, codeHash, readTxNum)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
