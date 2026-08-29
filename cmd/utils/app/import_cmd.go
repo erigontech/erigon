@@ -280,7 +280,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservice
 
 	for i, block := range blocks {
 		// If we're behind the chain head, only check block, state is available at head
-		if headBlock.NumberU64() > block.NumberU64() {
+		if headBlock != nil && headBlock.NumberU64() > block.NumberU64() {
 			if !ChainHasBlock(chainDB, block) {
 				return blocks[i:]
 			}
