@@ -2549,7 +2549,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 	}
 
-	bal := make([]*types.AccountChanges, 0, len(ac))
+	bal := make(types.BlockAccessList, 0, len(ac))
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
@@ -2564,10 +2564,10 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
-		bal = append(bal, account.changes)
+		bal = append(bal, *account.changes)
 	}
 
-	slices.SortFunc(bal, func(a, b *types.AccountChanges) int {
+	slices.SortFunc(bal, func(a, b types.AccountChanges) int {
 		return a.Address.Cmp(b.Address)
 	})
 
@@ -2590,6 +2590,8 @@ type accountState struct {
 	balanceValue            *uint256.Int                        // tracks latest seen balance
 	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	slotWrites              map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
+	slotReads               map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
 	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
 	initialCodeEmpty        bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
@@ -2707,16 +2709,20 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 	*a.balanceValue = v
 }
 
-func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
-	if account, ok := accounts[addr]; ok {
-		return account
-	}
-	account := &accountState{
+func newAccountState(addr accounts.Address) *accountState {
+	return &accountState{
 		changes: &types.AccountChanges{Address: addr},
 		balance: newBalanceTracker(),
 		nonce:   newNonceTracker(),
 		code:    newCodeTracker(),
 	}
+}
+
+func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
+	if account, ok := accounts[addr]; ok {
+		return account
+	}
+	account := newAccountState(addr)
 	accounts[addr] = account
 	return account
 }
@@ -2725,12 +2731,13 @@ func (account *accountState) applyWriteStorage(key accounts.StorageKey, val uint
 	// Skip intra-tx net-zero storage writes: if this is the first write
 	// to the slot (no prior tx wrote to it) and the written value equals
 	// the original read value, it's a no-op that should remain as a read.
-	if !hasStorageWrite(account.changes, key) {
+	at := account.storageWriteIndex(key)
+	if at < 0 {
 		if origVal, wasRead := account.storageReadValues[key]; wasRead && val.Eq(&origVal) {
 			return
 		}
 	}
-	addStorageUpdate(account.changes, key, val, accessIndex)
+	account.addStorageUpdate(at, key, val, accessIndex)
 }
 
 func (account *accountState) applyWriteNonce(val uint64, accessIndex uint32) {
@@ -2790,8 +2797,14 @@ func (account *accountState) updateReadStorage(key accounts.StorageKey, val uint
 	if _, exists := account.storageReadValues[key]; !exists {
 		account.storageReadValues[key] = val
 	}
-	if hasStorageWrite(account.changes, key) {
+	if account.hasStorageWrite(key) {
 		return
+	}
+	if account.slotReads != nil {
+		if _, seen := account.slotReads[key]; seen {
+			return
+		}
+		account.slotReads[key] = len(account.changes.StorageReads)
 	}
 	account.changes.StorageReads = append(account.changes.StorageReads, key)
 }
@@ -2817,58 +2830,114 @@ func (account *accountState) updateReadBalance(val uint256.Int) {
 	}
 }
 
-func addStorageUpdate(ac *types.AccountChanges, slot accounts.StorageKey, val uint256.Int, txIndex uint32) {
-	// If we already recorded a read for this slot, drop it because a write takes precedence.
-	removeStorageRead(ac, slot)
+// slotIndexMin is where scanning the slot lists stops being cheaper than a map
+// probe. A storage-bloated block puts thousands of slots on one account and
+// looks every one of them up.
+const slotIndexMin = 16
 
-	if ac.StorageChanges == nil {
-		ac.StorageChanges = []*types.SlotChanges{{
-			Slot:    slot,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
-		}}
+// storageWriteIndex returns the position of slot in changes.StorageChanges, or -1.
+func (account *accountState) storageWriteIndex(slot accounts.StorageKey) int {
+	if account.slotWrites != nil {
+		if i, ok := account.slotWrites[slot]; ok {
+			return i
+		}
+		return -1
+	}
+	for i := range account.changes.StorageChanges {
+		if account.changes.StorageChanges[i].Slot == slot {
+			return i
+		}
+	}
+	return -1
+}
+
+func (account *accountState) hasStorageWrite(slot accounts.StorageKey) bool {
+	return account.storageWriteIndex(slot) >= 0
+}
+
+// addStorageUpdate records a write at slot, which storageWriteIndex already
+// located as at (-1 when the slot is new). It is the only writer of
+// changes.StorageChanges, so the index cannot drift from it.
+func (account *accountState) addStorageUpdate(at int, slot accounts.StorageKey, val uint256.Int, txIndex uint32) {
+	// If we already recorded a read for this slot, drop it because a write takes precedence.
+	account.removeStorageRead(slot)
+
+	ac := account.changes
+	if at >= 0 {
+		sc := &ac.StorageChanges[at]
+		// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
+		if n := len(sc.Changes); n > 0 && val.Eq(&sc.Changes[n-1].Value) {
+			return
+		}
+		sc.Changes = append(sc.Changes, &types.StorageChange{Index: txIndex, Value: val})
 		return
 	}
 
-	for _, slotChange := range ac.StorageChanges {
-		if slotChange.Slot == slot {
-			// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
-			if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
-				return
-			}
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
-			return
-		}
+	if account.slotWrites != nil {
+		account.slotWrites[slot] = len(ac.StorageChanges)
 	}
-	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
+	ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
-}
-
-func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
-	for _, sc := range ac.StorageChanges {
-		if sc != nil && sc.Slot == slot {
-			return true
+	if account.slotWrites == nil && len(ac.StorageChanges) >= slotIndexMin {
+		account.slotWrites = make(map[accounts.StorageKey]int, len(ac.StorageChanges))
+		for i := range ac.StorageChanges {
+			account.slotWrites[ac.StorageChanges[i].Slot] = i
 		}
+		// StorageReads can hold the same slot twice: below the threshold reads are
+		// appended unchecked, and Normalize is what dedups them. The index needs
+		// one entry per slot, so drop the repeats while building it.
+		account.slotReads = make(map[accounts.StorageKey]int, len(ac.StorageReads))
+		deduped := ac.StorageReads[:0]
+		for _, slot := range ac.StorageReads {
+			if _, seen := account.slotReads[slot]; seen {
+				continue
+			}
+			account.slotReads[slot] = len(deduped)
+			deduped = append(deduped, slot)
+		}
+		ac.StorageReads = deduped
 	}
-	return false
 }
 
-func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
+// removeStorageRead drops slot from StorageReads, because a write to it takes
+// precedence. Past slotIndexMin the position is indexed and the last entry is
+// swapped in; order does not survive Normalize's sort anyway.
+func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
+	ac := account.changes
 	if len(ac.StorageReads) == 0 {
 		return
 	}
-	out := ac.StorageReads[:0]
-	for _, s := range ac.StorageReads {
-		if s != slot {
-			out = append(out, s)
+	if account.slotReads == nil {
+		out := ac.StorageReads[:0]
+		for _, s := range ac.StorageReads {
+			if s != slot {
+				out = append(out, s)
+			}
 		}
+		if len(out) == 0 {
+			ac.StorageReads = nil
+		} else {
+			ac.StorageReads = out
+		}
+		return
 	}
-	if len(out) == 0 {
+	i, ok := account.slotReads[slot]
+	if !ok {
+		return
+	}
+	delete(account.slotReads, slot)
+	last := len(ac.StorageReads) - 1
+	if i != last {
+		ac.StorageReads[i] = ac.StorageReads[last]
+		account.slotReads[ac.StorageReads[i]] = i
+	}
+	if last == 0 {
 		ac.StorageReads = nil
-	} else {
-		ac.StorageReads = out
+		return
 	}
+	ac.StorageReads = ac.StorageReads[:last]
 }
 
 type versionedReadSet struct {
