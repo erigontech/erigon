@@ -314,6 +314,7 @@ func ConsensusClStages(ctx context.Context,
 						"blockRoot", common.Hash(startingRoot),
 					)
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
+					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
 					if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
 						downloader.SetHTTPFallbackURL(urls[0])
 					}
