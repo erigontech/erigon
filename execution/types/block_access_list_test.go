@@ -19,7 +19,7 @@ import (
 func TestBlockAccessListCopy(t *testing.T) {
 	bal := BlockAccessList{{
 		Address: accounts.InternAddress(common.Address{1}),
-		StorageChanges: []*SlotChanges{{
+		StorageChanges: []SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{2}),
 			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
 		}},
@@ -33,7 +33,7 @@ func TestBlockAccessListCopy(t *testing.T) {
 	if !reflect.DeepEqual(bal, cpy) {
 		t.Fatalf("copy differs: got %v, want %v", cpy, bal)
 	}
-	if bal[0] == cpy[0] || bal[0].StorageChanges[0] == cpy[0].StorageChanges[0] ||
+	if &bal[0] == &cpy[0] || &bal[0].StorageChanges[0] == &cpy[0].StorageChanges[0] ||
 		bal[0].StorageChanges[0].Changes[0] == cpy[0].StorageChanges[0].Changes[0] ||
 		bal[0].BalanceChanges[0] == cpy[0].BalanceChanges[0] ||
 		bal[0].NonceChanges[0] == cpy[0].NonceChanges[0] ||
@@ -255,7 +255,7 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 			name: "empty slot changes",
 			bal: BlockAccessList{{
 				Address: accounts.InternAddress(common.Address{1}),
-				StorageChanges: []*SlotChanges{{
+				StorageChanges: []SlotChanges{{
 					Slot: accounts.InternKey(common.Hash{1}),
 				}},
 			}},
@@ -287,29 +287,16 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 	}
 }
 
-func TestEncodeBlockAccessListRejectsUnrepresentableNil(t *testing.T) {
-	if _, err := EncodeBlockAccessListBytes(BlockAccessList{nil}); err == nil {
-		t.Fatal("expected nil account encoding error")
-	}
-}
-
 func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
 	tests := []struct {
 		name string
 		bal  BlockAccessList
 	}{
 		{
-			name: "slot changes",
-			bal: BlockAccessList{{
-				Address:        accounts.InternAddress(common.Address{1}),
-				StorageChanges: []*SlotChanges{nil},
-			}},
-		},
-		{
 			name: "storage change",
 			bal: BlockAccessList{{
 				Address: accounts.InternAddress(common.Address{1}),
-				StorageChanges: []*SlotChanges{{
+				StorageChanges: []SlotChanges{{
 					Slot:    accounts.InternKey(common.Hash{1}),
 					Changes: []*StorageChange{nil},
 				}},
@@ -350,7 +337,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 	bal := BlockAccessList{
 		{
 			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
-			StorageChanges: []*SlotChanges{
+			StorageChanges: []SlotChanges{
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
@@ -410,7 +397,7 @@ func TestBlockAccessListValidateMaxItems(t *testing.T) {
 				h[31] = byte(j)
 				reads[j] = accounts.InternKey(h)
 			}
-			bal[i] = &AccountChanges{
+			bal[i] = AccountChanges{
 				Address:      accounts.InternAddress(addr),
 				StorageReads: reads,
 			}
@@ -442,7 +429,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 
 	ac := &AccountChanges{
 		Address: accounts.InternAddress(addr),
-		StorageChanges: []*SlotChanges{
+		StorageChanges: []SlotChanges{
 			{
 				Slot:    accounts.InternKey(slot),
 				Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
@@ -450,7 +437,7 @@ func TestBlockAccessListSlotUniqueness(t *testing.T) {
 		},
 		StorageReads: []accounts.StorageKey{accounts.InternKey(slot)},
 	}
-	bal := BlockAccessList{ac}
+	bal := BlockAccessList{*ac}
 	if err := bal.Validate(); err == nil {
 		t.Fatal("expected error for slot in both changes and reads")
 	}
@@ -557,7 +544,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 
 	ac := &AccountChanges{
 		Address: accounts.InternAddress(addr),
-		StorageChanges: []*SlotChanges{
+		StorageChanges: []SlotChanges{
 			{
 				Slot:    accounts.InternKey(slot),
 				Changes: []*StorageChange{}, // Intentionally empty list
@@ -565,7 +552,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 		},
 	}
 
-	bal := BlockAccessList{ac}
+	bal := BlockAccessList{*ac}
 	err := bal.Validate()
 
 	if err == nil {
@@ -592,5 +579,32 @@ func TestDecodeBlockAccessListBytesRejectsMalformedRLP(t *testing.T) {
 		if errors.Is(err, ErrInvalidBlockAccessList) {
 			t.Fatalf("%s: malformed RLP must not map to ErrInvalidBlockAccessList: %v", name, err)
 		}
+	}
+}
+
+// A reused AccountChanges receiver must not keep the previous decode's slots
+// when the next payload carries none: every other field is overwritten
+// unconditionally, so StorageChanges has to be too.
+func TestAccountChangesDecodeRLPClearsStorageChanges(t *testing.T) {
+	withSlots := AccountChanges{
+		Address: accounts.InternAddress(common.Address{1}),
+		StorageChanges: []SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{2}),
+			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
+		}},
+	}
+	empty := AccountChanges{Address: accounts.InternAddress(common.Address{9})}
+
+	var buf bytes.Buffer
+	if err := empty.EncodeRLP(&buf); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	ac := withSlots // reuse a receiver that already holds slots
+	if err := ac.DecodeRLP(rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(ac.StorageChanges) != 0 {
+		t.Fatalf("decode kept %d storage changes from the previous payload", len(ac.StorageChanges))
 	}
 }
