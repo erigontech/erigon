@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
@@ -41,6 +42,15 @@ type Allocator struct {
 }
 
 func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+
+// [dbg] sizing the entry slice: how many entries a buffer really holds when it
+// flushes, and how often the pool had to build one from scratch.
+var (
+	mxBufGet     = metrics.GetOrCreateCounter("etl_buffer_get_total")
+	mxBufEntries = metrics.GetOrCreateSummary("etl_buffer_entries_at_flush")
+	mxBufBytes   = metrics.GetOrCreateSummary("etl_buffer_bytes_at_flush")
+)
+
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
@@ -49,6 +59,7 @@ func (a *Allocator) Put(b Buffer) {
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
+	mxBufGet.Inc()
 	b := a.p.Get().(Buffer)
 	b.Reset()
 	return b
@@ -133,6 +144,8 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		return nil
 	}
 
+	mxBufEntries.Observe(float64(c.buf.Len()))
+	mxBufBytes.Observe(float64(c.buf.SizeLimit()))
 	if canStoreInRam && len(c.dataProviders) == 0 {
 		c.buf.Sort()
 		provider := KeepInRAM(c.buf)
