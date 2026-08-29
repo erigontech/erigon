@@ -539,7 +539,7 @@ func TestGetCode_RejectsParentAccountAboveStagedUnwindBound(t *testing.T) {
 	})
 	require.NoError(t, parent.DomainPut(kv.AccountsDomain, rwTx, addr, deadForkAccount, 40, nil)) // step 2
 
-	codeStore := cache.NewCodeStore(1<<20, 1<<20)
+	codeStore := cache.NewCodeStore(1 << 20)
 	require.NoError(t, codeStore.PutByHash(rwTx, codeHash[:], deadForkCode))
 	child.SetCodeStore(codeStore)
 
@@ -613,7 +613,7 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	codeStore := cache.NewCodeStore(1<<20, 1<<20)
+	codeStore := cache.NewCodeStore(1 << 20)
 
 	addr := make([]byte, 20)
 	addr[0] = 0xdd
@@ -762,4 +762,59 @@ func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
 	f := &fakeForbidder{}
 	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
 	require.False(t, f.called)
+}
+
+// A code-store hit must promote the bytes into the in-memory code cache, which
+// is the store's only memory tier.
+func TestGetCode_CodeStoreHitFillsCodeCache(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	codeStore := cache.NewCodeStore(1 << 20)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xf1
+	code := []byte{0x60, 0x03, 0x60, 0x00, 0x55}
+	codeHash := crypto.Keccak256Hash(code)
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		CodeHash: accounts.InternCodeHash(codeHash),
+	})
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.SetCodeStore(codeStore)
+	seedDomains.SetTxNum(20)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, rwTx, addr, account, 20, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, rwTx, addr, code, 20, nil))
+	require.NoError(t, seedDomains.Commit(ctx, rwTx))
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+	sd.SetCodeStore(codeStore)
+
+	_, ok := stateCache.View(nil).GetCodeByHash(codeHash[:])
+	require.False(t, ok, "the code cache must start cold")
+
+	got, ok, err := sd.GetCode(roTx, addr, 20)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+
+	cached, ok := stateCache.View(nil).GetCodeByHash(codeHash[:])
+	require.True(t, ok, "a code-store hit must fill the in-memory code cache")
+	require.Equal(t, code, cached)
 }
