@@ -149,6 +149,10 @@ var ErrPBinUnsupported = errors.New("pbin: unsupported under the bin commitment 
 // whole table.
 var pbinRootKey = []byte{0x08}
 
+// PBinIsRootKey reports whether key names the root-cell record. The record is a
+// bare cell, so nothing in its bytes distinguishes it from a branch record.
+func PBinIsRootKey(key []byte) bool { return bytes.Equal(key, pbinRootKey) }
+
 // Process folds the update stream into the tree and returns the new root.
 // HashSort hands keys over in tree-key order, which is descent order, so the
 // grid only ever walks the path between two consecutive keys. warmup is
@@ -355,7 +359,7 @@ func (pph *PBinPatriciaHashed) storeRoot() error {
 	record := []byte{}
 	if pph.grid.root.kind != pbinNodeEmpty {
 		var err error
-		if record, err = pbinAppendCell(nil, &pph.grid.root); err != nil {
+		if record, err = pbinAppendCell(nil, &pph.grid.root, false); err != nil {
 			return err
 		}
 	}
@@ -380,7 +384,7 @@ func (pph *PBinPatriciaHashed) loadRoot() error {
 	}
 	pph.rootPrev = data
 	pph.grid.root.reset()
-	pos, err := pbinDecodeCell(data, 0, &pph.grid.root)
+	pos, err := pbinDecodeCell(data, 0, &pph.grid.root, 0, &pph.updateStream.keyDigest, false)
 	if err != nil {
 		return fmt.Errorf("pbin: decode root cell: %w", err)
 	}
@@ -566,7 +570,7 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, pph.currentKey.bitLen)
 	}
 
-	_, afterMap, err := pbinDecodeBranch(data, &g.rows[row])
+	afterMap, err := pbinDecodeBranch(data, &g.rows[row], depth, &pph.updateStream.keyDigest)
 	if err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
@@ -793,7 +797,7 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 		if len(data) == 0 {
 			return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, path.bitLen)
 		}
-		_, afterMap, err := pbinDecodeBranch(data, &cells)
+		afterMap, err := pbinDecodeBranch(data, &cells, path.bitLen+1, &pph.updateStream.keyDigest)
 		if err != nil {
 			return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 		}
@@ -946,7 +950,7 @@ func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath)
 	pph.counters.materializeReads++
 
 	var cells [2]pbinCell
-	if _, _, err = pbinDecodeBranch(data, &cells); err != nil {
+	if _, err = pbinDecodeBranch(data, &cells, nodeKey.bitLen+1, &pph.updateStream.keyDigest); err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
 	childPath := nodeKey

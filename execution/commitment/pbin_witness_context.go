@@ -149,7 +149,7 @@ func (c *pbinWitnessContext) rootRecord() ([]byte, error) {
 	if err := c.fillCell(&cell, c.tree.root, &path); err != nil {
 		return nil, err
 	}
-	return pbinAppendCell(nil, &cell)
+	return pbinAppendCell(nil, &cell, false)
 }
 
 func (c *pbinWitnessContext) branchRecord(node *pbinWitnessNode, path *pbinBitpath) ([]byte, error) {

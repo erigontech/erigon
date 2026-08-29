@@ -963,6 +963,30 @@ func bindPBinHashSuite(name string) (func(), error) {
 	return func() { _ = commitment.SetPBinHashSuite(prev) }, nil
 }
 
+func validatePBinRebuildState(stateValue []byte) error {
+	if len(stateValue) == 0 {
+		return nil
+	}
+	if len(stateValue) < 18 {
+		return fmt.Errorf("commitment rebuild: commitment state is %d bytes, too short for a header", len(stateValue))
+	}
+	stateLen := int(binary.BigEndian.Uint16(stateValue[16:18]))
+	if len(stateValue) != 18+stateLen {
+		return fmt.Errorf("commitment rebuild: trie state claims %d bytes, %d present", stateLen, len(stateValue)-18)
+	}
+	if stateLen == 0 {
+		return nil
+	}
+	trieState := stateValue[18 : 18+stateLen]
+	if !commitment.IsPBinState(trieState) {
+		return nil
+	}
+	if err := commitment.ValidatePBinStateFormat(trieState); err != nil {
+		return fmt.Errorf("commitment rebuild: invalid pbin state: %w", err)
+	}
+	return nil
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
@@ -983,6 +1007,23 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	if target.Variant == commitment.VariantBinPatriciaTrie {
+		roTx, err := rwDb.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer roTx.Rollback() //nolint:gocritic
+		// A KV read slice only lives as long as its transaction, so the state is
+		// validated before the rollback rather than after it.
+		stateValue, _, readErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		if readErr == nil {
+			readErr = validatePBinRebuildState(stateValue)
+		}
+		roTx.Rollback()
+		if readErr != nil {
+			return nil, nil, readErr
+		}
+	}
 
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles

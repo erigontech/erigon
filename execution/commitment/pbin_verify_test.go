@@ -101,7 +101,7 @@ func (v *pbinVerifier) rootCell() (pbinCell, error) {
 	if len(data) == 0 {
 		return c, errPBinVerifyNoRecords
 	}
-	pos, err := pbinDecodeCell(data, 0, &c)
+	pos, err := pbinDecodeCell(data, 0, &c, 0, nil, false)
 	if err != nil {
 		return c, fmt.Errorf("pbin verify: root cell: %w", err)
 	}
@@ -202,7 +202,8 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 	if len(data) == 0 {
 		return cells, fmt.Errorf("pbin verify: no record for the %d-bit node at %x", nodePath.bitLen, key)
 	}
-	_, afterMap, err := pbinDecodeBranch(data, &cells)
+	keys := pbinDigestCache{sum: pbinSelectedSum}
+	afterMap, err := pbinDecodeBranch(data, &cells, nodePath.bitLen+1, &keys)
 	if err != nil {
 		return cells, fmt.Errorf("pbin verify: record at %x: %w", key, err)
 	}

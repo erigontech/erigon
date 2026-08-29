@@ -78,6 +78,16 @@ func (l pbinTestLeaf) cell(t *testing.T, depth int16) pbinCell {
 	return c
 }
 
+func (l pbinTestLeaf) recordCell(t *testing.T, depth int16) pbinCell {
+	t.Helper()
+	c := l.cell(t, depth)
+	c.storageAddrLen = 0
+	c.loaded = cellLoadNone
+	c.Flags, c.StorageLen = StorageUpdate, pbinValueLength
+	c.Storage = l.value
+	return c
+}
+
 func (l pbinTestLeaf) entry() pbinOracleEntry {
 	return pbinOracleEntry{key: l.treeKey, value: l.value[:]}
 }
@@ -176,15 +186,17 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 			require.NotEmpty(t, data, "a branch fold stores its row")
 
 			var stored [2]pbinCell
-			touchMap, afterMap, err := pbinDecodeBranch(data, &stored)
+			keys := pbinDigestCache{sum: pbinSelectedSum}
+			afterMap, err := pbinDecodeBranch(data, &stored, divergence+1, &keys)
 			require.NoError(t, err)
-			require.Equal(t, uint16(0b11), touchMap)
 			require.Equal(t, uint16(0b11), afterMap)
-			require.Equal(t, cells[0].prefix, stored[0].prefix)
-			require.Equal(t, cells[1].prefix, stored[1].prefix)
+			for i := range stored {
+				storageKey := pbinPathFromBytes(keys.storageKey(stored[i].storageAddr[:length.Addr], stored[i].storageAddr[length.Addr:]))
+				require.Equal(t, storageKey.slice(divergence+1, storageKey.bitLen), stored[i].prefix)
+			}
 
 			var enc pbinBranchEncoder
-			again, err := enc.encode(touchMap, afterMap, &stored)
+			again, err := enc.encode(0b11, afterMap, &stored)
 			require.NoError(t, err)
 			require.Equal(t, data, []byte(again))
 		})
@@ -250,7 +262,7 @@ func TestPBinFoldPropagateRestoresDescendedNode(t *testing.T) {
 			// Build the node once, then meet it again through a cell that knows only
 			// its prefix and hash, the way a reload would.
 			builder := NewPBinPatriciaHashed(ms)
-			cells := [2]pbinCell{left.cell(t, divergence+1), right.cell(t, divergence+1)}
+			cells := [2]pbinCell{left.recordCell(t, divergence+1), right.recordCell(t, divergence+1)}
 			pbinTestSeedRow(builder, prefix, divergence+1, cells, 0b11, 0b11)
 			require.NoError(t, builder.fold())
 			nodeHash := builder.grid.root.hash
@@ -472,4 +484,43 @@ func TestPBinFoldDeleteDropsRecord(t *testing.T) {
 	data, _, err := ms.Branch(pbinEncodeBitPath(&key))
 	require.NoError(t, err)
 	require.Empty(t, data)
+}
+
+// A row with one surviving cell owns no record: fold() must route it to
+// foldPropagate, which lifts the survivor and prepends the bits the row consumed.
+// The record format cannot spell a one-cell branch at all, so this dispatch is the
+// only thing standing between that shape and an encode error mid-rebuild.
+func TestPBinFoldOneCellRowWritesNoRecord(t *testing.T) {
+	t.Parallel()
+
+	base := pbinTestBaseStorageKey()
+	full := pbinTestKeyPrefix(base, pbinMaxPathBits)
+	for _, depth := range []int16{9, 64, 272, 528} {
+		t.Run(fmt.Sprintf("depth %d", depth), func(t *testing.T) {
+			t.Parallel()
+
+			a := pbinTestStorageLeaf(base, 0x77)
+			key := pbinTestKeyPrefix(a.treeKey, depth-1)
+			bit := int(full.bit(depth - 1))
+
+			ms := NewMockState(t)
+			pbinTestPutState(t, ms, a)
+			pph := NewPBinPatriciaHashed(ms)
+
+			var cells [2]pbinCell
+			cells[bit] = a.cell(t, depth)
+			pbinTestSeedRow(pph, key, depth, cells, uint16(1)<<bit, uint16(1)<<bit)
+
+			require.NoError(t, pph.fold())
+			require.Equal(t, 0, pph.grid.activeRows)
+
+			data, _, err := ms.Branch(pbinEncodeBitPath(&key))
+			require.NoError(t, err)
+			require.Empty(t, data, "a one-cell row must not store a record")
+
+			require.Equal(t, pbinNodeLeaf, pph.grid.root.kind)
+			require.Equal(t, full, pph.grid.root.prefix,
+				"the survivor must carry the whole path the collapsed row consumed")
+		})
+	}
 }
