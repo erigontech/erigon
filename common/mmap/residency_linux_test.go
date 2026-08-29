@@ -25,40 +25,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
-
-	"github.com/erigontech/erigon/common/dir"
 )
 
 // residencySink defeats dead-code elimination of the page-touching loop.
 var residencySink int
 
-func isTmpfs(t *testing.T, path string) bool {
-	t.Helper()
-	var st unix.Statfs_t
-	require.NoError(t, unix.Statfs(path, &st))
-	return st.Type == unix.TMPFS_MAGIC
-}
-
-// evictableTempDir returns a temp dir on a filesystem whose page cache can be
-// dropped. tmpfs keeps files only in RAM, so FADV_DONTNEED is a no-op there and
-// a mapping never goes cold; when TMPDIR is tmpfs, fall back to the package
-// directory.
-func evictableTempDir(t *testing.T) string {
-	t.Helper()
-
-	if tmp := t.TempDir(); !isTmpfs(t, tmp) {
-		return tmp
-	}
-
-	tmp, err := os.MkdirTemp(".", "residency")
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, dir.RemoveAll(tmp)) })
-	require.False(t, isTmpfs(t, tmp), "need a disk-backed filesystem to drop pages from the page cache")
-	return tmp
-}
-
 func TestResidencyProbe(t *testing.T) {
-	p := filepath.Join(evictableTempDir(t), "f")
+	dir := t.TempDir()
+	p := filepath.Join(dir, "f")
 	pg := os.Getpagesize()
 	data := make([]byte, pg*8)
 	for i := range data {

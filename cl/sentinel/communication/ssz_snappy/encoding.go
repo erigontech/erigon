@@ -64,7 +64,9 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	lengthBuf := make([]byte, 10)
 	vin := binary.PutUvarint(lengthBuf, uint64(len(enc)))
 
-	// Create writer size
+	// Sized to hold the whole frame: with a smaller buffer bufio writes chunks
+	// straight to w, and there it loops forever on a writer that keeps returning
+	// (0, nil) instead of reporting a short write.
 	wr := bufio.NewWriterSize(w, 10+len(enc))
 	// Write length of packet
 	if _, err := wr.Write(prefix); err != nil {

@@ -14,22 +14,35 @@ import (
 )
 
 const (
-	consolidationSourceIndex = 1
-	consolidationTargetIndex = 2
-	sourceBalance            = 40_000_000_000
-	sourceEffectiveBalance   = 32_000_000_000
+	consolidationSourceIndex    = 1
+	consolidationTargetIndex    = 2
+	consolidationSourceBalance  = 40_000_000_000
+	consolidationMovedBalance   = 32_000_000_000
+	consolidationDebitedBalance = consolidationSourceBalance - consolidationMovedBalance
 )
 
+// errUnknownBalance stands in for the target read that fails, which is what
+// drives ProcessPendingConsolidations into its rollback.
+var errUnknownBalance = errors.New("validator balance unavailable")
+
 // consolidationState wires up a single pending consolidation whose source is
-// eligible, leaving the balance moves to the caller's expectations.
-func consolidationState(t *testing.T, ctrl *gomock.Controller) *mock_services.MockBeaconState {
+// eligible. Balances are backed by the map, so the mock answers reads with what
+// earlier writes stored and the tests can assert the balance itself. Only the
+// source has a balance: the missing target is what makes IncreaseBalance fail.
+// setErr, when set, rejects the write that restores the source.
+func consolidationState(
+	t *testing.T,
+	ctrl *gomock.Controller,
+	balances map[int]uint64,
+	setErr error,
+) *mock_services.MockBeaconState {
 	t.Helper()
 
 	cfg := &clparams.MainnetBeaconConfig
 	source := solid.NewValidator()
 	source.SetSlashed(false)
 	source.SetWithdrawableEpoch(0)
-	source.SetEffectiveBalance(sourceEffectiveBalance)
+	source.SetEffectiveBalance(consolidationMovedBalance)
 
 	consolidations := solid.NewPendingConsolidationList(cfg)
 	consolidations.Append(&solid.PendingConsolidation{
@@ -42,7 +55,20 @@ func consolidationState(t *testing.T, ctrl *gomock.Controller) *mock_services.Mo
 	s.EXPECT().Slot().Return(uint64(0)).AnyTimes()
 	s.EXPECT().GetPendingConsolidations().Return(consolidations).AnyTimes()
 	s.EXPECT().ValidatorForValidatorIndex(consolidationSourceIndex).Return(source, nil).AnyTimes()
-	s.EXPECT().ValidatorBalance(consolidationSourceIndex).Return(uint64(sourceBalance), nil).AnyTimes()
+	s.EXPECT().ValidatorBalance(gomock.Any()).DoAndReturn(func(index int) (uint64, error) {
+		balance, ok := balances[index]
+		if !ok {
+			return 0, errUnknownBalance
+		}
+		return balance, nil
+	}).AnyTimes()
+	s.EXPECT().SetValidatorBalance(gomock.Any(), gomock.Any()).DoAndReturn(func(index int, balance uint64) error {
+		if setErr != nil && index == consolidationSourceIndex && balance == consolidationSourceBalance {
+			return setErr
+		}
+		balances[index] = balance
+		return nil
+	}).AnyTimes()
 	return s
 }
 
@@ -50,31 +76,25 @@ func TestProcessPendingConsolidationsRestoresTheSourceWhenTheTargetIncreaseFails
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	increaseErr := errors.New("target balance unavailable")
-	s := consolidationState(t, ctrl)
-
-	s.EXPECT().SetValidatorBalance(consolidationSourceIndex, uint64(sourceBalance-sourceEffectiveBalance)).Return(nil)
-	s.EXPECT().ValidatorBalance(consolidationTargetIndex).Return(uint64(0), increaseErr)
-	// The rollback: without it the source keeps the debit that was never credited.
-	s.EXPECT().SetValidatorBalance(consolidationSourceIndex, uint64(sourceBalance)).Return(nil)
+	balances := map[int]uint64{consolidationSourceIndex: consolidationSourceBalance}
+	s := consolidationState(t, ctrl, balances, nil)
 
 	err := statechange.ProcessPendingConsolidations(s)
-	require.ErrorIs(t, err, increaseErr)
+	require.ErrorIs(t, err, errUnknownBalance)
+	// Without the rollback the source keeps a debit that was never credited.
+	require.Equal(t, uint64(consolidationSourceBalance), balances[consolidationSourceIndex])
 }
 
 func TestProcessPendingConsolidationsReportsAFailedRollback(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	increaseErr := errors.New("target balance unavailable")
 	rollbackErr := errors.New("source restore rejected")
-	s := consolidationState(t, ctrl)
-
-	s.EXPECT().SetValidatorBalance(consolidationSourceIndex, uint64(sourceBalance-sourceEffectiveBalance)).Return(nil)
-	s.EXPECT().ValidatorBalance(consolidationTargetIndex).Return(uint64(0), increaseErr)
-	s.EXPECT().SetValidatorBalance(consolidationSourceIndex, uint64(sourceBalance)).Return(rollbackErr)
+	balances := map[int]uint64{consolidationSourceIndex: consolidationSourceBalance}
+	s := consolidationState(t, ctrl, balances, rollbackErr)
 
 	err := statechange.ProcessPendingConsolidations(s)
-	require.ErrorIs(t, err, increaseErr)
+	require.ErrorIs(t, err, errUnknownBalance)
 	require.ErrorIs(t, err, rollbackErr)
+	require.Equal(t, uint64(consolidationDebitedBalance), balances[consolidationSourceIndex])
 }

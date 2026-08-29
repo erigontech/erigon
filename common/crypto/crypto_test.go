@@ -308,6 +308,7 @@ func TestLoadECDSA(t *testing.T) {
 		}
 		filename := f.Name()
 		if _, err := f.WriteString(test.input); err != nil {
+			f.Close()
 			t.Fatal(err)
 		}
 		f.Close()
