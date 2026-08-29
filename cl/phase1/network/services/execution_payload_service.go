@@ -216,9 +216,21 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
 	}
 
+	finalizedSlot = s.forkchoiceStore.FinalizedSlot()
+	if block.Block.Slot < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
+	}
+	admissionToken, err := s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
+	}
+	seen := false
+	defer func() {
+		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, seen)
+	}()
+
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
-	var err error
 	if store, ok := s.forkchoiceStore.(interface {
 		OnExecutionPayloadAt(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
 	}); ok {
@@ -230,6 +242,7 @@ func (s *executionPayloadService) processMessage(ctx context.Context, signedEnve
 		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			s.emitExecutionPayloadGossip(block, envelope)
 			s.seenEnvelopesCache.Add(seenKey, struct{}{})
+			seen = true
 			return nil
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)

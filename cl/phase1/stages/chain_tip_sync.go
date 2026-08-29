@@ -429,7 +429,6 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		return
 	}
 
-	finalizedSlot := cfg.forkChoice.FinalizedSlot()
 	pendingBeforePrune := len(cfg.gloasEnvelopeRecoveryPending)
 	cfg.gloasEnvelopeRecoveryPending = retainActionableGloasEnvelopeRecoveryRoots(
 		cfg.gloasEnvelopeRecoveryPending,
@@ -480,24 +479,39 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		scanRoot = headRoot
 	}
 
-	completedScan := false
+	scanRoot, completedScan := scanGloasEnvelopeRecoveryAncestors(
+		cfg,
+		childBlock,
+		scanRoot,
+		cfg.forkChoice.GetBlock,
+		cfg.forkChoice.HasEnvelope,
+	)
+	missingRoots := nextGloasEnvelopeRecoveryBatch(cfg)
+	if len(missingRoots) > 0 {
+		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
+		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+		finishGloasEnvelopeRecoveryBatch(cfg, missingRoots, cfg.forkChoice.HasEnvelope)
+	}
+	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, completedScan)
+}
+
+func scanGloasEnvelopeRecoveryAncestors(
+	cfg *Cfg,
+	childBlock *cltypes.SignedBeaconBlock,
+	scanRoot common.Hash,
+	getBlock func(common.Hash) (*cltypes.SignedBeaconBlock, bool),
+	hasEnvelope func(common.Hash) bool,
+) (common.Hash, bool) {
 	for visited := 1; visited < maxGloasAncestorVisitsPerCycle; visited++ {
 		parentRoot := childBlock.Block.ParentRoot
-		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
-		if !ok {
-			completedScan = true
-			break
-		}
-
-		if parentBlock.Block.Slot <= finalizedSlot {
-			completedScan = true
-			break
+		parentBlock, ok := getBlock(parentRoot)
+		if !ok || parentBlock == nil || parentBlock.Block == nil {
+			return scanRoot, true
 		}
 
 		parentEpoch := parentBlock.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
 		if cfg.beaconCfg.GetCurrentStateVersion(parentEpoch) < clparams.GloasVersion {
-			completedScan = true
-			break
+			return scanRoot, true
 		}
 
 		childBid := childBlock.Block.Body.GetSignedExecutionPayloadBid()
@@ -509,20 +523,14 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		}
 
 		if childBid.Message.ParentBlockHash == parentBid.Message.BlockHash {
-			if !cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) && !trackGloasEnvelopeRecoveryRoot(cfg, common.Hash(parentRoot)) {
-				break
+			if !hasEnvelope(common.Hash(parentRoot)) && !trackGloasEnvelopeRecoveryRoot(cfg, common.Hash(parentRoot)) {
+				return scanRoot, false
 			}
 		}
 		childBlock = parentBlock
 		scanRoot = common.Hash(parentRoot)
 	}
-	missingRoots := nextGloasEnvelopeRecoveryBatch(cfg)
-	if len(missingRoots) > 0 {
-		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
-		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
-		finishGloasEnvelopeRecoveryBatch(cfg, missingRoots, cfg.forkChoice.HasEnvelope)
-	}
-	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, completedScan)
+	return scanRoot, false
 }
 
 func trackGloasEnvelopeRecoveryRoot(cfg *Cfg, root common.Hash) bool {

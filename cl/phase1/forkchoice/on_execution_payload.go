@@ -495,6 +495,115 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 	return f.applyEnvelopeCoordinated(ctx, signedEnvelope, checkBlobData, validatePayload, missingMode, receivedAt)
 }
 
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
+		return err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	root := signedEnvelope.Message.BeaconBlockRoot
+	blockState, err := f.forkGraph.GetState(root, false)
+	if err != nil || blockState == nil {
+		return fmt.Errorf("beacon block state %v is unavailable", root)
+	}
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return fmt.Errorf("beacon block %v is unavailable", root)
+	}
+	finalizedSlot := f.FinalizedSlot()
+	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
+	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
+		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
+	ctx context.Context,
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	token, err := f.envelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		envelope, readErr := f.forkGraph.ReadEnvelopeFromDisk(beaconBlockRoot)
+		if err := ctx.Err(); err != nil {
+			f.envelopeGossipAdmissions.Finish(token, false)
+			return ExecutionPayloadEnvelopeAdmissionToken{}, err
+		}
+		if readErr != nil || envelope == nil || envelope.Message == nil {
+			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+				f.envelopeGossipAdmissions.Finish(token, false)
+				return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %v", ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
+			}
+		} else if envelope.Message.BuilderIndex == builderIndex {
+			f.envelopeGossipAdmissions.Finish(token, true)
+			return ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		f.envelopeGossipAdmissions.Finish(token, false)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	return token, nil
+}
+
+func (f *ForkChoiceStore) FinishExecutionPayloadEnvelopeForGossip(token ExecutionPayloadEnvelopeAdmissionToken, seen bool) {
+	f.envelopeGossipAdmissions.Finish(token, seen)
+}
+
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if err := f.validateExecutionPayloadEnvelopeInput(signedEnvelope); err != nil {
+		return err
+	}
+
+	f.mu.RLock()
+	root := signedEnvelope.Message.BeaconBlockRoot
+	blockState, err := f.forkGraph.GetState(root, true)
+	if err != nil || blockState == nil {
+		f.mu.RUnlock()
+		return fmt.Errorf("beacon block state %v is unavailable", root)
+	}
+	block, ok := f.forkGraph.GetBlock(root)
+	finalizedSlot := f.FinalizedSlot()
+	f.mu.RUnlock()
+	if !ok || block == nil || block.Block == nil {
+		return fmt.Errorf("beacon block %v is unavailable", root)
+	}
+	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
+	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
+		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
+	}
+	if err := f.checkDataAvailability(ctx, block, root); err != nil {
+		return err
+	}
+	blockState.SetPreviousStateRoot(block.Block.StateRoot)
+	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+		return fmt.Errorf("%w: execution payload envelope consensus validation failed: %w", ErrInvalidExecutionPayloadEnvelope, err)
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) validateExecutionPayloadEnvelopeInput(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	if err := signedEnvelope.ValidateForConfig(f.beaconCfg); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
+	}
+	if err := signedEnvelope.ValidateForPersistence(f.beaconCfg); err != nil {
+		return fmt.Errorf("unpersistable execution payload envelope: %w", err)
+	}
+	return nil
+}
+
 // applyEnvelopeCoordinated temporarily yields the caller-held fork-choice lock during EL validation.
 // Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
