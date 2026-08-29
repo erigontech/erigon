@@ -876,8 +876,8 @@ func targetOf(br *blockResult) commitTarget {
 }
 
 // incrementalStepCheckpoints makes a mid-block step checkpoint fold only what
-// changed since the previous edge. The block-end fold still emits every key the
-// block touched, so the block's changeset — and unwind — are unaffected.
+// changed since the previous step end. The block-end fold still emits every key
+// the block touched, so the block's changeset — and unwind — are unaffected.
 var incrementalStepCheckpoints = dbg.EnvBool("INCREMENTAL_STEP_CKPT", true)
 
 // computeMode selects compute's per-call behaviour; isolation is otherwise
@@ -906,9 +906,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	segment := m.midBlock && incrementalStepCheckpoints
-	if segment {
-		cc.state.FlushSegmentToUpdates(cc.updates)
+	stepFlush := m.midBlock && incrementalStepCheckpoints
+	if stepFlush {
+		cc.state.FlushStepToUpdates(cc.updates)
 	} else {
 		cc.state.FlushToUpdates(cc.updates)
 	}
@@ -940,9 +940,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		cc.hasComputed = true
 	}
 
-	// Start the next segment only once this checkpoint's fold has landed.
-	if segment {
-		cc.state.ResetSegmentFlags()
+	// Only after this checkpoint's fold has landed.
+	if stepFlush {
+		cc.state.ResetStepFlags()
 	}
 
 	if !m.checkRoot {

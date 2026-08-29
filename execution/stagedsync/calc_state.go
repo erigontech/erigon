@@ -25,9 +25,9 @@ type calcAccountState struct {
 	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
-	// dirtySeg is dirty narrowed to the current step segment: cleared at each
-	// mid-block checkpoint, while dirty survives to the block-end fold.
-	dirtySeg bool
+	// dirtyStep is dirty cleared at each step end, while dirty survives to the
+	// block-end fold.
+	dirtyStep bool
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -93,8 +93,8 @@ type calcState struct {
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
-	// storageDirtySeg is storageDirty narrowed to the current step segment.
-	storageDirtySeg map[accounts.Address]map[accounts.StorageKey]bool
+	// storageDirtyStep is storageDirty cleared at each step end.
+	storageDirtyStep map[accounts.Address]map[accounts.StorageKey]bool
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader accountBaselineReader
@@ -122,13 +122,13 @@ func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
 
 func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) *calcState {
 	return &calcState{
-		accounts:        make(map[accounts.Address]*calcAccountState),
-		storageState:    make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
-		storageDirty:    make(map[accounts.Address]map[accounts.StorageKey]bool),
-		storageDirtySeg: make(map[accounts.Address]map[accounts.StorageKey]bool),
-		domainReader:    &calcDomainReader{reader: reader},
-		logger:          logger,
-		logPrefix:       logPrefix,
+		accounts:         make(map[accounts.Address]*calcAccountState),
+		storageState:     make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
+		storageDirty:     make(map[accounts.Address]map[accounts.StorageKey]bool),
+		storageDirtyStep: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		domainReader:     &calcDomainReader{reader: reader},
+		logger:           logger,
+		logPrefix:        logPrefix,
 	}
 }
 
@@ -187,7 +187,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
 			acc.dirty = true
-			acc.dirtySeg = true
+			acc.dirtyStep = true
 			cs.deleteStorageSubtree(addr)
 		}
 	}
@@ -198,7 +198,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Balance = vw.Val
 		acc.dirty = true
-		acc.dirtySeg = true
+		acc.dirtyStep = true
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
 		}
@@ -207,7 +207,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Nonce = vw.Val
 		acc.dirty = true
-		acc.dirtySeg = true
+		acc.dirtyStep = true
 		if clearsDeleted(addr, acc.Nonce != 0) {
 			acc.Deleted = false
 		}
@@ -216,7 +216,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Value()
 		acc.dirty = true
-		acc.dirtySeg = true
+		acc.dirtyStep = true
 		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
 			acc.Deleted = false
 		}
@@ -225,7 +225,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
 		acc.dirty = true
-		acc.dirtySeg = true
+		acc.dirtyStep = true
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
 			acc.Deleted = false
 		}
@@ -234,7 +234,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Incarnation = vw.Val
 		acc.dirty = true
-		acc.dirtySeg = true
+		acc.dirtyStep = true
 	}
 	for addr, inner := range writes.Storages() {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
@@ -250,11 +250,11 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
 		}
-		dirtySeg := cs.segSlots(addr)
+		dirtyStep := cs.stepSlots(addr)
 		for key, vw := range inner {
 			slots[key] = vw.Val
 			dirty[key] = true
-			dirtySeg[key] = true
+			dirtyStep[key] = true
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero
@@ -272,16 +272,14 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	}
 }
 
-// segSlots returns the current segment's dirty-slot set for addr, creating the
-// maps on demand so a zero-value calcState stays usable.
-func (cs *calcState) segSlots(addr accounts.Address) map[accounts.StorageKey]bool {
-	if cs.storageDirtySeg == nil {
-		cs.storageDirtySeg = make(map[accounts.Address]map[accounts.StorageKey]bool)
+func (cs *calcState) stepSlots(addr accounts.Address) map[accounts.StorageKey]bool {
+	if cs.storageDirtyStep == nil {
+		cs.storageDirtyStep = make(map[accounts.Address]map[accounts.StorageKey]bool)
 	}
-	m := cs.storageDirtySeg[addr]
+	m := cs.storageDirtyStep[addr]
 	if m == nil {
 		m = make(map[accounts.StorageKey]bool)
-		cs.storageDirtySeg[addr] = m
+		cs.storageDirtyStep[addr] = m
 	}
 	return m
 }
@@ -300,11 +298,11 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 		dirty = make(map[accounts.StorageKey]bool)
 		cs.storageDirty[addr] = dirty
 	}
-	dirtySeg := cs.segSlots(addr)
+	dirtyStep := cs.stepSlots(addr)
 	for key := range slots {
 		slots[key] = uint256.Int{}
 		dirty[key] = true
-		dirtySeg[key] = true
+		dirtyStep[key] = true
 	}
 }
 
@@ -350,14 +348,14 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) { cs.flush(updates, false) }
 
-// FlushSegmentToUpdates emits only what changed since the last checkpoint. The
+// FlushStepToUpdates emits only what changed since the last step end. The
 // block-end fold still uses FlushToUpdates, so the set of keys a block writes —
 // and therefore its changeset — is unchanged.
-func (cs *calcState) FlushSegmentToUpdates(updates *commitment.Updates) { cs.flush(updates, true) }
+func (cs *calcState) FlushStepToUpdates(updates *commitment.Updates) { cs.flush(updates, true) }
 
 func (cs *calcState) flush(updates *commitment.Updates, segOnly bool) {
 	for addr, acc := range cs.accounts {
-		if segOnly && !acc.dirtySeg {
+		if segOnly && !acc.dirtyStep {
 			continue
 		}
 		if !segOnly && !acc.dirty {
@@ -397,7 +395,7 @@ func (cs *calcState) flush(updates *commitment.Updates, segOnly bool) {
 
 	storageSrc := cs.storageDirty
 	if segOnly {
-		storageSrc = cs.storageDirtySeg
+		storageSrc = cs.storageDirtyStep
 	}
 	for addr, dirtySlots := range storageSrc {
 		address := addr.Value()
@@ -429,23 +427,23 @@ func (cs *calcState) flush(updates *commitment.Updates, segOnly bool) {
 func (cs *calcState) ResetBlockFlags() {
 	for _, acc := range cs.accounts {
 		acc.dirty = false
-		acc.dirtySeg = false
+		acc.dirtyStep = false
 	}
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
-	for addr := range cs.storageDirtySeg {
-		delete(cs.storageDirtySeg, addr)
+	for addr := range cs.storageDirtyStep {
+		delete(cs.storageDirtyStep, addr)
 	}
 }
 
-// ResetSegmentFlags starts a new step segment, leaving the per-block flags so
-// the block-end fold still sees every key the block touched.
-func (cs *calcState) ResetSegmentFlags() {
+// ResetStepFlags leaves the per-block flags, so the block-end fold still sees
+// every key the block touched.
+func (cs *calcState) ResetStepFlags() {
 	for _, acc := range cs.accounts {
-		acc.dirtySeg = false
+		acc.dirtyStep = false
 	}
-	for addr := range cs.storageDirtySeg {
-		delete(cs.storageDirtySeg, addr)
+	for addr := range cs.storageDirtyStep {
+		delete(cs.storageDirtyStep, addr)
 	}
 }
