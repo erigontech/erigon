@@ -93,12 +93,23 @@ func OpenCaplinDatabase(ctx context.Context,
 	blobDbPath := path.Join(blobDir, "chaindata")
 
 	if wipeout {
-		dir.RemoveAll(dataDirIndexer)
-		dir.RemoveAll(blobDbPath)
+		if err := dir.RemoveAll(dataDirIndexer); err != nil {
+			return nil, nil, err
+		}
+		if err := dir.RemoveAll(blobDbPath); err != nil {
+			return nil, nil, err
+		}
 	}
 
-	os.MkdirAll(dbPath, 0700)
-	os.MkdirAll(dataDirIndexer, 0700)
+	if err := os.MkdirAll(dbPath, 0700); err != nil {
+		return nil, nil, err
+	}
+	if err := os.MkdirAll(dataDirIndexer, 0700); err != nil {
+		return nil, nil, err
+	}
+	if err := os.MkdirAll(blobDbPath, 0700); err != nil {
+		return nil, nil, err
+	}
 
 	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
@@ -131,7 +142,9 @@ func OpenCaplinDatabase(ctx context.Context,
 func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
 
-	os.MkdirAll(dataDirIndexer, 0700)
+	if err := os.MkdirAll(dataDirIndexer, 0700); err != nil {
+		return nil, err
+	}
 
 	return mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { //TODO: move Caplin tables to own tables cofig
@@ -272,7 +285,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		networkConfig.StaticPeers = slices.Concat(networkConfig.StaticPeers, directBootnodes)
 	}
 	if genesisState != nil {
-		genesisDb.Initialize(genesisState)
+		if err := genesisDb.Initialize(genesisState); err != nil {
+			return err
+		}
 	} else {
 		genesisState, err = genesisDb.ReadGenesisState()
 		if err != nil {
@@ -341,7 +356,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
-	dir.RemoveAll(caplinFcuPath)
+	if err := dir.RemoveAll(caplinFcuPath); err != nil {
+		return err
+	}
 	err = os.MkdirAll(caplinFcuPath, 0o755)
 	if err != nil {
 		return err

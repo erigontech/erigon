@@ -565,20 +565,15 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
-		//TODO: initialSync maybe save files progress here
-
-		var minBlockNumber uint64
-
 		if s.CurrentSyncCycle.IsInitialCycle {
 			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 		} else {
 			cfg.blockRetire.SetWorkers(1)
 		}
-
 		started := cfg.blockRetire.BuildFilesInBackground(
 			ctx,
-			minBlockNumber,
-			s.ForwardProgress,
+			0,
+			s.FinalityCtx,
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
