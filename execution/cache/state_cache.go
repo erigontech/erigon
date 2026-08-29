@@ -341,8 +341,11 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
+		// A short hash would be zero-padded into the content-addressed key and
+		// would also blank the collision guard that rejects a 64-bit maphash
+		// clash, so anything but a full hash is derived here instead.
 		prepared.codeHash = update.CodeHash
-		if len(prepared.codeHash) == 0 {
+		if len(prepared.codeHash) != len(common.Hash{}) {
 			prepared.codeHash = crypto.Keccak256(prepared.value)
 		}
 	}
@@ -510,16 +513,8 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 	c.publishing = false
 }
 
-// publishChunk bounds how many updates are prepared before they are applied.
-// Preparing the whole batch up front means holding a clone of every value in it
-// at once, which for a block that deploys hundreds of MB of contract code is a
-// second copy of the whole delta.
-const publishChunk = 256
-
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool, updates []StateUpdate) {
-	prepared := make([]preparedStateUpdate, 0, min(len(updates), publishChunk))
-
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	if !c.beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum, hasUnwind) {
@@ -529,15 +524,12 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// Sub-caches synchronize their own reads and writes. While publishing is
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
-	for start := 0; start < len(updates); start += publishChunk {
-		chunk := updates[start:min(start+publishChunk, len(updates))]
-		prepared = prepared[:0]
-		for i := range chunk {
-			prepared = append(prepared, prepareStateUpdate(chunk[i]))
-		}
-		for i := range prepared {
-			c.applyPrepared(prepared[i])
-		}
+	//
+	// One update is prepared at a time: preparing the batch up front held a clone
+	// of every value at once — a second image of a whole block's contract code —
+	// and cost the same fill blackout, since the clones landed inside it either way.
+	for i := range updates {
+		c.applyPrepared(prepareStateUpdate(updates[i]))
 	}
 
 	c.finishPublication(committedStateVersion)

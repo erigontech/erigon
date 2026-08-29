@@ -1252,13 +1252,12 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			// Both consumers get the same hash; hashing a block's worth of code
-			// twice is the one duplicate they cannot avoid on their own.
+			// Only the code store needs a hash here, where every domain lock is
+			// held, and it needs one as its key. The cache reuses it when it is
+			// already in hand and otherwise hashes after the commit, off the lock.
 			var codeHash []byte
-			if len(v) > 0 {
+			if sd.codeStore != nil && len(v) > 0 {
 				codeHash = crypto.Keccak256(v)
-			}
-			if sd.codeStore != nil && codeHash != nil {
 				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, v})
 			}
 			if sd.stateCache != nil {

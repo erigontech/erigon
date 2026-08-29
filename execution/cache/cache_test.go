@@ -1829,3 +1829,32 @@ func TestPublishUsesProducerCodeHash(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, code, got)
 }
+
+// A malformed producer hash must be replaced, not used: hash32 would zero-pad it
+// into the content-addressed key, and an all-zero stamp also blanks the guard
+// that rejects a 64-bit maphash collision serving another contract's code.
+func TestPublishDerivesMalformedCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(9)
+	code := bytes.Repeat([]byte{0xcd}, 64)
+	short := []byte{0x01, 0x02, 0x03}
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: short,
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.True(t, ok, "a short producer hash must be replaced by the derived one")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(short)
+	require.False(t, ok, "the zero-padded short hash must not key the entry")
+}
