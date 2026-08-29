@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -1602,4 +1603,40 @@ func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emp
 		bitset ^= bit
 	}
 	return nil
+}
+
+// countingKeccak counts Write calls so a test can assert that a path performed
+// no hashing at all, rather than only that it produced the right bytes.
+type countingKeccak struct {
+	keccak.KeccakState
+	writes atomic.Int64
+}
+
+func (c *countingKeccak) Write(p []byte) (int, error) {
+	c.writes.Add(1)
+	return c.KeccakState.Write(p)
+}
+
+// An account cell carrying a memoized stateHash returns it without consulting
+// its hashed key, so reaching that answer must not hash the account address.
+func TestComputeCellHashReusesStateHashWithoutHashingAddress(t *testing.T) {
+	t.Parallel()
+
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	counter := &countingKeccak{KeccakState: hph.keccak}
+	hph.keccak = counter
+
+	var c cell
+	c.accountAddrLen = length.Addr
+	copy(c.accountAddr[:], bytes.Repeat([]byte{0xab}, length.Addr))
+	c.hashLen = length.Hash
+	c.stateHashLen = length.Hash
+	for i := range c.stateHash {
+		c.stateHash[i] = byte(i)
+	}
+
+	got, err := hph.computeCellHash(&c, 0, nil)
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{160}, c.stateHash[:]...), got)
+	require.Zero(t, counter.writes.Load(), "memoized stateHash path must not hash the account address")
 }
