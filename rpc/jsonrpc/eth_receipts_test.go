@@ -38,8 +38,9 @@ func logsWithIndexes(n int) types.Logs {
 
 func erigonLogsWithIndexes(n int) []*types.ErigonLog {
 	logs := make([]*types.ErigonLog, n)
-	for i, l := range logsWithIndexes(n) {
-		logs[i] = &types.ErigonLog{Log: l}
+	src := logsWithIndexes(n)
+	for i := range src {
+		logs[i] = &types.ErigonLog{Log: src[i]}
 	}
 	return logs
 }
