@@ -347,7 +347,17 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
-	return s.Type().FileInfoByMask(dir, s.from, s.to)
+	// s.FileName() is v4-aware (auto-selects raw-block form when
+	// endpoints aren't 1000-aligned) — synthesize the FileInfo from
+	// that. FileInfoByMask used the legacy %06d-%06d mask that
+	// truncated raw-block coords and returned an empty FileInfo for
+	// v4 segs, breaking buildMissedIndices' recovery path after a
+	// crash between .seg Compress and .idx build.
+	info, _, ok := snaptype.ParseFileName(dir, s.FileName())
+	if !ok {
+		return snaptype.FileInfo{}
+	}
+	return info
 }
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }

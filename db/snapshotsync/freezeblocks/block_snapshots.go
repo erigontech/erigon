@@ -986,22 +986,30 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 // chooseRetireTailStart returns the block from which retire should emit
 // the segment for chunk [chunkFrom, chunkEnd). Under the universal
 // two-v4-then-merge lifecycle, if a mode-C/D unwind emit left a v4 #1
-// covering [chunkFrom, cut) with cut < chunkEnd on disk, retire emits
-// only the complementary v4 #2 [cut, chunkEnd) so the pair can be
-// merged in the background. When no v4 #1 exists for the chunk, returns
-// chunkFrom (standard chunk output).
+// on disk that covers any prefix of the chunk, retire emits only the
+// complementary tail so the pair can be merged in the background.
+// When no v4 #1 covers any prefix, returns chunkFrom (standard chunk
+// output).
 //
-// Detects a v4 #1 by scanning the top-level snapshot directory for a
-// headers .seg whose FromBlock == chunkFrom and ToBlock in
-// (chunkFrom, chunkEnd). Headers is authoritative — a v4 #1 emit is
-// always a triple, and later bodies / transactions retire produce their
-// v4 #2 files against the same [cut, chunkEnd) range.
+// The straddle-rebuild path (rebuildBlockStraddles) can leave a WIDE
+// v4 #1 whose From is far below the retire chunk (e.g. a merged
+// straddle covering [3400000, 3498391) after mode-C truncation to
+// target 3498390) — any headers .seg whose range overlaps
+// [chunkFrom, chunkEnd) counts as a cover, not only those with
+// From == chunkFrom. Returns the largest cover-end (capped at
+// chunkEnd) so retire skips the pre-cut prefix. When the returned
+// value equals chunkEnd, the DumpBlocks caller's `if emitFrom >= segEnd`
+// branch skips the chunk entirely — nothing to emit.
+//
+// Headers is authoritative — a v4 #1 emit is always a triple, and
+// later bodies / transactions retire produce their v4 #2 files against
+// the same tail range.
 func chooseRetireTailStart(snapDir string, chunkFrom, chunkEnd uint64) uint64 {
 	entries, err := os.ReadDir(snapDir)
 	if err != nil {
 		return chunkFrom
 	}
-	var maxCut uint64
+	maxCut := chunkFrom
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), "-headers.seg") {
 			continue
@@ -1010,18 +1018,17 @@ func chooseRetireTailStart(snapDir string, chunkFrom, chunkEnd uint64) uint64 {
 		if !ok || info.Type == nil || info.Type.Enum() != snaptype2.Enums.Headers {
 			continue
 		}
-		if info.From != chunkFrom {
+		// Any overlap of the chunk with a covering .seg counts.
+		// Ignore files that end at or before the chunk, and files
+		// that start at or after the chunk end — neither can cover
+		// a prefix of [chunkFrom, chunkEnd).
+		if info.To <= chunkFrom || info.From >= chunkEnd {
 			continue
 		}
-		if info.To <= chunkFrom || info.To > chunkEnd {
-			continue
+		cut := min(info.To, chunkEnd)
+		if cut > maxCut {
+			maxCut = cut
 		}
-		if info.To > maxCut {
-			maxCut = info.To
-		}
-	}
-	if maxCut == 0 {
-		return chunkFrom
 	}
 	return maxCut
 }

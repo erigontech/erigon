@@ -227,6 +227,49 @@ func TestChooseRetireTailStart_V4OnePresentReturnsCut(t *testing.T) {
 	require.Equal(t, uint64(3_491_691), got, "v4 #1 present at [3491000, 3491691) — retire emits tail from cut")
 }
 
+// TestChooseRetireTailStart_WideV4OnePartialOverlapReturnsCut pins the
+// cycle-15 signature: rebuildBlockStraddles produces a WIDE v4 #1
+// whose From is far below the retire chunk (e.g. a merged straddle
+// covering [3400000, 3498391) after mode-C truncation) and whose To
+// falls INSIDE a later retire chunk. The old detector required
+// info.From == chunkFrom and missed this case — retire tried to emit
+// from chunkFrom, hit a DB with the pre-cut blocks pruned, and
+// errored with "header missed in db".
+func TestChooseRetireTailStart_WideV4OnePartialOverlapReturnsCut(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Wide v4 #1 spanning multiple chunks — covers [3400000, 3498391).
+	// From is far below the retire chunk [3498000, 3499000); To lands
+	// inside the chunk at 3498391. Retire must emit the tail
+	// [3498391, 3499000).
+	name := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_400_000, 3_498_391, "headers") + ".seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644))
+
+	got := chooseRetireTailStart(dir, 3_498_000, 3_499_000)
+	require.Equal(t, uint64(3_498_391), got,
+		"wide v4 #1 with partial overlap must move emitFrom to v4 #1's To — pre-cut range was retired into v4 #1")
+}
+
+// TestChooseRetireTailStart_WideV4OneFullCoverageReturnsChunkEnd pins the
+// full-coverage variant of the wide-v4 case: v4 #1's To reaches past
+// chunkEnd, so retire has nothing to emit for this chunk. The
+// per-chunk retire loop's `if emitFrom >= segEnd { skip }` branch
+// relies on this returning chunkEnd (or higher).
+func TestChooseRetireTailStart_WideV4OneFullCoverageReturnsChunkEnd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Wide v4 #1 fully covers this chunk (and many others).
+	name := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_400_000, 3_498_391, "headers") + ".seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644))
+
+	// Retire chunk in the middle of the wide v4 #1's range.
+	got := chooseRetireTailStart(dir, 3_450_000, 3_451_000)
+	require.GreaterOrEqual(t, got, uint64(3_451_000),
+		"chunk fully covered by wide v4 #1 — retire must skip (emitFrom >= chunkEnd)")
+}
+
 // TestChooseRetireTailStart_V4OneFullCoverageReturnsChunkEnd pins the
 // degenerate case: v4 #1 already covers the whole chunk (its To ==
 // chunkEnd). Retire has nothing to emit; DumpBlocks skips this chunk
