@@ -20,6 +20,7 @@ import (
 	"errors"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -222,4 +223,37 @@ func TestSubscribeReceiptsRemoteUpdateFailureReturnsError(t *testing.T) {
 	_, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
 	require.Error(t, err)
 	require.False(t, f.receiptsSubs.removeReceiptsFilter(id))
+}
+
+// distributeLog hands the same log to every subscriber, so only the race detector
+// catches a mutation after Send: the values written back are identical.
+func TestDistributeLogsLeavesDeliveredLogsUntouched(t *testing.T) {
+	f := newTestFilters(t)
+	var delivered atomic.Int64
+	var wg sync.WaitGroup
+	ids := make([]LogsSubID, 0, 8)
+	for range 8 {
+		logs, id, err := f.SubscribeLogs(64, filters.FilterCriteria{}, ProtocolWS)
+		require.NoError(t, err)
+		t.Cleanup(func() { f.UnsubscribeLogs(id) })
+		ids = append(ids, id)
+		wg.Go(func() {
+			for lg := range logs {
+				for _, topic := range lg.Topics {
+					_ = topic
+				}
+				_ = lg.Address
+				delivered.Add(1)
+			}
+		})
+	}
+
+	for range 2000 {
+		f.OnNewLogs(createLog())
+	}
+	for _, id := range ids {
+		f.UnsubscribeLogs(id)
+	}
+	wg.Wait()
+	require.Positive(t, delivered.Load())
 }
