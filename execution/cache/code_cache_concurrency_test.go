@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/elastic/go-freelru"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -196,30 +197,41 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
 }
 
-// The size layer keeps its value inside the freelru element, so it reserves no
-// external payload and freelruElemBytes alone has to cover a generation. A value
-// type that outgrows it would under-reserve silently.
+// A growLRU generation reserves no external payload for a value freelru stores
+// inline, so freelruElemBytes and the per-shard charge alone have to cover it.
+// codeEntry fills freelruValueBytes, which leaves the table charge no slack.
 func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
 	prevBudget := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
 	cachebudget.Global = cachebudget.New(math.MaxInt64)
 
-	g := newGrowLRUEntries[codeSizeEntry](1<<20, 0, nil)
-	defer g.Close()
-	require.Zero(t, g.avgBytes, "the size layer must reserve no external payload")
+	sizeLayer := newGrowLRUEntries[codeSizeEntry](1<<20, 0, nil)
+	defer sizeLayer.Close()
+	require.Zero(t, sizeLayer.avgBytes, "the size layer must reserve no external payload")
 
+	// Zero payload so the assertion weighs the table and shard charge alone; the
+	// code bytes a real content layer also reserves would mask an undercharge.
+	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, nil)
+	defer contentLayer.Close()
+
+	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer.newShards, sizeLayer.avgBytes) })
+	t.Run("codeEntry", func(t *testing.T) { requireGenerationCovered(t, contentLayer.newShards, contentLayer.avgBytes) })
+}
+
+func requireGenerationCovered[V any](t *testing.T, newShards func(uint32) *freelru.ShardedLRU[uint64, V], payloadBytes int64) {
+	t.Helper()
 	for _, capacity := range []uint32{1 << 12, 1 << 14, 1 << 16} {
 		// TotalAlloc rather than HeapAlloc: a collection inside the window would
 		// swamp a heap-size delta.
 		var before runtime.MemStats
 		runtime.ReadMemStats(&before)
-		gen := g.newShards(capacity)
+		gen := newShards(capacity)
 		var after runtime.MemStats
 		runtime.ReadMemStats(&after)
 		runtime.KeepAlive(gen)
 
 		allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
-		charged := growLRUBytes(capacity, g.avgBytes)
+		charged := growLRUBytes(capacity, payloadBytes)
 		require.Positive(t, allocated)
 		require.GreaterOrEqual(t, charged, allocated,
 			"envelope reserves %d B for %d slots but the generation allocates %d B",

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -76,15 +77,28 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	return newGrowLRUWith(maxCap, int64(avgBytes), onEvict)
 }
 
+// growLRUShards mirrors freelru.NewSharded's shard count: GOMAXPROCS*16 rounded
+// up to a power of two, then divided down until a shard holds at least 16 slots.
+func growLRUShards(tableSlots uint64) uint64 {
+	shards := math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0)) * 16)
+	for shards > tableSlots/16 {
+		shards /= 16
+	}
+	return max(shards, 1)
+}
+
 // growLRUBytes is what a generation costs. freelru.NewSharded rounds capacity
 // plus 25% up to a power of two once for the whole cache, so the table is 2x the
-// capacity at a power-of-two generation and 5/4 only on the fitted boundary.
+// capacity at a power-of-two generation and 5/4 only on the fitted boundary. A
+// value type that fills freelruValueBytes leaves the table charge no slack, so
+// the per-shard structs are charged separately rather than absorbed.
 func growLRUBytes(capacity uint32, payloadBytes int64) int64 {
 	if capacity == 0 {
 		return 0
 	}
 	table := math.NextPowerOfTwo(uint64(capacity) * 5 / 4)
-	return int64(capacity)*payloadBytes + int64(table)*freelruElemBytes
+	return int64(capacity)*payloadBytes + int64(table)*freelruElemBytes +
+		int64(growLRUShards(table))*freelruShardBytes
 }
 
 func newGrowLRUWith[V any](maxCap uint32, payloadBytes int64, onEvict func(uint64, V)) *growLRU[V] {
