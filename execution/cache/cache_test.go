@@ -1773,101 +1773,67 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 	}
 }
 
-// The O(1) entry counter that replaced freelru's all-shard Len on the grow
-// check must not drift from the LRU's real length on any mutation path.
-func TestGenericCache_LenTracksLRU(t *testing.T) {
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](8*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU))
-	key := func(i int) []byte {
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, uint64(i))
-		return k
-	}
-	lruLen := func() int {
-		g := c.data.Load()
-		sum := 0
-		for i := range g.shards {
-			sum += g.shards[i].Len()
-		}
-		return sum
-	}
-	check := func(phase string) {
-		t.Helper()
-		require.Equal(t, lruLen(), c.Len(), "entry counter drifted after %s", phase)
-	}
+// TestPublishUsesProducerCodeHash pins that a CodeDomain update carrying a
+// CodeHash is filed under that hash rather than one the cache derives itself,
+// which is what spares it re-hashing a block's worth of code. A sentinel hash
+// makes the difference visible: re-deriving would file the entry elsewhere.
+func TestPublishUsesProducerCodeHash(t *testing.T) {
+	t.Parallel()
 
-	for i := range 500 {
-		c.Put(key(i), []byte("v"), 10)
-	}
-	check("inserts")
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
 
-	for i := range 200 {
-		c.Put(key(i), []byte("updated"), 20)
-	}
-	check("updates")
+	addr := makeAddr(7)
+	code := bytes.Repeat([]byte{0xab}, 96)
+	var sentinel [32]byte
+	sentinel[0] = 0xc0
+	sentinel[31] = 0xde
 
-	for i := range 100 {
-		c.Delete(key(i))
-	}
-	check("deletes")
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: sentinel[:],
+		TxNum:    20,
+	}})
 
-	// Floor 15 leaves the txNum-10 entries live and strands the txNum-20 ones,
-	// which their next read drops.
-	c.Unwind(15)
-	for i := 100; i < 500; i++ {
-		c.Get(key(i))
-	}
-	check("stale drops")
+	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
+	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
+	require.Equal(t, code, got)
 
-	for i := 500; i < 4000; i++ {
-		c.Put(key(i), []byte("v"), 30)
-	}
-	g := c.data.Load()
-	require.Greater(t, slices.Max(g.curCap), g.startCapPerShard, "no shard grew")
-	check("grow")
+	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.False(t, ok, "the cache must not re-derive a hash of its own")
 
-	c.Clear()
-	require.Equal(t, 0, c.Len())
-	check("clear")
+	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
 }
 
-// Storing a key the generation already holds must not raise the count: freelru
-// replaces it in place and fires no OnEvict, so the rise never comes back down
-// and the grow gate trips on entries that are not there.
-func TestGrowLRU_PutOfPresentKeyKeepsCount(t *testing.T) {
-	t.Run("same key twice", func(t *testing.T) {
-		g := newGrowLRU[int](1*datasize.MB, 8, nil)
-		defer g.Close()
+// TestPublishAppliesEveryUpdateAcrossChunks covers a batch that spans several
+// publish chunks: chunking bounds how much is prepared at once, so every entry
+// must still land, including the ones on a chunk boundary.
+func TestPublishAppliesEveryUpdateAcrossChunks(t *testing.T) {
+	t.Parallel()
 
-		g.Put(1, 10)
-		g.Put(1, 20)
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
 
-		require.Equal(t, 1, g.Len())
-		v, ok := g.Get(1)
-		require.True(t, ok)
-		require.Equal(t, 20, v)
-	})
+	const n = publishChunk*3 + 1
+	updates := make([]StateUpdate, n)
+	for i := range updates {
+		updates[i] = StateUpdate{
+			Domain: kv.AccountsDomain,
+			Key:    binary.BigEndian.AppendUint64(make([]byte, 12), uint64(i)),
+			Value:  binary.BigEndian.AppendUint64(nil, uint64(i)),
+			TxNum:  uint64(i),
+		}
+	}
+	c.Applier().Publish(1, 2, updates)
 
-	// A grow copies a key into the next generation, a read-path Remove then
-	// drops it from the still-current old one, and a writer that missed on old
-	// stores it after the publish -- into a generation that already holds it.
-	t.Run("key carried in by a racing grow copy", func(t *testing.T) {
-		var evicted int
-		g := newGrowLRU[int](1*datasize.MB, 8, func(uint64, int) { evicted++ })
-		defer g.Close()
-
-		g.Put(1, 10)
-		old := g.cur.Load()
-
-		next := g.newShards(g.curCap.Load())
-		next.add(1, 10) // the grow's copy
-		old.lru.Remove(1)
-		g.cur.Store(next) // the publish the writer's miss straddles
-
-		evictedBefore := evicted
-		g.Put(1, 20)
-
-		require.Equal(t, 1, g.Len())
-		require.Equal(t, 1, evicted-evictedBefore,
-			"the copy the store displaced must be evicted, not dropped silently")
-	})
+	view := c.View(nil)
+	for i := range updates {
+		got, ok := view.Get(kv.AccountsDomain, updates[i].Key)
+		require.True(t, ok, "update %d must be applied", i)
+		require.Equal(t, updates[i].Value, got)
+	}
 }

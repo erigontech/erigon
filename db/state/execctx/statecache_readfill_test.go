@@ -808,11 +808,18 @@ func TestGetCode_CodeStoreHitFillsCodeCache(t *testing.T) {
 
 	_, ok := stateCache.View(nil).GetCodeByHash(codeHash[:])
 	require.False(t, ok, "the code cache must start cold")
+	codeStore.Stats() // reset, so the counters below cover only the read
 
 	got, ok, err := sd.GetCode(roTx, addr, 20)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, code, got)
+
+	// The CodeDomain fallback fills the same cache entry, so without this the
+	// assertion below would also hold for a store that missed.
+	hits, misses := codeStore.Stats()
+	require.Equal(t, uint64(1), hits)
+	require.Zero(t, misses)
 
 	cached, ok := stateCache.View(nil).GetCodeByHash(codeHash[:])
 	require.True(t, ok, "a code-store hit must fill the in-memory code cache")

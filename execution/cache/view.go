@@ -283,8 +283,11 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
 
 // FillCodeByHash offers code resolved by codeHash alone, populating the
 // content-addressed layer without binding it to an address.
+// code must already be owned by the caller — CodeStore.GetByHash clones the
+// mmap-backed value it returns, and the cache stores that one clone rather than
+// copying every cold contract a second time.
 func (v ReadView) FillCodeByHash(code, codeHash []byte, readTxNum uint64) {
-	v.fillCodeWithHash(nil, bytes.Clone(code), codeHash, readTxNum)
+	v.fillCodeWithHash(nil, code, codeHash, readTxNum)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
@@ -327,11 +330,14 @@ type Applier struct {
 }
 
 // StateUpdate is one committed domain mutation published to StateCache.
+// CodeHash is read only for kv.CodeDomain, and only to spare the cache hashing
+// Value again when the producer already holds the hash; nil is always valid.
 type StateUpdate struct {
-	Domain kv.Domain
-	Key    []byte
-	Value  []byte
-	TxNum  uint64
+	Domain   kv.Domain
+	Key      []byte
+	Value    []byte
+	CodeHash []byte
+	TxNum    uint64
 }
 
 // Applier creates the writer handle.
