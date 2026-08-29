@@ -101,7 +101,6 @@ func (w *Warmuper) Start() {
 
 	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
-	log.Info("[dbg][warmup] started", "logPrefix", w.logPrefix, "workers", w.numWorkers, "maxDepth", w.maxDepth)
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
@@ -125,9 +124,7 @@ func (w *Warmuper) Start() {
 						return nil
 					}
 					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
-					if n := w.keysProcessed.Add(1); n&8191 == 0 {
-						log.Info("[dbg][warmup] keys", "logPrefix", w.logPrefix, "processed", n)
-					}
+					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
 			}
