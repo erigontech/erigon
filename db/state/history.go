@@ -136,12 +136,20 @@ func (h *History) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*F
 // retire produces the v4 #2 tail file [v4#1.endTxN, stepEnd) when a
 // v4 #1 already occupies [step*ss, v4#1.endTxN); background merge
 // composes the pair into a standard step-aligned file later.
-func (h *History) historyRetireDestPaths(step kv.Step) (vPath, efPath string, isV4Tail bool) {
+// historyRetireDestPaths returns the .v and .ef paths retire's collate
+// should write, plus the raw fromTxN that goes into the file name AND
+// the multiencseq encoding base. isV4Tail reports whether v4 #2 tail
+// naming was chosen. Callers must use the returned fromTxN as the
+// seq/builder base so the reader (which parses fromTxN back from the
+// file name via parseV4VBaseName/parseV4EFBaseName) sees the same base
+// at Reset time — mismatch produces Seek values shifted by
+// (step_start - tail_start).
+func (h *History) historyRetireDestPaths(step kv.Step) (vPath, efPath string, fromTxN uint64, isV4Tail bool) {
 	if endTxN, ok := h.dirtyFiles.V4OneEndTxNForStep(h.stepSize, step); ok {
 		stepEnd := (uint64(step) + 1) * h.stepSize
-		return h.vNewFilePathV4(endTxN, stepEnd), h.efNewFilePathV4(endTxN, stepEnd), true
+		return h.vNewFilePathV4(endTxN, stepEnd), h.efNewFilePathV4(endTxN, stepEnd), endTxN, true
 	}
-	return h.vNewFilePath(step, step+1), h.efNewFilePath(step, step+1), false
+	return h.vNewFilePath(step, step+1), h.efNewFilePath(step, step+1), uint64(step) * h.stepSize, false
 }
 
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
@@ -586,9 +594,9 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		txKey     [8]byte
 		err       error
 
-		historyPath, efHistoryPath, isV4Tail = h.historyRetireDestPaths(step)
-		startAt                              = time.Now()
-		closeComp                            = true
+		historyPath, efHistoryPath, retireFromTxN, isV4Tail = h.historyRetireDestPaths(step)
+		startAt                                             = time.Now()
+		closeComp                                           = true
 	)
 	defer func() {
 		mxCollateTookHistory.ObserveDuration(startAt)
@@ -667,7 +675,13 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		defer cd.Close()
 	}
 
-	baseTxNum := uint64(step) * h.stepSize
+	// baseTxNum is the multiencseq encoding base for THIS retire output.
+	// It MUST equal the reader's seq.Reset base — Commit A derives that
+	// from FilesItem.startTxNum which parseV4VBaseName/parseV4EFBaseName
+	// extract from the file NAME. historyRetireDestPaths gives the same
+	// number, so pass it through: step_start for a standard aligned
+	// retire, tail_start (v4 #1's endTxN) for a v4 tail retire.
+	baseTxNum := retireFromTxN
 	var (
 		keyBuf = make([]byte, 0, 256)
 		numBuf = make([]byte, 8)
@@ -777,7 +791,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	return HistoryCollation{
 		efHistoryComp: invIndexWriter,
 		efHistoryPath: efHistoryPath,
-		efBaseTxNum:   uint64(step) * h.stepSize,
+		efBaseTxNum:   baseTxNum,
 		historyPath:   historyPath,
 		historyComp:   historyWriter,
 		isV4Tail:      isV4Tail,

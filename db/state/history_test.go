@@ -2539,7 +2539,7 @@ func TestHistoryRetireDestPaths_StandardAlignedWhenNoV4One(t *testing.T) {
 	t.Parallel()
 	_, h := testDbAndHistory(t, false, log.New())
 
-	vPath, efPath, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	vPath, efPath, _, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
 	require.False(t, isV4Tail, "no v4 #1 present — must use step-aligned paths")
 	require.Contains(t, vPath, ".3-4.v", "step-aligned .v path shape")
 	require.Contains(t, efPath, ".3-4.ef", "step-aligned .ef path shape")
@@ -2560,10 +2560,47 @@ func TestHistoryRetireDestPaths_ChoosesV4TailWhenV4OneExists(t *testing.T) {
 	cut := stepStart + 3
 	h.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
 
-	vPath, efPath, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	vPath, efPath, _, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
 	require.True(t, isV4Tail, "v4 #1 present at step 3 — must switch to v4 #2 form")
 	require.Contains(t, vPath, fmt.Sprintf(".%d-%d.v", cut, stepEnd),
 		"v4 #2 .v path must span [v4 #1.endTxN, stepEnd)")
 	require.Contains(t, efPath, fmt.Sprintf(".%d-%d.ef", cut, stepEnd),
 		"v4 #2 .ef path must span [v4 #1.endTxN, stepEnd)")
+}
+
+// TestHistoryRetireDestPaths_ReturnsRawFromTxNForV4Tail pins that
+// historyRetireDestPaths surfaces the raw fromTxN chosen for the
+// destination file's naming — retire's collate needs it to encode
+// multiencseq offsets with the same base the reader (post-Commit A)
+// derives from the file name via parseV4VBaseName / parseV4EFBaseName.
+// Without it collate encodes offsets relative to step_start while
+// seq.Reset decodes relative to tail_start — Seek returns
+// step_start + offset instead of tail_start + offset and the
+// InvertedIndexRoTx out-of-bounds check trips.
+func TestHistoryRetireDestPaths_ReturnsRawFromTxNForV4Tail(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	stepStart := uint64(3) * h.stepSize
+	cut := stepStart + 3
+	h.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
+
+	_, _, fromTxN, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	require.True(t, isV4Tail, "v4 #1 present — must return isV4Tail=true")
+	require.Equal(t, cut, fromTxN,
+		"v4 tail's fromTxN must equal v4 #1's endTxN — encoding base must match the raw start baked into the file name")
+}
+
+// TestHistoryRetireDestPaths_StandardAlignedFromTxN pins that under
+// the no-v4 path fromTxN is step*stepSize — the baseline behaviour
+// where the file name's fromTxN and the encoding base both come from
+// the step boundary.
+func TestHistoryRetireDestPaths_StandardAlignedFromTxN(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	_, _, fromTxN, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	require.False(t, isV4Tail)
+	require.Equal(t, uint64(3)*h.stepSize, fromTxN,
+		"standard aligned path must return fromTxN = step*stepSize")
 }
