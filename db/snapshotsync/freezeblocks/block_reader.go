@@ -644,11 +644,10 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 // fall back to the (hash, height)-keyed db when it does not match. A zero hash
 // carries no such constraint and skips the comparison entirely.
 func (r *BlockReader) frozenHashAt(tx kv.Getter, blockHeight uint64) (common.Hash, bool, error) {
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		return emptyHash, false, nil
 	}
-	defer release()
 
 	h, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -944,7 +943,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match header %x held at this height", h.Hash()))
 		}
-		release()
 		if tx == nil {
 			return
 		}
