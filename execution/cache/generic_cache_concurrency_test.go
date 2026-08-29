@@ -684,3 +684,23 @@ func TestGenericCache_EnvelopeCoversIntermediateGeneration(t *testing.T) {
 		})
 	}
 }
+
+// A byte budget whose slot quotient exceeds a uint32 must clamp to the ceiling,
+// not wrap into a tiny cache.
+func TestSlotCeilingClampsAboveUint32(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	// Exactly 2^32 slots, so the quotient no longer fits the uint32 the clamp
+	// used to be applied after.
+	overflow := func(perSlot uint64) datasize.ByteSize { return datasize.ByteSize(perSlot << 32) }
+
+	maxCap, shards := budgetedSlots(overflow(freelruSlotBytes), 0)
+	require.Positive(t, shards)
+	require.Equal(t, fitTableSlots(maxCacheSlots/shards)*shards, maxCap)
+
+	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+freelruSlotBytes), 0, nil)
+	t.Cleanup(g.Close)
+	require.Equal(t, fitTableSlots(maxCacheSlots), g.maxCap)
+}
