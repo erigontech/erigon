@@ -33,8 +33,10 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/klauspost/compress/zstd"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -43,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -155,7 +158,7 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	t.Helper()
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	t.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -206,7 +209,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	t.Helper()
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 	t.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -620,4 +623,88 @@ func TestDumpStateToTSV_MinBalanceFilter(t *testing.T) {
 	require.Contains(t, buf.String(), "0x0000000000000000000000000000000000000001")
 	require.NotContains(t, buf.String(), "0x0000000000000000000000000000000000000002")
 	require.NotContains(t, buf.String(), "0x0000000000000000000000000000000000000003")
+}
+
+func TestResolveExecTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name                          string
+		block, limit                  uint64
+		execProgress, sendersProgress uint64
+		wantTarget                    uint64
+		wantWork                      bool
+	}{
+		{name: "no flags runs to senders", sendersProgress: 200, execProgress: 100, wantTarget: 200, wantWork: true},
+		{name: "limit below remaining caps the target", limit: 10, execProgress: 100, sendersProgress: 200, wantTarget: 110, wantWork: true},
+		{name: "limit above remaining stops at senders", limit: 500, execProgress: 100, sendersProgress: 200, wantTarget: 200, wantWork: true},
+		{name: "limit of one advances one block", limit: 1, execProgress: 100, sendersProgress: 200, wantTarget: 101, wantWork: true},
+		{name: "explicit block below the limit wins", block: 105, limit: 50, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
+		{name: "limit below an explicit block wins", block: 190, limit: 5, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
+		{name: "block past senders is clamped by limit", block: 900, limit: 5, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
+		{name: "exec at senders leaves nothing to do", limit: 10, execProgress: 200, sendersProgress: 200, wantTarget: 200},
+		{name: "exec past senders leaves nothing to do", limit: 10, execProgress: 300, sendersProgress: 200, wantTarget: 200},
+		{name: "explicit block already reached", block: 50, execProgress: 100, sendersProgress: 200, wantTarget: 50},
+		{name: "nothing synced yet", wantTarget: 0, wantWork: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			target, hasWork := resolveExecTarget(tc.block, tc.limit, tc.execProgress, tc.sendersProgress)
+			require.Equal(t, tc.wantTarget, target)
+			require.Equal(t, tc.wantWork, hasWork)
+		})
+	}
+}
+
+// TestResolveExecTarget_ChainTipLoopReachesTarget pins the loop bound against the
+// resolved target: chain-tip mode steps one block at a time, so it must start
+// above the current progress and include the target itself.
+func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
+	t.Parallel()
+
+	const execProgress = uint64(100)
+	target, hasWork := resolveExecTarget(0, 1, execProgress, 200)
+	require.True(t, hasWork)
+
+	var executed []uint64
+	for bn := execProgress + 1; bn <= target; bn++ {
+		executed = append(executed, bn)
+	}
+	require.Equal(t, []uint64{101}, executed, "--limit=1 must execute exactly the next block")
+}
+
+// TestExecCommandsExposeParallelCommitment pins the flag on every integration
+// command that computes commitment. Without it the flag is unknown on stage_exec,
+// so integration can only ever run the sequential trie.
+func TestExecCommandsExposeParallelCommitment(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cmd  *cobra.Command
+	}{
+		{name: "stage_exec", cmd: cmdStageExec},
+		{name: "state_stages", cmd: stateStages},
+		{name: "loop_exec", cmd: loopExecCmd},
+		{name: "commitment_rebuild", cmd: cmdCommitmentRebuild},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotNil(t, tc.cmd.Flags().Lookup(utils.ExperimentalParallelCommitmentFlag.Name),
+				"command cannot select the parallel trie")
+		})
+	}
+}
+
+// TestWithExperimentalCommitmentFollowsErigonDefault pins integration's default to
+// erigon's own flag default, so flipping it in one place cannot leave the two
+// binaries computing commitment with different tries.
+func TestWithExperimentalCommitmentFollowsErigonDefault(t *testing.T) {
+	defer func(v bool) { utils.ExperimentalParallelCommitmentFlag.Value = v }(utils.ExperimentalParallelCommitmentFlag.Value)
+	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
+
+	utils.ExperimentalParallelCommitmentFlag.Value = true
+	statecfg.ExperimentalParallelCommitment = false
+
+	withExperimentalCommitment(&cobra.Command{Use: "probe"})
+
+	require.True(t, statecfg.ExperimentalParallelCommitment,
+		"integration ignored erigon's default and would run the sequential trie")
 }

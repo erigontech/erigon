@@ -388,6 +388,15 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 // skip the unwind path, write the new canonicals, and let AppendCanonicalTxNums
 // re-extend TxNums past commitBlock.
 func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
+	testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t, false)
+}
+
+func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testing.T) {
+	testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t, true)
+}
+
+func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
+	t.Helper()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -432,6 +441,9 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		if invalidExecutionProgress {
+			require.NoError(t, tx.Put(kv.SyncStageProgress, []byte(stages.Execution), []byte{1}))
+		}
 		return nil
 	}))
 	require.Equal(t, uint64(10), commitBlock, "commitBlock should be at block 10 after the initial chain")
@@ -2610,10 +2622,8 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 	}))
 }
 
-// transferGen returns a deterministic per-block tx generator: identical
-// inputs produce identical blocks, which lets tests build forks that share
-// a prefix with the canonical chain (requires a pre-Cancun config — Cancun+
-// blocks get a random ParentBeaconBlockRoot in blockgen).
+// transferGen returns a deterministic per-block tx generator so tests can
+// build forks that share a prefix with the canonical chain.
 func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {
 	return func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
@@ -2737,10 +2747,6 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 // could not see that. It also asserts the compute-ahead path actually engaged (a
 // real count) so a silent degrade-to-incremental can't make the differential pass
 // trivially.
-//
-// (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
-// randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
-// BALs — two chains can't share a prefix and a mid-chain parent has no state.)
 func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
 	off := runBALComputeAheadChangeset(t, false, false)
 	on := runBALComputeAheadChangeset(t, true, false)
@@ -2788,11 +2794,13 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	dbg.BALShadowCompute = shadow
 	stagedsync.ResetComputedAheadForTest()
 
-	const chainLen = 12
-	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
-	// blocks 1..7 are pre-window (compute-ahead candidates) and 8..12 own changesets.
-	const maxReorgDepth = 4
-	const windowStart = chainLen - maxReorgDepth
+	// Blocks 1..7 are compute-ahead candidates; blocks 8..12 own changesets.
+	const (
+		chainLen      = 12
+		maxReorgDepth = 4
+		windowStart   = chainLen - maxReorgDepth
+		reorgBackTo   = chainLen - 2
+	)
 
 	ctx := t.Context()
 	// Deterministic key: compute-ahead-off and compute-ahead-on must execute the identical chain
@@ -2816,16 +2824,30 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 
 	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
 	// (transferGen's 1-wei price is only valid on the pre-London default).
-	canonical, err := m.GenerateChain(chainLen,
-		func(i int, b *blockgen.BlockGen) {
+	forkRecipient := common.Address{0x42}
+	generate := func(divergent bool) *blockgen.ChainPack {
+		chainPack, err := m.GenerateChain(chainLen, func(i int, b *blockgen.BlockGen) {
+			to := senderAddr
+			amount := uint64(1_000)
+			if divergent && i >= reorgBackTo {
+				to = forkRecipient
+				amount = 2_000
+			}
 			tx, txErr := types.SignTx(
-				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				types.NewTransaction(uint64(i), to, uint256.NewInt(amount), 50000, uint256.NewInt(10_000_000_000), nil),
 				*types.LatestSignerForChainID(nil), privKey,
 			)
 			require.NoError(t, txErr)
 			b.AddTx(tx)
 		})
-	require.NoError(t, err)
+		require.NoError(t, err)
+		return chainPack
+	}
+	canonical := generate(false)
+	fork := generate(true)
+	require.Equal(t, canonical.Blocks[reorgBackTo-1].Hash(), fork.Blocks[reorgBackTo-1].Hash())
+	require.NotEqual(t, canonical.Blocks[reorgBackTo].Hash(), fork.Blocks[reorgBackTo].Hash())
+	require.NotEqual(t, canonical.TopBlock.Root(), fork.TopBlock.Root())
 
 	insRes, err := m.InsertBlocks(ctx, canonical.Blocks)
 	require.NoError(t, err)
@@ -2872,32 +2894,22 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 		return nil
 	}))
 
-	// End-to-end: FCU back into the window unwinds using those changesets, then
-	// FCU forward re-executes. If the compute-ahead-built state were wrong, the
-	// unwind restores a bad root and the forward re-exec fails.
-	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
-	back, err := m.UpdateForkChoice(ctx, canonical.Blocks[reorgBackTo-1].Header())
+	// The alternate suffix changes state, so success requires restoring the
+	// branch-point state before executing the fork.
+	insRes, err = m.InsertBlocks(ctx, fork.Blocks[reorgBackTo:])
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
-	m.ExecModule.WaitIdle(ctx)
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		execProg, err := stages.GetStageProgress(tx, stages.Execution)
-		require.NoError(t, err)
-		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the window changesets)")
-		return nil
-	}))
-
-	fwd, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	reorg, err := m.UpdateForkChoice(ctx, fork.TopBlock.Header())
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
-		"forward re-exec after unwind must reach the correct root (compute-ahead=%v); validationError=%q",
-		computeAhead, fwd.ValidationError)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, reorg.Status,
+		"divergent reorg must reach the correct root (compute-ahead=%v); validationError=%q",
+		computeAhead, reorg.ValidationError)
 	m.ExecModule.WaitIdle(ctx)
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
 		require.Equal(t, uint64(chainLen), execProg)
-		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
 	return res

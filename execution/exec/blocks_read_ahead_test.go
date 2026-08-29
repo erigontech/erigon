@@ -181,7 +181,7 @@ func TestBlockReadAheaderIgnoresNilGetter(t *testing.T) {
 
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 	bal := types.BlockAccessList{{
-		StorageChanges: make([]*types.SlotChanges, 65),
+		StorageChanges: make([]types.SlotChanges, 65),
 		StorageReads:   make([]accounts.StorageKey, 3),
 	}}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
@@ -283,7 +283,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 
 func TestMakeBALWarmupTasksKeepsSmallAccountsTogether(t *testing.T) {
 	bal := types.BlockAccessList{
-		{StorageChanges: make([]*types.SlotChanges, 1)},
+		{StorageChanges: make([]types.SlotChanges, 1)},
 		{StorageReads: make([]accounts.StorageKey, 1)},
 	}
 	tasks, workers := makeBALWarmupPlan(bal, 4)

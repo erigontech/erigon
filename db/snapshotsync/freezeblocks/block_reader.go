@@ -316,6 +316,11 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 	if err != nil {
 		return nil, err
 	}
+	if body == nil {
+		// A nil body still encodes as an empty list, which a caller cannot tell
+		// apart from a block that genuinely holds no transactions.
+		return nil, nil
+	}
 	bodyRlp, err = rlp.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
@@ -623,6 +628,42 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 	return h, true, nil
 }
 
+// frozenHashAt returns the hash of the header the block files hold at
+// blockHeight. Segments are indexed by height only, so a positional read there
+// can only answer for this one block: callers that decode a body - which
+// carries no hash of its own - compare against this before trusting it, and
+// fall back to the (hash, height)-keyed db when it does not match. A zero hash
+// carries no such constraint and skips the comparison entirely.
+func (r *BlockReader) frozenHashAt(tx kv.Getter, blockHeight uint64) (common.Hash, bool, error) {
+	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	if !ok {
+		return emptyHash, false, nil
+	}
+	defer release()
+
+	h, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
+	if err != nil {
+		return emptyHash, false, err
+	}
+	if h == nil {
+		return emptyHash, false, nil
+	}
+	return h.Hash(), true, nil
+}
+
+// frozenHashMatches reports whether a positional read at blockHeight answers for
+// hash. See frozenHashAt.
+func (r *BlockReader) frozenHashMatches(tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
+	if hash == emptyHash {
+		return true, nil
+	}
+	frozenHash, ok, err := r.frozenHashAt(tx, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	return ok && frozenHash == hash, nil
+}
+
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
 	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
 	//maxBlockNumInFiles := r.sn.BlocksAvailable()
@@ -649,6 +690,11 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
+	}
+	if h != nil && hash != emptyHash && h.Hash() != hash {
+		// The db read above already covered the requested hash, so there is
+		// nothing left to fall back to. See frozenHashAt.
+		return nil, nil
 	}
 	return h, nil
 }
@@ -688,6 +734,20 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, nil
 	}
 	defer release()
+
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		if dbgLogs {
+			log.Info(dbgPrefix + "requested hash is not the block held at this height")
+		}
+		if tx == nil {
+			return nil, nil
+		}
+		return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+	}
 
 	var baseTxnID uint64
 	var txCount uint32
@@ -739,6 +799,11 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 	if err != nil {
 		return nil, err
 	}
+	if body == nil {
+		// A nil body still encodes as an empty list, which a caller cannot tell
+		// apart from a block that genuinely holds no transactions.
+		return nil, nil
+	}
 	bodyRlp, err = rlp.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
@@ -762,6 +827,18 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 	}
 	defer release()
 
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !matches {
+		if tx == nil {
+			return
+		}
+		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
+		return body, txCount, nil
+	}
+
 	body, _, txCount, _, err = r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, 0, err
@@ -772,6 +849,16 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		return rawdb.HasSenders(tx, hash, blockHeight)
+	}
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	if !matches {
+		if tx == nil {
+			return false, nil
+		}
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
 	return true, nil
@@ -862,8 +949,18 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			log.Info(dbgPrefix + "got nil header from file")
 		}
 		return
-	} else {
-		hash = h.Hash()
+	}
+	if hash != emptyHash && h.Hash() != hash {
+		// See frozenHashAt: the files answer for h.Hash() only, so the
+		// requested block can still be in the db until this height is pruned.
+		if dbgLogs {
+			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match header %x held at this height", h.Hash()))
+		}
+		release()
+		if tx == nil {
+			return
+		}
+		return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 	}
 	release()
 
@@ -912,7 +1009,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, nil)
+	block = types.NewBlockFromStorage(h.Hash(), h, txs, b.Uncles, b.Withdrawals, nil)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))

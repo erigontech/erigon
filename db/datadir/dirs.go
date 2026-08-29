@@ -62,6 +62,37 @@ type Dirs struct {
 	Log string
 }
 
+// All returns every real directory a Dirs can point into (excluding
+// RelativeDataDir, which is an alternate form of DataDir, not its own dir).
+// A check that must see every mount point should walk this instead of
+// naming fields, so it doesn't go stale as fields are added here. Unlike
+// New()'s dir.MustExist list, not every returned path is guaranteed to
+// exist on disk; callers must tolerate a path that hasn't been created yet.
+func (d Dirs) All() []string {
+	return []string{
+		d.DataDir,
+		d.Chaindata,
+		d.Tmp,
+		d.Snap,
+		d.SnapIdx,
+		d.SnapHistory,
+		d.SnapDomain,
+		d.SnapAccessors,
+		d.SnapCaplin,
+		d.Downloader,
+		d.TxPool,
+		d.Nodes,
+		d.CaplinBlobs,
+		d.CaplinColumnData,
+		d.CaplinIndexing,
+		d.CaplinLatest,
+		d.CaplinGenesis,
+		d.CaplinHistory,
+		d.Migrations,
+		d.Log,
+	}
+}
+
 func New(datadir string) Dirs {
 	dirs := Open(datadir)
 
@@ -271,16 +302,23 @@ func CopyFile(from, to string) error {
 	return nil
 }
 
-func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
-	directories := []string{
+// VersionedDirs lists the trees that can hold version-prefixed file names. Caplin
+// blobs and column data are absent because a sidecar is named <blockRoot>_<index>.
+// The Snap* subdirs stay even though they live under d.Snap: WalkDir roots on
+// Lstat, so a datadir whose snapshots/ is a symlink is reached only by naming them.
+func (d *Dirs) VersionedDirs() []string {
+	return []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
+		d.Nodes, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
+}
+
+func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	renamed := 0
 	torrentsRemoved := 0
 	removed := 0
-	for _, dirPath := range directories {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { //skip magically disappeared files
@@ -335,7 +373,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 		log.Warn("Your snapshots are compatible but old. We recommend you (for better experience) " +
 			"upgrade them by `./build/bin/erigon --datadir /your/datadir snapshots reset ` command, after this command: next Erigon start - will download latest files (but re-use unchanged files) - likely will take many hours")
 	}
-	if d.Downloader != "" && (renamed > 0 || removed > 0) {
+	if d.Downloader != "" && (renamed > 0 || removed > 0 || torrentsRemoved > 0) {
 		if err := dir.RemoveAll(d.Downloader); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -346,14 +384,9 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 }
 
 func (d *Dirs) RenameNewVersions() error {
-	directories := []string{
-		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
-		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
-	}
 	var renamed, removed int
 
-	for _, dirPath := range directories {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { //skip magically disappeared files
@@ -394,6 +427,9 @@ func (d *Dirs) RenameNewVersions() error {
 		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
 		if err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
+				if os.IsNotExist(err) { //skip magically disappeared files
+					return nil
+				}
 				return err
 			}
 

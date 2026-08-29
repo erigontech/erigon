@@ -19,6 +19,7 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -139,11 +140,11 @@ type forkGraphDisk struct {
 }
 
 // Initialize fork graph with a new state.
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) (ForkGraph, error) {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
@@ -154,7 +155,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 			} else {
 				stateHash, err = anchorState.HashSSZ()
 				if err != nil {
-					panic(err)
+					return nil, err
 				}
 			}
 		}
@@ -164,7 +165,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		anchorState.SetPreviousStateRoot(stateHash)
 	} else {
 		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
-			panic(err)
+			return nil, err
 		}
 		anchorState.SetPreviousStateRoot(anchorHeader.Root)
 	}
@@ -188,9 +189,11 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
-	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
+	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
+		return nil, err
+	}
 	// preallocate buffer
-	return f
+	return f, nil
 }
 
 func (f *forkGraphDisk) AnchorSlot() uint64 {
@@ -601,10 +604,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
-		f.fs.Remove(getBeaconStateFilename(root))
+		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
+		}
 		// [New in Gloas:EIP7732] Also remove envelope files
 		f.envelopeExists.Delete(root)
-		f.fs.Remove(getEnvelopeFilename(root))
+		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
+		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

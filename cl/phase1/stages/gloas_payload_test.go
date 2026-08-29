@@ -820,7 +820,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 
 	st := state2.New(&cfg)
 	st.SetVersion(clparams.GloasVersion)
-	st.SetSlot(64)
+	require.NoError(t, st.SetSlot(64))
 	st.SetGenesisValidatorsRoot(common.HexToHash("0x01"))
 	st.SetFork(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion)),
@@ -833,7 +833,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 	require.NoError(t, err)
 	pubkey := common.Bytes48(bls.CompressPublicKey(privKey.PublicKey()))
 
-	st.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance)
+	require.NoError(t, st.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	if builderIndex != clparams.BuilderIndexSelfBuild {
 		for i := uint64(0); i <= builderIndex; i++ {

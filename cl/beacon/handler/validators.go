@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var stringsBuilderPool = sync.Pool{
+var stringsBuilderPool = &sync.Pool{
 	New: func() any {
 		return new(strings.Builder)
 	},
@@ -605,8 +605,10 @@ func (d directString) MarshalJSON() ([]byte, error) {
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
 	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
-	defer stringsBuilderPool.Put(b)
-	b.Reset()
+	defer func() {
+		b.Reset()
+		stringsBuilderPool.Put(b)
+	}()
 
 	var isOptimistic string = "false"
 	if optimistic {

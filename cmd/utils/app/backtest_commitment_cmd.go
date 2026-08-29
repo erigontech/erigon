@@ -125,12 +125,7 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	if err != nil {
 		return err
 	}
-	defer func() {
-		err := l.Unlock()
-		if err != nil {
-			logger.Error("failed to unlock datadir", "err", err)
-		}
-	}()
+	defer unlockDatadir(logger, l)
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)

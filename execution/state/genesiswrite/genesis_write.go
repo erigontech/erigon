@@ -41,6 +41,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -52,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // GenesisMismatchError is raised when trying to overwrite an existing
@@ -158,6 +163,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			genesis = chainspec.MainnetGenesisBlock()
 			custom = false
 		}
+		// Copy the struct, not just the config it points at: a named chain hands over the
+		// registered Genesis, and assigning the copied config back writes into it.
+		g := *genesis
+		g.Config = g.Config.Copy()
+		genesis = &g
 		applyOverrides(genesis.Config)
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
@@ -189,17 +199,19 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, nil, err
 		}
 	}
-	// Get the existing chain configuration.
-	newCfg := configOrDefault(genesis, chainName, storedHash)
+	// Get the existing chain configuration. configOrDefault can return a package-level
+	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
+	// overrides go onto a copy or they rewrite the schedule for every later reader.
+	newCfg := configOrDefault(genesis, chainName, storedHash).Copy()
 	applyOverrides(newCfg)
-	if err := newCfg.CheckConfigForkOrder(); err != nil {
-		return newCfg, nil, err
-	}
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
+		if err := newCfg.CheckConfigForkOrder(); err != nil {
+			return newCfg, nil, err
+		}
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
@@ -223,16 +235,36 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		if keepStoredChainConfig {
-			newCfg = storedCfg
+			// storedCfg is the receiver of CheckCompatible below, so overriding it in
+			// place would compare it against itself and find no conflict.
+			newCfg = storedCfg.Copy()
 			applyOverrides(newCfg)
 		}
 	}
+	// The ordering check runs here, not on configOrDefault's result: under
+	// keepStoredChainConfig that one is discarded, so validating it rejects a schedule
+	// the node never adopts and passes the one it does.
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return newCfg, nil, err
+	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
-	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
-	if height != nil {
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
-		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
+	headHash := rawdb.ReadHeadHeaderHash(tx)
+	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil && *height != 0 {
+		// The head's time, not just its number: the post-merge forks are scheduled by
+		// timestamp and cannot be compared against a block number. Only a fork that moved
+		// can conflict on that axis, so an undatable head is fatal only to those -- a
+		// datadir whose head header is gone still starts on an unchanged schedule.
+		var headTime uint64
+		if !storedCfg.SameTimestampForks(newCfg) {
+			var err error
+			if headTime, err = headTimestamp(tx, headHash, *height, chainName, dirs, logger); err != nil {
+				return newCfg, storedBlock, err
+			}
+		}
+		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
+		if compatibilityErr != nil &&
+			(compatibilityErr.RewindTo != 0 || compatibilityErr.HasTimestampConflict()) {
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
@@ -240,6 +272,37 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
+}
+
+// headTimestamp reads the head header's time, falling back to the block files: kv.Headers
+// holds no header for the snapshot-covered range while the kv.HeaderNumber marker and
+// HeadHeaderKey do, so a snapshot-synced node has the number without the header. Neither
+// source having it is an error rather than a time of 0, at which every fork scheduled
+// after genesis reads as inactive and a rescheduled one would be written unchecked.
+func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, dirs datadir.Dirs, logger log.Logger) (uint64, error) {
+	if head := rawdb.ReadHeader(tx, hash, number); head != nil {
+		return head.Time, nil
+	}
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: chainName}, dirs.Snap, logger)
+	defer snaps.Close()
+	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers}, false); err != nil {
+		return 0, fmt.Errorf("opening the header files to date head %x at %d: %w", hash, number, err)
+	}
+	// A nil tx keeps the lookup on these segments: a temporal tx carries its own pinned
+	// block-files view, which has nothing open this early in startup.
+	head, err := freezeblocks.NewBlockReader(snaps).Header(context.Background(), nil, hash, number)
+	if err != nil {
+		return 0, err
+	}
+	if head == nil {
+		return 0, fmt.Errorf("head header %x at %d is in neither the database nor the block files, so the active timestamp forks are unknown; an unindexed header segment reads the same way, and `erigon snapshots index` rebuilds it", hash, number)
+	}
+	// The block files are indexed by height, not by hash, so a stale head marker would
+	// otherwise be dated with whatever block sits at that number.
+	if head.Hash() != hash {
+		return 0, fmt.Errorf("the block files hold %x at %d, not the head marker's %x", head.Hash(), number, hash)
+	}
+	return head.Time, nil
 }
 
 func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
@@ -423,9 +486,12 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	for _, addr := range addrs {
 		account := g.Alloc[addr]
 
-		balance, overflow := uint256.FromBig(account.Balance)
-		if overflow {
-			panic("overflow at genesis allocs")
+		balance := new(uint256.Int)
+		if account.Balance != nil {
+			var overflow bool
+			if balance, overflow = uint256.FromBig(account.Balance); overflow {
+				panic("overflow at genesis allocs")
+			}
 		}
 		address := accounts.InternAddress(addr)
 		err := statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)

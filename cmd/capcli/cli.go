@@ -480,14 +480,16 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	var to uint64
-	db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
 			to, err = beacon_indicies.ReadHighestFinalized(tx)
 			return
 		}
 		to = c.To
 		return
-	})
+	}); err != nil {
+		return err
+	}
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
@@ -632,7 +634,9 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
 	start := time.Now()
 	for i := c.Slot; i < to; i++ {
-		snReader.ReadBlockBySlot(ctx, tx, i)
+		if _, err := snReader.ReadBlockBySlot(ctx, tx, i); err != nil {
+			return fmt.Errorf("failed to read block at slot %d: %w", i, err)
+		}
 	}
 	log.Info("Successfully checked", "slot", c.Slot, "time", time.Since(start))
 	return nil
@@ -703,7 +707,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	sn := synced_data.NewSyncedDataManager(beaconConfig, true)
-	sn.OnHeadState(bs)
+	if err := sn.OnHeadState(bs); err != nil {
+		return err
+	}
 
 	r.withPPROF.withProfile()
 	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn, sn)
@@ -1124,14 +1130,16 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	var to uint64
-	db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
 			to, err = beacon_indicies.ReadHighestFinalized(tx)
 			return
 		}
 		to = c.To
 		return
-	})
+	}); err != nil {
+		return err
+	}
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
@@ -1360,14 +1368,16 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	var to uint64
-	db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
 			to, err = state_accessors.GetStateProcessingProgress(tx)
 			return
 		}
 		to = c.To
 		return
-	})
+	}); err != nil {
+		return err
+	}
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain

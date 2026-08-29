@@ -87,7 +87,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {
-		case txpoolproto.AllReply_PENDING:
+		// Base fee sub-pool transactions are nonce-ready and otherwise valid, waiting only for the
+		// base fee to drop, which is what Geth keeps in its pending list, so they are pending here too.
+		case txpoolproto.AllReply_PENDING, txpoolproto.AllReply_BASE_FEE:
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
@@ -152,7 +154,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 
 		switch reply.Txs[i].TxnType {
-		case txpoolproto.AllReply_PENDING:
+		case txpoolproto.AllReply_PENDING, txpoolproto.AllReply_BASE_FEE:
 			pending = append(pending, txn)
 		case txpoolproto.AllReply_QUEUED:
 			queued = append(queued, txn)
@@ -185,7 +187,7 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, 
 		return nil, err
 	}
 	return map[string]hexutil.Uint{
-		"pending": hexutil.Uint(reply.PendingCount),
+		"pending": hexutil.Uint(uint64(reply.PendingCount) + uint64(reply.BaseFeeCount)),
 		"queued":  hexutil.Uint(reply.QueuedCount),
 	}, nil
 }

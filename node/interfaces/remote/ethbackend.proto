@@ -175,6 +175,7 @@ message SubscribeLogsReply {
   types.H256 transaction_hash = 7;
   uint64 transaction_index = 8;
   bool removed = 9;
+  uint64 block_timestamp = 10;
 }
 
 message ReceiptsFilterRequest {

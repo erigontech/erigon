@@ -65,7 +65,7 @@ func TestGetBlockOperationsBLSToExecutionChanges(t *testing.T) {
 
 		for i := range int(cfg.MaxBlsToExecutionChanges) + 4 {
 			v, from := blsChangeFor(&cfg, i+1, byte(cfg.BLSWithdrawalPrefixByte))
-			s.AddValidator(v, cfg.MaxEffectiveBalance)
+			require.NoError(t, s.AddValidator(v, cfg.MaxEffectiveBalance))
 			opPool.BLSToExecutionChangesPool.Insert(sig96(i+1), &cltypes.SignedBLSToExecutionChange{
 				Message:   &cltypes.BLSToExecutionChange{ValidatorIndex: uint64(i), From: from},
 				Signature: sig96(i + 1),
@@ -85,7 +85,7 @@ func TestGetBlockOperationsBLSToExecutionChanges(t *testing.T) {
 		opPool := pool.NewOperationsPool(&cfg)
 
 		v, from := blsChangeFor(&cfg, 1, byte(cfg.ETH1AddressWithdrawalPrefixByte))
-		s.AddValidator(v, cfg.MaxEffectiveBalance)
+		require.NoError(t, s.AddValidator(v, cfg.MaxEffectiveBalance))
 		opPool.BLSToExecutionChangesPool.Insert(sig96(1), &cltypes.SignedBLSToExecutionChange{
 			Message:   &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: from},
 			Signature: sig96(1),
@@ -105,7 +105,7 @@ func TestGetBlockOperationsBLSToExecutionChanges(t *testing.T) {
 		opPool := pool.NewOperationsPool(&cfg)
 
 		v, from := blsChangeFor(&cfg, 1, byte(cfg.BLSWithdrawalPrefixByte))
-		s.AddValidator(v, cfg.MaxEffectiveBalance)
+		require.NoError(t, s.AddValidator(v, cfg.MaxEffectiveBalance))
 		for i := range 3 {
 			opPool.BLSToExecutionChangesPool.Insert(sig96(i+1), &cltypes.SignedBLSToExecutionChange{
 				Message:   &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: from},

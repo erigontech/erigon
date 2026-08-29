@@ -1713,7 +1713,7 @@ func validAdmissionCancellationFixture(t *testing.T) (*clparams.BeaconChainConfi
 
 	blockState := state2.New(&cfg)
 	blockState.SetVersion(clparams.GloasVersion)
-	blockState.SetSlot(64)
+	require.NoError(t, blockState.SetSlot(64))
 	blockState.SetGenesisValidatorsRoot(common.HexToHash("0x01"))
 	blockState.SetFork(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion)),
@@ -1724,7 +1724,7 @@ func validAdmissionCancellationFixture(t *testing.T) (*clparams.BeaconChainConfi
 	privateKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
 	require.NoError(t, err)
 	publicKey := common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
-	blockState.AddValidator(solid.NewValidatorFromParameters(publicKey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance)
+	require.NoError(t, blockState.AddValidator(solid.NewValidatorFromParameters(publicKey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	builders.Append(&cltypes.Builder{Pubkey: publicKey})
 	blockState.SetBuilders(builders)

@@ -195,6 +195,8 @@ Before running `git push`, always run `make lint` first and fix all issues. Run 
 
 The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
 
+A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
+
 Common lint categories and fixes:
 - **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
 - **prealloc:** Pre-allocate slices when the length is known from a range.

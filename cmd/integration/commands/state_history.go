@@ -89,7 +89,9 @@ func openHistory(ctx context.Context, dirs datadir.Dirs, domainName string, scan
 	if err != nil {
 		return nil, nil, fmt.Errorf("init history: %w", err)
 	}
-	history.Scan(ctx, scanToStep*settings.StepSize)
+	if err := history.Scan(ctx, scanToStep*settings.StepSize); err != nil {
+		return nil, nil, fmt.Errorf("scan history: %w", err)
+	}
 	return history, settings, nil
 }
 
@@ -103,7 +105,11 @@ var printCmd = &cobra.Command{
 			logger.Error("Opening Datadir", "error", err)
 			return
 		}
-		defer l.Unlock()
+		defer func() {
+			if err := l.Unlock(); err != nil {
+				logger.Error("failed to unlock datadir", "err", err)
+			}
+		}()
 
 		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {
@@ -147,7 +153,11 @@ var distributionCmd = &cobra.Command{
 			logger.Error("Opening Datadir", "error", err)
 			return
 		}
-		defer l.Unlock()
+		defer func() {
+			if err := l.Unlock(); err != nil {
+				logger.Error("failed to unlock datadir", "err", err)
+			}
+		}()
 
 		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {

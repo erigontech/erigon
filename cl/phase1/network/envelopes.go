@@ -27,13 +27,20 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var requestEnvelopeBatchExpiration = 30 * time.Second
+var (
+	requestEnvelopeBatchExpiration = 30 * time.Second
+	requestEnvelopeAttemptTimeout  = 21 * time.Second
+	requestEnvelopeRetryInterval   = 300 * time.Millisecond
+)
 
 // RequestEnvelopesFrantically requests execution payload envelopes from the network for the given beacon block roots.
 // It first tries by-root, then falls back to by-range using the slot range of fullBlocks.
 // EMPTY blocks will not have envelopes on the network, so timeout is non-fatal.
 // Returns a map of beacon block root -> envelope for all received envelopes.
 func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte, fullBlocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+	requestCtx, cancelRequests := context.WithTimeout(ctx, requestEnvelopeBatchExpiration)
+	defer cancelRequests()
+
 	received := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	needed := make([][32]byte, len(roots))
 	copy(needed, roots)
@@ -44,16 +51,17 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		requestedRoots[common.Hash(root)] = struct{}{}
 	}
 
-	timer := time.NewTimer(requestEnvelopeBatchExpiration)
-	defer timer.Stop()
-
 	byRootAttempts := 0
 	byRangeAttempted := false
 	for len(needed) > 0 {
+		if err := ctx.Err(); err != nil {
+			return received, err
+		}
 		select {
-		case <-ctx.Done():
-			return received, ctx.Err()
-		case <-timer.C:
+		case <-requestCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return received, err
+			}
 			log.Debug("RequestEnvelopesFrantically: timeout, some envelopes not received", "missing", len(needed))
 			return received, nil
 		default:
@@ -64,31 +72,52 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		// protocol but return EOF, wasting the entire 30s timeout budget.
 		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
 			byRangeAttempted = true
-			requestEnvelopesByRange(ctx, r, fullBlocks, requestedRoots, received)
+			rangeCtx, cancelRange := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
+			requestEnvelopesByRange(rangeCtx, r, fullBlocks, requestedRoots, received)
+			cancelRange()
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
 			}
 		}
 
-		responses, err := requestEnvelopesByRoot(ctx, r, needed)
+		attemptCtx, cancelAttempt := context.WithTimeout(requestCtx, requestEnvelopeAttemptTimeout)
+		responses, err := requestEnvelopesByRoot(attemptCtx, r, needed)
+		attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && requestCtx.Err() == nil
+		cancelAttempt()
 		acceptEnvelopeResponses(responses, requestedRoots, received)
 		needed = filterReceived(needed, received)
 		if len(needed) == 0 {
 			break
 		}
+		if requestCtx.Err() != nil {
+			continue
+		}
 		if err != nil {
 			log.Trace("RequestEnvelopesFrantically: by-root error", "err", err)
+			if attemptTimedOut {
+				byRootAttempts = 3
+				continue
+			}
 			byRootAttempts++
-			time.Sleep(300 * time.Millisecond)
+			waitForEnvelopeRetry(requestCtx)
 			continue
 		}
 		if len(needed) > 0 {
 			byRootAttempts++
-			time.Sleep(300 * time.Millisecond)
+			waitForEnvelopeRetry(requestCtx)
 		}
 	}
 	return received, nil
+}
+
+func waitForEnvelopeRetry(ctx context.Context) {
+	timer := time.NewTimer(requestEnvelopeRetryInterval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, error) {

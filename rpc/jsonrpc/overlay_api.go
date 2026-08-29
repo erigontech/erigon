@@ -116,7 +116,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, creationData.Tx)
+	blockNum, _, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), creationData.Tx)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +446,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
 	if err != nil || block == nil {
 		return nil, err
 	}
@@ -560,6 +560,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
+		// Open-ended ranges use the forkchoice head visible to the caller's transaction.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err

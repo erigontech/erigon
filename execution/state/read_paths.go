@@ -356,8 +356,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		// at a strictly higher TxIndex; per-path (not account-wide) so a field with
 		// no post-self-destruct write correctly reads as the fresh account's zero.
 		revived := false
-		if pathRevival := s.versionMap.ReadStatus(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
-			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
+		pathRead := s.versionMap.ReadStatus(addr, path, key, s.txIndex)
+		if pathRead.DepIdx() > destructTxIndex &&
+			(pathRead.Status() == MVReadResultDone || pathRead.Status() == MVReadResultDependency) {
 			revived = true
 		}
 		if !revived && path != CodePath {
@@ -395,6 +396,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
+					// The wiped slot reads zero; record that read anchored on the
+					// destruct so it lands in the BAL and validation checks the
+					// destruct dependency, not the stale pre-destruct floor value.
+					if path == StoragePath {
+						s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+							ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
+							Val:        uint256.Int{},
+						})
+					}
 					r.outcome = outcomeReturnZero
 					r.source = MapRead
 					r.version = sdVersion
@@ -541,6 +551,11 @@ reread:
 						ReadHeader: ReadHeader{Source: MapRead, Version: canonicalVer},
 						Val:        true,
 					})
+					// The wiped read is not recorded as a storage read here: for a
+					// revived account canonicalVer is the revival cell, whose
+					// incarnation shifts as that tx re-executes, so anchoring a
+					// storage read on it never settles (self-loop). The genuinely
+					// absent case anchors on the stable destruct and does record it.
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead

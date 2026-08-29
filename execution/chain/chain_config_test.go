@@ -18,10 +18,13 @@ package chain
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -316,5 +319,27 @@ func TestCheckConfigForkOrder(t *testing.T) {
 				assert.NoError(t, err)
 			}
 		})
+	}
+}
+
+// forkTimestamps is the one inventory both the compatibility comparison and the ordering
+// check walk, so a time-based fork missing from it escapes both silently.
+func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
+	listed := make(map[string]bool)
+	for _, fork := range (&Config{}).forkTimestamps() {
+		listed[fork.name] = true
+	}
+
+	cfg := reflect.TypeFor[Config]()
+	for i := range cfg.NumField() {
+		field := cfg.Field(i)
+		if field.Type != reflect.TypeFor[*uint64]() {
+			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if !strings.HasSuffix(name, "Time") {
+			continue
+		}
+		require.True(t, listed[name], "%s is time-based but missing from forkTimestamps()", name)
 	}
 }

@@ -408,8 +408,12 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
-	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+	if err := emitHeadEvent(cfg, headSlot, headRoot, headState); err != nil {
+		logger.Warn("failed to emit head event", "err", err)
+	}
+	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
+		logger.Warn("failed to emit next payload attributes event", "err", err)
+	}
 
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)

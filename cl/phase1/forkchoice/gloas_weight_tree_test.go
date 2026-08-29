@@ -294,7 +294,7 @@ func TestComputeVotesProbabilisticAuxStateUsesClampedCount(t *testing.T) {
 	v.SetActivationEpoch(0)
 	v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 	v.SetEffectiveBalance(32_000_000_000)
-	s.AddValidator(v, 32_000_000_000)
+	require.NoError(t, s.AddValidator(v, 32_000_000_000))
 
 	votes := f.computeVotes(solid.Checkpoint{}, nil, s)
 

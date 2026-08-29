@@ -48,13 +48,27 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	return db, tx
 }
 
-// nolint:thelper
-func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, config3.DefaultStepSize)
+type Option func(*options)
+
+type options struct {
+	stepSize uint64
 }
 
-func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, stepSize)
+func WithStepSize(stepSize uint64) Option {
+	return func(opts *options) {
+		opts.stepSize = stepSize
+	}
+}
+
+// nolint:thelper
+func NewTestDB(tb testing.TB, dirs datadir.Dirs, opts ...Option) kv.TemporalRwDB {
+	config := options{
+		stepSize: config3.DefaultStepSize,
+	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return newTestDB(tb, dirs, config.stepSize)
 }
 
 // nolint:thelper

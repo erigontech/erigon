@@ -173,7 +173,7 @@ func (vm *VersionMap) assertUnsealed(txIdx int, addr accounts.Address, path Acco
 	}
 }
 
-func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
+func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{
 		HasBAL: len(changes) > 0,
 	}
@@ -219,8 +219,9 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // type is enforced at compile time — a future BAL field-type change that
 // breaks the contract surfaces as a build error here rather than a runtime
 // panic on the first read of the cell.
-func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
-	for _, accountChanges := range changes {
+func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
+	for i := range changes {
+		accountChanges := &changes[i]
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
 				vm.WriteStorage(accountChanges.Address, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
@@ -999,6 +1000,16 @@ func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx i
 	return vm.ReadAddress(a, tx)
 }
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+	// Wipe-aware: a slot of a destructed (non-live) account reads zero unless a
+	// post-destruct write revived it. Anchor the wiped read on the destruct
+	// (canonicalVer) so a recorded wiped read validates against the destruct
+	// dependency rather than the stale, wipe-blind pre-destruct floor value.
+	if state, canonicalVer, destroyedAt := vm.AccountLifecycleAt(a, tx); state != LifecycleLive {
+		if val, res, ok := vm.ReadStorage(a, k, tx); ok && res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+			return val, res, ok
+		}
+		return uint256.Int{}, ReadResult{depIdx: canonicalVer.TxIndex, incarnation: canonicalVer.Incarnation}, true
+	}
 	return vm.ReadStorage(a, k, tx)
 }
 
@@ -1036,9 +1047,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					// guard a recursive AddressPath/SelfDestructPath probe that
 					// lands on a Done cell would over-invalidate.
 				case matchesLive != nil && matchesLive():
-					// Value tiebreaker: a Done entry now exists where the read
-					// saw storage, but it holds the same value — read stays valid.
-					// Evaluated typed by the caller; no boxing.
+					// Value tiebreaker: the read was served cold from committed
+					// state and a concurrent worker's Done cell now shadows it, but
+					// the cell holds the same value — so the recorded read is still
+					// accurate and the tx need not re-execute. Evaluated typed by
+					// the caller (no boxing). Only value paths supply matchesLive;
+					// noValue paths (Code/CodeSize/CreateContract) fall through to
+					// the conservative version-check invalidation below.
 				default:
 					valid = VersionInvalid
 				}

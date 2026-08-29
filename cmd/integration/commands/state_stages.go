@@ -131,6 +131,7 @@ func init() {
 	withChain(stateStages)
 	withWorkers(stateStages)
 	withChaosMonkey(stateStages)
+	withExperimentalCommitment(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -140,6 +141,7 @@ func init() {
 	withChain(loopExecCmd)
 	withWorkers(loopExecCmd)
 	withChaosMonkey(loopExecCmd)
+	withExperimentalCommitment(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 

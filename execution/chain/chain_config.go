@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -41,9 +42,8 @@ import (
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
 //
-// Config must be copied only with jinzhu/copier (it contains a sync.Once), and
-// only via copier.CopyWithOption(..., DeepCopy: true) — a shallow copy leaves
-// pointer/map fields (ChainID, *Time, BlobSchedule, etc.) shared with the source.
+// Config holds a sync.Once, so it must never be copied by assignment. Use Copy, which
+// leaves that Once zeroed and shares every pointer, map and slice with the source.
 type Config struct {
 	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, gnosis
 	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
@@ -582,20 +582,40 @@ func (c *Config) GetBuilderExitContract() accounts.Address {
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
-func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
-	bhead := height
-
-	// Iterate checkCompatible to find the lowest conflict.
-	var lasterr *ConfigCompatError
-	for {
-		err := c.checkCompatible(newcfg, bhead)
-		if err == nil || (lasterr != nil && err.RewindTo == lasterr.RewindTo) {
+func (c *Config) CheckCompatible(newcfg *Config, height, headTime uint64) *ConfigCompatError {
+	// The axes are iterated separately. checkCompatibleBlocks returns at its first
+	// conflict, so sharing one loop lets a block fork the chain cannot rewind past --
+	// an EIP155 chain ID change, whose target is block 0 on every modern chain -- hide
+	// every timestamp conflict behind it.
+	var blockErr *ConfigCompatError
+	for bhead := height; ; {
+		err := c.checkCompatibleBlocks(newcfg, bhead)
+		if err == nil || (blockErr != nil && err.RewindTo == blockErr.RewindTo) {
 			break
 		}
-		lasterr = err
-		bhead = err.RewindTo
+		blockErr, bhead = err, err.RewindTo
 	}
-	return lasterr
+
+	var timeErr *ConfigCompatError
+	for btime := headTime; ; {
+		err := c.checkCompatibleTimestamps(newcfg, btime)
+		if err == nil || (timeErr != nil && err.RewindToTime == timeErr.RewindToTime) {
+			break
+		}
+		timeErr, btime = err, err.RewindToTime
+	}
+
+	switch {
+	case blockErr == nil:
+		return timeErr
+	case timeErr == nil:
+		return blockErr
+	default:
+		blockErr.WhatTime = timeErr.WhatTime
+		blockErr.StoredTime, blockErr.NewTime = timeErr.StoredTime, timeErr.NewTime
+		blockErr.RewindToTime = timeErr.RewindToTime
+		return blockErr
+	}
 }
 
 type forkBlockNumber struct {
@@ -622,6 +642,46 @@ func (c *Config) forkBlockNumbers() []forkBlockNumber {
 		{name: "grayGlacierBlock", blockNumber: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", blockNumber: c.MergeNetsplitBlock, optional: true},
 	}
+}
+
+type forkTimestamp struct {
+	name       string // the config field, as it is spelled in JSON
+	what       string // how the fork is named in a compatibility error
+	timestamp  *uint64
+	outOfOrder bool // exempt from the ordering check
+}
+
+// forkTimestamps is the one inventory of time-based forks. CheckConfigForkOrder reads it
+// as a monotonic sequence, so an entry belongs in its chronological slot rather than at
+// the end, and anything whose slot is not settled is marked outOfOrder -- a wrong guess
+// there refuses a valid schedule at startup, which is worse than a missed inversion.
+func (c *Config) forkTimestamps() []forkTimestamp {
+	return []forkTimestamp{
+		{name: "shanghaiTime", what: "Shanghai fork timestamp", timestamp: c.ShanghaiTime},
+		{name: "cancunTime", what: "Cancun fork timestamp", timestamp: c.CancunTime},
+		{name: "pragueTime", what: "Prague fork timestamp", timestamp: c.PragueTime},
+		{name: "osakaTime", what: "Osaka fork timestamp", timestamp: c.OsakaTime},
+		{name: "bpo1Time", what: "BPO1 fork timestamp", timestamp: c.Bpo1Time},
+		{name: "bpo2Time", what: "BPO2 fork timestamp", timestamp: c.Bpo2Time},
+		{name: "bpo3Time", what: "BPO3 fork timestamp", timestamp: c.Bpo3Time},
+		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time},
+		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
+		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
+		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
+	}
+}
+
+// SameTimestampForks reports whether every time-based fork is scheduled identically.
+// When they are, no head time can produce a timestamp conflict, so the caller need not
+// establish one.
+func (c *Config) SameTimestampForks(newcfg *Config) bool {
+	newTimes := newcfg.forkTimestamps()
+	for i, f := range c.forkTimestamps() {
+		if !numEqual(f.timestamp, newTimes[i].timestamp) {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckConfigForkOrder checks that we don't "skip" any forks
@@ -651,15 +711,33 @@ func (c *Config) CheckConfigForkOrder() error {
 			lastFork = fork
 		}
 	}
+
+	// Time-based forks are all optional -- every one is still ahead of some supported
+	// chain -- so only their ordering relative to each other is checked. Amsterdam is
+	// exempt because no shipped spec schedules it yet and BPO3-5 may well follow it;
+	// Balancer because Gnosis schedules it below its own osakaTime.
+	var lastTime forkTimestamp
+	for _, fork := range c.forkTimestamps() {
+		if fork.timestamp == nil || fork.outOfOrder {
+			continue
+		}
+		if lastTime.timestamp != nil && *lastTime.timestamp > *fork.timestamp {
+			return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
+				lastTime.name, *lastTime.timestamp, fork.name, *fork.timestamp)
+		}
+		lastTime = fork
+	}
 	return nil
 }
 
-func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError {
-	// returns true if a fork scheduled at s1 cannot be rescheduled to block s2 because head is already past the fork.
-	incompatible := func(s1, s2 *uint64, head uint64) bool {
-		return (isForked(s1, head) || isForked(s2, head)) && !numEqual(s1, s2)
-	}
+// incompatible reports whether a fork scheduled at s1 cannot be rescheduled to s2
+// because head is already past the fork. head is a block number or a timestamp
+// depending on the axis.
+func incompatible(s1, s2 *uint64, head uint64) bool {
+	return (isForked(s1, head) || isForked(s2, head)) && !numEqual(s1, s2)
+}
 
+func (c *Config) checkCompatibleBlocks(newcfg *Config, head uint64) *ConfigCompatError {
 	// Ethereum mainnet forks
 	if incompatible(c.HomesteadBlock, newcfg.HomesteadBlock, head) {
 		return newCompatError("Homestead fork block", c.HomesteadBlock, newcfg.HomesteadBlock)
@@ -714,6 +792,18 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	return nil
 }
 
+// checkCompatibleTimestamps compares the post-merge forks, which are scheduled by
+// timestamp and so cannot be compared against a block number.
+func (c *Config) checkCompatibleTimestamps(newcfg *Config, headTime uint64) *ConfigCompatError {
+	newTimes := newcfg.forkTimestamps()
+	for i, f := range c.forkTimestamps() {
+		if incompatible(f.timestamp, newTimes[i].timestamp, headTime) {
+			return newTimestampCompatError(f.what, f.timestamp, newTimes[i].timestamp)
+		}
+	}
+	return nil
+}
+
 func numEqual(x, y *uint64) bool {
 	if x == nil {
 		return y == nil
@@ -735,30 +825,74 @@ func uint256Equal(x, y *uint256.Int) bool {
 }
 
 // ConfigCompatError is raised if the locally-stored blockchain is initialised with a
-// ChainConfig that would alter the past.
+// ChainConfig that would alter the past. The two fork axes are independent, so one
+// error can carry a conflict on each, and correcting only one still leaves the node
+// on an incompatible schedule.
 type ConfigCompatError struct {
+	// What names the conflicting block-based fork, empty when only timestamps conflict.
 	What string
-	// block numbers of the stored and new configurations
+	// block numbers of the stored and new configurations, for a block-based fork
 	StoredConfig, NewConfig *uint64
 	// the block number to which the local chain must be rewound to correct the error
 	RewindTo uint64
+
+	// WhatTime names the conflicting time-based fork, empty when only blocks conflict.
+	WhatTime string
+	// timestamps of the stored and new configurations, for a time-based fork
+	StoredTime, NewTime *uint64
+	// the timestamp to which the local chain must be rewound to correct the error
+	RewindToTime uint64
 }
 
 func newCompatError(what string, storedblock, newblock *uint64) *ConfigCompatError {
-	var rew *uint64
-	switch {
-	case storedblock == nil:
-		rew = newblock
-	case newblock == nil || *storedblock < *newblock:
-		rew = storedblock
-	default:
-		rew = newblock
-	}
-	err := &ConfigCompatError{what, storedblock, newblock, 0}
+	rew := rewindTarget(storedblock, newblock)
+	err := &ConfigCompatError{What: what, StoredConfig: storedblock, NewConfig: newblock}
 	if rew != nil && *rew > 0 {
 		err.RewindTo = *rew - 1
 	}
 	return err
+}
+
+func newTimestampCompatError(what string, storedtime, newtime *uint64) *ConfigCompatError {
+	rew := rewindTarget(storedtime, newtime)
+	err := &ConfigCompatError{WhatTime: what, StoredTime: storedtime, NewTime: newtime}
+	if rew != nil && *rew > 0 {
+		err.RewindToTime = *rew - 1
+	}
+	return err
+}
+
+// rewindTarget is the earlier of the two schedules: rewinding past it is what makes the
+// two configurations agree again.
+func rewindTarget(stored, scheduled *uint64) *uint64 {
+	switch {
+	case stored == nil:
+		return scheduled
+	case scheduled == nil || *stored < *scheduled:
+		return stored
+	default:
+		return scheduled
+	}
+}
+
+// Copy returns a config whose fields can be reassigned without the original seeing it.
+// Every pointer, map and slice is shared with the source, so a caller that mutates
+// through one still writes into the original -- reassigning a field is what this is for.
+//
+// Deliberately not a deep copy. jinzhu/copier's DeepCopy turns a nil map or slice into an
+// empty one at every nesting depth, and Aura.Validators tells the two apart: a nil List
+// with Multi set is a multi validator set, an empty non-nil List is a set with no
+// validators at all. Only parseBlobScheduleOnce and its cache are left zeroed, so the
+// copy parses its own blob schedule.
+func (c *Config) Copy() *Config {
+	cp := new(Config)
+	src, dst := reflect.ValueOf(c).Elem(), reflect.ValueOf(cp).Elem()
+	for i := range src.NumField() {
+		if dst.Field(i).CanSet() {
+			dst.Field(i).Set(src.Field(i))
+		}
+	}
+	return cp
 }
 
 func uint64PtrStr(p *uint64) string {
@@ -769,8 +903,26 @@ func uint64PtrStr(p *uint64) string {
 }
 
 func (err *ConfigCompatError) Error() string {
-	return fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)", err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
+	blocks := fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)",
+		err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
+	times := fmt.Sprintf("mismatching %s in database (have timestamp %s, want timestamp %s, rewindto timestamp %d)",
+		err.WhatTime, uint64PtrStr(err.StoredTime), uint64PtrStr(err.NewTime), err.RewindToTime)
+	switch {
+	case !err.HasTimestampConflict():
+		return blocks
+	case !err.HasBlockConflict():
+		return times
+	default:
+		return blocks + "; " + times
+	}
 }
+
+// HasBlockConflict reports whether a block-based fork conflicts.
+func (err *ConfigCompatError) HasBlockConflict() bool { return err.What != "" }
+
+// HasTimestampConflict reports whether a time-based fork conflicts. A fork activating at
+// timestamp 0 or 1 rewinds to 0, so a zero rewind target cannot stand in for "no conflict".
+func (err *ConfigCompatError) HasTimestampConflict() bool { return err.WhatTime != "" }
 
 // EthashConfig is the rules engine configs for proof-of-work based sealing.
 type EthashConfig struct{}

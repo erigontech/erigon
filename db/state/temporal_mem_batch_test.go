@@ -17,13 +17,18 @@
 package state
 
 import (
+	"fmt"
+	"sync"
 	"testing"
+
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 // A reorg unwind restores domain values from the diffset, so a domain missing
@@ -43,5 +48,58 @@ func TestGetDiffsetCoversAllDomains(t *testing.T) {
 	require.True(t, ok)
 	for d := range kv.DomainLen {
 		require.NotEmpty(t, diffs[d], "domain %s missing from GetDiffset", d)
+	}
+}
+
+// Pins the locking contract of the per-domain latestStateLocks: readers and
+// writers of different domains run concurrently while Unwind takes every
+// lock. Meaningful under -race; also checks unwind correctness afterwards.
+func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for d := range sd.domains {
+		sd.domains[d] = map[string][]dataWithTxNum{}
+	}
+
+	const keysPerDomain = 200
+	const cutoff = uint64(keysPerDomain / 2)
+	var wg sync.WaitGroup
+	for d := range kv.DomainLen {
+		domain := kv.Domain(d)
+		wg.Go(func() {
+			for i := range keysPerDomain {
+				key := fmt.Sprintf("%s-%03d", domain, i)
+				sd.putLatest(domain, key, []byte(key), uint64(i))
+			}
+		})
+		wg.Go(func() {
+			for i := range keysPerDomain {
+				key := fmt.Sprintf("%s-%03d", domain, i)
+				if v, _, ok := sd.GetLatest(domain, []byte(key)); ok && string(v) != key {
+					t.Errorf("domain %s key %s: got %q", domain, key, v)
+				}
+				sd.HasPrefixInRAM(domain, []byte(key))
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 50 {
+			sd.Unwind(cutoff, nil)
+		}
+	})
+	wg.Wait()
+
+	sd.Unwind(cutoff, nil)
+	for d := range kv.DomainLen {
+		domain := kv.Domain(d)
+		for i := range keysPerDomain {
+			key := fmt.Sprintf("%s-%03d", domain, i)
+			_, _, ok := sd.GetLatest(domain, []byte(key))
+			require.Equal(t, uint64(i) < cutoff, ok, "domain %s key %s", domain, key)
+		}
 	}
 }

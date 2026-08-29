@@ -60,7 +60,7 @@ func writeStepsKeys(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, key
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	var blockNum uint64
@@ -86,7 +86,7 @@ func recomputeRootFromState(t *testing.T, db kv.TemporalRwDB) []byte {
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	acit, err := rwTx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
@@ -254,12 +254,12 @@ func buildMixedRegimeDatadir(t *testing.T, stepSize, frozenSteps uint64) (kv.Tem
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	writeStepsKeys(t, db, agg, setA, 0, frozenSteps)
 	writeStepsKeys(t, db, agg, setB, frozenSteps, 2*frozenSteps)
-	require.NoError(t, agg.BuildFiles(2*frozenSteps*stepSize))
+	require.NoError(t, agg.BuildFiles(2*frozenSteps*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	writeStepsKeys(t, db, agg, setB, 2*frozenSteps, 3*frozenSteps)
-	require.NoError(t, agg.BuildFiles(3*frozenSteps*stepSize))
+	require.NoError(t, agg.BuildFiles(3*frozenSteps*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	db, agg = reopenAggregator(t, db, agg, stepSize)

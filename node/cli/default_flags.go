@@ -267,8 +267,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.ShutterP2pBootstrapNodesFlag,
 	&utils.ShutterP2pListenPortFlag,
 
-	&utils.WitProtocolFlag,
-
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalParallelCommitmentFlag,

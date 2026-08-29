@@ -40,13 +40,18 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -240,6 +245,30 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
+}
+
+func TestStateCallMethodsRejectPendingTag(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	api := newEthApiForTest(base, m.DB, stubTxPoolClient{}, nil)
+	graphqlAPI := NewGraphQLAPI(base, m.DB, api, stubTxPoolClient{}, &rpccfg.GraphQLApiConfig{})
+	ctx := context.Background()
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+
+	t.Run("eth_call", func(t *testing.T) {
+		_, err := api.Call(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("eth_createAccessList", func(t *testing.T) {
+		_, err := api.CreateAccessList(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("graphql_call", func(t *testing.T) {
+		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
 }
 
 // TestCreateAccessListTracesStorage covers a target that touches storage, which is
@@ -590,6 +619,123 @@ func TestGetProof(t *testing.T) {
 			}
 		})
 	}
+}
+
+type missingHeaderBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (missingHeaderBlockReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return nil, nil
+}
+
+func TestGetProofMissingHeader(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	base := newBaseApiForTest(m)
+	base._blockReader = missingHeaderBlockReader{FullBlockReader: base._blockReader}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	proof, err := api.GetProof(
+		context.Background(),
+		bankAddr,
+		nil,
+		bnhPtr(rpc.BlockNumberOrHashWithNumber(6)),
+	)
+	require.EqualError(t, err, "header not found for block 6")
+	require.Nil(t, proof)
+}
+
+func TestGetProofPinsReadSnapshot(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	publishedDomains, err := execctx.NewSharedDomains(m.Ctx, roTx, m.Log)
+	require.NoError(t, err)
+	defer publishedDomains.Close()
+
+	storageKey := common.Hash{}
+	compositeKey := make([]byte, 0, len(contractAddress)+len(storageKey))
+	compositeKey = append(compositeKey, contractAddress[:]...)
+	compositeKey = append(compositeKey, storageKey[:]...)
+	require.NoError(t, publishedDomains.DomainPut(kv.StorageDomain, roTx, compositeKey, []byte{3}, 1, nil))
+
+	stateCache := &execmodule.Cache{}
+	stateCache.SetPublishedSD(func() *execctx.SharedDomains { return publishedDomains })
+	base := newBaseApiForTest(m)
+	base.stateCache = stateCache
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	proof, err := api.getProof(
+		m.Ctx,
+		roTx,
+		contractAddress,
+		[]StorageKeysInfo{{Hash: storageKey, KeyLength: len(storageKey)}},
+		6,
+		true,
+		log.New(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.Equal(t, uint64(2), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
+}
+
+func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	branchCache := provider.BranchCache()
+	require.NotNil(t, branchCache)
+	branchCache.Clear()
+	t.Cleanup(branchCache.Clear)
+
+	rootKey := nibbles.HexToCompact(nil)
+	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
+	require.NoError(t, err)
+	newerRootBranch := make(commitment.BranchData, 4)
+	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
+	cachedRootBranch, _, ok := branchCache.Get(rootKey)
+	require.True(t, ok)
+	require.Equal(t, []byte(newerRootBranch), cachedRootBranch)
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	storageKey := common.Hash{}
+	proof, err := api.getProof(
+		m.Ctx,
+		roTx,
+		contractAddress,
+		[]StorageKeysInfo{{Hash: storageKey, KeyLength: len(storageKey)}},
+		6,
+		true,
+		log.New(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.Equal(t, uint64(2), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
 }
 
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {

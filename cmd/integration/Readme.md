@@ -24,9 +24,6 @@ integration stage_exec --reset
 # Unwind single stage N blocks backward
 integration stage_exec --unwind=N
 
-# Run stage prune to block N
-integration stage_exec --prune.to=N
-
 # To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 

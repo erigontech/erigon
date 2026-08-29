@@ -32,6 +32,27 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
+var errCompressedPayloadLimit = errors.New("compressed payload exceeds maximum size")
+
+type compressedPayloadReader struct {
+	r         io.Reader
+	remaining uint64
+	read      uint64
+}
+
+func (r *compressedPayloadReader) Read(p []byte) (int, error) {
+	if r.remaining == 0 {
+		return 0, errCompressedPayloadLimit
+	}
+	if uint64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n, err := r.r.Read(p)
+	r.remaining -= uint64(n)
+	r.read += uint64(n)
+	return n, err
+}
+
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	enc := make([]byte, 0, val.EncodingSizeSSZ())
 	var err error
@@ -45,19 +66,26 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 
 	// Create writer size
 	wr := bufio.NewWriterSize(w, 10+len(enc))
-	defer wr.Flush()
 	// Write length of packet
-	wr.Write(prefix)
-	wr.Write(lengthBuf[:vin])
+	if _, err := wr.Write(prefix); err != nil {
+		return err
+	}
+	if _, err := wr.Write(lengthBuf[:vin]); err != nil {
+		return err
+	}
 	// start using streamed snappy compression
 	sw := snappypool.Writer(wr)
-	defer func() {
-		sw.Flush()
-		snappypool.PutWriter(sw)
-	}()
+	defer snappypool.PutWriter(sw)
 	// Marshall and snap it
-	_, err = sw.Write(enc)
-	return err
+	if _, err := sw.Write(enc); err != nil {
+		return err
+	}
+	// The buffered writes above only reach w on these flushes, so their errors
+	// are the ones that report a failed send.
+	if err := sw.Flush(); err != nil {
+		return err
+	}
+	return wr.Flush()
 }
 
 func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
@@ -75,21 +103,58 @@ func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainCon
 }
 
 func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
+	return decodeAndReadNoForkDigest(r, val, version, nil)
+}
+
+// DecodeAndReadNoForkDigestExact decodes a payload with an exact uncompressed size and no trailing data.
+func DecodeAndReadNoForkDigestExact(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize uint64) error {
+	return decodeAndReadNoForkDigest(r, val, version, &expectedSize)
+}
+
+func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64) error {
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %w", err)
 	}
+	if expectedSize != nil && encodedLn != *expectedSize {
+		return fmt.Errorf("unexpected payload size: got %d, want %d", encodedLn, *expectedSize)
+	}
 	if encodedLn > uint64(16*datasize.MB) {
 		return errors.New("payload too big")
 	}
 
-	sr := snappypool.Reader(r)
+	compressedInput := r
+	var compressedReader *compressedPayloadReader
+	var maxCompressedSize uint64
+	if expectedSize != nil {
+		maxCompressedSize = 32 + encodedLn + encodedLn/6
+		compressedReader = &compressedPayloadReader{r: r, remaining: maxCompressedSize}
+		compressedInput = compressedReader
+	}
+	sr := snappypool.Reader(compressedInput)
 	defer snappypool.PutReader(sr)
 	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
 		// fetch struct name of val
 		return fmt.Errorf("unable to readPacket: %w", err)
+	}
+	if expectedSize != nil {
+		if compressedReader.read >= maxCompressedSize {
+			return errCompressedPayloadLimit
+		}
+		compressedBytes := compressedReader.read
+		var extra [1]byte
+		_, err := io.ReadFull(sr, extra[:])
+		if compressedReader.read >= maxCompressedSize {
+			return errCompressedPayloadLimit
+		}
+		if err != nil && err != io.EOF { //nolint:errorlint // Only bare EOF proves clean stream termination.
+			return fmt.Errorf("unable to verify payload end: %w", err)
+		}
+		if err == nil || compressedReader.read != compressedBytes {
+			return errors.New("payload contains trailing bytes")
+		}
 	}
 
 	err = val.DecodeSSZ(raw, int(version))

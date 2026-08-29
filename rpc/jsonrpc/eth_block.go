@@ -283,7 +283,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +400,8 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return &n, nil
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -413,7 +414,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(overlayTx)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +423,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, overlayTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +444,8 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, api._blockReader, nil)
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, overlayTx, api._blockReader, nil)
 	if err != nil {
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
@@ -455,9 +457,12 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, overlayTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if body == nil {
+		return nil, nil
 	}
 
 	numOfTx := hexutil.Uint(txCount)
@@ -467,7 +472,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if blockNumber != rpc.PendingBlockNumber {
-		return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
+		return api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNumber.Uint64())
 	}
 
 	if block := api.pendingBlock(); block != nil {

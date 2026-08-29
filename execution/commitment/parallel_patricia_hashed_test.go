@@ -38,8 +38,15 @@ func TestParallelPatriciaHashedSkeletonConstruction(t *testing.T) {
 	require.NotNil(t, p)
 	require.NotNil(t, p.template, "template HexPatriciaHashed allocated")
 	assert.Equal(t, int16(length.Addr), p.accountKeyLen)
-	assert.Equal(t, runtime.NumCPU(), p.numWorkers)
+	assert.Equal(t, defaultParallelCommitmentWorkers, p.numWorkers)
 	assert.Nil(t, p.rootHash.Load())
+}
+
+func TestParallelCommitmentReadTxs(t *testing.T) {
+	foldWorkers := maxFoldConcurrency()
+	mountedWorkers := parallelMountConcurrency(defaultParallelCommitmentWorkers)
+
+	require.Equal(t, 2*mountedWorkers+foldWorkers, ParallelCommitmentReadTxs())
 }
 
 func TestParallelPatriciaHashedSkeletonParseTrieVariant(t *testing.T) {

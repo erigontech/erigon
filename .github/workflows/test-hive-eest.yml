@@ -221,14 +221,19 @@ jobs:
           path: erigon-full
           persist-credentials: false
 
-      - name: Read pinned Hive ref
+      - name: Read Hive checkout
         id: hive-version
-        run: echo "ref=$(jq -r .hive_ref erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          versions=erigon-full/.github/workflows/hive-versions.json
+          {
+            echo "repository=$(jq -r .hive_repository "$versions")"
+            echo "ref=$(jq -r .hive_ref "$versions")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v7
         with:
-          repository: ethereum/hive
+          repository: ${{ steps.hive-version.outputs.repository }}
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
           persist-credentials: false
@@ -347,10 +352,10 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
-          branch=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].branch // empty' erigon-full/test-fixtures.json)
-          branch_arg=""
-          if [ -n "$branch" ]; then
-            branch_arg="--sim.buildarg branch=$branch"
+          eels_ref=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].ref // empty' erigon-full/test-fixtures.json)
+          eels_ref_arg=""
+          if [ -n "$eels_ref" ]; then
+            eels_ref_arg="--sim.buildarg branch=$eels_ref"
           fi
           cd hive
           docker ps
@@ -362,7 +367,7 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${eels_ref_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then

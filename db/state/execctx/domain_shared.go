@@ -404,6 +404,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		sd.adaptivePinController = p.AdaptivePinController()
 	}
 
+	// WithParaTrieDB wires the parallel trie's DB at construction, so selecting
+	// the parallel variant and supplying its DB (plus binding the pin controller)
+	// happen in one expression instead of a separate EnableParaTrieDB call.
+	if o.paraTrieDB != nil {
+		sd.EnableParaTrieDB(o.paraTrieDB)
+	}
+
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return sd, err
@@ -442,6 +449,81 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 
 func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
+}
+
+// AsPutDelWithDiff is AsPutDel, but commitment-domain writes route through
+// diff explicitly rather than the shared SetChangesetAccumulator target — see
+// commitmentDiffPutDel.
+func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel {
+	return &commitmentDiffPutDel{temporalPutDel{sd, tx}, diff}
+}
+
+type commitmentDiffPutDel struct {
+	temporalPutDel
+	diff *kv.DomainDiff
+}
+
+func (p *commitmentDiffPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	if domain == kv.CommitmentDomain {
+		return p.sd.DomainPutCommitmentDiff(p.tx, k, v, txNum, prevVal, p.diff)
+	}
+	return p.temporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
+}
+
+func (p *commitmentDiffPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	if domain == kv.CommitmentDomain {
+		panic("commitmentDiffPutDel.DomainDel called for kv.CommitmentDomain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
+	}
+	return p.temporalPutDel.DomainDel(domain, k, txNum, prevVal)
+}
+
+func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	if domain == kv.CommitmentDomain {
+		panic("commitmentDiffPutDel.DomainDelPrefix called for kv.CommitmentDomain: not supported by the explicit-diff routing path")
+	}
+	return p.temporalPutDel.DomainDelPrefix(domain, prefix, txNum)
+}
+
+// commitmentBranchDiffWriter is implemented by TemporalMemBatch to route a
+// commitment-domain branch write into an explicit diff.
+type commitmentBranchDiffWriter interface {
+	PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
+}
+
+// resolvePrevVal touches the commitment key and resolves prevVal from the
+// latest domain value when the caller did not supply one.
+func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, k []byte, ks string, v, prevVal []byte) ([]byte, error) {
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, v)
+	}
+	if prevVal == nil {
+		var err error
+		prevVal, _, err = sd.GetLatest(domain, roTx, k)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return prevVal, nil
+}
+
+// DomainPutCommitmentDiff is DomainPut(kv.CommitmentDomain, ...) with an
+// explicit diff target instead of whatever SetChangesetAccumulator most
+// recently installed on the commitment writer. The commitment domain has
+// exactly one writer (the parallel commitment calculator), so this needs no
+// lock to stay race-free — see TemporalMemBatch.PutCommitmentBranchDiff.
+func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, diff *kv.DomainDiff) error {
+	if v == nil {
+		return errors.New("DomainPutCommitmentDiff: trying to put nil value, not allowed")
+	}
+	ks := string(k)
+	prevVal, err := sd.resolvePrevVal(kv.CommitmentDomain, roTx, k, ks, v, prevVal)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(prevVal, v) {
+		return nil
+	}
+	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
 }
 
 // changesetSwitcher is implemented by TemporalMemBatch to get/set changesets for deferred writes.
@@ -550,7 +632,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	switcher, ok := sd.mem.(changesetSwitcher)
 	if !ok {
-		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 		return err
 	}
 
@@ -574,7 +656,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// see concurrency contract on the wrappers above.
 		defer sd.SwapChangesetAccumulatorLocked(cs)()
 
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
 			return err
 		}
 
@@ -583,7 +665,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 
 	// No past changeset found — write into whatever is current.
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
 }
 
@@ -1297,6 +1379,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 // TemporalDomain satisfaction. Direct reads use request metrics when configured.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
+}
+
+// GetLatestFromMemory returns the latest in-memory (sd.mem) value for key,
+// without consulting the domain files — used by the commitment context to
+// resolve a branch's previous value from uncommitted state.
+func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool) {
+	v, _, maxStep, ok = sd.latestFromMem(domain, key)
+	return v, maxStep, ok
 }
 
 // GetLatestContext is GetLatest with per-worker metrics carried on ctx: the

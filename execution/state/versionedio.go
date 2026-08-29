@@ -1829,10 +1829,15 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				return uint256.Int{}, false, nil
+		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
+			// Self-destructed in-block (revival-aware, so a later SelfDestruct=false
+			// does not hide the wipe): a slot cell at or below the destruct is wiped
+			// to zero; only a write above it survives.
+			if val, res, ok := vr.versionMap.ReadStorage(address, key, vr.txIndex); ok &&
+				res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+				return val, true, nil
 			}
+			return uint256.Int{}, false, nil
 		}
 		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
 			return val, true, nil
@@ -1866,10 +1871,12 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	// Check version map for CodePath entries written by prior transactions
 	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
 	if vr.versionMap != nil {
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				return nil, nil
+		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
+			if code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex); ok &&
+				res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+				return code.Bytes, nil
 			}
+			return nil, nil
 		}
 		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
 			return code, nil
@@ -1889,10 +1896,12 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	}
 
 	if vr.versionMap != nil {
-		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
-			if destructed {
-				return 0, nil
+		if state, _, destroyedAt := vr.versionMap.AccountLifecycleAt(address, vr.txIndex); state != LifecycleLive {
+			if code, res, ok := vr.versionMap.ReadCode(address, vr.txIndex); ok &&
+				res.Status() == MVReadResultDone && res.DepIdx() > destroyedAt {
+				return len(code.Bytes), nil
 			}
+			return 0, nil
 		}
 		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
 			return len(code), nil
@@ -2550,7 +2559,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 	}
 
-	bal := make([]*types.AccountChanges, 0, len(ac))
+	bal := make(types.BlockAccessList, 0, len(ac))
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
@@ -2565,10 +2574,10 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
-		bal = append(bal, account.changes)
+		bal = append(bal, *account.changes)
 	}
 
-	slices.SortFunc(bal, func(a, b *types.AccountChanges) int {
+	slices.SortFunc(bal, func(a, b types.AccountChanges) int {
 		return a.Address.Cmp(b.Address)
 	})
 
@@ -2822,14 +2831,15 @@ func addStorageUpdate(ac *types.AccountChanges, slot accounts.StorageKey, val ui
 	removeStorageRead(ac, slot)
 
 	if ac.StorageChanges == nil {
-		ac.StorageChanges = []*types.SlotChanges{{
+		ac.StorageChanges = []types.SlotChanges{{
 			Slot:    slot,
 			Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 		}}
 		return
 	}
 
-	for _, slotChange := range ac.StorageChanges {
+	for i := range ac.StorageChanges {
+		slotChange := &ac.StorageChanges[i]
 		if slotChange.Slot == slot {
 			// EIP-7928 no-op filter: skip if value equals the slot's last recorded write.
 			if n := len(slotChange.Changes); n > 0 && val.Eq(&slotChange.Changes[n-1].Value) {
@@ -2839,15 +2849,15 @@ func addStorageUpdate(ac *types.AccountChanges, slot accounts.StorageKey, val ui
 			return
 		}
 	}
-	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
+	ac.StorageChanges = append(ac.StorageChanges, types.SlotChanges{
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
 }
 
 func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
-	for _, sc := range ac.StorageChanges {
-		if sc != nil && sc.Slot == slot {
+	for i := range ac.StorageChanges {
+		if ac.StorageChanges[i].Slot == slot {
 			return true
 		}
 	}

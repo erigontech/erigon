@@ -64,6 +64,13 @@ permissions:
   contents: read
 
 jobs:
+  # Skips the suites below on docs-only PRs; see changes.yml.
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   # Warms the docker-cl-* and docker-buildkit-* caches on the default branch
   # (where this workflow's PR runs restore them) via a dedicated workflow on a
   # paths filter + daily schedule — the caches only change when the pinned
@@ -188,7 +195,8 @@ jobs:
 
   gloas_test:
     name: gloas_${{ matrix.suite }}_test
-    if: ${{ !inputs.cl-images-only && !github.event.pull_request.draft }}
+    needs: [changes]
+    if: ${{ needs.changes.outputs.code != 'false' && !inputs.cl-images-only && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

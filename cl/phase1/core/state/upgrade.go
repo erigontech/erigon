@@ -77,12 +77,16 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	if err != nil {
 		return err
 	}
-	b.SetCurrentSyncCommittee(currentSyncCommittee)
+	if err := b.SetCurrentSyncCommittee(currentSyncCommittee); err != nil {
+		return err
+	}
 	nextSyncCommittee, err := b.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	b.SetNextSyncCommittee(nextSyncCommittee)
+	if err := b.SetNextSyncCommittee(nextSyncCommittee); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -221,8 +225,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
 		// curValidator.SetEffectiveBalance(0)
 		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
-		b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0)
-		b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch)
+		if err := b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0); err != nil {
+			return err
+		}
+		if err := b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch); err != nil {
+			return err
+		}
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
 		// and GENESIS_SLOT to distinguish from a pending deposit request
 		b.AppendPendingDeposit(&solid.PendingDeposit{
@@ -235,12 +243,18 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	}
 
 	// Ensure early adopters of compounding credentials go through the activation churn
+	var queueErr error
 	b.ValidatorSet().Range(func(vindex int, v solid.Validator, _ int) bool {
 		if HasCompoundingWithdrawalCredential(v, b.BeaconConfig()) {
-			QueueExcessActiveBalance(b, uint64(vindex), &v)
+			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), &v); queueErr != nil {
+				return false
+			}
 		}
 		return true
 	})
+	if queueErr != nil {
+		return queueErr
+	}
 	log.Info("Upgrade to Electra complete")
 	return nil
 }

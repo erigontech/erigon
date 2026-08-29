@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -268,7 +269,15 @@ func TestAssembledBlockToPayloadResponseReturnsSidecarEncodingError(t *testing.T
 		GasLimit:            30_000_000,
 		BlockAccessListHash: &balHash,
 	}
-	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{nil})
+	// A nil nested StorageChange is the encoding failure that survives an
+	// account list of values.
+	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{2}),
+		StorageChanges: []types.SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{3}),
+			Changes: []*types.StorageChange{nil},
+		}},
+	}})
 	block := types.NewBlockWithHeader(header, sidecar)
 	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
 

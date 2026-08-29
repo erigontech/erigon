@@ -33,7 +33,6 @@ The Sentry can run in-process or as a separate service for:
 
 ### Protocols (`protocols/`)
 - `eth/` - ETH protocol (headers, bodies, transactions)
-- `wit/` - Witness protocol for stateless clients
 
 ## Sentry Service (`sentry/`)
 

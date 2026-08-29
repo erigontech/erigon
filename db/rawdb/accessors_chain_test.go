@@ -877,7 +877,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(t.Context(), tx, 1)
@@ -951,7 +951,7 @@ func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	}
 
 	blockNum := header.Number.Uint64()
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
 	require.NoError(t, err)
 	defer sd.Close()
 	base, err := txNumReader.Min(t.Context(), tx, blockNum)
@@ -1002,7 +1002,7 @@ func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 	}
 
 	blockNum := header.Number.Uint64()
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
 	require.NoError(t, err)
 	defer sd.Close()
 	base, err := txNumReader.Min(t.Context(), tx, blockNum)

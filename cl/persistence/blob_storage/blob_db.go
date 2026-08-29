@@ -70,15 +70,38 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 	// An empty batch writes no file, so it has no slot to lock on; it still records a
 	// zero count row, which is what tells "this block has no blobs" from "unknown".
 	if len(blobSidecars) > 0 {
-		lock := bs.forSlot(blobSidecars[0].SignedBlockHeader.Header.Slot)
-		lock.Lock()
-		for _, blobSidecar := range blobSidecars {
-			if _, err := bs.write(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
-				lock.Unlock()
-				return err
+		var slot uint64
+		for index, sidecar := range blobSidecars {
+			if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+				return errors.New("blob sidecar is missing its signed block header")
+			}
+			if index == 0 {
+				slot = sidecar.SignedBlockHeader.Header.Slot
+				continue
+			}
+			if sidecar.SignedBlockHeader.Header.Slot != slot {
+				return errors.New("blob sidecars span multiple slots")
 			}
 		}
-		lock.Unlock()
+		lock := bs.forSlot(slot)
+		lock.Lock()
+		if !bs.startWrite(slot) {
+			lock.Unlock()
+			return nil
+		}
+		defer bs.finishWrite()
+		err := func() error {
+			defer lock.Unlock()
+			for _, blobSidecar := range blobSidecars {
+				if _, err := bs.writeAdmitted(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
+					return err
+				}
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
 	}
 	val := make([]byte, 4)
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))
@@ -143,7 +166,7 @@ func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash
 }
 
 func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
-	tx, err := bs.db.BeginRo(context.Background())
+	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -202,6 +225,36 @@ type sidecarsPayload struct {
 }
 
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
+
+// VerifyBlobSidecars validates sidecar proofs and optionally their signed headers.
+func VerifyBlobSidecars(sidecars []*cltypes.BlobSidecar, version clparams.StateVersion, verifySignatureFn func(*cltypes.SignedBeaconBlockHeader) error) error {
+	if len(sidecars) == 0 {
+		return nil
+	}
+	blobs := make([]*goethkzg.Blob, len(sidecars))
+	commitments := make([]goethkzg.KZGCommitment, len(sidecars))
+	proofs := make([]goethkzg.KZGProof, len(sidecars))
+	for i, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return errors.New("blob response contains incomplete sidecar")
+		}
+		if version < clparams.GloasVersion && !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+			return errors.New("could not verify blob's inclusion proof")
+		}
+		if verifySignatureFn != nil {
+			if err := verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+				return err
+			}
+		}
+		blobs[i] = (*goethkzg.Blob)(&sidecar.Blob)
+		commitments[i] = goethkzg.KZGCommitment(sidecar.KzgCommitment)
+		proofs[i] = goethkzg.KZGProof(sidecar.KzgProof)
+	}
+	if err := kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs); err != nil {
+		return errors.New("sidecar is wrong")
+	}
+	return nil
+}
 
 // VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
 func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {

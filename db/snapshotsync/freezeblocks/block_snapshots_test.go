@@ -24,7 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -36,6 +39,53 @@ import (
 )
 
 const testMergeLimit = snaptype.Erigon2MergeLimit
+
+type blockFinalityContextStub struct {
+	retireTo uint64
+}
+
+func (c blockFinalityContextStub) PruneToBlockNum() uint64 {
+	return 0
+}
+
+func (c blockFinalityContextStub) RetireToBlockNum() uint64 {
+	return c.retireTo
+}
+
+func (c blockFinalityContextStub) MaxReorgDepth() uint64 {
+	return 0
+}
+
+func (c blockFinalityContextStub) ReadyForCollation(_ context.Context, _ kv.RoDB, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	return 0, 0, 0, 0, false, nil
+}
+
+func TestBlockRetireUsesFinalityContext(t *testing.T) {
+	ctx := context.Background()
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	cfg := ethconfig.Defaults
+	cfg.MaxReorgDepth = 96
+	br := NewBlockRetire(
+		ctx,
+		1,
+		datadir.New(t.TempDir()),
+		nil,
+		nil,
+		db,
+		&chain.Config{},
+		&cfg,
+		nil,
+		nil,
+		log.New(),
+	)
+	defer br.Close()
+	blockFrom, blockTo, can := br.canRetire(8_000, blockFinalityContextStub{retireTo: 9_904}, snaptype.Unknown)
+	require.True(t, can)
+	require.Equal(t, uint64(8_000), blockFrom)
+	require.Equal(t, uint64(9_000), blockTo)
+	_, _, can = br.canRetire(8_000, blockFinalityContextStub{retireTo: 1_000}, snaptype.Unknown)
+	require.False(t, can)
+}
 
 // blockFilesTxStub is a kv.Getter that also exposes a pinned block-files view,
 // like a temporal tx does.

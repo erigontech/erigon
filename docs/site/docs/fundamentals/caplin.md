@@ -32,7 +32,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 

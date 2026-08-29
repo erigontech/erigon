@@ -96,10 +96,13 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 	val.PutUint256(m.store[offset:])
 }
 
-// zeroes - pre-allocated zeroes for Resize()
-var zeroes = make([]byte, 4*4096)
+// memoryPageSize is a growth quantum, not an OS page: 4 KiB is where evmone and
+// revm start a frame.
+const memoryPageSize = 4 * 1024
 
-// Resize resizes the memory to size
+// Resize resizes the memory to size. Capacity doubles, falling back to a whole
+// memoryPageSize multiple when doubling is not enough; plain append walks a
+// ~1.25x ladder instead and pays an allocation per step.
 func (m *Memory) Resize(size uint64) {
 	currLen := uint64(len(m.store))
 	if size <= currLen {
@@ -113,13 +116,13 @@ func (m *Memory) Resize(size uint64) {
 		return
 	}
 
-	grow := size - currLen
-	if grow <= uint64(len(zeroes)) {
-		m.store = append(m.store, zeroes[:grow]...)
-		return
-	}
+	store := make([]byte, size, max(uint64(cap(m.store))*2, alignUpToPage(size)))
+	copy(store, m.store)
+	m.store = store
+}
 
-	m.store = append(m.store, make([]byte, grow)...)
+func alignUpToPage(n uint64) uint64 {
+	return (n + memoryPageSize - 1) &^ uint64(memoryPageSize-1)
 }
 
 func (m *Memory) reset() {

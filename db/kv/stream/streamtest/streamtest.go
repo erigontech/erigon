@@ -17,6 +17,7 @@
 package streamtest
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -51,4 +52,27 @@ func ExpectEqual[V any](tb testing.TB, s1, s2 stream.Uno[V]) {
 	}
 	require.False(tb, has1, label)
 	require.False(tb, has2, label)
+}
+
+// RequireInvariant2KV drains s and checks stream.Duo Invariant 2: the K and V handed back by one
+// Next() must still read the same after the following Next(). The streams hand out views into
+// re-used buffers, so this is what makes zero-copy composition legal - and nothing else asserts it.
+func RequireInvariant2KV(tb testing.TB, s stream.KV) {
+	tb.Helper()
+	var prevK, prevV, wantK, wantV []byte
+	seen := 0
+	for s.HasNext() {
+		k, v, err := s.Next()
+		require.NoError(tb, err)
+		if seen > 0 {
+			require.True(tb, bytes.Equal(wantK, prevK),
+				"key from the previous Next() was overwritten: want %x, got %x (at item %d)", wantK, prevK, seen)
+			require.True(tb, bytes.Equal(wantV, prevV),
+				"value from the previous Next() was overwritten: want %x, got %x (at item %d)", wantV, prevV, seen)
+		}
+		prevK, prevV = k, v
+		wantK, wantV = bytes.Clone(k), bytes.Clone(v)
+		seen++
+	}
+	require.Positive(tb, seen, "stream was empty, so the invariant was never exercised")
 }

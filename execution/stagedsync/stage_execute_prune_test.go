@@ -22,12 +22,21 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // TestRetireCutoffs_ConvertsBlockDistanceToTxNum pins the per-domain
@@ -128,4 +137,57 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 		require.Equal(t, uint64(0), cutoffs.Default)
 		require.Equal(t, uint64(100), cutoffs.PerDomain[kv.RCacheDomain])
 	})
+}
+
+func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
+	orig := dbg.NoPrune()
+	t.Cleanup(func() { dbg.SetNoPrune(orig) })
+	dbg.SetNoPrune(false)
+	ctx := context.Background()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	const (
+		finalisedBlockNum = uint64(100)
+		forwardProgress   = uint64(1_000)
+		maxReorgDepth     = uint64(96)
+	)
+	finalisedHash := common.Hash{0x01}
+	require.NoError(t, rawdb.WriteHeaderNumber(tx, finalisedHash, finalisedBlockNum))
+	rawdb.WriteForkchoiceFinalized(tx, finalisedHash)
+	for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1, forwardProgress - maxReorgDepth} {
+		key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
+		require.NoError(t, tx.Put(kv.ChangeSets3, key, []byte{0x01}))
+		require.NoError(t, tx.Put(kv.BlockAccessList, key, []byte{0x01}))
+	}
+	state := &PruneState{
+		ID:              stages.Execution,
+		ForwardProgress: forwardProgress,
+		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true),
+		CurrentSyncCycle: CurrentSyncCycleInfo{
+			IsInitialCycle: true,
+		},
+	}
+	cfg := ExecuteBlockCfg{
+		db:          db,
+		chainConfig: &chain.Config{},
+		syncCfg: ethconfig.Sync{
+			MaxReorgDepth: maxReorgDepth,
+		},
+	}
+	require.NoError(t, PruneExecutionStage(ctx, state, tx, cfg, 0, log.New()))
+	for _, table := range []string{kv.ChangeSets3, kv.BlockAccessList} {
+		for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1} {
+			key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
+			has, err := tx.Has(table, key)
+			require.NoError(t, err)
+			require.False(t, has, "%s retained block %d", table, blockNum)
+		}
+		boundary := forwardProgress - maxReorgDepth
+		key := dbutils.BlockBodyKey(boundary, common.Hash{byte(boundary)})
+		has, err := tx.Has(table, key)
+		require.NoError(t, err)
+		require.True(t, has, "%s pruned the reorg boundary", table)
+	}
 }

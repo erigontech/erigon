@@ -63,7 +63,7 @@ func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool) {
 	const txs = 80 // 8 steps -> merge produces a >= threshold commitment file
 
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, referencesInCommitmentBranches)
 
@@ -94,7 +94,7 @@ func writeAndBuild(t *testing.T, ctx context.Context, db kv.TemporalRwDB, agg *s
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -117,7 +117,7 @@ func writeAndBuild(t *testing.T, ctx context.Context, db kv.TemporalRwDB, agg *s
 
 	require.NoError(t, domains.Flush(ctx, tx))
 	require.NoError(t, tx.Commit())
-	require.NoError(t, agg.BuildFiles(txs))
+	require.NoError(t, agg.BuildFiles(txs, unboundedFinalityCtx))
 }
 
 func reopenAgg(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dirs datadir.Dirs, stepSize uint64, logger log.Logger) kv.TemporalRwDB {

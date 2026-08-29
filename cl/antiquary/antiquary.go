@@ -453,8 +453,8 @@ func (a *Antiquary) NotifyBackfilled() {
 	a.backfilled.Store(true) // this is the lowest slot not in snapshots
 }
 
-func (a *Antiquary) NotifyBlobBackfilled() {
-	a.blobBackfilled.Store(true)
+func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
+	a.blobBackfilled.Store(completed)
 }
 
 func (a *Antiquary) antiquateBlobs() error {
