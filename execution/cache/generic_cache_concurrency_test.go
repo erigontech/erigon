@@ -43,7 +43,7 @@ func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
 	cachebudget.Global = cachebudget.New(math.MaxInt64)
 
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStoragePayloadBytes,
 		func(v []byte) int { return len(v) }, ModeEvictLRU))
 
 	// The production ceiling, not a power of two, across the shard counts a
@@ -657,7 +657,7 @@ func TestGenericCache_EnvelopeCoversIntermediateGeneration(t *testing.T) {
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
 	cachebudget.Global = cachebudget.New(math.MaxInt64)
 
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStoragePayloadBytes,
 		func(v []byte) int { return len(v) }, ModeEvictLRU))
 
 	for _, perShardCap := range []uint32{256, 1024, 4096} {
@@ -703,4 +703,30 @@ func TestSlotCeilingClampsAboveUint32(t *testing.T) {
 	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+freelruSlotBytes), 0, nil)
 	t.Cleanup(g.Close)
 	require.Equal(t, fitTableSlots(maxCacheSlots), g.maxCap)
+}
+
+// The reservation estimate counts bytes held outside freelru's element; the usage
+// report counts what currentSize tracks, which adds per-entry bookkeeping that
+// lives inside that element. Folding the bookkeeping into the estimate charges it
+// twice and buys fewer slots than the budget affords.
+func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
+	t.Parallel()
+
+	const budget = 1 * datasize.GB
+	sizeFunc := func(v []byte) int { return len(v) }
+
+	external := closeOnCleanup(t, NewGenericCacheWithAvg(budget, avgStoragePayloadBytes, sizeFunc, ModeEvictLRU))
+	doubled := closeOnCleanup(t, NewGenericCacheWithAvg(budget, avgStoragePayloadBytes+currentSizeEntryOverhead, sizeFunc, ModeEvictLRU))
+	require.Equal(t, external.maxCap, doubled.maxCap, "same ceiling, so the reservations are comparable")
+	require.Equal(t,
+		int64(external.maxCap)*currentSizeEntryOverhead,
+		doubled.generationBytes(doubled.maxCap)-external.generationBytes(external.maxCap),
+		"charging the in-element bookkeeping again takes that much extra from the shared envelope")
+
+	// currentSize is what usage_pct divides, and it counts payload plus that same
+	// bookkeeping — so the report's denominator has to add it back.
+	key := make([]byte, 52)
+	val := make([]byte, avgStoragePayloadBytes-len(key))
+	external.Put(key, val, 1)
+	require.Equal(t, int64(avgStoragePayloadBytes+currentSizeEntryOverhead), external.currentSize.Load())
 }

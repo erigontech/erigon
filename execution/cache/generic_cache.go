@@ -48,6 +48,12 @@ const avgBytesPerEntry = 256
 // bucket index. The 112 holds for a value type of at most freelruValueBytes.
 const freelruElemBytes = 112 + 4
 
+// currentSizeEntryOverhead is the per-entry bookkeeping currentSize adds on top
+// of key and value. It lives inside freelru's element, which freelruElemBytes
+// already charges, so a reservation estimate must exclude it — only the usage
+// report, which counts against currentSize, adds it back.
+const currentSizeEntryOverhead = 24
+
 // freelruValueBytes is the largest value type freelruElemBytes accounts for.
 // freelru's element is unexported, so the check goes on the value types instead:
 // a larger one grows every element and under-charges every slot.
@@ -433,7 +439,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
-	newSize := len(key) + valBytes + 24
+	newSize := len(key) + valBytes + currentSizeEntryOverhead
 
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
@@ -628,8 +634,9 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	// currentSize counts payload only, so it is reported against the payload the
 	// ceiling buys rather than against capacityB — which also funds the slot
 	// arrays, and would read ~27% on a cache that is already evicting. The
-	// envelope side is reserved_mb.
-	payloadCap := int64(c.maxCap) * c.payloadBytes
+	// denominator adds currentSize's own bookkeeping, which payloadBytes leaves
+	// to freelruElemBytes. The envelope side is reserved_mb.
+	payloadCap := int64(c.maxCap) * (c.payloadBytes + currentSizeEntryOverhead)
 	var usagePct float64
 	if payloadCap > 0 {
 		usagePct = float64(sizeBytes) / float64(payloadCap) * 100
