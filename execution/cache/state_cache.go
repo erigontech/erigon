@@ -341,7 +341,10 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
-		prepared.codeHash = crypto.Keccak256(prepared.value)
+		prepared.codeHash = update.CodeHash
+		if len(prepared.codeHash) == 0 {
+			prepared.codeHash = crypto.Keccak256(prepared.value)
+		}
 	}
 	return prepared
 }
@@ -507,12 +510,15 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 	c.publishing = false
 }
 
+// publishChunk bounds how many updates are prepared before they are applied.
+// Preparing the whole batch up front means holding a clone of every value in it
+// at once, which for a block that deploys hundreds of MB of contract code is a
+// second copy of the whole delta.
+const publishChunk = 256
+
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool, updates []StateUpdate) {
-	prepared := make([]preparedStateUpdate, len(updates))
-	for i := range updates {
-		prepared[i] = prepareStateUpdate(updates[i])
-	}
+	prepared := make([]preparedStateUpdate, 0, min(len(updates), publishChunk))
 
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
@@ -523,8 +529,15 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// Sub-caches synchronize their own reads and writes. While publishing is
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
-	for i := range prepared {
-		c.applyPrepared(prepared[i])
+	for start := 0; start < len(updates); start += publishChunk {
+		chunk := updates[start:min(start+publishChunk, len(updates))]
+		prepared = prepared[:0]
+		for i := range chunk {
+			prepared = append(prepared, prepareStateUpdate(chunk[i]))
+		}
+		for i := range prepared {
+			c.applyPrepared(prepared[i])
+		}
 	}
 
 	c.finishPublication(committedStateVersion)

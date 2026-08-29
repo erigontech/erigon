@@ -1797,3 +1797,39 @@ func TestFillCodeByHash_IgnoresAccountsFrontier(t *testing.T) {
 	require.True(t, ok, "a codeHash-only fill must not need the accounts frontier")
 	require.Equal(t, code, got)
 }
+
+// TestPublishUsesProducerCodeHash pins that a CodeDomain update carrying a
+// CodeHash is filed under that hash rather than one the cache derives itself,
+// which is what spares it re-hashing a block's worth of code. A sentinel hash
+// makes the difference visible: re-deriving would file the entry elsewhere.
+func TestPublishUsesProducerCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(7)
+	code := bytes.Repeat([]byte{0xab}, 96)
+	var sentinel [32]byte
+	sentinel[0] = 0xc0
+	sentinel[31] = 0xde
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: sentinel[:],
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
+	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.False(t, ok, "the cache must not re-derive a hash of its own")
+
+	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+}

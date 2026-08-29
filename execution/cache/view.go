@@ -337,11 +337,14 @@ type Applier struct {
 }
 
 // StateUpdate is one committed domain mutation published to StateCache.
+// CodeHash is read only for kv.CodeDomain, and only to spare the cache hashing
+// Value again when the producer already holds the hash; nil is always valid.
 type StateUpdate struct {
-	Domain kv.Domain
-	Key    []byte
-	Value  []byte
-	TxNum  uint64
+	Domain   kv.Domain
+	Key      []byte
+	Value    []byte
+	CodeHash []byte
+	TxNum    uint64
 }
 
 // Applier creates the writer handle.
