@@ -19,6 +19,9 @@ package exec
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,7 +280,8 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 
 type queueStubTask struct {
 	Task
-	txNum uint64
+	txNum     uint64
+	remaining int
 }
 
 func (s *queueStubTask) Version() state.Version { return state.Version{TxNum: s.txNum} }
@@ -327,4 +331,109 @@ func TestQueueWithRetryServesRetriesFirst(t *testing.T) {
 	}
 	require.Equal(t, []uint64{3, 7, 100}, got)
 	require.Equal(t, 0, q.Len())
+}
+
+// Measures the fresh-task capacity the retry path takes away from the
+// dispatcher. The budget expression mirrors blockExecutor.scheduleExecution.
+func TestQueueWithRetryBudgetUnderRetryLoad(t *testing.T) {
+	const capacity = 64
+
+	for _, retries := range []int{1, 8, 32, capacity} {
+		t.Run(fmt.Sprintf("retries=%d", retries), func(t *testing.T) {
+			q := NewQueueWithRetry(capacity)
+			defer q.Close()
+
+			for i := range retries {
+				q.ReTry(&queueStubTask{txNum: uint64(i)})
+			}
+			for range retries {
+				task, ok := q.Next(context.Background())
+				require.True(t, ok)
+				require.NotNil(t, task)
+			}
+			require.Equal(t, 0, q.RetriesLen())
+
+			budget := q.Capacity() - q.NewTasksLen()
+			t.Logf("served %d retries: budget %d/%d, lost %d slots", retries, budget, capacity, capacity-budget)
+			require.Equal(t, capacity, budget)
+		})
+	}
+}
+
+func BenchmarkQueueWithRetryDispatch(b *testing.B) {
+	const (
+		capacity = 2_048
+		workers  = 4
+	)
+
+	type dim struct {
+		retriesPerTask int
+		workPerTask    int
+	}
+	for _, d := range []dim{{0, 0}, {1, 0}, {4, 0}, {1, 2_000}, {4, 2_000}} {
+		retriesPerTask, workPerTask := d.retriesPerTask, d.workPerTask
+		b.Run(fmt.Sprintf("retriesPerTask=%d/work=%d", retriesPerTask, workPerTask), func(b *testing.B) {
+			q := NewQueueWithRetry(capacity)
+			var done atomic.Int64
+			var wg sync.WaitGroup
+
+			for range workers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						task, ok := q.Next(context.Background())
+						if !ok {
+							return
+						}
+						stub := task.(*queueStubTask)
+						queueBenchSink += busyWork(workPerTask)
+						if stub.remaining > 0 {
+							stub.remaining--
+							q.ReTry(stub)
+							continue
+						}
+						done.Add(1)
+					}
+				}()
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; {
+				budget := q.Capacity() - q.NewTasksLen()
+				if budget <= 0 {
+					runtime.Gosched()
+					continue
+				}
+				for range budget {
+					if i == b.N {
+						break
+					}
+					if !q.TryAdd(&queueStubTask{txNum: uint64(i), remaining: retriesPerTask}) {
+						break
+					}
+					i++
+				}
+			}
+			for done.Load() < int64(b.N) {
+				runtime.Gosched()
+			}
+			b.StopTimer()
+
+			q.Close()
+			wg.Wait()
+		})
+	}
+}
+
+var queueBenchSink uint64
+
+// busyWork stands in for the EVM execution a real task carries, so the
+// benchmark does not report queue overhead as if it were the whole cost.
+func busyWork(iterations int) uint64 {
+	var x uint64 = 1
+	for range iterations {
+		x = x*6364136223846793005 + 1442695040888963407
+	}
+	return x
 }

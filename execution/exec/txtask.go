@@ -889,8 +889,13 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 
 		select {
 		case <-wake:
-			if retry, has := q.popNoWait(); has {
-				return retry, true
+			q.lock.Lock()
+			if q.retires.Len() > 0 {
+				task = heap.Pop(&q.retires).(Task)
+			}
+			q.lock.Unlock()
+			if task != nil {
+				return task, true
 			}
 		case inTask, ok := <-newTasks:
 			if !ok {
@@ -920,9 +925,16 @@ func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 		task = heap.Pop(&q.retires).(Task)
 	}
 	newTasks := q.newTasks
+	wake := q.wake
 	q.lock.Unlock()
 
 	if has {
+		// Balance the token ReTry pushed for this task: a token that outlives
+		// its task parks and unparks a worker that has nothing to do.
+		select {
+		case <-wake:
+		default:
+		}
 		return task, task != nil
 	}
 
