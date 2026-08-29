@@ -255,6 +255,8 @@ type ApiHandler struct {
 	// [New in Gloas:EIP7732]
 	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
 	builderRoutes      *builderRouteStore
+
+	executionPayloadEnvelopeAdmissions executionPayloadEnvelopeAdmissions
 }
 
 func NewApiHandler(
