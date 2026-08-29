@@ -121,8 +121,9 @@ type parallelExecutor struct {
 	// pushes the result to the plain results channel. runSem holds the idle worker
 	// contexts; runWG tracks in-flight task goroutines for teardown.
 	runSem chan *exec.WorkerContext
-	// execSem decouples the execution-concurrency gate (the CPU tuning variable)
-	// from the WorkerContext-object pool (runSem, memory). Under selfLoopPause a worker
+	// execSem decouples the execution-concurrency gate (real CPU parallelism, sized
+	// to the worker count) from the WorkerContext-object pool (runSem, memory). Under
+	// selfLoopPause a worker
 	// resting mid-EVM on a dependency keeps its object but releases its execSem
 	// slot, so resting does not reduce the available concurrency — another worker
 	// runs on a different object. runSem must hold enough objects for the peak of
@@ -1744,10 +1745,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		for _, w := range pe.execWorkers {
 			pe.runSem <- w
 		}
-		slots := selfLoopSlots
-		if slots <= 0 || slots > len(pe.execWorkers) {
-			slots = len(pe.execWorkers)
-		}
+		slots := len(pe.execWorkers)
 		pe.execSem = make(chan struct{}, slots)
 		for range slots {
 			pe.execSem <- struct{}{}
@@ -1868,11 +1866,6 @@ type txResult struct {
 // execution continues in place instead of aborting/re-executing. Reads then always
 // see final values. A paused worker holds its context (it is mid-EVM), so the
 // context pool grows elastically (see acquireWorker) to avoid dependency starvation.
-
-// selfLoopSlots is the execution-concurrency tuning variable (the CPU parallelism
-// target), independent of the WorkerContext-object pool size (EPHEMERAL_WORKERS).
-// 0 → default to the object-pool size (no extra gating).
-var selfLoopSlots = dbg.EnvInt("SELF_LOOP_SLOTS", 0)
 
 // elasticWorkerCap bounds the runSem buffer so the context pool can grow past
 // the base worker count when workers park mid-EVM on a dependency. It is a
@@ -2152,10 +2145,12 @@ func (be *blockExecutor) taskIndexOf(versionTxIndex int) int {
 // (block-TxIndex) space into task-list-index space via taskIndexOf.
 // Fan-out: a valid result's target is the highest task it actually read from (its
 // real dependency), so it can commit as soon as those deps commit — out of order,
-// not behind the whole linear prefix. A coinbase reader implicitly depends on
-// every prior fee tip, so it gates on the full prefix (tv.index-1). Base reads of
-// a key a lower task writes carry no dependency here; that hazard is caught by the
-// exec loop's committed-dependent re-validation once the lower write lands.
+// not behind the whole linear prefix. A coinbase reader gates on the full prefix
+// implicitly: the fee tip stays an Estimate until calcFees materializes it in the
+// in-order finalize sweep, so the coinbase read either resolves to i-1's finalized
+// value (target i-1) or parks on the Estimate's Dependency. Base reads of a key a
+// lower task writes carry no dependency here; that hazard is caught by the exec
+// loop's committed-dependent re-validation once the lower write lands.
 // valid=false forces re-exec; blocker is the highest stale writer to wait for.
 func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult) (valid bool, target int, blocker int) {
 	blocker = -1
@@ -2205,9 +2200,6 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 		}
 		return true
 	})
-	if !be.coinbase.IsNil() && result.TxIn.ReadsAccount(be.coinbase) {
-		target = tv.index - 1
-	}
 	return true, target, -1
 }
 
@@ -2287,13 +2279,12 @@ func (result *execResult) finalize(cumulativeGasUsed uint64, firstLogIndex uint3
 		// System TXs use full IBS reconstruction — they don't go through
 		// the worker execution path so fee splitting doesn't apply.
 		// Strip coinbase/burnt for these since they may have stale writes.
-		txOut, coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
+		txOut, _, _, _ := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
 		result.TxOut = txOut
 		txOut, _, _, _ = result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
 		result.TxOut = txOut
 		result.TxIn.Delete(result.Coinbase)
 		result.TxIn.Delete(result.ExecutionResult.BurntContractAddress)
-		_, _, _ = coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta
 		return result.finalizeSystemTx(task, txTask, vm, stateReader)
 	}
 
@@ -3359,7 +3350,20 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult.WorkerVerdictSet = false
 			valid := true
 			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-			be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
+			if !be.coinbase.IsNil() {
+				cb := be.coinbase
+				isCoinbaseBal := func(h state.WriteHeader) bool {
+					return h.Address == cb && (h.Path == state.BalancePath || h.Path == state.AddressPath)
+				}
+				be.versionMap.FlushVersionedWrites(writeSet.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true, tracePrefix)
+				// The coinbase Balance/Address stays an Estimate here: its tip is not
+				// folded until calcFees materializes the Done in the in-order finalize
+				// sweep, so an out-of-order reader pauses on the Dependency instead of
+				// reading the tip-stale Done (the [validate,finalize] residual).
+				be.versionMap.FlushVersionedWrites(writeSet.Filter(isCoinbaseBal), false, tracePrefix)
+			} else {
+				be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
+			}
 			if dbg.TraceTransactionIO {
 				be.versionMap.SetTrace(false)
 			}

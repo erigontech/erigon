@@ -914,6 +914,48 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 		"a fresh read of post-tip value at the same version must stay valid")
 }
 
+// TestFinalizeTx_CoinbaseFlushedEstimateReadsAsDependency pins the write-side
+// invariant that closes the [validate,finalize] residual: the coinbase balance
+// published at the out-of-order validation flush is an Estimate, so a later tx
+// reading it observes an in-flight Dependency (and pauses) rather than a
+// committed-looking, tip-stale Done. calcFees materializes the Done only in the
+// in-order finalize sweep. A non-fee-recipient write flushed at the same point
+// stays a committed Done.
+func TestFinalizeTx_CoinbaseFlushedEstimateReadsAsDependency(t *testing.T) {
+	t.Parallel()
+	coinbase := accounts.InternAddress(common.HexToAddress("0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97"))
+	other := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000deadbeef"))
+
+	ws := &state.WriteSet{}
+	ws.SetBalance(coinbase, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath, Version: state.Version{TxIndex: 0}},
+		Val:         *uint256.NewInt(100),
+	})
+	ws.SetBalance(other, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: other, Path: state.BalancePath, Version: state.Version{TxIndex: 0}},
+		Val:         *uint256.NewInt(200),
+	})
+
+	// Mirror the dep-order validation flush split: coinbase Balance/Address stay
+	// Estimate, everything else is committed Done.
+	isCoinbaseBal := func(h state.WriteHeader) bool {
+		return h.Address == coinbase && (h.Path == state.BalancePath || h.Path == state.AddressPath)
+	}
+	vm := state.NewVersionMap(nil)
+	vm.FlushVersionedWrites(ws.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true, "")
+	vm.FlushVersionedWrites(ws.Filter(isCoinbaseBal), false, "")
+
+	_, cbRR, ok := vm.ReadBalance(coinbase, 1)
+	require.True(t, ok, "coinbase cell must exist")
+	assert.Equal(t, state.MVReadResultDependency, cbRR.Status(),
+		"coinbase balance flushed at the out-of-order validation must read as a Dependency so the reader pauses until calcFees finalizes it")
+
+	_, otherRR, ok := vm.ReadBalance(other, 1)
+	require.True(t, ok, "other cell must exist")
+	assert.Equal(t, state.MVReadResultDone, otherRR.Status(),
+		"a non-fee-recipient write flushed Done reads as a committed value")
+}
+
 // TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation verifies the
 // burnt contract's implicit FeeBurnt write is stamped at the worker's own
 // incarnation (same as coinbase under the post-#21387 architecture).
