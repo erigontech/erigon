@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -467,6 +468,22 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	calls := 0
+
+	payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, fmt.Errorf("get payload: %w", execution_client.ErrInvalidGetPayloadResponse)
+		})
+
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.Nil(t, payload)
+	require.Equal(t, 1, calls)
+}
+
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 
@@ -543,6 +560,147 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
+	proofIndexes := []struct {
+		name  string
+		index int
+	}{
+		{name: "first", index: 0},
+		{name: "last", index: 2*int(clparams.MainnetBeaconConfig.NumberOfColumns) - 1},
+	}
+	for _, proofIndex := range proofIndexes {
+		for _, proofLength := range []int{length.Bytes48 - 1, length.Bytes48 + 1} {
+			t.Run(fmt.Sprintf("%s proof length %d", proofIndex.name, proofLength), func(t *testing.T) {
+				body, err := produceFuluBodyWithProofLength(t, proofIndex.index, proofLength)
+
+				require.Nil(t, body)
+				require.ErrorContains(t, err, "invalid proof length")
+			})
+		}
+	}
+}
+
+func TestProduceBeaconBodyAcceptsExactFuluCellProofLength(t *testing.T) {
+	body, err := produceFuluBodyWithProofLength(t, 0, length.Bytes48)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+}
+
+func TestProduceBeaconBodyPreservesPreFuluValidationOrder(t *testing.T) {
+	bundle := &engine_types.BlobsBundle{
+		Blobs:       []hexutil.Bytes{make([]byte, cltypes.BYTES_PER_BLOB)},
+		Commitments: []hexutil.Bytes{make([]byte, length.Bytes48-1)},
+		Proofs:      []hexutil.Bytes{make([]byte, length.Bytes48-1)},
+	}
+
+	body, err := produceBodyWithBundle(t, clparams.ElectraVersion, bundle)
+
+	require.Nil(t, body)
+	require.ErrorContains(t, err, "invalid commitment length")
+}
+
+func produceFuluBodyWithProofLength(t *testing.T, proofIndex, proofLength int) (*cltypes.BeaconBody, error) {
+	t.Helper()
+	proofs := make([]hexutil.Bytes, 2*int(clparams.MainnetBeaconConfig.NumberOfColumns))
+	for i := range proofs {
+		proofs[i] = make([]byte, length.Bytes48)
+	}
+	proofs[proofIndex] = make([]byte, proofLength)
+	bundle := &engine_types.BlobsBundle{
+		Blobs: []hexutil.Bytes{
+			make([]byte, cltypes.BYTES_PER_BLOB),
+			make([]byte, cltypes.BYTES_PER_BLOB),
+		},
+		Commitments: []hexutil.Bytes{
+			make([]byte, length.Bytes48),
+			make([]byte, length.Bytes48),
+		},
+		Proofs: proofs,
+	}
+	return produceBodyWithBundle(t, clparams.FuluVersion, bundle)
+}
+
+func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *engine_types.BlobsBundle) (*cltypes.BeaconBody, error) {
+	t.Helper()
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	if version.AfterOrEqual(clparams.FuluVersion) {
+		h.beaconChainCfg.FuluForkEpoch = 1
+		h.beaconChainCfg.InitializeForkSchedule()
+	}
+
+	payload := cltypes.NewEth1Block(version, h.beaconChainCfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, version).Return(payload, bundle, nil, nil, nil)
+	h.engine = engine
+
+	baseBlock := blocks[len(blocks)-1].Block
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+	return body, err
+}
+
+func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.CapellaVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlock := blocks[len(blocks)-1].Block
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Zero(t, body.BlobKzgCommitments.Len())
+}
+
+func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	baseBlock := blocks[len(blocks)-1].Block
+	targetSlot := baseBlock.Slot + 1
+	h.beaconChainCfg.DenebForkEpoch = targetSlot / h.beaconChainCfg.SlotsPerEpoch
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.DenebVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.DenebVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.Nil(t, body)
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.ErrorContains(t, err, "missing blobs bundle")
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody

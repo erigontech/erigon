@@ -213,7 +213,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logger := log.New()
-			db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), 16)
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
 			require.NoError(t, db.UpdateTemporal(t.Context(), func(rwTx kv.TemporalRwTx) error {
 				domains, err := execctx.NewSharedDomains(t.Context(), rwTx, logger)
 				if err != nil {

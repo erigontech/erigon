@@ -1785,10 +1785,11 @@ func returnReadList(v ReadLists) {
 	if v == nil {
 		return
 	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
+	// Not optional: Vals pins what the txn read until the list is reused.
+	for _, tbl := range v {
+		clear(tbl.Keys)
+		clear(tbl.Vals)
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
 	readListPool.Put(v)
 }

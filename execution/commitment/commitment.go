@@ -210,6 +210,9 @@ type DeferredBranchUpdate struct {
 	raw     BranchData
 	prev    []byte
 	encoded BranchData
+	// Backing store for a merged encoded value. encoded either aliases raw or points
+	// here, so it is never itself reused — this is the buffer that survives pooling.
+	encodedBuf []byte
 }
 
 var deferredUpdatePool = &sync.Pool{
@@ -234,10 +237,7 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
 	upd.raw = reuseBytes(upd.raw, raw)
-	// prev stays cloned: it is the one argument that is legitimately nil or empty, and
-	// callers read a nil prev as "look up the previous value". Deriving that shape from a
-	// recycled buffer's capacity rather than from the input is not worth one allocation.
-	upd.prev = bytes.Clone(prev)
+	upd.prev = reuseBytes(upd.prev, prev)
 	upd.encoded = nil
 
 	return upd
@@ -268,7 +268,8 @@ func capLen(b []byte) []byte {
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prev = nil
+		// encoded can alias raw, so it is dropped rather than recycled; prefix, raw,
+		// prev and encodedBuf keep their backing arrays for the next checkout.
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
@@ -337,7 +338,8 @@ func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
@@ -354,7 +356,8 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 		if err != nil {
 			return err
 		}
-		upd.encoded = bytes.Clone(merged)
+		upd.encodedBuf = reuseBytes(upd.encodedBuf, merged)
+		upd.encoded = upd.encodedBuf
 		return nil
 	}
 	upd.encoded = upd.raw
@@ -691,21 +694,28 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-var errShortenedKeyFound = errors.New("shortened key found")
-
 // A malformed branch reports true: treat as referenced, never under-report.
 func (branchData BranchData) HasShortenedKeys() bool {
-	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			if len(key) != length.Addr+length.Hash {
-				return nil, errShortenedKeyFound
-			}
-		} else if len(key) != length.Addr {
-			return nil, errShortenedKeyFound
+	_, _, shortened, err := branchData.CountPlainKeys()
+	return shortened > 0 || err != nil
+}
+
+// CountPlainKeys tallies the branch's keys by kind. It walks every cell rather than stopping at the
+// first shortened key, so a branch holding both kinds reports both truthfully. A non-nil err is a
+// parse failure, and leaves the tally partial.
+func (branchData BranchData) CountPlainKeys() (plainAccounts, plainStorages, shortened uint64, err error) {
+	_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		switch {
+		case isStorage && len(key) == length.Addr+length.Hash:
+			plainStorages++
+		case !isStorage && len(key) == length.Addr:
+			plainAccounts++
+		default:
+			shortened++
 		}
 		return nil, nil
 	})
-	return err != nil
+	return plainAccounts, plainStorages, shortened, err
 }
 
 // If fn returns nil, the original key is kept.
@@ -726,6 +736,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	spanStart := 0
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
+		if pos >= len(branchData) {
+			return nil, errors.New("replacePlainKeys buffer too small for cell fields")
+		}
 		fields := cellFields(branchData[pos])
 		pos++
 		if fields&fieldExtension != 0 {
@@ -1742,6 +1755,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)
