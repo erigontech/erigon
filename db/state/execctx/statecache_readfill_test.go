@@ -825,3 +825,60 @@ func TestGetCode_CodeStoreHitFillsCodeCache(t *testing.T) {
 	require.True(t, ok, "a code-store hit must fill the in-memory code cache")
 	require.Equal(t, code, cached)
 }
+
+// A code-store hit under a staged unwind must not reach the shared cache: the
+// backing still holds the dying rows inside the bound, so the bytes are a
+// dead-fork read. Only the CodeDomain key is bounded here, so the account still
+// resolves and the store path is actually taken.
+func TestGetCode_CodeStoreHitUnderStagedUnwindDoesNotFill(t *testing.T) {
+	t.Parallel()
+
+	const stepSize = uint64(16)
+	ctx := t.Context()
+	db := newTestDb(t, stepSize)
+	codeStore := cache.NewCodeStore(1 << 20)
+
+	addr := make([]byte, 20)
+	addr[0] = 0xc7
+	code := []byte{0x60, 0x05, 0x60, 0x00, 0x55}
+	codeHash := crypto.Keccak256Hash(code)
+	account := accounts.SerialiseV3(&accounts.Account{
+		Nonce:    1,
+		CodeHash: accounts.InternCodeHash(codeHash),
+	})
+
+	seedTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer seedTx.Rollback()
+	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
+	require.NoError(t, err)
+	defer seedDomains.Close()
+	seedDomains.SetCodeStore(codeStore)
+	seedDomains.SetTxNum(20)
+	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 20, nil))
+	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, addr, code, 20, nil))
+	require.NoError(t, seedDomains.Commit(ctx, seedTx))
+
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.CodeDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes)}}
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+	sd.SetCodeStore(codeStore)
+	sd.Unwind(10, &diffs)
+
+	_, _, err = sd.GetCode(roTx, addr, 20)
+	require.NoError(t, err)
+
+	_, ok := stateCache.View(nil).GetCodeByHash(codeHash[:])
+	require.False(t, ok, "a bounded in-flight unwind read must not fill the code cache")
+}

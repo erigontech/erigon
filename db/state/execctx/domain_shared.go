@@ -1641,7 +1641,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 			}
 			if sd.codeStore != nil {
 				if cv, ok := sd.codeStore.GetByHash(tx, codeHash); ok {
-					sd.fillCodeCacheByHash(tx, view, cv, codeHash, txNum)
+					sd.fillCodeCacheByHash(tx, view, addr, cv, codeHash, txNum)
 					return cv, true, nil
 				}
 			}
@@ -1662,8 +1662,14 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 // fillCodeCacheByHash promotes a code-store hit into the in-memory code cache,
 // the store's only memory tier. txNum is the reader's, an upper bound on the
 // code's write txNum, so an unwind drops the entry no later than the code.
-func (sd *SharedDomains) fillCodeCacheByHash(tx kv.TemporalTx, view cache.ReadView, code, codeHash []byte, txNum uint64) {
+func (sd *SharedDomains) fillCodeCacheByHash(tx kv.TemporalTx, view cache.ReadView, addr, code, codeHash []byte, txNum uint64) {
 	if sd.stateCache == nil {
+		return
+	}
+	// A bounded read observes a staged unwind rather than stable committed state:
+	// the backing still holds the dying rows inside the bound, so the bytes must
+	// not reach the shared cache. Same gate the addr-keyed fill applies.
+	if _, _, maxStep, _ := sd.latestFromMem(kv.CodeDomain, addr); maxStep != kv.NoStepBound {
 		return
 	}
 	if view.NeedsFrontier() {

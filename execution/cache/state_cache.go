@@ -304,8 +304,12 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	defer c.admissionMu.RUnlock()
 	if c.publishing ||
 		viewEpoch != c.readViewEpoch.Load() ||
-		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
-		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
+		visibleEnd < c.appliedEnd[kv.CodeDomain] {
+		return
+	}
+	// Only an addr binding derives from an account record; a codeHash-only entry
+	// does not, so the accounts frontier must not gate it.
+	if len(key) > 0 && accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
 	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
