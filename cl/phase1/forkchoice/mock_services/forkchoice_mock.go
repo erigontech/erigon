@@ -61,31 +61,36 @@ type ForkChoiceStorageMock struct {
 
 	IsRootOptimisticVal bool
 
-	StateAtBlockRootVal             map[common.Hash]*state.CachingBeaconState
-	StateAtSlotVal                  map[uint64]*state.CachingBeaconState
-	GetSyncCommitteesVal            map[uint64][2]*solid.SyncCommittee
-	GetFinalityCheckpointsVal       map[common.Hash][3]solid.Checkpoint
-	PendingConsolidationsVal        map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]
-	PendingDepositsVal              map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]
-	PendingPartialWithdrawalsVal    map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]
-	WeightsMock                     []forkchoice.ForkNode
-	LightClientBootstraps           map[common.Hash]*cltypes.LightClientBootstrap
-	NewestLCUpdate                  *cltypes.LightClientUpdate
-	LCUpdates                       map[uint64]*cltypes.LightClientUpdate
-	SyncContributionPool            sync_contribution_pool.SyncContributionPool
-	Headers                         map[common.Hash]*cltypes.BeaconBlockHeader
-	Blocks                          map[common.Hash]*cltypes.SignedBeaconBlock
-	HasEquivocatingBlockFunc        func(common.Hash) (bool, bool)
-	envelopes                       map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	envelopesMu                     sync.RWMutex
-	VerifiedPayloads                map[common.Hash]bool
-	OnExecutionPayloadErr           error
-	OnExecutionPayloadCheckBlobData bool
-	OnExecutionPayloadFunc          func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
-	ApplyLocalSelfBuildEnvelopeErr  error
-	OnBlockFunc                     func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error
-	OnTickFunc                      func(uint64)
-	GetBeaconCommitteeMock          func(slot, committeeIndex uint64) ([]uint64, error)
+	StateAtBlockRootVal                                map[common.Hash]*state.CachingBeaconState
+	StateAtSlotVal                                     map[uint64]*state.CachingBeaconState
+	GetSyncCommitteesVal                               map[uint64][2]*solid.SyncCommittee
+	GetFinalityCheckpointsVal                          map[common.Hash][3]solid.Checkpoint
+	PendingConsolidationsVal                           map[common.Hash]*solid.ListSSZ[*solid.PendingConsolidation]
+	PendingDepositsVal                                 map[common.Hash]*solid.ListSSZ[*solid.PendingDeposit]
+	PendingPartialWithdrawalsVal                       map[common.Hash]*solid.ListSSZ[*solid.PendingPartialWithdrawal]
+	WeightsMock                                        []forkchoice.ForkNode
+	LightClientBootstraps                              map[common.Hash]*cltypes.LightClientBootstrap
+	NewestLCUpdate                                     *cltypes.LightClientUpdate
+	LCUpdates                                          map[uint64]*cltypes.LightClientUpdate
+	SyncContributionPool                               sync_contribution_pool.SyncContributionPool
+	Headers                                            map[common.Hash]*cltypes.BeaconBlockHeader
+	Blocks                                             map[common.Hash]*cltypes.SignedBeaconBlock
+	HasEquivocatingBlockFunc                           func(common.Hash) (bool, bool)
+	envelopes                                          map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	envelopesMu                                        sync.RWMutex
+	VerifiedPayloads                                   map[common.Hash]bool
+	OnExecutionPayloadErr                              error
+	OnExecutionPayloadCheckBlobData                    bool
+	OnExecutionPayloadCalled                           bool
+	OnExecutionPayloadFunc                             func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+	ValidateExecutionPayloadEnvelopeForGossipErr       error
+	ValidateExecutionPayloadEnvelopeForGossipCalled    bool
+	ValidateExecutionPayloadEnvelopeForConsensusErr    error
+	ValidateExecutionPayloadEnvelopeForConsensusCalled bool
+	ApplyLocalSelfBuildEnvelopeErr                     error
+	OnBlockFunc                                        func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error
+	OnTickFunc                                         func(uint64)
+	GetBeaconCommitteeMock                             func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
 
@@ -365,6 +370,7 @@ func (f *ForkChoiceStorageMock) OnBlock(
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
 	f.envelopesMu.Lock()
 	defer f.envelopesMu.Unlock()
+	f.OnExecutionPayloadCalled = true
 	f.OnExecutionPayloadCheckBlobData = checkBlobData
 	err := f.OnExecutionPayloadErr
 	if f.OnExecutionPayloadFunc != nil {
@@ -377,6 +383,16 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 		f.envelopes[signedEnvelope.Message.BeaconBlockRoot] = signedEnvelope
 	}
 	return err
+}
+
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForGossip(_ *cltypes.SignedExecutionPayloadEnvelope) error {
+	f.ValidateExecutionPayloadEnvelopeForGossipCalled = true
+	return f.ValidateExecutionPayloadEnvelopeForGossipErr
+}
+
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelopeForConsensus(_ context.Context, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+	f.ValidateExecutionPayloadEnvelopeForConsensusCalled = true
+	return f.ValidateExecutionPayloadEnvelopeForConsensusErr
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {

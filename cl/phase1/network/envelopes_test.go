@@ -60,6 +60,19 @@ type immediateEnvelopeSentinel struct {
 	empty bool
 }
 
+type countingRangeEnvelopeSentinel struct {
+	sentinelproto.SentinelClient
+	byRange atomic.Int32
+	cancel  context.CancelFunc
+}
+
+func (s *countingRangeEnvelopeSentinel) SendRequest(_ context.Context, req *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	if req.Topic == communication.ExecutionPayloadEnvelopesByRangeProtocolV1 && s.byRange.Add(1) == 5 {
+		s.cancel()
+	}
+	return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
+}
+
 func (s *immediateEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	if s.empty {
 		return &sentinelproto.ResponseData{Peer: &sentinelproto.Peer{Pid: "empty-peer"}}, nil
@@ -371,6 +384,32 @@ func TestEnvelopeRequestSlotRangeRejectsOverflow(t *testing.T) {
 		map[common.Hash]struct{}{lowRoot: {}, highRoot: {}},
 	)
 	require.False(t, ok)
+}
+
+func TestRequestEnvelopesByRangeBoundsCallsForSparseRequestedSlots(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := &countingRangeEnvelopeSentinel{cancel: cancel}
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	cfg.MaxRequestPayloads = 1
+	low := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	low.Block.Slot = 0
+	high := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	high.Block.Slot = 1 << 40
+	lowRoot, err := low.Block.HashSSZ()
+	require.NoError(t, err)
+	highRoot, err := high.Block.HashSSZ()
+	require.NoError(t, err)
+
+	requestEnvelopesByRange(
+		ctx,
+		rpcClient,
+		[]*cltypes.SignedBeaconBlock{low, high},
+		map[common.Hash]struct{}{lowRoot: {}, highRoot: {}},
+		map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{},
+	)
+
+	require.Equal(t, int32(2), sentinel.byRange.Load())
 }
 
 func TestRequestEnvelopesFranticallyPreservesParentCancellation(t *testing.T) {

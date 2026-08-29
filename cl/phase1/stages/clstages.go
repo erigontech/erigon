@@ -73,12 +73,11 @@ type Cfg struct {
 	gloasPayloadRetryOffset      atomic.Uint32
 	gloasEnvelopeRecoveryCursor  common.Hash
 	gloasEnvelopeRecoveryHead    common.Hash
+	gloasEnvelopeRecoveryPending []common.Hash
 	gloasHeadEnvelopeRequestMu   sync.Mutex
 	gloasHeadEnvelopeRequestID   uint64
 	gloasHeadEnvelopeRequests    map[common.Hash]uint64
 	gloasHeadEnvelopeRequestHead common.Hash
-	gloasHeadEnvelopeAttempted   bool
-	gloasHeadEnvelopeRetryUsed   bool
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash

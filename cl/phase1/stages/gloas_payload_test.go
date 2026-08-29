@@ -118,7 +118,6 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterLateResponse(t *testing.T) {
 				releaseSelectedHeadEnvelopeRequest(cfg, claim)
 				close(requestDone)
 			},
-			retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
 		})
 	}()
 	<-requestStarted
@@ -151,7 +150,6 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterCanceledApply(t *testing.T) {
 			releaseSelectedHeadEnvelopeRequest(cfg, claim)
 			close(requestDone)
 		},
-		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
 	})
 	<-requestDone
 
@@ -160,7 +158,7 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterCanceledApply(t *testing.T) {
 	require.True(t, wait)
 }
 
-func TestClaimedSelectedHeadEnvelopeBoundsAttemptDeadlineRetries(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeRetriesEachCycleAfterAttemptDeadline(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
@@ -181,7 +179,7 @@ func TestClaimedSelectedHeadEnvelopeBoundsAttemptDeadlineRetries(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	}
 
-	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 3, requestCalls)
 }
 
 func TestClaimedSelectedHeadEnvelopeRetriesAfterParentCancellation(t *testing.T) {
@@ -214,7 +212,7 @@ func TestClaimedSelectedHeadEnvelopeRetriesAfterParentCancellation(t *testing.T)
 	require.True(t, wait)
 }
 
-func TestClaimedSelectedHeadEnvelopeBoundsApplyFailureRetries(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeRetriesEachCycleAfterApplyFailure(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
@@ -238,10 +236,10 @@ func TestClaimedSelectedHeadEnvelopeBoundsApplyFailureRetries(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	}
 
-	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 3, requestCalls)
 }
 
-func TestClaimedSelectedHeadEnvelopeBoundsEmptyResponseRetries(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeRetriesEachCycleAfterEmptyResponse(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
@@ -261,7 +259,7 @@ func TestClaimedSelectedHeadEnvelopeBoundsEmptyResponseRetries(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	}
 
-	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 3, requestCalls)
 }
 
 func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {
@@ -283,7 +281,6 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {
 			releaseSelectedHeadEnvelopeRequest(cfg, claim)
 			close(requestDone)
 		},
-		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
 	})
 	<-requestDone
 
@@ -324,6 +321,34 @@ func TestClaimedSelectedHeadEnvelopeRetriesTransientApplyFailure(t *testing.T) {
 
 	require.Equal(t, 2, requestCalls)
 	require.Equal(t, 2, applyCalls)
+	require.True(t, store.HasEnvelope(headRoot))
+}
+
+func TestClaimedSelectedHeadEnvelopeRetriesUntilSuccessAfterTwoEmptyResponses(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		if requestCalls < 3 {
+			return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}, nil
+		}
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}
+
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 3, requestCalls)
 	require.True(t, store.HasEnvelope(headRoot))
 }
 
@@ -389,7 +414,7 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.Equal(t, 2, requests)
 }
 
-func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
+func TestSelectedHeadEnvelopeRequestCoalescesOnlyWhileRequestIsActive(t *testing.T) {
 	cfg := &Cfg{}
 	firstHead := common.HexToHash("0x1234")
 	secondHead := common.HexToHash("0x5678")
@@ -401,9 +426,10 @@ func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
 	require.False(t, ok)
 	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
-	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
-	require.False(t, ok)
-	require.False(t, wait)
+	secondAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
 	observeSelectedHeadEnvelopeRequest(cfg, secondHead)
 	observeSelectedHeadEnvelopeRequest(cfg, firstHead)
 	thirdAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
@@ -416,25 +442,55 @@ func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, secondHeadAttempt)
-	secondAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	staleReleaseAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.True(t, ok)
 	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
 	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.False(t, ok)
 	require.True(t, wait)
-	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
+	releaseSelectedHeadEnvelopeRequest(cfg, staleReleaseAttempt)
 }
 
-func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
+func TestGloasRecoveryRetainsFailedRootAcrossCursorReset(t *testing.T) {
 	cfg := &Cfg{}
 	scanRoot := common.HexToHash("0x1234")
+	missingRoot := common.HexToHash("0x5678")
 
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, missingRoot))
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, false)
 	require.Equal(t, scanRoot, cfg.gloasEnvelopeRecoveryCursor)
 
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, true)
 	require.Equal(t, common.Hash{}, cfg.gloasEnvelopeRecoveryCursor)
+
+	roots := nextGloasEnvelopeRecoveryBatch(cfg)
+	require.Equal(t, [][32]byte{missingRoot}, roots)
+	finishGloasEnvelopeRecoveryBatch(cfg, roots, func(common.Hash) bool { return false })
+	require.Equal(t, [][32]byte{missingRoot}, nextGloasEnvelopeRecoveryBatch(cfg))
+
+	finishGloasEnvelopeRecoveryBatch(cfg, roots, func(common.Hash) bool { return true })
+	require.Empty(t, nextGloasEnvelopeRecoveryBatch(cfg))
+}
+
+func TestGloasRecoveryPendingQueueIsBoundedAndRotatesFailures(t *testing.T) {
+	cfg := &Cfg{}
+	for i := range maxGloasEnvelopeRecoveryPending {
+		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
+	}
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+
+	first := nextGloasEnvelopeRecoveryBatch(cfg)
+	require.Len(t, first, maxGloasAncestorVisitsPerCycle)
+	finishGloasEnvelopeRecoveryBatch(cfg, first, func(common.Hash) bool { return false })
+	second := nextGloasEnvelopeRecoveryBatch(cfg)
+	require.NotEqual(t, first[0], second[0])
+	require.Equal(t, [32]byte{maxGloasAncestorVisitsPerCycle}, second[0])
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
+
+	finishGloasEnvelopeRecoveryBatch(cfg, second, func(common.Hash) bool { return true })
+	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending-maxGloasAncestorVisitsPerCycle)
+	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
 }
 
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {

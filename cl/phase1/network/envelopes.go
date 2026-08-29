@@ -19,6 +19,7 @@ package network
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -200,30 +201,72 @@ func requestEnvelopesByRangeWithValidator(
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	validate envelopeCandidateValidator,
 ) {
-	startSlot, count, ok := envelopeRequestSlotRange(blocks, requestedRoots)
-	if !ok {
-		return
-	}
-	log.Debug("envelope fetch: falling back to by-range", "startSlot", startSlot, "count", count)
-
 	maxCount := r.MaxRequestPayloads()
 	if maxCount == 0 {
 		log.Debug("envelope fetch: by-range disabled, MAX_REQUEST_PAYLOADS is zero")
 		return
 	}
-	for offset := uint64(0); offset < count; {
+	ranges := envelopeRequestSlotRanges(blocks, requestedRoots, maxCount)
+	if len(ranges) == 0 {
+		return
+	}
+	log.Debug("envelope fetch: falling back to by-range", "ranges", len(ranges))
+	for _, slotRange := range ranges {
 		if ctx.Err() != nil || len(received) == len(requestedRoots) {
 			return
 		}
-		chunkCount := min(maxCount, count-offset)
-		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot+offset, chunkCount)
+		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, slotRange.start, slotRange.count)
 		acceptEnvelopeResponsesWithValidator(envelopes, requestedRoots, received, validate)
 		if err != nil {
 			log.Debug("envelope fetch: by-range error", "err", err)
 			return
 		}
-		offset += chunkCount
 	}
+}
+
+type envelopeSlotRange struct {
+	start uint64
+	count uint64
+}
+
+func envelopeRequestSlotRanges(blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}, maxCount uint64) []envelopeSlotRange {
+	if maxCount == 0 {
+		return nil
+	}
+	uniqueSlots := make(map[uint64]struct{}, len(requestedRoots))
+	for _, block := range blocks {
+		if block == nil || block.Block == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		if _, ok := requestedRoots[root]; ok {
+			uniqueSlots[block.Block.Slot] = struct{}{}
+		}
+	}
+	slots := make([]uint64, 0, len(uniqueSlots))
+	for slot := range uniqueSlots {
+		slots = append(slots, slot)
+	}
+	slices.Sort(slots)
+	if len(slots) == 0 {
+		return nil
+	}
+	ranges := make([]envelopeSlotRange, 0, len(slots))
+	start := slots[0]
+	end := start
+	for _, slot := range slots[1:] {
+		if slot == end+1 && slot-start < maxCount {
+			end = slot
+			continue
+		}
+		ranges = append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
+		start = slot
+		end = slot
+	}
+	return append(ranges, envelopeSlotRange{start: start, count: end - start + 1})
 }
 
 func envelopeRequestSlotRange(blocks []*cltypes.SignedBeaconBlock, requestedRoots map[common.Hash]struct{}) (uint64, uint64, bool) {

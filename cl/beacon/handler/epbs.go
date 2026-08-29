@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -921,6 +922,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
 	}
+	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+		return
+	}
 	if validation == BlockPublishingValidationConsensusAndEquivocation {
 		equivocating, known := a.forkchoiceStore.HasEquivocatingBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if !known {
@@ -960,23 +965,20 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-	}
-
-	// Process through forkchoice so the local node marks the block as FULL.
-	var persistenceErr error
-	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, true, true); err != nil {
-		switch {
-		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
-			persistenceErr = err
-		case errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+	} else {
+		columnSidecars, err = a.dataColumnSidecarsFromCachedEnvelopeBlobs(signedEnvelope)
+		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
-		case errors.Is(err, forkchoice.ErrIgnore):
-			a.logger.Debug("[Beacon REST] execution payload envelope ignored locally", "err", err)
-		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
-			a.logger.Debug("[Beacon REST] execution payload envelope indices queued", "err", err)
-		default:
-			beaconhttp.WrapEndpointError(err).WriteTo(w)
+		}
+		if err := a.persistDataColumnSidecars(r.Context(), signedEnvelope.Message.BeaconBlockRoot, columnSidecars); err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
+	}
+	if validation != BlockPublishingValidationGossip {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
 	}
@@ -997,8 +999,18 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			return
 		}
 	}
-	if persistenceErr != nil {
-		beaconhttp.WrapEndpointError(persistenceErr).WriteTo(w)
+
+	var integrationErr error
+	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, true, true); err != nil {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
+			a.logger.Debug("[Beacon REST] execution payload envelope indices queued", "err", err)
+		} else {
+			integrationErr = err
+		}
+	}
+	if integrationErr != nil {
+		a.logger.Debug("[Beacon REST] execution payload envelope broadcast before integration completed", "err", integrationErr)
+		w.WriteHeader(http.StatusAccepted)
 		return
 	}
 
@@ -1054,6 +1066,54 @@ func (a *ApiHandler) dataColumnSidecarsFromEnvelopeBlobs(
 			return nil, err
 		}
 		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: cellProofs}
+	}
+	return dataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, blockRoot, cellsAndProofs)
+}
+
+func (a *ApiHandler) dataColumnSidecarsFromCachedEnvelopeBlobs(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+) ([]*cltypes.DataColumnSidecar, error) {
+	blockRoot := signedEnvelope.Message.BeaconBlockRoot
+	block, ok := a.forkchoiceStore.GetBlock(blockRoot)
+	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
+		return nil, nil
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return nil, errors.New("beacon block has no execution payload bid")
+	}
+	commitments := &bid.Message.BlobKzgCommitments
+	if commitments.Len() == 0 {
+		return nil, nil
+	}
+	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, commitments.Len())
+	for i := 0; i < commitments.Len(); i++ {
+		commitment := commitments.Get(i)
+		if commitment == nil {
+			return nil, fmt.Errorf("missing blob commitment %d", i)
+		}
+		bundle, ok := a.blobBundles.Get(common.Bytes48(*commitment))
+		if !ok || bundle.Blob == nil {
+			return nil, fmt.Errorf("missing cached blob bundle for commitment %x", commitment)
+		}
+		if bundle.Commitment != common.Bytes48(*commitment) {
+			return nil, fmt.Errorf("cached blob bundle commitment mismatch at index %d", i)
+		}
+		if len(bundle.KzgProofs) != int(a.beaconChainCfg.NumberOfColumns) {
+			return nil, fmt.Errorf("cached blob bundle has %d proofs, expected %d", len(bundle.KzgProofs), a.beaconChainCfg.NumberOfColumns)
+		}
+		cells, err := das.ComputeCells(bundle.Blob)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute cells for blob %d: %w", i, err)
+		}
+		if len(cells) != int(a.beaconChainCfg.NumberOfColumns) {
+			return nil, fmt.Errorf("cached blob produced %d cells, expected %d", len(cells), a.beaconChainCfg.NumberOfColumns)
+		}
+		proofs := make([]cltypes.KZGProof, len(bundle.KzgProofs))
+		for j := range bundle.KzgProofs {
+			proofs[j] = cltypes.KZGProof(bundle.KzgProofs[j])
+		}
+		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
 	}
 	return dataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, blockRoot, cellsAndProofs)
 }

@@ -368,6 +368,39 @@ func TestTrackedSkippedFullBlockCapacityReliefReturnsStalledWithoutLosingEntries
 	require.Equal(t, want, tracker.pending)
 }
 
+func TestTrackedSkippedFullBlockCapacityReliefHasOverallDeadline(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	want := slices.Clone(tracker.pending)
+	attempts := 0
+	started := time.Now()
+
+	result := relieveTrackedHistoryBackfillWithin(context.Background(), tracker, 20*time.Millisecond,
+		func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			attempts++
+			<-ctx.Done()
+			return pending
+		})
+
+	require.Equal(t, trackedHistoryStalled, result)
+	require.Equal(t, 1, attempts)
+	require.Less(t, time.Since(started), time.Second)
+	require.Equal(t, want, tracker.pending)
+}
+
+func TestTrackedSkippedFullBlockCapacityReliefPreservesCallerCancellation(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	result := relieveTrackedHistoryBackfillWithin(ctx, tracker, time.Second,
+		func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock {
+			cancel()
+			return tracker.pending[:skippedEnvelopeRecoveryBatchSize]
+		})
+
+	require.Equal(t, trackedHistoryCanceled, result)
+	require.Len(t, tracker.pending, 64)
+}
+
 func TestWaitForHistoryDownloadReadyReturnsOnStalledCapacity(t *testing.T) {
 	stalled := make(chan struct{}, 1)
 	stalled <- struct{}{}

@@ -26,6 +26,7 @@ import (
 const (
 	maxGloasVerificationSweepPerCycle = 32
 	maxGloasAncestorVisitsPerCycle    = 32
+	maxGloasEnvelopeRecoveryPending   = 128
 	maxPendingGloasPayloadsPerCycle   = 32
 	gloasPayloadRetryBudget           = 2 * time.Second
 )
@@ -428,8 +429,6 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 		return
 	}
 
-	missingRoots := make([][32]byte, 0, maxGloasAncestorVisitsPerCycle)
-
 	finalizedSlot := cfg.forkChoice.FinalizedSlot()
 	var directExtensionParent common.Hash
 	if cfg.gloasEnvelopeRecoveryHead != (common.Hash{}) && cfg.gloasEnvelopeRecoveryHead != headRoot {
@@ -442,7 +441,9 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 			if oldOK && oldHeadBlock != nil && newBid != nil && newBid.Message != nil {
 				oldBid := oldHeadBlock.Block.Body.GetSignedExecutionPayloadBid()
 				if oldBid != nil && oldBid.Message != nil && newBid.Message.ParentBlockHash == oldBid.Message.BlockHash && !cfg.forkChoice.HasEnvelope(cfg.gloasEnvelopeRecoveryHead) {
-					missingRoots = append(missingRoots, [32]byte(cfg.gloasEnvelopeRecoveryHead))
+					if !trackGloasEnvelopeRecoveryRoot(cfg, cfg.gloasEnvelopeRecoveryHead) {
+						directExtensionParent = common.Hash{}
+					}
 				}
 			}
 		}
@@ -489,24 +490,66 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 
 		childBid := childBlock.Block.Body.GetSignedExecutionPayloadBid()
 		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-		childBlock = parentBlock
-		scanRoot = common.Hash(parentRoot)
 		if childBid == nil || childBid.Message == nil || parentBid == nil || parentBid.Message == nil {
+			childBlock = parentBlock
+			scanRoot = common.Hash(parentRoot)
 			continue
 		}
 
 		if childBid.Message.ParentBlockHash == parentBid.Message.BlockHash {
-			// Parent is FULL — check whether its envelope is present.
-			if !cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
-				missingRoots = append(missingRoots, parentRoot)
+			if !cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) && !trackGloasEnvelopeRecoveryRoot(cfg, common.Hash(parentRoot)) {
+				break
 			}
 		}
+		childBlock = parentBlock
+		scanRoot = common.Hash(parentRoot)
 	}
+	missingRoots := nextGloasEnvelopeRecoveryBatch(cfg)
 	if len(missingRoots) > 0 {
 		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
 		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+		finishGloasEnvelopeRecoveryBatch(cfg, missingRoots, cfg.forkChoice.HasEnvelope)
 	}
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, completedScan)
+}
+
+func trackGloasEnvelopeRecoveryRoot(cfg *Cfg, root common.Hash) bool {
+	if slices.Contains(cfg.gloasEnvelopeRecoveryPending, root) {
+		return true
+	}
+	if len(cfg.gloasEnvelopeRecoveryPending) >= maxGloasEnvelopeRecoveryPending {
+		return false
+	}
+	cfg.gloasEnvelopeRecoveryPending = append(cfg.gloasEnvelopeRecoveryPending, root)
+	return true
+}
+
+func nextGloasEnvelopeRecoveryBatch(cfg *Cfg) [][32]byte {
+	count := min(len(cfg.gloasEnvelopeRecoveryPending), maxGloasAncestorVisitsPerCycle)
+	roots := make([][32]byte, count)
+	for i := range count {
+		roots[i] = cfg.gloasEnvelopeRecoveryPending[i]
+	}
+	return roots
+}
+
+func finishGloasEnvelopeRecoveryBatch(cfg *Cfg, roots [][32]byte, hasEnvelope func(common.Hash) bool) {
+	attempted := make(map[common.Hash]struct{}, len(roots))
+	for _, root := range roots {
+		attempted[common.Hash(root)] = struct{}{}
+	}
+	retained := make([]common.Hash, 0, len(cfg.gloasEnvelopeRecoveryPending))
+	for _, root := range cfg.gloasEnvelopeRecoveryPending {
+		if _, ok := attempted[root]; !ok {
+			retained = append(retained, root)
+		}
+	}
+	for _, root := range roots {
+		if !hasEnvelope(common.Hash(root)) {
+			retained = append(retained, common.Hash(root))
+		}
+	}
+	cfg.gloasEnvelopeRecoveryPending = retained
 }
 
 func advanceGloasEnvelopeRecoveryCursor(cfg *Cfg, scanRoot common.Hash, completedScan bool) {
@@ -573,8 +616,7 @@ func ensureAnchorEnvelopeForChild(
 type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
 
 type selectedHeadEnvelopeRequestHooks struct {
-	done  func()
-	retry func()
+	done func()
 }
 
 func waitForSelectedHeadEnvelope(
@@ -602,29 +644,17 @@ func waitForSelectedHeadEnvelope(
 			}
 			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
 			if err != nil {
-				if hooks.retry != nil {
-					hooks.retry()
-				}
 				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
 				return
 			}
 			envelope := envelopes[headRoot]
 			if envelope == nil {
-				if hooks.retry != nil {
-					hooks.retry()
-				}
 				return
 			}
 			if pollCtx.Err() != nil {
-				if hooks.retry != nil {
-					hooks.retry()
-				}
 				return
 			}
 			if err := store.OnExecutionPayload(pollCtx, envelope, true, validatePayload); err != nil {
-				if hooks.retry != nil {
-					hooks.retry()
-				}
 				log.Debug("[chainTipSync] failed to apply selected head envelope", "headRoot", headRoot, "err", err)
 			}
 		}()
@@ -655,8 +685,6 @@ func observeSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) {
 	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
 	if cfg.gloasHeadEnvelopeRequestHead != headRoot {
 		cfg.gloasHeadEnvelopeRequestHead = headRoot
-		cfg.gloasHeadEnvelopeAttempted = false
-		cfg.gloasHeadEnvelopeRetryUsed = false
 	}
 }
 
@@ -665,19 +693,13 @@ func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) (selectedH
 	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
 	if cfg.gloasHeadEnvelopeRequestHead != headRoot {
 		cfg.gloasHeadEnvelopeRequestHead = headRoot
-		cfg.gloasHeadEnvelopeAttempted = false
-		cfg.gloasHeadEnvelopeRetryUsed = false
 	}
 	if _, ok := cfg.gloasHeadEnvelopeRequests[headRoot]; ok {
 		return selectedHeadEnvelopeRequestClaim{}, false, true
 	}
-	if cfg.gloasHeadEnvelopeAttempted {
-		return selectedHeadEnvelopeRequestClaim{}, false, false
-	}
 	if cfg.gloasHeadEnvelopeRequests == nil {
 		cfg.gloasHeadEnvelopeRequests = make(map[common.Hash]uint64)
 	}
-	cfg.gloasHeadEnvelopeAttempted = true
 	cfg.gloasHeadEnvelopeRequestID++
 	id := cfg.gloasHeadEnvelopeRequestID
 	cfg.gloasHeadEnvelopeRequests[headRoot] = id
@@ -689,15 +711,6 @@ func releaseSelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequ
 	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
 	if cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
 		delete(cfg.gloasHeadEnvelopeRequests, claim.root)
-	}
-}
-
-func retrySelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequestClaim) {
-	cfg.gloasHeadEnvelopeRequestMu.Lock()
-	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
-	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id && !cfg.gloasHeadEnvelopeRetryUsed {
-		cfg.gloasHeadEnvelopeRetryUsed = true
-		cfg.gloasHeadEnvelopeAttempted = false
 	}
 }
 
@@ -717,7 +730,6 @@ func waitForClaimedSelectedHeadEnvelope(
 	hooks := selectedHeadEnvelopeRequestHooks{}
 	if requestFromPeer {
 		hooks.done = func() { releaseSelectedHeadEnvelopeRequest(cfg, claim) }
-		hooks.retry = func() { retrySelectedHeadEnvelopeRequest(cfg, claim) }
 	}
 	waitForSelectedHeadEnvelope(ctx, store, requestEnvelopes, headRoot, timeout, requestFromPeer, validatePayload, hooks)
 }

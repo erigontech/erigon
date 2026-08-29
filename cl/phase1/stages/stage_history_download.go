@@ -66,6 +66,7 @@ const logIntervalTime = 30 * time.Second
 const (
 	skippedEnvelopeRecoveryBatchSize     = 8
 	skippedEnvelopeRecoveryRetryInterval = 10 * time.Second
+	skippedEnvelopeCapacityReliefTimeout = 5 * time.Second
 )
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
@@ -426,7 +427,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
+			cfg.blobDownloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(cfg.antiquary.NotifyBlobBackfilled))
 		}
 
 		if !completeTrackedHistoryBackfill(
@@ -492,20 +493,37 @@ func relieveTrackedHistoryBackfill(
 	tracker skippedFullBlockTracker,
 	recoverEnvelopes func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock,
 ) trackedHistoryRelief {
+	return relieveTrackedHistoryBackfillWithin(ctx, tracker, skippedEnvelopeCapacityReliefTimeout, recoverEnvelopes)
+}
+
+func relieveTrackedHistoryBackfillWithin(
+	ctx context.Context,
+	tracker skippedFullBlockTracker,
+	timeout time.Duration,
+	recoverEnvelopes func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock,
+) trackedHistoryRelief {
+	reliefCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	if tracker.SkippedFullBlocksAtCapacity() {
 		if err := ctx.Err(); err != nil {
 			return trackedHistoryCanceled
 		}
 		pending := tracker.SkippedFullBlocks()
 		for start := 0; start < len(pending) && tracker.SkippedFullBlocksAtCapacity(); start += skippedEnvelopeRecoveryBatchSize {
-			if err := ctx.Err(); err != nil {
-				return trackedHistoryCanceled
+			if err := reliefCtx.Err(); err != nil {
+				if ctx.Err() != nil {
+					return trackedHistoryCanceled
+				}
+				return trackedHistoryStalled
 			}
 			end := min(start+skippedEnvelopeRecoveryBatchSize, len(pending))
 			batch := pending[start:end]
-			failed := recoverEnvelopes(ctx, batch)
+			failed := recoverEnvelopes(reliefCtx, batch)
 			markTrackedHistoryRecovery(tracker, batch, failed)
 		}
+	}
+	if ctx.Err() != nil {
+		return trackedHistoryCanceled
 	}
 	if tracker.SkippedFullBlocksAtCapacity() {
 		return trackedHistoryStalled
