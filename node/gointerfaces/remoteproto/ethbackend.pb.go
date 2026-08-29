@@ -997,6 +997,7 @@ type SubscribeLogsReply struct {
 	TransactionHash  *typesproto.H256       `protobuf:"bytes,7,opt,name=transaction_hash,json=transactionHash,proto3" json:"transaction_hash,omitempty"`
 	TransactionIndex uint64                 `protobuf:"varint,8,opt,name=transaction_index,json=transactionIndex,proto3" json:"transaction_index,omitempty"`
 	Removed          bool                   `protobuf:"varint,9,opt,name=removed,proto3" json:"removed,omitempty"`
+	BlockTimestamp   uint64                 `protobuf:"varint,10,opt,name=block_timestamp,json=blockTimestamp,proto3" json:"block_timestamp,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1092,6 +1093,13 @@ func (x *SubscribeLogsReply) GetRemoved() bool {
 		return x.Removed
 	}
 	return false
+}
+
+func (x *SubscribeLogsReply) GetBlockTimestamp() uint64 {
+	if x != nil {
+		return x.BlockTimestamp
+	}
+	return 0
 }
 
 type ReceiptsFilterRequest struct {
@@ -2403,7 +2411,7 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\taddresses\x18\x02 \x03(\v2\v.types.H160R\taddresses\x12\x1d\n" +
 	"\n" +
 	"all_topics\x18\x03 \x01(\bR\tallTopics\x12#\n" +
-	"\x06topics\x18\x04 \x03(\v2\v.types.H256R\x06topics\"\xdf\x02\n" +
+	"\x06topics\x18\x04 \x03(\v2\v.types.H256R\x06topics\"\x88\x03\n" +
 	"\x12SubscribeLogsReply\x12%\n" +
 	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12*\n" +
 	"\n" +
@@ -2414,7 +2422,9 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x06topics\x18\x06 \x03(\v2\v.types.H256R\x06topics\x126\n" +
 	"\x10transaction_hash\x18\a \x01(\v2\v.types.H256R\x0ftransactionHash\x12+\n" +
 	"\x11transaction_index\x18\b \x01(\x04R\x10transactionIndex\x12\x18\n" +
-	"\aremoved\x18\t \x01(\bR\aremoved\"~\n" +
+	"\aremoved\x18\t \x01(\bR\aremoved\x12'\n" +
+	"\x0fblock_timestamp\x18\n" +
+	" \x01(\x04R\x0eblockTimestamp\"~\n" +
 	"\x15ReceiptsFilterRequest\x12)\n" +
 	"\x10all_transactions\x18\x01 \x01(\bR\x0fallTransactions\x12:\n" +
 	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\"\xe7\x05\n" +

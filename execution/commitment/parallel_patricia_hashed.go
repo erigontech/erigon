@@ -27,6 +27,8 @@ import (
 	"sync/atomic"
 )
 
+var defaultParallelCommitmentWorkers = runtime.NumCPU()
+
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
@@ -41,6 +43,11 @@ type ParallelPatriciaHashed struct {
 
 	leaveDeferredForCaller bool
 	deferredForCaller      []*DeferredBranchUpdate
+
+	// metrics is the round's aggregate: each mount worker counts into its own
+	// Metrics and merges here when it finishes, so the fold loop never touches
+	// a shared cache line.
+	metrics *Metrics
 }
 
 func (p *ParallelPatriciaHashed) DeepLocalFolds() uint64 { return p.deepLocalFolds.Load() }
@@ -50,15 +57,26 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		numWorkers:     runtime.NumCPU(),
+		numWorkers:     defaultParallelCommitmentWorkers,
 		cfg:            cfg,
 	}
+	// Its own, not the template's: the template traverses the skeleton over the
+	// same keys the workers do, so aliasing them counts every key twice.
+	p.metrics = NewMetrics("")
 	return p
+}
+
+// ParallelCommitmentReadTxs returns the maximum read transactions held by nested parallel trie workers.
+// Mounted workers retain their own and storage-base transactions while waiting for the shared child-fold pool.
+func ParallelCommitmentReadTxs() int {
+	foldWorkers := maxFoldConcurrency()
+	mountedWorkers := parallelMountConcurrency(defaultParallelCommitmentWorkers)
+	return 2*mountedWorkers + foldWorkers
 }
 
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	if n <= 0 {
-		n = runtime.NumCPU()
+		n = defaultParallelCommitmentWorkers
 	}
 	p.numWorkers = n
 }
@@ -230,7 +248,7 @@ func (p *ParallelPatriciaHashed) Process(
 		for _, upd := range pu.deferredCombined {
 			putDeferredUpdate(upd)
 		}
-		pu.deferredCombined = pu.deferredCombined[:0]
+		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
 		return nil, mErr
 	}
@@ -250,6 +268,10 @@ func (p *ParallelPatriciaHashed) Process(
 	copy(out, rh)
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
+	if onProgress != nil && p.metrics != nil {
+		n := updates.Size()
+		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
+	}
 	return out, nil
 }
 
@@ -305,8 +327,14 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
 	}
 
-	if _, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch); err != nil {
+	// This path calls PutBranch directly rather than through a BranchEncoder,
+	// so it is the only place the parallel engine's branch writes get counted.
+	n, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch)
+	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
+	}
+	if p.metrics != nil {
+		p.metrics.updateBranch.Add(uint64(n))
 	}
 	return nil
 }

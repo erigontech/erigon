@@ -18,6 +18,10 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 // above this touched-slot count, storage subtree folds concurrently instead of streaming through one worker
 const deepStorageThreshold = 128
 
+func parallelMountConcurrency(numWorkers int) int {
+	return min(numWorkers, maxFoldConcurrency())
+}
+
 // unfold one nibble per step (avoids misplacing the wall)
 func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
 	zero := []byte{0}
@@ -129,7 +133,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 	)
 	foldSem := newFoldSem()
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(min(p.numWorkers, maxFoldConcurrency()))
+	g.SetLimit(parallelMountConcurrency(p.numWorkers))
 
 	childIdx := 0
 	for bm := root.bitmap; bm != 0; {
@@ -138,6 +142,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		ni, ch := nib, child
 		g.Go(func() error {
 			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
+			defer p.metrics.Merge(w.metrics)
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))

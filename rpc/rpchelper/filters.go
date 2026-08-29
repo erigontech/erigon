@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,7 +33,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -97,7 +97,7 @@ type Filters struct {
 	pendingReceiptsUpdate atomic.Bool
 	onNewSnapshot         func()
 
-	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
+	logsStores         *concurrent.SyncMap[LogsSubID, types.RPCLogs]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	trackedSubs        *concurrent.SyncMap[SubscriptionID, trackedSub]
@@ -129,7 +129,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
-		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
+		logsStores:         concurrent.NewSyncMap[LogsSubID, types.RPCLogs](),
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		trackedSubs:        concurrent.NewSyncMap[SubscriptionID, trackedSub](),
@@ -772,58 +772,27 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
-func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
-	sub := newChanSub[*types.Log](size, protocol)
-	id, f := ff.logsSubs.insertLogsFilter(sub)
-
-	// Initialize address and topic maps
-	f.addrs = concurrent.NewSyncMap[common.Address, int]()
-	f.topics = concurrent.NewSyncMap[common.Hash, int]()
-
-	// Handle addresses
-	if len(criteria.Addresses) == 0 {
-		// If no addresses are specified, it means all addresses should be included
-		f.allAddrs = 1
+func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.RPCLog, LogsSubID, error) {
+	if err := criteria.ValidateTopicPositions(); err != nil {
+		return nil, "", err
+	}
+	limits := ff.config.logFilterLimits()
+	if err := limits.Validate(criteria); err != nil {
+		return nil, "", err
+	}
+	var pollingCriteria *filters.FilterCriteria
+	if protocol == ProtocolHTTP {
+		criteria = criteria.Clone()
+		pollingCriteria = &criteria
 	} else {
-		// Limit the number of addresses
-		addressCount := 0
-		for _, addr := range criteria.Addresses {
-			if ff.config.RpcSubscriptionFiltersMaxAddresses == 0 || addressCount < ff.config.RpcSubscriptionFiltersMaxAddresses {
-				f.addrs.Put(addr, 1)
-				addressCount++
-			} else {
-				break
-			}
+		criteria.Topics = slices.Clone(criteria.Topics)
+		for i := range criteria.Topics {
+			criteria.Topics[i] = slices.Clone(criteria.Topics[i])
 		}
 	}
-
-	// Handle topics and track the allowed topics
-	if len(criteria.Topics) == 0 {
-		// If no topics are specified, it means all topics should be included
-		f.allTopics = 1
-	} else {
-		// Limit the number of topics
-		topicCount := 0
-		allowedTopics := make([][]common.Hash, 0, len(criteria.Topics))
-		for _, topics := range criteria.Topics {
-			allowedTopicsRow := []common.Hash{}
-			for _, topic := range topics {
-				if ff.config.RpcSubscriptionFiltersMaxTopics == 0 || topicCount < ff.config.RpcSubscriptionFiltersMaxTopics {
-					f.topics.Put(topic, 1)
-					allowedTopicsRow = append(allowedTopicsRow, topic)
-					topicCount++
-				} else {
-					break
-				}
-			}
-			// Preserve per-position wildcard slots (empty rows) for correct positional matching.
-			allowedTopics = append(allowedTopics, allowedTopicsRow)
-		}
-		f.topicsOriginal = allowedTopics
-	}
-
-	// Add the filter to the list of log filters
-	ff.logsSubs.addLogsFilters(f)
+	sub := newChanSub[*types.RPCLog](size, protocol)
+	f := newLogsFilter(sub, criteria, pollingCriteria)
+	id := ff.logsSubs.insertLogsFilter(f)
 
 	if err := ff.pushRemoteLogsFilter(); err != nil {
 		ff.logsSubs.removeLogsFilter(id)
@@ -832,6 +801,10 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 
 	ff.registerSubscription(SubscriptionID(id), FilterTypeLogs, sub)
 	return sub.ch, id, nil
+}
+
+func (ff *Filters) LogFilterCriteria(id LogsSubID) (filters.FilterCriteria, bool) {
+	return ff.logsSubs.filterCriteria(id)
 }
 
 // loadLogsRequester loads the current logs requester and returns it.
@@ -1052,8 +1025,8 @@ func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.
-func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
-	ff.logsStores.Do(id, func(st []*types.Log, ok bool) ([]*types.Log, bool) {
+func (ff *Filters) AddLogs(id LogsSubID, log *types.RPCLog) {
+	ff.logsStores.Do(id, func(st types.RPCLogs, ok bool) (types.RPCLogs, bool) {
 		// Drop (and clear) the entry when the subscription is gone: reads are gated
 		// on the subscription's existence, so a late write from the forwarding
 		// goroutine draining a closed channel would orphan the entry forever.
@@ -1063,14 +1036,14 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 			return nil, false
 		}
 		if !ok {
-			st = make([]*types.Log, 0)
+			st = make(types.RPCLogs, 0)
 		}
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
 			excessLogs := len(st) + 1 - maxLogs
 			if excessLogs >= len(st) {
-				st = []*types.Log{}
+				st = types.RPCLogs{}
 			} else {
 				st = st[excessLogs:]
 			}
@@ -1084,7 +1057,7 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
-func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
+func (ff *Filters) ReadLogs(id LogsSubID) (types.RPCLogs, bool) {
 	return ff.logsStores.Delete(id)
 }
 

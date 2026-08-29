@@ -2010,7 +2010,7 @@ With state archival enabled, Caplin's indexing database (`<datadir>/caplin/index
 
 For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
 
-* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+* `--caplin.columns-keep-slots` (default: `0`): Number of slots to retain PeerDAS data column sidecars. `0` uses the chain's own spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`, so the retained slot count and the wall-clock duration it covers both follow the chain (on Ethereum mainnet, 131072 slots, ~18 days). Increase this value for DA oracle or rollup nodes that require a longer column history.
 
 Caplin can also be used for [block production](../staking/caplin), aka **staking**.
 
@@ -2322,15 +2322,15 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `100`
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`
 * `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
   * Default: `20000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
   * Set to `0` to remove the limit entirely (use with caution on large ranges).
   * Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
-* `--rpc.logs.querylimit value`: Maximum number of alternative addresses or topics allowed per search position in the `eth_getLogs` filter criteria.
+* `--rpc.logs.querylimit value`: Maximum number of alternative addresses or topics allowed per search position in the `eth_getLogs` and `eth_getFilterLogs` filter criteria.
   * Default: `1000`
-  * Applies to: `eth_getLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`
   * Set to `0` or a negative value for no limit.
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
@@ -2358,9 +2358,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
   * Default: `10000`
-* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
+* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses accepted per log subscription.
   * Default: `0`
-* `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
+* `--rpc.subscription.filters.maxtopics value`: Maximum topic alternatives accepted across all positions per log subscription.
   * Default: `0`
 * `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
   * Default: `5m0s`
@@ -2579,7 +2579,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
-  * Default: `131072` (~18 days)
+  * Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
@@ -4314,10 +4314,10 @@ Flags:
       --rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)
       --rpc.slow duration                           Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call
       --rpc.streaming.disable                       Erigon has enabled json streaming for some heavy endpoints (like trace_*). It's a trade-off: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)
-      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses per subscription to filter logs by.
+      --rpc.subscription.filters.maxaddresses int   Maximum number of addresses accepted per log subscription.
       --rpc.subscription.filters.maxheaders int     Maximum number of block headers to store per subscription.
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
-      --rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
+      --rpc.subscription.filters.maxtopics int      Maximum number of topic alternatives accepted across all positions per log subscription.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
@@ -4970,25 +4970,46 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` is an Erigon extension that retrieves multiple storage slots for a given account in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
 
 **Parameters**
 
-| Parameter    | Type             | Description                                          |
-| ------------ | ---------------- | ---------------------------------------------------- |
-| address      | STRING           | The account address to query storage for             |
-| storageKeys  | ARRAY of STRING  | List of 32-byte storage slot keys (hex-encoded)      |
-| blockNumber  | STRING or NUMBER | Block number or tag (`"latest"`, `"earliest"`, etc.) |
+| Parameter   | Type             | Description                                                                                       |
+| ----------- | ---------------- | ------------------------------------------------------------------------------------------------- |
+| requests    | OBJECT           | Maps each account address to an array of 32-byte storage slot keys (hex-encoded)                   |
+| blockNumber | STRING or NUMBER | Optional. Block number, block hash or tag (`"latest"`, `"earliest"`, etc.). Defaults to `"latest"` |
 
 **Example**
 
 ```bash
-curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":[{"0xdAC17F958D2ee523a2206206994597C13D831ec7":["0x0000000000000000000000000000000000000000000000000000000000000000","0x0000000000000000000000000000000000000000000000000000000000000002"],"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48":["0x0000000000000000000000000000000000000000000000000000000000000002"]},"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
 
-An object mapping each requested storage key to its 32-byte value.
+An object mapping each requested address to an array of 32-byte values, in the same order as the slot keys requested for that address. Slots that were never written return zero.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "0xdac17f958d2ee523a2206206994597c13d831ec7": [
+      "0x000000000000000000000000c6cde7c39eb2f0f0095f41570af89efc2c1ea828",
+      "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": [
+      "0x0000000000000000000000000a06be16275b95a7d2567fbdae118b36c7da78f9"
+    ]
+  }
+}
+```
+
+**Limits**
+
+* A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
+* An empty `requests` object returns error code `-32602` with the message `empty request`.
+* When `blockNumber` is a block hash, the block must be canonical.
 
 ---
 
@@ -5915,7 +5936,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | --- | --- | --- |
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
-| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. See **TraceEntry fields** below. |
+| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
 | `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
@@ -6016,7 +6037,7 @@ Executes the given call and returns a number of possible traces for it.
 
 #### Returns
 
-`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
+`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; `stateDiff` and `vmTrace` are `null` when not requested, while `trace` is an empty array. See [Response Fields Reference](#response-fields-reference) for full field semantics.
 
 #### Example
 
@@ -6582,13 +6603,15 @@ Response
 URL: https://docs.erigon.tech/interacting-with-erigon/txpool
 
 
-The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending, queued, and base fee transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
+The `txpool` namespace provides methods for inspecting and managing the transaction pool (mempool) in Erigon. These methods allow you to view pending and queued transactions, providing insight into the current state of unconfirmed transactions. In Erigon, the `txpool` namespace is implemented through the `TxPoolAPI` interface and `TxPoolAPIImpl` struct.
 
 The TxPool namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon. These methods are particularly useful for monitoring transaction pool status and debugging transaction submission issues.
 
 ### Transaction Pool Architecture
 
 * Erigon's transaction pool is organized into three sub-pools: pending (executable), baseFee (insufficient base fee), and queued (nonce gaps)
+* The `txpool_content`, `txpool_contentFrom` and `txpool_status` methods expose only the `pending` and `queued` categories, as defined by the `ethereum/execution-apis` specification. Transactions in the internal baseFee sub-pool are nonce-ready and otherwise valid, but are not executable at the current base fee: they wait for the fee condition to change. They are reported as pending, matching Geth
+* Blob transactions (type 3) are not reported by `txpool_content` and `txpool_contentFrom`, matching Geth and Nethermind. They are still counted by `txpool_status`
 * The pool can run either integrated within the main Erigon process or as a separate service for scalability
 * Transaction pool methods communicate via gRPC with the TxPool service when running in external mode
 
@@ -6625,7 +6648,7 @@ The TxPool namespace must be explicitly enabled using the `--http.api` flag when
 
 ## **txpool\_content**
 
-Returns the content of the transaction pool, organized by sender address and categorized into pending, queued, and baseFee sub-pools.
+Returns the content of the transaction pool, organized by sender address and categorized into pending and queued transactions. Blob transactions are not returned.
 
 **Parameters**
 
@@ -6643,14 +6666,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":"1"}
 | ------- | --------------------------------------------------- |
 | Object  | Transaction pool content organized by sub-pool type |
 | pending | Object                                              |
-| baseFee | Object                                              |
 | queued  | Object                                              |
 
 ***
 
 ## **txpool\_contentFrom**
 
-Returns the content of the transaction pool for a specific sender address, showing all transactions from that address across all sub-pools.
+Returns the content of the transaction pool for a specific sender address, categorized into pending and queued transactions. The same rules as `txpool_content` apply.
 
 **Parameters**
 
@@ -6670,14 +6692,13 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e
 | ------- | -------------------------------------------------- |
 | Object  | Transaction pool content for the specified address |
 | pending | Object                                             |
-| baseFee | Object                                             |
 | queued  | Object                                             |
 
 ***
 
 ## **txpool\_status**
 
-Returns the current status of the transaction pool, including the count of transactions in each sub-pool.
+Returns the current status of the transaction pool, with the count of pending and queued transactions.
 
 **Parameters**
 
@@ -6695,7 +6716,6 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":"1"}'
 | ------- | ------------------------------ |
 | Object  | Transaction pool status counts |
 | pending | QUANTITY                       |
-| baseFee | QUANTITY                       |
 | queued  | QUANTITY                       |
 
 ---
