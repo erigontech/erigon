@@ -42,6 +42,25 @@ The `debug` namespace is intended for debugging and development purposes, not fo
 
 ***
 
+## Opcode logger configuration
+
+The `debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceTransaction`,
+`debug_traceCall`, and `debug_traceCallMany` methods accept the structured opcode logger
+configuration when the request does not specify a named `tracer`. The logger configuration
+supports these fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `enableMemory` | BOOLEAN | Include memory words for each opcode. |
+| `disableStack` | BOOLEAN | Omit the opcode stack. |
+| `disableStorage` | BOOLEAN | Omit SLOAD/SSTORE state. |
+| `enableReturnData` | BOOLEAN | Include return data for each opcode. |
+| `debug` | BOOLEAN | Print the top-level return data to the node log. |
+| `limit` | QUANTITY | Maximum opcode steps to capture; `0` means unlimited. Negative values are rejected. |
+
+For example, `{"limit":1000,"disableStorage":true}` captures at most 1000 opcode steps
+without storage snapshots.
+
 ## JSON-RPC Specification
 
 ### debug\_getRawReceipts

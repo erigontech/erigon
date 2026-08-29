@@ -26,9 +26,9 @@ func TestReplacePlainKeysRejectsEdgeRecord(t *testing.T) {
 	d := recordTestData("branch", nil)
 	record := EncodeBranchChild(0, &d)
 
-	_, err := BranchData(record).ReplacePlainKeys(nil, func([]byte, bool) ([]byte, error) {
+	_, err := BranchData(record).ReplacePlainKeysForFormat(nil, func([]byte, bool) ([]byte, error) {
 		return nil, nil
-	})
+	}, true)
 	require.ErrorIs(t, err, ErrEdgeRecord, "ReplacePlainKeys accepted a %d-byte edge record: %x", len(record), record)
 }
 
@@ -44,36 +44,36 @@ func TestLegacyRowParsersRejectEdgeRecord(t *testing.T) {
 		{
 			name: "decodeCells",
 			call: func() error {
-				_, _, _, err := record.decodeCells()
+				_, _, _, err := record.decodeCellsForFormat(true)
 				return err
 			},
 		},
 		{
 			name: "Validate",
-			call: func() error { return record.Validate(nil) },
+			call: func() error { return record.ValidateForFormat(nil, true) },
 		},
 		{
 			name: "IsComplete",
 			call: func() error {
-				_, err := record.IsComplete()
+				_, err := record.IsCompleteForFormat(true)
 				return err
 			},
 		},
 		{
 			name: "ChildCount",
 			call: func() error {
-				_, err := record.ChildCount()
+				_, err := record.ChildCountForFormat(true)
 				return err
 			},
 		},
 		{
 			name: "VerifyBranchHashes",
-			call: func() error { return VerifyBranchHashes(nil, record, nil, nil) },
+			call: func() error { return VerifyBranchHashesForFormat(nil, record, nil, nil, true) },
 		},
 		{
 			name: "DecodeBranchAndCollectStat",
 			call: func() error {
-				_, err := DecodeBranchAndCollectStat([]byte{0x01}, record, VariantHexPatriciaTrie)
+				_, err := DecodeBranchAndCollectStatForFormat([]byte{0x01}, record, VariantHexPatriciaTrie, true)
 				return err
 			},
 		},
@@ -84,4 +84,16 @@ func TestLegacyRowParsersRejectEdgeRecord(t *testing.T) {
 			require.ErrorIs(t, test.call(), ErrEdgeRecord, "%s accepted an edge record: %x", test.name, record)
 		})
 	}
+}
+
+func TestLegacyRowWithEdgeShapedPrefixIsParsedAsLegacy(t *testing.T) {
+	var cells [16]cellEncodeData
+	cells[12] = recordTestData("branch", nil)
+	legacy, err := NewBranchEncoder(1024).EncodeBranch(1<<12, 1<<12, 1<<12, &cells)
+	require.NoError(t, err)
+	require.True(t, BranchData(legacy).IsEdgeRecord())
+
+	count, err := BranchData(legacy).ChildCount()
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }

@@ -22,6 +22,20 @@ For API usage refer to the below official resources:
 
 Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
 
+### Logs and filters
+
+`eth_getLogs` and `eth_getFilterLogs` accept `fromBlock`/`toBlock` or `blockHash`, an optional
+`address` (one address or an array), and `topics`. Topic positions are ANDed; alternatives
+within one position are ORed, and `null` is a wildcard. A filter supports at most four topic
+positions. Log results include `blockTimestamp` as a hexadecimal Unix timestamp.
+
+The range and result limits are configured with `--rpc.blockrange.limit`,
+`--rpc.logs.maxresults`, and `--rpc.logs.querylimit`. The query limit bounds the number of
+alternative addresses or topic values at each search position. Log subscriptions additionally
+use `--rpc.subscription.filters.maxaddresses` and
+`--rpc.subscription.filters.maxtopics`; the latter counts topic alternatives across all
+positions. A value of `0` disables each of these limits where supported.
+
 ### eth\_getProof
 
 `eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.

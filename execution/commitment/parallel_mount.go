@@ -300,6 +300,6 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 		copy(c.hash[:], sr.hash[:sr.hashLen])
 	}
 	c.branchMask = sr.branchMask
-	c.storageMask = sr.storageMask
+	c.storageMask = sr.branchMask
 	c.stateHashLen = 0
 }

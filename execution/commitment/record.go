@@ -99,7 +99,7 @@ func SynthesizeBranchRow(mask uint16, maskKnown bool, records [16][]byte, record
 				return BranchRecordRead{}, fmt.Errorf("decode edge record at nibble %d: %w", nibble, err)
 			}
 			cells[nibble] = cellEncodeDataFromCell(&c)
-			if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
+			if recordMask != 0 {
 				result.ChildMasks[nibble] = recordMask
 				result.ChildMasksKnown |= bit
 			}

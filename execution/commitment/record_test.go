@@ -151,6 +151,28 @@ func TestEncodeLeafChildOmitsEmbeddedHash(t *testing.T) {
 	require.Zero(t, got.stateHashLen)
 }
 
+func TestSynthesizeBranchRowCarriesLeafChildMask(t *testing.T) {
+	d := recordTestData("account-storage", nil)
+	var records [16][]byte
+	records[0] = EncodeLeafChild(&d)
+
+	read, err := SynthesizeBranchRow(1, true, records, 1, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint16(1), read.ChildMasksKnown)
+	require.Equal(t, d.storageMask, read.ChildMasks[0])
+}
+
+func TestSynthesizeBranchRowDoesNotMarkSingletonStorageAsBranch(t *testing.T) {
+	d := recordTestData("account-storage", nil)
+	d.storageMask = 0
+	var records [16][]byte
+	records[0] = EncodeLeafChild(&d)
+
+	read, err := SynthesizeBranchRow(1, true, records, 1, nil)
+	require.NoError(t, err)
+	require.Zero(t, read.ChildMasksKnown)
+}
+
 func TestDecodeRecordIntoRoundTrip(t *testing.T) {
 	for _, shape := range []string{"branch", "storage", "account", "account-storage"} {
 		extensions := [][]byte{nil}

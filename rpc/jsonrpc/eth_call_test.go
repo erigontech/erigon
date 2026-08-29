@@ -697,6 +697,7 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	statecfg.Schema.CommitmentDomain.EdgeRecordsInCommitment = false
 	t.Cleanup(func() {
 		statecfg.Schema = previousSchema
 	})

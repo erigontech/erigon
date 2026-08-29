@@ -1697,6 +1697,11 @@ func TestPutDataChunkRejectsOversized(t *testing.T) {
 			require.Equal(t, tc.pooled, isPooledChunk(make([]byte, tc.length)))
 		})
 	}
+
+	putDataChunk(make([]byte, dataChunkSize+7))
+	chunk := getDataChunk()
+	require.Len(t, chunk, dataChunkSize)
+	putDataChunk(chunk)
 }
 
 // disposeProbe records whether the collector still owned its data chunks when

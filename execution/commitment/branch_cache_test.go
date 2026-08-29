@@ -384,6 +384,21 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	require.Equal(t, []byte("d"), got)
 }
 
+func TestBranchCache_LegacyStateKeyDoesNotBlockRoot(t *testing.T) {
+	c := NewBranchCache(100, false)
+	defer c.Close()
+
+	rootKey := []byte{0x00}
+	c.Put(rootKey, []byte("root"), 1, 1)
+	got, _, ok := c.Get(rootKey)
+	require.True(t, ok)
+	require.Equal(t, []byte("root"), got)
+
+	c.Put(LegacyKeyCommitmentState, []byte("checkpoint"), 1, 1)
+	_, _, ok = c.Get(LegacyKeyCommitmentState)
+	require.False(t, ok)
+}
+
 func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 	c := NewBranchCache(DefaultBranchCacheTailCapacity)
 	defer c.Close()

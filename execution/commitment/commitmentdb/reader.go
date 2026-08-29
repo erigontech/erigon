@@ -182,8 +182,9 @@ func (r *HistoryStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, 
 			if err != nil {
 				return records, present, step, err
 			}
+			found = value != nil
 		}
-		if len(value) > 0 {
+		if found {
 			records[nibble] = bytes.Clone(value)
 			present |= bit
 		}

@@ -224,6 +224,11 @@ func (p *ParallelPatriciaHashed) Process(
 	if p.template == nil {
 		return nil, errors.New("ParallelPatriciaHashed.Process called after Release")
 	}
+	updatesCount := updates.Size()
+	if p.metrics != nil {
+		p.metrics.Reset()
+		p.metrics.updates.Store(updatesCount)
+	}
 
 	p.rootHash.Store(nil)
 	p.deepLocalFolds.Store(0)
@@ -266,8 +271,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
-		n := updates.Size()
-		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
+		onProgress(&CommitProgress{KeyIndex: updatesCount, UpdateCount: updatesCount, Metrics: p.metrics.AsValues()})
 	}
 	return out, nil
 }

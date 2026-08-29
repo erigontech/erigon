@@ -38,10 +38,6 @@ var KeyCommitmentState = []byte{0x00}
 // LegacyKeyCommitmentState is the pre-v3 commitment state key.
 var LegacyKeyCommitmentState = []byte("state")
 
-func isCommitmentStateKey(prefix []byte) bool {
-	return IsCommitmentStateKey(prefix)
-}
-
 // IsCommitmentStateKey reports whether prefix identifies a commitment state record.
 func IsCommitmentStateKey(prefix []byte) bool {
 	return bytes.Equal(prefix, KeyCommitmentState) || bytes.Equal(prefix, LegacyKeyCommitmentState)
@@ -77,7 +73,8 @@ type BranchCache struct {
 
 	// trunkDisabled (env BRANCH_CACHE_TRUNK_DISABLE): A/B switch since the LRU
 	// self-heals stale entries via eviction and the trunk does not.
-	trunkDisabled bool
+	trunkDisabled           bool
+	edgeRecordsInCommitment atomic.Bool
 
 	rootHits, rootMisses     atomic.Uint64
 	trunkHits, trunkMisses   atomic.Uint64
@@ -244,7 +241,7 @@ func (c *BranchCache) unlockAllPutStripes() {
 	}
 }
 
-func NewBranchCache(tailCapacity int) *BranchCache {
+func NewBranchCache(tailCapacity int, edgeRecords ...bool) *BranchCache {
 	if tailCapacity <= 0 {
 		panic(fmt.Sprintf("BranchCache: tailCapacity must be positive, got %d", tailCapacity))
 	}
@@ -255,8 +252,19 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		accountTrunk:  newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
+	if len(edgeRecords) == 0 || edgeRecords[0] {
+		bc.edgeRecordsInCommitment.Store(true)
+	}
 	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
+}
+
+func (c *BranchCache) SetEdgeRecords(edgeRecords bool) {
+	c.edgeRecordsInCommitment.Store(edgeRecords)
+}
+
+func (c *BranchCache) isCommitmentStateKey(prefix []byte) bool {
+	return IsCommitmentStateKeyForFormat(prefix, c.edgeRecordsInCommitment.Load())
 }
 
 func (c *BranchCache) Close() {
@@ -523,7 +531,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if c.isCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -559,7 +567,7 @@ func (c *BranchCache) PinnedCount() int {
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
+	if c.isCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
@@ -578,7 +586,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if c.isCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))

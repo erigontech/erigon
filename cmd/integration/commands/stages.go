@@ -674,6 +674,9 @@ func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (targ
 	if target == 0 {
 		target = sendersProgress
 	}
+	if target > sendersProgress {
+		target = sendersProgress
+	}
 	if limit > 0 {
 		to := sendersProgress
 		if execProgress < sendersProgress {

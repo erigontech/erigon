@@ -439,7 +439,7 @@ When applying this design to a new Docusaurus project:
 
 - [ ] Install non-default packages: `@easyops-cn/docusaurus-search-local`
 - [ ] Copy `src/css/custom.css` (Google Fonts imports + all CSS variables)
-- [ ] Copy `src/theme/Footer/index.tsx` and update column links/addresses
+- [ ] Copy `src/theme/Footer/index.tsx` and update social/legal links and branding
 - [ ] Copy `src/theme/NotFound/index.tsx` + `src/theme/NotFound/Content/index.tsx` and update nav card links
 - [ ] Add `img/logo-icon-orange.png` (or replace with project logo) to `static/img/`
 - [ ] Configure navbar HTML items (blog btn, release btn, github icon) with correct URLs

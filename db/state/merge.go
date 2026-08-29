@@ -468,22 +468,25 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
 			var commitmentStateKey []byte
+			commitmentEdgeRecords := false
 			if dt.name == kv.CommitmentDomain {
-				if statecfg.CommitmentEdgeRecords(item.version) {
+				commitmentEdgeRecords = statecfg.CommitmentEdgeRecords(item.version)
+				if commitmentEdgeRecords {
 					commitmentStateKey = commitmentdb.KeyCommitmentState
 				} else {
 					commitmentStateKey = commitmentdb.LegacyKeyCommitmentState
 				}
 			}
 			heap.Push(&cp, &CursorItem{
-				t:                  FILE_CURSOR,
-				kvReader:           g,
-				key:                key,
-				val:                val,
-				startTxNum:         item.startTxNum,
-				endTxNum:           item.endTxNum,
-				commitmentStateKey: commitmentStateKey,
-				reverse:            true,
+				t:                     FILE_CURSOR,
+				kvReader:              g,
+				key:                   key,
+				val:                   val,
+				startTxNum:            item.startTxNum,
+				endTxNum:              item.endTxNum,
+				commitmentStateKey:    commitmentStateKey,
+				commitmentEdgeRecords: commitmentEdgeRecords,
+				reverse:               true,
 			})
 		}
 	}
@@ -496,12 +499,14 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var lastKey, lastVal []byte
 	var keyFileStartTxNum, keyFileEndTxNum uint64
 	var keyFileCommitmentStateKey []byte
+	var keyFileCommitmentEdgeRecords bool
 	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
 		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		lastFileCommitmentStateKey := cp[0].commitmentStateKey
+		lastFileCommitmentEdgeRecords := cp[0].commitmentEdgeRecords
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
@@ -520,7 +525,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 		if keyBuf != nil {
 			if vt != nil {
-				if !bytes.Equal(keyBuf, keyFileCommitmentStateKey) { // no replacement for state key
+				if !keyFileCommitmentEdgeRecords && !bytes.Equal(keyBuf, keyFileCommitmentStateKey) {
 					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
@@ -539,11 +544,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		valBuf = append(valBuf[:0], lastVal...)
 		keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 		keyFileCommitmentStateKey = lastFileCommitmentStateKey
+		keyFileCommitmentEdgeRecords = lastFileCommitmentEdgeRecords
 		p.Processed.Store(i)
 	}
 	if keyBuf != nil {
 		if vt != nil {
-			if !bytes.Equal(keyBuf, keyFileCommitmentStateKey) { // no replacement for state key
+			if !keyFileCommitmentEdgeRecords && !bytes.Equal(keyBuf, keyFileCommitmentStateKey) {
 				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)

@@ -90,7 +90,7 @@ func TestIntegrityRecordChecksRefuseAnEdgeRecordValue(t *testing.T) {
 	record := edgeBranchRecord()
 	logger := log.New()
 
-	_, _, err := checkDerefBranch(nil, record, nil, nil, nil, nil, "fixture.kv", false, logger)
+	_, _, err := checkDerefBranch(nil, record, nil, nil, nil, nil, "fixture.kv", true, false, logger)
 	requireEdgeRecordRefusal(t, err)
 
 	var hashMismatches, hashChecked atomic.Uint64
@@ -99,6 +99,7 @@ func TestIntegrityRecordChecksRefuseAnEdgeRecordValue(t *testing.T) {
 		true,
 		"fixture.kv",
 		false,
+		true,
 		nil,
 		nil,
 		nil,

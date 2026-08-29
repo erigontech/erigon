@@ -76,12 +76,14 @@ func TestDeepFold_InjectedRootClearsStaleStorage(t *testing.T) {
 	require.True(t, hph.root.loaded.storage(), "precondition: root is flagged storage-loaded")
 
 	acct := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
-	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), cell{hash: common.HexToHash("0x1234"), hashLen: 32})
+	setAccountStorageRoot(hph, KeyToHexNibbleHash(acct[:]), cell{hash: common.HexToHash("0x1234"), hashLen: 32, branchMask: 0x5a3c})
 
 	require.Zerof(t, hph.root.storageAddrLen,
 		"injecting a storage root must clear the stale storage plain key (got len=%d)", hph.root.storageAddrLen)
 	require.Falsef(t, hph.root.loaded.storage(),
 		"injecting a storage root must clear the stale storage-loaded flag")
+	require.Equal(t, uint16(0x5a3c), hph.root.storageMask,
+		"the account leaf must retain the injected storage subtree mask")
 }
 
 func TestDeepFold_InjectedStorageRootWins(t *testing.T) {

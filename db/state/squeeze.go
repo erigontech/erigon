@@ -259,7 +259,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !commitmentdb.IsCommitmentStateKeyForFormat(k, statecfg.CommitmentEdgeRecords(cf.version)) {
+				if !statecfg.CommitmentEdgeRecords(cf.version) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
@@ -340,7 +340,17 @@ func ExpandShortenedKeysInBranch(
 	accountFile, storageFile *FilesItem,
 	startTxNum, endTxNum uint64,
 ) (commitment.BranchData, error) {
-	if branch.IsEdgeRecord() {
+	return ExpandShortenedKeysInBranchForFormat(branch, accounts, storage, accountFile, storageFile, startTxNum, endTxNum, false)
+}
+
+func ExpandShortenedKeysInBranchForFormat(
+	branch commitment.BranchData,
+	accounts, storage *DomainRoTx,
+	accountFile, storageFile *FilesItem,
+	startTxNum, endTxNum uint64,
+	edgeRecords bool,
+) (commitment.BranchData, error) {
+	if edgeRecords {
 		return nil, fmt.Errorf("expand shortened keys: %w", commitment.ErrEdgeRecord)
 	}
 	storageGetter := storage.dataReader(storageFile.decompressor)
@@ -348,7 +358,7 @@ func ExpandShortenedKeysInBranch(
 	logger := log.Root()
 	stepSize := accounts.d.stepSize
 
-	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	return branch.ReplacePlainKeysForFormat(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // not a referenced key, keep as is
@@ -373,7 +383,7 @@ func ExpandShortenedKeysInBranch(
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
 		return apkBuf, nil
-	})
+	}, false)
 }
 
 func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {

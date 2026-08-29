@@ -57,18 +57,11 @@ import (
 var ErrCommitmentEdgeRecordsUnsupported = errors.New("commitment edge-record integrity checks are unsupported")
 
 func isCommitmentStateKeyForFile(key []byte, file state.VisibleFile) bool {
-	return commitmentdb.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(file.Version()))
+	return commitment.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(file.Version()))
 }
 
 func commitmentEdgeRecordsUnsupported(file state.VisibleFile, check string) error {
 	return fmt.Errorf("%w: %s cannot inspect %s as bundled branch rows", ErrCommitmentEdgeRecordsUnsupported, check, filepath.Base(file.Fullpath()))
-}
-
-func commitmentEdgeRecordValueUnsupported(branchKey, branchValue []byte, check, fileName string) error {
-	if !commitment.BranchData(branchValue).IsEdgeRecord() {
-		return nil
-	}
-	return fmt.Errorf("%w: %s cannot inspect edge record at key %x in %s as a bundled branch row", ErrCommitmentEdgeRecordsUnsupported, check, branchKey, fileName)
 }
 
 func rejectCommitmentEdgeRecords(file state.VisibleFile, check string) error {
@@ -447,11 +440,12 @@ func checkDerefBranch(
 	newBranchValueBuf, plainKeyBuf []byte,
 	accReader, storageReader *seg.Reader,
 	fileName string,
+	edgeRecords bool,
 	trace bool,
 	logger log.Logger,
 ) (dc derefCounts, newBranchData commitment.BranchData, retErr error) {
-	if err := commitmentEdgeRecordValueUnsupported(branchKey, branchValue, "CommitmentKvDeref", fileName); err != nil {
-		return derefCounts{}, nil, err
+	if edgeRecords {
+		return derefCounts{}, nil, fmt.Errorf("%w: CommitmentKvDeref cannot inspect edge record at key %x in %s as a bundled branch row", ErrCommitmentEdgeRecordsUnsupported, branchKey, fileName)
 	}
 	branchData := commitment.BranchData(branchValue)
 	var integrityErr error
@@ -609,10 +603,6 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 		v, _ = g.Next(v[:0])
 		if isCommitmentStateKeyForFile(k, file) {
 			continue
-		}
-		if err := commitmentEdgeRecordValueUnsupported(k, v, "CommitmentKvDeref", filepath.Base(file.Fullpath())); err != nil {
-			log.Root().Warn(err.Error())
-			return commitmentFileScan{unsupported: true}
 		}
 		counts.branchKeys++
 		plainAccounts, plainStorages, shortened, err := commitment.BranchData(v).CountPlainKeys()
@@ -777,7 +767,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			var localIntegrityErr error
 			for item := range ch {
 				localCounts.branchKeys++
-				dc, _, err := checkDerefBranch(item.branchKey, item.branchValue, newBranchValueBuf, plainKeyBuf, workerAccReader, workerStorageReader, fileName, trace, logger)
+				dc, _, err := checkDerefBranch(item.branchKey, item.branchValue, newBranchValueBuf, plainKeyBuf, workerAccReader, workerStorageReader, fileName, statecfg.CommitmentEdgeRecords(file.Version()), trace, logger)
 				localCounts.referencedAccounts += dc.referencedAccounts
 				localCounts.plainAccounts += dc.plainAccounts
 				localCounts.referencedStorages += dc.referencedStorages
@@ -1062,15 +1052,6 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			}
 		} else {
-			if edgeErr := commitmentEdgeRecordValueUnsupported(k, v, "CommitmentHistVal", fileName); edgeErr != nil {
-				if failFast {
-					return 0, edgeErr
-				}
-				logger.Warn(edgeErr.Error())
-				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, edgeErr)
-				total++
-				continue
-			}
 			branchData := commitment.BranchData(v)
 			err = branchData.Validate(k)
 			if err != nil {
@@ -1461,14 +1442,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
-		if err := commitmentEdgeRecordValueUnsupported(branchKey, branchValue, "StateVerify", fileName); err != nil {
-			if failFast {
-				return err
-			}
-			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
-			continue
-		}
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
@@ -1694,14 +1667,6 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
 		if isCommitmentStateKeyForFile(branchKey, file) {
-			continue
-		}
-		if err := commitmentEdgeRecordValueUnsupported(branchKey, branchValue, "StateVerify", fileName); err != nil {
-			if failFast {
-				return err
-			}
-			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			continue
 		}
 		branchKeys++
@@ -2099,10 +2064,6 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 		if isCommitmentStateKeyForFile(branchKey, file) {
 			continue
 		}
-		if err := commitmentEdgeRecordValueUnsupported(branchKey, branchValue, "StateVerify", nextFileName); err != nil {
-			return err
-		}
-
 		branchData := commitment.BranchData(branchValue)
 		complete, parseErr := branchData.IsComplete()
 		if parseErr != nil {
@@ -2252,7 +2213,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 						return nil
 					}
 				}
-				if err := verifyHashItem(item, failFast, fileName, isReferencing,
+				if err := verifyHashItem(item, failFast, fileName, isReferencing, statecfg.CommitmentEdgeRecords(file.Version()),
 					preloadedAccValues, preloadedStoValues,
 					accReader, stoReader,
 					plainKeyBuf, valBuf,
@@ -2304,10 +2265,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			if isCommitmentStateKeyForFile(branchKey, file) {
 				continue
 			}
-			if err := commitmentEdgeRecordValueUnsupported(branchKey, branchValue, "StateVerify hash verification", fileName); err != nil {
-				return err
-			}
-
 			branchData := commitment.BranchData(branchValue)
 			complete, parseErr := branchData.IsComplete()
 			if parseErr != nil {
@@ -2358,14 +2315,15 @@ func verifyHashItem(
 	failFast bool,
 	fileName string,
 	isReferencing bool,
+	edgeRecords bool,
 	preloadedAccValues, preloadedStoValues map[string][]byte,
 	accReader, stoReader *seg.Reader,
 	plainKeyBuf, valBuf []byte,
 	hashMismatches, hashChecked *atomic.Uint64,
 	logger log.Logger,
 ) error {
-	if err := commitmentEdgeRecordValueUnsupported(item.branchKey, item.branchValue, "StateVerify hash verification", fileName); err != nil {
-		return err
+	if edgeRecords {
+		return fmt.Errorf("%w: StateVerify cannot inspect edge record at key %x in %s as a bundled branch row", ErrCommitmentEdgeRecordsUnsupported, item.branchKey, fileName)
 	}
 	accountValues := valMapPool.Get().(map[string][]byte)
 	storageValues := valMapPool.Get().(map[string][]byte)

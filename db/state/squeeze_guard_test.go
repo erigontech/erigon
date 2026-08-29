@@ -29,6 +29,6 @@ func TestExpandShortenedKeysInBranchRejectsEdgeRecord(t *testing.T) {
 	record := make([]byte, 1+2+32)
 	record[0] = 0x10
 
-	_, err := state.ExpandShortenedKeysInBranch(commitment.BranchData(record), nil, nil, nil, nil, 0, 0)
+	_, err := state.ExpandShortenedKeysInBranchForFormat(commitment.BranchData(record), nil, nil, nil, nil, 0, 0, true)
 	require.ErrorIs(t, err, commitment.ErrEdgeRecord)
 }

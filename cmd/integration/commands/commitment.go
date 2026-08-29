@@ -1185,7 +1185,7 @@ func sampleCommitmentKeysFromFiles(ctx context.Context, acRo *dbstate.Aggregator
 				}
 				getter.Skip() // skip value
 
-				if commitmentdb.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(f.Version())) {
+				if commitment.IsCommitmentStateKeyForFormat(key, statecfg.CommitmentEdgeRecords(f.Version())) {
 					continue
 				}
 

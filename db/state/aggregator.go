@@ -292,6 +292,9 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 
 func (a *Aggregator) ForTestEdgeRecordsInCommitment(domain kv.Domain, v bool) {
 	a.d[domain].EdgeRecordsInCommitment = v
+	if domain == kv.CommitmentDomain && a.d[domain].branchCache != nil {
+		a.d[domain].branchCache.SetEdgeRecords(v)
+	}
 }
 
 // referencesInCommitmentBranches reads the live commitment flag under the lock; merge and
@@ -323,6 +326,9 @@ func (a *Aggregator) applyEdgeRecordsInCommitment(edgeRecords bool) {
 	}
 	if a.d[kv.CommitmentDomain] != nil {
 		a.d[kv.CommitmentDomain].EdgeRecordsInCommitment = edgeRecords
+		if a.d[kv.CommitmentDomain].branchCache != nil {
+			a.d[kv.CommitmentDomain].branchCache.SetEdgeRecords(edgeRecords)
+		}
 	}
 }
 
@@ -440,7 +446,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	// opt out (e.g. one-shot genesis processing has no cross-block reuse).
 	if dbg.UseStateCache && !a.branchCacheDisabled {
 		if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache == nil {
-			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity)
+			cd.branchCache = commitment.NewBranchCache(commitment.DefaultBranchCacheTailCapacity, cd.EdgeRecordsInCommitment)
 			if !dbg.DisableAdaptivePin {
 				cd.adaptivePinController = commitment.NewAdaptivePinController(
 					cd.branchCache, commitment.DefaultAdaptivePinControllerConfig(), a.logger)

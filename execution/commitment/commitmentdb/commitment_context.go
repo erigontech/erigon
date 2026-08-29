@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/bits"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -406,6 +407,22 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 // BranchChildCount returns the child count of the branch at nibblePrefix, read
 // from the in-memory commitment domain (post-compute state).
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+	if sdc.edgeRecords {
+		nodeKey := nibbles.EncodeKeyV3(nibblePrefix)
+		records, present, _, err := sdc.sharedDomains.ReadCommitmentRecords(tx, nodeKey, 0, false)
+		if err != nil {
+			return 0, err
+		}
+		count := 0
+		for bitset := present; bitset != 0; bitset &= bitset - 1 {
+			bit := bitset & -bitset
+			nibble := bits.TrailingZeros16(bit)
+			if len(records[nibble]) > 0 {
+				count++
+			}
+		}
+		return count, nil
+	}
 	key := nibbles.HexToCompact(nibblePrefix)
 	enc, _, err := sdc.sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{}).GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 	if err != nil {
@@ -789,12 +806,6 @@ var KeyCommitmentState = commitment.KeyCommitmentState
 // LegacyKeyCommitmentState aliases the pre-v3 commitment state key.
 var LegacyKeyCommitmentState = commitment.LegacyKeyCommitmentState
 
-// IsCommitmentStateKeyForFormat reports whether prefix is the state key for the
-// selected bundled-row or edge-record format.
-func IsCommitmentStateKeyForFormat(prefix []byte, edgeRecords bool) bool {
-	return commitment.IsCommitmentStateKeyForFormat(prefix, edgeRecords)
-}
-
 var ErrBehindCommitment = errors.New("behind commitment")
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
@@ -1059,6 +1070,9 @@ func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]
 	legacy, legacyStep, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {
 		return nil, 0, [16]uint16{}, 0, err
+	}
+	if bytes.Equal(pref, commitment.KeyCommitmentState) && isCommitmentStateValue(legacy) {
+		legacy = nil
 	}
 
 	var records [16][]byte

@@ -59,6 +59,8 @@ func TestParallelPatriciaHashedReportsProgress(t *testing.T) {
 	require.Len(t, got, 1, "parallel Process must report the round exactly once")
 	p := got[0]
 	assert.Equal(t, p.UpdateCount, p.KeyIndex, "terminal callback reports a finished round")
+	assert.Equal(t, uint64(len(keys)), p.UpdateCount, "terminal callback reports the input update count")
+	assert.Equal(t, uint64(len(keys)), p.Metrics.Updates, "parallel metrics report the input update count")
 
 	// The counters must describe the whole round, not one worker's slice.
 	m := p.Metrics
