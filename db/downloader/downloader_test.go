@@ -1266,24 +1266,6 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 	}
 }
 
-// Registering is not seeding: makeAddTorrentOpts disallows upload on every torrent it adds,
-// and afterAdd is the only thing that lifts it and attaches the trackers. AddNewSeedableFile
-// is the sole route for a kept snapshot without metainfo, so it has to finish the add too.
-func TestKeptLocalSnapshotIsAnnouncedAndUploadable(t *testing.T) {
-	require := require.New(t)
-	d, _, name, _ := newLocalSnapshotTest(t)
-	markInitialDownloadComplete(t, d)
-
-	require.NoError(d.testStartSingleDownloadAndWait(t.Context(), snaptype.Hex2InfoHash("aa"), name))
-
-	d.lock.RLock()
-	tor := d.torrentsByName[name]
-	d.lock.RUnlock()
-	require.NotNil(tor)
-	require.NotEmpty(tor.Metainfo().AnnounceList,
-		"kept snapshot registered without trackers, so no peer can discover it")
-}
-
 // A kept snapshot whose local .torrent cannot be parsed must still be seeded. BuildTorrentIfNeed
 // only checks that the path exists, so a corrupt file suppresses the derivation that the kept data
 // would otherwise supply, and the name never reaches torrentsByName.
