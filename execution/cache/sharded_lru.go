@@ -49,14 +49,14 @@ type shardedLRU[V any] struct {
 	// the shard at its current size, evicting within it. refundGrow returns a
 	// reservation whose grow lost the race, so a loser cannot strand envelope
 	// bytes and stop another cache from growing.
-	fundGrow   func(slots uint32) bool
-	refundGrow func(slots uint32)
+	fundGrow   func(oldCap, newCap uint32) bool
+	refundGrow func(oldCap, newCap uint32)
 
 	n atomic.Int64
 }
 
 func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, V),
-	fundGrow func(uint32) bool, refundGrow func(uint32)) *shardedLRU[V] {
+	fundGrow func(oldCap, newCap uint32) bool, refundGrow func(oldCap, newCap uint32)) *shardedLRU[V] {
 	shards = max(uint32(math.NextPowerOfTwo(uint64(shards))), 1)
 	s := &shardedLRU[V]{
 		shards:     make([]*freelru.LRU[uint64, V], shards),
@@ -147,7 +147,7 @@ func (s *shardedLRU[V]) Replace(h uint64, v V) (evicted bool) {
 func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 	i := s.idx(h)
 	s.mus[i].Lock()
-	if newCap, reserved, ok := s.growStep(i); ok {
+	if newCap, oldCap, ok := s.growStep(i); ok {
 		// Allocate without the shard lock: the replacement is the largest thing
 		// a grow does, and nothing needs to be excluded while it is built. Several
 		// writers can reach here on the same full shard, so the loser hands its
@@ -158,7 +158,7 @@ func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 		if s.curCap[i] < newCap {
 			s.migrateLocked(i, next, newCap)
 		} else if s.refundGrow != nil {
-			s.refundGrow(reserved)
+			s.refundGrow(oldCap, newCap)
 		}
 	}
 	before := s.shards[i].Len()
@@ -172,16 +172,16 @@ func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 
 // growStep reports the next capacity for shard i, the slots it reserved from the
 // envelope, and whether the step is funded. Called with the shard lock held.
-func (s *shardedLRU[V]) growStep(i uint64) (newCap, reserved uint32, ok bool) {
+func (s *shardedLRU[V]) growStep(i uint64) (newCap, oldCap uint32, ok bool) {
 	if s.curCap[i] >= s.maxCap || s.shards[i].Len() < int(s.curCap[i]) {
 		return 0, 0, false
 	}
-	newCap = min(s.curCap[i]*genericCacheGrowFactor, s.maxCap)
-	reserved = newCap - s.curCap[i]
-	if s.fundGrow != nil && !s.fundGrow(reserved) {
+	oldCap = s.curCap[i]
+	newCap = min(oldCap*genericCacheGrowFactor, s.maxCap)
+	if s.fundGrow != nil && !s.fundGrow(oldCap, newCap) {
 		return 0, 0, false
 	}
-	return newCap, reserved, true
+	return newCap, oldCap, true
 }
 
 // migrateLocked rebuilds shard i one step larger. Only that shard's readers and

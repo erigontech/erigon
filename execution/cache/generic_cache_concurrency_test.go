@@ -18,7 +18,10 @@ package cache
 
 import (
 	"encoding/binary"
+	"fmt"
+	"math"
 	"math/rand"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,6 +33,49 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/maphash"
 )
+
+// The envelope must cover what a cache actually allocates. freelru wraps every
+// value in an element carrying a key, five list indices and an expiry, and
+// over-allocates the table by 25% -- none of which the per-entry payload
+// estimate accounts for, so a byte budget used to buy ~2.5x the RAM it charged.
+func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	// The production ceiling, not a power of two, across the shard counts a
+	// GOMAXPROCS between 8 and 32 produces. A power-of-two capacity divides into
+	// power-of-two shards and lands on the cheapest table ratio, so it can never
+	// observe the rounding that makes a fixed per-slot charge wrong.
+	for _, shards := range []uint32{128, 256, 512} {
+		t.Run(fmt.Sprintf("shards=%d", shards), func(t *testing.T) {
+			slots := c.maxCap
+			require.Positive(t, slots)
+
+			runtime.GC()
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+			gen := c.newShards(slots, slots, shards)
+			runtime.GC()
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(gen)
+
+			allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+			// Only the overhead share of the reserve may cover the table. Comparing
+			// the whole per-slot charge would let the payload estimate -- which pays
+			// for values the table does not hold -- mask an undercharged table.
+			overhead := shardArrayBytes(slots, shards)
+			require.Positive(t, allocated)
+			require.GreaterOrEqual(t, overhead, allocated,
+				"envelope reserves %d B of slot overhead for %d slots across %d shards but the table allocates %d B",
+				overhead, slots, shards, allocated)
+		})
+	}
+}
 
 // grownShards counts the shards that have grown past their birth size, so a
 // test can assert the grow it exercises actually happened.
@@ -600,4 +646,61 @@ func TestGenericCache_CloseSettlesAgainstConcurrentGrow(t *testing.T) {
 		wg.Wait()
 	}
 	require.Equal(t, before, cachebudget.Global.Used(), "envelope not restored after Close raced a grow")
+}
+
+// TestGenericCache_EnvelopeCoversIntermediateGeneration walks the grow ladder
+// rather than only the fitted ceiling. A generation's capacity is a power of
+// two, which freelru rounds to a 2x table, so a charge fitted to the ceiling's
+// 5/4 under-reserves every step below it.
+func TestGenericCache_EnvelopeCoversIntermediateGeneration(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	for _, perShardCap := range []uint32{256, 1024, 4096} {
+		t.Run(fmt.Sprintf("perShard=%d", perShardCap), func(t *testing.T) {
+			slots := perShardCap * c.shardCount
+
+			// TotalAlloc rather than HeapAlloc: a collection inside the window would
+			// swamp a heap-size delta.
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+			gen := c.newShards(slots, slots, c.shardCount)
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+			runtime.KeepAlive(gen)
+
+			allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+			// generationBytes charges the payload estimate too, which buys values the
+			// table does not hold, so compare only its slot-array share.
+			charged := c.generationBytes(slots) - int64(slots)*c.payloadBytes
+			require.Positive(t, allocated)
+			require.GreaterOrEqual(t, charged, allocated,
+				"envelope reserves %d B of slot overhead for %d slots across %d shards but the generation allocates %d B",
+				charged, slots, c.shardCount, allocated)
+		})
+	}
+}
+
+// A byte budget whose slot quotient exceeds a uint32 must clamp to the ceiling,
+// not wrap into a tiny cache.
+func TestSlotCeilingClampsAboveUint32(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	// Exactly 2^32 slots, so the quotient no longer fits the uint32 the clamp
+	// used to be applied after.
+	overflow := func(perSlot uint64) datasize.ByteSize { return datasize.ByteSize(perSlot << 32) }
+
+	maxCap, shards := budgetedSlots(overflow(freelruSlotBytes), 0)
+	require.Positive(t, shards)
+	require.Equal(t, fitTableSlots(maxCacheSlots/shards)*shards, maxCap)
+
+	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+freelruSlotBytes), 0, nil)
+	t.Cleanup(g.Close)
+	require.Equal(t, fitTableSlots(maxCacheSlots), g.maxCap)
 }

@@ -18,6 +18,7 @@ package cache
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -25,7 +26,26 @@ import (
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/math"
 )
+
+// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
+// freelru's own Len locks every shard, which serialises readers on a path that
+// only wanted a number.
+type lruGen[V any] struct {
+	lru *freelru.ShardedLRU[uint64, V]
+	n   atomic.Int64
+}
+
+func (g *lruGen[V]) len() int { return int(g.n.Load()) }
+
+// add requires a key the LRU does not hold — Put removes first — so the count
+// can rise unconditionally; a capacity eviction fires OnEvict, which lowers it.
+func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
+	evicted = g.lru.Add(h, v)
+	g.n.Add(1)
+	return evicted
+}
 
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
 // toward a byte-budget ceiling as it fills, funding each step from the shared
@@ -38,11 +58,10 @@ import (
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
 // drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. The onEvict-maintained counters are
-// approximate across grow windows (a lost write is counted but never
-// evicted; a raced removal can subtract twice).
+// need GenericCache's fenced swap. Each generation's own entry count is exact;
+// the caller's onEvict byte counters stay approximate across grow windows.
 type growLRU[V any] struct {
-	cur      atomic.Pointer[freelru.ShardedLRU[uint64, V]]
+	cur      atomic.Pointer[lruGen[V]]
 	onEvict  func(uint64, V)
 	avgBytes int64
 
@@ -55,42 +74,91 @@ type growLRU[V any] struct {
 	closed   bool
 }
 
+// newGrowLRUEntries builds a growLRU from an entry ceiling rather than a byte
+// budget, for layers whose contract is the entry count. The envelope charge
+// follows freelru.NewSharded's real geometry: it rounds capacity*5/4 up to a
+// power of two for the whole cache, so the overhead per slot is that table over
+// the capacity, not a constant.
+// avgBytes is the payload held outside the freelru element; a layer whose value
+// is stored inline passes 0, since freelruElemBytes already covers it.
+func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
+	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes), onEvict)
+}
+
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	maxCap := min(max(uint32(uint64(maxBytes)/uint64(avgBytes)), 1), 1<<24)
+	perSlot := int64(avgBytes) + freelruSlotBytes
+	maxCap := max(fitTableSlots(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots))), 1)
+	return newGrowLRUWith(maxCap, int64(avgBytes), onEvict)
+}
+
+// growLRUShards mirrors freelru.NewSharded's shard count: GOMAXPROCS*16 rounded
+// up to a power of two, then divided down until a shard holds at least 16 slots.
+func growLRUShards(tableSlots uint64) uint64 {
+	shards := math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0)) * 16)
+	for shards > tableSlots/16 {
+		shards /= 16
+	}
+	return max(shards, 1)
+}
+
+// growLRUBytes is what a generation costs. freelru.NewSharded rounds capacity
+// plus 25% up to a power of two once for the whole cache, so the table is 2x the
+// capacity at a power-of-two generation and 5/4 only on the fitted boundary. A
+// value type that fills freelruValueBytes leaves the table charge no slack, so
+// the per-shard structs are charged separately rather than absorbed.
+func growLRUBytes(capacity uint32, payloadBytes int64) int64 {
+	if capacity == 0 {
+		return 0
+	}
+	table := math.NextPowerOfTwo(uint64(capacity) * 5 / 4)
+	return int64(capacity)*payloadBytes + int64(table)*freelruElemBytes +
+		int64(growLRUShards(table))*freelruShardBytes
+}
+
+func newGrowLRUWith[V any](maxCap uint32, payloadBytes int64, onEvict func(uint64, V)) *growLRU[V] {
 	// Start small (bounded by the ceiling); the floor is on the start size, not
-	// the ceiling — a tiny configured budget yields a tiny, still-evicting cap.
+	// the ceiling -- a tiny configured budget yields a tiny, still-evicting cap.
 	start := min(uint32(genericCacheStartCapacity), maxCap)
-	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap}
+	g := &growLRU[V]{onEvict: onEvict, avgBytes: payloadBytes, startCap: start, maxCap: maxCap}
 	g.curCap.Store(start)
-	g.reserved = int64(start) * g.avgBytes
+	g.reserved = growLRUBytes(start, g.avgBytes)
 	cachebudget.Global.Take(g.reserved)
 	g.cur.Store(g.newShards(start))
 	return g
 }
 
-func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
+func (g *growLRU[V]) newShards(capacity uint32) *lruGen[V] {
 	lru, err := freelru.NewSharded[uint64, V](capacity, u64identity)
 	if err != nil {
 		panic(fmt.Sprintf("growLRU: NewSharded(%d): %s", capacity, err))
 	}
-	if g.onEvict != nil {
-		lru.SetOnEvict(g.onEvict)
-	}
-	return lru
+	gen := &lruGen[V]{lru: lru}
+	lru.SetOnEvict(func(k uint64, v V) {
+		gen.n.Add(-1)
+		if g.onEvict != nil {
+			g.onEvict(k, v)
+		}
+	})
+	return gen
 }
 
-func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
+func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key) }
 
-func (g *growLRU[V]) Add(key uint64, value V) {
-	lru := g.cur.Load()
-	if curCap := g.curCap.Load(); curCap < g.maxCap && lru.Len() >= int(curCap) {
+// Put stores a key, growing first when the generation is full. The Remove is not
+// redundant after a caller's miss: an unfenced grow can leave the key present in
+// the generation this Put lands on, and freelru's Add would replace it in place
+// without firing OnEvict, stranding the count and the caller's byte counter.
+func (g *growLRU[V]) Put(key uint64, value V) {
+	gen := g.cur.Load()
+	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
 		g.maybeGrow()
-		lru = g.cur.Load()
+		gen = g.cur.Load()
 	}
-	lru.Add(key, value)
+	gen.lru.Remove(key)
+	gen.add(key, value)
 }
 
 func (g *growLRU[V]) maybeGrow() {
@@ -98,18 +166,18 @@ func (g *growLRU[V]) maybeGrow() {
 	defer g.resizeMu.Unlock()
 	old := g.cur.Load()
 	curCap := g.curCap.Load()
-	if curCap >= g.maxCap || old.Len() < int(curCap) {
+	if curCap >= g.maxCap || old.len() < int(curCap) {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
-	delta := int64(newCap-curCap) * g.avgBytes
+	delta := growLRUBytes(newCap, g.avgBytes) - growLRUBytes(curCap, g.avgBytes)
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
 	next := g.newShards(newCap)
-	for _, k := range old.Keys() {
-		if v, ok := old.Get(k); ok {
-			next.Add(k, v)
+	for _, k := range old.lru.Keys() {
+		if v, ok := old.lru.Get(k); ok {
+			next.add(k, v)
 		}
 	}
 	g.cur.Store(next)
@@ -117,16 +185,17 @@ func (g *growLRU[V]) maybeGrow() {
 	g.reserved += delta
 }
 
-func (g *growLRU[V]) Remove(key uint64) { g.cur.Load().Remove(key) }
-func (g *growLRU[V]) Len() int          { return g.cur.Load().Len() }
+func (g *growLRU[V]) Remove(key uint64) { g.cur.Load().lru.Remove(key) }
+func (g *growLRU[V]) Len() int          { return g.cur.Load().len() }
 
 // Purge empties the LRU and shrinks it back to the start size, returning the
 // grown budget to the envelope (it regrows on demand).
 func (g *growLRU[V]) Purge() {
 	g.resizeMu.Lock()
 	defer g.resizeMu.Unlock()
-	cachebudget.Global.Release(g.reserved - int64(g.startCap)*g.avgBytes)
-	g.reserved = int64(g.startCap) * g.avgBytes
+	start := growLRUBytes(g.startCap, g.avgBytes)
+	cachebudget.Global.Release(g.reserved - start)
+	g.reserved = start
 	g.curCap.Store(g.startCap)
 	g.cur.Store(g.newShards(g.startCap))
 }

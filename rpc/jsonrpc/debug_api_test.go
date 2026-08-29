@@ -919,6 +919,61 @@ func TestAccountRangeResolvesCommittedBlockTags(t *testing.T) {
 			require.Equal(t, want, got)
 		})
 	}
+
+	t.Run("latest resolves to execution head", func(t *testing.T) {
+		latestTag := rpc.LatestBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, start[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(latestExecuted)
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, start[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("pending tag is rejected", func(t *testing.T) {
+		pendingTag := rpc.PendingBlockNumber
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &pendingTag}, start[:], 10, true, true, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "pending block not supported")
+	})
+
+	t.Run("earliest tag returns genesis state root", func(t *testing.T) {
+		earliestTag := rpc.EarliestBlockNumber
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, start[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		genesis, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, 0)
+		require.NoError(t, err)
+		require.Equal(t, fmt.Sprintf("%x", genesis.Root), result.Root)
+	})
+}
+
+// TestAccountRange_UsesCommittedBlockResolution pins that AccountRange resolves
+// block tags against committed state, not the block overlay. With the overlay
+// head one past the MDBX-committed chain, "latest" must resolve to the committed
+// head — the overlay-only block has no committed state for NewDumper.
+func TestAccountRange_UsesCommittedBlockResolution(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	addr := common.HexToAddress("0x0100000000000000000000000000000000000000")
+
+	latestTag := rpc.LatestBlockNumber
+	result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+	require.NoError(t, err)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	committedHead, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%x", committedHead.Root), result.Root,
+		"must resolve to the committed head, not the overlay-only block")
 }
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {

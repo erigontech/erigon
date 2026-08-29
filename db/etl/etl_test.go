@@ -2169,10 +2169,10 @@ func TestMergerMatchesReferenceSort(t *testing.T) {
 	// rewind heapifies with the same sift the reads use, so check the
 	// invariant directly - a broken heapify need not show up in the order.
 	m := &buf.mrg
-	require.Greater(t, len(m.heap), 8, "a heap of a few elements proves little")
-	for i := 1; i < len(m.heap); i++ {
-		require.False(t, m.less(m.heap[i], m.heap[(i-1)/2]),
-			"heap[%d] sorts before its parent %d", i, (i-1)/2)
+	require.Greater(t, len(m.tree), 8, "a tree of a few elements proves little")
+	for i := 1; i < len(m.tree); i++ {
+		require.False(t, beats(m.tree[i], m.tree[0]),
+			"the loser at %d sorts before the winner", i)
 	}
 
 	got := drainBuffer(buf)
@@ -2394,4 +2394,53 @@ func TestSpillValueLengthCeiling(t *testing.T) {
 	over++ // wraps; a constant expression would not compile
 	putValLen(buf[:], over)
 	require.Negative(t, int32(binary.NativeEndian.Uint32(buf[:]))) //nolint:gosec
+}
+
+// BenchmarkProviderHeap drives mergeSortFiles' heap on its own: k sorted runs
+// of keys, advanced the way the load loop does, with no file or collector
+// around it.
+func BenchmarkProviderHeap(b *testing.B) {
+	const keyLen = 32
+	for _, k := range []int{4, 8, 16} {
+		for _, count := range []int{200_000} {
+			b.Run(fmt.Sprintf("k%d_n%d", k, count), func(b *testing.B) {
+				runs := make([][][]byte, k)
+				for i := range runs {
+					runs[i] = make([][]byte, 0, count/k)
+					for j := range count / k {
+						key := make([]byte, keyLen)
+						x := uint64(i*count+j) * 6364136223846793005 //nolint:gosec
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+						runs[i] = append(runs[i], key)
+					}
+					slices.SortFunc(runs[i], bytes.Compare)
+				}
+				val := make([]byte, 128)
+				b.ResetTimer()
+				for b.Loop() {
+					at := make([]int, k)
+					h := &Heap{elems: make([]*HeapElem, 0, k)}
+					for i := range runs {
+						e := &HeapElem{Value: val, TimeIdx: i}
+						e.setKey(runs[i][0])
+						h.elems = append(h.elems, e)
+						at[i] = 1
+					}
+					heapInit(h)
+					for h.Len() > 0 {
+						e := h.elems[0]
+						i := e.TimeIdx
+						if at[i] < len(runs[i]) {
+							e.setKey(runs[i][at[i]])
+							at[i]++
+							heapFixRoot(h)
+							continue
+						}
+						heapPopRoot(h)
+					}
+				}
+			})
+		}
+	}
 }

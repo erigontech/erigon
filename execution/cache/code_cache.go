@@ -52,10 +52,6 @@ const (
 	// average so the cap keeps RAM near the budget instead of several × over; the
 	// persistent (MDBX-backed) cold tier backstops entries the tighter cap evicts.
 	avgCodeEntryBytes = 12 * 1024
-	// codeSizeEntryBytes is the resident cost of one size-layer slot (freelru
-	// element holding size/keyHash/txNum/epoch), used to map the size-layer entry
-	// ceiling to an envelope byte budget.
-	codeSizeEntryBytes = 64
 )
 
 type versionedAddressID struct {
@@ -191,11 +187,10 @@ type CodeCache struct {
 // putContentLocked is the shared insert path for the content-addressed code layers
 // (hashToCode, codeHashToCode, codeSizeByCodeHash). Each is a freelru.ShardedLRU
 // of per-key-immutable entries carrying a (txNum, epoch) stamp: a live entry is
-// kept (its bytes/size are invariant for a given key), a stale one is removed
-// (its OnEvict decrements counter) so the fresh entry can replace it, and once
-// the entry-count cap is reached freelru.Add evicts the coldest entry (whose
-// OnEvict decrements counter) rather than freezing. counter tracks resident
-// bytes as a stat; the hard bound is the LRU's entry cap. stamp/valCost are
+// kept (its bytes/size are invariant for a given key), and whatever Put displaces
+// — a stale entry, or the coldest one once the cap is reached — decrements
+// counter through OnEvict. counter tracks resident bytes as a stat; the hard
+// bound is the LRU's entry cap. stamp/valCost are
 // non-capturing so passing them allocates nothing on the put path. The caller
 // holds the key's put stripe.
 func putContentLocked[T any](
@@ -212,10 +207,9 @@ func putContentLocked[T any](
 		if txNum, epoch := stamp(existing); !coh.IsStale(txNum, epoch) {
 			return
 		}
-		lru.Remove(h) // stale — OnEvict decrements counter for the removed entry
 	}
 	counter.Add(keyCost + valCost(newEntry))
-	lru.Add(h, newEntry) // evicts the coldest entry when full; its OnEvict decrements counter
+	lru.Put(h, newEntry)
 }
 
 func codeEntryStamp(e codeEntry) (uint64, uint32)         { return e.txNum, e.epoch }
@@ -251,8 +245,10 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 		func(_ uint64, e codeEntry) { cc.codeSize.Add(-(8 + int64(len(e.code)))) })
 	cc.codeHashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
 		func(_ uint64, e codeEntry) { cc.codeHashCodeSize.Add(-(32 + int64(len(e.code)))) })
-	cc.codeSizeByCodeHash = newGrowLRU[codeSizeEntry](
-		datasize.ByteSize(DefaultCodeSizeCacheEntries*codeSizeEntryBytes), codeSizeEntryBytes,
+	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
+	// freelruElemBytes already charges for.
+	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
+		uint32(cc.codeSizeCapEntries), 0,
 		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
 	return cc
 }
