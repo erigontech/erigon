@@ -830,7 +830,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 	var execCodeStore *cache.CodeStore
 	if dbg.UseCodeStore {
-		execCodeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
+		execCodeStore = cache.NewCodeStore(cache.DefaultCodeStoreTableBytes)
 	}
 
 	collateAndPrune := func() error {

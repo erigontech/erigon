@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-func TestCodeStore_TwoTierAndEvict(t *testing.T) {
+func TestCodeStore_BackingAndEvict(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -35,15 +35,15 @@ func TestCodeStore_TwoTierAndEvict(t *testing.T) {
 	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
 	hash := crypto.Keccak256(code)
 
-	// Write path populates both tiers.
-	cs := NewCodeStore(1<<20, 1<<20)
+	// Write path populates the MDBX backing.
+	cs := NewCodeStore(1 << 20)
 	require.NoError(t, cs.PutByHash(tx, hash, code))
 	got, ok := cs.GetByHash(tx, hash)
 	require.True(t, ok)
 	require.Equal(t, code, got)
 
-	// A fresh store (empty mem) serves from the MDBX backing tier.
-	cs2 := NewCodeStore(1<<20, 1<<20)
+	// A fresh store serves the same bytes from the backing.
+	cs2 := NewCodeStore(1 << 20)
 	got, ok = cs2.GetByHash(tx, hash)
 	require.True(t, ok, "must serve from the persistent TblCodeCache backing")
 	require.Equal(t, code, got)
@@ -53,7 +53,7 @@ func TestCodeStore_TwoTierAndEvict(t *testing.T) {
 	require.False(t, ok)
 
 	// Evict prunes the backing when over the table cap.
-	small := NewCodeStore(1<<20, 128)
+	small := NewCodeStore(128)
 	for i := range 64 {
 		c := []byte{byte(i), byte(i >> 8), 0xaa, 0xbb}
 		require.NoError(t, small.PutByHash(tx, crypto.Keccak256(c), c))
@@ -64,7 +64,7 @@ func TestCodeStore_TwoTierAndEvict(t *testing.T) {
 	// Restart scenario: a fresh store (tableSizeBytes=0) over an already-full
 	// backing must still prune — seed the size from the table, don't grow
 	// unbounded. Without the seed, Evict's under-cap early return would skip.
-	restarted := NewCodeStore(1<<20, 128)
+	restarted := NewCodeStore(128)
 	require.Zero(t, restarted.tableSizeBytes.Load())
 	require.NoError(t, restarted.Evict(tx))
 	require.LessOrEqual(t, restarted.tableSizeBytes.Load(), int64(128),

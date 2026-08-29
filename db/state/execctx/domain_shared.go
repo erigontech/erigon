@@ -286,9 +286,9 @@ type SharedDomains struct {
 	// mem; both reach the transaction during flush, which resets the memo.
 	visibleEnds domainVisibleEndMemo
 
-	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
-	// cache, reached via StateGetter so an addr-keyed reader can serve a
-	// code-by-hash read with the application's authoritative codehash.
+	// codeStore is the optional MDBX-backed codehash-keyed code table, reached
+	// via StateGetter so an addr-keyed reader can serve a code-by-hash read with
+	// the application's authoritative codehash.
 	codeStore *cache.CodeStore
 
 	// changesetMu serializes the exec loop's install of a block's changeset
@@ -1641,6 +1641,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 			}
 			if sd.codeStore != nil {
 				if cv, ok := sd.codeStore.GetByHash(tx, codeHash); ok {
+					sd.fillCodeCacheByHash(tx, view, cv, codeHash, txNum)
 					return cv, true, nil
 				}
 			}
@@ -1656,6 +1657,19 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 		return nil, false, nil
 	}
 	return v, true, nil
+}
+
+// fillCodeCacheByHash promotes a code-store hit into the in-memory code cache,
+// the store's only memory tier. txNum is the reader's, an upper bound on the
+// code's write txNum, so an unwind drops the entry no later than the code.
+func (sd *SharedDomains) fillCodeCacheByHash(tx kv.TemporalTx, view cache.ReadView, code, codeHash []byte, txNum uint64) {
+	if sd.stateCache == nil {
+		return
+	}
+	if view.NeedsFrontier() {
+		view = view.WithFrontier(sd.cacheFrontierFor(tx))
+	}
+	view.FillCodeByHash(code, codeHash, txNum)
 }
 
 // codeHashForAddr returns the Ethereum codeHash for an account, or nil if the

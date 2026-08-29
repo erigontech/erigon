@@ -281,6 +281,12 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
 	v.fillCodeWithHash(addr, bytes.Clone(code), codeHash, readTxNum)
 }
 
+// FillCodeByHash offers code resolved by codeHash alone, populating the
+// content-addressed layer without binding it to an address.
+func (v ReadView) FillCodeByHash(code, codeHash []byte, readTxNum uint64) {
+	v.fillCodeWithHash(nil, bytes.Clone(code), codeHash, readTxNum)
+}
+
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
 // record read from this view, so admission checks the accounts frontier even
 // though the mapping lives in the code cache.
