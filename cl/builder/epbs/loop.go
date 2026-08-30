@@ -54,6 +54,7 @@ const (
 	revealQueued revealState = iota
 	revealInProgress
 	revealComplete
+	revealRetryable
 	revealExpired
 )
 
@@ -238,6 +239,11 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 		l.specBuild.Discard(payloadID)
 	}
 	for _, removed := range removed {
+		if submitter, ok := l.submitter.(payloadBroadcastDiscarder); ok {
+			for root := range removed.pending.reveals {
+				submitter.discardPayloadBroadcast(root)
+			}
+		}
 		if l.pendingStore != nil {
 			if err := l.pendingStore.Delete(context.Background(), removed.key); err != nil {
 				log.Warn("ePBS builder: delete persisted pending payload failed", "slot", removed.key.slot, "err", err)
@@ -682,18 +688,19 @@ func (l *BuilderLoop) queuePendingBidReveal(slot, builderIndex uint64, parentHas
 	if pending.reveals == nil {
 		pending.reveals = make(map[common.Hash]revealState)
 	}
-	_, exists := pending.reveals[beaconRoot]
-	if !exists {
+	state, exists := pending.reveals[beaconRoot]
+	queued := !exists || state == revealRetryable
+	if queued {
 		pending.reveals[beaconRoot] = revealQueued
 	}
 	l.mu.Unlock()
-	return key, !exists
+	return key, queued
 }
 
 func (l *BuilderLoop) unqueuePendingBidReveal(key pendingPayloadKey, beaconRoot common.Hash) {
 	l.mu.Lock()
 	if pending := l.pendingPayloads[key]; pending != nil && pending.reveals[beaconRoot] == revealQueued {
-		delete(pending.reveals, beaconRoot)
+		pending.reveals[beaconRoot] = revealRetryable
 	}
 	l.mu.Unlock()
 }

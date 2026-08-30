@@ -450,6 +450,38 @@ func TestImportedBlockWatcherRetriesWinningPayloadAfterLocalDeadline(t *testing.
 	<-done
 }
 
+func TestBuilderLoopPruneDiscardsExpiredRevealProgress(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+
+	root := common.HexToHash("0xa1")
+	block := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = sc.Slot
+	block.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+	caplinSubmitter := NewCaplinBidSubmitter(nil, &testGossipPublisher{err: errors.New("unavailable")}, testEnvelopeProcessor{}, nil)
+	loop.submitter = caplinSubmitter
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Add(-time.Hour).Unix()), common.Hash{}, loop.beaconCfg)
+	scheduler := newRevealScheduler(t.Context(), 1, 1)
+	require.NoError(t, scheduleImportedBlockReveal(
+		&beaconevents.BlockData{Slot: sc.Slot, Block: root}, testImportedBlockReader{block: block},
+		clock, loop.beaconCfg, loop, scheduler,
+	))
+	scheduler.Wait()
+	require.Contains(t, caplinSubmitter.progress, root)
+
+	next := sc
+	next.Slot += 2
+	require.NoError(t, loop.OnNewHead(t.Context(), next))
+	require.Empty(t, loop.pendingPayloads)
+	require.Empty(t, caplinSubmitter.progress)
+}
+
 func TestRevealQueueAdmissionFailureRemainsRetryable(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	sc := testSlotContext()
