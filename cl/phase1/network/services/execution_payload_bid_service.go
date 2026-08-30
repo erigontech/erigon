@@ -445,9 +445,10 @@ func (s *executionPayloadBidService) storeValidBidAt(msg *cltypes.SignedExecutio
 	if err := s.validateHighestBid(bid); err != nil {
 		return err
 	}
+	if !s.epbsPool.AddHighestBid(msg) {
+		return fmt.Errorf("%w: bid value %d is no longer the highest for slot %d", ErrIgnore, bid.Value, bid.Slot)
+	}
 	s.seenCache.Add(seenKey)
-	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	s.epbsPool.HighestBids.Add(bidKey, msg)
 	return nil
 }
 
@@ -505,16 +506,17 @@ func bidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid, headRoot common.Has
 }
 
 func (s *executionPayloadBidService) validateHighestBid(bid *cltypes.ExecutionPayloadBid) error {
+	candidate := &cltypes.SignedExecutionPayloadBid{Message: bid}
+	if s.epbsPool.WouldIncreaseHighestBid(candidate) {
+		return nil
+	}
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
 	existing, found := s.epbsPool.HighestBids.Get(bidKey)
 	if !found || existing == nil || existing.Message == nil {
 		return nil
 	}
-	if bid.Value <= existing.Message.Value {
-		return fmt.Errorf("%w: bid value %d is not higher than existing %d for slot %d",
-			ErrIgnore, bid.Value, existing.Message.Value, bid.Slot)
-	}
-	return nil
+	return fmt.Errorf("%w: bid value %d is not higher than existing %d for slot %d",
+		ErrIgnore, bid.Value, existing.Message.Value, bid.Slot)
 }
 
 func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.Hash, bidSlot uint64) (*bidValidationStateEntry, error) {

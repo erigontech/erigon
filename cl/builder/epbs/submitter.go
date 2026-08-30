@@ -86,6 +86,9 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	if bid == nil || bid.Message == nil {
 		return fmt.Errorf("%w: nil bid", ErrBidNotPublished)
 	}
+	if !s.epbsPool.WouldIncreaseHighestBid(bid) {
+		return fmt.Errorf("%w: bid value %d does not exceed highest seen", ErrBidNotPublished, bid.Message.Value)
+	}
 
 	encodedSSZ, err := bid.EncodeSSZ(nil)
 	if err != nil {
@@ -98,12 +101,7 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 		}
 		return fmt.Errorf("epbs/submitter: publish bid: %w", err)
 	}
-	key := pool.HighestBidKey{
-		Slot:            bid.Message.Slot,
-		ParentBlockHash: bid.Message.ParentBlockHash,
-		ParentBlockRoot: bid.Message.ParentBlockRoot,
-	}
-	s.epbsPool.HighestBids.Add(key, bid)
+	s.epbsPool.AddHighestBid(bid)
 
 	return nil
 }

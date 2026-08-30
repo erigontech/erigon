@@ -35,6 +35,28 @@ func (m *slotMap[K, V]) Add(key K, value V) bool {
 	return false
 }
 
+func (m *slotMap[K, V]) addIf(key K, value V, accept func(V, V, bool) bool) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, found := m.values[key]; !accept(existing, value, found) {
+		return false
+	}
+	m.values[key] = value
+	slot := m.slotFor(key)
+	if m.bySlot[slot] == nil {
+		m.bySlot[slot] = make(map[K]struct{})
+	}
+	m.bySlot[slot][key] = struct{}{}
+	return true
+}
+
+func (m *slotMap[K, V]) accepts(key K, value V, accept func(V, V, bool) bool) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	existing, found := m.values[key]
+	return accept(existing, value, found)
+}
+
 func (m *slotMap[K, V]) ValuesForSlot(slot uint64) []V {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -161,4 +183,29 @@ func (p *EpbsPool) GetPreferencesForSlot(slot uint64) []*cltypes.SignedProposerP
 
 func (p *EpbsPool) GetPreference(slot uint64, dependentRoot common.Hash) (*cltypes.SignedProposerPreferences, bool) {
 	return p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
+}
+
+func (p *EpbsPool) WouldIncreaseHighestBid(bid *cltypes.SignedExecutionPayloadBid) bool {
+	if bid == nil || bid.Message == nil {
+		return false
+	}
+	return p.HighestBids.accepts(highestBidKey(bid.Message), bid, higherBid)
+}
+
+func (p *EpbsPool) AddHighestBid(bid *cltypes.SignedExecutionPayloadBid) bool {
+	if bid == nil || bid.Message == nil {
+		return false
+	}
+	return p.HighestBids.addIf(highestBidKey(bid.Message), bid, higherBid)
+}
+
+func highestBidKey(bid *cltypes.ExecutionPayloadBid) HighestBidKey {
+	return HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
+}
+
+func higherBid(existing, candidate *cltypes.SignedExecutionPayloadBid, found bool) bool {
+	if !found || existing == nil || existing.Message == nil {
+		return true
+	}
+	return candidate.Message.Value > existing.Message.Value
 }

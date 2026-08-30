@@ -46,6 +46,11 @@ type testGossipPublisher struct {
 	topics    []string
 }
 
+type blockingBidPublisher struct {
+	started chan struct{}
+	release chan struct{}
+}
+
 type testColumnStorage struct {
 	writes map[uint64]int
 	errors map[uint64]error
@@ -93,6 +98,12 @@ func (p *testGossipPublisher) Publish(_ context.Context, topic string, _ []byte)
 	return p.err
 }
 
+func (p *blockingBidPublisher) Publish(context.Context, string, []byte) error {
+	close(p.started)
+	<-p.release
+	return nil
+}
+
 func TestCaplinBidSubmitter_SubmitBidDoesNotStoreUnpublishedBid(t *testing.T) {
 	epbsPool := pool.NewEpbsPool()
 	gossipPublisher := &testGossipPublisher{err: fmt.Errorf("%w: publish failed", gossip.ErrNotPublished)}
@@ -109,6 +120,108 @@ func TestCaplinBidSubmitter_SubmitBidDoesNotStoreUnpublishedBid(t *testing.T) {
 	require.ErrorIs(t, err, ErrBidNotPublished)
 	_, stored := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: bid.Message.ParentBlockHash, ParentBlockRoot: bid.Message.ParentBlockRoot})
 	require.False(t, stored)
+}
+
+func TestCaplinBidSubmitterSubmitBidDoesNotPublishBelowHighestSeenBid(t *testing.T) {
+	epbsPool := pool.NewEpbsPool()
+	gossipPublisher := &testGossipPublisher{}
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
+	high := testSignedBid(100, 2, 2000)
+	low := testSignedBid(100, 1, 1000)
+	key := pool.HighestBidKey{Slot: 100, ParentBlockHash: high.Message.ParentBlockHash, ParentBlockRoot: high.Message.ParentBlockRoot}
+	epbsPool.HighestBids.Add(key, high)
+
+	err := submitter.SubmitBid(t.Context(), low)
+
+	require.ErrorIs(t, err, ErrBidNotPublished)
+	require.Zero(t, gossipPublisher.published)
+	stored, found := epbsPool.HighestBids.Get(key)
+	require.True(t, found)
+	require.Same(t, high, stored)
+}
+
+func TestCaplinBidSubmitterSubmitBidReplacesLowerHighestSeenBid(t *testing.T) {
+	epbsPool := pool.NewEpbsPool()
+	gossipPublisher := &testGossipPublisher{}
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
+	low := testSignedBid(100, 1, 1000)
+	high := testSignedBid(100, 2, 2000)
+
+	require.NoError(t, submitter.SubmitBid(t.Context(), low))
+	require.NoError(t, submitter.SubmitBid(t.Context(), high))
+
+	require.Equal(t, 2, gossipPublisher.published)
+	stored, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: high.Message.ParentBlockHash, ParentBlockRoot: high.Message.ParentBlockRoot})
+	require.True(t, found)
+	require.Same(t, high, stored)
+}
+
+func TestCaplinBidSubmitterSubmitBidDoesNotReplaceEqualHighestSeenBid(t *testing.T) {
+	for _, builderIndex := range []uint64{1, 2} {
+		t.Run(fmt.Sprintf("builder_%d", builderIndex), func(t *testing.T) {
+			epbsPool := pool.NewEpbsPool()
+			gossipPublisher := &testGossipPublisher{}
+			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
+			first := testSignedBid(100, 1, 1000)
+			equal := testSignedBid(100, builderIndex, 1000)
+			key := pool.HighestBidKey{Slot: 100, ParentBlockHash: first.Message.ParentBlockHash, ParentBlockRoot: first.Message.ParentBlockRoot}
+			epbsPool.HighestBids.Add(key, first)
+
+			err := submitter.SubmitBid(t.Context(), equal)
+
+			require.ErrorIs(t, err, ErrBidNotPublished)
+			require.Zero(t, gossipPublisher.published)
+			stored, found := epbsPool.HighestBids.Get(key)
+			require.True(t, found)
+			require.Same(t, first, stored)
+		})
+	}
+}
+
+func TestCaplinBidSubmitterSubmitBidAcceptsZeroValueInEmptyMarket(t *testing.T) {
+	epbsPool := pool.NewEpbsPool()
+	gossipPublisher := &testGossipPublisher{}
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
+	bid := testSignedBid(100, 1, 0)
+
+	require.NoError(t, submitter.SubmitBid(t.Context(), bid))
+
+	require.Equal(t, 1, gossipPublisher.published)
+	stored, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: bid.Message.ParentBlockHash, ParentBlockRoot: bid.Message.ParentBlockRoot})
+	require.True(t, found)
+	require.Same(t, bid, stored)
+}
+
+func TestCaplinBidSubmitterSubmitBidKeepsConcurrentHigherBid(t *testing.T) {
+	epbsPool := pool.NewEpbsPool()
+	publisher := &blockingBidPublisher{started: make(chan struct{}), release: make(chan struct{})}
+	submitter := NewCaplinBidSubmitter(epbsPool, publisher, testEnvelopeProcessor{}, nil)
+	low := testSignedBid(100, 1, 1000)
+	high := testSignedBid(100, 2, 2000)
+	result := make(chan error, 1)
+
+	go func() {
+		result <- submitter.SubmitBid(t.Context(), low)
+	}()
+	<-publisher.started
+	require.True(t, epbsPool.AddHighestBid(high))
+	close(publisher.release)
+	require.NoError(t, <-result)
+
+	stored, found := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: high.Message.ParentBlockHash, ParentBlockRoot: high.Message.ParentBlockRoot})
+	require.True(t, found)
+	require.Same(t, high, stored)
+}
+
+func testSignedBid(slot, builderIndex, value uint64) *cltypes.SignedExecutionPayloadBid {
+	return &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		Slot:               slot,
+		BuilderIndex:       builderIndex,
+		Value:              value,
+		ParentBlockHash:    common.HexToHash("0x1111"),
+		ParentBlockRoot:    common.HexToHash("0x2222"),
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](4, 48),
+	}}
 }
 
 func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T) {
