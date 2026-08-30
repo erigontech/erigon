@@ -11,21 +11,32 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
 type testEnvelopeProcessor struct {
-	err   error
-	calls *int
+	err       error
+	errors    []error
+	calls     *int
+	persisted *cltypes.SignedExecutionPayloadEnvelope
+	readErr   error
 }
 
 func (p testEnvelopeProcessor) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 	if p.calls != nil {
 		*p.calls++
+		if len(p.errors) >= *p.calls {
+			return p.errors[*p.calls-1]
+		}
 	}
 	return p.err
+}
+
+func (p testEnvelopeProcessor) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return p.persisted, p.readErr
 }
 
 type testGossipPublisher struct {
@@ -110,6 +121,71 @@ func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T)
 	err := submitter.BroadcastPayload(context.Background(), envelope, nil)
 	require.ErrorContains(t, err, "invalid envelope")
 	require.Zero(t, gossipPublisher.published)
+}
+
+func TestCaplinBidSubmitterBroadcastPayloadRecoversAfterPersistedIndexFailure(t *testing.T) {
+	publisher := &testGossipPublisher{}
+	calls := 0
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	processor := testEnvelopeProcessor{
+		errors:    []error{errors.New("index write failed"), forkchoice.ErrIgnore},
+		calls:     &calls,
+		persisted: envelope,
+	}
+	submitter := NewCaplinBidSubmitter(nil, publisher, processor, nil)
+
+	require.ErrorContains(t, submitter.BroadcastPayload(t.Context(), envelope, nil), "index write failed")
+	require.NoError(t, submitter.BroadcastPayload(t.Context(), envelope, nil))
+	require.Equal(t, 2, calls)
+	require.Equal(t, []string{gossip.TopicNameExecutionPayload}, publisher.topics)
+}
+
+func TestCaplinBidSubmitterBroadcastPayloadRecoversAfterRestart(t *testing.T) {
+	publisher := &testGossipPublisher{}
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{
+		err:       forkchoice.ErrIgnore,
+		persisted: envelope,
+	}, nil)
+
+	require.NoError(t, submitter.BroadcastPayload(t.Context(), envelope, nil))
+	require.Equal(t, []string{gossip.TopicNameExecutionPayload}, publisher.topics)
+}
+
+func TestCaplinBidSubmitterBroadcastPayloadRejectsUnverifiedIgnore(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	different := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	different.Message.BeaconBlockRoot = envelope.Message.BeaconBlockRoot
+	different.Message.Payload.BlockNumber = 1
+
+	for _, tc := range []struct {
+		name      string
+		persisted *cltypes.SignedExecutionPayloadEnvelope
+		readErr   error
+	}{
+		{name: "missing"},
+		{name: "mismatch", persisted: different},
+		{name: "read error", readErr: errors.New("disk unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			publisher := &testGossipPublisher{}
+			submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{
+				err:       forkchoice.ErrIgnore,
+				persisted: tc.persisted,
+				readErr:   tc.readErr,
+			}, nil)
+
+			err := submitter.BroadcastPayload(t.Context(), envelope, nil)
+			require.ErrorIs(t, err, forkchoice.ErrIgnore)
+			require.Empty(t, publisher.topics)
+		})
+	}
 }
 
 func TestCaplinBidSubmitterBroadcastPayloadResumesAfterPublishedPrefix(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/common"
 )
@@ -59,6 +60,7 @@ type payloadBroadcastProgress struct {
 
 type executionPayloadProcessor interface {
 	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 // NewCaplinBidSubmitter creates a CaplinBidSubmitter.
@@ -146,7 +148,9 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 
 	if !progress.processed {
 		if err := s.forkchoice.OnExecutionPayload(ctx, envelope, false, true); err != nil {
-			return fmt.Errorf("epbs/submitter: process payload: %w", err)
+			if !errors.Is(err, forkchoice.ErrIgnore) || !s.persistedEnvelopeMatches(root, envelope) {
+				return fmt.Errorf("epbs/submitter: process payload: %w", err)
+			}
 		}
 		progress.processed = true
 	}
@@ -184,6 +188,23 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 	s.progressMu.Unlock()
 
 	return nil
+}
+
+func (s *CaplinBidSubmitter) persistedEnvelopeMatches(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	persisted, err := s.forkchoice.ReadEnvelopeFromDisk(root)
+	if err != nil || !validEnvelopeForIdentity(persisted) || !validEnvelopeForIdentity(envelope) {
+		return false
+	}
+	persistedRoot, err := persisted.HashSSZ()
+	if err != nil {
+		return false
+	}
+	envelopeRoot, err := envelope.HashSSZ()
+	return err == nil && persistedRoot == envelopeRoot
+}
+
+func validEnvelopeForIdentity(envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+	return envelope != nil && envelope.Message != nil && envelope.Message.Payload != nil && envelope.Message.ExecutionRequests != nil
 }
 
 func (s *CaplinBidSubmitter) writeColumnSidecar(ctx context.Context, root common.Hash, index int64, column *cltypes.DataColumnSidecar) error {
