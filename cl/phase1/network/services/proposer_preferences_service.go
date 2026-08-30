@@ -100,6 +100,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		return fmt.Errorf("%w: slots per epoch is zero", ErrIgnore)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, proposalSlot)
+	if proposalEpoch < s.beaconCfg.GloasForkEpoch {
+		return fmt.Errorf("%w: proposal epoch %d before Gloas fork %d", ErrIgnore, proposalEpoch, s.beaconCfg.GloasForkEpoch)
+	}
 	if proposalEpoch < s.beaconCfg.MinSeedLookahead {
 		return fmt.Errorf("%w: proposal epoch %d before min seed lookahead %d", ErrIgnore, proposalEpoch, s.beaconCfg.MinSeedLookahead)
 	}

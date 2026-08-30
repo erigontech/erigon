@@ -36,6 +36,7 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 	beaconCfg.SlotsPerHistoricalRoot = 8192
 	beaconCfg.MinSeedLookahead = 1
 	beaconCfg.ValidatorRegistryLimit = 1024
+	beaconCfg.GloasForkEpoch = 0
 	forkChoiceMock := &forkchoice_mock.ForkChoiceStorageMock{
 		Headers:             map[common.Hash]*cltypes.BeaconBlockHeader{},
 		StateAtBlockRootVal: map[common.Hash]*state2.CachingBeaconState{},
@@ -127,6 +128,36 @@ func TestProposerPreferencesServiceNilMessage(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, &cltypes.SignedProposerPreferences{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil proposer preferences message")
+}
+
+func TestProposerPreferencesServiceGloasForkBoundary(t *testing.T) {
+	t.Run("before fork", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		service, _, ethClock, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
+		service.beaconCfg.GloasForkEpoch = 3
+		ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
+		msg := newTestSignedProposerPreferences(95, 42)
+
+		err := service.ProcessMessage(context.Background(), nil, msg)
+
+		require.ErrorIs(t, err, ErrIgnore)
+		require.Contains(t, err.Error(), "before Gloas fork")
+		_, found := epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 95, DependentRoot: testDependentRoot})
+		require.False(t, found)
+	})
+
+	t.Run("at fork", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		service, _, ethClock, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
+		service.beaconCfg.GloasForkEpoch = 3
+		ethClock.EXPECT().GetCurrentSlot().Return(uint64(90))
+		msg := newTestSignedProposerPreferences(96, 42)
+
+		require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+		stored, found := epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 96, DependentRoot: testDependentRoot})
+		require.True(t, found)
+		require.Same(t, msg, stored)
+	})
 }
 
 func TestProposerPreferencesServiceRejectsUnrepresentableSlotBeforeState(t *testing.T) {

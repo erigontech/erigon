@@ -1485,6 +1485,7 @@ func newTestPayloadAttestationMessage(t *testing.T, validatorIndex uint64, beaco
 
 func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.epbsPool = pool.NewEpbsPool()
 	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{
 		{
@@ -1528,8 +1529,32 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestPostValidatorProposerPreferencesRejectsPreGloasWithoutPoolingOrGossip(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 3
+	handler.epbsPool = pool.NewEpbsPool()
+	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+	preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot:  95,
+		DependentRoot: common.Hash{1},
+	}}
+	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{preference})
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	_, found := handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 95, DependentRoot: common.Hash{1}})
+	require.False(t, found)
+}
+
 func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailures(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.epbsPool = pool.NewEpbsPool()
 	preferences := []*cltypes.SignedProposerPreferences{
 		{Message: &cltypes.ProposerPreferences{ProposalSlot: 32, DependentRoot: common.Hash{1}}},
@@ -1570,6 +1595,7 @@ func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailure
 
 func TestPostValidatorProposerPreferencesAcceptsBatchSSZ(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.epbsPool = pool.NewEpbsPool()
 	preferences := []*cltypes.SignedProposerPreferences{
 		{Message: &cltypes.ProposerPreferences{ProposalSlot: 32, DependentRoot: common.Hash{1}}},
@@ -1591,6 +1617,7 @@ func TestPostValidatorProposerPreferencesAcceptsBatchSSZ(t *testing.T) {
 
 func TestPostValidatorProposerPreferencesRequiresJSONArrayButPoolRetainsSingletonCompatibility(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.epbsPool = pool.NewEpbsPool()
 	preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: 32, DependentRoot: common.Hash{1}}}
 	body, err := json.Marshal(preference)
@@ -1612,6 +1639,7 @@ func TestPostValidatorProposerPreferencesRequiresJSONArrayButPoolRetainsSingleto
 
 func TestPostValidatorProposerPreferencesCapsJSONCardinality(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
 	for _, tc := range []struct {
 		name        string
 		count       int
@@ -1640,6 +1668,7 @@ func TestPostValidatorProposerPreferencesCapsJSONCardinality(t *testing.T) {
 
 func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
 	handler.epbsPool = pool.NewEpbsPool()
 	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{
 		{

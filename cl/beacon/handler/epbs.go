@@ -725,6 +725,15 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 			failures = append(failures, poolingFailure{Index: i, Message: "missing message in signed proposer preferences"})
 			continue
 		}
+		if a.beaconChainCfg.SlotsPerEpoch == 0 {
+			failures = append(failures, poolingFailure{Index: i, Message: "slots per epoch is zero"})
+			continue
+		}
+		proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, req.Message.ProposalSlot)
+		if proposalEpoch < a.beaconChainCfg.GloasForkEpoch {
+			failures = append(failures, poolingFailure{Index: i, Message: fmt.Sprintf("proposal epoch %d before Gloas fork %d", proposalEpoch, a.beaconChainCfg.GloasForkEpoch)})
+			continue
+		}
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
