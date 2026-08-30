@@ -301,6 +301,7 @@ func New(
 	// Assemble the Ethereum object
 	if config.ExperimentalParallelCommitment {
 		statecfg.ExperimentalParallelCommitment = true
+		logger.Info("Parallel commitment enabled", "trie", "hex-parallel-patricia-hashed")
 	}
 	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
