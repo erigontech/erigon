@@ -820,10 +820,7 @@ func TestExecutionPayloadBidServicePendingValidationFailureLogged(t *testing.T) 
 	require.Contains(t, output.String(), "fee_recipient")
 }
 
-// TestExecutionPayloadBidServiceLoopProcessesQueuedBid exercises the real
-// polling loop, including its wake-up and retry after the
-// missing dependency becomes available.
-func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
+func TestExecutionPayloadBidServiceProcessesQueuedBidAfterPreferencesArrive(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -835,20 +832,19 @@ func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
 
-	pending := service.newPendingQueue(t.Context())
-	service.pending = pending
-	defer pending.stopAndWait()
-
 	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	require.Equal(t, int32(1), service.pending.count.Load())
 
 	addPreferencesToPool(epbsPool, 100)
+	// Retry directly so this test covers service behavior independently of
+	// polling intervals and scheduler timing.
+	service.pending.processPending(context.Background())
 
 	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot}
-	require.Eventually(t, func() bool {
-		_, found := epbsPool.HighestBids.Get(bidKey)
-		return found && service.pending.count.Load() == 0
-	}, 5*time.Second, 10*time.Millisecond)
+	stored, found := epbsPool.HighestBids.Get(bidKey)
+	require.True(t, found)
+	require.Same(t, msg, stored)
+	require.Equal(t, int32(0), service.pending.count.Load())
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {

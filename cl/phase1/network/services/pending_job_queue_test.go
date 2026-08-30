@@ -226,8 +226,9 @@ func TestNewPendingJobQueueRejectsNonPositiveCheckInterval(t *testing.T) {
 	}
 }
 
-func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
+func TestPendingJobQueueLoopRetriesKeptJob(t *testing.T) {
 	processed := make(chan string, 1)
+	var attempts atomic.Int32
 	queue := newPendingJobQueue(
 		t.Context(),
 		pendingJobQueueOptions{
@@ -237,6 +238,11 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 			checkInterval: time.Millisecond,
 		},
 		func(_ context.Context, _ int, msg string) pendingJobDecision {
+			// Keep the first attempt so only a later polling tick can process
+			// and remove the job.
+			if attempts.Add(1) == 1 {
+				return pendingJobKeep
+			}
 			processed <- msg
 			return pendingJobRemove
 		},
@@ -255,8 +261,9 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 	case msg := <-processed:
 		require.Equal(t, "message", msg)
 	case <-time.After(time.Second):
-		t.Fatal("pending job queue did not process the job")
+		t.Fatal("pending job queue did not retry the kept job")
 	}
+	require.GreaterOrEqual(t, attempts.Load(), int32(2))
 	require.Eventually(t, func() bool {
 		return queue.count.Load() == 0
 	}, time.Second, time.Millisecond)
