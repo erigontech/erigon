@@ -67,10 +67,17 @@ linters:
         underef:
           skipRecvDeref: true
     staticcheck:
-      # SA* only: the ST/QF/S1 style checks are a separate discussion, and
-      # SA1019 needs the 42 deprecations cleaned up first.
+      # golangci's default set (all minus these ST) less SA1019, which waits on
+      # 42 deprecations. Naming SA*/S1* alone would silently drop the ST and QF
+      # checks already enforced; the noisy ones are muted by name in exclusions.
       checks:
-        - SA*
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
         - -SA1019
     govet:
       enable:
@@ -159,7 +166,7 @@ linters:
           )/[^/]+\\.go$"
       - linters:
           - staticcheck
-        text: ST1019|ST1029|ST5011|QF1003|QF1008|S1021|QF1001|S1002|QF1002|QF1012|QF1006|ST1005|ST1023|ST1012|QF1011|S1019|S1000|S1000|S1009|ST1008|S1016|S1016|ST1017|QF1007|QF1010
+        text: ST1019|ST1029|ST5011|QF1003|QF1008|QF1001|QF1002|QF1012|QF1006|ST1005|ST1023|ST1012|QF1011|ST1008|ST1017|QF1007|QF1010
       - linters:
           - gosec
           - perfsprint

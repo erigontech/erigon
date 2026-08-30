@@ -391,10 +391,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var freeList []*CompressionWord                         // written words available for reuse
 	t := time.Now()
 
-	var err error
-
-	var intermediateFile *os.File
-	if intermediateFile, err = dir.CreateTemp(segmentFilePath); err != nil {
+	intermediateFile, err := dir.CreateTemp(segmentFilePath)
+	if err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	intermediatePath := intermediateFile.Name()
