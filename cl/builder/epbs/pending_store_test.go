@@ -188,8 +188,8 @@ func TestBuilderLoopDoesNotRetryExpiredPendingDeletionForever(t *testing.T) {
 	key := pendingPayloadKey{slot: 1, blockHash: common.HexToHash("0xb10c")}
 	loop.pendingPayloads[key] = &pendingPayload{slot: 1, bidValue: bidValue}
 
-	loop.pruneBeforeSlot(2)
-	loop.pruneBeforeSlot(3)
+	loop.pruneBeforeSlot(2, nil)
+	loop.pruneBeforeSlot(3, nil)
 	require.Equal(t, 1, store.deletes)
 	require.NotContains(t, loop.pendingPayloads, key)
 	require.Zero(t, loop.manager.reservedBidValue)
@@ -209,7 +209,7 @@ func TestBuilderLoopRestoresPublishedPendingPayloadAfterRestart(t *testing.T) {
 
 	restarted, _, submitter, _ := setupBuilderLoop(t)
 	restarted.pendingStore = store
-	require.NoError(t, restarted.restorePendingPayloads(t.Context(), sc.Slot))
+	require.NoError(t, restarted.restorePendingPayloads(t.Context(), sc.Slot, sc.Slot))
 	require.Len(t, restarted.pendingPayloads, 1)
 	require.NotZero(t, restarted.manager.reservedBidValue)
 	root := common.HexToHash("0xbeef")
@@ -227,7 +227,7 @@ func TestBuilderLoopRestoresPublishedPendingPayloadAfterRestart(t *testing.T) {
 	))
 	scheduler.Wait()
 	require.Len(t, submitter.broadcasts, 1)
-	restarted.pruneBeforeSlot(sc.Slot + 1)
+	restarted.pruneBeforeSlot(sc.Slot+1, nil)
 	records, err := store.Load(t.Context(), 0)
 	require.NoError(t, err)
 	require.Empty(t, records)
@@ -261,7 +261,7 @@ func TestBuilderLoopRestoreIgnoresExpiredFilesBeforeCapacityCheck(t *testing.T) 
 
 	restarted, _, _, _ := setupBuilderLoop(t)
 	restarted.pendingStore = store
-	require.NoError(t, restarted.restorePendingPayloads(t.Context(), currentSlot))
+	require.NoError(t, restarted.restorePendingPayloads(t.Context(), currentSlot, currentSlot))
 	require.Contains(t, restarted.pendingPayloads, currentKey)
 	require.Len(t, restarted.pendingPayloads, 1)
 	entries, err := os.ReadDir(store.dir)

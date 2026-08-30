@@ -142,10 +142,35 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	loop := NewBuilderLoop(manager, strategy, deps.Exec, prefsWatch, submitter, deps.BeaconCfg)
 	loop.pendingStore = deps.Pending
 	currentSlot := deps.EthClock.GetCurrentSlot()
-	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot); err != nil {
+	minPendingSlot := currentSlot
+	var canonical *ParentInfo
+	head, err := deps.ForkChoice.GetHeadNode()
+	if err != nil {
+		return nil, fmt.Errorf("epbs/integration: resolve canonical head: %w", err)
+	}
+	header, ok := deps.ForkChoice.GetHeader(head.Root)
+	if !ok || header == nil {
+		return nil, fmt.Errorf("epbs/integration: canonical head %s unavailable", head.Root)
+	}
+	if header.Slot < minPendingSlot {
+		minPendingSlot = header.Slot
+	}
+	if block, ok := deps.ForkChoice.GetBlock(head.Root); ok && block != nil && block.Block != nil && block.Block.Body != nil {
+		if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
+			canonical = &ParentInfo{Slot: bid.Message.Slot, ExecutionHash: bid.Message.BlockHash}
+			if bid.Message.Slot < minPendingSlot {
+				minPendingSlot = bid.Message.Slot
+			}
+		}
+	}
+	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot, minPendingSlot); err != nil {
 		return nil, fmt.Errorf("epbs/integration: restore pending payloads: %w", err)
 	}
-	loop.pruneBeforeSlot(currentSlot)
+	if canonical != nil {
+		loop.pruneBeforeSlot(currentSlot, canonical)
+	} else {
+		loop.pruneBeforeSlot(minPendingSlot, nil)
+	}
 
 	serviceCtx, cancel := context.WithCancel(deps.Ctx)
 	svc := &BuilderService{

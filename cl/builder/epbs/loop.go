@@ -142,9 +142,7 @@ func NewBuilderLoop(
 // Called when the builder observes a new head via fork choice.
 func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 	l.releaseReservationsBeforeSlot(sc.Slot)
-	if sc.Slot > 1 {
-		l.pruneBeforeSlot(sc.Slot - 1)
-	}
+	l.pruneBeforeSlot(sc.Slot, &sc.Parent)
 	params := l.buildParams(sc)
 
 	payloadId, err := l.specBuild.StartBuild(ctx, params)
@@ -194,9 +192,6 @@ func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 // determines whether the speculative build matches, and submits a bid.
 func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
 	l.releaseReservationsBeforeSlot(sc.Slot)
-	if sc.Slot > 1 {
-		l.pruneBeforeSlot(sc.Slot - 1)
-	}
 	if !sc.BidDeadline.IsZero() {
 		if !time.Now().Before(sc.BidDeadline) {
 			return nil
@@ -214,7 +209,7 @@ func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
 	return l.buildAndBid(ctx, sc, prefs)
 }
 
-func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
+func (l *BuilderLoop) pruneBeforeSlot(slot uint64, canonical *ParentInfo) {
 	var discarded []uint64
 	type removedPending struct {
 		key     pendingPayloadKey
@@ -223,7 +218,9 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 	var removed []removedPending
 	l.mu.Lock()
 	for key, pending := range l.pendingPayloads {
-		if key.slot < slot && !revealInFlight(pending) {
+		canonicalWinner := canonical != nil && canonical.ExecutionHash != (common.Hash{}) &&
+			key.slot == canonical.Slot && key.blockHash == canonical.ExecutionHash
+		if key.slot < slot && !canonicalWinner && !revealInFlight(pending) {
 			delete(l.pendingPayloads, key)
 			removed = append(removed, removedPending{key: key, pending: pending})
 		}
@@ -554,8 +551,8 @@ func (l *BuilderLoop) restorePreviousPending(key pendingPayloadKey, current, pre
 	l.mu.Unlock()
 }
 
-func (l *BuilderLoop) restorePendingPayloads(ctx context.Context, currentSlot uint64) error {
-	records, err := l.pendingStore.Load(ctx, currentSlot)
+func (l *BuilderLoop) restorePendingPayloads(ctx context.Context, currentSlot, minSlot uint64) error {
+	records, err := l.pendingStore.Load(ctx, minSlot)
 	if err != nil {
 		return err
 	}

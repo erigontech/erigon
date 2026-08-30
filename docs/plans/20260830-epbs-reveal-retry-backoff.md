@@ -11,8 +11,8 @@ log work indefinitely.
 
 This does not block transaction simulation or bid construction. The current
 branch already preserves eventual reveal, bounds each attempt, retains the
-current-slot payload across restart, and cleans partial broadcast progress when
-the payload is pruned.
+canonical-head payload across restart even when wall-clock slots advance, and
+cleans partial broadcast progress when the payload is pruned.
 
 ## Proposed policy
 

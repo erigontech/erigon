@@ -297,12 +297,15 @@ func TestInitBuilderService_RejectsMissingDependencies(t *testing.T) {
 	require.ErrorContains(t, err, "context is required")
 }
 
-func TestInitBuilderServiceRetainsCurrentSlotWinnerAfterRevealCutoff(t *testing.T) {
+func TestInitBuilderServiceRetainsCanonicalWinnerBehindWallClock(t *testing.T) {
 	beaconCfg := testBeaconCfg()
 	beaconCfg.GloasForkEpoch = 0
 	beaconCfg.PayloadDueBps = 5000
 	beaconCfg.InitializeForkSchedule()
-	const currentSlot = uint64(100)
+	const (
+		headSlot    = uint64(100)
+		currentSlot = uint64(102)
+	)
 	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
 	genesisTime := uint64(time.Now().Add(-time.Duration(currentSlot)*slotDuration - 3*slotDuration/4).Unix())
 	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, beaconCfg)
@@ -319,11 +322,11 @@ func TestInitBuilderServiceRetainsCurrentSlotWinnerAfterRevealCutoff(t *testing.
 	require.NoError(t, err)
 	store := newFilePendingPayloadStore(t.TempDir(), beaconCfg)
 	key := pendingPayloadKey{
-		slot: currentSlot, parentBlockHash: common.HexToHash("0xdead"),
+		slot: headSlot, parentBlockHash: common.HexToHash("0xdead"),
 		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: common.HexToHash("0xb10c"),
 	}
 	pending := &pendingPayload{
-		slot: currentSlot, builderIndex: 42, bidValue: 1, parent: testParentInfo(),
+		slot: headSlot, builderIndex: 42, bidValue: 1, parent: testParentInfo(),
 		assembled: makeTestPayload(t, big.NewInt(1)),
 		execReqs:  cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
 	}
@@ -331,9 +334,9 @@ func TestInitBuilderServiceRetainsCurrentSlotWinnerAfterRevealCutoff(t *testing.
 
 	anchor := state.New(beaconCfg)
 	anchor.SetVersion(clparams.GloasVersion)
-	require.NoError(t, anchor.SetSlot(currentSlot))
+	require.NoError(t, anchor.SetSlot(headSlot))
 	anchor.SetGenesisValidatorsRoot(common.Hash{})
-	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: currentSlot})
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: headSlot})
 	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
 	emitters := beaconevents.NewEventEmitter()
@@ -357,7 +360,7 @@ func TestInitBuilderServiceRetainsCurrentSlotWinnerAfterRevealCutoff(t *testing.
 	submitter := &mockBidSubmitter{}
 	svc.Loop.submitter = submitter
 	require.NoError(t, svc.Loop.OnBidWon(
-		t.Context(), currentSlot, 42, key.parentBlockHash, key.parentBlockRoot, key.blockHash, common.HexToHash("0xa1"),
+		t.Context(), headSlot, 42, key.parentBlockHash, key.parentBlockRoot, key.blockHash, common.HexToHash("0xa1"),
 	))
 	require.Len(t, submitter.broadcasts, 1)
 }
