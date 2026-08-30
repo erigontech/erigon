@@ -28,6 +28,13 @@ func (f *ForkChoiceStore) IsBuilderBidCompatibleWithHead(ctx context.Context, bi
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	initialBuildOnFull := f.ShouldBuildOnFull(headNode, bid.Slot)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if latestHeadNode, ok := f.cachedHeadNode(); !ok || latestHeadNode != headNode {
+		return false, nil
+	}
 	headBlock, hasBlock := f.GetBlock(headRoot)
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -42,16 +49,19 @@ func (f *ForkChoiceStore) IsBuilderBidCompatibleWithHead(ctx context.Context, bi
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	finalBuildOnFull := f.ShouldBuildOnFull(finalHeadNode, bid.Slot)
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if finalBuildOnFull != initialBuildOnFull {
+		return false, nil
+	}
+	if latestHeadNode, ok := f.cachedHeadNode(); !ok || latestHeadNode != finalHeadNode {
+		return false, nil
+	}
 	signedHeadBid := headBlock.Block.Body.GetSignedExecutionPayloadBid()
 	if signedHeadBid != nil && signedHeadBid.Message != nil {
-		buildOnFull := f.ShouldBuildOnFull(finalHeadNode, bid.Slot)
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		if latestHeadNode, ok := f.cachedHeadNode(); !ok || latestHeadNode != finalHeadNode {
-			return false, nil
-		}
-		return BidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, buildOnFull), nil
+		return BidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, finalBuildOnFull), nil
 	}
 	headPayload := headBlock.Block.Body.ExecutionPayload
 	if headPayload == nil {

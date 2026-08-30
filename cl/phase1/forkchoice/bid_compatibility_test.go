@@ -33,6 +33,10 @@ func (g *blockingBidCompatibilityForkGraph) GetBlock(common.Hash) (*cltypes.Sign
 	return g.block, g.block != nil
 }
 
+func (g *blockingBidCompatibilityForkGraph) HasEnvelope(common.Hash) bool {
+	return false
+}
+
 func TestIsBuilderBidCompatibleWithHeadRejectsHeadFlipDuringLookup(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -71,12 +75,36 @@ func TestIsBuilderBidCompatibleWithHeadRejectsHeadFlipDuringLookup(t *testing.T)
 func TestIsBuilderBidCompatibleWithHeadAcceptsStableHead(t *testing.T) {
 	headRoot := common.HexToHash("0x1000")
 	graph, bid := testBidCompatibilityForkGraph(headRoot)
+	graph.header.Slot = bid.Slot - 1
 	store := &ForkChoiceStore{headHash: headRoot, headPayloadStatus: cltypes.PayloadStatusFull, forkGraph: graph}
 
 	compatible, err := store.IsBuilderBidCompatibleWithHead(context.Background(), bid)
 
 	require.NoError(t, err)
 	require.True(t, compatible)
+}
+
+func TestIsBuilderBidCompatibleWithHeadRejectsDerivedDecisionFlip(t *testing.T) {
+	headRoot := common.HexToHash("0x1000")
+	graph, bid := testBidCompatibilityForkGraph(headRoot)
+	graph.header.Slot = bid.Slot - 1
+	graph.started = make(chan struct{})
+	graph.release = make(chan struct{})
+	store := &ForkChoiceStore{headHash: headRoot, headPayloadStatus: cltypes.PayloadStatusFull, forkGraph: graph}
+	store.payloadDataAvailabilityVote.Store(headRoot, [clparams.PtcSize]int8{})
+	result := make(chan bool, 1)
+	errs := make(chan error, 1)
+	go func() {
+		compatible, err := store.IsBuilderBidCompatibleWithHead(t.Context(), bid)
+		result <- compatible
+		errs <- err
+	}()
+	<-graph.started
+	store.payloadDataAvailabilityVote.Delete(headRoot)
+	close(graph.release)
+
+	require.NoError(t, <-errs)
+	require.False(t, <-result)
 }
 
 func TestIsBuilderBidCompatibleWithHeadFailsClosedWithoutHeadBlock(t *testing.T) {
