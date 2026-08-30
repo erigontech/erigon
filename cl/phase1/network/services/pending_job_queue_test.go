@@ -104,7 +104,6 @@ func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQu
 		},
 		nil,
 		func(int, string) {},
-		nil,
 	)
 }
 
@@ -130,7 +129,6 @@ func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 			nil,
 			nil,
 			func(int, string) {},
-			nil,
 		)
 	})
 }
@@ -148,7 +146,6 @@ func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
 			func(context.Context, int, string) pendingJobDecision {
 				return pendingJobKeep
 			},
-			nil,
 			nil,
 			nil,
 		)
@@ -248,7 +245,6 @@ func TestPendingJobQueueLoopRetriesKeptJob(t *testing.T) {
 		},
 		nil,
 		func(int, string) {},
-		nil,
 	)
 
 	result, err := queue.enqueueLazy("message", func() (int, error) {
@@ -341,7 +337,6 @@ func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 		},
 		nil,
 		func(int, string) {},
-		nil,
 	)
 	defer func() {
 		releaseProcessing()
@@ -562,7 +557,6 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 			_ = enqueueTestPendingJob(queue, key, "replacement")
 		},
 		func(int, string) {},
-		nil,
 	)
 
 	_ = enqueueTestPendingJob(queue, 1, "original")

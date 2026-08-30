@@ -110,8 +110,7 @@ func (s *payloadAttestationService) newPendingQueue(ctx context.Context) *pendin
 		s.processPendingAttestation,
 		func(key pendingPayloadAttestationKey, _ *cltypes.PayloadAttestationMessage) {
 			log.Trace("Pending payload attestation expired", "blockRoot", key.blockRoot)
-		},
-		nil)
+		})
 }
 
 func (s *payloadAttestationService) Names() []string {
