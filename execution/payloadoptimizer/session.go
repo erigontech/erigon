@@ -348,11 +348,10 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if !reflect.DeepEqual(header.SlotNumber, params.SlotNumber) {
 		return mismatch("slot number")
 	}
-	expectedGasLimit := buildContext.parentGasLimit
-	if params.TargetGasLimit != nil {
-		expectedGasLimit = misc.CalcGasLimit(buildContext.parentGasLimit, *params.TargetGasLimit)
+	if params.TargetGasLimit != nil && !misc.IsGasLimitTargetCompatible(buildContext.parentGasLimit, header.GasLimit, *params.TargetGasLimit) {
+		return mismatch("target gas limit")
 	}
-	if header.GasLimit != expectedGasLimit {
+	if params.TargetGasLimit == nil && header.GasLimit != buildContext.parentGasLimit {
 		return mismatch("target gas limit")
 	}
 	if !reflect.DeepEqual(header.Extra, params.ExtraData) {

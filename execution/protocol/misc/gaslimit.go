@@ -71,3 +71,18 @@ func CalcGasLimit(parentGasLimit, desiredLimit uint64) uint64 {
 	}
 	return limit
 }
+
+// IsGasLimitTargetCompatible applies the Gloas proposer-preference transition rule.
+func IsGasLimitTargetCompatible(parentGasLimit, gasLimit, targetGasLimit uint64) bool {
+	maxGasLimitDifference := max(parentGasLimit/params.GasLimitBoundDivisor, 1) - 1
+	minGasLimit := parentGasLimit - maxGasLimitDifference
+	maxGasLimit := parentGasLimit + maxGasLimitDifference
+
+	if targetGasLimit >= minGasLimit && targetGasLimit <= maxGasLimit {
+		return gasLimit == targetGasLimit
+	}
+	if targetGasLimit > maxGasLimit {
+		return gasLimit == maxGasLimit
+	}
+	return gasLimit == minGasLimit
+}

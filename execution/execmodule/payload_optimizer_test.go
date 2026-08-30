@@ -305,6 +305,44 @@ func TestPayloadOptimizerAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
 	require.Equal(t, misc.CalcGasLimit(parent.GasLimit(), targetGasLimit), candidate.Block().Block.GasLimit())
 }
 
+func TestPayloadOptimizerDoesNotPublishGloasIncompatibleMinimumGasCandidate(t *testing.T) {
+	ctx := t.Context()
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.AmsterdamTime = common.NewUint64(math.MaxUint64)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chainConfig,
+		GasLimit: params.MinBlockGasLimit,
+	}))
+	parent := m.Genesis
+	require.Equal(t, uint64(params.MinBlockGasLimit), parent.GasLimit())
+	targetGasLimit := uint64(0)
+	beaconRoot := randomHash()
+	buildParams := &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{3},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		TargetGasLimit:        &targetGasLimit,
+	}
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	require.NoError(t, err)
+	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
+	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, session.Close()) })
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+
+	candidate, err := session.Apply(ctx, update)
+	require.ErrorIs(t, err, payloadoptimizer.ErrCandidateContextMismatch)
+	require.Nil(t, candidate)
+	_, ok := session.Best()
+	require.False(t, ok)
+}
+
 func TestPayloadOptimizerMatchesCanonicalProviderAcrossBatchBoundary(t *testing.T) {
 	ctx := t.Context()
 	m := execmoduletester.New(t,

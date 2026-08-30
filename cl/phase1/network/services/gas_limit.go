@@ -16,22 +16,10 @@
 
 package services
 
+import "github.com/erigontech/erigon/execution/protocol/misc"
+
 // IsGasLimitTargetCompatible checks whether the bid's gas_limit is consistent with the
 // proposer's target given the parent's gas_limit, per EIP-1559 transition rules (consensus-specs PR #5236).
 func IsGasLimitTargetCompatible(parentGasLimit, gasLimit, targetGasLimit uint64) bool {
-	var maxGasLimitDifference uint64
-	if parentGasLimit/1024 > 1 {
-		maxGasLimitDifference = parentGasLimit/1024 - 1
-	}
-
-	minGasLimit := parentGasLimit - maxGasLimitDifference
-	maxGasLimit := parentGasLimit + maxGasLimitDifference
-
-	if targetGasLimit >= minGasLimit && targetGasLimit <= maxGasLimit {
-		return gasLimit == targetGasLimit
-	}
-	if targetGasLimit > maxGasLimit {
-		return gasLimit == maxGasLimit
-	}
-	return gasLimit == minGasLimit
+	return misc.IsGasLimitTargetCompatible(parentGasLimit, gasLimit, targetGasLimit)
 }

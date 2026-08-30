@@ -351,7 +351,15 @@ func TestCandidateValidationRejectsAdjustedHeaderAboveMaximum(t *testing.T) {
 	result := validColdResult(params, requests, 1)
 	result.Block.Block.HeaderNoCopy().GasLimit = misc.CalcGasLimit(protocolparams.MaxBlockGasLimit, target)
 	require.Greater(t, result.Block.Block.GasLimit(), uint64(protocolparams.MaxBlockGasLimit))
-	require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
+	err = applyColdResult(t, buildCtx, result)
+	require.ErrorIs(t, err, payloadoptimizer.ErrCandidateContextMismatch)
+	require.ErrorContains(t, err, "gas limit bounds")
+
+	result = validColdResult(params, requests, 1)
+	result.Block.Block.HeaderNoCopy().GasLimit = protocolparams.MaxBlockGasLimit
+	err = applyColdResult(t, buildCtx, result)
+	require.ErrorIs(t, err, payloadoptimizer.ErrCandidateContextMismatch)
+	require.ErrorContains(t, err, "target gas limit")
 }
 
 func TestCandidateValidationUsesParentGasLimitWithoutTarget(t *testing.T) {
