@@ -18,6 +18,7 @@ package builder
 
 import (
 	context0 "context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -179,14 +180,34 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	yielded := mapset.NewSet[[32]byte]()
 	var retainedProgress retainedPassProgress
+	var retainedStopAt time.Time
 
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, batchProgress, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		providerCtx := ctx
+		cancelProvider := func() {}
+		if cfg.retainedTxnProvider != nil && interrupt != nil && interrupt.Load() {
+			if retainedStopAt.IsZero() {
+				retainedStopAt = time.Now().Add(exec.TransactionPackingStopGrace)
+			}
+			if !time.Now().Before(retainedStopAt) {
+				break
+			}
+			providerCtx, cancelProvider = context0.WithDeadline(ctx, retainedStopAt)
+		}
+		txns, batchProgress, err := getNextTransactions(providerCtx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		providerCtxErr := providerCtx.Err()
+		cancelProvider()
 		if err != nil {
+			if !retainedStopAt.IsZero() && ctx.Err() == nil && errors.Is(providerCtxErr, context0.DeadlineExceeded) && errors.Is(err, context0.DeadlineExceeded) {
+				break
+			}
 			return err
+		}
+		if !retainedStopAt.IsZero() && ctx.Err() == nil && errors.Is(providerCtxErr, context0.DeadlineExceeded) {
+			break
 		}
 
 		accepted := 0
@@ -206,6 +227,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		if cfg.retainedTxnProvider != nil {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if !retainedStopAt.IsZero() && !time.Now().Before(retainedStopAt) {
+				break
 			}
 			if retainedProgress.shouldContinue(accepted, batchProgress.stabilized, batchProgress.passComplete) {
 				continue

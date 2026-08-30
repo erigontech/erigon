@@ -57,6 +57,13 @@ type countedRetainedTxnProvider struct {
 	calls       atomic.Uint64
 }
 
+type stopBoundedRetainedTxnProvider struct {
+	transaction types.Transaction
+	calls       atomic.Uint64
+	sawDeadline chan struct{}
+	deadline    sync.Once
+}
+
 func (p *countedRetainedTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	batch, err := p.ProvideRetainedTxns(ctx, opts...)
 	return batch.Transactions, err
@@ -79,6 +86,29 @@ func (p *countedRetainedTxnProvider) ProvideRetainedTxns(ctx context.Context, op
 		Transactions:       types.Transactions{p.transaction},
 		NewlyYieldedTxnIDs: [][32]byte{hash},
 		PassComplete:       true,
+	}, nil
+}
+
+func (p *stopBoundedRetainedTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	batch, err := p.ProvideRetainedTxns(ctx, opts...)
+	return batch.Transactions, err
+}
+
+func (p *stopBoundedRetainedTxnProvider) ProvideRetainedTxns(ctx context.Context, opts ...txnprovider.ProvideOption) (builder.RetainedTxnBatch, error) {
+	call := p.calls.Add(1)
+	if _, ok := ctx.Deadline(); call > 1 && ok {
+		p.deadline.Do(func() { close(p.sawDeadline) })
+		<-ctx.Done()
+		return builder.RetainedTxnBatch{}, ctx.Err()
+	}
+	options := txnprovider.ApplyProvideOptions(opts...)
+	hash := [32]byte(p.transaction.Hash())
+	if options.TxnIdsFilter != nil {
+		options.TxnIdsFilter.Add(hash)
+	}
+	return builder.RetainedTxnBatch{
+		Transactions:       types.Transactions{p.transaction},
+		NewlyYieldedTxnIDs: [][32]byte{hash},
 	}, nil
 }
 
@@ -570,6 +600,50 @@ func TestPayloadOptimizerStopsAfterRetainedPassWithoutProgress(t *testing.T) {
 	require.Empty(t, actual.Block.Transactions())
 	require.Equal(t, oracle.Block.Block.Hash(), actual.Block.Hash())
 	require.Equal(t, oracle.Block.Receipts, actual.Receipts)
+}
+
+func TestPayloadOptimizerBoundsStoppedRetainedProviderAcrossIncompleteFilteredBatches(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+	transaction, err := types.SignTx(
+		types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(parent.BaseFee().Uint64()+1), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	transaction.SetSender(accounts.InternAddress(m.Address))
+	provider := &stopBoundedRetainedTxnProvider{transaction: transaction, sawDeadline: make(chan struct{})}
+	beaconRoot := randomHash()
+	buildParams := &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{3},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		CustomTxnProvider:     provider,
+	}
+	assembled, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, buildParams)
+	require.NoError(t, err)
+	t.Cleanup(func() { m.ExecModule.DiscardAssembledBlock(assembled.PayloadID) })
+
+	getCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	result, err := m.ExecModule.GetAssembledBlock(getCtx, assembled.PayloadID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Block)
+	require.Empty(t, result.Block.Block.Transactions())
+	require.Greater(t, provider.calls.Load(), uint64(1))
+	select {
+	case <-provider.sawDeadline:
+	default:
+		t.Fatal("retained provider never received the stopped-build deadline")
+	}
 }
 
 func TestPayloadOptimizerStopsAfterAssemblerRejectsCompletedRetainedPass(t *testing.T) {

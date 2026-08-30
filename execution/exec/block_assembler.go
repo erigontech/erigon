@@ -32,6 +32,9 @@ type AssemblerCfg struct {
 	ExperimentalBAL bool
 }
 
+// TransactionPackingStopGrace allows packing to finish useful work after a payload is requested.
+const TransactionPackingStopGrace = 500 * time.Millisecond
+
 type AssembledBlock struct {
 	PayloadId        uint64
 	ParentHeaderTime uint64
@@ -319,7 +322,7 @@ LOOP:
 		if interrupt != nil && interrupt.Load() && stopped == nil {
 			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
-			stopped = time.NewTicker(500 * time.Millisecond)
+			stopped = time.NewTicker(TransactionPackingStopGrace)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
 		if gasPool.Gas() < params.TxGas {
