@@ -54,6 +54,11 @@ func (s *revealScheduler) Enqueue(task revealTask) bool {
 			case s.sem <- struct{}{}:
 			}
 			defer func() { <-s.sem }()
+			if !time.Now().Before(task.deadline) {
+				attemptCtx, cancel := context.WithTimeout(ctx, revealRetryDelay)
+				defer cancel()
+				return task.reveal(attemptCtx)
+			}
 			return task.reveal(ctx)
 		})
 		s.mu.Lock()

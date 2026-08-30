@@ -83,3 +83,46 @@ func TestRevealSchedulerDoesNotAttemptAfterCancellation(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 	require.Zero(t, attempts)
 }
+
+func TestRevealSchedulerBoundsExpiredAttempts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	scheduler := newRevealScheduler(ctx, 4, 5)
+	started := make(chan struct{}, 4)
+	for i := range 4 {
+		require.True(t, scheduler.Enqueue(revealTask{
+			root: common.Hash{byte(i + 1)}, deadline: time.Now().Add(-time.Second),
+			reveal: func(ctx context.Context) error {
+				started <- struct{}{}
+				<-ctx.Done()
+				return ctx.Err()
+			},
+		}))
+	}
+	for range 4 {
+		<-started
+	}
+	succeeded := make(chan struct{})
+	require.True(t, scheduler.Enqueue(revealTask{
+		root: common.Hash{5}, deadline: time.Now().Add(-time.Second),
+		reveal: func(context.Context) error {
+			close(succeeded)
+			return nil
+		},
+	}))
+	select {
+	case <-succeeded:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expired reveal attempts exhausted the scheduler")
+	}
+	waited := make(chan struct{})
+	go func() {
+		scheduler.Wait()
+		close(waited)
+	}()
+	select {
+	case <-waited:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expired reveal attempts blocked scheduler shutdown")
+	}
+}
