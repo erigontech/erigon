@@ -4,11 +4,17 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
+
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/devgenesis"
@@ -16,8 +22,12 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -285,6 +295,71 @@ func TestInitBuilderService_RejectsInvalidConfig(t *testing.T) {
 func TestInitBuilderService_RejectsMissingDependencies(t *testing.T) {
 	_, err := InitBuilderService(epbscfg.Config{Enabled: true, KeyPath: "key", BidMargin: 0.5}, BuilderDeps{})
 	require.ErrorContains(t, err, "context is required")
+}
+
+func TestInitBuilderServiceRetainsCurrentSlotWinnerAfterRevealCutoff(t *testing.T) {
+	beaconCfg := testBeaconCfg()
+	beaconCfg.GloasForkEpoch = 0
+	beaconCfg.PayloadDueBps = 5000
+	beaconCfg.InitializeForkSchedule()
+	const currentSlot = uint64(100)
+	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
+	genesisTime := uint64(time.Now().Add(-time.Duration(currentSlot)*slotDuration - 3*slotDuration/4).Unix())
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, beaconCfg)
+	require.Equal(t, currentSlot, clock.GetCurrentSlot())
+	require.False(t, time.Now().Before(payloadRevealDeadline(clock, beaconCfg, currentSlot)))
+
+	keyBytes := make([]byte, 32)
+	for i := range keyBytes {
+		keyBytes[i] = byte(i + 1)
+	}
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	require.NoError(t, os.WriteFile(keyPath, keyBytes, 0600))
+	signer, err := NewLocalSignerFromBytes(keyBytes)
+	require.NoError(t, err)
+	store := newFilePendingPayloadStore(t.TempDir(), beaconCfg)
+	key := pendingPayloadKey{
+		slot: currentSlot, parentBlockHash: common.HexToHash("0xdead"),
+		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: common.HexToHash("0xb10c"),
+	}
+	pending := &pendingPayload{
+		slot: currentSlot, builderIndex: 42, bidValue: 1, parent: testParentInfo(),
+		assembled: makeTestPayload(t, big.NewInt(1)),
+		execReqs:  cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
+	}
+	require.NoError(t, store.Save(t.Context(), key, pending, signer.Pubkey()))
+
+	anchor := state.New(beaconCfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(currentSlot))
+	anchor.SetGenesisValidatorsRoot(common.Hash{})
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: currentSlot})
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	emitters := beaconevents.NewEventEmitter()
+	syncedData := synced_data.NewSyncedDataManager(beaconCfg, true)
+	forkChoice, err := forkchoice.NewForkChoiceStore(
+		clock, anchor, nil, pool.NewOperationsPool(beaconCfg), graph, emitters, syncedData, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
+	)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	svc, err := InitBuilderService(epbscfg.Config{Enabled: true, KeyPath: keyPath, BidMargin: 0.5}, BuilderDeps{
+		Ctx: ctx, BeaconCfg: beaconCfg, EthClock: clock, SyncedData: syncedData, ForkChoice: forkChoice,
+		Exec: newMockPayloadAssembler(), EpbsPool: pool.NewEpbsPool(), Gossip: &testGossipPublisher{},
+		Columns: &testColumnStorage{writes: make(map[uint64]int), errors: make(map[uint64]error)},
+		Pending: store, Emitters: emitters,
+	})
+	require.NoError(t, err)
+	defer svc.Shutdown()
+	require.Contains(t, svc.Loop.pendingPayloads, key)
+	submitter := &mockBidSubmitter{}
+	svc.Loop.submitter = submitter
+	require.NoError(t, svc.Loop.OnBidWon(
+		t.Context(), currentSlot, 42, key.parentBlockHash, key.parentBlockRoot, key.blockHash, common.HexToHash("0xa1"),
+	))
+	require.Len(t, submitter.broadcasts, 1)
 }
 
 func TestBuilderService_Shutdown_Nil(t *testing.T) {

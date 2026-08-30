@@ -138,9 +138,6 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 		return nil, fmt.Errorf("epbs/integration: restore pending payloads: %w", err)
 	}
 	loop.pruneBeforeSlot(currentSlot)
-	if !time.Now().Before(payloadRevealDeadline(deps.EthClock, deps.BeaconCfg, currentSlot)) {
-		loop.pruneBeforeSlot(currentSlot + 1)
-	}
 
 	serviceCtx, cancel := context.WithCancel(deps.Ctx)
 	svc := &BuilderService{
