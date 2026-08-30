@@ -93,9 +93,10 @@ func PayloadIdToBytes(id uint64) []byte {
 
 // ParentInfo captures the parent context needed for building an execution payload.
 type ParentInfo struct {
-	Slot          uint64      // Slot of the parent beacon block
-	BlockRoot     common.Hash // Beacon block root of the parent
-	ExecutionHash common.Hash // EL parent hash to build on
-	GasLimit      uint64
-	ShouldExtend  bool // FULL path (extend) vs EMPTY path (skip)
+	Slot             uint64      // Slot of the parent beacon block
+	BlockRoot        common.Hash // Beacon block root of the parent
+	ExecutionHash    common.Hash // EL parent hash to build on
+	PayloadBlockHash common.Hash // EL block hash included by the parent bid
+	GasLimit         uint64
+	ShouldExtend     bool // FULL path (extend) vs EMPTY path (skip)
 }

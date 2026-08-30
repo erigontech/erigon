@@ -157,7 +157,7 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	}
 	if block, ok := deps.ForkChoice.GetBlock(head.Root); ok && block != nil && block.Block != nil && block.Block.Body != nil {
 		if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
-			canonical = &ParentInfo{Slot: bid.Message.Slot, ExecutionHash: bid.Message.BlockHash}
+			canonical = &ParentInfo{Slot: bid.Message.Slot, PayloadBlockHash: bid.Message.BlockHash}
 			if bid.Message.Slot < minPendingSlot {
 				minPendingSlot = bid.Message.Slot
 			}
@@ -166,7 +166,13 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot, minPendingSlot); err != nil {
 		return nil, fmt.Errorf("epbs/integration: restore pending payloads: %w", err)
 	}
-	if canonical != nil {
+	currentHead, err := deps.ForkChoice.GetHeadNode()
+	if err != nil {
+		return nil, fmt.Errorf("epbs/integration: revalidate canonical head: %w", err)
+	}
+	if currentHead.Root != head.Root {
+		loop.pruneBeforeSlot(minPendingSlot, nil)
+	} else if canonical != nil {
 		loop.pruneBeforeSlot(currentSlot, canonical)
 	} else {
 		loop.pruneBeforeSlot(minPendingSlot, nil)
@@ -306,6 +312,10 @@ func handleHeadEvent(
 				"slot", nextSlot, "parentRoot", parent.BlockRoot, "err", err)
 			continue
 		}
+		currentHead, err := fc.GetHeadNode()
+		if err != nil || currentHead.Root != parent.BlockRoot {
+			continue
+		}
 		if err := loop.OnNewHead(ctx, sc); err != nil {
 			log.Warn("ePBS builder: OnNewHead failed",
 				"slot", nextSlot,
@@ -388,6 +398,10 @@ func buildSlotContext(
 	if parentState.Slot() != parent.Slot {
 		return SlotContext{}, fmt.Errorf("parent state slot %d does not match parent slot %d", parentState.Slot(), parent.Slot)
 	}
+	parentPayloadBlockHash := common.Hash{}
+	if bid := parentState.GetLatestExecutionPayloadBid(); bid != nil && bid.Slot == parent.Slot {
+		parentPayloadBlockHash = bid.BlockHash
+	}
 	if err := transition.DefaultMachine.ProcessSlots(parentState, slot); err != nil {
 		return SlotContext{}, fmt.Errorf("advance parent state to slot %d: %w", slot, err)
 	}
@@ -413,11 +427,12 @@ func buildSlotContext(
 	return SlotContext{
 		Slot: slot,
 		Parent: ParentInfo{
-			Slot:          parent.Slot,
-			BlockRoot:     parent.BlockRoot,
-			ExecutionHash: parent.ExecutionHash,
-			GasLimit:      parentGasLimit,
-			ShouldExtend:  parent.ShouldExtend,
+			Slot:             parent.Slot,
+			BlockRoot:        parent.BlockRoot,
+			ExecutionHash:    parent.ExecutionHash,
+			PayloadBlockHash: parentPayloadBlockHash,
+			GasLimit:         parentGasLimit,
+			ShouldExtend:     parent.ShouldExtend,
 		},
 		DependentRoot: dependentRoot,
 		Timestamp:     timestamp,

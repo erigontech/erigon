@@ -218,8 +218,14 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64, canonical *ParentInfo) {
 	var removed []removedPending
 	l.mu.Lock()
 	for key, pending := range l.pendingPayloads {
-		canonicalWinner := canonical != nil && canonical.ExecutionHash != (common.Hash{}) &&
-			key.slot == canonical.Slot && key.blockHash == canonical.ExecutionHash
+		canonicalBlockHash := common.Hash{}
+		if canonical != nil {
+			canonicalBlockHash = canonical.PayloadBlockHash
+			if canonicalBlockHash == (common.Hash{}) {
+				canonicalBlockHash = canonical.ExecutionHash
+			}
+		}
+		canonicalWinner := canonicalBlockHash != (common.Hash{}) && key.slot == canonical.Slot && key.blockHash == canonicalBlockHash
 		if key.slot < slot && !canonicalWinner && !revealInFlight(pending) {
 			delete(l.pendingPayloads, key)
 			removed = append(removed, removedPending{key: key, pending: pending})

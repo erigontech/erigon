@@ -233,6 +233,52 @@ func TestBuildSlotContextDoesNotUseNonPayloadBuilderVersion(t *testing.T) {
 	require.False(t, sc.BuilderFound)
 }
 
+func TestEmptyCanonicalHeadRetainsWinnerUntilImportedReveal(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+
+	cfg := loop.beaconCfg
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	parentState, _, err := devgenesis.BuildGenesisState("empty-canonical-head", 64, cfg, 0, common.Hash{})
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(parentState, sc.Slot))
+	parentState.SetVersion(clparams.GloasVersion)
+	parentState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		Slot: sc.Slot, ParentBlockHash: sc.Parent.ExecutionHash, BlockHash: common.HexToHash("0xb10c"),
+	})
+	canonicalRoot := common.HexToHash("0xa1")
+	fc := &slotContextForkChoiceStub{state: parentState, dependentRoot: common.HexToHash("0xbbbb")}
+	next, err := buildSlotContext(fc, cfg, sc.Slot+1, sc.Timestamp+cfg.SecondsPerSlot, forkchoice.ParentCandidate{
+		Slot: sc.Slot, BlockRoot: canonicalRoot, ExecutionHash: sc.Parent.ExecutionHash, ShouldExtend: false,
+	}, loop.manager.Pubkey())
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0xb10c"), next.Parent.PayloadBlockHash)
+	require.NoError(t, loop.OnNewHead(t.Context(), next))
+	require.Len(t, loop.pendingPayloads, 1)
+	require.NoError(t, loop.OnBidWon(
+		t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+		common.HexToHash("0xb10c"), canonicalRoot,
+	))
+	require.Len(t, submitter.broadcasts, 1)
+
+	parentState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		Slot: sc.Slot, ParentBlockHash: sc.Parent.ExecutionHash, BlockHash: common.HexToHash("0x9999"),
+	})
+	replacement, err := buildSlotContext(fc, cfg, sc.Slot+1, sc.Timestamp+cfg.SecondsPerSlot, forkchoice.ParentCandidate{
+		Slot: sc.Slot, BlockRoot: common.HexToHash("0xb2"), ExecutionHash: sc.Parent.ExecutionHash, ShouldExtend: false,
+	}, loop.manager.Pubkey())
+	require.NoError(t, err)
+	require.NoError(t, loop.OnNewHead(t.Context(), replacement))
+	require.Empty(t, loop.pendingPayloads)
+}
+
 func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return r.block, r.block != nil
 }
