@@ -72,16 +72,30 @@ func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionR
 	if len(configured) == 1 {
 		defaults = configured[0]
 	}
+	targetGasLimit := params.TargetGasLimit
+	if targetGasLimit == nil {
+		targetGasLimit = defaults.TargetGasLimit
+		if targetGasLimit == nil {
+			targetGasLimit = &parentGasLimit
+		}
+	}
+	if *targetGasLimit > protocolparams.MaxBlockGasLimit {
+		return BuildContext{}, errors.New("payload optimizer build context has an invalid target gas limit")
+	}
+	extraData := params.ExtraData
+	if extraData == nil {
+		extraData = defaults.ExtraData
+	}
+	if uint64(len(extraData)) > protocolparams.MaximumExtraDataSize {
+		return BuildContext{}, errors.New("payload optimizer build context has invalid extra data")
+	}
 	owned := params.Copy()
 	owned.PayloadId = 0
 	if owned.TargetGasLimit == nil {
-		owned.TargetGasLimit = copyUint64(defaults.TargetGasLimit)
-		if owned.TargetGasLimit == nil {
-			owned.TargetGasLimit = copyUint64(&parentGasLimit)
-		}
+		owned.TargetGasLimit = copyUint64(targetGasLimit)
 	}
 	if owned.ExtraData == nil {
-		owned.ExtraData = append([]byte{}, defaults.ExtraData...)
+		owned.ExtraData = append([]byte{}, extraData...)
 	}
 	if owned.MaxBlobsPerBlock == nil {
 		owned.MaxBlobsPerBlock = copyUint64(defaults.MaxBlobsPerBlock)

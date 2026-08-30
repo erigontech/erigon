@@ -322,6 +322,13 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		return mismatch("block value")
 	}
 	params := buildContext.params
+	headerView := result.Block.Block.HeaderNoCopy()
+	if headerView.GasLimit < protocolparams.MinBlockGasLimit || headerView.GasLimit > protocolparams.MaxBlockGasLimit {
+		return mismatch("gas limit bounds")
+	}
+	if uint64(len(headerView.Extra)) > protocolparams.MaximumExtraDataSize {
+		return mismatch("extra data bounds")
+	}
 	header := result.Block.Block.Header()
 	if header.ParentHash != params.ParentHash {
 		return mismatch("parent hash")

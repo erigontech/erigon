@@ -59,7 +59,7 @@ func baseBuildContextInput() (*builder.Parameters, [4]byte, types.FlatRequests) 
 func TestBuildContextOwnsItsInputs(t *testing.T) {
 	parentRoot := common.Hash{0x04}
 	slot := uint64(5)
-	gasLimit := uint64(6)
+	gasLimit := uint64(protocolparams.MinBlockGasLimit)
 	params := &builder.Parameters{
 		PayloadId:             99,
 		ParentHash:            common.Hash{0x01},
@@ -90,7 +90,7 @@ func TestBuildContextOwnsItsInputs(t *testing.T) {
 	require.Equal(t, uint64(9), owned.Withdrawals[0].Amount)
 	require.Equal(t, common.Hash{0x04}, *owned.ParentBeaconBlockRoot)
 	require.Equal(t, uint64(5), *owned.SlotNumber)
-	require.Equal(t, uint64(6), *owned.TargetGasLimit)
+	require.Equal(t, uint64(protocolparams.MinBlockGasLimit), *owned.TargetGasLimit)
 	require.Equal(t, []byte{0x0b}, owned.ExtraData)
 	require.Zero(t, owned.PayloadId)
 	require.Nil(t, owned.CustomTxnProvider)
@@ -241,6 +241,73 @@ func TestBuildContextRejectsInvalidInputs(t *testing.T) {
 		_, err = payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	})
 	require.Error(t, err)
+}
+
+func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
+	aboveMaximum := uint64(protocolparams.MaxBlockGasLimit + 1)
+	for name, configure := range map[string]func(*builder.Parameters) payloadoptimizer.BuildDefaults{
+		"explicit gas above maximum": func(params *builder.Parameters) payloadoptimizer.BuildDefaults {
+			params.TargetGasLimit = &aboveMaximum
+			return payloadoptimizer.BuildDefaults{}
+		},
+		"default gas above maximum": func(params *builder.Parameters) payloadoptimizer.BuildDefaults {
+			params.TargetGasLimit = nil
+			return payloadoptimizer.BuildDefaults{TargetGasLimit: &aboveMaximum}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			defaults := configure(params)
+			_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+			require.Error(t, err)
+		})
+	}
+	for name, target := range map[string]uint64{
+		"zero":    0,
+		"clamped": protocolparams.MinBlockGasLimit - 1,
+		"minimum": protocolparams.MinBlockGasLimit,
+		"maximum": protocolparams.MaxBlockGasLimit,
+	} {
+		t.Run("explicit gas "+name, func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			params.TargetGasLimit = &target
+			buildContext, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			require.NoError(t, err)
+			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
+		})
+		t.Run("default gas "+name, func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			params.TargetGasLimit = nil
+			buildContext, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{TargetGasLimit: &target})
+			require.NoError(t, err)
+			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
+		})
+	}
+
+	tooLong := make([]byte, protocolparams.MaximumExtraDataSize+1)
+	t.Run("explicit extra above maximum", func(t *testing.T) {
+		params, fork, requests := baseBuildContextInput()
+		params.ExtraData = tooLong
+		_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+		require.Error(t, err)
+	})
+	t.Run("default extra above maximum", func(t *testing.T) {
+		params, fork, requests := baseBuildContextInput()
+		params.ExtraData = nil
+		_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{ExtraData: tooLong})
+		require.Error(t, err)
+	})
+	for name, extra := range map[string][]byte{
+		"empty":   {},
+		"maximum": make([]byte, protocolparams.MaximumExtraDataSize),
+	} {
+		t.Run("valid extra "+name, func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			params.ExtraData = extra
+			_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestZeroBuildContextAccessorsAreSafe(t *testing.T) {
