@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -169,7 +170,7 @@ func TestPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T) {
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -235,7 +236,7 @@ func TestPayloadOptimizerResolvesNondefaultBuilderConfiguration(t *testing.T) {
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 
 	defaults := payloadoptimizer.BuildDefaultsFromConfig(buildDefaults)
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit(), defaults)
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit(), defaults)
 	require.NoError(t, err)
 	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
 	require.Equal(t, []byte{0xaa, 0xbb}, buildCtx.Parameters().ExtraData)
@@ -280,7 +281,7 @@ func TestPayloadOptimizerAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
 		SlotNumber:            syntheticSlotNumber(parent),
 		TargetGasLimit:        &targetGasLimit,
 	}
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
@@ -316,7 +317,7 @@ func TestPayloadOptimizerDoesNotPublishGloasIncompatibleMinimumGasCandidate(t *t
 		SlotNumber:            syntheticSlotNumber(parent),
 		TargetGasLimit:        &targetGasLimit,
 	}
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
@@ -383,7 +384,7 @@ func TestPayloadOptimizerMatchesCanonicalProviderAcrossBatchBoundary(t *testing.
 	for i := range ascending {
 		descending[i] = ascending[len(ascending)-1-i]
 	}
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -452,7 +453,7 @@ func TestPayloadOptimizerReconsidersBudgetAfterStableBlobRejection(t *testing.T)
 	require.NotEmpty(t, oracleWrapper.Commitments)
 	require.NotEmpty(t, oracleWrapper.Proofs)
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -556,7 +557,7 @@ func TestPayloadOptimizerReconsidersBudgetAfterStableRlpRejection(t *testing.T) 
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 	require.Equal(t, []common.Hash{valid.Hash()}, transactionHashes(oracle.Block.Block.Transactions()))
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -610,7 +611,7 @@ func TestPayloadOptimizerStopsAfterRetainedPassWithoutProgress(t *testing.T) {
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 	require.Empty(t, oracle.Block.Block.Transactions())
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -704,7 +705,7 @@ func TestPayloadOptimizerStopsAfterAssemblerRejectsCompletedRetainedPass(t *test
 	require.Empty(t, retained.Block.Block.Transactions())
 	require.Equal(t, uint64(2), retainedProvider.calls.Load())
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)

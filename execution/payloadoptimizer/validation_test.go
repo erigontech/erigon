@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -88,7 +89,7 @@ func applyColdResult(t *testing.T, buildCtx payloadoptimizer.BuildContext, resul
 	return err
 }
 
-func withAmsterdamBAL(t *testing.T, result execmodule.AssembledBlockResult) execmodule.AssembledBlockResult {
+func withGloasBAL(t *testing.T, result execmodule.AssembledBlockResult) execmodule.AssembledBlockResult {
 	t.Helper()
 	bal := types.BlockAccessList{}
 	sidecar := types.NewBlockAccessListSidecar(bal)
@@ -108,16 +109,16 @@ func withAmsterdamBAL(t *testing.T, result execmodule.AssembledBlockResult) exec
 	return result
 }
 
-func TestCandidateValidationRequiresAmsterdamBALCommitmentAndSidecar(t *testing.T) {
+func TestCandidateValidationRequiresGloasBALCommitmentAndSidecar(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	missing := validColdResult(params, requests, 1)
 	require.ErrorIs(t, applyColdResult(t, buildCtx, missing), payloadoptimizer.ErrCandidateContextMismatch)
-	require.NoError(t, applyColdResult(t, buildCtx, withAmsterdamBAL(t, validColdResult(params, requests, 1))))
+	require.NoError(t, applyColdResult(t, buildCtx, withGloasBAL(t, validColdResult(params, requests, 1))))
 }
 
 func staleBALResult(t *testing.T, params *builder.Parameters, requests types.FlatRequests, canonicalHeader bool) execmodule.AssembledBlockResult {
@@ -147,7 +148,7 @@ func TestCandidateValidationRejectsStaleBALCacheAlias(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	err = applyColdResult(t, buildCtx, staleBALResult(t, params, requests, false))
@@ -158,7 +159,7 @@ func TestCandidateCopiesFreshBALFromCanonicalLogicalValue(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := staleBALResult(t, params, requests, true)
 	backend := &optimizerBackend{
@@ -188,7 +189,7 @@ func TestCandidateCopiesFreshBALFromCanonicalLogicalValue(t *testing.T) {
 
 func TestCandidateRejectsIncompleteOrInconsistentResultGraph(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	transaction := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}}
 	receipt := &types.Receipt{BlockNumber: uint256.NewInt(2), GasUsed: 21_000, CumulativeGasUsed: 21_000}
@@ -259,46 +260,86 @@ func resultWithCanonicalReceiptGas(params *builder.Parameters, requests types.Fl
 }
 
 func TestCandidateValidatesDerivedReceiptGasAndCanonicalBlockValue(t *testing.T) {
-	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
-	require.NoError(t, err)
+	for _, stateVersion := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(stateVersion.String(), func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, stateVersion, fork, requests, baseParentGasLimit)
+			require.NoError(t, err)
 
-	require.NoError(t, applyColdResult(t, buildCtx, resultWithCanonicalReceiptGas(params, requests)))
-	for name, mutate := range map[string]func(*execmodule.AssembledBlockResult){
-		"receipt gas delta": func(result *execmodule.AssembledBlockResult) {
-			result.Block.Receipts[0].GasUsed++
-		},
-		"final cumulative gas": func(result *execmodule.AssembledBlockResult) {
-			result.Block.Block.HeaderNoCopy().GasUsed++
-		},
-		"inflated block value": func(result *execmodule.AssembledBlockResult) {
-			result.BlockValue.AddUint64(result.BlockValue, 1)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			result := resultWithCanonicalReceiptGas(params, requests)
-			mutate(&result)
-			require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
+			require.NoError(t, applyColdResult(t, buildCtx, resultWithCanonicalReceiptGas(params, requests)))
+			for name, mutate := range map[string]func(*execmodule.AssembledBlockResult){
+				"receipt gas delta": func(result *execmodule.AssembledBlockResult) {
+					result.Block.Receipts[0].GasUsed++
+				},
+				"final cumulative gas": func(result *execmodule.AssembledBlockResult) {
+					result.Block.Block.HeaderNoCopy().GasUsed++
+				},
+				"inflated block value": func(result *execmodule.AssembledBlockResult) {
+					result.BlockValue.AddUint64(result.BlockValue, 1)
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					result := resultWithCanonicalReceiptGas(params, requests)
+					mutate(&result)
+					require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
+				})
+			}
 		})
 	}
 }
 
-func TestAmsterdamCandidateAllowsHeaderGasToDifferFromReceiptGas(t *testing.T) {
+func TestGloasCandidateAllowsHeaderGasToDifferFromReceiptGas(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := resultWithCanonicalReceiptGas(params, requests)
 	result.Block.Block.HeaderNoCopy().GasUsed = 31
-	result = withAmsterdamBAL(t, result)
+	result = withGloasBAL(t, result)
 
 	require.NoError(t, applyColdResult(t, buildCtx, result))
 }
 
+func TestGloasCandidateAcceptsAccountAbstractionReceiptGas(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	slot := uint64(6)
+	params.SlotNumber = &slot
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, clparams.GloasVersion, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	tx := &types.AccountAbstractionTransaction{
+		ChainID:       uint256.NewInt(1),
+		Tip:           uint256.NewInt(2),
+		FeeCap:        uint256.NewInt(2),
+		GasLimit:      100,
+		SenderAddress: accounts.InternAddress(common.Address{1}),
+		BuilderFee:    uint256.NewInt(0),
+		NonceKey:      uint256.NewInt(0),
+	}
+	receipt := &types.Receipt{
+		Type:              types.AccountAbstractionTxType,
+		BlockNumber:       uint256.NewInt(2),
+		GasUsed:           40,
+		CumulativeGasUsed: 50,
+	}
+	result := validColdResult(params, requests, 1)
+	header := result.Block.Block.Header()
+	header.GasUsed = 60
+	result.Block.Block = types.NewBlock(header, types.Transactions{tx}, nil, types.Receipts{receipt}, params.Withdrawals, nil)
+	result.Block.Receipts = types.Receipts{receipt}
+	result.BlockValue = execmodule.BlockValue(result.Block, header.BaseFee)
+	result = withGloasBAL(t, result)
+
+	require.NoError(t, applyColdResult(t, buildCtx, result))
+	result.BlockValue.AddUint64(result.BlockValue, 1)
+	err = applyColdResult(t, buildCtx, result)
+	require.ErrorIs(t, err, payloadoptimizer.ErrCandidateContextMismatch)
+	require.ErrorContains(t, err, "block value")
+}
+
 func TestNilExpectedRequestsAcceptsGeneratedCandidateRequests(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, nil, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, nil, baseParentGasLimit)
 	require.NoError(t, err)
 
 	require.NoError(t, applyColdResult(t, buildCtx, validColdResult(params, requests, 1)))
@@ -306,7 +347,7 @@ func TestNilExpectedRequestsAcceptsGeneratedCandidateRequests(t *testing.T) {
 
 func TestCandidateValidationCoversBuildContextFields(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	otherRoot := common.Hash{0xff}
 	otherSlot := uint64(99)
@@ -351,7 +392,7 @@ func TestCandidateValidationCoversBuildContextFields(t *testing.T) {
 
 func TestCandidateValidationAcceptsAProtocolAdjustedGasLimit(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := validColdResult(params, requests, 1)
 	require.NotEqual(t, *params.TargetGasLimit, result.Block.Block.GasLimit())
@@ -374,7 +415,7 @@ func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	maxBlobs := uint64(1)
 	params.MaxBlobsPerBlock = &maxBlobs
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	baseWrapper := candidateBlobWrapper(t, 0, 0)
 	blobTransaction := func(nonce uint64) types.Transaction {
@@ -408,7 +449,7 @@ func TestCandidateValidationRequiresValidBlobSidecars(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	maxBlobs := uint64(1)
 	params.MaxBlobsPerBlock = &maxBlobs
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	validV0 := candidateBlobWrapper(t, 0, 0)
 	validV1 := candidateBlobWrapper(t, 1, 0)
@@ -436,12 +477,12 @@ func TestCandidateValidationRequiresValidBlobSidecars(t *testing.T) {
 	}
 
 	for name, transaction := range map[string]types.Transaction{
-		"plain":                     &validV0.Tx,
-		"missing":                   missing,
-		"invalid v0":                invalidV0,
-		"invalid v1":                invalidV1,
-		"valid v1 on pre-Amsterdam": validV1,
-		"unknown":                   unknown,
+		"plain":                &validV0.Tx,
+		"missing":              missing,
+		"invalid v0":           invalidV0,
+		"invalid v1":           invalidV1,
+		"valid v1 before Fulu": validV1,
+		"unknown":              unknown,
 	} {
 		t.Run(name, func(t *testing.T) {
 			require.ErrorIs(t, applyColdResult(t, buildCtx, resultWith(transaction)), payloadoptimizer.ErrCandidateContextMismatch)
@@ -486,27 +527,29 @@ func coldResultWithBlob(params *builder.Parameters, requests types.FlatRequests,
 
 func TestCandidateValidationRequiresForkSpecificBlobWrapperVersion(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		amsterdam bool
-		version   byte
-		wantErr   bool
+		name         string
+		stateVersion clparams.StateVersion
+		version      byte
+		wantErr      bool
 	}{
-		{name: "pre-Amsterdam v0", version: 0},
-		{name: "pre-Amsterdam v1", version: 1, wantErr: true},
-		{name: "Amsterdam v0", amsterdam: true, version: 0, wantErr: true},
-		{name: "Amsterdam v1", amsterdam: true, version: 1},
+		{name: "Electra v0", stateVersion: clparams.ElectraVersion, version: 0},
+		{name: "Electra v1", stateVersion: clparams.ElectraVersion, version: 1, wantErr: true},
+		{name: "Fulu v0", stateVersion: clparams.FuluVersion, version: 0, wantErr: true},
+		{name: "Fulu v1", stateVersion: clparams.FuluVersion, version: 1},
+		{name: "Gloas v0", stateVersion: clparams.GloasVersion, version: 0, wantErr: true},
+		{name: "Gloas v1", stateVersion: clparams.GloasVersion, version: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
-			if tc.amsterdam {
+			if tc.stateVersion >= clparams.GloasVersion {
 				slot := uint64(6)
 				params.SlotNumber = &slot
 			}
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, tc.stateVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			result := coldResultWithBlob(params, requests, candidateBlobWrapper(t, tc.version, 0))
-			if tc.amsterdam {
-				result = withAmsterdamBAL(t, result)
+			if tc.stateVersion >= clparams.GloasVersion {
+				result = withGloasBAL(t, result)
 			}
 			err = applyColdResult(t, buildCtx, result)
 			if tc.wantErr {
@@ -528,7 +571,7 @@ func TestCandidateValidationUsesCanonicalParentAndTargetGasLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			params.TargetGasLimit = &target
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, parentGasLimit)
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, parentGasLimit)
 			require.NoError(t, err)
 			want := misc.CalcGasLimit(parentGasLimit, target)
 			result := validColdResult(params, requests, 1)
@@ -547,7 +590,7 @@ func TestCandidateValidationAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	target := uint64(math.MaxUint64)
 	params.TargetGasLimit = &target
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, parentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, parentGasLimit)
 	require.NoError(t, err)
 	require.Equal(t, target, *buildCtx.Parameters().TargetGasLimit)
 
@@ -560,7 +603,7 @@ func TestCandidateValidationRejectsAdjustedHeaderAboveMaximum(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	target := uint64(math.MaxUint64)
 	params.TargetGasLimit = &target
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MaxBlockGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MaxBlockGasLimit)
 	require.NoError(t, err)
 
 	result := validColdResult(params, requests, 1)
@@ -580,7 +623,7 @@ func TestCandidateValidationRejectsAdjustedHeaderAboveMaximum(t *testing.T) {
 func TestCandidateValidationUsesParentGasLimitWithoutTarget(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	params.TargetGasLimit = nil
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := validColdResult(params, requests, 1)
 	result.Block.Block.HeaderNoCopy().GasLimit = baseParentGasLimit
@@ -591,12 +634,16 @@ func TestCandidateValidationUsesParentGasLimitWithoutTarget(t *testing.T) {
 	require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
 }
 
-func TestCandidateValidationAcceptsPreAmsterdamComputedBALWithoutHeaderCommitment(t *testing.T) {
-	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
-	require.NoError(t, err)
-	result := validColdResult(params, requests, 1)
-	result.Block.BlockAccessList = types.BlockAccessList{}
+func TestCandidateValidationAcceptsPreGloasComputedBALWithoutHeaderCommitment(t *testing.T) {
+	for _, stateVersion := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(stateVersion.String(), func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, stateVersion, fork, requests, baseParentGasLimit)
+			require.NoError(t, err)
+			result := validColdResult(params, requests, 1)
+			result.Block.BlockAccessList = types.BlockAccessList{}
 
-	require.NoError(t, applyColdResult(t, buildCtx, result))
+			require.NoError(t, applyColdResult(t, buildCtx, result))
+		})
+	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -87,23 +88,25 @@ func TestOrderflowUpdateReturnsMarshalPanicsAsErrors(t *testing.T) {
 func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {
 	backendErr := errors.New("backend reached")
 	for _, tc := range []struct {
-		name      string
-		amsterdam bool
-		wrapper   byte
-		wantGate  bool
+		name         string
+		stateVersion clparams.StateVersion
+		wrapper      byte
+		wantGate     bool
 	}{
-		{name: "pre-Amsterdam v0", wrapper: 0},
-		{name: "pre-Amsterdam v1", wrapper: 1, wantGate: true},
-		{name: "Amsterdam v0", amsterdam: true, wrapper: 0, wantGate: true},
-		{name: "Amsterdam v1", amsterdam: true, wrapper: 1},
+		{name: "Electra v0", stateVersion: clparams.ElectraVersion, wrapper: 0},
+		{name: "Electra v1", stateVersion: clparams.ElectraVersion, wrapper: 1, wantGate: true},
+		{name: "Fulu v0", stateVersion: clparams.FuluVersion, wrapper: 0, wantGate: true},
+		{name: "Fulu v1", stateVersion: clparams.FuluVersion, wrapper: 1},
+		{name: "Gloas v0", stateVersion: clparams.GloasVersion, wrapper: 0, wantGate: true},
+		{name: "Gloas v1", stateVersion: clparams.GloasVersion, wrapper: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
-			if tc.amsterdam {
+			if tc.stateVersion >= clparams.GloasVersion {
 				slot := uint64(6)
 				params.SlotNumber = &slot
 			}
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, tc.stateVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			called := false
 			backend := &optimizerBackend{
@@ -134,7 +137,7 @@ func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {
 
 func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	canonicalResult := validColdResult(params, requests, 100)
 	canonicalResult.Block.Block.HeaderNoCopy().Root = common.Hash{0x31}
@@ -170,6 +173,9 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 	require.Equal(t, canonical.Block.Hash(), candidate.Block().Block.Hash())
 	require.Equal(t, uint64(100), candidate.Value().Uint64())
 
+	canonicalResult.Block.Block.HeaderNoCopy().GasLimit = 2
+	canonicalResult.Block.Receipts[0].GasUsed = 2
+	canonicalResult.BlockValue.SetUint64(2)
 	firstCopy := candidate.Block()
 	firstCopy.Block.HeaderNoCopy().GasLimit = 1
 	firstCopy.Requests[0].RequestData[0] = 0xff
@@ -185,7 +191,7 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 
 func TestSessionRejectsCandidateForDifferentParent(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            common.Hash{0xff},
@@ -225,7 +231,7 @@ func TestSessionRejectsCandidateForDifferentParent(t *testing.T) {
 
 func TestApplyDoesNotInstallAfterCallCancellation(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            params.ParentHash,

@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
@@ -71,7 +72,7 @@ func internallyMalformedCandidate(gasLimit uint64, extra []byte) (BuildContext, 
 		RequestsHash: requestsHash,
 	}
 	block := types.NewBlock(header, nil, nil, nil, withdrawals, nil)
-	return BuildContext{params: params, parentGasLimit: gasLimit}, execmodule.AssembledBlockResult{
+	return BuildContext{params: params, stateVersion: clparams.ElectraVersion, parentGasLimit: gasLimit}, execmodule.AssembledBlockResult{
 		Block:      &types.BlockWithReceipts{Block: block},
 		BlockValue: uint256.NewInt(0),
 	}

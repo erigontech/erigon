@@ -42,7 +42,7 @@ import (
 
 func TestCanceledQueuedApplyNeverCallsBackend(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
@@ -91,7 +91,7 @@ func TestCanceledQueuedApplyNeverCallsBackend(t *testing.T) {
 
 func TestSessionRetriesBusyCollectionAndDiscardsPayload(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	var gets atomic.Uint64
 	var discards atomic.Uint64
@@ -124,7 +124,7 @@ func TestSessionRetriesBusyCollectionAndDiscardsPayload(t *testing.T) {
 
 func TestSessionDiscardsAnIdReturnedWithBusy(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	var discards atomic.Uint64
 	backend := &optimizerBackend{
@@ -152,7 +152,7 @@ func TestSessionDiscardsAnIdReturnedWithBusy(t *testing.T) {
 
 func TestSessionDiscardsAnIdReturnedWithAssemblyError(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	backendErr := errors.New("assembly failed after allocating an id")
 	var discards atomic.Uint64
@@ -181,7 +181,7 @@ func TestSessionDiscardsAnIdReturnedWithAssemblyError(t *testing.T) {
 
 func TestSessionBusyRetryStopsOnCancellationAndDiscards(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	var gets atomic.Uint64
 	var discards atomic.Uint64
@@ -210,7 +210,7 @@ func TestSessionBusyRetryStopsOnCancellationAndDiscards(t *testing.T) {
 
 func TestPermanentBusyReturnsAndLaterApplyAdvances(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	var assemblies atomic.Uint64
 	var firstGets atomic.Uint64
@@ -255,7 +255,7 @@ func TestPermanentBusyReturnsAndLaterApplyAdvances(t *testing.T) {
 
 func TestCloseWaitsForActiveApplyCleanup(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	started := make(chan struct{})
 	discarded := make(chan struct{})
@@ -293,7 +293,7 @@ func TestCloseWaitsForActiveApplyCleanup(t *testing.T) {
 
 func TestParentCancellationPreventsPromotionAndHidesExistingBest(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	t.Run("before promotion", func(t *testing.T) {
@@ -342,9 +342,63 @@ func TestParentCancellationPreventsPromotionAndHidesExistingBest(t *testing.T) {
 	})
 }
 
+func TestApplyCancellationAfterCollectionPreventsPromotion(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	applyCtx, cancelApply := context.WithCancel(t.Context())
+	backend := &optimizerBackend{
+		assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			return execmodule.AssembleBlockResult{PayloadID: 22}, nil
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+			result := validColdResult(params, requests, 1)
+			cancelApply()
+			return result, nil
+		},
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+
+	_, err = session.Apply(applyCtx, update)
+	require.ErrorIs(t, err, context.Canceled)
+	_, ok := session.Best()
+	require.False(t, ok)
+}
+
+func TestCloseDuringCollectionPreventsPromotion(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	closeDone := make(chan error, 1)
+	var session *payloadoptimizer.Session
+	backend := &optimizerBackend{
+		assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			return execmodule.AssembleBlockResult{PayloadID: 23}, nil
+		},
+		get: func(ctx context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+			go func() { closeDone <- session.Close() }()
+			<-ctx.Done()
+			return validColdResult(params, requests, 1), nil
+		},
+	}
+	session, err = payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+
+	_, err = session.Apply(t.Context(), update)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, <-closeDone)
+	_, ok := session.Best()
+	require.False(t, ok)
+}
+
 func TestOrderflowProviderHonorsAmountAcrossCalls(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	txs := types.Transactions{
 		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21_000}},
@@ -381,7 +435,7 @@ func TestOrderflowProviderHonorsAmountAcrossCalls(t *testing.T) {
 
 func TestOrderflowProviderRetainsTransactionsForDynamicFilters(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	txs := make(types.Transactions, 51)
 	for i := range txs {
@@ -432,7 +486,7 @@ func TestOrderflowProviderRetainsTransactionsForDynamicFilters(t *testing.T) {
 
 func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	baseWrapper := types.MakeWrappedBlobTxn(uint256.NewInt(1))
 	baseWrapper.Tx.BlobVersionedHashes = baseWrapper.Tx.BlobVersionedHashes[:1]
@@ -502,7 +556,7 @@ func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
 
 func TestOrderflowProviderChargesCanonicalRlpElementCost(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	transaction := types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), []byte{1})
 	backend := &optimizerBackend{
@@ -540,7 +594,7 @@ func TestOrderflowProviderChargesCanonicalRlpElementCost(t *testing.T) {
 
 func TestOpenRejectsTypedNilBackend(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	var backend *optimizerBackend
 
@@ -575,7 +629,7 @@ func TestNewOrderflowUpdateRequiresCompleteBlobSidecars(t *testing.T) {
 
 func TestCloseCancelsActiveApplyAndPreventsLaterUse(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	started := make(chan struct{})
 	backend := &optimizerBackend{
@@ -611,7 +665,7 @@ func TestCloseCancelsActiveApplyAndPreventsLaterUse(t *testing.T) {
 
 func TestSessionKeepsOnlyStrictlyImprovedCandidates(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	values := []uint64{100, 90, 110}
 	var next atomic.Uint64
@@ -649,7 +703,7 @@ func TestSessionKeepsOnlyStrictlyImprovedCandidates(t *testing.T) {
 
 func TestSessionReportsColdBackendStates(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	backendErr := errors.New("backend failed")
 	tests := map[string]struct {
@@ -702,7 +756,7 @@ func TestSessionReportsColdBackendStates(t *testing.T) {
 
 func TestSessionDiscardsAContextMismatchedCandidate(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := validColdResult(params, requests, 1)
 	result.Block.Block.HeaderNoCopy().ParentHash[0]++
@@ -748,7 +802,7 @@ func TestOrderflowUpdateOwnsTransactions(t *testing.T) {
 
 func TestSessionSerializesConcurrentApply(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})

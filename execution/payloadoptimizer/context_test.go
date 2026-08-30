@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
@@ -55,6 +56,41 @@ func baseBuildContextInput() (*builder.Parameters, [4]byte, types.FlatRequests) 
 	}, [4]byte{0x0d}, types.FlatRequests{{Type: types.DepositRequestType, RequestData: []byte{0x0e}}}
 }
 
+func testStateVersion(params *builder.Parameters) clparams.StateVersion {
+	if params != nil && params.SlotNumber != nil {
+		return clparams.GloasVersion
+	}
+	return clparams.ElectraVersion
+}
+
+func TestBuildContextRequiresStateVersionForkShape(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		version    clparams.StateVersion
+		slotNumber *uint64
+		wantErr    bool
+	}{
+		{name: "Electra without slot", version: clparams.ElectraVersion},
+		{name: "Fulu without slot", version: clparams.FuluVersion},
+		{name: "Gloas without slot", version: clparams.GloasVersion, wantErr: true},
+		{name: "Electra with slot", version: clparams.ElectraVersion, slotNumber: new(uint64), wantErr: true},
+		{name: "Fulu with slot", version: clparams.FuluVersion, slotNumber: new(uint64), wantErr: true},
+		{name: "Gloas with slot", version: clparams.GloasVersion, slotNumber: new(uint64)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params, forkVersion, requests := baseBuildContextInput()
+			params.SlotNumber = tc.slotNumber
+			ctx, err := payloadoptimizer.NewBuildContext(params, tc.version, forkVersion, requests, baseParentGasLimit)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.version, ctx.StateVersion())
+		})
+	}
+}
+
 func TestBuildContextOwnsItsInputs(t *testing.T) {
 	parentRoot := common.Hash{0x04}
 	slot := uint64(5)
@@ -73,7 +109,7 @@ func TestBuildContextOwnsItsInputs(t *testing.T) {
 	}
 	requests := types.FlatRequests{{Type: types.DepositRequestType, RequestData: []byte{0x0c}}}
 
-	ctx, err := payloadoptimizer.NewBuildContext(params, [4]byte{0x0d}, requests, baseParentGasLimit)
+	ctx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), [4]byte{0x0d}, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	params.ParentHash[0] = 0xff
@@ -118,7 +154,7 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	params.TargetGasLimit = nil
 	params.ExtraData = nil
 
-	resolved, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+	resolved, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
 	require.Equal(t, defaultGas, *resolved.Parameters().TargetGasLimit)
 	require.Equal(t, []byte{0xaa}, resolved.Parameters().ExtraData)
@@ -127,7 +163,7 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	explicitParams.TargetGasLimit = &defaultGas
 	explicitParams.ExtraData = []byte{0xaa}
 	explicitParams.MaxBlobsPerBlock = &defaultBlobs
-	explicit, err := payloadoptimizer.NewBuildContext(explicitParams, fork, requests, baseParentGasLimit, defaults)
+	explicit, err := payloadoptimizer.NewBuildContext(explicitParams, testStateVersion(explicitParams), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
 	require.True(t, resolved.Equal(explicit))
 	require.True(t, explicit.Equal(resolved))
@@ -136,7 +172,7 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	params.TargetGasLimit = &overrideGas
 	params.ExtraData = []byte{0xbb}
 	params.MaxBlobsPerBlock = &overrideBlobs
-	overridden, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+	overridden, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
 	require.Equal(t, overrideGas, *overridden.Parameters().TargetGasLimit)
 	require.Equal(t, []byte{0xbb}, overridden.Parameters().ExtraData)
@@ -150,7 +186,7 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	params.TargetGasLimit = nil
 	params.ExtraData = nil
 	params.MaxBlobsPerBlock = nil
-	fallback, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+	fallback, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
 	require.Equal(t, baseParentGasLimit, *fallback.Parameters().TargetGasLimit)
 	require.NotNil(t, fallback.Parameters().ExtraData)
@@ -160,7 +196,7 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 
 func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testing.T) {
 	baseParams, baseFork, baseRequests := baseBuildContextInput()
-	base, err := payloadoptimizer.NewBuildContext(baseParams, baseFork, baseRequests, baseParentGasLimit)
+	base, err := payloadoptimizer.NewBuildContext(baseParams, testStateVersion(baseParams), baseFork, baseRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.True(t, base.Equal(base)) //nolint:gocritic
 
@@ -201,19 +237,23 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 		t.Run(name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			mutate(params, &fork, &requests)
-			other, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			other, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			require.False(t, base.Equal(other))
 			require.False(t, other.Equal(base))
 		})
 	}
+	fulu, err := payloadoptimizer.NewBuildContext(baseParams, clparams.FuluVersion, baseFork, baseRequests, baseParentGasLimit)
+	require.NoError(t, err)
+	require.False(t, base.Equal(fulu))
+	require.False(t, fulu.Equal(base))
 
 	sameParams, sameFork, sameRequests := baseBuildContextInput()
 	sameParams.PayloadId = 123
-	same, err := payloadoptimizer.NewBuildContext(sameParams, sameFork, sameRequests, baseParentGasLimit)
+	same, err := payloadoptimizer.NewBuildContext(sameParams, testStateVersion(sameParams), sameFork, sameRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.True(t, base.Equal(same))
-	differentParentGas, err := payloadoptimizer.NewBuildContext(sameParams, sameFork, sameRequests, baseParentGasLimit+1)
+	differentParentGas, err := payloadoptimizer.NewBuildContext(sameParams, testStateVersion(sameParams), sameFork, sameRequests, baseParentGasLimit+1)
 	require.NoError(t, err)
 	require.False(t, base.Equal(differentParentGas))
 	require.Equal(t, baseParentGasLimit, base.ParentGasLimit())
@@ -221,25 +261,25 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 }
 
 func TestBuildContextRejectsInvalidInputs(t *testing.T) {
-	_, err := payloadoptimizer.NewBuildContext(nil, [4]byte{}, nil, baseParentGasLimit)
+	_, err := payloadoptimizer.NewBuildContext(nil, clparams.ElectraVersion, [4]byte{}, nil, baseParentGasLimit)
 	require.Error(t, err)
 	params, fork, requests := baseBuildContextInput()
-	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MinBlockGasLimit-1)
+	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MinBlockGasLimit-1)
 	require.Error(t, err)
-	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MinBlockGasLimit)
+	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MinBlockGasLimit)
 	require.NoError(t, err)
-	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MaxBlockGasLimit+1)
+	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MaxBlockGasLimit+1)
 	require.Error(t, err)
 	params, fork, requests = baseBuildContextInput()
 	params.CustomTxnProvider = contextTxnProvider{}
 
-	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.ErrorIs(t, err, payloadoptimizer.ErrCustomTxnProvider)
 
 	params, fork, requests = baseBuildContextInput()
 	params.Withdrawals = append(params.Withdrawals, nil)
 	require.NotPanics(t, func() {
-		_, err = payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+		_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	})
 	require.Error(t, err)
 }
@@ -256,14 +296,14 @@ func TestBuildContextPreservesGloasTargetGasPreference(t *testing.T) {
 		t.Run("explicit gas "+name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			params.TargetGasLimit = &target
-			buildContext, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			buildContext, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
 		})
 		t.Run("default gas "+name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			params.TargetGasLimit = nil
-			buildContext, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{TargetGasLimit: &target})
+			buildContext, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{TargetGasLimit: &target})
 			require.NoError(t, err)
 			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
 		})
@@ -275,13 +315,13 @@ func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
 	t.Run("explicit extra above maximum", func(t *testing.T) {
 		params, fork, requests := baseBuildContextInput()
 		params.ExtraData = tooLong
-		_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+		_, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 		require.Error(t, err)
 	})
 	t.Run("default extra above maximum", func(t *testing.T) {
 		params, fork, requests := baseBuildContextInput()
 		params.ExtraData = nil
-		_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{ExtraData: tooLong})
+		_, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{ExtraData: tooLong})
 		require.Error(t, err)
 	})
 	for name, extra := range map[string][]byte{
@@ -291,7 +331,7 @@ func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
 		t.Run("valid extra "+name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			params.ExtraData = extra
-			_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			_, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 		})
 	}

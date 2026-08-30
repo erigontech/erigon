@@ -21,6 +21,7 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
@@ -31,6 +32,7 @@ var ErrCustomTxnProvider = errors.New("payload optimizer build context cannot co
 
 type BuildContext struct {
 	params            *builder.Parameters
+	stateVersion      clparams.StateVersion
 	forkVersion       [4]byte
 	executionRequests types.FlatRequests
 	parentGasLimit    uint64
@@ -50,12 +52,18 @@ func BuildDefaultsFromConfig(config buildercfg.BuilderConfig) BuildDefaults {
 	}
 }
 
-func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionRequests types.FlatRequests, parentGasLimit uint64, configured ...BuildDefaults) (BuildContext, error) {
+func NewBuildContext(params *builder.Parameters, stateVersion clparams.StateVersion, forkVersion [4]byte, executionRequests types.FlatRequests, parentGasLimit uint64, configured ...BuildDefaults) (BuildContext, error) {
 	if params == nil {
 		return BuildContext{}, errors.New("payload optimizer build context requires parameters")
 	}
 	if params.CustomTxnProvider != nil {
 		return BuildContext{}, ErrCustomTxnProvider
+	}
+	if stateVersion < clparams.GloasVersion && params.SlotNumber != nil {
+		return BuildContext{}, errors.New("payload optimizer pre-Gloas build context contains a slot number")
+	}
+	if stateVersion >= clparams.GloasVersion && params.SlotNumber == nil {
+		return BuildContext{}, errors.New("payload optimizer Gloas build context requires a slot number")
 	}
 	if parentGasLimit < protocolparams.MinBlockGasLimit || parentGasLimit > protocolparams.MaxBlockGasLimit {
 		return BuildContext{}, errors.New("payload optimizer build context has an invalid parent gas limit")
@@ -103,10 +111,15 @@ func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionR
 	}
 	return BuildContext{
 		params:            owned,
+		stateVersion:      stateVersion,
 		forkVersion:       forkVersion,
 		executionRequests: copyRequests(executionRequests),
 		parentGasLimit:    parentGasLimit,
 	}, nil
+}
+
+func (c BuildContext) StateVersion() clparams.StateVersion {
+	return c.stateVersion
 }
 
 func copyUint64(value *uint64) *uint64 {
@@ -138,6 +151,7 @@ func (c BuildContext) ParentGasLimit() uint64 {
 
 func (c BuildContext) Equal(other BuildContext) bool {
 	return c.params != nil && other.params != nil &&
+		c.stateVersion == other.stateVersion &&
 		c.forkVersion == other.forkVersion &&
 		c.parentGasLimit == other.parentGasLimit &&
 		reflect.DeepEqual(c.params, other.params) &&
@@ -147,6 +161,7 @@ func (c BuildContext) Equal(other BuildContext) bool {
 func (c BuildContext) clone() BuildContext {
 	return BuildContext{
 		params:            c.Parameters(),
+		stateVersion:      c.stateVersion,
 		forkVersion:       c.forkVersion,
 		executionRequests: copyRequests(c.executionRequests),
 		parentGasLimit:    c.parentGasLimit,

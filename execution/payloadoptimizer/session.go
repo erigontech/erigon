@@ -27,6 +27,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -222,7 +223,7 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 
 	params := s.buildContext.Parameters()
 	transactions := update.Transactions()
-	if err := validateOrderflowFork(params, transactions); err != nil {
+	if err := validateOrderflowFork(s.buildContext.stateVersion, transactions); err != nil {
 		return nil, err
 	}
 	params.CustomTxnProvider = &updateProvider{transactions: transactions}
@@ -281,27 +282,37 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 	if err := validateCandidate(s.buildContext, ownedResult); err != nil {
 		return nil, err
 	}
-	candidate, err := newCandidate(s.buildContext, ownedResult)
-	if err != nil {
-		return nil, err
-	}
+	candidate := newOwnedCandidate(s.buildContext, ownedResult)
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.ctx.Err(); err != nil {
+	promote, err := s.canPromoteLocked(applyCtx, candidate)
+	s.mu.Unlock()
+	if err != nil || !promote {
 		return nil, err
 	}
-	if err := applyCtx.Err(); err != nil {
+	resultCandidate := candidate.copy()
+	s.mu.Lock()
+	promote, err = s.canPromoteLocked(applyCtx, candidate)
+	if err != nil || !promote {
+		s.mu.Unlock()
 		return nil, err
-	}
-	if s.closed {
-		return nil, ErrSessionClosed
-	}
-	if s.best != nil && candidate.value.Cmp(&s.best.value) <= 0 {
-		return nil, nil
 	}
 	s.best = candidate
-	return candidate.copy(), nil
+	s.mu.Unlock()
+	return resultCandidate, nil
+}
+
+func (s *Session) canPromoteLocked(applyCtx context.Context, candidate *Candidate) (bool, error) {
+	if err := s.ctx.Err(); err != nil {
+		return false, err
+	}
+	if err := applyCtx.Err(); err != nil {
+		return false, err
+	}
+	if s.closed {
+		return false, ErrSessionClosed
+	}
+	return s.best == nil || candidate.value.Cmp(&s.best.value) > 0, nil
 }
 
 func copyBackendResult(result execmodule.AssembledBlockResult) (owned execmodule.AssembledBlockResult, err error) {
@@ -319,11 +330,8 @@ func copyBackendResult(result execmodule.AssembledBlockResult) (owned execmodule
 	return owned, nil
 }
 
-func validateOrderflowFork(params *builder.Parameters, transactions types.Transactions) error {
-	wantVersion := byte(0)
-	if params.SlotNumber != nil {
-		wantVersion = 1
-	}
+func validateOrderflowFork(stateVersion clparams.StateVersion, transactions types.Transactions) error {
+	wantVersion := blobWrapperVersion(stateVersion)
 	for i, transaction := range transactions {
 		if transaction.Type() != types.BlobTxType {
 			continue
@@ -334,6 +342,13 @@ func validateOrderflowFork(params *builder.Parameters, transactions types.Transa
 		}
 	}
 	return nil
+}
+
+func blobWrapperVersion(stateVersion clparams.StateVersion) byte {
+	if stateVersion >= clparams.FuluVersion {
+		return 1
+	}
+	return 0
 }
 
 func (s *Session) sessionError() error {
@@ -433,10 +448,7 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		if !ok {
 			continue
 		}
-		wantVersion := byte(0)
-		if params.SlotNumber != nil {
-			wantVersion = 1
-		}
+		wantVersion := blobWrapperVersion(buildContext.stateVersion)
 		if wrapper.WrapperVersion != wantVersion {
 			return mismatch(fmt.Sprintf("blob transaction wrapper version %d", wrapper.WrapperVersion))
 		}
@@ -461,6 +473,7 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if len(result.Block.Receipts) != len(transactions) {
 		return mismatch("receipt cardinality")
 	}
+	validateCumulativeGas := buildContext.stateVersion < clparams.GloasVersion
 	var cumulativeGasUsed uint64
 	for _, receipt := range result.Block.Receipts {
 		if receipt == nil {
@@ -469,17 +482,19 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		if receipt.BlockNumber == nil {
 			return mismatch("receipt block number")
 		}
-		if receipt.CumulativeGasUsed < cumulativeGasUsed || receipt.GasUsed != receipt.CumulativeGasUsed-cumulativeGasUsed {
-			return mismatch("receipt gas used")
+		if validateCumulativeGas {
+			if receipt.CumulativeGasUsed < cumulativeGasUsed || receipt.GasUsed != receipt.CumulativeGasUsed-cumulativeGasUsed {
+				return mismatch("receipt gas used")
+			}
+			cumulativeGasUsed = receipt.CumulativeGasUsed
 		}
-		cumulativeGasUsed = receipt.CumulativeGasUsed
 		for _, log := range receipt.Logs {
 			if log == nil {
 				return mismatch("nil receipt log")
 			}
 		}
 	}
-	if params.SlotNumber == nil && cumulativeGasUsed != header.GasUsed {
+	if validateCumulativeGas && cumulativeGasUsed != header.GasUsed {
 		return mismatch("header gas used")
 	}
 	if types.DeriveSha(result.Block.Receipts) != header.ReceiptHash {
@@ -494,7 +509,7 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if buildContext.executionRequests != nil && !reflect.DeepEqual(result.Block.Requests, buildContext.executionRequests) {
 		return mismatch("execution requests")
 	}
-	if err := validateBlockAccessList(result.Block, header, params.SlotNumber != nil); err != nil {
+	if err := validateBlockAccessList(result.Block, header, buildContext.stateVersion >= clparams.GloasVersion); err != nil {
 		return mismatch("block access list: " + err.Error())
 	}
 	if result.BlockValue.Cmp(execmodule.BlockValue(result.Block, header.BaseFee)) != 0 {
@@ -503,25 +518,25 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	return nil
 }
 
-func validateBlockAccessList(result *types.BlockWithReceipts, header *types.Header, amsterdam bool) error {
+func validateBlockAccessList(result *types.BlockWithReceipts, header *types.Header, gloas bool) error {
 	if err := result.BlockAccessList.ValidateForBlock(header.GasLimit); err != nil {
 		return err
 	}
 	sidecar := result.Block.BlockAccessListSidecar()
-	if !amsterdam {
+	if !gloas {
 		if header.BlockAccessListHash != nil {
-			return errors.New("pre-Amsterdam header hash")
+			return errors.New("pre-Gloas header hash")
 		}
 		if sidecar != nil {
-			return errors.New("pre-Amsterdam sidecar")
+			return errors.New("pre-Gloas sidecar")
 		}
 		return nil
 	}
 	if header.BlockAccessListHash == nil {
-		return errors.New("missing Amsterdam header hash")
+		return errors.New("missing Gloas header hash")
 	}
 	if sidecar == nil {
-		return errors.New("missing Amsterdam sidecar")
+		return errors.New("missing Gloas sidecar")
 	}
 	freshSidecar, err := copyFreshBlockAccessListSidecar(sidecar)
 	if err != nil {
@@ -562,11 +577,20 @@ func (s *Session) Best() (*Candidate, bool) {
 		return nil, false
 	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if s.closed || s.ctx.Err() != nil || s.best == nil {
+		s.mu.RUnlock()
 		return nil, false
 	}
-	return s.best.copy(), true
+	best := s.best
+	s.mu.RUnlock()
+	result := best.copy()
+	s.mu.RLock()
+	valid := !s.closed && s.ctx.Err() == nil && s.best == best
+	s.mu.RUnlock()
+	if !valid {
+		return nil, false
+	}
+	return result, true
 }
 
 func (s *Session) Close() error {
@@ -585,19 +609,13 @@ func (s *Session) Close() error {
 	return nil
 }
 
-func newCandidate(buildContext BuildContext, result execmodule.AssembledBlockResult) (candidate *Candidate, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			candidate = nil
-			err = fmt.Errorf("%w: copy malformed result: %v", ErrCandidateContextMismatch, recovered)
-		}
-	}()
-	candidate = &Candidate{
+func newOwnedCandidate(buildContext BuildContext, result execmodule.AssembledBlockResult) *Candidate {
+	candidate := &Candidate{
 		buildContext: buildContext.clone(),
-		block:        copyBlockWithReceipts(result.Block),
+		block:        result.Block,
 	}
 	candidate.value.Set(result.BlockValue)
-	return candidate, nil
+	return candidate
 }
 
 func (c *Candidate) copy() *Candidate {
