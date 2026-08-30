@@ -124,6 +124,14 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	// --- Build components ---
 	prefsWatch := NewPreferencesWatcher()
 	deps.EpbsPool.SetPreferencesHandler(prefsWatch.OnPreferencesReceived)
+	for _, key := range deps.EpbsPool.ProposerPreferences.Keys() {
+		preferences, ok := deps.EpbsPool.ProposerPreferences.Get(key)
+		if !ok || preferences == nil || preferences.Message == nil ||
+			preferences.Message.ProposalSlot != key.Slot || preferences.Message.DependentRoot != key.DependentRoot {
+			continue
+		}
+		prefsWatch.OnPreferencesReceived(key.Slot, preferences)
+	}
 
 	submitter := NewCaplinBidSubmitter(deps.EpbsPool, deps.Gossip, deps.ForkChoice, deps.Columns)
 	strategy := &FixedMarginStrategy{

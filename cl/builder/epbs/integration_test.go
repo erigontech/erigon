@@ -362,6 +362,71 @@ func TestInitBuilderServiceRetainsCurrentSlotWinnerAfterRevealCutoff(t *testing.
 	require.Len(t, submitter.broadcasts, 1)
 }
 
+func TestInitBuilderServiceSeedsPooledProposerPreferences(t *testing.T) {
+	beaconCfg := testBeaconCfg()
+	beaconCfg.GloasForkEpoch = 0
+	beaconCfg.InitializeForkSchedule()
+	const currentSlot = uint64(100)
+	genesisTime := uint64(time.Now().Unix()) - currentSlot*beaconCfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, beaconCfg)
+
+	keyBytes := make([]byte, 32)
+	for i := range keyBytes {
+		keyBytes[i] = byte(i + 1)
+	}
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	require.NoError(t, os.WriteFile(keyPath, keyBytes, 0600))
+
+	anchor := state.New(beaconCfg)
+	anchor.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchor.SetSlot(currentSlot))
+	anchor.SetGenesisValidatorsRoot(common.Hash{})
+	anchor.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: currentSlot})
+	graph, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	emitters := beaconevents.NewEventEmitter()
+	syncedData := synced_data.NewSyncedDataManager(beaconCfg, true)
+	forkChoice, err := forkchoice.NewForkChoiceStore(
+		clock, anchor, nil, pool.NewOperationsPool(beaconCfg), graph, emitters, syncedData, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
+	)
+	require.NoError(t, err)
+
+	dependentRoot := common.HexToHash("0x1111")
+	want := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: currentSlot, DependentRoot: dependentRoot, TargetGasLimit: 30_000_000,
+	}}
+	epbsPool := pool.NewEpbsPool()
+	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+		Slot: currentSlot, DependentRoot: common.HexToHash("0x2222"),
+	}, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: currentSlot, DependentRoot: common.HexToHash("0x2222"),
+	}})
+	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+		Slot: currentSlot + 1, DependentRoot: dependentRoot,
+	}, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: currentSlot + 1, DependentRoot: dependentRoot,
+	}})
+	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+		Slot: currentSlot, DependentRoot: dependentRoot,
+	}, want)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	svc, err := InitBuilderService(epbscfg.Config{Enabled: true, KeyPath: keyPath, BidMargin: 0.5}, BuilderDeps{
+		Ctx: ctx, BeaconCfg: beaconCfg, EthClock: clock, SyncedData: syncedData, ForkChoice: forkChoice,
+		Exec: newMockPayloadAssembler(), EpbsPool: epbsPool, Gossip: &testGossipPublisher{},
+		Columns: &testColumnStorage{writes: make(map[uint64]int), errors: make(map[uint64]error)},
+		Pending: newFilePendingPayloadStore(t.TempDir(), beaconCfg), Emitters: emitters,
+	})
+	require.NoError(t, err)
+	defer svc.Shutdown()
+
+	got, err := svc.Loop.prefsWatch.WaitForPreferences(t.Context(), currentSlot, dependentRoot, 20*time.Millisecond)
+	require.NoError(t, err)
+	require.Same(t, want, got)
+}
+
 func TestBuilderService_Shutdown_Nil(t *testing.T) {
 	// Shutdown on nil should not panic.
 	var svc *BuilderService
