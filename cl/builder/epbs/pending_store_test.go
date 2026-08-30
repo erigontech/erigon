@@ -128,8 +128,8 @@ func TestFilePendingPayloadStoreRejectsNewIdentityAboveCapacity(t *testing.T) {
 	dir := t.TempDir()
 	store := newFilePendingPayloadStore(dir, loop.beaconCfg)
 	store.syncDir = func(string) error { return nil }
-	for i := uint64(0); i < maxPendingPayloadFiles; i++ {
-		key, pending := pendingPayloadForStoreTest(t, loop, i+1)
+	for i := range maxPendingPayloadFiles {
+		key, pending := pendingPayloadForStoreTest(t, loop, uint64(i)+1)
 		require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
 	}
 	restarted := newFilePendingPayloadStore(dir, loop.beaconCfg)
