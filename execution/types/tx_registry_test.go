@@ -176,8 +176,9 @@ func registerFakeTxType(t *testing.T) {
 		return
 	}
 	RegisterTxType(fakeRegisteredTxType, TxTypeSpec{
-		New:           func() Transaction { return &fakeRegisteredTx{} },
-		UnmarshalJSON: unmarshalFakeRegisteredTxJSON,
+		New:                    func() Transaction { return &fakeRegisteredTx{} },
+		StandardReceiptPayload: true,
+		UnmarshalJSON:          unmarshalFakeRegisteredTxJSON,
 		Sender: func(txn Transaction, _ Signer) (accounts.Address, error) {
 			return txn.(*fakeRegisteredTx).sender, nil
 		},
@@ -321,4 +322,127 @@ func TestRegisteredTxTypeNilJSONDecoder(t *testing.T) {
 
 	_, err := UnmarshalTransactionFromJSON([]byte(`{"type":"0x7d"}`))
 	require.Error(t, err)
+}
+
+func fakeRegisteredReceipt() *Receipt {
+	r := &Receipt{
+		Type:              fakeRegisteredTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 42,
+		Logs: []*Log{{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead")},
+			Data:    []byte{0x01, 0x00, 0xff},
+		}},
+	}
+	r.Bloom = CreateBloom(Receipts{r})
+	return r
+}
+
+func TestRegisteredTxTypeReceiptRoundTrip(t *testing.T) {
+	registerFakeTxType(t)
+
+	want := fakeRegisteredReceipt()
+	binary, err := want.MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, byte(fakeRegisteredTxType), binary[0])
+
+	got := new(Receipt)
+	require.NoError(t, got.UnmarshalBinary(binary))
+	require.Equal(t, want.Type, got.Type)
+	require.Equal(t, want.Status, got.Status)
+	require.Equal(t, want.CumulativeGasUsed, got.CumulativeGasUsed)
+	require.Equal(t, want.Bloom, got.Bloom)
+	require.Equal(t, want.Logs, got.Logs)
+
+	var buf bytes.Buffer
+	require.NoError(t, want.EncodeRLP(&buf))
+	streamed := new(Receipt)
+	require.NoError(t, rlp.DecodeBytes(buf.Bytes(), streamed))
+	require.Equal(t, want.Type, streamed.Type)
+	require.Equal(t, want.CumulativeGasUsed, streamed.CumulativeGasUsed)
+	require.Equal(t, want.Logs, streamed.Logs)
+
+	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(want))
+	require.NoError(t, err)
+	unstored := new(ReceiptForStorage)
+	require.NoError(t, rlp.DecodeBytes(stored, unstored))
+	require.Equal(t, want.Type, unstored.Type)
+	require.Equal(t, want.CumulativeGasUsed, unstored.CumulativeGasUsed)
+}
+
+func TestRegisteredTxTypeReceiptRoot(t *testing.T) {
+	registerFakeTxType(t)
+
+	r := fakeRegisteredReceipt()
+	binary, err := r.MarshalBinary()
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	Receipts{r}.EncodeIndex(0, &buf)
+	require.Equal(t, binary, buf.Bytes(), "EncodeIndex must agree with MarshalBinary")
+
+	// Golden root over the single 0x7e-prefixed leaf.
+	want := common.HexToHash("0x10d0be5b17612ce56aca9e438311c8c76484f24346b5c911857a522aacec5d20")
+	require.Equal(t, want, DeriveSha(Receipts{r}))
+}
+
+func TestUnregisteredReceiptTypeRejected(t *testing.T) {
+	const unknownType = 0x7f
+
+	payload, err := rlp.EncodeToBytes(&receiptRLP{[]byte{1}, 42, Bloom{}, nil})
+	require.NoError(t, err)
+	binary := append([]byte{unknownType}, payload...)
+
+	require.ErrorIs(t, new(Receipt).UnmarshalBinary(binary), ErrTxTypeNotSupported)
+
+	enveloped, err := rlp.EncodeToBytes(binary)
+	require.NoError(t, err)
+	require.ErrorIs(t, rlp.DecodeBytes(enveloped, new(Receipt)), ErrTxTypeNotSupported)
+
+	_, err = (&Receipt{Type: unknownType}).MarshalBinary()
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+
+	// EncodeIndex runs under DeriveSha on the block path, so it contributes no
+	// leaf rather than panicking; the block is rejected on the root mismatch.
+	var derived bytes.Buffer
+	Receipts{{Type: unknownType}}.EncodeIndex(0, &derived)
+	require.Empty(t, derived.Bytes())
+
+	_, err = rlp.EncodeToBytes(&ReceiptForStorage{Type: unknownType, Status: ReceiptStatusSuccessful})
+	require.ErrorContains(t, err, "invalid receipt type")
+
+	// Bypass the encoder to stand in for bytes an older binary already wrote.
+	stored, err := rlp.EncodeToBytes(&storedReceiptRLP{Type: unknownType, PostStateOrStatus: []byte{1}})
+	require.NoError(t, err)
+	require.ErrorContains(t, rlp.DecodeBytes(stored, new(ReceiptForStorage)), "invalid receipt type")
+}
+
+// A type whose ReceiptPayload is not the built-in one — OP's deposit receipts
+// add two consensus fields — must be refused rather than encoded as standard.
+func TestRegisteredTxTypeWithoutStandardReceiptPayload(t *testing.T) {
+	const customReceiptType = 0x7a
+
+	RegisterTxType(customReceiptType, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
+	t.Cleanup(func() { unregisterTxType(customReceiptType) })
+
+	r := &Receipt{Type: customReceiptType, Status: ReceiptStatusSuccessful, CumulativeGasUsed: 1}
+
+	// Both directions, or the encode side emits bytes this package's own
+	// decoder rejects.
+	_, err := r.MarshalBinary()
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP(new(bytes.Buffer)), ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP69(new(bytes.Buffer)), ErrTxTypeNotSupported)
+
+	payload, err := rlp.EncodeToBytes(&receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs})
+	require.NoError(t, err)
+	require.ErrorIs(t, new(Receipt).UnmarshalBinary(append([]byte{customReceiptType}, payload...)), ErrTxTypeNotSupported)
+
+	var derived bytes.Buffer
+	Receipts{r}.EncodeIndex(0, &derived)
+	require.Empty(t, derived.Bytes(), "a type that never claimed the standard payload must not get one")
+
+	_, err = rlp.EncodeToBytes((*ReceiptForStorage)(r))
+	require.ErrorContains(t, err, "invalid receipt type")
 }
