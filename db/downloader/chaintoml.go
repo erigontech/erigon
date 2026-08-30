@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -200,11 +201,31 @@ func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorr
 type PreverifiedFilter func(snapcfg.PreverifiedItems) snapcfg.PreverifiedItems
 
 // mergeBootstrapPreverified folds preverified into a local chain.toml.
-// filter is applied to items first when non-nil — a filtered-out entry
-// never reaches the merge.
-func mergeBootstrapPreverified(localTomlBytes []byte, items snapcfg.PreverifiedItems, filter PreverifiedFilter) []byte {
+// filter is applied to items first when non-nil. Preverified entries
+// whose block range is subsumed by a locally-held wider file of the
+// same class are then dropped via snaptype.LocalCoverageIndex — the
+// shared "local-overrides-external" invariant. Without this, retire's
+// wider merged output (e.g. v1.1-003500-003510-headers.seg) would
+// coexist in chain.toml with the ten preverified 1k chunks it
+// subsumes, and peers reading the manifest would request files the
+// local torrent client cannot serve.
+//
+// snapDir == "" makes the local-coverage filter a pass-through
+// (test-only callers that don't have a real snap directory).
+func mergeBootstrapPreverified(localTomlBytes []byte, items snapcfg.PreverifiedItems, filter PreverifiedFilter, snapDir string) []byte {
 	if filter != nil {
 		items = filter(items)
+	}
+	if snapDir != "" && len(items) > 0 {
+		cov := snaptype.BuildLocalCoverageIndex(snapDir)
+		out := items[:0]
+		for _, p := range items {
+			if cov.Covers(p.Name) {
+				continue
+			}
+			out = append(out, p)
+		}
+		items = out
 	}
 	if len(items) == 0 {
 		return localTomlBytes
@@ -250,7 +271,7 @@ func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName stri
 		if cfg, known := snapcfg.KnownCfg(chainName); known {
 			authoritativeTx = cfg.ExpectBlocks
 			if bootstrapFromPreverified {
-				tomlBytes = mergeBootstrapPreverified(tomlBytes, cfg.Preverified.Items, preverifiedFilter)
+				tomlBytes = mergeBootstrapPreverified(tomlBytes, cfg.Preverified.Items, preverifiedFilter, snapDir)
 			}
 		}
 	}

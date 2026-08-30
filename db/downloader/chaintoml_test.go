@@ -478,7 +478,7 @@ func TestMergeBootstrapPreverified_FilterAppliedBeforeMerge(t *testing.T) {
 		return out
 	}
 
-	got := mergeBootstrapPreverified(local, items, filter)
+	got := mergeBootstrapPreverified(local, items, filter, "")
 	gotStr := string(got)
 
 	assert.Contains(t, gotStr, "local-file.seg", "local entry must survive the merge")
@@ -496,10 +496,94 @@ func TestMergeBootstrapPreverified_NilFilterPassesEverything(t *testing.T) {
 		{Name: "v1.1-000000-000500-headers.seg", Hash: "112233445566778899aabbccddeeff0011223344"},
 	}
 
-	got := mergeBootstrapPreverified(local, items, nil)
+	got := mergeBootstrapPreverified(local, items, nil, "")
 	gotStr := string(got)
 
 	assert.Contains(t, gotStr, "beaconblocks", "nil filter must preserve every preverified entry")
 	assert.Contains(t, gotStr, "headers.seg")
 	assert.Contains(t, gotStr, "local-file.seg")
+}
+
+// TestMergeBootstrapPreverified_LocalWiderSubsumesPreverifiedNarrower
+// pins the cycle-16 shape: local retire produced a 10k-block merged
+// headers .seg; preverified still lists ten 1k-block sub-chunks with
+// different filenames but overlapping ranges. The merged chain.toml
+// must contain only the local wider form — publishing the preverified
+// narrower names would tell peers we can serve files we don't have
+// on disk.
+func TestMergeBootstrapPreverified_LocalWiderSubsumesPreverifiedNarrower(t *testing.T) {
+	snapDir := t.TempDir()
+	// Local 10k headers on disk (torrent sidecar is what
+	// GenerateChainToml scans, but BuildLocalCoverageIndex reads the
+	// primary data file). Write both.
+	createTestTorrent(t, snapDir, "v1.1-003400-003500-headers.seg")
+
+	// Preverified lists the same range at 1k granularity — ten
+	// entries that should all be subsumed by the local wider file.
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-003400-003410-headers.seg", Hash: "1010101010101010101010101010101010101010"},
+		{Name: "v1.1-003410-003420-headers.seg", Hash: "2020202020202020202020202020202020202020"},
+		{Name: "v1.1-003420-003430-headers.seg", Hash: "3030303030303030303030303030303030303030"},
+		{Name: "v1.1-003490-003500-headers.seg", Hash: "9090909090909090909090909090909090909090"},
+	}
+
+	local := []byte(`"local-baseline.seg" = "0000000000000000000000000000000000000000"` + "\n")
+	got := mergeBootstrapPreverified(local, items, nil, snapDir)
+	gotStr := string(got)
+
+	assert.NotContains(t, gotStr, "v1.1-003400-003410-headers.seg",
+		"preverified 1k entry subsumed by local 10k merged headers must be dropped")
+	assert.NotContains(t, gotStr, "v1.1-003410-003420-headers.seg", "same")
+	assert.NotContains(t, gotStr, "v1.1-003420-003430-headers.seg", "same")
+	assert.NotContains(t, gotStr, "v1.1-003490-003500-headers.seg", "same")
+	assert.Contains(t, gotStr, "local-baseline.seg",
+		"unrelated local entry must survive")
+}
+
+// TestMergeBootstrapPreverified_PreverifiedFillsGap pins the
+// complement: preverified entries whose range is NOT covered by any
+// local file survive the merge — they fill genuine gaps in the local
+// set. Peer download of those entries is the intended bootstrap flow.
+func TestMergeBootstrapPreverified_PreverifiedFillsGap(t *testing.T) {
+	snapDir := t.TempDir()
+	// Local has headers 3400-3500 (10k merged) but nothing past 3500.
+	createTestTorrent(t, snapDir, "v1.1-003400-003500-headers.seg")
+
+	items := snapcfg.PreverifiedItems{
+		// Subsumed by local — must be dropped.
+		{Name: "v1.1-003400-003410-headers.seg", Hash: "1010101010101010101010101010101010101010"},
+		// Past the local coverage — must survive.
+		{Name: "v1.1-003500-003600-headers.seg", Hash: "5050505050505050505050505050505050505050"},
+	}
+
+	got := mergeBootstrapPreverified(nil, items, nil, snapDir)
+	gotStr := string(got)
+
+	assert.NotContains(t, gotStr, "v1.1-003400-003410-headers.seg",
+		"subsumed preverified must be dropped")
+	assert.Contains(t, gotStr, "v1.1-003500-003600-headers.seg",
+		"preverified filling a gap past local coverage must survive")
+}
+
+// TestMergeBootstrapPreverified_DifferentTypeIndependent pins the
+// per-type partition: a local BODIES file does NOT suppress a
+// preverified HEADERS file at the same range. Range subsumption is
+// keyed by (subdir, typeString, ext) — cross-type match is rejected.
+func TestMergeBootstrapPreverified_DifferentTypeIndependent(t *testing.T) {
+	snapDir := t.TempDir()
+	// Local has bodies at 3400-3500 but no headers.
+	createTestTorrent(t, snapDir, "v1.1-003400-003500-bodies.seg")
+
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-003400-003500-headers.seg", Hash: "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh"},
+		{Name: "v1.1-003400-003500-bodies.seg", Hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	}
+
+	got := mergeBootstrapPreverified(nil, items, nil, snapDir)
+	gotStr := string(got)
+
+	assert.Contains(t, gotStr, "v1.1-003400-003500-headers.seg",
+		"preverified headers must survive — local BODIES doesn't cover headers")
+	assert.NotContains(t, gotStr, "v1.1-003400-003500-bodies.seg",
+		"preverified bodies covered by same-range local bodies must be dropped")
 }
