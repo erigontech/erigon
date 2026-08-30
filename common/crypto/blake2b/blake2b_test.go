@@ -186,7 +186,9 @@ func testHashes2X(t *testing.T) {
 
 		h.Reset()
 		for j := range input {
-			h.Write(input[j : j+1])
+			if _, err := h.Write(input[j : j+1]); err != nil {
+				t.Fatalf("#%d (byte-by-byte write): error from Write: %v", i, err)
+			}
 		}
 		for j := range sum {
 			h = h.Clone()
