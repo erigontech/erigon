@@ -1747,3 +1747,20 @@ func TestFindMergeRangeSkipsUncoveredLowerHalf(t *testing.T) {
 	require.Empty(t, merger.FindMergeRanges(r, 3_203_072),
 		"the 8192 tier below 3_203_072 reaches under the pruned frontier")
 }
+
+// The other side of that condition. When the pruned type resumes on a 524288 boundary, every merge
+// the ladder can ask for starts at or above it, so the coverage check must not get in the way.
+func TestFindMergeRangeAllowsAlignedPrunedStart(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	const start = 6 * 524_288 // 3_145_728
+	var r Ranges
+	for from := uint64(start); from < 7*524_288; from += 65_536 {
+		r = append(r, NewRange(from, from+65_536))
+	}
+
+	require.Equal(t, Ranges{NewRange(start, 7*524_288)}.String(),
+		Ranges(merger.FindMergeRanges(r, 7*524_288)).String(),
+		"nothing is missing below the start, so the tier merges")
+}
