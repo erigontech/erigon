@@ -86,3 +86,17 @@ func TestFakeTxnProviderDefaultAmount(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 3)
 }
+
+func TestRetainedPassProgressStopsOnlyAfterACompletePassWithoutAcceptedTransactions(t *testing.T) {
+	var noProgress retainedPassProgress
+	require.True(t, noProgress.shouldContinue(0, false))
+	require.False(t, noProgress.shouldContinue(0, true))
+
+	var progressThenExhaustion retainedPassProgress
+	require.True(t, progressThenExhaustion.shouldContinue(1, true))
+	require.False(t, progressThenExhaustion.shouldContinue(0, true))
+
+	var progressAcrossBatches retainedPassProgress
+	require.True(t, progressAcrossBatches.shouldContinue(0, false))
+	require.True(t, progressAcrossBatches.shouldContinue(1, true))
+}

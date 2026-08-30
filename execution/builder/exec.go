@@ -49,17 +49,17 @@ import (
 )
 
 type BuilderExecCfg struct {
-	builderState BuilderState
-	notifier     stagedsync.ChainEventNotifier
-	chainConfig  *chain.Config
-	engine       rules.Engine
-	blockReader  dbservices.FullBlockReader
-	vmConfig     *vm.Config
-	tmpdir       string
-	interrupt    *atomic.Bool
-	payloadId    uint64
-	txnProvider  txnprovider.TxnProvider
-	retainedTxns bool
+	builderState        BuilderState
+	notifier            stagedsync.ChainEventNotifier
+	chainConfig         *chain.Config
+	engine              rules.Engine
+	blockReader         dbservices.FullBlockReader
+	vmConfig            *vm.Config
+	tmpdir              string
+	interrupt           *atomic.Bool
+	payloadId           uint64
+	txnProvider         txnprovider.TxnProvider
+	retainedTxnProvider RetainedTxnProvider
 }
 
 func StageBuilderExecCfg(
@@ -178,31 +178,41 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
+	var retainedProgress retainedPassProgress
 
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		txns, passComplete, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
 		if err != nil {
 			return err
 		}
 
+		accepted := 0
 		if len(txns) > 0 {
+			before := ba.Txns.Len()
 			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, logPrefix, logger)
 			if err != nil {
 				return err
 			}
+			accepted = ba.Txns.Len() - before
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
 			if stop {
 				break
 			}
 		}
 
-		// if we yielded less than the count we wanted, assume the txpool has run dry now
-		if cfg.retainedTxns && provided > 0 {
-			continue
+		if cfg.retainedTxnProvider != nil {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if retainedProgress.shouldContinue(accepted, passComplete) {
+				continue
+			}
+			break
 		}
+		// if we yielded less than the count we wanted, assume the txpool has run dry now
 		if len(txns) < amount {
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
@@ -274,6 +284,20 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	return nil
 }
 
+type retainedPassProgress struct {
+	accepted int
+}
+
+func (p *retainedPassProgress) shouldContinue(accepted int, passComplete bool) bool {
+	p.accepted += accepted
+	if !passComplete {
+		return true
+	}
+	madeProgress := p.accepted > 0
+	p.accepted = 0
+	return madeProgress
+}
+
 func getNextTransactions(
 	ctx context0.Context,
 	cfg BuilderExecCfg,
@@ -287,7 +311,7 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 	stats *filtrationStats,
-) ([]types.Transaction, int, error) {
+) ([]types.Transaction, bool, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -313,15 +337,25 @@ func getNextTransactions(
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
 	}
 
-	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
+	var allTxns types.Transactions
+	passComplete := false
+	var err error
+	if cfg.retainedTxnProvider != nil {
+		var batch RetainedTxnBatch
+		batch, err = cfg.retainedTxnProvider.ProvideRetainedTxns(ctx, provideOpts...)
+		allTxns = batch.Transactions
+		passComplete = batch.PassComplete
+	} else {
+		allTxns, err = cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
+	}
 	if err != nil {
-		return nil, 0, err
+		return nil, false, err
 	}
 
 	blockNum := executionAt + 1
 	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
 	if err != nil {
-		return nil, 0, err
+		return nil, false, err
 	}
 
 	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
@@ -355,7 +389,7 @@ func getNextTransactions(
 		}
 	}
 
-	return txns, len(allTxns), nil
+	return txns, passComplete, nil
 }
 
 // filtrationStats accumulates txpool-filtration outcomes across all batches of a

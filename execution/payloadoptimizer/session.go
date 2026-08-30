@@ -512,43 +512,33 @@ type updateProvider struct {
 }
 
 var _ txnprovider.TxnProvider = (*updateProvider)(nil)
-
-func (*updateProvider) RetainsTransactions() bool {
-	return true
-}
+var _ builder.RetainedTxnProvider = (*updateProvider)(nil)
 
 func (p *updateProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	batch, err := p.ProvideRetainedTxns(ctx, opts...)
+	return batch.Transactions, err
+}
+
+func (p *updateProvider) ProvideRetainedTxns(ctx context.Context, opts ...txnprovider.ProvideOption) (builder.RetainedTxnBatch, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return builder.RetainedTxnBatch{}, err
 	}
 	options := txnprovider.ApplyProvideOptions(opts...)
 	amount := options.Amount
 	if amount <= 0 {
-		return nil, nil
+		return builder.RetainedTxnBatch{}, nil
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return builder.RetainedTxnBatch{}, err
 	}
 	provided := make(types.Transactions, 0, min(amount, len(p.transactions)-p.next))
 	remainingBlobGas := options.GasTarget.Blob
 	remainingRlpSpace := options.AvailableRlpSpace
-	startedAt := p.next
-	wrapped := false
-	for len(provided) < amount {
-		if p.next == len(p.transactions) {
-			p.next = 0
-			if len(provided) > 0 || wrapped || startedAt == 0 {
-				break
-			}
-			wrapped = true
-		}
-		if len(p.transactions) == 0 {
-			break
-		}
+	for p.next < len(p.transactions) && len(provided) < amount {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return builder.RetainedTxnBatch{}, err
 		}
 		transaction := p.transactions[p.next]
 		p.next++
@@ -570,5 +560,9 @@ func (p *updateProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.Pr
 		remainingBlobGas -= blobCount * protocolparams.GasPerBlob
 		remainingRlpSpace -= encodingSize
 	}
-	return copyTransactions(provided), nil
+	passComplete := p.next == len(p.transactions)
+	if passComplete {
+		p.next = 0
+	}
+	return builder.RetainedTxnBatch{Transactions: copyTransactions(provided), PassComplete: passComplete}, nil
 }

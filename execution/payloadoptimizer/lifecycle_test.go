@@ -389,8 +389,11 @@ func TestOrderflowProviderRetainsTransactionsForDynamicFilters(t *testing.T) {
 	backend := &optimizerBackend{
 		assemble: func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 			filter := mapset.NewThreadUnsafeSet[[32]byte]()
-			first, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
+			retained := params.CustomTxnProvider.(builder.RetainedTxnProvider)
+			firstBatch, err := retained.ProvideRetainedTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
 			require.NoError(t, err)
+			require.False(t, firstBatch.PassComplete)
+			first := firstBatch.Transactions
 			require.Len(t, first, 50)
 			require.Equal(t, uint64(50), first[0].GetNonce())
 			require.Equal(t, uint64(1), first[49].GetNonce())
@@ -398,12 +401,16 @@ func TestOrderflowProviderRetainsTransactionsForDynamicFilters(t *testing.T) {
 				filter.Remove([32]byte(transaction.Hash()))
 			}
 
-			second, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
+			secondBatch, err := retained.ProvideRetainedTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
 			require.NoError(t, err)
+			require.True(t, secondBatch.PassComplete)
+			second := secondBatch.Transactions
 			require.Len(t, second, 1)
 			require.Equal(t, uint64(0), second[0].GetNonce())
-			third, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
+			thirdBatch, err := retained.ProvideRetainedTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
 			require.NoError(t, err)
+			require.False(t, thirdBatch.PassComplete)
+			third := thirdBatch.Transactions
 			require.Len(t, third, 50)
 			require.Equal(t, uint64(50), third[0].GetNonce())
 			require.Equal(t, uint64(1), third[49].GetNonce())
@@ -456,6 +463,13 @@ func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
 			blobFilter := mapset.NewThreadUnsafeSet(
 				[32]byte(firstBlob.Hash()), [32]byte(small.Hash()), [32]byte(large.Hash()),
 			)
+			completedPass, err := params.CustomTxnProvider.ProvideTxns(ctx,
+				txnprovider.WithAmount(1),
+				txnprovider.WithTxnIdsFilter(blobFilter),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, protocolparams.GasPerBlob)),
+			)
+			require.NoError(t, err)
+			require.Empty(t, completedPass)
 			secondTry, err := params.CustomTxnProvider.ProvideTxns(ctx,
 				txnprovider.WithAmount(1),
 				txnprovider.WithTxnIdsFilter(blobFilter),
