@@ -227,8 +227,9 @@ func TestSubscribeReceiptsRemoteUpdateFailureReturnsError(t *testing.T) {
 	require.False(t, f.receiptsSubs.removeReceiptsFilter(id))
 }
 
-// distributeLog hands the same log to every subscriber, so only the race detector
-// catches a mutation after Send: the values written back are identical.
+// distributeLog hands the same log to every subscriber, and the mutation it used to do
+// wrote identical values back, so delivery succeeds either way: without -race this test
+// asserts nothing.
 func TestDistributeLogsLeavesDeliveredLogsUntouched(t *testing.T) {
 	f := newTestFilters(t)
 	var delivered atomic.Int64
@@ -237,6 +238,8 @@ func TestDistributeLogsLeavesDeliveredLogsUntouched(t *testing.T) {
 	for range 8 {
 		logs, id, err := f.SubscribeLogs(64, filters.FilterCriteria{}, ProtocolWS)
 		require.NoError(t, err)
+		// Covers the FailNow path only, where wg.Wait() is never reached and the
+		// consumers would block on a channel nobody closes.
 		t.Cleanup(func() { f.UnsubscribeLogs(id) })
 		ids = append(ids, id)
 		wg.Go(func() {

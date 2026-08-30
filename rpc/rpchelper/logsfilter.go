@@ -245,10 +245,7 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
-func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) error {
-	a.logsFilterLock.RLock()
-	defer a.logsFilterLock.RUnlock()
-
+func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
 	addr := gointerfaces.ConvertH160toAddress(eventLog.Address)
 	topics := make([]common.Hash, len(eventLog.Topics))
 	for i, topic := range eventLog.Topics {
@@ -271,6 +268,9 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 		BlockTimestamp: hexutil.Uint64(eventLog.BlockTimestamp),
 	}
 
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
+
 	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
 			if _, ok := filter.addrs.Get(addr); !ok {
@@ -283,7 +283,6 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 		filter.sender.Send(lg)
 		return nil
 	})
-	return nil
 }
 
 // chooseTopics checks if the log topics match the filter's topics.
