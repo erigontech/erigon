@@ -83,12 +83,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0)
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
-		expectedRPCLogs = append(expectedRPCLogs, &types.RPCLog{
-			Log:            expectedLog.Log,
-			BlockTimestamp: expectedLog.BlockTimestamp,
-		})
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
@@ -123,12 +120,9 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make([]*types.RPCLog, 0)
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
-		expectedRPCLogs = append(expectedRPCLogs, &types.RPCLog{
-			Log:            expectedLog.Log,
-			BlockTimestamp: expectedLog.BlockTimestamp,
-		})
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 
 	var lastBlock uint64

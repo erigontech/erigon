@@ -121,11 +121,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 
 	var begin, end uint64
-	rpcLogs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return rpcLogs, beginErr
+		return nil, beginErr
 	}
 	defer tx.Rollback()
 
@@ -192,12 +191,13 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: requested %d, maximum %d", errRequestedBlockCountExceedsLimit, logOptions.BlockCount, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	rpcLogs := types.RPCLogs{}
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return rpcLogs, beginErr
+		return nil, beginErr
 	}
 	defer tx.Rollback()
+
+	rpcLogs := types.RPCLogs{}
 
 	var err error
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
@@ -241,7 +241,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	// The Logs should retrieve from latest to oldest order=Descend
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
-		return rpcLogs, err
+		return nil, err
 	}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
@@ -352,21 +352,14 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if api.getLogsMaxResults != 0 && len(rpcLogs) >= api.getLogsMaxResults {
 				return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, api.getLogsMaxResults), Code: rpc.ErrCodeInvalidParams}
 			}
-			rpcLog := &types.RPCLog{}
-			rpcLog.BlockNumber = hexutil.Uint64(blockNum)
-			rpcLog.BlockHash = blockHash
 			txi := int(log.TxIndex)
 			if txi >= len(body.Transactions) {
 				return nil, fmt.Errorf("log txIndex %d out of range in block %d with %d txns", txi, blockNum, len(body.Transactions))
 			}
+			rpcLog := &types.RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(timestamp)}
+			rpcLog.BlockNumber = hexutil.Uint64(blockNum)
+			rpcLog.BlockHash = blockHash
 			rpcLog.TxHash = body.Transactions[txi].Hash()
-			rpcLog.BlockTimestamp = hexutil.Uint64(timestamp)
-			rpcLog.Address = log.Address
-			rpcLog.Topics = log.Topics
-			rpcLog.Data = log.Data
-			rpcLog.Index = log.Index
-			rpcLog.TxIndex = log.TxIndex
-			rpcLog.Removed = log.Removed
 			rpcLogs = append(rpcLogs, rpcLog)
 		}
 

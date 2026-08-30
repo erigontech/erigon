@@ -400,15 +400,26 @@ func TestToRPCLogs(t *testing.T) {
 
 	logs := Logs{
 		{
-			Address: common.HexToAddress("0x5555555555555555555555555555555555555555"),
-			Topics:  []common.Hash{common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")},
-			Data:    hexutil.Bytes{0xaa},
-			Index:   1,
+			Address:     common.HexToAddress("0x5555555555555555555555555555555555555555"),
+			Topics:      []common.Hash{common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")},
+			Data:        hexutil.Bytes{0xaa},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+			TxIndex:     7,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       1,
+			Removed:     false,
 		},
 		{
-			Address: common.HexToAddress("0x6666666666666666666666666666666666666666"),
-			Data:    hexutil.Bytes{0xbb},
-			Index:   2,
+			Address:     common.HexToAddress("0x6666666666666666666666666666666666666666"),
+			Topics:      []common.Hash{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
+			Data:        hexutil.Bytes{0xbb},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x2222333344445555666677778888999900001111aaaabbbbccccddddeeeeffff"),
+			TxIndex:     8,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       2,
+			Removed:     true,
 		},
 	}
 
@@ -417,16 +428,17 @@ func TestToRPCLogs(t *testing.T) {
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
 		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
-		require.Equal(t, logs[i].Address, rpcLog.Address)
-		require.Equal(t, logs[i].Topics, rpcLog.Topics)
-		require.Equal(t, logs[i].Data, rpcLog.Data)
-		require.Equal(t, logs[i].Index, rpcLog.Index)
+		require.Equal(t, *logs[i], rpcLog.Log)
 	}
 }
 
 func TestToRPCLogsEmpty(t *testing.T) {
 	t.Parallel()
 
-	require.Empty(t, Logs{}.ToRPCLogs(1))
-	require.Empty(t, Logs(nil).ToRPCLogs(1))
+	// Non-nil empty, so eth_getLogs/erigon_getLogs serialise `[]` and not `null`.
+	for _, logs := range []Logs{{}, nil} {
+		rpcLogs := logs.ToRPCLogs(1)
+		require.NotNil(t, rpcLogs)
+		require.Len(t, rpcLogs, 0)
+	}
 }

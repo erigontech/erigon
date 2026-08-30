@@ -36,8 +36,8 @@ func logsWithIndexes(n int) types.Logs {
 	return logs
 }
 
-func rpcLogsWithIndexes(n int) []*types.RPCLog {
-	logs := make([]*types.RPCLog, n)
+func rpcLogsWithIndexes(n int) types.RPCLogs {
+	logs := make(types.RPCLogs, n)
 	for i, l := range logsWithIndexes(n) {
 		logs[i] = &types.RPCLog{Log: *l}
 	}
@@ -49,7 +49,7 @@ func TestAppendRPCLogs(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		logs       []*types.RPCLog
+		logs       types.RPCLogs
 		filtered   types.Logs
 		maxResults int
 		wantLen    int

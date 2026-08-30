@@ -182,11 +182,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 
-	logs := types.RPCLogs{}
-
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return logs, beginErr
+		return nil, beginErr
 	}
 	defer tx.Rollback()
 
@@ -304,7 +302,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 }
 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) (types.RPCLogs, error) {
-	logs := types.RPCLogs{} //nolint
+	logs := types.RPCLogs{}
 
 	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
@@ -328,7 +326,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Asc)
 	if err != nil {
-		return logs, err
+		return nil, err
 	}
 
 	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
