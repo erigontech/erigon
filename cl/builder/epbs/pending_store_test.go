@@ -188,8 +188,8 @@ func TestBuilderLoopDoesNotRetryExpiredPendingDeletionForever(t *testing.T) {
 	key := pendingPayloadKey{slot: 1, blockHash: common.HexToHash("0xb10c")}
 	loop.pendingPayloads[key] = &pendingPayload{slot: 1, bidValue: bidValue}
 
-	loop.pruneBeforeSlot(2, nil)
-	loop.pruneBeforeSlot(3, nil)
+	loop.prunePendingBeforeSlot(2)
+	loop.prunePendingBeforeSlot(3)
 	require.Equal(t, 1, store.deletes)
 	require.NotContains(t, loop.pendingPayloads, key)
 	require.Zero(t, loop.manager.reservedBidValue)
@@ -227,7 +227,7 @@ func TestBuilderLoopRestoresPublishedPendingPayloadAfterRestart(t *testing.T) {
 	))
 	scheduler.Wait()
 	require.Len(t, submitter.broadcasts, 1)
-	restarted.pruneBeforeSlot(sc.Slot+1, nil)
+	restarted.prunePendingBeforeSlot(sc.Slot + 1)
 	records, err := store.Load(t.Context(), 0)
 	require.NoError(t, err)
 	require.Empty(t, records)

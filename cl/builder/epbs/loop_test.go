@@ -354,7 +354,7 @@ func TestBuilderLoopReleasesPriorSlotCollateralBeforeNewBid(t *testing.T) {
 
 	require.NoError(t, loop.OnSlot(t.Context(), sc))
 	require.Len(t, submitter.submittedBids, 1)
-	require.NotContains(t, loop.pendingPayloads, oldKey)
+	require.Contains(t, loop.pendingPayloads, oldKey)
 	require.Equal(t, bidValue, loop.manager.reservedBidValue)
 }
 
@@ -756,7 +756,7 @@ func TestBuilderLoopPruneRetainsInFlightRevealReservation(t *testing.T) {
 	}()
 	<-started
 
-	loop.pruneBeforeSlot(sc.Slot+1, nil)
+	loop.prunePendingBeforeSlot(sc.Slot + 1)
 	require.Len(t, loop.pendingPayloads, 1)
 	require.NotZero(t, loop.manager.reservedBidValue)
 	close(release)
@@ -781,7 +781,7 @@ func TestBuilderLoopSlotAdvanceRetainsCanonicalOldHeadWinner(t *testing.T) {
 	require.Len(t, loop.pendingPayloads, 1)
 }
 
-func TestBuilderLoopHeadReplacementPrunesOldWinner(t *testing.T) {
+func TestBuilderLoopFinalizationPrunesOldWinner(t *testing.T) {
 	loop, exec, _, prefsWatch := setupBuilderLoop(t)
 	sc := testSlotContext()
 	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
@@ -793,9 +793,28 @@ func TestBuilderLoopHeadReplacementPrunesOldWinner(t *testing.T) {
 
 	replacement := sc
 	replacement.Slot++
+	replacement.FinalizedSlot = sc.Slot + 1
 	replacement.Parent = ParentInfo{Slot: sc.Slot, ExecutionHash: common.HexToHash("0x9999")}
 	require.NoError(t, loop.OnNewHead(t.Context(), replacement))
 	require.Empty(t, loop.pendingPayloads)
+}
+
+func TestBuilderLoopStaleHeadDoesNotPruneCompetingPendingPayload(t *testing.T) {
+	loop, exec, _, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+
+	stale := sc
+	stale.Slot += 2
+	stale.FinalizedSlot = sc.Slot - 1
+	stale.Parent = ParentInfo{Slot: sc.Slot, PayloadBlockHash: common.HexToHash("0x9999")}
+	require.NoError(t, loop.OnNewHead(t.Context(), stale))
+	require.Len(t, loop.pendingPayloads, 1)
 }
 
 func TestBuilderLoopQueuedRevealsPreserveRootsAndSurvivePrune(t *testing.T) {
@@ -820,7 +839,7 @@ func TestBuilderLoopQueuedRevealsPreserveRootsAndSurvivePrune(t *testing.T) {
 	require.True(t, queue(rootB))
 	require.False(t, queue(rootA))
 
-	loop.pruneBeforeSlot(sc.Slot+1, nil)
+	loop.prunePendingBeforeSlot(sc.Slot + 1)
 	require.Len(t, loop.pendingPayloads, 1)
 	for _, pending := range loop.pendingPayloads {
 		require.Equal(t, map[common.Hash]revealState{rootA: revealQueued, rootB: revealQueued}, pending.reveals)
@@ -828,10 +847,10 @@ func TestBuilderLoopQueuedRevealsPreserveRootsAndSurvivePrune(t *testing.T) {
 
 	loop.abandonPendingBidReveal(key, rootA)
 	require.False(t, queue(rootA))
-	loop.pruneBeforeSlot(sc.Slot+1, nil)
+	loop.prunePendingBeforeSlot(sc.Slot + 1)
 	require.Len(t, loop.pendingPayloads, 1)
 	loop.abandonPendingBidReveal(key, rootB)
-	loop.pruneBeforeSlot(sc.Slot+1, nil)
+	loop.prunePendingBeforeSlot(sc.Slot + 1)
 	require.Empty(t, loop.pendingPayloads)
 	require.Zero(t, loop.manager.reservedBidValue)
 }
@@ -1219,7 +1238,8 @@ func TestBuilderLoop_PruneBeforeSlot(t *testing.T) {
 		loop.specBuild.builds[slot] = struct{}{}
 	}
 
-	loop.pruneBeforeSlot(100, nil)
+	loop.prunePendingBeforeSlot(100)
+	loop.pruneSpeculativeBeforeSlot(100)
 	require.Len(t, loop.pendingPayloads, 1)
 	require.Len(t, loop.speculativePayloads, 1)
 	require.Len(t, loop.specBuild.builds, 1)

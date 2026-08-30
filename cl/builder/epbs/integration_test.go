@@ -276,6 +276,9 @@ func TestEmptyCanonicalHeadRetainsWinnerUntilImportedReveal(t *testing.T) {
 	}, loop.manager.Pubkey())
 	require.NoError(t, err)
 	require.NoError(t, loop.OnNewHead(t.Context(), replacement))
+	require.Len(t, loop.pendingPayloads, 1)
+	replacement.FinalizedSlot = sc.Slot + 1
+	require.NoError(t, loop.OnNewHead(t.Context(), replacement))
 	require.Empty(t, loop.pendingPayloads)
 }
 
@@ -343,14 +346,14 @@ func TestInitBuilderService_RejectsMissingDependencies(t *testing.T) {
 	require.ErrorContains(t, err, "context is required")
 }
 
-func TestInitBuilderServiceRetainsCanonicalWinnerBehindWallClock(t *testing.T) {
+func TestInitBuilderServiceRetainsUnfinalizedCandidatesBehindWallClock(t *testing.T) {
 	beaconCfg := testBeaconCfg()
 	beaconCfg.GloasForkEpoch = 0
 	beaconCfg.PayloadDueBps = 5000
 	beaconCfg.InitializeForkSchedule()
 	const (
-		headSlot    = uint64(100)
-		currentSlot = uint64(102)
+		headSlot    = uint64(127)
+		currentSlot = uint64(129)
 	)
 	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
 	genesisTime := uint64(time.Now().Add(-time.Duration(currentSlot)*slotDuration - 3*slotDuration/4).Unix())
@@ -367,16 +370,25 @@ func TestInitBuilderServiceRetainsCanonicalWinnerBehindWallClock(t *testing.T) {
 	signer, err := NewLocalSignerFromBytes(keyBytes)
 	require.NoError(t, err)
 	store := newFilePendingPayloadStore(t.TempDir(), beaconCfg)
-	key := pendingPayloadKey{
-		slot: headSlot, parentBlockHash: common.HexToHash("0xdead"),
-		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: common.HexToHash("0xb10c"),
+	savePending := func(slot uint64, root, blockHash common.Hash) pendingPayloadKey {
+		key := pendingPayloadKey{
+			slot: slot, parentBlockHash: common.HexToHash("0xdead"),
+			parentBlockRoot: root, blockHash: blockHash,
+		}
+		assembled := makeTestPayload(t, big.NewInt(1))
+		assembled.Eth1Block.SlotNumber = slot
+		assembled.Eth1Block.BlockHash = blockHash
+		parent := testParentInfo()
+		parent.BlockRoot = root
+		pending := &pendingPayload{
+			slot: slot, builderIndex: 42, bidValue: 1, parent: parent, assembled: assembled,
+			execReqs: cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
+		}
+		require.NoError(t, store.Save(t.Context(), key, pending, signer.Pubkey()))
+		return key
 	}
-	pending := &pendingPayload{
-		slot: headSlot, builderIndex: 42, bidValue: 1, parent: testParentInfo(),
-		assembled: makeTestPayload(t, big.NewInt(1)),
-		execReqs:  cltypes.NewExecutionRequestsWithVersion(beaconCfg, clparams.GloasVersion),
-	}
-	require.NoError(t, store.Save(t.Context(), key, pending, signer.Pubkey()))
+	key := savePending(headSlot, common.HexToHash("0xbeef"), common.HexToHash("0xb10c"))
+	reorgKey := savePending(headSlot, common.HexToHash("0xcafe"), common.HexToHash("0xc0de"))
 
 	anchor := state.New(beaconCfg)
 	anchor.SetVersion(clparams.GloasVersion)
@@ -392,6 +404,7 @@ func TestInitBuilderServiceRetainsCanonicalWinnerBehindWallClock(t *testing.T) {
 		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
 	)
 	require.NoError(t, err)
+	require.Equal(t, headSlot, forkChoice.FinalizedSlot())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	svc, err := InitBuilderService(epbscfg.Config{Enabled: true, KeyPath: keyPath, BidMargin: 0.5}, BuilderDeps{
@@ -403,6 +416,7 @@ func TestInitBuilderServiceRetainsCanonicalWinnerBehindWallClock(t *testing.T) {
 	require.NoError(t, err)
 	defer svc.Shutdown()
 	require.Contains(t, svc.Loop.pendingPayloads, key)
+	require.Contains(t, svc.Loop.pendingPayloads, reorgKey)
 	submitter := &mockBidSubmitter{}
 	svc.Loop.submitter = submitter
 	require.NoError(t, svc.Loop.OnBidWon(
@@ -641,6 +655,8 @@ func TestImportedBlockWatcherRetriesWinningPayloadAfterLocalDeadline(t *testing.
 
 func TestBuilderLoopPruneDiscardsExpiredRevealProgress(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
+	loop.pendingStore = store
 	sc := testSlotContext()
 	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
 	require.NoError(t, loop.OnNewHead(t.Context(), sc))
@@ -666,9 +682,14 @@ func TestBuilderLoopPruneDiscardsExpiredRevealProgress(t *testing.T) {
 
 	next := sc
 	next.Slot += 2
+	next.FinalizedSlot = sc.Slot + 1
 	require.NoError(t, loop.OnNewHead(t.Context(), next))
 	require.Empty(t, loop.pendingPayloads)
 	require.Empty(t, caplinSubmitter.progress)
+	require.Zero(t, loop.manager.reservedBidValue)
+	records, err := store.Load(t.Context(), 0)
+	require.NoError(t, err)
+	require.Empty(t, records)
 }
 
 func TestRevealQueueAdmissionFailureRemainsRetryable(t *testing.T) {

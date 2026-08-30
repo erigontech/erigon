@@ -142,40 +142,9 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	loop := NewBuilderLoop(manager, strategy, deps.Exec, prefsWatch, submitter, deps.BeaconCfg)
 	loop.pendingStore = deps.Pending
 	currentSlot := deps.EthClock.GetCurrentSlot()
-	minPendingSlot := currentSlot
-	var canonical *ParentInfo
-	head, err := deps.ForkChoice.GetHeadNode()
-	if err != nil {
-		return nil, fmt.Errorf("epbs/integration: resolve canonical head: %w", err)
-	}
-	header, ok := deps.ForkChoice.GetHeader(head.Root)
-	if !ok || header == nil {
-		return nil, fmt.Errorf("epbs/integration: canonical head %s unavailable", head.Root)
-	}
-	if header.Slot < minPendingSlot {
-		minPendingSlot = header.Slot
-	}
-	if block, ok := deps.ForkChoice.GetBlock(head.Root); ok && block != nil && block.Block != nil && block.Block.Body != nil {
-		if bid := block.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
-			canonical = &ParentInfo{Slot: bid.Message.Slot, PayloadBlockHash: bid.Message.BlockHash}
-			if bid.Message.Slot < minPendingSlot {
-				minPendingSlot = bid.Message.Slot
-			}
-		}
-	}
-	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot, minPendingSlot); err != nil {
+	finalizedSlot := deps.ForkChoice.FinalizedSlot()
+	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot, finalizedSlot); err != nil {
 		return nil, fmt.Errorf("epbs/integration: restore pending payloads: %w", err)
-	}
-	currentHead, err := deps.ForkChoice.GetHeadNode()
-	if err != nil {
-		return nil, fmt.Errorf("epbs/integration: revalidate canonical head: %w", err)
-	}
-	if currentHead.Root != head.Root {
-		loop.pruneBeforeSlot(minPendingSlot, nil)
-	} else if canonical != nil {
-		loop.pruneBeforeSlot(currentSlot, canonical)
-	} else {
-		loop.pruneBeforeSlot(minPendingSlot, nil)
 	}
 
 	serviceCtx, cancel := context.WithCancel(deps.Ctx)
@@ -295,6 +264,8 @@ func handleHeadEvent(
 	if beaconCfg.GetCurrentStateVersion(nextSlot/beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
 		return
 	}
+	finalizedSlot := fc.FinalizedSlot()
+	loop.prunePendingBeforeSlot(finalizedSlot)
 	parents := fc.ActiveParents(nextSlot)
 	if len(parents) == 0 {
 		return
@@ -316,6 +287,7 @@ func handleHeadEvent(
 		if err != nil || currentHead.Root != parent.BlockRoot {
 			continue
 		}
+		sc.FinalizedSlot = finalizedSlot
 		if err := loop.OnNewHead(ctx, sc); err != nil {
 			log.Warn("ePBS builder: OnNewHead failed",
 				"slot", nextSlot,

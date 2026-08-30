@@ -62,6 +62,7 @@ const (
 // This separates beacon state access (caller responsibility) from build logic.
 type SlotContext struct {
 	Slot          uint64
+	FinalizedSlot uint64
 	Parent        ParentInfo
 	DependentRoot common.Hash
 	Timestamp     uint64      // Unix timestamp for the slot (from ComputeTimestampAtSlot)
@@ -142,7 +143,8 @@ func NewBuilderLoop(
 // Called when the builder observes a new head via fork choice.
 func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 	l.releaseReservationsBeforeSlot(sc.Slot)
-	l.pruneBeforeSlot(sc.Slot, &sc.Parent)
+	l.prunePendingBeforeSlot(sc.FinalizedSlot)
+	l.pruneSpeculativeBeforeSlot(sc.Slot)
 	params := l.buildParams(sc)
 
 	payloadId, err := l.specBuild.StartBuild(ctx, params)
@@ -209,8 +211,7 @@ func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
 	return l.buildAndBid(ctx, sc, prefs)
 }
 
-func (l *BuilderLoop) pruneBeforeSlot(slot uint64, canonical *ParentInfo) {
-	var discarded []uint64
+func (l *BuilderLoop) prunePendingBeforeSlot(slot uint64) {
 	type removedPending struct {
 		key     pendingPayloadKey
 		pending *pendingPayload
@@ -218,29 +219,12 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64, canonical *ParentInfo) {
 	var removed []removedPending
 	l.mu.Lock()
 	for key, pending := range l.pendingPayloads {
-		canonicalBlockHash := common.Hash{}
-		if canonical != nil {
-			canonicalBlockHash = canonical.PayloadBlockHash
-			if canonicalBlockHash == (common.Hash{}) {
-				canonicalBlockHash = canonical.ExecutionHash
-			}
-		}
-		canonicalWinner := canonicalBlockHash != (common.Hash{}) && key.slot == canonical.Slot && key.blockHash == canonicalBlockHash
-		if key.slot < slot && !canonicalWinner && !revealInFlight(pending) {
+		if key.slot < slot && !revealInFlight(pending) {
 			delete(l.pendingPayloads, key)
 			removed = append(removed, removedPending{key: key, pending: pending})
 		}
 	}
-	for key, payloadID := range l.speculativePayloads {
-		if key.slot < slot {
-			delete(l.speculativePayloads, key)
-			discarded = append(discarded, payloadID)
-		}
-	}
 	l.mu.Unlock()
-	for _, payloadID := range discarded {
-		l.specBuild.Discard(payloadID)
-	}
 	for _, removed := range removed {
 		if submitter, ok := l.submitter.(payloadBroadcastDiscarder); ok {
 			for root := range removed.pending.reveals {
@@ -256,6 +240,21 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64, canonical *ParentInfo) {
 			removed.pending.reservationReleased = true
 			l.manager.ReleaseBid(removed.pending.bidValue)
 		}
+	}
+}
+
+func (l *BuilderLoop) pruneSpeculativeBeforeSlot(slot uint64) {
+	var discarded []uint64
+	l.mu.Lock()
+	for key, payloadID := range l.speculativePayloads {
+		if key.slot < slot {
+			delete(l.speculativePayloads, key)
+			discarded = append(discarded, payloadID)
+		}
+	}
+	l.mu.Unlock()
+	for _, payloadID := range discarded {
+		l.specBuild.Discard(payloadID)
 	}
 }
 
