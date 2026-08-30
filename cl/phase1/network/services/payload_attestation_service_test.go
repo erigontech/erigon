@@ -496,6 +496,30 @@ func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
 	require.True(t, exists)
 }
 
+func TestPayloadAttestationServiceDoesNotReportQueuedWhenPendingQueueFull(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	service.pending.capacity = 1
+
+	queuedRoot := common.HexToHash("0x1111")
+	require.NoError(t, service.queuePendingAttestation(queuedRoot, newTestPayloadAttestationMessage(100, 1, queuedRoot)))
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	blockRoot := common.HexToHash("0x2222")
+	msg := newTestPayloadAttestationMessage(100, 2, blockRoot)
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
+	output := captureServiceLogs(t)
+	err := service.ProcessMessage(context.Background(), nil, msg)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, errPendingJobQueueFull)
+	require.NotErrorIs(t, err, ErrAttestationQueued)
+	require.Contains(t, err.Error(), "pending job queue full")
+	require.NotContains(t, output.String(), "Queued payload attestation for later processing")
+}
+
 func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -507,9 +531,9 @@ func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t 
 	second := newTestPayloadAttestationMessage(100, 1, blockRoot)
 	second.Signature[0] = 1
 
-	service.queuePendingAttestation(blockRoot, first)
-	service.queuePendingAttestation(blockRoot, first)
-	service.queuePendingAttestation(blockRoot, second)
+	require.NoError(t, service.queuePendingAttestation(blockRoot, first))
+	require.NoError(t, service.queuePendingAttestation(blockRoot, first))
+	require.NoError(t, service.queuePendingAttestation(blockRoot, second))
 
 	require.Equal(t, int32(2), service.pending.count.Load())
 	_, firstExists := service.pending.jobs.Load(mustPendingPayloadAttestationKey(t, blockRoot, first))
@@ -727,7 +751,7 @@ func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
 		wg.Go(func() {
 			blockRoot := common.Hash{byte(i), byte(i >> 8)}
 			msg := newTestPayloadAttestationMessage(100, uint64(10000+i), blockRoot)
-			service.queuePendingAttestation(blockRoot, msg)
+			_ = service.queuePendingAttestation(blockRoot, msg)
 		})
 	}
 	wg.Wait()

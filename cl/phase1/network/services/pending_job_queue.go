@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,6 +61,18 @@ var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
 	[]string{"queue"},
 	"Total pending queue admission attempts rejected at capacity",
 )
+
+var errPendingJobQueueFull = errors.New("pending job queue full")
+
+func pendingJobAdmissionError(result pendingJobEnqueueResult, err error) error {
+	if err != nil {
+		return err
+	}
+	if result == pendingJobQueueFull {
+		return errPendingJobQueueFull
+	}
+	return nil
+}
 
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
 // started by newPendingJobQueue. Jobs remain until the service callback requests

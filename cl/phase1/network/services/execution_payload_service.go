@@ -141,7 +141,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	block, ok := s.forkchoiceStore.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
 		// Block hasn't arrived yet, queue envelope for later processing
-		s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
+		queueErr := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
 		// Also store in forkchoice's pendingEnvelopes so OnBlock can process it immediately
 		// when the block arrives, instead of waiting for the 100ms polling loop.
 		// validatePayload must be true: if the block arrives (via OnBlock) before this call
@@ -152,6 +152,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil {
 			log.Warn("Failed to eagerly store pending execution payload envelope in forkchoice",
 				"beaconBlockRoot", beaconBlockRoot, "builderIndex", builderIndex, "err", err)
+		}
+		if queueErr != nil {
+			return fmt.Errorf("%w: execution payload envelope pending queue admission failed: %w", ErrIgnore, queueErr)
 		}
 		log.Trace("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
@@ -204,8 +207,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 }
 
 // queuePendingEnvelope defers an envelope until its referenced block is available.
-func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	_, err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
+// It returns an error when the pending queue cannot admit the envelope.
+func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	result, err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
 		if err != nil {
 			return pendingEnvelopeKey{}, err
@@ -218,6 +222,7 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 	if err != nil {
 		log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
 	}
+	return pendingJobAdmissionError(result, err)
 }
 
 func (s *executionPayloadService) tryProcessPendingEnvelope(_ context.Context, key pendingEnvelopeKey, _ *cltypes.SignedExecutionPayloadEnvelope) pendingJobDecision {
