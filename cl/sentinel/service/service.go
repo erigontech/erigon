@@ -44,10 +44,17 @@ var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
 type SentinelServer struct {
 	sentinelproto.UnimplementedSentinelServer
 
-	ctx      context.Context
-	sentinel *sentinel.Sentinel
+	ctx                context.Context
+	sentinel           *sentinel.Sentinel
+	peerRequestBackend peerRequestBackend
 
 	logger log.Logger
+}
+
+type peerRequestBackend interface {
+	GetPeersCount() (active int, connected int, disconnected int)
+	Config() *sentinel.SentinelConfig
+	ReqRespHandler() http.Handler
 }
 
 type (
@@ -58,9 +65,10 @@ type (
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
-		sentinel: sentinel,
-		ctx:      ctx,
-		logger:   logger,
+		sentinel:           sentinel,
+		peerRequestBackend: sentinel,
+		ctx:                ctx,
+		logger:             logger,
 	}
 }
 
@@ -109,25 +117,32 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		return nil, err
 	}
 
-	activePeers, _, _ := s.sentinel.GetPeersCount()
+	activePeers, _, _ := s.peerRequestBackend.GetPeersCount()
 
-	shouldBanOnFail := activePeers >= int(s.sentinel.Config().MaxPeerCount)
+	shouldBanOnFail := activePeers >= int(s.peerRequestBackend.Config().MaxPeerCount)
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
 	if req.MaxResponseBytes > 0 {
 		httpReq.Header.Set(httpreqresp.MaxResponseBytesHeader, strconv.FormatUint(req.MaxResponseBytes, 10))
 	}
-	// for now this can't actually error. in the future, it can due to a network error
-	resp, err := httpreqresp.Do(s.sentinel.ReqRespHandler(), httpReq)
+	resp, err := httpreqresp.Do(s.peerRequestBackend.ReqRespHandler(), httpReq)
 	if err != nil {
 		// we remove, but dont ban the peer if we fail. this is because its probably not their fault, but maybe it is.
 		return nil, err
 	}
+	stopBodyClose := closeBodyOnCancel(ctx, resp.Body)
+	defer stopBodyClose()
 	defer resp.Body.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// some standard http error code parsing
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		errorMessage := &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       string(errBody),
@@ -144,6 +159,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// we should never get an invalid response to this. our responder should always set it on non-error response
 	code, err := strconv.Atoi(resp.Header.Get("REQRESP-RESPONSE-CODE"))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		// TODO: think about how to properly handle this. should we? (or should we just assume no response is success?)
 		return nil, err
 	}
@@ -152,6 +170,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if !responseCode.Success() {
 		errorMessage, err := responseCode.ErrorMessage(resp)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if shouldBanOnFail {
 				s.dropPeer(pid)
 			}
@@ -169,6 +190,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	// read the body from the response
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		// An over-cap flood surfaces here as ErrResponseTooLarge rather than a non-2xx status, so
 		// drop the peer as the status path above would.
 		if errors.Is(err, httpreqresp.ErrResponseTooLarge) && shouldBanOnFail {
@@ -184,6 +208,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 		},
 	}
 	return ans, nil
+}
+
+func closeBodyOnCancel(ctx context.Context, body io.Closer) func() bool {
+	return context.AfterFunc(ctx, func() { _ = body.Close() })
 }
 
 func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
