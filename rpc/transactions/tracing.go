@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -201,6 +202,9 @@ func AssembleTracer(
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, cancel, nil
 	default:
+		if config.LogConfig != nil && config.LogConfig.Limit < 0 {
+			return nil, false, func() {}, &rpc.InvalidParamsError{Message: "limit must not be negative"}
+		}
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, cancel, nil
 	}

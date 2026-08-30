@@ -24,7 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -1229,4 +1234,132 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			tc.check(t, wrapAsExecAbort(tc.origErr, tc.depTxIndex))
 		})
 	}
+}
+
+// TestCustomTraceSharedDomainsUsesParallelTrie pins custom_trace on the same
+// commitment trie the rest of the process selects. The variant is only upgraded
+// once a DB is wired in, so a construction that skips that step keeps the
+// sequential trie no matter what the flag says.
+func TestCustomTraceSharedDomainsUsesParallelTrie(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
+	statecfg.ExperimentalParallelCommitment = true
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := newCustomTraceSharedDomains(t.Context(), db, tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
+
+	require.Equal(t, commitment.VariantParallelHexPatricia, doms.GetCommitmentCtx().Trie().Variant(),
+		"custom_trace commits on the sequential trie while the flag selects the parallel one")
+}
+
+// TestCommitmentBarrierCtxSurvivesTerminalCancel pins the context choice
+// commitmentBarrierCtx documents: a terminal block must outlive the stopCause
+// so triggerBatchCommitment still runs.
+func TestCommitmentBarrierCtxSurvivesTerminalCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.Error(t, commitmentBarrierCtx(ctx, false).Err(),
+		"non-terminal blocks must still abort the barrier on cancellation")
+	require.NoError(t, commitmentBarrierCtx(ctx, true).Err(),
+		"terminal blocks must wait past the stopCause so triggerBatchCommitment still runs")
+}
+
+// TestWaitProcessedWithoutCommitStreamReturns covers exec-only
+// (DISCARD_COMMITMENT), where WaitProcessed's in == nil fast path is the only
+// escape: see its comment for why every other one is unreachable there.
+func TestWaitProcessedWithoutCommitStreamReturns(t *testing.T) {
+	cc := &commitmentCalculator{
+		in:            nil,
+		done:          make(chan struct{}),
+		processedWake: make(chan struct{}),
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cc.WaitProcessed(context.Background(), 1) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitProcessed parked with no commit stream: nothing can ever mark a block processed")
+	}
+}
+
+// TestWaitProcessedBarrier covers the exec side of the COMMITMENT_AFTER_EXEC
+// barrier as an isolated markProcessed/WaitProcessed pair: the waiter for block
+// N must stay parked until N is marked processed, and must not be released by an
+// earlier block's mark. The calculator side — the guarded call in
+// handleMessage's *blockResult arm — is pinned by
+// TestHandleMessage_MarksProcessedUnderFlag.
+func TestWaitProcessedBarrier(t *testing.T) {
+	newCalc := func() *commitmentCalculator {
+		return &commitmentCalculator{
+			in:            make(chan applyResult),
+			done:          make(chan struct{}),
+			processedWake: make(chan struct{}),
+		}
+	}
+
+	t.Run("released by the mark for the awaited block", func(t *testing.T) {
+		cc := newCalc()
+		done := make(chan error, 1)
+		go func() { done <- cc.WaitProcessed(context.Background(), 5) }()
+
+		cc.markProcessed(4)
+		select {
+		case <-done:
+			t.Fatal("barrier released by an earlier block's mark")
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		cc.markProcessed(5)
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("barrier still parked after the awaited block was marked")
+		}
+	})
+
+	t.Run("already processed does not wait", func(t *testing.T) {
+		cc := newCalc()
+		cc.markProcessed(9)
+		require.NoError(t, cc.WaitProcessed(context.Background(), 5))
+	})
+
+	t.Run("released when the calculator stops", func(t *testing.T) {
+		cc := newCalc()
+		done := make(chan error, 1)
+		go func() { done <- cc.WaitProcessed(context.Background(), 5) }()
+
+		close(cc.done)
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("barrier outlived the calculator")
+		}
+	})
+
+	t.Run("released on cancellation", func(t *testing.T) {
+		cc := newCalc()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- cc.WaitProcessed(ctx, 5) }()
+
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(2 * time.Second):
+			t.Fatal("barrier ignored cancellation")
+		}
+	})
 }
