@@ -1269,7 +1269,7 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 // A kept snapshot whose local .torrent cannot be parsed must still be seeded. BuildTorrentIfNeed
 // only checks that the path exists, so a corrupt file suppresses the derivation that the kept data
 // would otherwise supply, and the name never reaches torrentsByName.
-func TestKeptLocalSnapshotWithUnreadableMetainfoIsSeeded(t *testing.T) {
+func TestKeptLocalSnapshotWithMalformedMetainfoIsSeeded(t *testing.T) {
 	require := require.New(t)
 	d, _, name, path := newLocalSnapshotTest(t)
 	require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("not bencode"), 0o644))

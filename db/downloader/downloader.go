@@ -1271,6 +1271,10 @@ func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
 // for the life of the process. Remove it only when the bytes are confirmed malformed: a file we
 // could not read says nothing about its contents.
 func (d *Downloader) removeMalformedMetainfo(name string) error {
+	name, err := ensureCantLeaveDir(name, d.snapDir())
+	if err != nil {
+		return err
+	}
 	b, err := os.ReadFile(d.metainfoFilePathForName(name))
 	if err != nil {
 		return nil
