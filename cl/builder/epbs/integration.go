@@ -524,7 +524,6 @@ type importedBlockWatcherReader interface {
 	importedBlockReader
 	GetHeadNode() (forkchoice.ForkChoiceNode, error)
 	GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool)
-	Ancestor(common.Hash, uint64) forkchoice.ForkChoiceNode
 	FinalizedCheckpoint() solid.Checkpoint
 }
 
@@ -536,20 +535,21 @@ func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEm
 	defer sub.Unsubscribe()
 	workerCtx, cancel := context.WithCancel(ctx)
 	scheduler := newRevealScheduler(workerCtx, 4, 128)
+	reconciler := &pendingAncestryReconciler{}
 	reconcileTicker := time.NewTicker(revealRetryDelay)
 	defer reconcileTicker.Stop()
 	defer func() {
 		cancel()
 		scheduler.Wait()
 	}()
-	_ = reconcileCurrentHeadReveal(reader, ethClock, beaconCfg, loop, scheduler)
+	_ = reconciler.reconcile(reader, ethClock, beaconCfg, loop, scheduler)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-reconcileTicker.C:
 			if loop.hasPendingPayloads() {
-				_ = reconcileCurrentHeadReveal(reader, ethClock, beaconCfg, loop, scheduler)
+				_ = reconciler.reconcile(reader, ethClock, beaconCfg, loop, scheduler)
 			}
 		case event, ok := <-ch:
 			if !ok {
@@ -579,7 +579,22 @@ func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEm
 	}
 }
 
-func reconcileCurrentHeadReveal(reader importedBlockWatcherReader, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop, scheduler *revealScheduler) error {
+const maxCanonicalAncestryHeadersPerTick = 256
+
+type pendingAncestryReconciler struct {
+	headRoot     common.Hash
+	cursorRoot   common.Hash
+	cursorHeader *cltypes.BeaconBlockHeader
+}
+
+func (r *pendingAncestryReconciler) reconcile(reader importedBlockWatcherReader, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop, scheduler *revealScheduler) error {
+	slots := loop.unresolvedPendingPayloadSlots()
+	if len(slots) == 0 {
+		r.headRoot = common.Hash{}
+		r.cursorRoot = common.Hash{}
+		r.cursorHeader = nil
+		return nil
+	}
 	head, err := reader.GetHeadNode()
 	if err != nil {
 		return err
@@ -589,27 +604,55 @@ func reconcileCurrentHeadReveal(reader importedBlockWatcherReader, ethClock eth_
 		return fmt.Errorf("head %s unavailable", head.Root)
 	}
 	finalizedSlot := finalizedPayloadPruneSlot(reader.FinalizedCheckpoint().Epoch, beaconCfg.SlotsPerEpoch)
+	if r.headRoot != head.Root || r.cursorRoot == (common.Hash{}) {
+		r.headRoot = head.Root
+		r.cursorRoot = head.Root
+		r.cursorHeader = header
+	}
+	currentRoot := r.cursorRoot
+	currentHeader := r.cursorHeader
+	if currentHeader == nil {
+		currentHeader, ok = reader.GetHeader(currentRoot)
+		if !ok || currentHeader == nil {
+			r.cursorRoot = head.Root
+			r.cursorHeader = header
+			return fmt.Errorf("ancestry cursor %s unavailable", currentRoot)
+		}
+	}
 	var reconcileErr error
-	seen := make(map[common.Hash]struct{})
-	for _, slot := range loop.pendingPayloadSlots() {
-		if slot < finalizedSlot || slot > header.Slot {
-			continue
+	slotIndex := 0
+	for slotIndex < len(slots) && slots[slotIndex] > currentHeader.Slot {
+		slotIndex++
+	}
+	for work := 0; work < maxCanonicalAncestryHeadersPerTick && slotIndex < len(slots); work++ {
+		for slotIndex < len(slots) && slots[slotIndex] > currentHeader.Slot {
+			slotIndex++
 		}
-		ancestor := reader.Ancestor(head.Root, slot)
-		if ancestor.Root == (common.Hash{}) {
-			continue
+		if slotIndex == len(slots) || slots[slotIndex] < finalizedSlot {
+			break
 		}
-		if _, ok := seen[ancestor.Root]; ok {
-			continue
+		if slots[slotIndex] == currentHeader.Slot {
+			if err := scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: currentHeader.Slot, Block: currentRoot}, reader, ethClock, beaconCfg, loop, scheduler); err != nil {
+				reconcileErr = errors.Join(reconcileErr, err)
+			}
+			slotIndex++
 		}
-		ancestorHeader, ok := reader.GetHeader(ancestor.Root)
-		if !ok || ancestorHeader == nil || ancestorHeader.Slot != slot {
-			continue
+		currentRoot = currentHeader.ParentRoot
+		if currentRoot == (common.Hash{}) {
+			break
 		}
-		seen[ancestor.Root] = struct{}{}
-		if err := scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: slot, Block: ancestor.Root}, reader, ethClock, beaconCfg, loop, scheduler); err != nil {
-			reconcileErr = errors.Join(reconcileErr, err)
+		currentHeader, ok = reader.GetHeader(currentRoot)
+		if !ok || currentHeader == nil {
+			currentRoot = common.Hash{}
+			break
 		}
+	}
+	if currentRoot == (common.Hash{}) || slotIndex == len(slots) || (slotIndex < len(slots) && slots[slotIndex] < finalizedSlot) {
+		r.cursorRoot = head.Root
+		r.cursorHeader = header
+	} else {
+		r.cursorRoot = currentRoot
+		r.cursorHeader = currentHeader
 	}
 	return reconcileErr
 }

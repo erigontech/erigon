@@ -288,12 +288,14 @@ func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlo
 }
 
 type importedBlockWatcherReaderStub struct {
-	mu        sync.RWMutex
-	head      common.Hash
-	finalized solid.Checkpoint
-	headers   map[common.Hash]*cltypes.BeaconBlockHeader
-	blocks    map[common.Hash]*cltypes.SignedBeaconBlock
-	lookups   chan struct{}
+	mu          sync.RWMutex
+	head        common.Hash
+	finalized   solid.Checkpoint
+	headers     map[common.Hash]*cltypes.BeaconBlockHeader
+	blocks      map[common.Hash]*cltypes.SignedBeaconBlock
+	lookups     chan struct{}
+	headersRead int
+	blocksRead  int
 }
 
 func (r *importedBlockWatcherReaderStub) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
@@ -303,15 +305,17 @@ func (r *importedBlockWatcherReaderStub) GetHeadNode() (forkchoice.ForkChoiceNod
 }
 
 func (r *importedBlockWatcherReaderStub) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.headersRead++
 	header, ok := r.headers[root]
 	return header, ok
 }
 
 func (r *importedBlockWatcherReaderStub) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.blocksRead++
 	if r.lookups != nil {
 		select {
 		case r.lookups <- struct{}{}:
@@ -322,20 +326,16 @@ func (r *importedBlockWatcherReaderStub) GetBlock(root common.Hash) (*cltypes.Si
 	return block, ok
 }
 
-func (r *importedBlockWatcherReaderStub) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+func (r *importedBlockWatcherReaderStub) blockCalls() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for root != (common.Hash{}) {
-		header, ok := r.headers[root]
-		if !ok || header == nil {
-			return forkchoice.ForkChoiceNode{}
-		}
-		if header.Slot <= slot {
-			return forkchoice.ForkChoiceNode{Root: root}
-		}
-		root = header.ParentRoot
-	}
-	return forkchoice.ForkChoiceNode{}
+	return r.blocksRead
+}
+
+func (r *importedBlockWatcherReaderStub) ancestryHeaderCalls() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.headersRead
 }
 
 func (r *importedBlockWatcherReaderStub) FinalizedCheckpoint() solid.Checkpoint {
@@ -348,6 +348,67 @@ func (r *importedBlockWatcherReaderStub) setBlock(root common.Hash, block *cltyp
 	r.mu.Lock()
 	r.blocks[root] = block
 	r.mu.Unlock()
+}
+
+func TestCompletedRevealDoesNotTraverseCanonicalAncestry(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	root := common.HexToHash("0xa1")
+	loop.pendingPayloads[pendingPayloadKey{slot: 100}] = &pendingPayload{
+		slot: 100, reveals: map[common.Hash]revealState{root: revealComplete},
+	}
+	reader := &importedBlockWatcherReaderStub{
+		head: root, headers: map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: 100}},
+		blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+
+	_ = (&pendingAncestryReconciler{}).reconcile(reader, nil, loop.beaconCfg, loop, newRevealScheduler(t.Context(), 1, 1))
+
+	require.Zero(t, reader.ancestryHeaderCalls())
+}
+
+func TestPendingRevealAncestryTraversalIsLinear(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	headers := make(map[common.Hash]*cltypes.BeaconBlockHeader, maxPendingPayloadFiles)
+	var head common.Hash
+	for slot := uint64(1); slot <= maxPendingPayloadFiles; slot++ {
+		root := common.BigToHash(new(big.Int).SetUint64(slot))
+		parent := common.BigToHash(new(big.Int).SetUint64(slot - 1))
+		headers[root] = &cltypes.BeaconBlockHeader{Slot: slot, ParentRoot: parent}
+		loop.pendingPayloads[pendingPayloadKey{slot: slot, blockHash: root}] = &pendingPayload{slot: slot}
+		head = root
+	}
+	reader := &importedBlockWatcherReaderStub{
+		head: head, headers: headers, blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+
+	_ = (&pendingAncestryReconciler{}).reconcile(reader, nil, loop.beaconCfg, loop, newRevealScheduler(t.Context(), 1, maxPendingPayloadFiles))
+
+	require.LessOrEqual(t, reader.ancestryHeaderCalls(), maxPendingPayloadFiles+1)
+}
+
+func TestPendingRevealAncestryCursorEventuallyReachesDeepSlot(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	loop.pendingPayloads[pendingPayloadKey{slot: 1}] = &pendingPayload{slot: 1}
+	headers := make(map[common.Hash]*cltypes.BeaconBlockHeader, 600)
+	for slot := uint64(1); slot <= 600; slot++ {
+		root := common.BigToHash(new(big.Int).SetUint64(slot))
+		parent := common.BigToHash(new(big.Int).SetUint64(slot - 1))
+		headers[root] = &cltypes.BeaconBlockHeader{Slot: slot, ParentRoot: parent}
+	}
+	reader := &importedBlockWatcherReaderStub{
+		head: common.BigToHash(big.NewInt(600)), headers: headers,
+		blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+	reconciler := &pendingAncestryReconciler{}
+	scheduler := newRevealScheduler(t.Context(), 1, 1)
+	previousHeaders := 0
+	for range 3 {
+		_ = reconciler.reconcile(reader, nil, loop.beaconCfg, loop, scheduler)
+		currentHeaders := reader.ancestryHeaderCalls()
+		require.LessOrEqual(t, currentHeaders-previousHeaders, maxCanonicalAncestryHeadersPerTick+1)
+		previousHeaders = currentHeaders
+	}
+	require.Equal(t, 1, reader.blockCalls())
 }
 
 func TestInitBuilderService_Disabled(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"time"
 
@@ -713,13 +714,16 @@ func (l *BuilderLoop) hasPendingPayloads() bool {
 	return len(l.pendingPayloads) > 0
 }
 
-func (l *BuilderLoop) pendingPayloadSlots() []uint64 {
+func (l *BuilderLoop) unresolvedPendingPayloadSlots() []uint64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	capacity := min(len(l.pendingPayloads), maxPendingPayloadFiles)
 	seen := make(map[uint64]struct{}, capacity)
 	slots := make([]uint64, 0, capacity)
-	for key := range l.pendingPayloads {
+	for key, pending := range l.pendingPayloads {
+		if !pendingNeedsRevealReconciliation(pending) {
+			continue
+		}
 		if _, ok := seen[key.slot]; ok {
 			continue
 		}
@@ -729,7 +733,20 @@ func (l *BuilderLoop) pendingPayloadSlots() []uint64 {
 			break
 		}
 	}
+	sort.Slice(slots, func(i, j int) bool { return slots[i] > slots[j] })
 	return slots
+}
+
+func pendingNeedsRevealReconciliation(pending *pendingPayload) bool {
+	if len(pending.reveals) == 0 {
+		return true
+	}
+	for _, reveal := range pending.reveals {
+		if reveal == revealRetryable {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *BuilderLoop) abandonPendingBidReveal(key pendingPayloadKey, beaconRoot common.Hash) {
