@@ -214,6 +214,60 @@ STRESS_INTER_ITER_SEC="${STRESS_INTER_ITER_SEC:-90}"
 SNAP_DIR="${SNAP_DIR:-}"
 INVENTORY_CHECK="${INVENTORY_CHECK:-1}"
 
+# waitForMergeQuiescence polls the erigon log tail for background
+# retire/merge activity and returns once the merger has been idle for
+# QUIESCE_IDLE_SEC seconds OR the cap MERGE_QUIESCE_CAP_SEC is hit.
+# Both a starting "merge file=" / "Compression start" and a matching
+# "Stat blocks=" completion must be balanced before we consider it
+# idle — an in-flight merge that started but hasn't completed keeps
+# the wait alive.
+#
+# Rationale: chain.toml can advertise a merged file the moment the
+# merger integrates the output into Inventory, before the physical
+# file's rename lands. Firing inventory_drift during that window
+# false-fails as inv_missing — the file is on its way but not yet
+# on disk. Cycle 16 iter 5 aborted on exactly this race with a
+# merger that had 3 files in flight and one still compressing when
+# the driver killed erigon.
+QUIESCE_IDLE_SEC="${QUIESCE_IDLE_SEC:-20}"
+MERGE_QUIESCE_CAP_SEC="${MERGE_QUIESCE_CAP_SEC:-300}"
+waitForMergeQuiescence() {
+    if [[ ! -r "$LOG" ]]; then
+        return
+    fi
+    local start_ts=$(date +%s)
+    local last_activity_ts=$start_ts
+    while true; do
+        local now=$(date +%s)
+        local elapsed=$((now - start_ts))
+        if [[ $elapsed -ge $MERGE_QUIESCE_CAP_SEC ]]; then
+            echo "  merge-quiesce: cap ${MERGE_QUIESCE_CAP_SEC}s reached — proceeding anyway"
+            return
+        fi
+        # Window covers only the last 60 seconds of log — we don't care
+        # about ancient merge events; only whether the merger is CURRENTLY
+        # doing work. `tail -c 200000` reads the most recent ~200KB which
+        # covers a busy erigon's last several minutes.
+        local starts completes tail_out
+        tail_out=$(tail -c 200000 "$LOG" 2>/dev/null || true)
+        starts=$(echo "$tail_out" | grep -cE "\[snapshots\] Compression start|\[snapshots\] merge " || true)
+        completes=$(echo "$tail_out" | grep -cE "\[snapshots:merge\] Stat|\[snapshots\] Stat" || true)
+        local in_flight=$((starts - completes))
+        if [[ $in_flight -le 0 ]]; then
+            local idle_for=$((now - last_activity_ts))
+            if [[ $idle_for -ge $QUIESCE_IDLE_SEC ]]; then
+                if [[ $elapsed -gt 5 ]]; then
+                    echo "  merge-quiesce: idle for ${idle_for}s (waited ${elapsed}s total)"
+                fi
+                return
+            fi
+        else
+            last_activity_ts=$now
+        fi
+        sleep 5
+    done
+}
+
 # inventory_drift: returns "missing_on_disk on_disk_not_in_toml" pair.
 # Used to compute before/after deltas around a setHead so transient
 # steady-state drift (mid-retire files not yet advertised, normal in
@@ -462,6 +516,10 @@ scenario_test() {
     errors=$(tail -c +"$((log_offset + 1))" "$LOG" 2>/dev/null \
         | grep -cE "parent's total difficulty not found|Could not start execution service|invalid block|halting process|snapshot step misalignment" \
         || true)
+    # Let background retire+merge finish before measuring inventory —
+    # otherwise a merge that Inventory has already registered but whose
+    # physical file rename is still in flight false-fires as inv_missing.
+    waitForMergeQuiescence
     local post_missing post_extras
     read -r post_missing post_extras <<< "$(inventory_drift)"
     inventory_drift_names "iter=$iter $phase post"
