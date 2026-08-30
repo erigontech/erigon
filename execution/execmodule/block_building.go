@@ -269,3 +269,15 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		BlockValue: value,
 	}, nil
 }
+
+// DiscardAssembledBlock releases payloadID's builder and is safe to call repeatedly.
+func (e *ExecModule) DiscardAssembledBlock(payloadID uint64) {
+	if e == nil || e.semaphore == nil {
+		return
+	}
+	if err := e.semaphore.Acquire(e.backgroundCtx, 1); err != nil {
+		return
+	}
+	defer e.semaphore.Release(1)
+	e.dropBuilder(payloadID, e.builders[payloadID])
+}

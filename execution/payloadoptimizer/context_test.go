@@ -1,3 +1,19 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package payloadoptimizer_test
 
 import (
@@ -10,11 +26,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
+	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
 type contextTxnProvider struct{}
+
+const baseParentGasLimit = uint64(30_000_000)
 
 func (contextTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	return nil, nil
@@ -23,7 +42,7 @@ func (contextTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOpt
 func baseBuildContextInput() (*builder.Parameters, [4]byte, types.FlatRequests) {
 	root := common.Hash{0x05}
 	slot := uint64(6)
-	gasLimit := uint64(7)
+	gasLimit := uint64(31_000_000)
 	return &builder.Parameters{
 		ParentHash:            common.Hash{0x01},
 		Timestamp:             2,
@@ -55,7 +74,7 @@ func TestBuildContextOwnsItsInputs(t *testing.T) {
 	}
 	requests := types.FlatRequests{{Type: types.DepositRequestType, RequestData: []byte{0x0c}}}
 
-	ctx, err := payloadoptimizer.NewBuildContext(params, [4]byte{0x0d}, requests)
+	ctx, err := payloadoptimizer.NewBuildContext(params, [4]byte{0x0d}, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	params.ParentHash[0] = 0xff
@@ -91,7 +110,7 @@ func TestBuildContextOwnsItsInputs(t *testing.T) {
 
 func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testing.T) {
 	baseParams, baseFork, baseRequests := baseBuildContextInput()
-	base, err := payloadoptimizer.NewBuildContext(baseParams, baseFork, baseRequests)
+	base, err := payloadoptimizer.NewBuildContext(baseParams, baseFork, baseRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.True(t, base.Equal(base)) //nolint:gocritic
 
@@ -126,7 +145,7 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 		t.Run(name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			mutate(params, &fork, &requests)
-			other, err := payloadoptimizer.NewBuildContext(params, fork, requests)
+			other, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			require.False(t, base.Equal(other))
 			require.False(t, other.Equal(base))
@@ -135,18 +154,45 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 
 	sameParams, sameFork, sameRequests := baseBuildContextInput()
 	sameParams.PayloadId = 123
-	same, err := payloadoptimizer.NewBuildContext(sameParams, sameFork, sameRequests)
+	same, err := payloadoptimizer.NewBuildContext(sameParams, sameFork, sameRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.True(t, base.Equal(same))
+	differentParentGas, err := payloadoptimizer.NewBuildContext(sameParams, sameFork, sameRequests, baseParentGasLimit+1)
+	require.NoError(t, err)
+	require.False(t, base.Equal(differentParentGas))
+	require.Equal(t, baseParentGasLimit, base.ParentGasLimit())
 	require.Equal(t, 11, reflect.TypeFor[builder.Parameters]().NumField())
 }
 
 func TestBuildContextRejectsInvalidInputs(t *testing.T) {
-	_, err := payloadoptimizer.NewBuildContext(nil, [4]byte{}, nil)
+	_, err := payloadoptimizer.NewBuildContext(nil, [4]byte{}, nil, baseParentGasLimit)
 	require.Error(t, err)
 	params, fork, requests := baseBuildContextInput()
+	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MinBlockGasLimit-1)
+	require.Error(t, err)
+	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MinBlockGasLimit)
+	require.NoError(t, err)
+	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MaxBlockGasLimit+1)
+	require.Error(t, err)
+	params, fork, requests = baseBuildContextInput()
 	params.CustomTxnProvider = contextTxnProvider{}
 
-	_, err = payloadoptimizer.NewBuildContext(params, fork, requests)
+	_, err = payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.ErrorIs(t, err, payloadoptimizer.ErrCustomTxnProvider)
+
+	params, fork, requests = baseBuildContextInput()
+	params.Withdrawals = append(params.Withdrawals, nil)
+	require.NotPanics(t, func() {
+		_, err = payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	})
+	require.Error(t, err)
+}
+
+func TestZeroBuildContextAccessorsAreSafe(t *testing.T) {
+	var buildCtx payloadoptimizer.BuildContext
+	require.NotPanics(t, func() {
+		require.Nil(t, buildCtx.Parameters())
+		require.Nil(t, buildCtx.ExecutionRequests())
+		require.False(t, buildCtx.Equal(payloadoptimizer.BuildContext{}))
+	})
 }

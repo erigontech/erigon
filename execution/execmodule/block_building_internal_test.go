@@ -640,6 +640,40 @@ func TestGetAssembledBlockReportsADiscardedBuilderAsUnknown(t *testing.T) {
 	require.NotContains(t, module.buildersByTimestamp, timestamp)
 }
 
+func TestDiscardAssembledBlockReleasesActiveAndCompletedBuildersIdempotently(t *testing.T) {
+	t.Run("active", func(t *testing.T) {
+		started := make(chan struct{})
+		module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: newTestTimestamp()})
+		require.NoError(t, err)
+		<-started
+
+		module.DiscardAssembledBlock(result.PayloadID)
+		module.DiscardAssembledBlock(result.PayloadID)
+		require.NotContains(t, module.builders, result.PayloadID)
+	})
+
+	t.Run("completed", func(t *testing.T) {
+		want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
+		module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+			return want, nil
+		})
+		result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: newTestTimestamp()})
+		require.NoError(t, err)
+		assembled, err := module.GetAssembledBlock(t.Context(), result.PayloadID)
+		require.NoError(t, err)
+		require.Same(t, want, assembled.Block)
+
+		module.DiscardAssembledBlock(result.PayloadID)
+		module.DiscardAssembledBlock(404)
+		require.NotContains(t, module.builders, result.PayloadID)
+	})
+}
+
 func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 	timestamp := newTestTimestamp()
 	stopObserved := make(chan struct{})

@@ -1,7 +1,24 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package payloadoptimizer_test
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -11,12 +28,22 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 type optimizerBackend struct {
 	assemble func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error)
 	get      func(context.Context, uint64) (execmodule.AssembledBlockResult, error)
+	discard  func(uint64)
+}
+
+type panicMarshalTransaction struct {
+	types.Transaction
+}
+
+func (*panicMarshalTransaction) MarshalBinary(io.Writer) error {
+	panic("malformed transaction")
 }
 
 func (b *optimizerBackend) AssembleBlock(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
@@ -27,14 +54,43 @@ func (b *optimizerBackend) GetAssembledBlock(ctx context.Context, payloadID uint
 	return b.get(ctx, payloadID)
 }
 
+func (b *optimizerBackend) DiscardAssembledBlock(payloadID uint64) {
+	if b.discard != nil {
+		b.discard(payloadID)
+	}
+}
+
+func TestOrderflowUpdateRejectsNilTransactions(t *testing.T) {
+	var typedNil *types.LegacyTx
+
+	for name, tx := range map[string]types.Transaction{
+		"interface nil": nil,
+		"typed nil":     typedNil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{tx})
+				require.Error(t, err)
+			})
+		})
+	}
+}
+
+func TestOrderflowUpdateReturnsMarshalPanicsAsErrors(t *testing.T) {
+	require.NotPanics(t, func() {
+		_, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{new(panicMarshalTransaction)})
+		require.Error(t, err)
+	})
+}
+
 func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            params.ParentHash,
 		Number:                *uint256.NewInt(2),
-		GasLimit:              *params.TargetGasLimit,
+		GasLimit:              misc.CalcGasLimit(baseParentGasLimit, *params.TargetGasLimit),
 		Time:                  params.Timestamp,
 		Root:                  common.Hash{0x31},
 		MixDigest:             params.PrevRandao,
@@ -42,6 +98,7 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 		ParentBeaconBlockRoot: params.ParentBeaconBlockRoot,
 		SlotNumber:            params.SlotNumber,
 		Extra:                 params.ExtraData,
+		RequestsHash:          requests.Hash(),
 	}
 	canonical := &types.BlockWithReceipts{
 		Block:    types.NewBlock(header, nil, nil, nil, params.Withdrawals, nil),
@@ -85,7 +142,7 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 
 	best, ok := session.Best()
 	require.True(t, ok)
-	require.Equal(t, *params.TargetGasLimit, best.Block().Block.GasLimit())
+	require.Equal(t, misc.CalcGasLimit(baseParentGasLimit, *params.TargetGasLimit), best.Block().Block.GasLimit())
 	require.Equal(t, []byte{0x0e}, best.Block().Requests[0].RequestData)
 	require.Equal(t, uint64(100), best.Value().Uint64())
 	require.True(t, best.Context().Equal(buildCtx))
@@ -93,7 +150,7 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 
 func TestSessionRejectsCandidateForDifferentParent(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            common.Hash{0xff},
@@ -133,7 +190,7 @@ func TestSessionRejectsCandidateForDifferentParent(t *testing.T) {
 
 func TestApplyDoesNotInstallAfterCallCancellation(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests)
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            params.ParentHash,
