@@ -732,7 +732,7 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
