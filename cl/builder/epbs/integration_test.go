@@ -3,6 +3,7 @@ package epbs
 import (
 	"context"
 	"errors"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -346,13 +347,30 @@ func TestInitBuilderService_RejectsMissingDependencies(t *testing.T) {
 	require.ErrorContains(t, err, "context is required")
 }
 
+func TestInitBuilderServiceRejectsZeroSlotsPerEpoch(t *testing.T) {
+	beaconCfg := testBeaconCfg()
+	beaconCfg.SlotsPerEpoch = 0
+	_, err := InitBuilderService(epbscfg.Config{Enabled: true, KeyPath: "key", BidMargin: 0.5}, BuilderDeps{
+		Ctx: t.Context(), BeaconCfg: beaconCfg,
+	})
+	require.ErrorContains(t, err, "slots per epoch")
+}
+
+func TestFinalizedPayloadPruneSlotFailsSafe(t *testing.T) {
+	maxEpoch := uint64(math.MaxUint64) / 32
+	require.Equal(t, uint64(96), finalizedPayloadPruneSlot(3, 32))
+	require.Zero(t, finalizedPayloadPruneSlot(3, 0))
+	require.Zero(t, finalizedPayloadPruneSlot(maxEpoch+1, 32))
+	require.Equal(t, maxEpoch*32, finalizedPayloadPruneSlot(maxEpoch, 32))
+}
+
 func TestInitBuilderServiceRetainsUnfinalizedCandidatesBehindWallClock(t *testing.T) {
 	beaconCfg := testBeaconCfg()
 	beaconCfg.GloasForkEpoch = 0
 	beaconCfg.PayloadDueBps = 5000
 	beaconCfg.InitializeForkSchedule()
 	const (
-		headSlot    = uint64(127)
+		headSlot    = uint64(111)
 		currentSlot = uint64(129)
 	)
 	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
@@ -387,8 +405,26 @@ func TestInitBuilderServiceRetainsUnfinalizedCandidatesBehindWallClock(t *testin
 		require.NoError(t, store.Save(t.Context(), key, pending, signer.Pubkey()))
 		return key
 	}
-	key := savePending(headSlot, common.HexToHash("0xbeef"), common.HexToHash("0xb10c"))
-	reorgKey := savePending(headSlot, common.HexToHash("0xcafe"), common.HexToHash("0xc0de"))
+	finalizedEpochStart := uint64(96)
+	boundarySlots := []uint64{
+		finalizedEpochStart - 1,
+		finalizedEpochStart,
+		finalizedEpochStart + 1,
+		headSlot,
+		finalizedEpochStart + beaconCfg.SlotsPerEpoch - 1,
+		finalizedEpochStart + beaconCfg.SlotsPerEpoch,
+	}
+	keys := make(map[uint64]pendingPayloadKey, len(boundarySlots))
+	for _, slot := range boundarySlots {
+		root := common.BigToHash(new(big.Int).SetUint64(slot + 1_000))
+		blockHash := common.BigToHash(new(big.Int).SetUint64(slot + 2_000))
+		if slot == headSlot {
+			root = common.HexToHash("0xbeef")
+			blockHash = common.HexToHash("0xb10c")
+		}
+		keys[slot] = savePending(slot, root, blockHash)
+	}
+	key := keys[headSlot]
 
 	anchor := state.New(beaconCfg)
 	anchor.SetVersion(clparams.GloasVersion)
@@ -404,7 +440,7 @@ func TestInitBuilderServiceRetainsUnfinalizedCandidatesBehindWallClock(t *testin
 		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil,
 	)
 	require.NoError(t, err)
-	require.Equal(t, headSlot, forkChoice.FinalizedSlot())
+	require.Equal(t, finalizedEpochStart+beaconCfg.SlotsPerEpoch-1, forkChoice.FinalizedSlot())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	svc, err := InitBuilderService(epbscfg.Config{Enabled: true, KeyPath: keyPath, BidMargin: 0.5}, BuilderDeps{
@@ -415,8 +451,16 @@ func TestInitBuilderServiceRetainsUnfinalizedCandidatesBehindWallClock(t *testin
 	})
 	require.NoError(t, err)
 	defer svc.Shutdown()
-	require.Contains(t, svc.Loop.pendingPayloads, key)
-	require.Contains(t, svc.Loop.pendingPayloads, reorgKey)
+	require.NotContains(t, svc.Loop.pendingPayloads, keys[finalizedEpochStart-1])
+	for _, slot := range boundarySlots[1:] {
+		require.Contains(t, svc.Loop.pendingPayloads, keys[slot])
+	}
+	records, err := store.Load(t.Context(), 0)
+	require.NoError(t, err)
+	require.Len(t, records, len(boundarySlots)-1)
+	for _, record := range records {
+		require.GreaterOrEqual(t, record.Slot, finalizedEpochStart)
+	}
 	submitter := &mockBidSubmitter{}
 	svc.Loop.submitter = submitter
 	require.NoError(t, svc.Loop.OnBidWon(

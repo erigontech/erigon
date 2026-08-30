@@ -72,6 +72,8 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 		return nil, fmt.Errorf("epbs/integration: context is required")
 	case deps.BeaconCfg == nil:
 		return nil, fmt.Errorf("epbs/integration: beacon config is required")
+	case deps.BeaconCfg.SlotsPerEpoch == 0:
+		return nil, fmt.Errorf("epbs/integration: slots per epoch must be positive")
 	case deps.EthClock == nil:
 		return nil, fmt.Errorf("epbs/integration: ethereum clock is required")
 	case deps.SyncedData == nil:
@@ -142,7 +144,7 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	loop := NewBuilderLoop(manager, strategy, deps.Exec, prefsWatch, submitter, deps.BeaconCfg)
 	loop.pendingStore = deps.Pending
 	currentSlot := deps.EthClock.GetCurrentSlot()
-	finalizedSlot := deps.ForkChoice.FinalizedSlot()
+	finalizedSlot := finalizedPayloadPruneSlot(deps.ForkChoice.FinalizedCheckpoint().Epoch, deps.BeaconCfg.SlotsPerEpoch)
 	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot, finalizedSlot); err != nil {
 		return nil, fmt.Errorf("epbs/integration: restore pending payloads: %w", err)
 	}
@@ -264,7 +266,7 @@ func handleHeadEvent(
 	if beaconCfg.GetCurrentStateVersion(nextSlot/beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
 		return
 	}
-	finalizedSlot := fc.FinalizedSlot()
+	finalizedSlot := finalizedPayloadPruneSlot(fc.FinalizedCheckpoint().Epoch, beaconCfg.SlotsPerEpoch)
 	loop.prunePendingBeforeSlot(finalizedSlot)
 	parents := fc.ActiveParents(nextSlot)
 	if len(parents) == 0 {
@@ -296,6 +298,13 @@ func handleHeadEvent(
 			)
 		}
 	}
+}
+
+func finalizedPayloadPruneSlot(epoch, slotsPerEpoch uint64) uint64 {
+	if slotsPerEpoch == 0 || epoch > math.MaxUint64/slotsPerEpoch {
+		return 0
+	}
+	return epoch * slotsPerEpoch
 }
 
 // runSlotWatcher wakes up at the start of each slot and triggers OnSlot.
