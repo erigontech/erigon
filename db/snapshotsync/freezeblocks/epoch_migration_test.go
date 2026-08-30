@@ -517,3 +517,83 @@ func TestSortedNoOverlapsDropsContained(t *testing.T) {
 	require.Equal(t, uint64(16384), coveredTo)
 	require.Equal(t, 2, runLen)
 }
+
+// Pruning deletes whole segments, so a type whose old history is gone starts well above block 0.
+// coverage must report that block, not give up because the run does not reach block 0.
+func TestCoveragePrunedType(t *testing.T) {
+	dir := t.TempDir()
+	logger := log.New()
+	createSeqSeg(t, dir, 3000, 4000, snaptype2.Transactions, version.V1_0, false, logger)
+	createSeqSeg(t, dir, 4000, 5000, snaptype2.Transactions, version.V1_0, false, logger)
+
+	all, err := snaptype.Segments(dir)
+	require.NoError(t, err)
+	epoch, decimal := classifyByType(all, snaptype2.Transactions.Enum())
+	require.Empty(t, epoch)
+	require.Len(t, decimal, 2)
+
+	start, coveredTo, runLen := coverage(epoch, decimal)
+	require.Equal(t, uint64(3000), start, "the type's own frontier; the caller aligns it to the shared tiling")
+	require.Equal(t, uint64(5000), coveredTo)
+	require.Equal(t, 2, runLen)
+}
+
+// On a pruned node headers and bodies still reach block 0 while transactions start higher up. Every
+// type ends at the same block, so only the starts differ, and loadSegs has to report them per type.
+func TestLoadSegsPrunedTransactions(t *testing.T) {
+	dir := t.TempDir()
+	logger := log.New()
+	for _, tp := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		createSeqSeg(t, dir, 0, 1000, tp, version.V1_0, false, logger)
+		createSeqSeg(t, dir, 1000, 2000, tp, version.V1_0, false, logger)
+		createSeqSeg(t, dir, 2000, 3000, tp, version.V1_0, false, logger)
+	}
+	createSeqSeg(t, dir, 2000, 3000, snaptype2.Transactions, version.V1_0, false, logger)
+
+	m := &epochMigrator{
+		dirs:    datadir.Dirs{Snap: dir, Tmp: dir},
+		snCfg:   snapcfg.KnownCfgOrDevnet(networkname.Mainnet),
+		workers: 1,
+		lvl:     log.LvlDebug,
+		logger:  logger,
+	}
+	start, frozenMax, hasDecimal, err := m.loadSegs()
+	require.NoError(t, err)
+	require.True(t, hasDecimal)
+	require.Equal(t, uint64(3000), frozenMax, "every type ends at 3000; pruning only moves starts")
+	require.Equal(t, uint64(0), start[snaptype2.Headers.Enum()])
+	require.Equal(t, uint64(0), start[snaptype2.Bodies.Enum()])
+	require.Equal(t, uint64(2000), start[snaptype2.Transactions.Enum()],
+		"raw frontier; run() aligns it to the shared tiling")
+}
+
+// A datadir missing one block type cannot open any block segment at all, so it is already broken.
+// Converting it would move the breakage rather than fix it: refuse, and say which type is missing.
+func TestMigrateRefusesTypeWithNoSegments(t *testing.T) {
+	dir := t.TempDir()
+	logger := log.New()
+	for _, tp := range []snaptype.Type{snaptype2.Headers, snaptype2.Bodies} {
+		createSeqSeg(t, dir, 0, 1000, tp, version.V1_0, false, logger)
+		createSeqSeg(t, dir, 1000, 2000, tp, version.V1_0, false, logger)
+	}
+
+	err := MigrateDecimalToEpoch(t.Context(), datadir.Dirs{Snap: dir, Tmp: dir}, nil,
+		chainspec.Mainnet.Config, 1, logger)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "transactions", "the error must name the missing type")
+}
+
+// Every transactions segment needs a bodies segment with the same from and to, because that is how
+// its index gets built. So a pruned type resumes at the next cut in the shared plan, which is not
+// the same as the next multiple of 1024.
+func TestStartOnPlan(t *testing.T) {
+	plan, tailFrom := planEpochSegments(0, 20_000, snapcfg.KnownCfgOrDevnet(networkname.Mainnet))
+	require.Equal(t, [][2]uint64{{0, 8192}, {8192, 16384}, {16384, 17408}, {17408, 18432}, {18432, 19456}}, plan)
+	require.Equal(t, uint64(19_456), tailFrom)
+
+	require.Equal(t, uint64(0), startOnPlan(plan, 0))
+	require.Equal(t, uint64(8192), startOnPlan(plan, 1), "1 is on no boundary; the next one is 8192")
+	require.Equal(t, uint64(16384), startOnPlan(plan, 9_000), "9216 would be 1024-aligned but is not a boundary")
+	require.Equal(t, uint64(16384), startOnPlan(plan, 16_384))
+	require.Equal(t, uint64(18432), startOnPlan(plan, 17_409))
+}
