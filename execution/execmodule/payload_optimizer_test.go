@@ -19,6 +19,7 @@ package execmodule_test
 import (
 	"bytes"
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -234,6 +236,43 @@ func TestPayloadOptimizerResolvesNondefaultBuilderConfiguration(t *testing.T) {
 	require.Equal(t, transactionHashes(oracle.Block.Block.Transactions()), transactionHashes(actual.Block.Transactions()))
 	require.Equal(t, oracle.Block.Receipts, actual.Receipts)
 	require.Equal(t, oracle.BlockValue, candidate.Value())
+}
+
+func TestPayloadOptimizerAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 30_000_000,
+	}))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+	require.Equal(t, uint64(30_000_000), parent.GasLimit())
+	targetGasLimit := uint64(math.MaxUint64)
+	beaconRoot := randomHash()
+	buildParams := &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{3},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		TargetGasLimit:        &targetGasLimit,
+	}
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	require.NoError(t, err)
+	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
+	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, session.Close()) })
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+	candidate, err := session.Apply(ctx, update)
+	require.NoError(t, err)
+	require.NotNil(t, candidate)
+	require.Equal(t, misc.CalcGasLimit(parent.GasLimit(), targetGasLimit), candidate.Block().Block.GasLimit())
 }
 
 func TestPayloadOptimizerMatchesCanonicalProviderAcrossBatchBoundary(t *testing.T) {

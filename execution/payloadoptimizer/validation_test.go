@@ -18,6 +18,7 @@ package payloadoptimizer_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -324,6 +325,33 @@ func TestCandidateValidationUsesCanonicalParentAndTargetGasLimit(t *testing.T) {
 			require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
 		})
 	}
+}
+
+func TestCandidateValidationAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
+	const parentGasLimit = uint64(30_000_000)
+	params, fork, requests := baseBuildContextInput()
+	target := uint64(math.MaxUint64)
+	params.TargetGasLimit = &target
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, parentGasLimit)
+	require.NoError(t, err)
+	require.Equal(t, target, *buildCtx.Parameters().TargetGasLimit)
+
+	result := validColdResult(params, requests, 1)
+	result.Block.Block.HeaderNoCopy().GasLimit = misc.CalcGasLimit(parentGasLimit, target)
+	require.NoError(t, applyColdResult(t, buildCtx, result))
+}
+
+func TestCandidateValidationRejectsAdjustedHeaderAboveMaximum(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	target := uint64(math.MaxUint64)
+	params.TargetGasLimit = &target
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, protocolparams.MaxBlockGasLimit)
+	require.NoError(t, err)
+
+	result := validColdResult(params, requests, 1)
+	result.Block.Block.HeaderNoCopy().GasLimit = misc.CalcGasLimit(protocolparams.MaxBlockGasLimit, target)
+	require.Greater(t, result.Block.Block.GasLimit(), uint64(protocolparams.MaxBlockGasLimit))
+	require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
 }
 
 func TestCandidateValidationUsesParentGasLimitWithoutTarget(t *testing.T) {

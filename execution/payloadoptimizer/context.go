@@ -79,9 +79,6 @@ func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionR
 			targetGasLimit = &parentGasLimit
 		}
 	}
-	if *targetGasLimit > protocolparams.MaxBlockGasLimit {
-		return BuildContext{}, errors.New("payload optimizer build context has an invalid target gas limit")
-	}
 	extraData := params.ExtraData
 	if extraData == nil {
 		extraData = defaults.ExtraData

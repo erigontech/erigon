@@ -18,6 +18,7 @@ package payloadoptimizer_test
 
 import (
 	"context"
+	"math"
 	"reflect"
 	"testing"
 
@@ -243,30 +244,14 @@ func TestBuildContextRejectsInvalidInputs(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
-	aboveMaximum := uint64(protocolparams.MaxBlockGasLimit + 1)
-	for name, configure := range map[string]func(*builder.Parameters) payloadoptimizer.BuildDefaults{
-		"explicit gas above maximum": func(params *builder.Parameters) payloadoptimizer.BuildDefaults {
-			params.TargetGasLimit = &aboveMaximum
-			return payloadoptimizer.BuildDefaults{}
-		},
-		"default gas above maximum": func(params *builder.Parameters) payloadoptimizer.BuildDefaults {
-			params.TargetGasLimit = nil
-			return payloadoptimizer.BuildDefaults{TargetGasLimit: &aboveMaximum}
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			params, fork, requests := baseBuildContextInput()
-			defaults := configure(params)
-			_, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
-			require.Error(t, err)
-		})
-	}
+func TestBuildContextPreservesGloasTargetGasPreference(t *testing.T) {
 	for name, target := range map[string]uint64{
-		"zero":    0,
-		"clamped": protocolparams.MinBlockGasLimit - 1,
-		"minimum": protocolparams.MinBlockGasLimit,
-		"maximum": protocolparams.MaxBlockGasLimit,
+		"zero":           0,
+		"below minimum":  protocolparams.MinBlockGasLimit - 1,
+		"minimum":        protocolparams.MinBlockGasLimit,
+		"maximum":        protocolparams.MaxBlockGasLimit,
+		"above maximum":  protocolparams.MaxBlockGasLimit + 1,
+		"uint64 maximum": math.MaxUint64,
 	} {
 		t.Run("explicit gas "+name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
@@ -283,7 +268,9 @@ func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
 			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
 		})
 	}
+}
 
+func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
 	tooLong := make([]byte, protocolparams.MaximumExtraDataSize+1)
 	t.Run("explicit extra above maximum", func(t *testing.T) {
 		params, fork, requests := baseBuildContextInput()
