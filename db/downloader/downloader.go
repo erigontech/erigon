@@ -1282,8 +1282,11 @@ func (d *Downloader) removeMalformedMetainfo(name string) error {
 	if _, err := metainfo.Load(bytes.NewReader(b)); err == nil {
 		return nil
 	}
-	d.log(log.LvlWarn, "removing malformed metainfo, deriving a new one from kept data", "name", name)
-	return d.torrentFS.Delete(name)
+	if err := d.torrentFS.Delete(name); err != nil {
+		return err
+	}
+	d.log(log.LvlWarn, "removed malformed metainfo, deriving a new one from kept data", "name", name)
+	return nil
 }
 
 func (d *Downloader) snapshotDataExists(name string) (bool, error) {
