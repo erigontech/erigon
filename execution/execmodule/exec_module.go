@@ -197,6 +197,7 @@ type ExecModule struct {
 
 	logger log.Logger
 	// Block building
+	builderRegistryMu   sync.Mutex
 	nextPayloadId       uint64
 	builderFunc         builder.BlockBuilderFunc
 	builders            map[uint64]*builderEntry

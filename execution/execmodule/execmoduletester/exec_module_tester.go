@@ -60,6 +60,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -336,6 +337,22 @@ func WithTxPool() Option {
 	}
 }
 
+func WithBuilderConfig(config buildercfg.BuilderConfig) Option {
+	return func(opts *options) {
+		owned := config
+		owned.ExtraData = append([]byte(nil), config.ExtraData...)
+		if config.GasLimit != nil {
+			gasLimit := *config.GasLimit
+			owned.GasLimit = &gasLimit
+		}
+		if config.MaxBlobsPerBlock != nil {
+			maxBlobs := *config.MaxBlobsPerBlock
+			owned.MaxBlobsPerBlock = &maxBlobs
+		}
+		opts.builderConfig = &owned
+	}
+}
+
 func WithEnableDomain(domain kv.Domain) Option {
 	return func(opts *options) {
 		opts.enableDomains = append(opts.enableDomains, domain)
@@ -402,6 +419,7 @@ type options struct {
 	engine                        rules.Engine
 	pruneMode                     *prune.Mode
 	withTxPool                    bool
+	builderConfig                 *buildercfg.BuilderConfig
 	enableDomains                 []kv.Domain
 	fcuBackgroundPrune            bool
 	alwaysGenerateChangesets      *bool
@@ -519,6 +537,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
+	if opt.builderConfig != nil {
+		cfg.Builder = *opt.builderConfig
+	}
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("EXEC_MODULE_TESTER_LOG_LEVEL"); ok {

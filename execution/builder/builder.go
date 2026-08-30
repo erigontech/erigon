@@ -115,7 +115,7 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	}()
 
 	// Per-build state: fresh AssembledBlock and result channel, shared pendingBlockCh.
-	perBuildCfg := *b.builderCfg
+	perBuildCfg := builderConfigForParameters(b.builderCfg, param)
 	perBuildCfg.Etherbase = param.SuggestedFeeRecipient
 	state := BuilderState{
 		BuilderConfig:   &perBuildCfg,
@@ -170,6 +170,8 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 		txnProvider = param.CustomTxnProvider
 	}
 	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
+	retainedProvider, ok := param.CustomTxnProvider.(interface{ RetainsTransactions() bool })
+	execCfg.retainedTxns = ok && retainedProvider.RetainsTransactions()
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
 	if err := createBlock(ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
@@ -183,6 +185,15 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	}
 
 	return waitForBuilderResult(ctx, state.BuilderResultCh)
+}
+
+func builderConfigForParameters(config *buildercfg.BuilderConfig, param *Parameters) buildercfg.BuilderConfig {
+	perBuild := *config
+	if param.MaxBlobsPerBlock != nil {
+		maxBlobs := *param.MaxBlobsPerBlock
+		perBuild.MaxBlobsPerBlock = &maxBlobs
+	}
+	return perBuild
 }
 
 func waitForBuilderResult(ctx context.Context, results <-chan *types.BlockWithReceipts) (*types.BlockWithReceipts, error) {

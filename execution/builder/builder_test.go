@@ -97,3 +97,19 @@ func TestWaitForBuilderResultPrefersCompletedPayloadOverCancellation(t *testing.
 		require.Same(t, want, got)
 	}
 }
+
+func TestBuilderConfigForParametersOverridesOnlyAnExplicitBlobCap(t *testing.T) {
+	configuredMax := uint64(2)
+	config := &buildercfg.BuilderConfig{MaxBlobsPerBlock: &configuredMax}
+
+	inherited := builderConfigForParameters(config, &Parameters{})
+	require.Equal(t, configuredMax, *inherited.MaxBlobsPerBlock)
+
+	overrideMax := uint64(1)
+	overridden := builderConfigForParameters(config, &Parameters{MaxBlobsPerBlock: &overrideMax})
+	require.Equal(t, overrideMax, *overridden.MaxBlobsPerBlock)
+	require.Equal(t, configuredMax, *config.MaxBlobsPerBlock)
+
+	unset := builderConfigForParameters(&buildercfg.BuilderConfig{}, &Parameters{})
+	require.Nil(t, unset.MaxBlobsPerBlock)
+}

@@ -59,6 +59,7 @@ type BuilderExecCfg struct {
 	interrupt    *atomic.Bool
 	payloadId    uint64
 	txnProvider  txnprovider.TxnProvider
+	retainedTxns bool
 }
 
 func StageBuilderExecCfg(
@@ -182,7 +183,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		txns, provided, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
 		if err != nil {
 			return err
 		}
@@ -199,6 +200,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		}
 
 		// if we yielded less than the count we wanted, assume the txpool has run dry now
+		if cfg.retainedTxns && provided > 0 {
+			continue
+		}
 		if len(txns) < amount {
 			if interrupt != nil && !interrupt.Load() {
 				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
@@ -283,7 +287,7 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 	stats *filtrationStats,
-) ([]types.Transaction, error) {
+) ([]types.Transaction, int, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -311,13 +315,13 @@ func getNextTransactions(
 
 	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	blockNum := executionAt + 1
 	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
@@ -351,7 +355,7 @@ func getNextTransactions(
 		}
 	}
 
-	return txns, nil
+	return txns, len(allTxns), nil
 }
 
 // filtrationStats accumulates txpool-filtration outcomes across all batches of a

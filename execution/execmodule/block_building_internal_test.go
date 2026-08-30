@@ -674,6 +674,42 @@ func TestDiscardAssembledBlockReleasesActiveAndCompletedBuildersIdempotently(t *
 	})
 }
 
+func TestDiscardAssembledBlockDoesNotWaitForTheGlobalSemaphore(t *testing.T) {
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return nil, ctx.Err()
+	})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: newTestTimestamp()})
+	require.NoError(t, err)
+	<-started
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	defer module.semaphore.Release(1)
+	done := make(chan struct{})
+	go func() {
+		module.DiscardAssembledBlock(result.PayloadID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		module.semaphore.Release(1)
+		<-done
+		require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+		t.Fatal("payload discard waited for the global execution semaphore")
+	}
+	require.NotContains(t, module.builders, result.PayloadID)
+	select {
+	case <-canceled:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("payload discard did not cancel the builder")
+	}
+}
+
 func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 	timestamp := newTestTimestamp()
 	stopObserved := make(chan struct{})

@@ -123,37 +123,61 @@ func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now ti
 	return timestamp+slotSeconds > nowSeconds && timestamp <= nowSeconds+2*slotSeconds
 }
 
-// dropBuilder removes and discards a builder.
-func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
-	if entry != nil {
-		if e.isIndexedFor(id, entry) {
-			delete(e.buildersByTimestamp, entry.params.Timestamp)
-		}
-		if entry.builder != nil {
-			entry.builder.Discard()
-		}
+func (e *ExecModule) detachBuilderLocked(id uint64, expected *builderEntry) *builder.BlockBuilder {
+	entry, ok := e.builders[id]
+	if !ok || expected != nil && entry != expected {
+		return nil
+	}
+	if entry != nil && e.isIndexedFor(id, entry) {
+		delete(e.buildersByTimestamp, entry.params.Timestamp)
 	}
 	delete(e.builders, id)
+	if entry == nil {
+		return nil
+	}
+	return entry.builder
+}
+
+func (e *ExecModule) dropBuilder(id uint64, expected *builderEntry) {
+	e.builderRegistryMu.Lock()
+	blockBuilder := e.detachBuilderLocked(id, expected)
+	e.builderRegistryMu.Unlock()
+	if blockBuilder != nil {
+		blockBuilder.Discard()
+	}
 }
 
 // evictOldBuilders makes room for one builder by dropping the oldest entries, except those a live
 // proposal is still waiting on.
-func (e *ExecModule) evictOldBuilders() {
+func (e *ExecModule) evictOldBuildersLocked() []*builder.BlockBuilder {
 	remaining := len(e.builders) - engine_helpers.MaxBuilders + 1
 	if remaining <= 0 {
-		return
+		return nil
 	}
+	var discarded []*builder.BlockBuilder
 	now := time.Now()
 	for _, id := range common.SortedKeys(e.builders) {
 		if remaining <= 0 {
-			return
+			break
 		}
 		entry := e.builders[id]
 		if e.isLiveProposalTarget(id, entry, now) {
 			continue
 		}
-		e.dropBuilder(id, entry)
+		if blockBuilder := e.detachBuilderLocked(id, entry); blockBuilder != nil {
+			discarded = append(discarded, blockBuilder)
+		}
 		remaining--
+	}
+	return discarded
+}
+
+func (e *ExecModule) evictOldBuilders() {
+	e.builderRegistryMu.Lock()
+	discarded := e.evictOldBuildersLocked()
+	e.builderRegistryMu.Unlock()
+	for _, blockBuilder := range discarded {
+		blockBuilder.Discard()
 	}
 }
 
@@ -179,10 +203,12 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
 	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
 	// discarded with its work still winding down - has to be passed over.
+	e.builderRegistryMu.Lock()
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
 		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
 			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
+				e.builderRegistryMu.Unlock()
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
 			}
@@ -191,7 +217,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// A superseded builder keeps running to its own deadline. The timestamp index moves to the new
 	// one, so nothing reaches it by dedup, while an id already handed out goes on answering with a
 	// payload that is still growing.
-	e.evictOldBuilders()
+	discarded := e.evictOldBuildersLocked()
 
 	e.nextPayloadId++
 	ownedParams := params.Copy()
@@ -204,6 +230,10 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 		params: ownedParams,
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
+	e.builderRegistryMu.Unlock()
+	for _, blockBuilder := range discarded {
+		blockBuilder.Discard()
+	}
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
@@ -234,7 +264,9 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	}
 	defer e.semaphore.Release(1)
 
+	e.builderRegistryMu.Lock()
 	entry, ok := e.builders[payloadID]
+	e.builderRegistryMu.Unlock()
 	if !ok || entry == nil || entry.builder == nil {
 		return AssembledBlockResult{Unknown: true}, nil
 	}
@@ -272,12 +304,8 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 
 // DiscardAssembledBlock releases payloadID's builder and is safe to call repeatedly.
 func (e *ExecModule) DiscardAssembledBlock(payloadID uint64) {
-	if e == nil || e.semaphore == nil {
+	if e == nil {
 		return
 	}
-	if err := e.semaphore.Acquire(e.backgroundCtx, 1); err != nil {
-		return
-	}
-	defer e.semaphore.Release(1)
-	e.dropBuilder(payloadID, e.builders[payloadID])
+	e.dropBuilder(payloadID, nil)
 }

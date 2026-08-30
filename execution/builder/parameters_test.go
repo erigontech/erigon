@@ -39,11 +39,13 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	root := common.Hash{0x01}
 	slot := uint64(2)
 	gasLimit := uint64(3)
+	maxBlobs := uint64(4)
 	params := &Parameters{
 		Withdrawals:           []*types.Withdrawal{nil, {Index: 4}},
 		ParentBeaconBlockRoot: &root,
 		SlotNumber:            &slot,
 		TargetGasLimit:        &gasLimit,
+		MaxBlobsPerBlock:      &maxBlobs,
 		ExtraData:             []byte{5},
 	}
 	copied := params.Copy()
@@ -52,6 +54,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	root[0] = 10
 	slot = 20
 	gasLimit = 30
+	maxBlobs = 40
 	params.ExtraData[0] = 50
 
 	require.Nil(t, copied.Withdrawals[0])
@@ -59,6 +62,7 @@ func TestParametersCopyKeepsNothingShared(t *testing.T) {
 	require.Equal(t, common.Hash{0x01}, *copied.ParentBeaconBlockRoot)
 	require.Equal(t, uint64(2), *copied.SlotNumber)
 	require.Equal(t, uint64(3), *copied.TargetGasLimit)
+	require.Equal(t, uint64(4), *copied.MaxBlobsPerBlock)
 	require.Equal(t, byte(5), copied.ExtraData[0])
 }
 
@@ -67,6 +71,6 @@ func TestParametersCopyCoversEveryField(t *testing.T) {
 
 	// Copy has to be revisited whenever a reference-typed field is added, and nothing else will say
 	// so: a shallow copy of a new slice or pointer compiles and silently shares it.
-	require.Equal(t, 11, reflect.TypeFor[Parameters]().NumField(),
+	require.Equal(t, 12, reflect.TypeFor[Parameters]().NumField(),
 		"Parameters gained or lost a field; check whether Copy has to copy it")
 }

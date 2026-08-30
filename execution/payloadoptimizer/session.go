@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -168,6 +169,12 @@ type Session struct {
 	best         *Candidate
 }
 
+const (
+	maxBusyAttempts  = 6
+	initialBusyDelay = time.Millisecond
+	maxBusyDelay     = 8 * time.Millisecond
+)
+
 func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -216,7 +223,8 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 	}
 
 	var result execmodule.AssembledBlockResult
-	for {
+	busyDelay := initialBusyDelay
+	for attempt := 0; ; attempt++ {
 		result, err = s.backend.GetAssembledBlock(applyCtx, assembled.PayloadID)
 		if err != nil {
 			return nil, fmt.Errorf("collect cold payload build: %w", err)
@@ -227,13 +235,17 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 		if !result.Busy {
 			break
 		}
-		timer := time.NewTimer(time.Millisecond)
+		if attempt+1 >= maxBusyAttempts {
+			return nil, ErrBackendBusy
+		}
+		timer := time.NewTimer(busyDelay)
 		select {
 		case <-applyCtx.Done():
 			timer.Stop()
 			return nil, applyCtx.Err()
 		case <-timer.C:
 		}
+		busyDelay = min(busyDelay*2, maxBusyDelay)
 	}
 	if result.Unknown {
 		return nil, ErrUnknownPayload
@@ -251,6 +263,9 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := applyCtx.Err(); err != nil {
 		return nil, err
 	}
@@ -316,12 +331,34 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if header.GasLimit != expectedGasLimit {
 		return mismatch("target gas limit")
 	}
-	if params.ExtraData != nil && !reflect.DeepEqual(header.Extra, params.ExtraData) {
+	if !reflect.DeepEqual(header.Extra, params.ExtraData) {
 		return mismatch("extra data")
 	}
 	transactions := result.Block.Block.Transactions()
 	if slices.ContainsFunc(transactions, isNilTransaction) {
 		return mismatch("nil transaction")
+	}
+	var blobCount uint64
+	for _, transaction := range transactions {
+		transactionBlobs := uint64(len(transaction.GetBlobHashes()))
+		if transactionBlobs > ^uint64(0)-blobCount {
+			return mismatch("blob count")
+		}
+		blobCount += transactionBlobs
+	}
+	if params.MaxBlobsPerBlock == nil || blobCount > *params.MaxBlobsPerBlock {
+		return mismatch("blob count")
+	}
+	if blobCount > ^uint64(0)/protocolparams.GasPerBlob {
+		return mismatch("blob gas")
+	}
+	expectedBlobGas := blobCount * protocolparams.GasPerBlob
+	if blobCount == 0 {
+		if header.BlobGasUsed != nil && *header.BlobGasUsed != 0 {
+			return mismatch("blob gas")
+		}
+	} else if header.BlobGasUsed == nil || *header.BlobGasUsed != expectedBlobGas {
+		return mismatch("blob gas")
 	}
 	for _, uncle := range result.Block.Block.Uncles() {
 		if uncle == nil {
@@ -407,7 +444,7 @@ func (s *Session) Best() (*Candidate, bool) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.closed || s.best == nil {
+	if s.closed || s.ctx.Err() != nil || s.best == nil {
 		return nil, false
 	}
 	return s.best.copy(), true
@@ -471,15 +508,21 @@ func copyBlockWithReceipts(block *types.BlockWithReceipts) *types.BlockWithRecei
 type updateProvider struct {
 	mu           sync.Mutex
 	transactions types.Transactions
+	next         int
 }
 
 var _ txnprovider.TxnProvider = (*updateProvider)(nil)
+
+func (*updateProvider) RetainsTransactions() bool {
+	return true
+}
 
 func (p *updateProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	amount := txnprovider.ApplyProvideOptions(opts...).Amount
+	options := txnprovider.ApplyProvideOptions(opts...)
+	amount := options.Amount
 	if amount <= 0 {
 		return nil, nil
 	}
@@ -488,12 +531,44 @@ func (p *updateProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.Pr
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	amount = min(amount, len(p.transactions))
-	provided := copyTransactions(p.transactions[:amount])
-	clear(p.transactions[:amount])
-	p.transactions = p.transactions[amount:]
-	if len(p.transactions) == 0 {
-		p.transactions = nil
+	provided := make(types.Transactions, 0, min(amount, len(p.transactions)-p.next))
+	remainingBlobGas := options.GasTarget.Blob
+	remainingRlpSpace := options.AvailableRlpSpace
+	startedAt := p.next
+	wrapped := false
+	for len(provided) < amount {
+		if p.next == len(p.transactions) {
+			p.next = 0
+			if len(provided) > 0 || wrapped || startedAt == 0 {
+				break
+			}
+			wrapped = true
+		}
+		if len(p.transactions) == 0 {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		transaction := p.transactions[p.next]
+		p.next++
+		if options.TxnIdsFilter != nil && options.TxnIdsFilter.Contains([32]byte(transaction.Hash())) {
+			continue
+		}
+		blobCount := uint64(len(transaction.GetBlobHashes()))
+		if blobCount > remainingBlobGas/protocolparams.GasPerBlob {
+			continue
+		}
+		encodingSize := transaction.EncodingSize()
+		if encodingSize > remainingRlpSpace {
+			continue
+		}
+		provided = append(provided, transaction)
+		if options.TxnIdsFilter != nil {
+			options.TxnIdsFilter.Add([32]byte(transaction.Hash()))
+		}
+		remainingBlobGas -= blobCount * protocolparams.GasPerBlob
+		remainingRlpSpace -= encodingSize
 	}
-	return provided, nil
+	return copyTransactions(provided), nil
 }

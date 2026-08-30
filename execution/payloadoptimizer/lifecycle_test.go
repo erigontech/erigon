@@ -19,16 +19,21 @@ package payloadoptimizer_test
 import (
 	"context"
 	"errors"
+	"math"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider"
@@ -202,6 +207,51 @@ func TestSessionBusyRetryStopsOnCancellationAndDiscards(t *testing.T) {
 	require.Equal(t, uint64(1), discards.Load())
 }
 
+func TestPermanentBusyReturnsAndLaterApplyAdvances(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	var assemblies atomic.Uint64
+	var firstGets atomic.Uint64
+	var discards atomic.Uint64
+	backend := &optimizerBackend{
+		assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			return execmodule.AssembleBlockResult{PayloadID: assemblies.Add(1)}, nil
+		},
+		get: func(_ context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
+			if payloadID == 1 {
+				firstGets.Add(1)
+				return execmodule.AssembledBlockResult{Busy: true}, nil
+			}
+			return validColdResult(params, requests, 2), nil
+		},
+		discard: func(uint64) { discards.Add(1) },
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+	firstDone := make(chan error, 1)
+	go func() {
+		_, applyErr := session.Apply(context.Background(), update)
+		firstDone <- applyErr
+	}()
+
+	select {
+	case err := <-firstDone:
+		require.ErrorIs(t, err, payloadoptimizer.ErrBackendBusy)
+	case <-time.After(150 * time.Millisecond):
+		require.NoError(t, session.Close())
+		<-firstDone
+		t.Fatal("permanent Busy did not reach a finite terminal result")
+	}
+	require.LessOrEqual(t, firstGets.Load(), uint64(8))
+	second, err := session.Apply(t.Context(), update)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, uint64(2), discards.Load())
+}
+
 func TestCloseWaitsForActiveApplyCleanup(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
@@ -240,6 +290,57 @@ func TestCloseWaitsForActiveApplyCleanup(t *testing.T) {
 	}
 }
 
+func TestParentCancellationPreventsPromotionAndHidesExistingBest(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+
+	t.Run("before promotion", func(t *testing.T) {
+		parentCtx, cancelParent := context.WithCancel(t.Context())
+		backend := &optimizerBackend{
+			assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				return execmodule.AssembleBlockResult{PayloadID: 20}, nil
+			},
+			get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+				cancelParent()
+				return validColdResult(params, requests, 1), nil
+			},
+		}
+		session, err := payloadoptimizer.New(backend).Open(parentCtx, buildCtx)
+		require.NoError(t, err)
+		update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+		require.NoError(t, err)
+
+		_, err = session.Apply(t.Context(), update)
+		require.ErrorIs(t, err, context.Canceled)
+		_, ok := session.Best()
+		require.False(t, ok)
+	})
+
+	t.Run("after best", func(t *testing.T) {
+		parentCtx, cancelParent := context.WithCancel(t.Context())
+		backend := &optimizerBackend{
+			assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				return execmodule.AssembleBlockResult{PayloadID: 21}, nil
+			},
+			get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+				return validColdResult(params, requests, 1), nil
+			},
+		}
+		session, err := payloadoptimizer.New(backend).Open(parentCtx, buildCtx)
+		require.NoError(t, err)
+		update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+		require.NoError(t, err)
+		candidate, err := session.Apply(t.Context(), update)
+		require.NoError(t, err)
+		require.NotNil(t, candidate)
+		cancelParent()
+
+		_, ok := session.Best()
+		require.False(t, ok)
+	})
+}
+
 func TestOrderflowProviderHonorsAmountAcrossCalls(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
@@ -254,7 +355,10 @@ func TestOrderflowProviderHonorsAmountAcrossCalls(t *testing.T) {
 			require.NoError(t, err)
 			second, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(1))
 			require.NoError(t, err)
-			exhausted, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(1))
+			exhausted, err := params.CustomTxnProvider.ProvideTxns(ctx,
+				txnprovider.WithAmount(1),
+				txnprovider.WithTxnIdsFilter(mapset.NewThreadUnsafeSet([32]byte(txs[0].Hash()), [32]byte(txs[1].Hash()))),
+			)
 			require.NoError(t, err)
 			require.Equal(t, uint64(1), first[0].GetNonce())
 			require.Equal(t, uint64(2), second[0].GetNonce())
@@ -268,6 +372,116 @@ func TestOrderflowProviderHonorsAmountAcrossCalls(t *testing.T) {
 	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
 	require.NoError(t, err)
 	update, err := payloadoptimizer.NewOrderflowUpdate(txs)
+	require.NoError(t, err)
+
+	_, err = session.Apply(t.Context(), update)
+	require.ErrorIs(t, err, payloadoptimizer.ErrBackendBusy)
+}
+
+func TestOrderflowProviderRetainsTransactionsForDynamicFilters(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	txs := make(types.Transactions, 51)
+	for i := range txs {
+		txs[i] = &types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(50 - i), GasLimit: 21_000}}
+	}
+	backend := &optimizerBackend{
+		assemble: func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			filter := mapset.NewThreadUnsafeSet[[32]byte]()
+			first, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
+			require.NoError(t, err)
+			require.Len(t, first, 50)
+			require.Equal(t, uint64(50), first[0].GetNonce())
+			require.Equal(t, uint64(1), first[49].GetNonce())
+			for _, transaction := range first {
+				filter.Remove([32]byte(transaction.Hash()))
+			}
+
+			second, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
+			require.NoError(t, err)
+			require.Len(t, second, 1)
+			require.Equal(t, uint64(0), second[0].GetNonce())
+			third, err := params.CustomTxnProvider.ProvideTxns(ctx, txnprovider.WithAmount(50), txnprovider.WithTxnIdsFilter(filter))
+			require.NoError(t, err)
+			require.Len(t, third, 50)
+			require.Equal(t, uint64(50), third[0].GetNonce())
+			require.Equal(t, uint64(1), third[49].GetNonce())
+			return execmodule.AssembleBlockResult{Busy: true}, nil
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+			return execmodule.AssembledBlockResult{}, nil
+		},
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(txs)
+	require.NoError(t, err)
+
+	_, err = session.Apply(t.Context(), update)
+	require.ErrorIs(t, err, payloadoptimizer.ErrBackendBusy)
+}
+
+func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	to := common.Address{0x01}
+	oneBlob := func(nonce uint64) *types.BlobTx {
+		return &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21_000, To: &to},
+				ChainID:  *uint256.NewInt(1),
+				TipCap:   *uint256.NewInt(1),
+				FeeCap:   *uint256.NewInt(1),
+			},
+			MaxFeePerBlobGas:    *uint256.NewInt(1),
+			BlobVersionedHashes: []common.Hash{{0x01, byte(nonce)}},
+		}
+	}
+	firstBlob, secondBlob := oneBlob(1), oneBlob(2)
+	small := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21_000, Data: []byte{0x01}}}
+	large := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 4, GasLimit: 21_000, Data: make([]byte, 512)}}
+	backend := &optimizerBackend{
+		assemble: func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			blobLimited, err := params.CustomTxnProvider.ProvideTxns(ctx,
+				txnprovider.WithAmount(2),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, protocolparams.GasPerBlob)),
+			)
+			require.NoError(t, err)
+			require.Len(t, blobLimited, 2)
+			require.Equal(t, firstBlob.Hash(), blobLimited[0].Hash())
+			require.Equal(t, small.Hash(), blobLimited[1].Hash())
+
+			blobFilter := mapset.NewThreadUnsafeSet(
+				[32]byte(firstBlob.Hash()), [32]byte(small.Hash()), [32]byte(large.Hash()),
+			)
+			secondTry, err := params.CustomTxnProvider.ProvideTxns(ctx,
+				txnprovider.WithAmount(1),
+				txnprovider.WithTxnIdsFilter(blobFilter),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, protocolparams.GasPerBlob)),
+			)
+			require.NoError(t, err)
+			require.Len(t, secondTry, 1)
+			require.Equal(t, secondBlob.Hash(), secondTry[0].Hash())
+
+			rlpLimited, err := params.CustomTxnProvider.ProvideTxns(ctx,
+				txnprovider.WithAmount(2),
+				txnprovider.WithTxnIdsFilter(mapset.NewThreadUnsafeSet([32]byte(firstBlob.Hash()), [32]byte(secondBlob.Hash()))),
+				txnprovider.WithAvailableRlpSpace(small.EncodingSize()),
+			)
+			require.NoError(t, err)
+			require.Len(t, rlpLimited, 1)
+			require.Equal(t, small.Hash(), rlpLimited[0].Hash())
+			return execmodule.AssembleBlockResult{Busy: true}, nil
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+			return execmodule.AssembledBlockResult{}, nil
+		},
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{firstBlob, secondBlob, small, large})
 	require.NoError(t, err)
 
 	_, err = session.Apply(t.Context(), update)

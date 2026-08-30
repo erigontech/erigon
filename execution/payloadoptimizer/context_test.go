@@ -108,6 +108,57 @@ func TestBuildContextOwnsItsInputs(t *testing.T) {
 	require.Equal(t, []byte{0x0c}, ctx.ExecutionRequests()[0].RequestData)
 }
 
+func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
+	defaultGas, defaultBlobs := uint64(31_000_000), uint64(2)
+	defaults := payloadoptimizer.BuildDefaults{
+		TargetGasLimit:   &defaultGas,
+		ExtraData:        []byte{0xaa},
+		MaxBlobsPerBlock: &defaultBlobs,
+	}
+	params, fork, requests := baseBuildContextInput()
+	params.TargetGasLimit = nil
+	params.ExtraData = nil
+
+	resolved, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+	require.NoError(t, err)
+	require.Equal(t, defaultGas, *resolved.Parameters().TargetGasLimit)
+	require.Equal(t, []byte{0xaa}, resolved.Parameters().ExtraData)
+	require.Equal(t, defaultBlobs, *resolved.Parameters().MaxBlobsPerBlock)
+	explicitParams := params.Copy()
+	explicitParams.TargetGasLimit = &defaultGas
+	explicitParams.ExtraData = []byte{0xaa}
+	explicitParams.MaxBlobsPerBlock = &defaultBlobs
+	explicit, err := payloadoptimizer.NewBuildContext(explicitParams, fork, requests, baseParentGasLimit, defaults)
+	require.NoError(t, err)
+	require.True(t, resolved.Equal(explicit))
+	require.True(t, explicit.Equal(resolved))
+
+	overrideGas, overrideBlobs := uint64(32_000_000), uint64(1)
+	params.TargetGasLimit = &overrideGas
+	params.ExtraData = []byte{0xbb}
+	params.MaxBlobsPerBlock = &overrideBlobs
+	overridden, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+	require.NoError(t, err)
+	require.Equal(t, overrideGas, *overridden.Parameters().TargetGasLimit)
+	require.Equal(t, []byte{0xbb}, overridden.Parameters().ExtraData)
+	require.Equal(t, overrideBlobs, *overridden.Parameters().MaxBlobsPerBlock)
+	require.False(t, resolved.Equal(overridden))
+	require.False(t, overridden.Equal(resolved))
+
+	defaults.TargetGasLimit = nil
+	defaults.ExtraData = nil
+	defaults.MaxBlobsPerBlock = nil
+	params.TargetGasLimit = nil
+	params.ExtraData = nil
+	params.MaxBlobsPerBlock = nil
+	fallback, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit, defaults)
+	require.NoError(t, err)
+	require.Equal(t, baseParentGasLimit, *fallback.Parameters().TargetGasLimit)
+	require.NotNil(t, fallback.Parameters().ExtraData)
+	require.Empty(t, fallback.Parameters().ExtraData)
+	require.Equal(t, uint64(^uint64(0)), *fallback.Parameters().MaxBlobsPerBlock)
+}
+
 func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testing.T) {
 	baseParams, baseFork, baseRequests := baseBuildContextInput()
 	base, err := payloadoptimizer.NewBuildContext(baseParams, baseFork, baseRequests, baseParentGasLimit)
@@ -133,6 +184,10 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 		"slot number nil":    func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.SlotNumber = nil },
 		"target gas limit":   func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { *p.TargetGasLimit++ },
 		"gas limit nil":      func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.TargetGasLimit = nil },
+		"max blobs": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) {
+			maxBlobs := uint64(1)
+			p.MaxBlobsPerBlock = &maxBlobs
+		},
 		"extra data":         func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.ExtraData[0]++ },
 		"extra data nil":     func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.ExtraData = nil },
 		"fork version":       func(_ *builder.Parameters, f *[4]byte, _ *types.FlatRequests) { f[0]++ },
@@ -161,7 +216,7 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 	require.NoError(t, err)
 	require.False(t, base.Equal(differentParentGas))
 	require.Equal(t, baseParentGasLimit, base.ParentGasLimit())
-	require.Equal(t, 11, reflect.TypeFor[builder.Parameters]().NumField())
+	require.Equal(t, 12, reflect.TypeFor[builder.Parameters]().NumField())
 }
 
 func TestBuildContextRejectsInvalidInputs(t *testing.T) {

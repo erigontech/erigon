@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -203,6 +204,45 @@ func TestCandidateValidationAcceptsAProtocolAdjustedGasLimit(t *testing.T) {
 
 	_, err = session.Apply(t.Context(), update)
 	require.NoError(t, err)
+}
+
+func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	maxBlobs := uint64(1)
+	params.MaxBlobsPerBlock = &maxBlobs
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	to := common.Address{0x01}
+	blobTransaction := func(nonce uint64) types.Transaction {
+		return &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21_000, To: &to},
+				ChainID:  *uint256.NewInt(1),
+				TipCap:   *uint256.NewInt(1),
+				FeeCap:   *uint256.NewInt(1),
+			},
+			MaxFeePerBlobGas:    *uint256.NewInt(1),
+			BlobVersionedHashes: []common.Hash{{0x01, byte(nonce)}},
+		}
+	}
+	resultWith := func(blobCount int) execmodule.AssembledBlockResult {
+		result := validColdResult(params, requests, 1)
+		transactions := make(types.Transactions, blobCount)
+		receipts := make(types.Receipts, blobCount)
+		for i := range blobCount {
+			transactions[i] = blobTransaction(uint64(i))
+			receipts[i] = &types.Receipt{Type: types.BlobTxType, BlockNumber: uint256.NewInt(2), GasUsed: 21_000, CumulativeGasUsed: uint64(i+1) * 21_000}
+		}
+		blobGasUsed := uint64(blobCount) * protocolparams.GasPerBlob
+		header := result.Block.Block.Header()
+		header.BlobGasUsed = &blobGasUsed
+		result.Block.Block = types.NewBlock(header, transactions, nil, receipts, params.Withdrawals, nil)
+		result.Block.Receipts = receipts
+		return result
+	}
+
+	require.NoError(t, applyColdResult(t, buildCtx, resultWith(1)))
+	require.ErrorIs(t, applyColdResult(t, buildCtx, resultWith(2)), payloadoptimizer.ErrCandidateContextMismatch)
 }
 
 func TestCandidateValidationUsesCanonicalParentAndTargetGasLimit(t *testing.T) {

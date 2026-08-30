@@ -18,9 +18,11 @@ package payloadoptimizer
 
 import (
 	"errors"
+	"math"
 	"reflect"
 
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -34,7 +36,21 @@ type BuildContext struct {
 	parentGasLimit    uint64
 }
 
-func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionRequests types.FlatRequests, parentGasLimit uint64) (BuildContext, error) {
+type BuildDefaults struct {
+	TargetGasLimit   *uint64
+	ExtraData        []byte
+	MaxBlobsPerBlock *uint64
+}
+
+func BuildDefaultsFromConfig(config buildercfg.BuilderConfig) BuildDefaults {
+	return BuildDefaults{
+		TargetGasLimit:   copyUint64(config.GasLimit),
+		ExtraData:        append([]byte(nil), config.ExtraData...),
+		MaxBlobsPerBlock: copyUint64(config.MaxBlobsPerBlock),
+	}
+}
+
+func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionRequests types.FlatRequests, parentGasLimit uint64, configured ...BuildDefaults) (BuildContext, error) {
 	if params == nil {
 		return BuildContext{}, errors.New("payload optimizer build context requires parameters")
 	}
@@ -49,14 +65,45 @@ func NewBuildContext(params *builder.Parameters, forkVersion [4]byte, executionR
 			return BuildContext{}, errors.New("payload optimizer build context contains a nil withdrawal")
 		}
 	}
+	if len(configured) > 1 {
+		return BuildContext{}, errors.New("payload optimizer build context accepts one defaults value")
+	}
+	var defaults BuildDefaults
+	if len(configured) == 1 {
+		defaults = configured[0]
+	}
 	owned := params.Copy()
 	owned.PayloadId = 0
+	if owned.TargetGasLimit == nil {
+		owned.TargetGasLimit = copyUint64(defaults.TargetGasLimit)
+		if owned.TargetGasLimit == nil {
+			owned.TargetGasLimit = copyUint64(&parentGasLimit)
+		}
+	}
+	if owned.ExtraData == nil {
+		owned.ExtraData = append([]byte{}, defaults.ExtraData...)
+	}
+	if owned.MaxBlobsPerBlock == nil {
+		owned.MaxBlobsPerBlock = copyUint64(defaults.MaxBlobsPerBlock)
+		if owned.MaxBlobsPerBlock == nil {
+			unlimited := uint64(math.MaxUint64)
+			owned.MaxBlobsPerBlock = &unlimited
+		}
+	}
 	return BuildContext{
 		params:            owned,
 		forkVersion:       forkVersion,
 		executionRequests: copyRequests(executionRequests),
 		parentGasLimit:    parentGasLimit,
 	}, nil
+}
+
+func copyUint64(value *uint64) *uint64 {
+	if value == nil {
+		return nil
+	}
+	owned := *value
+	return &owned
 }
 
 func (c BuildContext) Parameters() *builder.Parameters {
