@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
@@ -61,7 +62,7 @@ func (o *PayloadOptimizer) Open(ctx context.Context, buildContext BuildContext) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if o == nil || o.backend == nil {
+	if o == nil || isNilInterface(o.backend) {
 		return nil, errors.New("payload optimizer requires a backend")
 	}
 	if buildContext.params == nil {
@@ -97,6 +98,18 @@ func NewOrderflowUpdate(transactions types.Transactions) (update OrderflowUpdate
 	if slices.ContainsFunc(transactions, isNilTransaction) {
 		return OrderflowUpdate{}, errors.New("payload optimizer orderflow contains a nil transaction")
 	}
+	for i, transaction := range transactions {
+		if transaction.Type() != types.BlobTxType {
+			continue
+		}
+		wrapper, ok := transaction.(*types.BlobTxWrapper)
+		if !ok {
+			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d has no sidecar", i)
+		}
+		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
+			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d: %w", i, err)
+		}
+	}
 	if _, err := types.MarshalTransactionsBinary(transactions); err != nil {
 		return OrderflowUpdate{}, fmt.Errorf("copy orderflow transactions: %w", err)
 	}
@@ -104,13 +117,17 @@ func NewOrderflowUpdate(transactions types.Transactions) (update OrderflowUpdate
 }
 
 func isNilTransaction(transaction types.Transaction) bool {
-	if transaction == nil {
+	return isNilInterface(transaction)
+}
+
+func isNilInterface(value any) bool {
+	if value == nil {
 		return true
 	}
-	value := reflect.ValueOf(transaction)
-	switch value.Kind() {
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
+		return reflected.IsNil()
 	default:
 		return false
 	}
@@ -534,6 +551,7 @@ func (p *updateProvider) ProvideRetainedTxns(ctx context.Context, opts ...txnpro
 		return builder.RetainedTxnBatch{}, err
 	}
 	provided := make(types.Transactions, 0, min(amount, len(p.transactions)-p.next))
+	newlyYielded := make([][32]byte, 0, cap(provided))
 	remainingBlobGas := options.GasTarget.Blob
 	remainingRlpSpace := options.AvailableRlpSpace
 	for p.next < len(p.transactions) && len(provided) < amount {
@@ -550,12 +568,15 @@ func (p *updateProvider) ProvideRetainedTxns(ctx context.Context, opts ...txnpro
 			continue
 		}
 		encodingSize := transaction.EncodingSize()
+		encodingSize += rlp.ListPrefixLen(encodingSize)
 		if encodingSize > remainingRlpSpace {
 			continue
 		}
 		provided = append(provided, transaction)
 		if options.TxnIdsFilter != nil {
-			options.TxnIdsFilter.Add([32]byte(transaction.Hash()))
+			hash := [32]byte(transaction.Hash())
+			options.TxnIdsFilter.Add(hash)
+			newlyYielded = append(newlyYielded, hash)
 		}
 		remainingBlobGas -= blobCount * protocolparams.GasPerBlob
 		remainingRlpSpace -= encodingSize
@@ -564,5 +585,9 @@ func (p *updateProvider) ProvideRetainedTxns(ctx context.Context, opts ...txnpro
 	if passComplete {
 		p.next = 0
 	}
-	return builder.RetainedTxnBatch{Transactions: copyTransactions(provided), PassComplete: passComplete}, nil
+	return builder.RetainedTxnBatch{
+		Transactions:       copyTransactions(provided),
+		NewlyYieldedTxnIDs: newlyYielded,
+		PassComplete:       passComplete,
+	}, nil
 }

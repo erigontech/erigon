@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/txnprovider"
@@ -433,18 +434,15 @@ func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
-	to := common.Address{0x01}
-	oneBlob := func(nonce uint64) *types.BlobTx {
-		return &types.BlobTx{
-			DynamicFeeTransaction: types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21_000, To: &to},
-				ChainID:  *uint256.NewInt(1),
-				TipCap:   *uint256.NewInt(1),
-				FeeCap:   *uint256.NewInt(1),
-			},
-			MaxFeePerBlobGas:    *uint256.NewInt(1),
-			BlobVersionedHashes: []common.Hash{{0x01, byte(nonce)}},
-		}
+	baseWrapper := types.MakeWrappedBlobTxn(uint256.NewInt(1))
+	baseWrapper.Tx.BlobVersionedHashes = baseWrapper.Tx.BlobVersionedHashes[:1]
+	baseWrapper.Blobs = baseWrapper.Blobs[:1]
+	baseWrapper.Commitments = baseWrapper.Commitments[:1]
+	baseWrapper.Proofs = baseWrapper.Proofs[:1]
+	oneBlob := func(nonce uint64) *types.BlobTxWrapper {
+		wrapper := types.CopyTxs(types.Transactions{baseWrapper})[0].(*types.BlobTxWrapper)
+		wrapper.Tx.Nonce = nonce
+		return wrapper
 	}
 	firstBlob, secondBlob := oneBlob(1), oneBlob(2)
 	small := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21_000, Data: []byte{0x01}}}
@@ -482,7 +480,7 @@ func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
 			rlpLimited, err := params.CustomTxnProvider.ProvideTxns(ctx,
 				txnprovider.WithAmount(2),
 				txnprovider.WithTxnIdsFilter(mapset.NewThreadUnsafeSet([32]byte(firstBlob.Hash()), [32]byte(secondBlob.Hash()))),
-				txnprovider.WithAvailableRlpSpace(small.EncodingSize()),
+				txnprovider.WithAvailableRlpSpace(small.EncodingSize()+rlp.ListPrefixLen(small.EncodingSize())),
 			)
 			require.NoError(t, err)
 			require.Len(t, rlpLimited, 1)
@@ -500,6 +498,79 @@ func TestOrderflowProviderHonorsBlobAndRlpBudgets(t *testing.T) {
 
 	_, err = session.Apply(t.Context(), update)
 	require.ErrorIs(t, err, payloadoptimizer.ErrBackendBusy)
+}
+
+func TestOrderflowProviderChargesCanonicalRlpElementCost(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	transaction := types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), []byte{1})
+	backend := &optimizerBackend{
+		assemble: func(ctx context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			tooSmall, err := params.CustomTxnProvider.(builder.RetainedTxnProvider).ProvideRetainedTxns(ctx,
+				txnprovider.WithAmount(1),
+				txnprovider.WithAvailableRlpSpace(transaction.EncodingSize()),
+			)
+			require.NoError(t, err)
+			require.Empty(t, tooSmall.Transactions)
+			require.True(t, tooSmall.PassComplete)
+
+			canonicalCost := transaction.EncodingSize() + rlp.ListPrefixLen(transaction.EncodingSize())
+			exact, err := params.CustomTxnProvider.(builder.RetainedTxnProvider).ProvideRetainedTxns(ctx,
+				txnprovider.WithAmount(1),
+				txnprovider.WithAvailableRlpSpace(canonicalCost),
+			)
+			require.NoError(t, err)
+			require.Len(t, exact.Transactions, 1)
+			require.True(t, exact.PassComplete)
+			return execmodule.AssembleBlockResult{Busy: true}, nil
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+			return execmodule.AssembledBlockResult{}, nil
+		},
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{transaction})
+	require.NoError(t, err)
+
+	_, err = session.Apply(t.Context(), update)
+	require.ErrorIs(t, err, payloadoptimizer.ErrBackendBusy)
+}
+
+func TestOpenRejectsTypedNilBackend(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	var backend *optimizerBackend
+
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.Error(t, err)
+	require.Nil(t, session)
+}
+
+func TestNewOrderflowUpdateRequiresCompleteBlobSidecars(t *testing.T) {
+	validV0 := types.MakeWrappedBlobTxn(uint256.NewInt(1))
+	validV1 := types.MakeV1WrappedBlobTxn(uint256.NewInt(1))
+	missingSidecar := types.CopyTxs(types.Transactions{validV0})[0].(*types.BlobTxWrapper)
+	missingSidecar.Blobs = nil
+	missingSidecar.Commitments = nil
+	missingSidecar.Proofs = nil
+	unknownVersion := types.CopyTxs(types.Transactions{validV0})[0].(*types.BlobTxWrapper)
+	unknownVersion.WrapperVersion = 2
+	badHash := types.CopyTxs(types.Transactions{validV0})[0].(*types.BlobTxWrapper)
+	badHash.Tx.BlobVersionedHashes[0][1] ^= 0xff
+
+	for _, transaction := range (types.Transactions{validV0, validV1}) {
+		update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{transaction})
+		require.NoError(t, err)
+		require.Len(t, update.Transactions(), 1)
+	}
+	for _, transaction := range (types.Transactions{&validV0.Tx, missingSidecar, unknownVersion, badHash}) {
+		update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{transaction})
+		require.Error(t, err)
+		require.Empty(t, update.Transactions())
+	}
 }
 
 func TestCloseCancelsActiveApplyAndPreventsLaterUse(t *testing.T) {

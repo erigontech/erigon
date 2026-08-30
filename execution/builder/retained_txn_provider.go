@@ -26,6 +26,8 @@ import (
 // RetainedTxnBatch exposes both selected transactions and the retained-order pass boundary.
 type RetainedTxnBatch struct {
 	Transactions types.Transactions
+	// NewlyYieldedTxnIDs identifies filter entries added while selecting this batch.
+	NewlyYieldedTxnIDs [][32]byte
 	// PassComplete reports that this batch reached the end of the provider's stable retained order.
 	PassComplete bool
 }

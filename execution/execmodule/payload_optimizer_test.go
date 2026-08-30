@@ -31,10 +31,13 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	execpkg "github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -70,7 +73,11 @@ func (p *countedRetainedTxnProvider) ProvideRetainedTxns(ctx context.Context, op
 	if options.TxnIdsFilter != nil {
 		options.TxnIdsFilter.Add(hash)
 	}
-	return builder.RetainedTxnBatch{Transactions: types.Transactions{p.transaction}, PassComplete: true}, nil
+	return builder.RetainedTxnBatch{
+		Transactions:       types.Transactions{p.transaction},
+		NewlyYieldedTxnIDs: [][32]byte{hash},
+		PassComplete:       true,
+	}, nil
 }
 
 func (p *oneBatchTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -135,7 +142,7 @@ func TestPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T) {
 	}
 	oracleParams := buildParams.Copy()
 	oracleParams.CustomTxnProvider = &oneBatchTxnProvider{txns: types.Transactions{orderflowTx}}
-	oracleID, err := m.ExecModule.AssembleBlock(ctx, oracleParams)
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, oracleParams)
 	require.NoError(t, err)
 	require.False(t, oracleID.Busy)
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
@@ -201,7 +208,7 @@ func TestPayloadOptimizerResolvesNondefaultBuilderConfiguration(t *testing.T) {
 	}
 	oracleParams := buildParams.Copy()
 	oracleParams.CustomTxnProvider = &oneBatchTxnProvider{txns: types.Transactions{orderflowTx}}
-	oracleID, err := m.ExecModule.AssembleBlock(ctx, oracleParams)
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, oracleParams)
 	require.NoError(t, err)
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
@@ -270,7 +277,7 @@ func TestPayloadOptimizerMatchesCanonicalProviderAcrossBatchBoundary(t *testing.
 		ParentBeaconBlockRoot: &beaconRoot,
 		SlotNumber:            syntheticSlotNumber(parent),
 	}
-	oracleID, err := m.ExecModule.AssembleBlock(ctx, buildParams)
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, buildParams)
 	require.NoError(t, err)
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
@@ -296,6 +303,177 @@ func TestPayloadOptimizerMatchesCanonicalProviderAcrossBatchBoundary(t *testing.
 	require.Equal(t, transactionHashes(oracle.Block.Block.Transactions()), transactionHashes(actual.Block.Transactions()))
 	require.Equal(t, oracle.Block.Block.Hash(), actual.Block.Hash())
 	require.Equal(t, oracle.Block.Receipts, actual.Receipts)
+}
+
+func TestPayloadOptimizerReconsidersBudgetAfterStableBlobRejection(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseWrapper := types.MakeV1WrappedBlobTxn(m.ChainConfig.ChainID)
+	baseWrapper.Tx.BlobVersionedHashes = baseWrapper.Tx.BlobVersionedHashes[:1]
+	baseWrapper.Blobs = baseWrapper.Blobs[:1]
+	baseWrapper.Commitments = baseWrapper.Commitments[:1]
+	baseWrapper.Proofs = baseWrapper.Proofs[:params.CellsPerExtBlob]
+	makeTransaction := func(feeCap uint64) types.Transaction {
+		wrapper := types.CopyTxs(types.Transactions{baseWrapper})[0].(*types.BlobTxWrapper)
+		wrapper.Tx.Nonce = 0
+		wrapper.Tx.TipCap = *uint256.NewInt(1)
+		wrapper.Tx.FeeCap = *uint256.NewInt(feeCap)
+		wrapper.Tx.MaxFeePerBlobGas = *uint256.NewInt(1_000_000_000)
+		transaction, signErr := types.SignTx(wrapper, signer, m.Key)
+		require.NoError(t, signErr)
+		transaction.SetSender(accounts.InternAddress(m.Address))
+		return transaction
+	}
+	lowFee := makeTransaction(0)
+	valid := makeTransaction(parent.BaseFee().Uint64() + 1)
+	beaconRoot := randomHash()
+	maxBlobs := uint64(1)
+	buildParams := &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{3},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		MaxBlobsPerBlock:      &maxBlobs,
+	}
+	oracleParams := buildParams.Copy()
+	oracleParams.CustomTxnProvider = &oneBatchTxnProvider{txns: types.Transactions{lowFee, valid}}
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, oracleParams)
+	require.NoError(t, err)
+	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
+	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
+	require.Equal(t, []common.Hash{valid.Hash()}, transactionHashes(oracle.Block.Block.Transactions()))
+	oracleWrapper := oracle.Block.Block.Transactions()[0].(*types.BlobTxWrapper)
+	require.Equal(t, byte(1), oracleWrapper.WrapperVersion)
+	require.NotEmpty(t, oracleWrapper.Blobs)
+	require.NotEmpty(t, oracleWrapper.Commitments)
+	require.NotEmpty(t, oracleWrapper.Proofs)
+
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	require.NoError(t, err)
+	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, session.Close()) })
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{lowFee, valid})
+	require.NoError(t, err)
+	candidate, err := session.Apply(ctx, update)
+	require.NoError(t, err)
+	require.NotNil(t, candidate)
+	actual := candidate.Block()
+
+	require.Equal(t, oracle.Block.Block.Hash(), actual.Block.Hash())
+	require.Equal(t, transactionHashes(oracle.Block.Block.Transactions()), transactionHashes(actual.Block.Transactions()))
+	actualWrapper := actual.Block.Transactions()[0].(*types.BlobTxWrapper)
+	require.Equal(t, oracleWrapper.WrapperVersion, actualWrapper.WrapperVersion)
+	require.Equal(t, oracleWrapper.Blobs, actualWrapper.Blobs)
+	require.Equal(t, oracleWrapper.Commitments, actualWrapper.Commitments)
+	require.Equal(t, oracleWrapper.Proofs, actualWrapper.Proofs)
+	oracleBundle, err := engine_types.BlobsBundleFromTransactions(oracle.Block.Block.Transactions())
+	require.NoError(t, err)
+	actualBundle, err := engine_types.BlobsBundleFromTransactions(actual.Block.Transactions())
+	require.NoError(t, err)
+	require.NotEmpty(t, actualBundle.Blobs)
+	require.Equal(t, oracleBundle, actualBundle)
+}
+
+func TestPayloadOptimizerReconsidersBudgetAfterStableRlpRejection(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	beaconRoot := randomHash()
+	buildParams := &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{3},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+	}
+	emptyParams := buildParams.Copy()
+	emptyParams.CustomTxnProvider = &oneBatchTxnProvider{}
+	emptyID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, emptyParams)
+	require.NoError(t, err)
+	empty := collectPayloadOptimizerResult(t, ctx, m.ExecModule, emptyID.PayloadID)
+	m.ExecModule.DiscardAssembledBlock(emptyID.PayloadID)
+	assembled := &execpkg.AssembledBlock{
+		Header:      empty.Block.Block.Header(),
+		Uncles:      empty.Block.Block.Uncles(),
+		Withdrawals: empty.Block.Block.Withdrawals(),
+	}
+	available := assembled.AvailableRlpSpace(m.ChainConfig)
+	valid, err := types.SignTx(
+		&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: params.TxGas, To: &common.Address{1}},
+			ChainID:  *m.ChainConfig.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(parent.BaseFee().Uint64() + 1),
+		},
+		signer,
+		m.Key,
+	)
+	require.NoError(t, err)
+	valid.SetSender(accounts.InternAddress(m.Address))
+	validCost := valid.EncodingSize() + rlp.ListPrefixLen(valid.EncodingSize())
+	require.Greater(t, validCost, 1)
+	targetCost := available - 1
+	dataSize := targetCost - 128
+	var lowFee types.Transaction
+	for range 4 {
+		lowFee, err = types.SignTx(
+			&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: 0, GasLimit: parent.GasLimit(), To: &common.Address{1}, Data: make([]byte, dataSize)},
+				ChainID:  *m.ChainConfig.ChainID,
+				TipCap:   *uint256.NewInt(1),
+				FeeCap:   *uint256.NewInt(0),
+			},
+			signer,
+			m.Key,
+		)
+		require.NoError(t, err)
+		cost := lowFee.EncodingSize() + rlp.ListPrefixLen(lowFee.EncodingSize())
+		if cost == targetCost {
+			break
+		}
+		dataSize += targetCost - cost
+	}
+	lowFee.SetSender(accounts.InternAddress(m.Address))
+	require.Equal(t, targetCost, lowFee.EncodingSize()+rlp.ListPrefixLen(lowFee.EncodingSize()))
+	require.Equal(t, 1, available-targetCost)
+
+	oracleParams := buildParams.Copy()
+	oracleParams.CustomTxnProvider = &oneBatchTxnProvider{txns: types.Transactions{lowFee, valid}}
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, oracleParams)
+	require.NoError(t, err)
+	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
+	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
+	require.Equal(t, []common.Hash{valid.Hash()}, transactionHashes(oracle.Block.Block.Transactions()))
+
+	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
+	require.NoError(t, err)
+	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, session.Close()) })
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{lowFee, valid})
+	require.NoError(t, err)
+	candidate, err := session.Apply(ctx, update)
+	require.NoError(t, err)
+	require.NotNil(t, candidate)
+	actual := candidate.Block()
+
+	require.Equal(t, oracle.Block.Block.Hash(), actual.Block.Hash())
+	require.Equal(t, transactionHashes(oracle.Block.Block.Transactions()), transactionHashes(actual.Block.Transactions()))
 }
 
 func TestPayloadOptimizerStopsAfterRetainedPassWithoutProgress(t *testing.T) {
@@ -330,7 +508,7 @@ func TestPayloadOptimizerStopsAfterRetainedPassWithoutProgress(t *testing.T) {
 		ParentBeaconBlockRoot: &beaconRoot,
 		SlotNumber:            syntheticSlotNumber(parent),
 	}
-	oracleID, err := m.ExecModule.AssembleBlock(ctx, buildParams)
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, buildParams)
 	require.NoError(t, err)
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
@@ -381,7 +559,7 @@ func TestPayloadOptimizerStopsAfterAssemblerRejectsCompletedRetainedPass(t *test
 	}
 	oracleParams := buildParams.Copy()
 	oracleParams.CustomTxnProvider = &oneBatchTxnProvider{txns: types.Transactions{transaction}}
-	oracleID, err := m.ExecModule.AssembleBlock(ctx, oracleParams)
+	oracleID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, oracleParams)
 	require.NoError(t, err)
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
@@ -389,12 +567,12 @@ func TestPayloadOptimizerStopsAfterAssemblerRejectsCompletedRetainedPass(t *test
 	retainedProvider := &countedRetainedTxnProvider{transaction: transaction}
 	retainedParams := buildParams.Copy()
 	retainedParams.CustomTxnProvider = retainedProvider
-	retainedID, err := m.ExecModule.AssembleBlock(ctx, retainedParams)
+	retainedID, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, retainedParams)
 	require.NoError(t, err)
 	retained := collectPayloadOptimizerResult(t, ctx, m.ExecModule, retainedID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(retainedID.PayloadID)
 	require.Empty(t, retained.Block.Block.Transactions())
-	require.Equal(t, uint64(1), retainedProvider.calls.Load())
+	require.Equal(t, uint64(2), retainedProvider.calls.Load())
 
 	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, [4]byte{0x07}, nil, parent.GasLimit())
 	require.NoError(t, err)
@@ -443,6 +621,22 @@ func collectPayloadOptimizerResult(t *testing.T, ctx context.Context, module *ex
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func assemblePayloadOptimizerBlock(ctx context.Context, module *execmodule.ExecModule, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+	retryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		result, err := module.AssembleBlock(retryCtx, params)
+		if err != nil || !result.Busy {
+			return result, err
+		}
+		select {
+		case <-retryCtx.Done():
+			return execmodule.AssembleBlockResult{}, retryCtx.Err()
 		case <-time.After(time.Millisecond):
 		}
 	}

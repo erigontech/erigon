@@ -184,7 +184,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		txns, passComplete, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
+		txns, batchProgress, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
 		if err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if retainedProgress.shouldContinue(accepted, passComplete) {
+			if retainedProgress.shouldContinue(accepted, batchProgress.stabilized, batchProgress.passComplete) {
 				continue
 			}
 			break
@@ -285,17 +285,25 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 }
 
 type retainedPassProgress struct {
-	accepted int
+	accepted   int
+	stabilized int
 }
 
-func (p *retainedPassProgress) shouldContinue(accepted int, passComplete bool) bool {
+func (p *retainedPassProgress) shouldContinue(accepted, stabilized int, passComplete bool) bool {
 	p.accepted += accepted
+	p.stabilized += stabilized
 	if !passComplete {
 		return true
 	}
-	madeProgress := p.accepted > 0
+	madeProgress := p.accepted > 0 || p.stabilized > 0
 	p.accepted = 0
+	p.stabilized = 0
 	return madeProgress
+}
+
+type retainedBatchProgress struct {
+	passComplete bool
+	stabilized   int
 }
 
 func getNextTransactions(
@@ -311,7 +319,7 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 	stats *filtrationStats,
-) ([]types.Transaction, bool, error) {
+) ([]types.Transaction, retainedBatchProgress, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
@@ -339,24 +347,27 @@ func getNextTransactions(
 
 	var allTxns types.Transactions
 	passComplete := false
+	var newlyYielded [][32]byte
 	var err error
 	if cfg.retainedTxnProvider != nil {
 		var batch RetainedTxnBatch
 		batch, err = cfg.retainedTxnProvider.ProvideRetainedTxns(ctx, provideOpts...)
 		allTxns = batch.Transactions
 		passComplete = batch.PassComplete
+		newlyYielded = batch.NewlyYieldedTxnIDs
 	} else {
 		allTxns, err = cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, retainedBatchProgress{}, err
 	}
 
 	blockNum := executionAt + 1
 	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)
 	if err != nil {
-		return nil, false, err
+		return nil, retainedBatchProgress{}, err
 	}
+	progress := retainedBatchProgress{passComplete: passComplete}
 
 	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
 	// in subsequent iterations. When best() skips blob TXs that exceed remaining blob gas,
@@ -388,8 +399,15 @@ func getNextTransactions(
 			}
 		}
 	}
+	if alreadyYielded != nil {
+		for _, h := range newlyYielded {
+			if alreadyYielded.Contains(h) {
+				progress.stabilized++
+			}
+		}
+	}
 
-	return txns, passComplete, nil
+	return txns, progress, nil
 }
 
 // filtrationStats accumulates txpool-filtration outcomes across all batches of a
