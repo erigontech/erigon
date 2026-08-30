@@ -42,7 +42,6 @@ func (contextTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOpt
 
 func baseBuildContextInput() (*builder.Parameters, [4]byte, types.FlatRequests) {
 	root := common.Hash{0x05}
-	slot := uint64(6)
 	gasLimit := uint64(31_000_000)
 	return &builder.Parameters{
 		ParentHash:            common.Hash{0x01},
@@ -51,7 +50,6 @@ func baseBuildContextInput() (*builder.Parameters, [4]byte, types.FlatRequests) 
 		SuggestedFeeRecipient: common.Address{0x04},
 		Withdrawals:           []*types.Withdrawal{{Index: 8, Validator: 9, Amount: 10, Address: common.Address{0x0b}}},
 		ParentBeaconBlockRoot: &root,
-		SlotNumber:            &slot,
 		TargetGasLimit:        &gasLimit,
 		ExtraData:             []byte{0x0c},
 	}, [4]byte{0x0d}, types.FlatRequests{{Type: types.DepositRequestType, RequestData: []byte{0x0e}}}
@@ -181,10 +179,12 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 		"withdrawals empty":  func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.Withdrawals = []*types.Withdrawal{} },
 		"parent beacon root": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { (*p.ParentBeaconBlockRoot)[0]++ },
 		"parent root nil":    func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.ParentBeaconBlockRoot = nil },
-		"slot number":        func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { *p.SlotNumber++ },
-		"slot number nil":    func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.SlotNumber = nil },
-		"target gas limit":   func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { *p.TargetGasLimit++ },
-		"gas limit nil":      func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.TargetGasLimit = nil },
+		"slot number": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) {
+			slot := uint64(6)
+			p.SlotNumber = &slot
+		},
+		"target gas limit": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { *p.TargetGasLimit++ },
+		"gas limit nil":    func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.TargetGasLimit = nil },
 		"max blobs": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) {
 			maxBlobs := uint64(1)
 			p.MaxBlobsPerBlock = &maxBlobs
@@ -217,7 +217,7 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 	require.NoError(t, err)
 	require.False(t, base.Equal(differentParentGas))
 	require.Equal(t, baseParentGasLimit, base.ParentGasLimit())
-	require.Equal(t, 12, reflect.TypeFor[builder.Parameters]().NumField())
+	require.Equal(t, 13, reflect.TypeFor[builder.Parameters]().NumField())
 }
 
 func TestBuildContextRejectsInvalidInputs(t *testing.T) {

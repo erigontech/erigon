@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func validColdResult(params *builder.Parameters, requests types.FlatRequests, value uint64) execmodule.AssembledBlockResult {
@@ -51,9 +52,20 @@ func validColdResult(params *builder.Parameters, requests types.FlatRequests, va
 		Extra:                 params.ExtraData,
 		RequestsHash:          requestsHash,
 	}
+	var transactions types.Transactions
+	var receipts types.Receipts
+	if value != 0 {
+		transactions = types.Transactions{&types.LegacyTx{
+			CommonTx: types.CommonTx{GasLimit: 1},
+			GasPrice: *uint256.NewInt(value),
+		}}
+		receipts = types.Receipts{{BlockNumber: uint256.NewInt(2), GasUsed: 1, CumulativeGasUsed: 1}}
+		header.GasUsed = 1
+	}
 	return execmodule.AssembledBlockResult{
 		Block: &types.BlockWithReceipts{
-			Block:    types.NewBlock(header, nil, nil, nil, params.Withdrawals, nil),
+			Block:    types.NewBlock(header, transactions, nil, receipts, params.Withdrawals, nil),
+			Receipts: receipts,
 			Requests: requests,
 		},
 		BlockValue: uint256.NewInt(value),
@@ -74,6 +86,104 @@ func applyColdResult(t *testing.T, buildCtx payloadoptimizer.BuildContext, resul
 	require.NoError(t, err)
 	_, err = session.Apply(t.Context(), update)
 	return err
+}
+
+func withAmsterdamBAL(t *testing.T, result execmodule.AssembledBlockResult) execmodule.AssembledBlockResult {
+	t.Helper()
+	bal := types.BlockAccessList{}
+	sidecar := types.NewBlockAccessListSidecar(bal)
+	hash, err := sidecar.Hash()
+	require.NoError(t, err)
+	header := result.Block.Block.Header()
+	header.BlockAccessListHash = &hash
+	result.Block.Block = types.NewBlock(
+		header,
+		result.Block.Block.Transactions(),
+		result.Block.Block.Uncles(),
+		result.Block.Receipts,
+		result.Block.Block.Withdrawals(),
+		sidecar,
+	)
+	result.Block.BlockAccessList = bal
+	return result
+}
+
+func TestCandidateValidationRequiresAmsterdamBALCommitmentAndSidecar(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	slot := uint64(6)
+	params.SlotNumber = &slot
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+
+	missing := validColdResult(params, requests, 1)
+	require.ErrorIs(t, applyColdResult(t, buildCtx, missing), payloadoptimizer.ErrCandidateContextMismatch)
+	require.NoError(t, applyColdResult(t, buildCtx, withAmsterdamBAL(t, validColdResult(params, requests, 1))))
+}
+
+func staleBALResult(t *testing.T, params *builder.Parameters, requests types.FlatRequests, canonicalHeader bool) execmodule.AssembledBlockResult {
+	t.Helper()
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	sidecar := types.NewBlockAccessListSidecar(bal)
+	require.NoError(t, sidecar.ValidateForBlock(baseParentGasLimit))
+	staleHash, err := sidecar.Hash()
+	require.NoError(t, err)
+	bal[0].Address = accounts.InternAddress(common.Address{2})
+	freshSidecar := types.NewBlockAccessListSidecar(bal.Copy())
+	freshHash, err := freshSidecar.Hash()
+	require.NoError(t, err)
+
+	result := validColdResult(params, requests, 1)
+	header := result.Block.Block.Header()
+	header.BlockAccessListHash = &staleHash
+	if canonicalHeader {
+		header.BlockAccessListHash = &freshHash
+	}
+	result.Block.Block = types.NewBlock(header, result.Block.Block.Transactions(), nil, result.Block.Receipts, params.Withdrawals, sidecar)
+	result.Block.BlockAccessList = bal
+	return result
+}
+
+func TestCandidateValidationRejectsStaleBALCacheAlias(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	slot := uint64(6)
+	params.SlotNumber = &slot
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+
+	err = applyColdResult(t, buildCtx, staleBALResult(t, params, requests, false))
+	require.ErrorContains(t, err, "sidecar hash mismatch")
+}
+
+func TestCandidateCopiesFreshBALFromCanonicalLogicalValue(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	slot := uint64(6)
+	params.SlotNumber = &slot
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	result := staleBALResult(t, params, requests, true)
+	backend := &optimizerBackend{
+		assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			return execmodule.AssembleBlockResult{PayloadID: 1}, nil
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) { return result, nil },
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+	candidate, err := session.Apply(t.Context(), update)
+	require.NoError(t, err)
+
+	result.Block.BlockAccessList[0].Address = accounts.InternAddress(common.Address{3})
+	result.Block.Block.BlockAccessListSidecar().BlockAccessList()[0].Address = accounts.InternAddress(common.Address{3})
+	first := candidate.Block()
+	require.Equal(t, common.Address{2}, first.Block.BlockAccessList()[0].Address.Value())
+	hash, err := first.Block.BlockAccessListSidecar().Hash()
+	require.NoError(t, err)
+	require.Equal(t, *first.Block.BlockAccessListHash(), hash)
+
+	first.Block.BlockAccessList()[0].Address = accounts.InternAddress(common.Address{4})
+	require.Equal(t, common.Address{2}, candidate.Block().Block.BlockAccessList()[0].Address.Value())
 }
 
 func TestCandidateRejectsIncompleteOrInconsistentResultGraph(t *testing.T) {
@@ -131,6 +241,59 @@ func TestCandidateRejectsIncompleteOrInconsistentResultGraph(t *testing.T) {
 			})
 		})
 	}
+}
+
+func resultWithCanonicalReceiptGas(params *builder.Parameters, requests types.FlatRequests) execmodule.AssembledBlockResult {
+	first := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}, GasPrice: *uint256.NewInt(2)}
+	second := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21_000}, GasPrice: *uint256.NewInt(3)}
+	receipts := types.Receipts{
+		{BlockNumber: uint256.NewInt(2), GasUsed: 10, CumulativeGasUsed: 10},
+		{BlockNumber: uint256.NewInt(2), GasUsed: 20, CumulativeGasUsed: 30},
+	}
+	result := validColdResult(params, requests, 80)
+	header := result.Block.Block.Header()
+	header.GasUsed = 30
+	result.Block.Block = types.NewBlock(header, types.Transactions{first, second}, nil, receipts, params.Withdrawals, nil)
+	result.Block.Receipts = receipts
+	return result
+}
+
+func TestCandidateValidatesDerivedReceiptGasAndCanonicalBlockValue(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+
+	require.NoError(t, applyColdResult(t, buildCtx, resultWithCanonicalReceiptGas(params, requests)))
+	for name, mutate := range map[string]func(*execmodule.AssembledBlockResult){
+		"receipt gas delta": func(result *execmodule.AssembledBlockResult) {
+			result.Block.Receipts[0].GasUsed++
+		},
+		"final cumulative gas": func(result *execmodule.AssembledBlockResult) {
+			result.Block.Block.HeaderNoCopy().GasUsed++
+		},
+		"inflated block value": func(result *execmodule.AssembledBlockResult) {
+			result.BlockValue.AddUint64(result.BlockValue, 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := resultWithCanonicalReceiptGas(params, requests)
+			mutate(&result)
+			require.ErrorIs(t, applyColdResult(t, buildCtx, result), payloadoptimizer.ErrCandidateContextMismatch)
+		})
+	}
+}
+
+func TestAmsterdamCandidateAllowsHeaderGasToDifferFromReceiptGas(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	slot := uint64(6)
+	params.SlotNumber = &slot
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	result := resultWithCanonicalReceiptGas(params, requests)
+	result.Block.Block.HeaderNoCopy().GasUsed = 31
+	result = withAmsterdamBAL(t, result)
+
+	require.NoError(t, applyColdResult(t, buildCtx, result))
 }
 
 func TestNilExpectedRequestsAcceptsGeneratedCandidateRequests(t *testing.T) {
@@ -229,9 +392,11 @@ func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
 		}
 		blobGasUsed := uint64(blobCount) * protocolparams.GasPerBlob
 		header := result.Block.Block.Header()
+		header.GasUsed = uint64(blobCount) * 21_000
 		header.BlobGasUsed = &blobGasUsed
 		result.Block.Block = types.NewBlock(header, transactions, nil, receipts, params.Withdrawals, nil)
 		result.Block.Receipts = receipts
+		result.BlockValue = execmodule.BlockValue(result.Block, header.BaseFee)
 		return result
 	}
 
@@ -261,25 +426,28 @@ func TestCandidateValidationRequiresValidBlobSidecars(t *testing.T) {
 		result := validColdResult(params, requests, 1)
 		blobGasUsed := uint64(protocolparams.GasPerBlob)
 		header := result.Block.Block.Header()
+		header.GasUsed = 21_000
 		header.BlobGasUsed = &blobGasUsed
 		receipt := &types.Receipt{Type: types.BlobTxType, BlockNumber: uint256.NewInt(2), GasUsed: 21_000, CumulativeGasUsed: 21_000}
 		result.Block.Block = types.NewBlock(header, types.Transactions{transaction}, nil, types.Receipts{receipt}, params.Withdrawals, nil)
 		result.Block.Receipts = types.Receipts{receipt}
+		result.BlockValue = execmodule.BlockValue(result.Block, header.BaseFee)
 		return result
 	}
 
 	for name, transaction := range map[string]types.Transaction{
-		"plain":      &validV0.Tx,
-		"missing":    missing,
-		"invalid v0": invalidV0,
-		"invalid v1": invalidV1,
-		"unknown":    unknown,
+		"plain":                     &validV0.Tx,
+		"missing":                   missing,
+		"invalid v0":                invalidV0,
+		"invalid v1":                invalidV1,
+		"valid v1 on pre-Amsterdam": validV1,
+		"unknown":                   unknown,
 	} {
 		t.Run(name, func(t *testing.T) {
 			require.ErrorIs(t, applyColdResult(t, buildCtx, resultWith(transaction)), payloadoptimizer.ErrCandidateContextMismatch)
 		})
 	}
-	for name, transaction := range map[string]types.Transaction{"v0": validV0, "v1": validV1} {
+	for name, transaction := range map[string]types.Transaction{"v0": validV0} {
 		t.Run(name, func(t *testing.T) {
 			require.NoError(t, applyColdResult(t, buildCtx, resultWith(transaction)))
 		})
@@ -301,6 +469,53 @@ func candidateBlobWrapper(t *testing.T, version byte, nonce uint64) *types.BlobT
 	wrapper.Commitments = wrapper.Commitments[:1]
 	wrapper.Tx.Nonce = nonce
 	return wrapper
+}
+
+func coldResultWithBlob(params *builder.Parameters, requests types.FlatRequests, wrapper *types.BlobTxWrapper) execmodule.AssembledBlockResult {
+	result := validColdResult(params, requests, 1)
+	blobGasUsed := uint64(protocolparams.GasPerBlob)
+	header := result.Block.Block.Header()
+	header.GasUsed = 21_000
+	header.BlobGasUsed = &blobGasUsed
+	receipt := &types.Receipt{Type: types.BlobTxType, BlockNumber: uint256.NewInt(2), GasUsed: 21_000, CumulativeGasUsed: 21_000}
+	result.Block.Block = types.NewBlock(header, types.Transactions{wrapper}, nil, types.Receipts{receipt}, params.Withdrawals, nil)
+	result.Block.Receipts = types.Receipts{receipt}
+	result.BlockValue = execmodule.BlockValue(result.Block, header.BaseFee)
+	return result
+}
+
+func TestCandidateValidationRequiresForkSpecificBlobWrapperVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		version   byte
+		wantErr   bool
+	}{
+		{name: "pre-Amsterdam v0", version: 0},
+		{name: "pre-Amsterdam v1", version: 1, wantErr: true},
+		{name: "Amsterdam v0", amsterdam: true, version: 0, wantErr: true},
+		{name: "Amsterdam v1", amsterdam: true, version: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			if tc.amsterdam {
+				slot := uint64(6)
+				params.SlotNumber = &slot
+			}
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			require.NoError(t, err)
+			result := coldResultWithBlob(params, requests, candidateBlobWrapper(t, tc.version, 0))
+			if tc.amsterdam {
+				result = withAmsterdamBAL(t, result)
+			}
+			err = applyColdResult(t, buildCtx, result)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "wrapper version")
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestCandidateValidationUsesCanonicalParentAndTargetGasLimit(t *testing.T) {

@@ -41,7 +41,8 @@ type Parameters struct {
 	// nil → use the injected TxnProvider (normal mempool path)
 	CustomTxnProvider txnprovider.TxnProvider
 	// ExtraData overrides the builder's configured extra data when non-nil.
-	ExtraData []byte
+	ExtraData   []byte
+	packingStop *packingStopSignal
 }
 
 // Copy returns parameters that share nothing mutable with the receiver, except CustomTxnProvider:
@@ -52,6 +53,7 @@ func (p *Parameters) Copy() *Parameters {
 		return nil
 	}
 	copied := *p
+	copied.packingStop = nil
 	copied.ExtraData = bytes.Clone(p.ExtraData)
 	if p.Withdrawals != nil {
 		copied.Withdrawals = make([]*types.Withdrawal, len(p.Withdrawals))

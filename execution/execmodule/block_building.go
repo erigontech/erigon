@@ -239,8 +239,8 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 }
 
-// blockValue computes the expected value received by the fee recipient in wei.
-func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
+// BlockValue computes the expected value received by the fee recipient in wei.
+func BlockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)
 	txs := br.Block.Transactions()
 	var gas, txValue uint256.Int
@@ -294,7 +294,7 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 
 	header := blockWithReceipts.Block.Header()
 	baseFee := header.BaseFee
-	value := blockValue(blockWithReceipts, baseFee)
+	value := BlockValue(blockWithReceipts, baseFee)
 
 	return AssembledBlockResult{
 		Block:      blockWithReceipts,

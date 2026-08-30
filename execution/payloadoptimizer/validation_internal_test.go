@@ -73,6 +73,6 @@ func internallyMalformedCandidate(gasLimit uint64, extra []byte) (BuildContext, 
 	block := types.NewBlock(header, nil, nil, nil, withdrawals, nil)
 	return BuildContext{params: params, parentGasLimit: gasLimit}, execmodule.AssembledBlockResult{
 		Block:      &types.BlockWithReceipts{Block: block},
-		BlockValue: uint256.NewInt(1),
+		BlockValue: uint256.NewInt(0),
 	}
 }

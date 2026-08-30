@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	execpkg "github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -47,13 +48,48 @@ const (
 // It answers to two different requests. Interrupting asks for the block it has so far, which is how
 // a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
-	interrupt atomic.Bool
-	state     atomic.Uint32
-	discard   context.CancelFunc
-	mu        sync.Mutex
-	done      chan struct{}
-	result    *types.BlockWithReceipts
-	err       error
+	interrupt   atomic.Bool
+	state       atomic.Uint32
+	discard     context.CancelFunc
+	packingStop *packingStopSignal
+	mu          sync.Mutex
+	done        chan struct{}
+	result      *types.BlockWithReceipts
+	err         error
+}
+
+type packingStopSignal struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	once     sync.Once
+	deadline atomic.Pointer[time.Time]
+}
+
+func newPackingStopSignal() *packingStopSignal {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &packingStopSignal{ctx: ctx, cancel: cancel}
+}
+
+func (s *packingStopSignal) stop() {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() {
+		deadline := time.Now().Add(execpkg.TransactionPackingStopGrace)
+		s.deadline.Store(&deadline)
+		s.cancel()
+	})
+}
+
+func (s *packingStopSignal) stopped() bool {
+	return s != nil && s.ctx.Err() != nil
+}
+
+func (s *packingStopSignal) stopDeadline() time.Time {
+	if deadline := s.deadline.Load(); deadline != nil {
+		return *deadline
+	}
+	return time.Time{}
 }
 
 // NewBlockBuilder starts a build. maxBuildTime is the budget after which the builder stops itself
@@ -62,7 +98,12 @@ type BlockBuilder struct {
 // discarded.
 func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
 	buildCtx, discard := context.WithCancel(ctx)
-	builder := &BlockBuilder{done: make(chan struct{}), discard: discard}
+	packingStop := newPackingStopSignal()
+	builder := &BlockBuilder{done: make(chan struct{}), discard: discard, packingStop: packingStop}
+	buildParams := param.Copy()
+	if buildParams != nil {
+		buildParams.packingStop = packingStop
+	}
 
 	go func() {
 		var result *types.BlockWithReceipts
@@ -86,7 +127,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 
 		log.Info("Building block...")
 		t := time.Now()
-		result, err = build(buildCtx, param, &builder.interrupt)
+		result, err = build(buildCtx, buildParams, &builder.interrupt)
 		if err != nil {
 			if buildCtx.Err() != nil {
 				log.Debug("Block builder discarded", "err", err)
@@ -128,7 +169,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 }
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
-	b.interrupt.Store(true)
+	b.requestStop()
 	if b.Discarded() {
 		return b.readResult()
 	}
@@ -167,9 +208,14 @@ func (b *BlockBuilder) finished() bool {
 
 // Discard cancels the build without waiting for it to return.
 func (b *BlockBuilder) Discard() {
-	b.interrupt.Store(true)
+	b.requestStop()
 	b.state.CompareAndSwap(blockBuilderRunning, blockBuilderDiscarded)
 	b.discard()
+}
+
+func (b *BlockBuilder) requestStop() {
+	b.interrupt.Store(true)
+	b.packingStop.stop()
 }
 
 // Discarded reports whether discard won before the build completed.

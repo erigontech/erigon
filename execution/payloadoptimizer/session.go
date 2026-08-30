@@ -221,7 +221,11 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 	}()
 
 	params := s.buildContext.Parameters()
-	params.CustomTxnProvider = &updateProvider{transactions: update.Transactions()}
+	transactions := update.Transactions()
+	if err := validateOrderflowFork(params, transactions); err != nil {
+		return nil, err
+	}
+	params.CustomTxnProvider = &updateProvider{transactions: transactions}
 	assembled, err := s.backend.AssembleBlock(applyCtx, params)
 	if assembled.PayloadID != 0 {
 		defer s.backend.DiscardAssembledBlock(assembled.PayloadID)
@@ -267,13 +271,17 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 	if result.Unknown {
 		return nil, ErrUnknownPayload
 	}
-	if result.Block == nil {
+	if result.Block == nil || result.Block.Block == nil || result.Block.Block.HeaderNoCopy() == nil {
 		return nil, ErrPayloadNotReady
 	}
-	if err := validateCandidate(s.buildContext, result); err != nil {
+	ownedResult, err := copyBackendResult(result)
+	if err != nil {
 		return nil, err
 	}
-	candidate, err := newCandidate(s.buildContext, result)
+	if err := validateCandidate(s.buildContext, ownedResult); err != nil {
+		return nil, err
+	}
+	candidate, err := newCandidate(s.buildContext, ownedResult)
 	if err != nil {
 		return nil, err
 	}
@@ -294,6 +302,38 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 	}
 	s.best = candidate
 	return candidate.copy(), nil
+}
+
+func copyBackendResult(result execmodule.AssembledBlockResult) (owned execmodule.AssembledBlockResult, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			owned = execmodule.AssembledBlockResult{}
+			err = fmt.Errorf("%w: copy backend result: %v", ErrCandidateContextMismatch, recovered)
+		}
+	}()
+	owned = result
+	owned.Block = copyBlockWithReceipts(result.Block)
+	if result.BlockValue != nil {
+		owned.BlockValue = new(uint256.Int).Set(result.BlockValue)
+	}
+	return owned, nil
+}
+
+func validateOrderflowFork(params *builder.Parameters, transactions types.Transactions) error {
+	wantVersion := byte(0)
+	if params.SlotNumber != nil {
+		wantVersion = 1
+	}
+	for i, transaction := range transactions {
+		if transaction.Type() != types.BlobTxType {
+			continue
+		}
+		wrapper, ok := transaction.(*types.BlobTxWrapper)
+		if !ok || wrapper.WrapperVersion != wantVersion {
+			return fmt.Errorf("payload optimizer orderflow blob transaction %d requires wrapper version %d", i, wantVersion)
+		}
+	}
+	return nil
 }
 
 func (s *Session) sessionError() error {
@@ -393,6 +433,13 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		if !ok {
 			continue
 		}
+		wantVersion := byte(0)
+		if params.SlotNumber != nil {
+			wantVersion = 1
+		}
+		if wrapper.WrapperVersion != wantVersion {
+			return mismatch(fmt.Sprintf("blob transaction wrapper version %d", wrapper.WrapperVersion))
+		}
 		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
 			return mismatch("blob transaction sidecar: " + err.Error())
 		}
@@ -414,6 +461,7 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if len(result.Block.Receipts) != len(transactions) {
 		return mismatch("receipt cardinality")
 	}
+	var cumulativeGasUsed uint64
 	for _, receipt := range result.Block.Receipts {
 		if receipt == nil {
 			return mismatch("nil receipt")
@@ -421,11 +469,18 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		if receipt.BlockNumber == nil {
 			return mismatch("receipt block number")
 		}
+		if receipt.CumulativeGasUsed < cumulativeGasUsed || receipt.GasUsed != receipt.CumulativeGasUsed-cumulativeGasUsed {
+			return mismatch("receipt gas used")
+		}
+		cumulativeGasUsed = receipt.CumulativeGasUsed
 		for _, log := range receipt.Logs {
 			if log == nil {
 				return mismatch("nil receipt log")
 			}
 		}
+	}
+	if params.SlotNumber == nil && cumulativeGasUsed != header.GasUsed {
+		return mismatch("header gas used")
 	}
 	if types.DeriveSha(result.Block.Receipts) != header.ReceiptHash {
 		return mismatch("receipt root")
@@ -439,40 +494,67 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if buildContext.executionRequests != nil && !reflect.DeepEqual(result.Block.Requests, buildContext.executionRequests) {
 		return mismatch("execution requests")
 	}
-	if err := validateBlockAccessList(result.Block, header); err != nil {
+	if err := validateBlockAccessList(result.Block, header, params.SlotNumber != nil); err != nil {
 		return mismatch("block access list: " + err.Error())
+	}
+	if result.BlockValue.Cmp(execmodule.BlockValue(result.Block, header.BaseFee)) != 0 {
+		return mismatch("block value")
 	}
 	return nil
 }
 
-func validateBlockAccessList(result *types.BlockWithReceipts, header *types.Header) error {
+func validateBlockAccessList(result *types.BlockWithReceipts, header *types.Header, amsterdam bool) error {
 	if err := result.BlockAccessList.ValidateForBlock(header.GasLimit); err != nil {
 		return err
 	}
 	sidecar := result.Block.BlockAccessListSidecar()
-	if header.BlockAccessListHash == nil {
+	if !amsterdam {
+		if header.BlockAccessListHash != nil {
+			return errors.New("pre-Amsterdam header hash")
+		}
 		if sidecar != nil {
-			return errors.New("sidecar without header hash")
+			return errors.New("pre-Amsterdam sidecar")
 		}
 		return nil
 	}
-	if sidecar == nil {
-		return errors.New("header hash without sidecar")
+	if header.BlockAccessListHash == nil {
+		return errors.New("missing Amsterdam header hash")
 	}
-	if err := sidecar.ValidateForBlock(header.GasLimit); err != nil {
+	if sidecar == nil {
+		return errors.New("missing Amsterdam sidecar")
+	}
+	freshSidecar, err := copyFreshBlockAccessListSidecar(sidecar)
+	if err != nil {
 		return err
 	}
-	hash, err := sidecar.Hash()
+	if err := freshSidecar.ValidateForBlock(header.GasLimit); err != nil {
+		return err
+	}
+	hash, err := freshSidecar.Hash()
 	if err != nil {
 		return err
 	}
 	if hash != *header.BlockAccessListHash {
 		return errors.New("sidecar hash mismatch")
 	}
-	if !reflect.DeepEqual(sidecar.BlockAccessList(), result.BlockAccessList) {
+	if !reflect.DeepEqual(freshSidecar.BlockAccessList(), result.BlockAccessList) {
 		return errors.New("sidecar representation mismatch")
 	}
 	return nil
+}
+
+func copyFreshBlockAccessListSidecar(sidecar *types.BlockAccessListSidecar) (*types.BlockAccessListSidecar, error) {
+	if sidecar == nil {
+		return nil, nil
+	}
+	fresh := types.NewBlockAccessListSidecar(sidecar.BlockAccessList().Copy())
+	if _, err := fresh.Bytes(); err != nil {
+		return nil, err
+	}
+	if _, err := fresh.Hash(); err != nil {
+		return nil, err
+	}
+	return fresh, nil
 }
 
 func (s *Session) Best() (*Candidate, bool) {
@@ -534,8 +616,16 @@ func copyBlockWithReceipts(block *types.BlockWithReceipts) *types.BlockWithRecei
 	if block == nil {
 		return nil
 	}
+	blockCopy := block.Block.Copy()
+	if sidecar := block.Block.BlockAccessListSidecar(); sidecar != nil {
+		freshSidecar, err := copyFreshBlockAccessListSidecar(sidecar)
+		if err != nil {
+			panic(fmt.Errorf("copy block access list sidecar: %w", err))
+		}
+		blockCopy = blockCopy.WithBlockAccessListSidecar(freshSidecar)
+	}
 	return &types.BlockWithReceipts{
-		Block:           block.Block.Copy(),
+		Block:           blockCopy,
 		Receipts:        block.Receipts.Copy(),
 		Requests:        copyRequests(block.Requests),
 		BlockAccessList: block.BlockAccessList.Copy(),

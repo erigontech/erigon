@@ -71,6 +71,6 @@ func TestParametersCopyCoversEveryField(t *testing.T) {
 
 	// Copy has to be revisited whenever a reference-typed field is added, and nothing else will say
 	// so: a shallow copy of a new slice or pointer compiles and silently shares it.
-	require.Equal(t, 12, reflect.TypeFor[Parameters]().NumField(),
+	require.Equal(t, 13, reflect.TypeFor[Parameters]().NumField(),
 		"Parameters gained or lost a field; check whether Copy has to copy it")
 }

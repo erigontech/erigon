@@ -18,6 +18,7 @@ package payloadoptimizer_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -83,27 +84,61 @@ func TestOrderflowUpdateReturnsMarshalPanicsAsErrors(t *testing.T) {
 	})
 }
 
+func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {
+	backendErr := errors.New("backend reached")
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		wrapper   byte
+		wantGate  bool
+	}{
+		{name: "pre-Amsterdam v0", wrapper: 0},
+		{name: "pre-Amsterdam v1", wrapper: 1, wantGate: true},
+		{name: "Amsterdam v0", amsterdam: true, wrapper: 0, wantGate: true},
+		{name: "Amsterdam v1", amsterdam: true, wrapper: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params, fork, requests := baseBuildContextInput()
+			if tc.amsterdam {
+				slot := uint64(6)
+				params.SlotNumber = &slot
+			}
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+			require.NoError(t, err)
+			called := false
+			backend := &optimizerBackend{
+				assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+					called = true
+					return execmodule.AssembleBlockResult{}, backendErr
+				},
+				get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+					return execmodule.AssembledBlockResult{}, nil
+				},
+			}
+			session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+			require.NoError(t, err)
+			update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{candidateBlobWrapper(t, tc.wrapper, 0)})
+			require.NoError(t, err)
+
+			_, err = session.Apply(t.Context(), update)
+			if tc.wantGate {
+				require.ErrorContains(t, err, "wrapper version")
+				require.False(t, called)
+				return
+			}
+			require.ErrorIs(t, err, backendErr)
+			require.True(t, called)
+		})
+	}
+}
+
 func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
-	header := &types.Header{
-		ParentHash:            params.ParentHash,
-		Number:                *uint256.NewInt(2),
-		GasLimit:              misc.CalcGasLimit(baseParentGasLimit, *params.TargetGasLimit),
-		Time:                  params.Timestamp,
-		Root:                  common.Hash{0x31},
-		MixDigest:             params.PrevRandao,
-		Coinbase:              params.SuggestedFeeRecipient,
-		ParentBeaconBlockRoot: params.ParentBeaconBlockRoot,
-		SlotNumber:            params.SlotNumber,
-		Extra:                 params.ExtraData,
-		RequestsHash:          requests.Hash(),
-	}
-	canonical := &types.BlockWithReceipts{
-		Block:    types.NewBlock(header, nil, nil, nil, params.Withdrawals, nil),
-		Requests: requests,
-	}
+	canonicalResult := validColdResult(params, requests, 100)
+	canonicalResult.Block.Block.HeaderNoCopy().Root = common.Hash{0x31}
+	canonical := canonicalResult.Block
 	backend := &optimizerBackend{
 		assemble: func(ctx context.Context, got *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 			require.NoError(t, ctx.Err())
@@ -117,7 +152,7 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 		get: func(ctx context.Context, payloadID uint64) (execmodule.AssembledBlockResult, error) {
 			require.NoError(t, ctx.Err())
 			require.Equal(t, uint64(17), payloadID)
-			return execmodule.AssembledBlockResult{Block: canonical, BlockValue: uint256.NewInt(100)}, nil
+			return canonicalResult, nil
 		},
 	}
 	optimizer := payloadoptimizer.New(backend)

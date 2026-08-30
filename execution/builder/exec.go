@@ -61,6 +61,7 @@ type BuilderExecCfg struct {
 	payloadId           uint64
 	txnProvider         txnprovider.TxnProvider
 	retainedTxnProvider RetainedTxnProvider
+	packingStop         *packingStopSignal
 }
 
 func StageBuilderExecCfg(
@@ -180,41 +181,32 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	yielded := mapset.NewSet[[32]byte]()
 	var retainedProgress retainedPassProgress
-	var retainedStopAt time.Time
+	packingCtx, cancelPacking := retainedPackingContext(ctx, cfg)
+	defer cancelPacking()
 
 	interrupt := cfg.interrupt
 	const amount = 50
 	filtration := &filtrationStats{}
 	for {
-		providerCtx := ctx
-		cancelProvider := func() {}
-		if cfg.retainedTxnProvider != nil && interrupt != nil && interrupt.Load() {
-			if retainedStopAt.IsZero() {
-				retainedStopAt = time.Now().Add(exec.TransactionPackingStopGrace)
-			}
-			if !time.Now().Before(retainedStopAt) {
-				break
-			}
-			providerCtx, cancelProvider = context0.WithDeadline(ctx, retainedStopAt)
-		}
-		txns, batchProgress, err := getNextTransactions(providerCtx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
-		providerCtxErr := providerCtx.Err()
-		cancelProvider()
+		txns, batchProgress, err := getNextTransactions(packingCtx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger, filtration)
 		if err != nil {
-			if !retainedStopAt.IsZero() && ctx.Err() == nil && errors.Is(providerCtxErr, context0.DeadlineExceeded) && errors.Is(err, context0.DeadlineExceeded) {
+			if stoppedRetainedPacking(ctx, packingCtx, cfg.packingStop, err) {
 				break
 			}
 			return err
 		}
-		if !retainedStopAt.IsZero() && ctx.Err() == nil && errors.Is(providerCtxErr, context0.DeadlineExceeded) {
+		if stoppedRetainedPacking(ctx, packingCtx, cfg.packingStop, packingCtx.Err()) {
 			break
 		}
 
 		accepted := 0
 		if len(txns) > 0 {
 			before := ba.Txns.Len()
-			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, logPrefix, logger)
+			logs, stop, err := ba.AddTransactions(packingCtx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, logPrefix, logger)
 			if err != nil {
+				if stoppedRetainedPacking(ctx, packingCtx, cfg.packingStop, err) {
+					break
+				}
 				return err
 			}
 			accepted = ba.Txns.Len() - before
@@ -228,7 +220,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if !retainedStopAt.IsZero() && !time.Now().Before(retainedStopAt) {
+			if stoppedRetainedPacking(ctx, packingCtx, cfg.packingStop, packingCtx.Err()) {
 				break
 			}
 			if retainedProgress.shouldContinue(accepted, batchProgress.stabilized, batchProgress.passComplete) {
@@ -306,6 +298,36 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	logger.Info("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txns.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
 
 	return nil
+}
+
+func retainedPackingContext(ctx context0.Context, cfg BuilderExecCfg) (context0.Context, context0.CancelFunc) {
+	if cfg.retainedTxnProvider == nil || cfg.packingStop == nil {
+		return context0.WithCancel(ctx)
+	}
+	packingCtx, cancel := context0.WithCancel(ctx)
+	stopCallback := context0.AfterFunc(cfg.packingStop.ctx, func() {
+		delay := time.Until(cfg.packingStop.stopDeadline())
+		if delay <= 0 {
+			cancel()
+			return
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			cancel()
+		case <-ctx.Done():
+		}
+	})
+	return packingCtx, func() {
+		stopCallback()
+		cancel()
+	}
+}
+
+func stoppedRetainedPacking(ctx, packingCtx context0.Context, signal *packingStopSignal, err error) bool {
+	return signal != nil && signal.stopped() && ctx.Err() == nil && packingCtx.Err() != nil &&
+		(errors.Is(err, context0.Canceled) || errors.Is(err, context0.DeadlineExceeded))
 }
 
 type retainedPassProgress struct {
