@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -99,41 +100,64 @@ func classifyByType(all []snaptype.FileInfo, t snaptype.Enum) (epoch, decimal []
 	return sortedNoOverlaps(epoch), sortedNoOverlaps(decimal)
 }
 
-// coverage walks type t as one run from block 0 and returns:
-//   - epochStart: end of the epoch segments we already made; a re-run picks up here.
-//   - coveredTo: how far the run goes once the decimal segments continue past the epoch part.
-//     frozenMax is the smallest coveredTo of the three types (a block is done only when all three
-//     have it — same min RoSnapshots uses).
+// coverage walks one type as a single run and returns:
+//   - start: where conversion resumes. Either the end of the epoch segments already written, or, for a
+//     type with none, its own data frontier — which a pruned node leaves far above block 0. The caller
+//     snaps it to the shared tiling.
+//   - coveredTo: how far the run reaches. frozenMax is the smallest coveredTo across types.
 //   - runLen: how many decimal segments from the front have no gaps — the ones a repack reads.
-//     After earlier deletions the first one may not start at block 0.
 //
-// The decimal segment sitting across the epoch frontier is caught by From <= coveredTo < To; a gap
-// stops both the run and coveredTo. Inputs must be sorted and overlap-free.
-func coverage(epoch, decimal []snaptype.FileInfo) (epochStart, coveredTo uint64, runLen int) {
-	for i := range epoch { // contiguous epoch prefix from block 0
-		f := &epoch[i]
-		if f.From != epochStart {
-			break
+// A gap stops both the run and coveredTo. Inputs must be sorted and overlap-free.
+func coverage(epoch, decimal []snaptype.FileInfo) (start, coveredTo uint64, runLen int) {
+	var epochEnd uint64
+	haveEpoch := len(epoch) > 0
+	if haveEpoch {
+		epochEnd = epoch[0].From
+		for i := range epoch {
+			if epoch[i].From != epochEnd {
+				break
+			}
+			epochEnd = epoch[i].To
 		}
-		epochStart = f.To
 	}
-	coveredTo = epochStart
-	end := uint64(0)
+	var decimalStart, decimalEnd uint64
 	if len(decimal) > 0 {
-		end = decimal[0].From
-	}
-	for i := range decimal {
-		f := &decimal[i]
-		if f.From != end {
-			break // gap: the contiguous decimal run ends here
-		}
-		runLen++
-		end = f.To
-		if f.From <= coveredTo && coveredTo < f.To {
-			coveredTo = f.To
+		decimalStart = decimal[0].From
+		decimalEnd = decimalStart
+		for i := range decimal {
+			if decimal[i].From != decimalEnd {
+				break // gap: the contiguous decimal run ends here
+			}
+			runLen++
+			decimalEnd = decimal[i].To
 		}
 	}
-	return epochStart, coveredTo, runLen
+
+	switch {
+	case runLen == 0:
+		return epochEnd, epochEnd, 0
+	case !haveEpoch:
+		return decimalStart, decimalEnd, runLen
+	case decimalStart > epochEnd:
+		return 0, 0, 0 // epoch run and decimal run do not meet: leave this type alone
+	default:
+		return epochEnd, max(epochEnd, decimalEnd), runLen
+	}
+}
+
+// startOnPlan returns the first boundary of plan at or above frontier. Every block type converts on
+// one shared tiling, because the transactions index is built by walking a bodies segment of the
+// identical range; a pruned type therefore resumes on a boundary, dropping the blocks below it.
+func startOnPlan(plan [][2]uint64, frontier uint64) uint64 {
+	for _, r := range plan {
+		if r[0] >= frontier {
+			return r[0]
+		}
+	}
+	if len(plan) == 0 {
+		return frontier
+	}
+	return plan[len(plan)-1][1]
 }
 
 // removeDecimalSegFiles deletes each decimal segment and everything with its range and type: the .seg,
@@ -203,6 +227,7 @@ func (s *seqWords) Close() {
 }
 
 type epochMigrator struct {
+	uncovered   []string // types with no usable segments; the refusal names them
 	dirs        datadir.Dirs
 	snCfg       *snapcfg.Cfg
 	db          kv.RwDB
@@ -571,9 +596,20 @@ func (m *epochMigrator) run(ctx context.Context) error {
 		return nil
 	}
 	if frozenMax == 0 {
-		return fmt.Errorf("epoch-migration: decimal segments present but none reach a contiguous frontier from block 0; refusing to delete anything")
+		// Every block type must be present and reachable: the visible-file calculation drops every
+		// type when one of them has none, so converting such a datadir would only move the breakage.
+		return fmt.Errorf("epoch-migration: no usable segments for %s; refusing to convert a datadir that is already unopenable",
+			strings.Join(m.uncovered, ", "))
 	}
 	m.logger.Info("[epoch-migration] converting decimal block segments to epoch", "upto", frozenMax)
+
+	// One tiling for every type: a pruned type resumes on a boundary of it, never between two.
+	plan, _ := planEpochSegments(0, frozenMax, m.snCfg)
+	for _, t := range snaptype2.BlockSnapshotTypes {
+		if s := start[t.Enum()]; s > 0 {
+			start[t.Enum()] = startOnPlan(plan, s)
+		}
+	}
 
 	tailFrom := frozenMax - frozenMax%snaptype.EpochMinSegmentSize
 	tailHeaders := make(map[uint64][]byte)
@@ -637,11 +673,14 @@ func (m *epochMigrator) loadSegs() (start map[snaptype.Enum]uint64, frozenMax ui
 	frozenMax = ^uint64(0)
 	for _, t := range snaptype2.BlockSnapshotTypes {
 		epoch, decimal := classifyByType(all, t.Enum())
-		epochStart, coveredTo, contiguousLen := coverage(epoch, decimal)
+		typeStart, coveredTo, contiguousLen := coverage(epoch, decimal)
 		m.decimalSegs[t.Enum()] = decimal
 		m.contiguousLen[t.Enum()] = contiguousLen
-		start[t.Enum()] = epochStart
+		start[t.Enum()] = typeStart
 		frozenMax = min(frozenMax, coveredTo)
+		if coveredTo == 0 {
+			m.uncovered = append(m.uncovered, t.Name())
+		}
 		if len(decimal) > 0 {
 			hasDecimal = true
 		}
@@ -662,7 +701,6 @@ func hasEpochIndexes(info snaptype.FileInfo, names []string) bool {
 // (the transactions index needs the epoch bodies), and skips any segment whose index already exists so
 // a re-run doesn't rebuild everything.
 func (m *epochMigrator) buildEpochIndexes(ctx context.Context, frozenMax uint64) error {
-	plan, _ := planEpochSegments(0, frozenMax, m.snCfg)
 	des, err := os.ReadDir(m.dirs.Snap)
 	if err != nil {
 		return err
@@ -671,9 +709,14 @@ func (m *epochMigrator) buildEpochIndexes(ctx context.Context, frozenMax uint64)
 	for _, de := range des {
 		names = append(names, de.Name())
 	}
+	plan, _ := planEpochSegments(0, frozenMax, m.snCfg)
 	for _, t := range snaptype2.BlockSnapshotTypes {
 		for _, r := range plan {
 			info := t.FileInfo(m.dirs.Snap, true, r[0], r[1])
+			// A pruned type has no segment below its frontier; there is nothing to index there.
+			if !slices.Contains(names, filepath.Base(info.Path)) {
+				continue
+			}
 			if hasEpochIndexes(info, names) {
 				continue
 			}
