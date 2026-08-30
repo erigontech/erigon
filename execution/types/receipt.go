@@ -364,6 +364,7 @@ func (r *Receipt) Copy() *Receipt {
 		TxHash:            r.TxHash,
 		ContractAddress:   r.ContractAddress,
 		GasUsed:           r.GasUsed,
+		BlobGasUsed:       r.BlobGasUsed,
 		BlockHash:         r.BlockHash,
 		BlockNumber:       new(uint256.Int).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,

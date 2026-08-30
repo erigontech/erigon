@@ -47,6 +47,61 @@ func TestDecodeEmptyTypedReceipt(t *testing.T) {
 	}
 }
 
+func TestReceiptCopyPreservesFieldsAndOwnership(t *testing.T) {
+	t.Parallel()
+	receipt := &Receipt{
+		Type:              BlobTxType,
+		PostState:         []byte{1, 2, 3},
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 4,
+		Bloom:             Bloom{5},
+		Logs: Logs{{
+			Address: common.HexToAddress("0x6"),
+			Topics:  []common.Hash{common.HexToHash("0x7")},
+			Data:    []byte{8},
+		}},
+		TxHash:                   common.HexToHash("0x9"),
+		ContractAddress:          common.HexToAddress("0xa"),
+		GasUsed:                  11,
+		BlobGasUsed:              12,
+		BlockHash:                common.HexToHash("0xd"),
+		BlockNumber:              uint256.NewInt(14),
+		TransactionIndex:         15,
+		FirstLogIndexWithinBlock: 16,
+	}
+
+	copy := receipt.Copy()
+	require.Equal(t, receipt, copy)
+	require.Equal(t, uint64(12), copy.BlobGasUsed)
+
+	copy.PostState[0]++
+	copy.Logs[0].Topics[0][0]++
+	copy.Logs[0].Data[0]++
+	copy.BlockNumber.SetUint64(17)
+	require.Equal(t, []byte{1, 2, 3}, receipt.PostState)
+	require.Equal(t, common.HexToHash("0x7"), receipt.Logs[0].Topics[0])
+	require.Equal(t, byte(8), receipt.Logs[0].Data[0])
+	require.Equal(t, uint64(14), receipt.BlockNumber.Uint64())
+}
+
+func TestReceiptsCopyPreservesBlobGasUsed(t *testing.T) {
+	t.Parallel()
+	receipts := Receipts{
+		{BlobGasUsed: 21, BlockNumber: uint256.NewInt(22)},
+		{BlobGasUsed: 0, BlockNumber: uint256.NewInt(23)},
+		nil,
+	}
+
+	copy := receipts.Copy()
+	require.Equal(t, receipts, copy)
+	require.Equal(t, uint64(21), copy[0].BlobGasUsed)
+	require.Zero(t, copy[1].BlobGasUsed)
+	require.Nil(t, copy[2])
+
+	copy[0].BlockNumber.SetUint64(24)
+	require.Equal(t, uint64(22), receipts[0].BlockNumber.Uint64())
+}
+
 func TestLegacyReceiptDecoding(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
