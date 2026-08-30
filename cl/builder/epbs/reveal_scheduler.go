@@ -12,7 +12,10 @@ import (
 
 var ErrRevealExpired = errors.New("payload reveal deadline expired")
 
-const revealRetryDelay = 100 * time.Millisecond
+const (
+	revealRetryDelay         = 100 * time.Millisecond
+	lateRevealAttemptTimeout = time.Second
+)
 
 type revealTask struct {
 	root     common.Hash
@@ -55,7 +58,7 @@ func (s *revealScheduler) Enqueue(task revealTask) bool {
 			}
 			defer func() { <-s.sem }()
 			if !time.Now().Before(task.deadline) {
-				attemptCtx, cancel := context.WithTimeout(ctx, revealRetryDelay)
+				attemptCtx, cancel := context.WithTimeout(ctx, lateRevealAttemptTimeout)
 				defer cancel()
 				return task.reveal(attemptCtx)
 			}

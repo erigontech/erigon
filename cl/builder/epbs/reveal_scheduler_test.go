@@ -52,6 +52,38 @@ func TestRevealWinningBidUntilAttemptsExpiredWinnerOnce(t *testing.T) {
 	require.Equal(t, 1, attempts)
 }
 
+func TestRevealSchedulerAllowsCooperativeLateAttempt(t *testing.T) {
+	scheduler := newRevealScheduler(t.Context(), 1, 1)
+	succeeded := make(chan struct{})
+	terminal := make(chan error, 1)
+	require.True(t, scheduler.Enqueue(revealTask{
+		root: common.HexToHash("0xa1"), deadline: time.Now().Add(-time.Second),
+		reveal: func(ctx context.Context) error {
+			timer := time.NewTimer(150 * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				close(succeeded)
+				return nil
+			}
+		},
+		terminal: func(err error) { terminal <- err },
+	}))
+	scheduler.Wait()
+	select {
+	case <-succeeded:
+	default:
+		t.Fatal("cooperative late reveal was canceled")
+	}
+	select {
+	case err := <-terminal:
+		t.Fatalf("cooperative late reveal failed: %v", err)
+	default:
+	}
+}
+
 func TestRevealSchedulerPassesDeadlineToBlockedAttempt(t *testing.T) {
 	scheduler := newRevealScheduler(t.Context(), 1, 1)
 	done := make(chan error, 1)
@@ -112,7 +144,7 @@ func TestRevealSchedulerBoundsExpiredAttempts(t *testing.T) {
 	}))
 	select {
 	case <-succeeded:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("expired reveal attempts exhausted the scheduler")
 	}
 	waited := make(chan struct{})
@@ -122,7 +154,7 @@ func TestRevealSchedulerBoundsExpiredAttempts(t *testing.T) {
 	}()
 	select {
 	case <-waited:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("expired reveal attempts blocked scheduler shutdown")
 	}
 }
