@@ -23,6 +23,7 @@ type testEnvelopeProcessor struct {
 	calls     *int
 	persisted *cltypes.SignedExecutionPayloadEnvelope
 	readErr   error
+	parents   []forkchoice.ParentCandidate
 }
 
 func (p testEnvelopeProcessor) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
@@ -37,6 +38,10 @@ func (p testEnvelopeProcessor) OnExecutionPayload(context.Context, *cltypes.Sign
 
 func (p testEnvelopeProcessor) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	return p.persisted, p.readErr
+}
+
+func (p testEnvelopeProcessor) ActiveParents(uint64) []forkchoice.ParentCandidate {
+	return p.parents
 }
 
 type testGossipPublisher struct {
@@ -107,19 +112,97 @@ func (p *blockingBidPublisher) Publish(context.Context, string, []byte) error {
 func TestCaplinBidSubmitter_SubmitBidDoesNotStoreUnpublishedBid(t *testing.T) {
 	epbsPool := pool.NewEpbsPool()
 	gossipPublisher := &testGossipPublisher{err: fmt.Errorf("%w: publish failed", gossip.ErrNotPublished)}
-	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
 		Slot:               100,
 		ParentBlockHash:    common.HexToHash("0x1111"),
 		ParentBlockRoot:    common.HexToHash("0x2222"),
 		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](4, 48),
 	}}
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testProcessorForBid(bid), nil)
 
 	err := submitter.SubmitBid(context.Background(), bid)
 	require.ErrorContains(t, err, "publish failed")
 	require.ErrorIs(t, err, ErrBidNotPublished)
 	_, stored := epbsPool.HighestBids.Get(pool.HighestBidKey{Slot: 100, ParentBlockHash: bid.Message.ParentBlockHash, ParentBlockRoot: bid.Message.ParentBlockRoot})
 	require.False(t, stored)
+}
+
+func TestCaplinBidSubmitterSubmitBidRejectsParentAfterHeadChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		parent forkchoice.ParentCandidate
+	}{
+		{name: "beacon root changed", parent: forkchoice.ParentCandidate{
+			BlockRoot:     common.HexToHash("0xbbbb"),
+			ExecutionHash: common.HexToHash("0x1111"),
+		}},
+		{name: "execution hash changed", parent: forkchoice.ParentCandidate{
+			BlockRoot:     common.HexToHash("0x2222"),
+			ExecutionHash: common.HexToHash("0xbbbb"),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			epbsPool := pool.NewEpbsPool()
+			gossipPublisher := &testGossipPublisher{}
+			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{parents: []forkchoice.ParentCandidate{tc.parent}}, nil)
+			bid := testSignedBid(100, 1, 1000)
+
+			err := submitter.SubmitBid(t.Context(), bid)
+
+			require.ErrorIs(t, err, ErrBidNotPublished)
+			require.Zero(t, gossipPublisher.published)
+			_, stored := epbsPool.HighestBids.Get(pool.HighestBidKey{
+				Slot:            bid.Message.Slot,
+				ParentBlockHash: bid.Message.ParentBlockHash,
+				ParentBlockRoot: bid.Message.ParentBlockRoot,
+			})
+			require.False(t, stored)
+		})
+	}
+}
+
+func TestCaplinBidSubmitterSubmitBidAcceptsActiveFullAndEmptyParents(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		slot         uint64
+		shouldExtend bool
+	}{
+		{name: "current slot full parent", slot: 100, shouldExtend: true},
+		{name: "next slot empty parent", slot: 101, shouldExtend: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			epbsPool := pool.NewEpbsPool()
+			gossipPublisher := &testGossipPublisher{}
+			bid := testSignedBid(tc.slot, 1, 1000)
+			processor := testProcessorForBid(bid)
+			processor.parents[0].ShouldExtend = tc.shouldExtend
+			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, processor, nil)
+
+			require.NoError(t, submitter.SubmitBid(t.Context(), bid))
+			require.Equal(t, 1, gossipPublisher.published)
+		})
+	}
+}
+
+func TestCaplinBidSubmitterSubmitBidFailsClosedWithoutActiveParents(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		processor executionPayloadProcessor
+	}{
+		{name: "forkchoice unavailable"},
+		{name: "no active parents", processor: testEnvelopeProcessor{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			epbsPool := pool.NewEpbsPool()
+			gossipPublisher := &testGossipPublisher{}
+			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, tc.processor, nil)
+
+			err := submitter.SubmitBid(t.Context(), testSignedBid(100, 1, 1000))
+
+			require.ErrorIs(t, err, ErrBidNotPublished)
+			require.Zero(t, gossipPublisher.published)
+		})
+	}
 }
 
 func TestCaplinBidSubmitterSubmitBidDoesNotPublishBelowHighestSeenBid(t *testing.T) {
@@ -143,9 +226,9 @@ func TestCaplinBidSubmitterSubmitBidDoesNotPublishBelowHighestSeenBid(t *testing
 func TestCaplinBidSubmitterSubmitBidReplacesLowerHighestSeenBid(t *testing.T) {
 	epbsPool := pool.NewEpbsPool()
 	gossipPublisher := &testGossipPublisher{}
-	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
 	low := testSignedBid(100, 1, 1000)
 	high := testSignedBid(100, 2, 2000)
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testProcessorForBid(high), nil)
 
 	require.NoError(t, submitter.SubmitBid(t.Context(), low))
 	require.NoError(t, submitter.SubmitBid(t.Context(), high))
@@ -181,8 +264,8 @@ func TestCaplinBidSubmitterSubmitBidDoesNotReplaceEqualHighestSeenBid(t *testing
 func TestCaplinBidSubmitterSubmitBidAcceptsZeroValueInEmptyMarket(t *testing.T) {
 	epbsPool := pool.NewEpbsPool()
 	gossipPublisher := &testGossipPublisher{}
-	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
 	bid := testSignedBid(100, 1, 0)
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testProcessorForBid(bid), nil)
 
 	require.NoError(t, submitter.SubmitBid(t.Context(), bid))
 
@@ -195,9 +278,9 @@ func TestCaplinBidSubmitterSubmitBidAcceptsZeroValueInEmptyMarket(t *testing.T) 
 func TestCaplinBidSubmitterSubmitBidKeepsConcurrentHigherBid(t *testing.T) {
 	epbsPool := pool.NewEpbsPool()
 	publisher := &blockingBidPublisher{started: make(chan struct{}), release: make(chan struct{})}
-	submitter := NewCaplinBidSubmitter(epbsPool, publisher, testEnvelopeProcessor{}, nil)
 	low := testSignedBid(100, 1, 1000)
 	high := testSignedBid(100, 2, 2000)
+	submitter := NewCaplinBidSubmitter(epbsPool, publisher, testProcessorForBid(low), nil)
 	result := make(chan error, 1)
 
 	go func() {
@@ -222,6 +305,13 @@ func testSignedBid(slot, builderIndex, value uint64) *cltypes.SignedExecutionPay
 		ParentBlockRoot:    common.HexToHash("0x2222"),
 		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](4, 48),
 	}}
+}
+
+func testProcessorForBid(bid *cltypes.SignedExecutionPayloadBid) testEnvelopeProcessor {
+	return testEnvelopeProcessor{parents: []forkchoice.ParentCandidate{{
+		BlockRoot:     bid.Message.ParentBlockRoot,
+		ExecutionHash: bid.Message.ParentBlockHash,
+	}}}
 }
 
 func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T) {
