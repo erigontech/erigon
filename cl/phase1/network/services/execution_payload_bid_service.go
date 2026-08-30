@@ -466,7 +466,7 @@ func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.Execut
 	if hasBlock && headBlock != nil && headBlock.Block != nil && headBlock.Block.Body != nil {
 		signedHeadBid := headBlock.Block.Body.GetSignedExecutionPayloadBid()
 		if signedHeadBid != nil && signedHeadBid.Message != nil {
-			return bidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
+			return forkchoice.BidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
 		}
 		if headPayload := headBlock.Block.Body.ExecutionPayload; headPayload != nil {
 			return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
@@ -481,28 +481,13 @@ func (s *executionPayloadBidService) isBidCompatibleWithHead(bid *cltypes.Execut
 		if headBid == nil {
 			return false, fmt.Errorf("%w: head bid unavailable", errBidDependencyUnavailable)
 		}
-		return bidCompatibleWithHead(bid, headRoot, headHeader, headBid, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
+		return forkchoice.BidCompatibleWithHead(bid, headRoot, headHeader, headBid, s.forkchoiceStore.ShouldBuildOnFull(headNode, bid.Slot)), nil
 	}
 	headPayload := headState.LatestExecutionPayloadHeader()
 	if headPayload == nil {
 		return false, fmt.Errorf("%w: head execution payload unavailable", errBidDependencyUnavailable)
 	}
 	return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
-}
-
-func bidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid, headRoot common.Hash, headHeader *cltypes.BeaconBlockHeader, headBid *cltypes.ExecutionPayloadBid, buildOnFull bool) bool {
-	buildsOnParentBlock := bid.ParentBlockRoot == headHeader.ParentRoot
-	buildsOnParentPayload := bid.ParentBlockHash == headBid.ParentBlockHash
-	if buildsOnParentBlock && buildsOnParentPayload {
-		return true
-	}
-	if bid.ParentBlockRoot != headRoot {
-		return false
-	}
-	if buildOnFull {
-		return bid.ParentBlockHash == headBid.BlockHash
-	}
-	return buildsOnParentPayload
 }
 
 func (s *executionPayloadBidService) validateHighestBid(bid *cltypes.ExecutionPayloadBid) error {

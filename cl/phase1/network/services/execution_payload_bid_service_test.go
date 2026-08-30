@@ -594,12 +594,12 @@ func TestBidCompatibleWithHead(t *testing.T) {
 	headBid := &cltypes.ExecutionPayloadBid{ParentBlockHash: parentPayload, BlockHash: headPayload}
 
 	buildsOnParent := &cltypes.ExecutionPayloadBid{Slot: 100, ParentBlockRoot: parentRoot, ParentBlockHash: parentPayload}
-	require.True(t, bidCompatibleWithHead(buildsOnParent, headRoot, headHeader, headBid, true))
+	require.True(t, forkchoice.BidCompatibleWithHead(buildsOnParent, headRoot, headHeader, headBid, true))
 	buildsOnHead := &cltypes.ExecutionPayloadBid{Slot: 100, ParentBlockRoot: headRoot, ParentBlockHash: headPayload}
-	require.True(t, bidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, true))
-	require.False(t, bidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, false))
+	require.True(t, forkchoice.BidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, true))
+	require.False(t, forkchoice.BidCompatibleWithHead(buildsOnHead, headRoot, headHeader, headBid, false))
 	stale := &cltypes.ExecutionPayloadBid{Slot: 100, ParentBlockRoot: common.HexToHash("0x50"), ParentBlockHash: parentPayload}
-	require.False(t, bidCompatibleWithHead(stale, headRoot, headHeader, headBid, false))
+	require.False(t, forkchoice.BidCompatibleWithHead(stale, headRoot, headHeader, headBid, false))
 }
 
 func TestExecutionPayloadBidServiceFirstGloasSlotBuildsOnFuluHead(t *testing.T) {

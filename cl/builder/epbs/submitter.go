@@ -59,7 +59,7 @@ type payloadBroadcastProgress struct {
 }
 
 type executionPayloadProcessor interface {
-	ActiveParents(uint64) []forkchoice.ParentCandidate
+	IsBidCompatibleWithHead(*cltypes.ExecutionPayloadBid) (bool, error)
 	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
@@ -95,7 +95,11 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	if err != nil {
 		return fmt.Errorf("%w: encode bid: %w", ErrBidNotPublished, err)
 	}
-	if !s.isActiveParent(bid.Message) {
+	compatible, err := s.isBidCompatibleWithHead(bid.Message)
+	if err != nil {
+		return fmt.Errorf("%w: validate parent compatibility: %w", ErrBidNotPublished, err)
+	}
+	if !compatible {
 		return fmt.Errorf("%w: parent is no longer active", ErrBidNotPublished)
 	}
 	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encodedSSZ); err != nil {
@@ -109,16 +113,11 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	return nil
 }
 
-func (s *CaplinBidSubmitter) isActiveParent(bid *cltypes.ExecutionPayloadBid) bool {
+func (s *CaplinBidSubmitter) isBidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid) (bool, error) {
 	if s.forkchoice == nil {
-		return false
+		return false, nil
 	}
-	for _, parent := range s.forkchoice.ActiveParents(bid.Slot) {
-		if parent.BlockRoot == bid.ParentBlockRoot && parent.ExecutionHash == bid.ParentBlockHash {
-			return true
-		}
-	}
-	return false
+	return s.forkchoice.IsBidCompatibleWithHead(bid)
 }
 
 // BroadcastPayload publishes the envelope and advances the local block to FULL.

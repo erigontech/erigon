@@ -18,12 +18,16 @@ import (
 )
 
 type testEnvelopeProcessor struct {
-	err       error
-	errors    []error
-	calls     *int
-	persisted *cltypes.SignedExecutionPayloadEnvelope
-	readErr   error
-	parents   []forkchoice.ParentCandidate
+	err              error
+	errors           []error
+	calls            *int
+	persisted        *cltypes.SignedExecutionPayloadEnvelope
+	readErr          error
+	headRoot         common.Hash
+	headHeader       *cltypes.BeaconBlockHeader
+	headBid          *cltypes.ExecutionPayloadBid
+	buildOnFull      bool
+	compatibilityErr error
 }
 
 func (p testEnvelopeProcessor) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
@@ -40,8 +44,11 @@ func (p testEnvelopeProcessor) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Signe
 	return p.persisted, p.readErr
 }
 
-func (p testEnvelopeProcessor) ActiveParents(uint64) []forkchoice.ParentCandidate {
-	return p.parents
+func (p testEnvelopeProcessor) IsBidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid) (bool, error) {
+	if p.compatibilityErr != nil {
+		return false, p.compatibilityErr
+	}
+	return forkchoice.BidCompatibleWithHead(bid, p.headRoot, p.headHeader, p.headBid, p.buildOnFull), nil
 }
 
 type testGossipPublisher struct {
@@ -129,22 +136,24 @@ func TestCaplinBidSubmitter_SubmitBidDoesNotStoreUnpublishedBid(t *testing.T) {
 
 func TestCaplinBidSubmitterSubmitBidRejectsParentAfterHeadChanges(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		parent forkchoice.ParentCandidate
+		name      string
+		processor testEnvelopeProcessor
 	}{
-		{name: "beacon root changed", parent: forkchoice.ParentCandidate{
-			BlockRoot:     common.HexToHash("0xbbbb"),
-			ExecutionHash: common.HexToHash("0x1111"),
+		{name: "beacon root changed", processor: testEnvelopeProcessor{
+			headRoot:   common.HexToHash("0xaaaa"),
+			headHeader: &cltypes.BeaconBlockHeader{ParentRoot: common.HexToHash("0xbbbb")},
+			headBid:    &cltypes.ExecutionPayloadBid{ParentBlockHash: common.HexToHash("0x1111")},
 		}},
-		{name: "execution hash changed", parent: forkchoice.ParentCandidate{
-			BlockRoot:     common.HexToHash("0x2222"),
-			ExecutionHash: common.HexToHash("0xbbbb"),
+		{name: "execution hash changed", processor: testEnvelopeProcessor{
+			headRoot:   common.HexToHash("0xaaaa"),
+			headHeader: &cltypes.BeaconBlockHeader{ParentRoot: common.HexToHash("0x2222")},
+			headBid:    &cltypes.ExecutionPayloadBid{ParentBlockHash: common.HexToHash("0xbbbb")},
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			epbsPool := pool.NewEpbsPool()
 			gossipPublisher := &testGossipPublisher{}
-			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{parents: []forkchoice.ParentCandidate{tc.parent}}, nil)
+			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, tc.processor, nil)
 			bid := testSignedBid(100, 1, 1000)
 
 			err := submitter.SubmitBid(t.Context(), bid)
@@ -163,19 +172,26 @@ func TestCaplinBidSubmitterSubmitBidRejectsParentAfterHeadChanges(t *testing.T) 
 
 func TestCaplinBidSubmitterSubmitBidAcceptsActiveFullAndEmptyParents(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		slot         uint64
-		shouldExtend bool
+		name        string
+		slot        uint64
+		buildOnFull bool
 	}{
-		{name: "current slot full parent", slot: 100, shouldExtend: true},
-		{name: "next slot empty parent", slot: 101, shouldExtend: false},
+		{name: "current slot full parent", slot: 100, buildOnFull: true},
+		{name: "next slot empty parent", slot: 101, buildOnFull: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			epbsPool := pool.NewEpbsPool()
 			gossipPublisher := &testGossipPublisher{}
 			bid := testSignedBid(tc.slot, 1, 1000)
-			processor := testProcessorForBid(bid)
-			processor.parents[0].ShouldExtend = tc.shouldExtend
+			processor := testEnvelopeProcessor{
+				headRoot:    bid.Message.ParentBlockRoot,
+				headHeader:  &cltypes.BeaconBlockHeader{},
+				headBid:     &cltypes.ExecutionPayloadBid{ParentBlockHash: bid.Message.ParentBlockHash, BlockHash: common.HexToHash("0x4444")},
+				buildOnFull: tc.buildOnFull,
+			}
+			if tc.buildOnFull {
+				bid.Message.ParentBlockHash = processor.headBid.BlockHash
+			}
 			submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, processor, nil)
 
 			require.NoError(t, submitter.SubmitBid(t.Context(), bid))
@@ -184,13 +200,30 @@ func TestCaplinBidSubmitterSubmitBidAcceptsActiveFullAndEmptyParents(t *testing.
 	}
 }
 
-func TestCaplinBidSubmitterSubmitBidFailsClosedWithoutActiveParents(t *testing.T) {
+func TestCaplinBidSubmitterSubmitBidAcceptsParentOfLateHead(t *testing.T) {
+	epbsPool := pool.NewEpbsPool()
+	gossipPublisher := &testGossipPublisher{}
+	bid := testSignedBid(100, 1, 1000)
+	processor := testEnvelopeProcessor{
+		headRoot:    common.HexToHash("0x9999"),
+		headHeader:  &cltypes.BeaconBlockHeader{Slot: 99, ParentRoot: bid.Message.ParentBlockRoot},
+		headBid:     &cltypes.ExecutionPayloadBid{ParentBlockHash: bid.Message.ParentBlockHash, BlockHash: common.HexToHash("0xaaaa")},
+		buildOnFull: true,
+	}
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, processor, nil)
+
+	require.NoError(t, submitter.SubmitBid(t.Context(), bid))
+	require.Equal(t, 1, gossipPublisher.published)
+}
+
+func TestCaplinBidSubmitterSubmitBidFailsClosedWithoutCompatibleHead(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		processor executionPayloadProcessor
 	}{
 		{name: "forkchoice unavailable"},
-		{name: "no active parents", processor: testEnvelopeProcessor{}},
+		{name: "no compatible head snapshot", processor: testEnvelopeProcessor{}},
+		{name: "head lookup failed", processor: testEnvelopeProcessor{compatibilityErr: errors.New("head unavailable")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			epbsPool := pool.NewEpbsPool()
@@ -308,10 +341,12 @@ func testSignedBid(slot, builderIndex, value uint64) *cltypes.SignedExecutionPay
 }
 
 func testProcessorForBid(bid *cltypes.SignedExecutionPayloadBid) testEnvelopeProcessor {
-	return testEnvelopeProcessor{parents: []forkchoice.ParentCandidate{{
-		BlockRoot:     bid.Message.ParentBlockRoot,
-		ExecutionHash: bid.Message.ParentBlockHash,
-	}}}
+	return testEnvelopeProcessor{
+		headRoot:    bid.Message.ParentBlockRoot,
+		headHeader:  &cltypes.BeaconBlockHeader{},
+		headBid:     &cltypes.ExecutionPayloadBid{BlockHash: bid.Message.ParentBlockHash},
+		buildOnFull: true,
+	}
 }
 
 func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T) {
