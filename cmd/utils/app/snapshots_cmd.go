@@ -38,6 +38,7 @@ import (
 
 	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
+	"github.com/gofrs/flock"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/semaphore"
 
@@ -80,6 +81,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
@@ -88,6 +90,14 @@ import (
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
+
+// unlockDatadir releases a datadir flock acquired via MustFlock, logging
+// rather than failing the command if the release itself errors.
+func unlockDatadir(logger log.Logger, l *flock.Flock) {
+	if err := l.Unlock(); err != nil {
+		logger.Error("failed to unlock datadir", "err", err)
+	}
+}
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 	lists = append(lists, debug.Flags, logging.Flags, utils.MetricFlags)
@@ -166,7 +176,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 
 				return doIndicesCommand(ctx, c, dirs)
 			},
@@ -183,7 +193,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 
 				return doRetireCommand(ctx, c, dirs)
 			},
@@ -200,7 +210,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 
 				return doUnmerge(ctx, c, dirs)
 			},
@@ -217,7 +227,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 
 				return doRemoveOverlap(ctx, c, dirs)
 			},
@@ -262,7 +272,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 
 				err = dir2.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 				if err != nil {
@@ -282,7 +292,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 				return dirs.RenameNewVersions()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -295,7 +305,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 				return dirs.RenameOldVersions(true)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -409,7 +419,7 @@ var snapshotCommand = cli.Command{
 				if err != nil {
 					return err
 				}
-				defer l.Unlock()
+				defer unlockDatadir(log.Root(), l)
 				if err := doIntegrity(ctx, cliCtx); err != nil {
 					log.Error("[integrity]", "err", err)
 					return err
@@ -1064,8 +1074,12 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 			fmt.Printf("[dry-run] rm %s\n", res.Path+".torrent")
 			continue
 		}
-		dir2.RemoveFile(res.Path)
-		dir2.RemoveFile(res.Path + ".torrent")
+		if err := dir2.RemoveFile(res.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if err := dir2.RemoveFile(res.Path + ".torrent"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
@@ -1105,7 +1119,7 @@ func doRmStateSnapshots(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer l.Unlock()
+	defer unlockDatadir(log.Root(), l)
 
 	removeLatest := cliCtx.Bool("latest")
 	stepRange := cliCtx.String("step")
@@ -1330,7 +1344,7 @@ func doRmBlockSnapshots(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer l.Unlock()
+	defer unlockDatadir(log.Root(), l)
 
 	return DeleteBlockSnapshots(DeleteBlockSnapshotsArgs{
 		Dirs:                   dirs,
@@ -1344,12 +1358,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	if err != nil {
 		return err
 	}
-	defer func() {
-		err := l.Unlock()
-		if err != nil {
-			logger.Error("failed to unlock datadir", "err", err)
-		}
-	}()
+	defer unlockDatadir(logger, l)
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -1427,7 +1436,7 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer l.Unlock()
+	defer unlockDatadir(log.Root(), l)
 	logger := log.Root()
 
 	srcF := cliCtx.String("src")
@@ -2645,7 +2654,7 @@ func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer l.Unlock()
+	defer unlockDatadir(log.Root(), l)
 	accessorsDir := dat.SnapAccessors
 	domainDir := dat.SnapDomain
 	snapDir := dat.Snap
@@ -2666,10 +2675,11 @@ func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
 	}
 
 	// remove salt-state.txt and salt-blocks.txt
-	dir2.RemoveFile(filepath.Join(snapDir, "salt-state.txt"))
-	dir2.RemoveFile(filepath.Join(snapDir, "salt-state.txt.torrent"))
-	dir2.RemoveFile(filepath.Join(snapDir, "salt-blocks.txt"))
-	dir2.RemoveFile(filepath.Join(snapDir, "salt-blocks.txt.torrent"))
+	for _, name := range []string{"salt-state.txt", "salt-state.txt.torrent", "salt-blocks.txt", "salt-blocks.txt.torrent"} {
+		if err := dir2.RemoveFile(filepath.Join(snapDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("failed to remove %s: %w", name, err)
+		}
+	}
 
 	return nil
 }
@@ -3150,7 +3160,7 @@ func doUncompress(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer l.Unlock()
+	defer unlockDatadir(log.Root(), l)
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
@@ -3183,7 +3193,7 @@ func doCompress(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer lck.Unlock()
+	defer unlockDatadir(log.Root(), lck)
 
 	logger := log.Root()
 
@@ -3472,9 +3482,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	//agg.LimitRecentHistoryWithoutFiles(0)
 
-	var to uint64
+	var to, finalisedBlockNum uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		to, err = stages.GetStageProgress(tx, stages.Senders)
+		finalisedBlockNum = rawdb.ReadForkchoiceFinalizedNum(tx)
 		return err
 	}); err != nil {
 		return err
@@ -3482,7 +3493,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
+	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
+	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
 
@@ -3539,7 +3551,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := agg.BuildFiles(lastTxNum); err != nil {
+	if err := agg.BuildFiles(lastTxNum, finalityCtx); err != nil {
 		return err
 	}
 

@@ -130,7 +130,13 @@ var (
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
+	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
+	// CommitmentAfterExec makes the exec loop wait for the commitment
+	// calculator to handle block N's result before starting N+1. Diagnostic:
+	// it trades the block-level exec/commitment overlap for most of the
+	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
+	// checkpoints) still run alongside exec.
+	CommitmentAfterExec           = EnvBool("COMMITMENT_AFTER_EXEC", false)
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
@@ -149,9 +155,28 @@ var (
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
+	return max(gomaxprocs, 1)
+}
+
+func BALCommitmentWarmupReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(TrieBALWarmupers, 0)
+}
+
+func ReadAheadWorkerReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(ReadAheadWorkers, 1)
+}
 
 func init() {
 	if PerfProfiles {

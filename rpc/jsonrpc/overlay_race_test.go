@@ -27,7 +27,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -359,7 +358,7 @@ func TestGetBlockByTimestamp_SeesOverlayHead(t *testing.T) {
 	resp, err := api.GetBlockByTimestamp(m.Ctx, rpc.Timestamp(overlayHeader.Time), false)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, overlayHeader.Number.ToBig(), resp["number"].(*hexutil.Big).ToInt(),
+	require.Equal(t, overlayHeader.Number.ToBig(), resp["number"].(*hexutil.U256).ToInt(),
 		"must resolve to the overlay head block, not the stale MDBX-committed head")
 }
 
@@ -1057,9 +1056,7 @@ func TestTraceFilter_UsesCommittedFromTag(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 
 	from := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize))
@@ -1296,9 +1293,7 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	m, _ := newHeaderAheadTester(t)
 	api := newTraceApiForTest(m)
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 
 	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
 	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
@@ -1310,9 +1305,7 @@ func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 	m, _ := newHeaderAheadTester(t)
 	api := newTraceApiForTest(m)
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 
 	from := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
 	err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, stream)
@@ -1323,10 +1316,9 @@ func TestTraceFilter_RejectsOverlayOnlyHead(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.New(nil)
 	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
 	require.ErrorContains(t, err, "not executed")
 }
 
@@ -1335,10 +1327,9 @@ func TestTraceFilter_RejectsOverlayReorgAtExecutedHeight(t *testing.T) {
 	reorgHeader := writeOverlayReorgHeader(t, base, m)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.New(nil)
 	to := rpc.BlockNumberOrHashWithHash(reorgHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
 	require.ErrorContains(t, err, "not available in the committed view")
 }
 
@@ -1348,10 +1339,9 @@ func TestTraceFilter_PropagatesOverlayProbeError(t *testing.T) {
 	base._blockReader = failOverlayHeaderNumberBlockReader{FullBlockReader: base._blockReader, err: wantErr}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.New(nil)
 	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
 	require.ErrorIs(t, err, wantErr)
 }
 
@@ -1359,12 +1349,11 @@ func TestTraceFilter_UnknownBlockReturnsEmptyArray(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.New(nil)
 	to := rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
 	require.NoError(t, err)
-	require.Equal(t, "[]", string(s.Buffer()))
+	require.Equal(t, "[]", string(stream.Buffer()))
 }
 
 func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
@@ -1381,9 +1370,8 @@ func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
 	})
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	err := api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, jsonstream.Wrap(s))
+	stream := jsonstream.New(nil)
+	err := api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream)
 
 	require.NoError(t, err)
 }

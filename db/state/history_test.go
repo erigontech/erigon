@@ -2558,6 +2558,110 @@ func TestMaxHistoryValLen(t *testing.T) {
 	require.Error(t, put(maxHistoryValLen+1))
 }
 
+// requirePagedHistoryFiles fails unless the fixture produced page-compressed .v files. Collate
+// writes WithValuesOnCompressedPage(0), so only merged files reach seg.PagedReader; without this
+// a change to the merge config would silently drop that coverage.
+func requirePagedHistoryFiles(tb testing.TB, ic *HistoryRoTx) {
+	tb.Helper()
+	for _, f := range ic.files {
+		if f.src.decompressor.CompressedPageValuesCount() > 1 {
+			return
+		}
+	}
+	tb.Fatal("no page-compressed .v file: this fixture never reaches seg.PagedReader")
+}
+
+// The history streams return views into re-used buffers that bottom out in seg.PagedReader, so
+// Invariant 2 is what makes them safe to compose. Run over merged files, where the values come
+// from a page-decode buffer rather than straight from the file.
+func TestHistoryStreamsKeepInvariant2(t *testing.T) {
+	logger := log.New()
+	ctx := t.Context()
+	db, h, txs := filledHistory(t, true, logger)
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ic := h.beginForTests()
+	defer ic.Close()
+	requirePagedHistoryFiles(t, ic)
+
+	t.Run("HistoryRange", func(t *testing.T) {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
+		require.NoError(t, err)
+		defer it.Close()
+		streamtest.RequireInvariant2KV(t, it)
+	})
+	t.Run("RangeAsOf", func(t *testing.T) {
+		it, err := ic.RangeAsOf(ctx, txs/2, nil, nil, order.Asc, -1, tx)
+		require.NoError(t, err)
+		defer it.Close()
+		streamtest.RequireInvariant2KV(t, it)
+	})
+}
+
+// BenchmarkHistorySeekInFiles measures a point lookup against merged (page-compressed)
+// history files. The `warm` arm reuses one HistoryRoTx, so ht.blockCompressionBuf is
+// reused across seeks; `coldTx` opens a fresh HistoryRoTx per seek, which is what an
+// rpcdaemon request does and what leaves the page-decode buffer cold every time.
+func BenchmarkHistorySeekInFiles(b *testing.B) {
+	logger := log.New()
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	ht := h.beginForTests()
+	defer ht.Close()
+
+	requirePagedHistoryFiles(b, ht)
+
+	keys := make([][]byte, 0, 31)
+	for keyNum := uint64(1); keyNum <= 31; keyNum++ {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, keyNum)
+		k[0] = 1
+		keys = append(keys, k)
+	}
+
+	seek := func(b *testing.B, ht *HistoryRoTx, i int) {
+		_, _, err := ht.historySeekInFiles(keys[i%len(keys)], uint64(i)%txs+1)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("warm", func(b *testing.B) {
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			seek(b, ht, i)
+			i++
+		}
+	})
+
+	b.Run("coldBuf", func(b *testing.B) {
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			ht.blockCompressionBuf = nil
+			seek(b, ht, i)
+			i++
+		}
+	})
+
+	b.Run("coldTx", func(b *testing.B) {
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			fresh := h.beginForTests()
+			seek(b, fresh, i)
+			fresh.Close()
+			i++
+		}
+	})
+}
+
 // BenchmarkHistoryRangePaged walks merged (page-compressed) history files, which is
 // where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
 // its files un-merged, so it never reaches that path.
@@ -2574,15 +2678,7 @@ func BenchmarkHistoryRangePaged(b *testing.B) {
 
 	ic := h.beginForTests()
 	defer ic.Close()
-
-	paged := false
-	for _, f := range ic.files {
-		if f.src.decompressor.CompressedPageValuesCount() > 1 {
-			paged = true
-			break
-		}
-	}
-	require.True(b, paged, "bench must run against page-compressed .v files, else it does not touch PagedReader")
+	requirePagedHistoryFiles(b, ic)
 
 	b.ResetTimer()
 	b.ReportAllocs()

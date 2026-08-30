@@ -45,9 +45,7 @@ func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	//if cast, ok := b.(*sortableBuffer); ok {
-	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
-	//}
+	b.Reset() // return the buffer's chunks to the pool now — see dataChunks in buffers.go
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
@@ -96,6 +94,12 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
+	if len(k) > MaxKeyLen {
+		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
+	}
+	if len(v) > MaxValLen {
+		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
+	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
@@ -107,7 +111,8 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
-// Collect does copy `k` and `v`
+// Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
+// over MaxValLen - the spill format cannot spell either.
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
@@ -263,6 +268,14 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 }
 
 func (c *Collector) Close() {
+	// Providers first: a KeepInRAM one reads straight from `buf`, whose chunks
+	// Reset hands to a pool that other collectors draw from.
+	if c.dataProviders != nil { //idempotency
+		for _, p := range c.dataProviders {
+			p.Dispose()
+		}
+		c.dataProviders = nil
+	}
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
@@ -270,12 +283,6 @@ func (c *Collector) Close() {
 		} else {
 			c.buf.Reset()
 		}
-	}
-	if c.dataProviders != nil { //idempotency
-		for _, p := range c.dataProviders {
-			p.Dispose()
-		}
-		c.dataProviders = nil
 	}
 	c.allFlushed = false
 }
