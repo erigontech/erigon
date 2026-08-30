@@ -118,7 +118,9 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
-	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
+	// calculator is read-only for the exec loop: the COMMITMENT_AFTER_EXEC barrier.
+	calculator  *commitmentCalculator
+	maxBlockNum uint64 // set before execLoop; exec loop exits when reached
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
@@ -366,6 +368,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	if err != nil {
 		return nil, nil, err
 	}
+	pe.calculator = calculator
 	calculator.Start(ctx)
 	defer calculator.Stop()
 
@@ -641,6 +644,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					block := applyResult.Block
 					blockNum := block.NumberU64()
 					blockHash := block.Hash()
+					// Above the paths that abandon the block below: a superseded
+					// set has no reader left, whatever the block's verdict.
+					applyResult.superseded.release()
 					if finalized {
 						appliedBlocks[blockNum] = struct{}{}
 						continue
@@ -1147,10 +1153,10 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// blockResults on a separate goroutine) can find this block's
 		// saved changeset via GetChangesetByBlockNum at compute time.
 		// In per-block compute mode (changeset window), the
-		// calculator switches the accumulator to this saved CS for the
-		// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-		// so branch writes land in block N's CS rather than whatever the
-		// exec loop has installed as current. If we saved AFTER sendResult,
+		// calculator passes this saved CS to ComputeCommitment as an explicit
+		// diff (committer.go:computeWithBlockAccumulator) so branch writes land
+		// in block N's CS rather than whatever the exec loop has installed as
+		// current. If we saved AFTER sendResult,
 		// the calculator could race ahead and look up an unsaved CS,
 		// causing branch deltas to leak into the next block's CS and
 		// produce wrong-trie-root chains on subsequent reorg-driven
@@ -1183,6 +1189,12 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// and cancelling would join context.Canceled onto the reported error.
 		if blockResult.Err != nil {
 			return true, nil
+		}
+
+		if dbg.CommitmentAfterExec && pe.calculator != nil {
+			if err := pe.calculator.WaitProcessed(commitmentBarrierCtx(ctx, terminal), blockNum); err != nil {
+				return false, err
+			}
 		}
 
 		pe.Lock()
@@ -1378,6 +1390,18 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	return nil
+}
+
+// commitmentBarrierCtx returns the context the COMMITMENT_AFTER_EXEC barrier
+// waits on. On a terminal block decideStop has already published the stopCause,
+// so ctx is cancelled: waiting on it would return before triggerBatchCommitment
+// and drop the batch-end commitment. The blockResult was sent with mustDeliver,
+// so the calculator always reaches markProcessed and the wait still ends.
+func commitmentBarrierCtx(ctx context.Context, terminal bool) context.Context {
+	if terminal {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
 }
 
 // applyLoopMissingBlocks returns the blockNums in txResultBlocks that
@@ -1787,6 +1811,28 @@ type blockResult struct {
 	AllDeps          map[int]map[int]bool
 	Exhausted        *ErrLoopExhausted
 	blockStateCache  *state.BlockStateCache
+	superseded       supersededWrites
+}
+
+// supersededWrites are merged write sets a later merge replaced. Nothing reaches
+// them from then on, and ReleaseMaps clears every map before pooling it -- which
+// is O(entries) per set -- so the exec loop only collects them and the apply loop
+// pays for them where it already releases the recorded write sets.
+type supersededWrites []*state.WriteSet
+
+func (s supersededWrites) release() {
+	for _, ws := range s {
+		ws.ReleaseMaps()
+	}
+}
+
+// takeSuperseded hands the collected sets to a block result and clears the
+// executor's slice, so the same sets cannot also reach a later result. The apply
+// loop pools them, and a second handoff would release them twice.
+func (be *blockExecutor) takeSuperseded() supersededWrites {
+	s := be.superseded
+	be.superseded = nil
+	return s
 }
 
 type txResult struct {
@@ -2349,7 +2395,9 @@ type blockExecutor struct {
 	// some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]feeMerge
 
-	mapReleasing sync.WaitGroup
+	// superseded collects the merged sets a later merge replaced, for the apply
+	// loop to pool once the block is done with them.
+	superseded supersededWrites
 
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
@@ -2515,8 +2563,9 @@ func (be *blockExecutor) hash() common.Hash { return be.block.Hash() }
 // completeness check doesn't double-report, and surfaces the error.
 func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	return &blockResult{
-		Block: be.block,
-		Err:   err,
+		Block:      be.block,
+		Err:        err,
+		superseded: be.takeSuperseded(),
 	}
 }
 
@@ -2536,7 +2585,7 @@ func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *sta
 	be.blockIO.RecordWrites(txVersion, writes)
 	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok {
 		if temp.writes != writes {
-			be.queueMapRelease(temp.writes)
+			be.superseded = append(be.superseded, temp.writes)
 		}
 		delete(be.feeMergeTemp, txVersion.TxIndex)
 	}
@@ -2588,7 +2637,7 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	// this tx's writes still holds the superseded set the release clears.
 	be.blockIO.RecordWrites(txVersion, merged)
 	if stale != nil {
-		be.queueMapRelease(stale)
+		be.superseded = append(be.superseded, stale)
 	}
 	if outcome == feeCreditNew {
 		be.feeMergeTemp[txVersion.TxIndex] = feeMerge{writes: merged, base: base, version: txVersion}
@@ -2607,40 +2656,6 @@ func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev,
 		}
 	}
 }
-
-// ReleaseMaps clears every map before pooling it, which is O(entries), and a
-// superseded fee-merge set holds the whole tx's writes. Keep it off the apply
-// loop, which is the serial stage the workers wait behind.
-type mapRelease struct {
-	ws      *state.WriteSet
-	pending *sync.WaitGroup
-}
-
-var (
-	mapReleases     = make(chan mapRelease, 4096)
-	mapReleaseStart sync.Once
-)
-
-func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
-	mapReleaseStart.Do(func() {
-		go func() {
-			for r := range mapReleases {
-				r.ws.ReleaseMaps()
-				r.pending.Done()
-			}
-		}()
-	})
-	be.mapReleasing.Add(1)
-	select {
-	case mapReleases <- mapRelease{ws, &be.mapReleasing}:
-	default:
-		// Releaser is behind; inline costs less than blocking the apply loop.
-		ws.ReleaseMaps()
-		be.mapReleasing.Done()
-	}
-}
-
-func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
@@ -3055,28 +3070,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// committed for addr (sd.mem + domain files), so a self-destruct
 					// emits the full StoragePath=0 cascade — covers genesis-allocated
 					// and prior-block storage that vm.StorageKeys doesn't see.
-					var domainKeysErr error
-					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-						var keys []accounts.StorageKey
-						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
-							return nil
-						}
-						return keys
-					}
+					domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-					if domainKeysErr != nil {
-						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
 					}
@@ -3326,28 +3323,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
 				// redundant.
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 				emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 				var normErr error
 				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
-				if domainKeysErr != nil {
-					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
-				}
 				if normErr != nil {
 					return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
 				}
@@ -3402,6 +3381,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			AllDeps:          allDeps,
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
+			superseded:       be.takeSuperseded(),
 		}
 		return be.result, nil
 	}

@@ -188,7 +188,7 @@ var eip8038SStoreTests = []struct {
 		original:      1,
 		input:         "0x6000600055",
 		usedExecution: 2*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038,
-		refund:        params.SstoreClearsScheduleRefundEIP8038,
+		refund:        11_616,
 	},
 	{
 		// 1 -> 2 -> 1: reset to original (existing) refunds the full STORAGE_WRITE.

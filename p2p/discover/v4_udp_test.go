@@ -476,6 +476,67 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 	})
 }
 
+// endpointStatements exceeds enode's iptrackMinStatements, so a batch this size
+// moves the endpoint predictor once the statements are accepted.
+const endpointStatements = 20
+
+func TestUDPv4_unbondedPingDoesNotUpdateEndpoint(t *testing.T) {
+	test := newUDPTest(t)
+	defer test.close()
+
+	fallback := netip.MustParseAddrPort("192.0.2.1:30303")
+	test.udp.localNode.SetFallbackIP(net.IP(fallback.Addr().AsSlice()))
+	test.udp.localNode.SetFallbackUDP(int(fallback.Port()))
+	before := test.udp.localNode.Node()
+
+	claimed := netip.MustParseAddrPort("198.51.100.1:40404")
+	for i := range endpointStatements {
+		sender := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 2, byte(i + 1)}), 30303)
+		test.packetInFrom(nil, newkey(), sender, &v4wire.Ping{
+			From:       testRemote,
+			To:         v4wire.NewEndpoint(claimed, 0),
+			Version:    4,
+			Expiration: futureExp,
+		})
+	}
+
+	after := test.udp.localNode.Node()
+	if got := netip.AddrPortFrom(after.IPAddr(), uint16(after.UDP())); got != fallback {
+		t.Fatalf("local endpoint changed to %v, want %v", got, fallback)
+	}
+	if after.Seq() != before.Seq() {
+		t.Fatalf("local ENR sequence changed to %d, want %d", after.Seq(), before.Seq())
+	}
+}
+
+func TestUDPv4_bondedPingUpdatesEndpoint(t *testing.T) {
+	// Long PingInterval so table revalidation never fires an unsolicited PING,
+	// whose logging could otherwise race the test's completion.
+	test := newUDPTestWithConfig(t, Config{PingInterval: time.Hour})
+	defer test.close()
+
+	test.udp.localNode.SetFallbackIP(net.IP{192, 0, 2, 1})
+	test.udp.localNode.SetFallbackUDP(30303)
+
+	claimed := netip.MustParseAddrPort("198.51.100.1:40404")
+	for i := range endpointStatements {
+		key := newkey()
+		sender := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 2, byte(i + 1)}), 30303)
+		test.udp.db.UpdateLastPongReceived(v4wire.EncodePubkey(&key.PublicKey).ID(), sender.Addr(), time.Now())
+		test.packetInFrom(nil, key, sender, &v4wire.Ping{
+			From:       testRemote,
+			To:         v4wire.NewEndpoint(claimed, 0),
+			Version:    4,
+			Expiration: futureExp,
+		})
+	}
+
+	after := test.udp.localNode.Node()
+	if got := netip.AddrPortFrom(after.IPAddr(), uint16(after.UDP())); got != claimed {
+		t.Fatalf("local endpoint = %v, want %v", got, claimed)
+	}
+}
+
 func TestUDPv4_successfulPing(t *testing.T) {
 	test := newUDPTest(t)
 	added := make(chan *tableNode, 1)
