@@ -524,6 +524,8 @@ type importedBlockWatcherReader interface {
 	importedBlockReader
 	GetHeadNode() (forkchoice.ForkChoiceNode, error)
 	GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool)
+	Ancestor(common.Hash, uint64) forkchoice.ForkChoiceNode
+	FinalizedCheckpoint() solid.Checkpoint
 }
 
 type revealWinningBidFunc func(context.Context, uint64, uint64, common.Hash, common.Hash, common.Hash, common.Hash) error
@@ -586,7 +588,30 @@ func reconcileCurrentHeadReveal(reader importedBlockWatcherReader, ethClock eth_
 	if !ok || header == nil {
 		return fmt.Errorf("head %s unavailable", head.Root)
 	}
-	return scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: header.Slot, Block: head.Root}, reader, ethClock, beaconCfg, loop, scheduler)
+	finalizedSlot := finalizedPayloadPruneSlot(reader.FinalizedCheckpoint().Epoch, beaconCfg.SlotsPerEpoch)
+	var reconcileErr error
+	seen := make(map[common.Hash]struct{})
+	for _, slot := range loop.pendingPayloadSlots() {
+		if slot < finalizedSlot || slot > header.Slot {
+			continue
+		}
+		ancestor := reader.Ancestor(head.Root, slot)
+		if ancestor.Root == (common.Hash{}) {
+			continue
+		}
+		if _, ok := seen[ancestor.Root]; ok {
+			continue
+		}
+		ancestorHeader, ok := reader.GetHeader(ancestor.Root)
+		if !ok || ancestorHeader == nil || ancestorHeader.Slot != slot {
+			continue
+		}
+		seen[ancestor.Root] = struct{}{}
+		if err := scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: slot, Block: ancestor.Root}, reader, ethClock, beaconCfg, loop, scheduler); err != nil {
+			reconcileErr = errors.Join(reconcileErr, err)
+		}
+	}
+	return reconcileErr
 }
 
 func scheduleImportedBlockReveal(data *beaconevents.BlockData, reader importedBlockReader, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop, scheduler *revealScheduler) error {

@@ -713,6 +713,25 @@ func (l *BuilderLoop) hasPendingPayloads() bool {
 	return len(l.pendingPayloads) > 0
 }
 
+func (l *BuilderLoop) pendingPayloadSlots() []uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	capacity := min(len(l.pendingPayloads), maxPendingPayloadFiles)
+	seen := make(map[uint64]struct{}, capacity)
+	slots := make([]uint64, 0, capacity)
+	for key := range l.pendingPayloads {
+		if _, ok := seen[key.slot]; ok {
+			continue
+		}
+		seen[key.slot] = struct{}{}
+		slots = append(slots, key.slot)
+		if len(slots) == maxPendingPayloadFiles {
+			break
+		}
+	}
+	return slots
+}
+
 func (l *BuilderLoop) abandonPendingBidReveal(key pendingPayloadKey, beaconRoot common.Hash) {
 	l.mu.Lock()
 	if pending := l.pendingPayloads[key]; pending != nil {

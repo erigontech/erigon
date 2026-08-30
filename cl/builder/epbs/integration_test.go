@@ -288,11 +288,12 @@ func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlo
 }
 
 type importedBlockWatcherReaderStub struct {
-	mu      sync.RWMutex
-	head    common.Hash
-	headers map[common.Hash]*cltypes.BeaconBlockHeader
-	blocks  map[common.Hash]*cltypes.SignedBeaconBlock
-	lookups chan struct{}
+	mu        sync.RWMutex
+	head      common.Hash
+	finalized solid.Checkpoint
+	headers   map[common.Hash]*cltypes.BeaconBlockHeader
+	blocks    map[common.Hash]*cltypes.SignedBeaconBlock
+	lookups   chan struct{}
 }
 
 func (r *importedBlockWatcherReaderStub) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
@@ -319,6 +320,28 @@ func (r *importedBlockWatcherReaderStub) GetBlock(root common.Hash) (*cltypes.Si
 	}
 	block, ok := r.blocks[root]
 	return block, ok
+}
+
+func (r *importedBlockWatcherReaderStub) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for root != (common.Hash{}) {
+		header, ok := r.headers[root]
+		if !ok || header == nil {
+			return forkchoice.ForkChoiceNode{}
+		}
+		if header.Slot <= slot {
+			return forkchoice.ForkChoiceNode{Root: root}
+		}
+		root = header.ParentRoot
+	}
+	return forkchoice.ForkChoiceNode{}
+}
+
+func (r *importedBlockWatcherReaderStub) FinalizedCheckpoint() solid.Checkpoint {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.finalized
 }
 
 func (r *importedBlockWatcherReaderStub) setBlock(root common.Hash, block *cltypes.SignedBeaconBlock) {
@@ -655,6 +678,63 @@ func TestImportedBlockWatcherRevealsAlreadyImportedRootOnHeadChange(t *testing.T
 	}, time.Second, time.Millisecond)
 	cancel()
 	<-done
+}
+
+func TestImportedBlockWatcherRecoversCanonicalAncestorAndIgnoresSiblingAfterRestart(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
+	loop.pendingStore = store
+	sc := testSlotContext()
+	sc.Slot = 96
+	sc.BuilderStatus.Slot = sc.Slot
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+
+	restarted, _, restartedSubmitter, _ := setupBuilderLoop(t)
+	restarted.pendingStore = store
+	require.NoError(t, restarted.restorePendingPayloads(t.Context(), sc.Slot+2, sc.Slot))
+	winnerRoot := common.HexToHash("0xb1")
+	headRoot := common.HexToHash("0xa1")
+	siblingRoot := common.HexToHash("0xc1")
+	winner := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	winner.Block.Slot = sc.Slot
+	winner.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+	sibling := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	sibling.Block.Slot = sc.Slot
+	sibling.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+	head := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	head.Block.Slot = sc.Slot + 2
+	head.Block.ParentRoot = winnerRoot
+	reader := &importedBlockWatcherReaderStub{
+		head: headRoot, finalized: solid.Checkpoint{Epoch: sc.Slot / loop.beaconCfg.SlotsPerEpoch},
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			headRoot:    {Slot: head.Block.Slot, ParentRoot: winnerRoot},
+			winnerRoot:  {Slot: winner.Block.Slot},
+			siblingRoot: {Slot: sibling.Block.Slot},
+		},
+		blocks: map[common.Hash]*cltypes.SignedBeaconBlock{headRoot: head, winnerRoot: winner, siblingRoot: sibling},
+	}
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-(sc.Slot+2)*loop.beaconCfg.SecondsPerSlot, common.Hash{}, loop.beaconCfg)
+	emitters := beaconevents.NewEventEmitter()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runImportedBlockWatcher(ctx, emitters, reader, clock, loop.beaconCfg, restarted)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		restartedSubmitter.mu.Lock()
+		defer restartedSubmitter.mu.Unlock()
+		return len(restartedSubmitter.broadcasts) == 1
+	}, time.Second, time.Millisecond)
+	cancel()
+	<-done
+	require.Len(t, restartedSubmitter.broadcasts, 1)
+	require.Equal(t, winnerRoot, restartedSubmitter.broadcasts[0].Message.BeaconBlockRoot)
 }
 
 func TestImportedBlockWatcherRetriesWinningPayloadAfterLocalDeadline(t *testing.T) {
