@@ -42,14 +42,14 @@ func TestRevealSchedulerDoesNotStarveIndependentWinner(t *testing.T) {
 	}
 }
 
-func TestRevealWinningBidUntilRejectsExpiredDeadlineBeforeAttempt(t *testing.T) {
+func TestRevealWinningBidUntilAttemptsExpiredWinnerOnce(t *testing.T) {
 	attempts := 0
 	err := revealWinningBidUntil(t.Context(), time.Now().Add(-time.Second), func(context.Context) error {
 		attempts++
 		return nil
 	})
-	require.ErrorIs(t, err, ErrRevealExpired)
-	require.Zero(t, attempts)
+	require.NoError(t, err)
+	require.Equal(t, 1, attempts)
 }
 
 func TestRevealSchedulerPassesDeadlineToBlockedAttempt(t *testing.T) {

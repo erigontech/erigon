@@ -72,6 +72,15 @@ func (s *revealScheduler) Wait() {
 }
 
 func revealWinningBidUntil(ctx context.Context, deadline time.Time, reveal func(context.Context) error) error {
+	if !time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := reveal(ctx); err != nil {
+			return revealExpiredError(err)
+		}
+		return nil
+	}
 	deadlineCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	var err error

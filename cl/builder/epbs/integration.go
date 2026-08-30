@@ -2,6 +2,7 @@ package epbs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -579,7 +580,11 @@ func scheduleImportedBlockReveal(data *beaconevents.BlockData, reader importedBl
 			return loop.OnBidWon(revealCtx, bid.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, bid.BlockHash, beaconRoot)
 		},
 		terminal: func(err error) {
-			loop.abandonPendingBidReveal(key, beaconRoot)
+			if errors.Is(err, ErrRevealExpired) {
+				loop.unqueuePendingBidReveal(key, beaconRoot)
+			} else {
+				loop.abandonPendingBidReveal(key, beaconRoot)
+			}
 			log.Warn("ePBS builder: winning bid reveal failed", "slot", bid.Slot, "err", err)
 		},
 	}) {

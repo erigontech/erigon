@@ -410,6 +410,46 @@ func TestImportedBlockWatcherRevealsAlreadyImportedRootOnHeadChange(t *testing.T
 	<-done
 }
 
+func TestImportedBlockWatcherRetriesWinningPayloadAfterLocalDeadline(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+
+	root := common.HexToHash("0xa1")
+	block := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = sc.Slot
+	block.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+	reader := &importedBlockWatcherReaderStub{
+		head: root,
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: sc.Slot},
+		},
+		blocks: map[common.Hash]*cltypes.SignedBeaconBlock{root: block},
+	}
+	submitter.broadcastErr = errors.New("transient gossip failure")
+	submitter.broadcastFailures = 1
+	emitters := beaconevents.NewEventEmitter()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Add(-time.Hour).Unix()), common.Hash{}, loop.beaconCfg)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runImportedBlockWatcher(ctx, emitters, reader, clock, loop.beaconCfg, loop)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		submitter.mu.Lock()
+		defer submitter.mu.Unlock()
+		return len(submitter.broadcasts) == 1
+	}, time.Second, time.Millisecond)
+	cancel()
+	<-done
+}
+
 func TestRevealQueueAdmissionFailureRemainsRetryable(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	sc := testSlotContext()
