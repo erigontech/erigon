@@ -206,7 +206,8 @@ const (
 	outcomeMapDone       // versionMap hit; the path's typed map*Val field carries the value
 	outcomeReadSetHit    // a prior read matched; typed wrapper re-fetches it via GetX
 	outcomeStorageRead   // r.so resolved; wrapper does typed storage read + records r.hdr
-	outcomeReturnZero    // typed wrapper returns the path-typed zero value
+	outcomeReturnZero    // typed wrapper returns the path-typed zero value (account absent)
+	outcomeReturnEmpty   // typed wrapper returns the path-typed empty value (account exists, field wiped): EmptyCodeHash for CodeHashPath, otherwise the zero value
 	outcomeReturnDefault // typed wrapper returns its caller-supplied defaultV
 )
 
@@ -276,6 +277,17 @@ type readPathResult struct {
 // wrappers return their defaultV; AddressPath reads avoid recursing back
 // through getStateObject).
 //
+// wipedFieldOutcome distinguishes how a field wiped by a self-destruct reads back:
+// outcomeReturnEmpty when the account was revived (a later write re-created it, so a
+// field with no post-destruct write reads as its empty value — EmptyCodeHash for the
+// code hash), or outcomeReturnZero when the account is absent (reads as the zero value).
+func wipedFieldOutcome(s *IntraBlockState, addr accounts.Address) readPathOutcome {
+	if state, _, _ := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state == LifecycleRevived {
+		return outcomeReturnEmpty
+	}
+	return outcomeReturnZero
+}
+
 // Result is written into *r (caller stack) to avoid a large return-value copy per read.
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
 	// Callers pass a fresh, zero-valued *r (a stack `var r readPathResult`), so no
@@ -308,7 +320,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					Val:        true,
 				})
 			}
-			r.outcome = outcomeReturnZero
+			r.outcome = wipedFieldOutcome(s, addr)
 			r.source = MapRead
 			r.version = sdVer
 			return
@@ -374,7 +386,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				})
 			} else {
 				if commited {
-					r.outcome = outcomeReturnZero
+					r.outcome = wipedFieldOutcome(s, addr)
 					r.source = MapRead
 					r.version = sdVersion
 					return
@@ -405,7 +417,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 							Val:        uint256.Int{},
 						})
 					}
-					r.outcome = outcomeReturnZero
+					r.outcome = wipedFieldOutcome(s, addr)
 					r.source = MapRead
 					r.version = sdVersion
 					return
@@ -855,7 +867,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{r.hdr, NewAccountView(acc)})
 		}
 		return acc, r.source, r.version, nil
-	case outcomeReturnZero:
+	case outcomeReturnZero, outcomeReturnEmpty:
 		// The account read as absent because a prior tx self-destructed it; the
 		// SD dependency is already recorded (at the destruct version). Return
 		// absent at that version WITHOUT re-seeding the committed origin. Seeding
@@ -1022,7 +1034,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 			return uint256.Int{}, StorageRead, UnknownVersion, nil
 		}
 		return r.so.Balance(), StorageRead, UnknownVersion, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readBalance: unexpected outcome %d for %x", r.outcome, addr))
@@ -1057,7 +1069,7 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 			s.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{r.hdr, r.mapBalanceVal})
 		}
 		return r.mapBalanceVal, r.source, r.version, nil
-	case outcomeReturnZero:
+	case outcomeReturnZero, outcomeReturnEmpty:
 		// Account was self-destructed (or not present): return the zero value,
 		// NOT the caller's stale pre-destruct balance. outcomeReturnDefault
 		// keeps the current value; only this branch must zero it.
@@ -1112,7 +1124,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 			return 0, StorageRead, UnknownVersion, nil
 		}
 		return r.so.Nonce(), StorageRead, UnknownVersion, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readNonce: unexpected outcome %d for %x", r.outcome, addr))
@@ -1141,7 +1153,7 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 			s.versionedReads.SetNonce(addr, VersionedRead[uint64]{r.hdr, r.mapNonceVal})
 		}
 		return r.mapNonceVal, r.source, r.version, nil
-	case outcomeReturnZero:
+	case outcomeReturnZero, outcomeReturnEmpty:
 		return 0, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
@@ -1193,7 +1205,7 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 			return 0, StorageRead, UnknownVersion, nil
 		}
 		return r.so.data.Incarnation, StorageRead, UnknownVersion, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readIncarnation: unexpected outcome %d for %x", r.outcome, addr))
@@ -1214,7 +1226,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapIncarnationVal, r.source, r.version, nil
-	case outcomeReturnZero:
+	case outcomeReturnZero, outcomeReturnEmpty:
 		return 0, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
@@ -1274,7 +1286,7 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 		}
 		code, err := r.so.Code()
 		return code, StorageRead, UnknownVersion, err
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return nil, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readCode: unexpected outcome %d for %x", r.outcome, addr))
@@ -1298,7 +1310,7 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) ([]byte, ReadSource,
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapCodeVal, r.source, r.version, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return nil, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
@@ -1353,7 +1365,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 			return 0, StorageRead, UnknownVersion, err
 		}
 		return v, StorageRead, UnknownVersion, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return 0, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readCodeSize: unexpected outcome %d for %x", r.outcome, addr))
@@ -1409,6 +1421,8 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 		return r.so.data.CodeHash, StorageRead, UnknownVersion, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return accounts.NilCodeHash, r.source, r.version, nil
+	case outcomeReturnEmpty:
+		return accounts.EmptyCodeHash, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readCodeHash: unexpected outcome %d for %x", r.outcome, addr))
 	}
@@ -1439,6 +1453,8 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 		return r.mapCodeHashVal, r.source, r.version, nil
 	case outcomeReturnZero:
 		return accounts.NilCodeHash, r.source, r.version, nil
+	case outcomeReturnEmpty:
+		return accounts.EmptyCodeHash, r.source, r.version, nil
 	case outcomeReturnDefault:
 		if r.recordVR {
 			s.versionedReads.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{r.hdr, currentHash})
@@ -1509,7 +1525,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			return uint256.Int{}, StorageRead, UnknownVersion, false, err
 		}
 		return v, StorageRead, UnknownVersion, clean, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
 	default:
 		panic(fmt.Sprintf("readStateForSet: unexpected outcome %d for %x", r.outcome, addr))
@@ -1559,7 +1575,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		}
 		v, err := r.so.GetCommittedState(key)
 		return v, StorageRead, UnknownVersion, err
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readCommittedState: unexpected outcome %d for %x", r.outcome, addr))
@@ -1614,7 +1630,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 			return false, StorageRead, UnknownVersion, nil
 		}
 		return r.so.selfdestructed, StorageRead, UnknownVersion, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return false, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readSelfDestruct: unexpected outcome %d for %x", r.outcome, addr))
@@ -1636,7 +1652,7 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapSelfDestructVal, r.source, r.version, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		if r.recordVR {
 			// SelfDestructPath defaultV is false — the zero value.
 			s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: r.hdr})
@@ -1670,7 +1686,7 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 		return nil, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapAddressVal, r.source, r.version, nil
-	case outcomeReturnZero, outcomeReturnDefault:
+	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		if r.recordVR {
 			// AddressPath defaultV is nil.
 			s.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: r.hdr})
