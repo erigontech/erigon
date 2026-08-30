@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -24,7 +25,10 @@ type PendingPayloadStore interface {
 	Load(context.Context, uint64) ([]storedPendingPayload, error)
 }
 
-var ErrPendingPayloadMayExist = errors.New("pending payload durability is uncertain")
+var (
+	ErrPendingPayloadMayExist = errors.New("pending payload durability is uncertain")
+	ErrPendingPayloadCapacity = errors.New("pending payload capacity reached")
+)
 
 type storedPendingPayload struct {
 	Slot                  uint64
@@ -48,6 +52,7 @@ type filePendingPayloadStore struct {
 	dir       string
 	beaconCfg *clparams.BeaconChainConfig
 	syncDir   func(string) error
+	mu        sync.Mutex
 }
 
 const (
@@ -71,7 +76,30 @@ func (s *filePendingPayloadStore) Save(ctx context.Context, key pendingPayloadKe
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return err
+	}
+	path := s.path(key)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		entries, err := os.ReadDir(s.dir)
+		if err != nil {
+			return err
+		}
+		count := 0
+		for _, entry := range entries {
+			if isPendingPayloadFile(entry) {
+				count++
+			}
+		}
+		if count >= maxPendingPayloadFiles {
+			return fmt.Errorf("%w: maximum %d active records", ErrPendingPayloadCapacity, maxPendingPayloadFiles)
+		}
+	} else if err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(s.dir, ".pending-*.tmp")
@@ -92,7 +120,7 @@ func (s *filePendingPayloadStore) Save(ctx context.Context, key pendingPayloadKe
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, s.path(key)); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
 	if err := s.syncDir(s.dir); err != nil {
@@ -102,6 +130,11 @@ func (s *filePendingPayloadStore) Save(ctx context.Context, key pendingPayloadKe
 }
 
 func (s *filePendingPayloadStore) Delete(ctx context.Context, key pendingPayloadKey) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -131,6 +164,11 @@ func syncPendingDirectory(path string) error {
 }
 
 func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]storedPendingPayload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(s.dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -151,7 +189,7 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if !isPendingPayloadFile(entry) {
 			continue
 		}
 		slot, err := pendingPayloadSlotFromName(entry.Name())
@@ -202,6 +240,10 @@ func (s *filePendingPayloadStore) Load(ctx context.Context, minSlot uint64) ([]s
 		}
 	}
 	return records, nil
+}
+
+func isPendingPayloadFile(entry os.DirEntry) bool {
+	return !entry.IsDir() && filepath.Ext(entry.Name()) == ".json"
 }
 
 func pendingPayloadSlotFromName(name string) (uint64, error) {

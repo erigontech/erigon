@@ -2,6 +2,7 @@ package epbs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -121,6 +122,113 @@ func TestFilePendingPayloadStoreSyncsDirectoryAfterSaveAndDelete(t *testing.T) {
 	require.NoError(t, store.Delete(t.Context(), key))
 	require.True(t, deleteSynced)
 }
+
+func TestFilePendingPayloadStoreRejectsNewIdentityAboveCapacity(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	dir := t.TempDir()
+	store := newFilePendingPayloadStore(dir, loop.beaconCfg)
+	store.syncDir = func(string) error { return nil }
+	for i := uint64(0); i < maxPendingPayloadFiles; i++ {
+		key, pending := pendingPayloadForStoreTest(t, loop, i+1)
+		require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
+	}
+	restarted := newFilePendingPayloadStore(dir, loop.beaconCfg)
+	restarted.syncDir = func(string) error { return nil }
+	records, err := restarted.Load(t.Context(), 0)
+	require.NoError(t, err)
+	require.Len(t, records, maxPendingPayloadFiles)
+	firstKey, replacement := pendingPayloadForStoreTest(t, loop, 1)
+	replacement.bidValue = 2
+	require.NoError(t, restarted.Save(t.Context(), firstKey, replacement, loop.manager.Pubkey()))
+	records, err = restarted.Load(t.Context(), 0)
+	require.NoError(t, err)
+	require.Len(t, records, maxPendingPayloadFiles)
+	replaced := false
+	for i := range records {
+		if records[i].BlockHash == firstKey.blockHash {
+			require.Equal(t, uint64(2), records[i].BidValue)
+			replaced = true
+		}
+	}
+	require.True(t, replaced)
+	key, pending := pendingPayloadForStoreTest(t, loop, maxPendingPayloadFiles+1)
+
+	err = restarted.Save(t.Context(), key, pending, loop.manager.Pubkey())
+
+	require.ErrorIs(t, err, ErrPendingPayloadCapacity)
+}
+
+func TestFilePendingPayloadStoreConcurrentAdmissionDoesNotExceedCapacity(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
+	store.syncDir = func(string) error { return nil }
+	results := make(chan error, maxPendingPayloadFiles+1)
+	for i := uint64(1); i <= maxPendingPayloadFiles+1; i++ {
+		key, pending := pendingPayloadForStoreTest(t, loop, i)
+		go func() {
+			results <- store.Save(t.Context(), key, pending, loop.manager.Pubkey())
+		}()
+	}
+	accepted := 0
+	rejected := 0
+	for range maxPendingPayloadFiles + 1 {
+		err := <-results
+		if err == nil {
+			accepted++
+		} else {
+			require.ErrorIs(t, err, ErrPendingPayloadCapacity)
+			rejected++
+		}
+	}
+	require.Equal(t, maxPendingPayloadFiles, accepted)
+	require.Equal(t, 1, rejected)
+	records, err := store.Load(t.Context(), 0)
+	require.NoError(t, err)
+	require.Len(t, records, maxPendingPayloadFiles)
+}
+
+func TestBuilderLoopDoesNotPublishBidAbovePendingPayloadCapacity(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
+	store.syncDir = func(string) error { return nil }
+	for i := uint64(1); i <= maxPendingPayloadFiles; i++ {
+		key, pending := pendingPayloadForStoreTest(t, loop, i)
+		require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
+	}
+	loop.pendingStore = store
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+
+	err := loop.OnSlot(t.Context(), sc)
+
+	require.ErrorIs(t, err, ErrPendingPayloadCapacity)
+	require.Empty(t, submitter.submittedBids)
+	require.Empty(t, loop.pendingPayloads)
+	require.Zero(t, loop.manager.reservedBidValue)
+	records, loadErr := store.Load(t.Context(), 0)
+	require.NoError(t, loadErr)
+	require.Len(t, records, maxPendingPayloadFiles)
+}
+
+func pendingPayloadForStoreTest(t *testing.T, loop *BuilderLoop, identity uint64) (pendingPayloadKey, *pendingPayload) {
+	blockHash := common.BigToHash(new(big.Int).SetUint64(identity))
+	key := pendingPayloadKey{
+		slot: identity, parentBlockHash: common.HexToHash("0xdead"),
+		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: blockHash,
+	}
+	payload := makeTestPayload(t, big.NewInt(1))
+	payload.Eth1Block.SlotNumber = identity
+	payload.Eth1Block.BlockHash = blockHash
+	return key, &pendingPayload{
+		slot: identity, builderIndex: 42, bidValue: 1, parent: testParentInfo(), assembled: payload,
+		execReqs: cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion),
+	}
+}
+
 func (failingPendingPayloadStore) Delete(context.Context, pendingPayloadKey) error { return nil }
 func (failingPendingPayloadStore) Load(context.Context, uint64) ([]storedPendingPayload, error) {
 	return nil, nil
@@ -250,7 +358,7 @@ func TestBuilderLoopRestoreIgnoresExpiredFilesBeforeCapacityCheck(t *testing.T) 
 			slot: slot, builderIndex: 42, bidValue: 1, parent: testParentInfo(), assembled: payload,
 			execReqs: cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion),
 		}
-		require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
+		writePendingRecordForLoadTest(t, store, key, pending, loop.manager.Pubkey())
 		return key
 	}
 	for slot := uint64(1); slot <= maxPendingPayloadFiles+1; slot++ {
@@ -267,6 +375,15 @@ func TestBuilderLoopRestoreIgnoresExpiredFilesBeforeCapacityCheck(t *testing.T) 
 	entries, err := os.ReadDir(store.dir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
+}
+
+func writePendingRecordForLoadTest(t *testing.T, store *filePendingPayloadStore, key pendingPayloadKey, pending *pendingPayload, pubkey common.Bytes48) {
+	record, err := encodeStoredPendingPayload(key, pending, pubkey)
+	require.NoError(t, err)
+	data, err := json.Marshal(record)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(store.dir, 0o700))
+	require.NoError(t, os.WriteFile(store.path(key), data, 0o600))
 }
 
 func TestFilePendingPayloadStoreRejectsFilenameRecordIdentityMismatch(t *testing.T) {
