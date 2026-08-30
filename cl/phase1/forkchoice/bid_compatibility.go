@@ -1,57 +1,72 @@
 package forkchoice
 
 import (
+	"context"
 	"errors"
-	"fmt"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
 
-// IsBidCompatibleWithHead evaluates the gossip bid-parent rule against a coherent head root.
-func (f *ForkChoiceStore) IsBidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid) (bool, error) {
+// IsBuilderBidCompatibleWithHead applies the gossip bid-parent rule using only bounded in-memory head data.
+func (f *ForkChoiceStore) IsBuilderBidCompatibleWithHead(ctx context.Context, bid *cltypes.ExecutionPayloadBid) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if bid == nil {
 		return false, errors.New("nil execution payload bid")
 	}
-	headNode, err := f.GetHeadNode()
-	if err != nil {
-		return false, fmt.Errorf("head unavailable: %w", err)
+	headNode, ok := f.cachedHeadNode()
+	if !ok {
+		return false, errors.New("head unavailable")
 	}
 	headRoot := headNode.Root
 	headHeader, ok := f.GetHeader(headRoot)
 	if !ok || headHeader == nil {
 		return false, errors.New("head block header unavailable")
 	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	headBlock, hasBlock := f.GetBlock(headRoot)
-	if hasBlock && headBlock != nil && headBlock.Block != nil && headBlock.Block.Body != nil {
-		signedHeadBid := headBlock.Block.Body.GetSignedExecutionPayloadBid()
-		if signedHeadBid != nil && signedHeadBid.Message != nil {
-			return BidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, f.ShouldBuildOnFull(headNode, bid.Slot)), nil
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if !hasBlock || headBlock == nil || headBlock.Block == nil || headBlock.Block.Body == nil {
+		return false, errors.New("head block unavailable")
+	}
+	finalHeadNode, ok := f.cachedHeadNode()
+	if !ok || finalHeadNode != headNode {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	signedHeadBid := headBlock.Block.Body.GetSignedExecutionPayloadBid()
+	if signedHeadBid != nil && signedHeadBid.Message != nil {
+		buildOnFull := f.ShouldBuildOnFull(finalHeadNode, bid.Slot)
+		if err := ctx.Err(); err != nil {
+			return false, err
 		}
-		if headPayload := headBlock.Block.Body.ExecutionPayload; headPayload != nil {
-			return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
+		if latestHeadNode, ok := f.cachedHeadNode(); !ok || latestHeadNode != finalHeadNode {
+			return false, nil
 		}
+		return BidCompatibleWithHead(bid, headRoot, headHeader, signedHeadBid.Message, buildOnFull), nil
 	}
-	headState, err := f.GetStateAtBlockRoot(headRoot, true)
-	if err != nil {
-		return false, fmt.Errorf("head state unavailable: %w", err)
-	}
-	if headState == nil {
-		return false, errors.New("head state unavailable")
-	}
-	if headState.Version() >= clparams.GloasVersion {
-		headBid := headState.GetLatestExecutionPayloadBid()
-		if headBid == nil {
-			return false, errors.New("head bid unavailable")
-		}
-		return BidCompatibleWithHead(bid, headRoot, headHeader, headBid, f.ShouldBuildOnFull(headNode, bid.Slot)), nil
-	}
-	headPayload := headState.LatestExecutionPayloadHeader()
+	headPayload := headBlock.Block.Body.ExecutionPayload
 	if headPayload == nil {
-		return false, errors.New("head execution payload unavailable")
+		return false, errors.New("head payload unavailable")
 	}
 	return bid.ParentBlockRoot == headRoot && bid.ParentBlockHash == headPayload.BlockHash, nil
+}
+
+func (f *ForkChoiceStore) cachedHeadNode() (ForkChoiceNode, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.headHash == (common.Hash{}) {
+		return ForkChoiceNode{}, false
+	}
+	return ForkChoiceNode{Root: f.headHash, PayloadStatus: f.headPayloadStatus}, true
 }
 
 // BidCompatibleWithHead reports whether a bid builds on the head or its parent under the Gloas gossip rule.

@@ -59,7 +59,7 @@ type payloadBroadcastProgress struct {
 }
 
 type executionPayloadProcessor interface {
-	IsBidCompatibleWithHead(*cltypes.ExecutionPayloadBid) (bool, error)
+	IsBuilderBidCompatibleWithHead(context.Context, *cltypes.ExecutionPayloadBid) (bool, error)
 	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
@@ -84,6 +84,9 @@ func NewCaplinBidSubmitter(
 // SubmitBid adds the bid to the local highest-bids pool and publishes it on
 // the execution_payload_bid gossip topic.
 func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedExecutionPayloadBid) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrBidNotPublished, err)
+	}
 	if bid == nil || bid.Message == nil {
 		return fmt.Errorf("%w: nil bid", ErrBidNotPublished)
 	}
@@ -95,9 +98,12 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	if err != nil {
 		return fmt.Errorf("%w: encode bid: %w", ErrBidNotPublished, err)
 	}
-	compatible, err := s.isBidCompatibleWithHead(bid.Message)
+	compatible, err := s.isBidCompatibleWithHead(ctx, bid.Message)
 	if err != nil {
 		return fmt.Errorf("%w: validate parent compatibility: %w", ErrBidNotPublished, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrBidNotPublished, err)
 	}
 	if !compatible {
 		return fmt.Errorf("%w: parent is no longer active", ErrBidNotPublished)
@@ -113,11 +119,11 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	return nil
 }
 
-func (s *CaplinBidSubmitter) isBidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid) (bool, error) {
+func (s *CaplinBidSubmitter) isBidCompatibleWithHead(ctx context.Context, bid *cltypes.ExecutionPayloadBid) (bool, error) {
 	if s.forkchoice == nil {
 		return false, nil
 	}
-	return s.forkchoice.IsBidCompatibleWithHead(bid)
+	return s.forkchoice.IsBuilderBidCompatibleWithHead(ctx, bid)
 }
 
 // BroadcastPayload publishes the envelope and advances the local block to FULL.

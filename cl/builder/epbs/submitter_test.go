@@ -18,16 +18,17 @@ import (
 )
 
 type testEnvelopeProcessor struct {
-	err              error
-	errors           []error
-	calls            *int
-	persisted        *cltypes.SignedExecutionPayloadEnvelope
-	readErr          error
-	headRoot         common.Hash
-	headHeader       *cltypes.BeaconBlockHeader
-	headBid          *cltypes.ExecutionPayloadBid
-	buildOnFull      bool
-	compatibilityErr error
+	err               error
+	errors            []error
+	calls             *int
+	persisted         *cltypes.SignedExecutionPayloadEnvelope
+	readErr           error
+	headRoot          common.Hash
+	headHeader        *cltypes.BeaconBlockHeader
+	headBid           *cltypes.ExecutionPayloadBid
+	buildOnFull       bool
+	compatibilityErr  error
+	compatibilityHook func(context.Context, *cltypes.ExecutionPayloadBid) (bool, error)
 }
 
 func (p testEnvelopeProcessor) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
@@ -44,11 +45,37 @@ func (p testEnvelopeProcessor) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Signe
 	return p.persisted, p.readErr
 }
 
-func (p testEnvelopeProcessor) IsBidCompatibleWithHead(bid *cltypes.ExecutionPayloadBid) (bool, error) {
+func (p testEnvelopeProcessor) IsBuilderBidCompatibleWithHead(ctx context.Context, bid *cltypes.ExecutionPayloadBid) (bool, error) {
+	if p.compatibilityHook != nil {
+		return p.compatibilityHook(ctx, bid)
+	}
 	if p.compatibilityErr != nil {
 		return false, p.compatibilityErr
 	}
 	return forkchoice.BidCompatibleWithHead(bid, p.headRoot, p.headHeader, p.headBid, p.buildOnFull), nil
+}
+
+func TestCaplinBidSubmitterSubmitBidStopsWhenCompatibilityContextIsCanceled(t *testing.T) {
+	started := make(chan struct{})
+	processor := testEnvelopeProcessor{compatibilityHook: func(ctx context.Context, _ *cltypes.ExecutionPayloadBid) (bool, error) {
+		close(started)
+		<-ctx.Done()
+		return false, ctx.Err()
+	}}
+	gossipPublisher := &testGossipPublisher{}
+	submitter := NewCaplinBidSubmitter(pool.NewEpbsPool(), gossipPublisher, processor, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		result <- submitter.SubmitBid(ctx, testSignedBid(100, 1, 1000))
+	}()
+	<-started
+	cancel()
+
+	err := <-result
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, ErrBidNotPublished)
+	require.Zero(t, gossipPublisher.published)
 }
 
 type testGossipPublisher struct {
