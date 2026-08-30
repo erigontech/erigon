@@ -852,12 +852,13 @@ func (q *QueueWithRetry) ReTry(t Task) {
 		return
 	}
 	heap.Push(&q.retires, t)
-	wake := q.wake
-	q.lock.Unlock()
+	// Send under the lock: a consumer that pops this task before its token exists
+	// leaves the token behind, and a token without a task wakes a worker for nothing.
 	select {
-	case wake <- struct{}{}:
+	case q.wake <- struct{}{}:
 	default:
 	}
+	q.lock.Unlock()
 }
 
 // Next - blocks until new task available
