@@ -379,13 +379,15 @@ func BenchmarkQueueWithRetryDispatch(b *testing.B) {
 
 			for range workers {
 				wg.Go(func() {
+					var sink uint64
+					defer func() { queueBenchSink.Add(sink) }()
 					for {
 						task, ok := q.Next(context.Background())
 						if !ok {
 							return
 						}
 						stub := task.(*queueStubTask)
-						queueBenchSink += busyWork(workPerTask)
+						sink += busyWork(workPerTask)
 						if stub.remaining > 0 {
 							stub.remaining--
 							q.ReTry(stub)
@@ -424,7 +426,7 @@ func BenchmarkQueueWithRetryDispatch(b *testing.B) {
 	}
 }
 
-var queueBenchSink uint64
+var queueBenchSink atomic.Uint64
 
 // busyWork stands in for the EVM execution a real task carries, so the
 // benchmark does not report queue overhead as if it were the whole cost.
