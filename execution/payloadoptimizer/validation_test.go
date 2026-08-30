@@ -212,18 +212,11 @@ func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
 	params.MaxBlobsPerBlock = &maxBlobs
 	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
-	to := common.Address{0x01}
+	baseWrapper := candidateBlobWrapper(t, 0, 0)
 	blobTransaction := func(nonce uint64) types.Transaction {
-		return &types.BlobTx{
-			DynamicFeeTransaction: types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21_000, To: &to},
-				ChainID:  *uint256.NewInt(1),
-				TipCap:   *uint256.NewInt(1),
-				FeeCap:   *uint256.NewInt(1),
-			},
-			MaxFeePerBlobGas:    *uint256.NewInt(1),
-			BlobVersionedHashes: []common.Hash{{0x01, byte(nonce)}},
-		}
+		wrapper := types.CopyTxs(types.Transactions{baseWrapper})[0].(*types.BlobTxWrapper)
+		wrapper.Tx.Nonce = nonce
+		return wrapper
 	}
 	resultWith := func(blobCount int) execmodule.AssembledBlockResult {
 		result := validColdResult(params, requests, 1)
@@ -243,6 +236,70 @@ func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
 
 	require.NoError(t, applyColdResult(t, buildCtx, resultWith(1)))
 	require.ErrorIs(t, applyColdResult(t, buildCtx, resultWith(2)), payloadoptimizer.ErrCandidateContextMismatch)
+}
+
+func TestCandidateValidationRequiresValidBlobSidecars(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	maxBlobs := uint64(1)
+	params.MaxBlobsPerBlock = &maxBlobs
+	buildCtx, err := payloadoptimizer.NewBuildContext(params, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	validV0 := candidateBlobWrapper(t, 0, 0)
+	validV1 := candidateBlobWrapper(t, 1, 0)
+	missing := types.CopyTxs(types.Transactions{validV0})[0].(*types.BlobTxWrapper)
+	missing.Blobs = nil
+	missing.Commitments = nil
+	missing.Proofs = nil
+	invalidV0 := types.CopyTxs(types.Transactions{validV0})[0].(*types.BlobTxWrapper)
+	invalidV0.Proofs[0][0] ^= 0xff
+	invalidV1 := types.CopyTxs(types.Transactions{validV1})[0].(*types.BlobTxWrapper)
+	invalidV1.Proofs[0][0] ^= 0xff
+	unknown := types.CopyTxs(types.Transactions{validV0})[0].(*types.BlobTxWrapper)
+	unknown.WrapperVersion = 2
+	resultWith := func(transaction types.Transaction) execmodule.AssembledBlockResult {
+		result := validColdResult(params, requests, 1)
+		blobGasUsed := uint64(protocolparams.GasPerBlob)
+		header := result.Block.Block.Header()
+		header.BlobGasUsed = &blobGasUsed
+		receipt := &types.Receipt{Type: types.BlobTxType, BlockNumber: uint256.NewInt(2), GasUsed: 21_000, CumulativeGasUsed: 21_000}
+		result.Block.Block = types.NewBlock(header, types.Transactions{transaction}, nil, types.Receipts{receipt}, params.Withdrawals, nil)
+		result.Block.Receipts = types.Receipts{receipt}
+		return result
+	}
+
+	for name, transaction := range map[string]types.Transaction{
+		"plain":      &validV0.Tx,
+		"missing":    missing,
+		"invalid v0": invalidV0,
+		"invalid v1": invalidV1,
+		"unknown":    unknown,
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.ErrorIs(t, applyColdResult(t, buildCtx, resultWith(transaction)), payloadoptimizer.ErrCandidateContextMismatch)
+		})
+	}
+	for name, transaction := range map[string]types.Transaction{"v0": validV0, "v1": validV1} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, applyColdResult(t, buildCtx, resultWith(transaction)))
+		})
+	}
+}
+
+func candidateBlobWrapper(t *testing.T, version byte, nonce uint64) *types.BlobTxWrapper {
+	t.Helper()
+	var wrapper *types.BlobTxWrapper
+	if version == 0 {
+		wrapper = types.MakeWrappedBlobTxn(uint256.NewInt(1))
+		wrapper.Proofs = wrapper.Proofs[:1]
+	} else {
+		wrapper = types.MakeV1WrappedBlobTxn(uint256.NewInt(1))
+		wrapper.Proofs = wrapper.Proofs[:protocolparams.CellsPerExtBlob]
+	}
+	wrapper.Tx.BlobVersionedHashes = wrapper.Tx.BlobVersionedHashes[:1]
+	wrapper.Blobs = wrapper.Blobs[:1]
+	wrapper.Commitments = wrapper.Commitments[:1]
+	wrapper.Tx.Nonce = nonce
+	return wrapper
 }
 
 func TestCandidateValidationUsesCanonicalParentAndTargetGasLimit(t *testing.T) {

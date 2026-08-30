@@ -357,6 +357,11 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	}
 	var blobCount uint64
 	for _, transaction := range transactions {
+		if transaction.Type() == types.BlobTxType {
+			if _, ok := transaction.(*types.BlobTxWrapper); !ok {
+				return mismatch("blob transaction sidecar")
+			}
+		}
 		transactionBlobs := uint64(len(transaction.GetBlobHashes()))
 		if transactionBlobs > ^uint64(0)-blobCount {
 			return mismatch("blob count")
@@ -376,6 +381,15 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		}
 	} else if header.BlobGasUsed == nil || *header.BlobGasUsed != expectedBlobGas {
 		return mismatch("blob gas")
+	}
+	for _, transaction := range transactions {
+		wrapper, ok := transaction.(*types.BlobTxWrapper)
+		if !ok {
+			continue
+		}
+		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
+			return mismatch("blob transaction sidecar: " + err.Error())
+		}
 	}
 	for _, uncle := range result.Block.Block.Uncles() {
 		if uncle == nil {
