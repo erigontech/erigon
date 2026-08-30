@@ -61,3 +61,29 @@ func TestSeedableFrozenEpoch(t *testing.T) {
 	require.False(t, cfg.IsFrozen(small))
 	require.False(t, cfg.Seedable(small))
 }
+
+// The preverified type filter derives a file's type from the last dash-separated token before the
+// extension, which for an epoch segment is the "ep" marker rather than the type. Dropping those
+// entries as unreadable means a published epoch manifest can never turn into a download request.
+func TestTypedKeepsEpochEntries(t *testing.T) {
+	types := snaptype2.BlockSnapshotTypes
+	p := snapcfg.Preverified{Items: []snapcfg.PreverifiedItem{
+		{Name: "v1.1-000000-000512-headers-ep.seg", Hash: "aa"},
+		{Name: "v1.1-000000-000512-bodies-ep.seg", Hash: "bb"},
+		{Name: "v1.1-000000-000512-transactions-ep.seg", Hash: "cc"},
+		{Name: "v2.0-000000-000512-transactions-to-block-ep.idx", Hash: "dd"},
+		{Name: "v1.1-000000-000500-headers.seg", Hash: "ee"}, // decimal still kept
+	}}
+
+	var kept []string
+	for _, it := range p.Typed(types).Items {
+		kept = append(kept, it.Name)
+	}
+	require.ElementsMatch(t, []string{
+		"v1.1-000000-000512-headers-ep.seg",
+		"v1.1-000000-000512-bodies-ep.seg",
+		"v1.1-000000-000512-transactions-ep.seg",
+		"v2.0-000000-000512-transactions-to-block-ep.idx",
+		"v1.1-000000-000500-headers.seg",
+	}, kept)
+}

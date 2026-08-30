@@ -1681,3 +1681,69 @@ func TestCanRetireEpochStep(t *testing.T) {
 	require.Equal(t, uint64(0), from)
 	require.Equal(t, uint64(8_192), to)
 }
+
+// A node that downloaded its lower segments starts producing again at the end of the last one. How
+// big a segment it may cut there depends on what that block is aligned to.
+func TestCanRetireEpochSeam(t *testing.T) {
+	require := require.New(t)
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
+
+	cases := []struct {
+		name                         string
+		inFrom, inTo, outFrom, outTo uint64
+	}{
+		{"8192-aligned boundary jumps one era1 file", 598_016, 610_000, 598_016, 606_208},
+		{"65536-aligned boundary jumps a whole tier", 589_824, 700_000, 589_824, 655_360},
+		{"only the 1024 floor fits", 598_016, 600_000, 598_016, 599_040},
+	}
+	for _, tc := range cases {
+		from, to, can := CanRetire(true, tc.inFrom, tc.inTo, snaptype.Unknown, snCfg, 0)
+		require.True(can, tc.name)
+		require.Equal(int(tc.outFrom), int(from), tc.name)
+		require.Equal(int(tc.outTo), int(to), tc.name)
+	}
+}
+
+// After a download the file list is one large segment followed by small ones just produced. Those
+// small ones merge among themselves; the large neighbour is already full and must be left alone.
+func TestFindMergeRangeEpochSeam(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	seam := func(produced uint64) Ranges {
+		r := Ranges{
+			NewRange(0, 524_288),
+			NewRange(524_288, 589_824),
+			NewRange(589_824, 598_016),
+		}
+		for i := range produced {
+			r = append(r, NewRange(598_016+i*1_024, 598_016+(i+1)*1_024))
+		}
+		return r
+	}
+
+	full := seam(8)
+	require.Equal(t, Ranges{NewRange(598_016, 606_208)}.String(),
+		Ranges(merger.FindMergeRanges(full, 606_208)).String())
+
+	require.Empty(t, merger.FindMergeRanges(seam(7), 605_184),
+		"an incomplete era1 file must not drag the downloaded neighbour into a merge")
+}
+
+// A pruned type starts above block 0 and between two cuts, so sooner or later the ladder asks for a
+// merge reaching below its first file. Doing it would write a file short of the range in its name.
+func TestFindMergeRangeSkipsUncoveredLowerHalf(t *testing.T) {
+	merger := NewMerger("x", 1, log.LvlInfo, nil, chainspec.Mainnet.Config, nil)
+	merger.DisableFsync()
+
+	// transactions pruned to 3_200_000; the first 8192-aligned boundary above it is 3_203_072, whose
+	// merge range would start at 3_194_880 — below anything on disk.
+	var r Ranges
+	for from := uint64(3_200_000); from < 3_203_072; from += 1_024 {
+		r = append(r, NewRange(from, from+1_024))
+	}
+	r = append(r, NewRange(3_202_048, 3_203_072))
+
+	require.Empty(t, merger.FindMergeRanges(r, 3_203_072),
+		"the 8192 tier below 3_203_072 reaches under the pruned frontier")
+}

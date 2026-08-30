@@ -242,6 +242,13 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
+		// An epoch segment carries the "ep" marker as a suffix on the type, so the last dash-separated
+		// token is the marker; the type is the one before it.
+		if typeName == snaptype.EpochMarker {
+			if prevSep := strings.LastIndex(name[:lastSep], "-"); prevSep >= 0 {
+				typeName = name[prevSep+1 : lastSep]
+			}
+		}
 		include := false
 		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
