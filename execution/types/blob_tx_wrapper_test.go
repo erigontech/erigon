@@ -53,6 +53,32 @@ func TestConvertToV1(t *testing.T) {
 	assert.Len(t, v0.Proofs, 2)
 }
 
+func TestValidateBlobTransactionWrapperVersions(t *testing.T) {
+	tests := []struct {
+		name    string
+		wrapper *BlobTxWrapper
+		wantErr bool
+	}{
+		{name: "v0", wrapper: MakeWrappedBlobTxn(uint256.NewInt(1))},
+		{name: "v1", wrapper: MakeV1WrappedBlobTxn(uint256.NewInt(1))},
+		{name: "unknown", wrapper: func() *BlobTxWrapper {
+			wrapper := MakeWrappedBlobTxn(uint256.NewInt(1))
+			wrapper.WrapperVersion = 2
+			return wrapper
+		}(), wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.wrapper.ValidateBlobTransactionWrapper()
+			if test.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 // helpers to convert typed slices into the formats expected by VerifyCellProofBatch
 func (txw *BlobTxWrapper) blobBytes() [][]byte {
 	out := make([][]byte, len(txw.Blobs))

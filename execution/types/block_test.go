@@ -814,6 +814,22 @@ func TestCopyTxs(t *testing.T) {
 	assert.Equal(t, txs, copies)
 }
 
+func TestCopyTxsPreservesBlobWrapperVersionAndSidecarOwnership(t *testing.T) {
+	original := MakeV1WrappedBlobTxn(uint256.NewInt(1))
+	copied := CopyTxs(Transactions{original})[0].(*BlobTxWrapper)
+
+	require.Equal(t, byte(1), copied.WrapperVersion)
+	require.Equal(t, original.Blobs, copied.Blobs)
+	require.Equal(t, original.Commitments, copied.Commitments)
+	require.Equal(t, original.Proofs, copied.Proofs)
+	original.Blobs[0][0] ^= 0xff
+	original.Commitments[0][0] ^= 0xff
+	original.Proofs[0][0] ^= 0xff
+	require.NotEqual(t, original.Blobs, copied.Blobs)
+	require.NotEqual(t, original.Commitments, copied.Commitments)
+	require.NotEqual(t, original.Proofs, copied.Proofs)
+}
+
 func TestCopyHeader(t *testing.T) {
 	// if this test fails when adding a new attribute to the Header struct
 	// please update the copy function to include logic for the new attribute

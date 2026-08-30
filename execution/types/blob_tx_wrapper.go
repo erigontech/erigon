@@ -245,22 +245,41 @@ func (c KZGCommitment) ComputeVersionedHash() common.Hash {
 
 /* BlobTxWrapper methods */
 
-// validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
+// ValidateBlobTransactionWrapper validates supported blob sidecar encodings and KZG bindings.
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
+	if txw == nil {
+		return errors.New("blob transaction wrapper is nil")
+	}
 	l1 := len(txw.Tx.BlobVersionedHashes)
 	if l1 == 0 {
 		return errors.New("a blob txn must contain at least one blob")
 	}
 	l2 := len(txw.Commitments)
 	l3 := len(txw.Blobs)
-	l4 := len(txw.Proofs)
-	if l1 != l2 || l1 != l3 || l1 != l4 {
-		return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, l4)
+	if l1 != l2 || l1 != l3 {
+		return fmt.Errorf("lengths don't match %v %v %v", l1, l2, l3)
 	}
-	kzgCtx := libkzg.Ctx()
-	err := kzgCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
-	if err != nil {
-		return fmt.Errorf("error during proof verification: %w", err)
+	switch txw.WrapperVersion {
+	case 0:
+		if len(txw.Proofs) != l1 {
+			return fmt.Errorf("lengths don't match %v %v %v %v", l1, l2, l3, len(txw.Proofs))
+		}
+		if err := libkzg.Ctx().VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs)); err != nil {
+			return fmt.Errorf("error during proof verification: %w", err)
+		}
+	case 1:
+		if len(txw.Proofs) != l1*int(goethkzg.CellsPerExtBlob) {
+			return fmt.Errorf("invalid cell proof count %v for %v blobs", len(txw.Proofs), l1)
+		}
+		blobBytes := make([][]byte, len(txw.Blobs))
+		for i := range txw.Blobs {
+			blobBytes[i] = txw.Blobs[i][:]
+		}
+		if err := libkzg.VerifyCellProofBatch(blobBytes, toComms(txw.Commitments), toProofs(txw.Proofs)); err != nil {
+			return fmt.Errorf("error during cell proof verification: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported blob transaction wrapper version %d", txw.WrapperVersion)
 	}
 	for i, h := range txw.Tx.BlobVersionedHashes {
 		if computed := txw.Commitments[i].ComputeVersionedHash(); computed != h {
