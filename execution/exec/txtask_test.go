@@ -378,9 +378,7 @@ func BenchmarkQueueWithRetryDispatch(b *testing.B) {
 			var wg sync.WaitGroup
 
 			for range workers {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					for {
 						task, ok := q.Next(context.Background())
 						if !ok {
@@ -395,7 +393,7 @@ func BenchmarkQueueWithRetryDispatch(b *testing.B) {
 						}
 						done.Add(1)
 					}
-				}()
+				})
 			}
 
 			b.ResetTimer()
