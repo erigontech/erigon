@@ -302,13 +302,13 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
-// pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) closePeer(pid peer.ID) {
 	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
 		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
 	}
 }
 
+// pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) pruneExcessPeers() {
 	peerCount := len(s.p2p.Host().Network().Peers())
 	targetPeerCount := int(s.cfg.MaxPeerCount)
