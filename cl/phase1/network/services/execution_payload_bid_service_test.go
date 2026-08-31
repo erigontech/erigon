@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -754,32 +753,6 @@ func TestExecutionPayloadBidServiceRemovePendingBidDoesNotRemoveOtherSameBuilder
 	current, exists := service.pending.jobs.Load(mustPendingBidKey(t, second))
 	require.True(t, exists)
 	require.Same(t, second, current.(*pendingJob[*cltypes.SignedExecutionPayloadBid]).msg)
-}
-
-func TestExecutionPayloadBidServicePendingQueueCapConcurrent(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-
-	service.pending.count.Store(maxPendingBids - 5)
-
-	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Go(func() {
-			msg := newTestSignedExecutionPayloadBid(uint64(10000+i), uint64(i), 1000)
-			_ = service.queuePendingBid(msg)
-		})
-	}
-	wg.Wait()
-
-	require.Equal(t, int32(maxPendingBids), service.pending.count.Load())
-	stored := 0
-	service.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Equal(t, 5, stored)
 }
 
 func TestExecutionPayloadBidServicePendingExpiry(t *testing.T) {

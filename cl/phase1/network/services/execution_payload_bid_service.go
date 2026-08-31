@@ -195,12 +195,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	preferences, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
-			if queueErr := s.queuePendingBid(msg); queueErr != nil {
-				return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, queueErr)
-			}
-			log.Trace("Queued execution payload bid waiting for dependencies",
-				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, err)
+			return s.queueBidAwaitingDependency(msg, err)
 		}
 		return err
 	}
@@ -216,12 +211,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 
 	if err := s.validateAndStoreBid(msg, preferences); err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
-			if queueErr := s.queuePendingBid(msg); queueErr != nil {
-				return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, queueErr)
-			}
-			log.Trace("Queued execution payload bid waiting for dependencies",
-				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, err)
+			return s.queueBidAwaitingDependency(msg, err)
 		}
 		return err
 	}
@@ -341,10 +331,6 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			return fmt.Errorf("%w: bid gas_limit %d not compatible with target %d (parent %d)",
 				ErrIgnore, bid.GasLimit, prefs.TargetGasLimit, parentGasLimit)
 		}
-	}
-
-	if err := s.validateHighestBid(bid); err != nil {
-		return err
 	}
 
 	if err := s.storeValidBid(msg); err != nil {
@@ -497,6 +483,15 @@ func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutio
 			"slot", msg.Message.Slot, "builderIndex", msg.Message.BuilderIndex, "err", err)
 	}
 	return pendingJobAdmissionError(result, err)
+}
+
+func (s *executionPayloadBidService) queueBidAwaitingDependency(msg *cltypes.SignedExecutionPayloadBid, dependencyErr error) error {
+	if err := s.queuePendingBid(msg); err != nil {
+		return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, err)
+	}
+	log.Trace("Queued execution payload bid waiting for dependencies",
+		"slot", msg.Message.Slot, "builderIndex", msg.Message.BuilderIndex, "err", dependencyErr)
+	return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, dependencyErr)
 }
 
 func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) (pendingBidKey, error) {

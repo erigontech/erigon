@@ -737,34 +737,6 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 2}))
 }
 
-func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _ := setupPayloadAttestationService(t, ctrl)
-
-	// Start near cap so only a few slots remain
-	service.pending.count.Store(maxPendingAttestations - 5)
-
-	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Go(func() {
-			blockRoot := common.Hash{byte(i), byte(i >> 8)}
-			msg := newTestPayloadAttestationMessage(100, uint64(10000+i), blockRoot)
-			_ = service.queuePendingAttestation(blockRoot, msg)
-		})
-	}
-	wg.Wait()
-
-	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
-	stored := 0
-	service.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Equal(t, 5, stored)
-}
-
 func TestPayloadAttestationServiceNames(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

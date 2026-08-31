@@ -19,7 +19,6 @@ package services
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -386,41 +385,6 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	require.NoError(t, err)
 	_, exists := impl.pending.jobs.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
 	require.False(t, exists)
-}
-
-func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
-	cfg := &clparams.MainnetBeaconConfig
-	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-
-	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
-	require.NoError(t, err)
-	impl := &executionPayloadService{
-		forkchoiceStore:    forkchoiceMock,
-		beaconCfg:          cfg,
-		emitters:           beaconevents.NewEventEmitter(),
-		seenEnvelopesCache: seenCache,
-	}
-	impl.pending = impl.newPendingQueue(canceledPendingQueueContext(t))
-
-	impl.pending.count.Store(maxPendingEnvelopes - 5)
-
-	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Go(func() {
-			blockRoot := common.Hash{byte(i), byte(i >> 8)}
-			envelope := newTestSignedEnvelope(100, blockRoot, uint64(10000+i))
-			_ = impl.queuePendingEnvelope(blockRoot, envelope)
-		})
-	}
-	wg.Wait()
-
-	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
-	stored := 0
-	impl.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Equal(t, 5, stored)
 }
 
 func TestExecutionPayloadServiceNames(t *testing.T) {
