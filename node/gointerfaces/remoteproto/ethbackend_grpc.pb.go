@@ -46,6 +46,7 @@ const (
 	ETHBACKEND_AAValidation_FullMethodName            = "/remote.ETHBACKEND/AAValidation"
 	ETHBACKEND_BlockForTxNum_FullMethodName           = "/remote.ETHBACKEND/BlockForTxNum"
 	ETHBACKEND_MinimumBlockAvailable_FullMethodName   = "/remote.ETHBACKEND/MinimumBlockAvailable"
+	ETHBACKEND_FrozenBlocks_FullMethodName            = "/remote.ETHBACKEND/FrozenBlocks"
 	ETHBACKEND_SetHead_FullMethodName                 = "/remote.ETHBACKEND/SetHead"
 )
 
@@ -95,6 +96,7 @@ type ETHBACKENDClient interface {
 	AAValidation(ctx context.Context, in *AAValidationRequest, opts ...grpc.CallOption) (*AAValidationReply, error)
 	BlockForTxNum(ctx context.Context, in *BlockForTxNumRequest, opts ...grpc.CallOption) (*BlockForTxNumResponse, error)
 	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MinimumBlockAvailableReply, error)
+	FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksReply, error)
 	SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error)
 }
 
@@ -371,6 +373,16 @@ func (c *eTHBACKENDClient) MinimumBlockAvailable(ctx context.Context, in *emptyp
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FrozenBlocksReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_FrozenBlocks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetHeadReply)
@@ -427,6 +439,7 @@ type ETHBACKENDServer interface {
 	AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error)
 	BlockForTxNum(context.Context, *BlockForTxNumRequest) (*BlockForTxNumResponse, error)
 	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error)
+	FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksReply, error)
 	SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
@@ -512,6 +525,9 @@ func (UnimplementedETHBACKENDServer) BlockForTxNum(context.Context, *BlockForTxN
 }
 func (UnimplementedETHBACKENDServer) MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MinimumBlockAvailable not implemented")
+}
+func (UnimplementedETHBACKENDServer) FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method FrozenBlocks not implemented")
 }
 func (UnimplementedETHBACKENDServer) SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetHead not implemented")
@@ -958,6 +974,24 @@ func _ETHBACKEND_MinimumBlockAvailable_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_FrozenBlocks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).FrozenBlocks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_FrozenBlocks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).FrozenBlocks(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_SetHead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetHeadRequest)
 	if err := dec(in); err != nil {
@@ -1070,6 +1104,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MinimumBlockAvailable",
 			Handler:    _ETHBACKEND_MinimumBlockAvailable_Handler,
+		},
+		{
+			MethodName: "FrozenBlocks",
+			Handler:    _ETHBACKEND_FrozenBlocks_Handler,
 		},
 		{
 			MethodName: "SetHead",
