@@ -1255,3 +1255,28 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 		t.Fatal("wait did not return after the caller cancelled")
 	}
 }
+
+func openFdCount(t *testing.T) int {
+	t.Helper()
+	ents, err := os.ReadDir("/dev/fd")
+	require.NoError(t, err)
+	return len(ents)
+}
+
+func TestVerifyDataFailFastClosesFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/fd on windows")
+	}
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a"), bytes.Repeat([]byte{1}, 4096), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(t.Context(), "a"))
+
+	const runs = 20
+	require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	before := openFdCount(t)
+	for range runs {
+		require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	}
+	require.Less(openFdCount(t)-before, runs/2, "VerifyFileFailFast leaks a file descriptor per verified file")
+}
