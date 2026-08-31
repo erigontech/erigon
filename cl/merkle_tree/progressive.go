@@ -41,6 +41,11 @@ func ProgressiveListRoot(chunks [][32]byte, logicalLength uint64) ([32]byte, err
 	return crypto.Sha256(progressiveRoot[:], lengthRoot[:]), nil
 }
 
+// ProgressiveByteListRoot computes the EIP-7916 root of data.
+func ProgressiveByteListRoot(data []byte) ([32]byte, error) {
+	return ProgressiveListRoot(packBits(data), uint64(len(data)))
+}
+
 // MixInActiveFields computes the EIP-7495 active-fields mix-in. Bit i is
 // packed into bit i%8 of byte i/8 in a zero-padded 32-byte chunk.
 func MixInActiveFields(root [32]byte, activeFields []bool) ([32]byte, error) {

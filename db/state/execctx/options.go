@@ -16,11 +16,16 @@
 
 package execctx
 
-import "github.com/erigontech/erigon/execution/commitment"
+import (
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
+)
 
 type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
+	mem                  kv.TemporalMemBatch
+	paraTrieDB           kv.TemporalRoDB
 }
 
 // SharedDomainOption configures NewSharedDomains.
@@ -36,9 +41,28 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
 }
 
-// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
+// WithoutSharedBranchCache disables the aggregator-scoped commitment branch cache
+// and its adaptive pin controller. Cache entries are not view-bound, so callers
+// whose commitment reads can reach this cache while another transaction updates
+// it must pass this option.
 func WithoutSharedBranchCache() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
+}
+
+// WithMemBatch supplies the in-memory domain batch instead of building the
+// default one from the tx. The seam an ephemeral single-block replay uses to
+// serve a flat witness (no temporal source) via SharedDomains. A general
+// top-down hoist of mem-batch construction out of the tx is a follow-up.
+func WithMemBatch(mem kv.TemporalMemBatch) SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.mem = mem }
+}
+
+// WithParaTrieDB supplies the DB the parallel trie needs for its per-worker read
+// contexts. Selecting the trie and wiring its DB then happen in one expression,
+// leaving no second call to forget; the context otherwise stays on the sequential
+// trie whatever the flag selected.
+func WithParaTrieDB(db kv.TemporalRoDB) SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.paraTrieDB = db }
 }
 
 // WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless

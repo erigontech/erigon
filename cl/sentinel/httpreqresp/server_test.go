@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -34,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestMaxResponseBodySize(t *testing.T) {
@@ -116,7 +116,8 @@ func TestResponseCodeErrorMessageRejectsOverlongLengthVarint(t *testing.T) {
 func TestResponseCodeErrorMessageCapsDecodedMessage(t *testing.T) {
 	var body bytes.Buffer
 	body.WriteByte(0x01)
-	sw := snappy.NewBufferedWriter(&body)
+	sw := snappypool.Writer(&body)
+	defer snappypool.PutWriter(sw)
 	_, err := sw.Write(bytes.Repeat([]byte{'x'}, maxErrorMessageBytes+1))
 	require.NoError(t, err)
 	require.NoError(t, sw.Close())
@@ -139,7 +140,7 @@ func TestDoCopiesHandlerWriteBuffer(t *testing.T) {
 		_, _ = w.Write(buf)
 		copy(buf, "XXXXX") // simulate fmt reusing its pooled buffer after Write returns
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -188,6 +189,58 @@ func TestDoClosesStreamingBodyOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestRequestContextCancelClosesEstablishedStream(t *testing.T) {
+	const topic = protocol.ID("/erigon/test/cancel/1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	victim, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { victim.Close() })
+	peerHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { peerHost.Close() })
+
+	established := make(chan struct{})
+	releasePeer := make(chan struct{})
+	peerHost.SetStreamHandler(topic, func(s network.Stream) {
+		close(established)
+		<-releasePeer
+		s.Close()
+	})
+	t.Cleanup(func() { close(releasePeer) })
+	require.NoError(t, victim.Connect(ctx, peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", http.NoBody)
+	require.NoError(t, err)
+	req.Header.Set(PeerIdHeader, peerHost.ID().String())
+	req.Header.Set(TopicHeader, string(topic))
+	errCh := make(chan error, 1)
+	go func() {
+		resp, doErr := Do(NewRequestHandler(victim), req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		errCh <- doErr
+	}()
+
+	select {
+	case <-established:
+	case <-time.After(5 * time.Second):
+		t.Fatal("libp2p stream was not established")
+	}
+	cancel()
+	require.ErrorIs(t, <-errCh, context.Canceled)
+	require.Eventually(t, func() bool {
+		for _, conn := range victim.Network().ConnsToPeer(peerHost.ID()) {
+			if len(conn.GetStreams()) != 0 {
+				return false
+			}
+		}
+		return true
+	}, time.Second, 10*time.Millisecond, "request cancellation left the underlying libp2p stream active")
+}
+
 type signalCloser struct{ closed chan struct{} }
 
 func (s *signalCloser) Read([]byte) (int, error) { return 0, io.EOF }
@@ -199,7 +252,7 @@ func TestDoRecoversHandlerPanic(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("boom")
 	})
-	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(h, req)
 	require.NoError(t, err)
@@ -227,7 +280,7 @@ func TestDoThroughChiRouterPreservesStreamingHandoff(t *testing.T) {
 	mux := chi.NewRouter()
 	mux.Get("/", h)
 
-	req, err := http.NewRequest("GET", "http://service.internal/", http.NoBody)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
 	require.NoError(t, err)
 	resp, err := Do(mux, req)
 	require.NoError(t, err)

@@ -187,7 +187,6 @@ func buildBlackListForPruning(
 
 type blockReader interface {
 	Snapshots() dbservices.BlockSnapshots
-	BorSnapshots() dbservices.BlockSnapshots
 	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
@@ -425,7 +424,7 @@ func SyncSnapshots(
 			log.Debug(fmt.Sprintf("[%s] filtering", logPrefix), "toBlock", toBlock, "toStep", toStep, "toTxNum", toTxNum)
 			// we downloaded extra seg files during the header chain download (the ones containing the toBlock)
 			// so that we can correctly calculate toTxNum above (now we should delete these)
-			if err = blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
+			if err := blockReader.Snapshots().RetireFilesAbove(toBlock, func(files []string) error {
 				return snapshotDownloader.Delete(ctx, files)
 			}); err != nil {
 				return err
@@ -587,6 +586,14 @@ func SyncSnapshots(
 	return nil
 }
 
+// BlockFileRetainedUnderCap reports whether a block-segment file ending at
+// `to` survives a download capped at toBlock; toBlock == 0 means no cap.
+// Callers deriving a block target must use this same rule, so the target and
+// the downloaded byte total describe the same file set.
+func BlockFileRetainedUnderCap(to, toBlock uint64) bool {
+	return toBlock == 0 || to <= toBlock
+}
+
 func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
@@ -609,5 +616,5 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 		// so that we can correctly calculate its maxTxNum from the body segment files (we will later on delete this file)
 		return fileInfo.From > toBlock
 	}
-	return fileInfo.To > toBlock
+	return !BlockFileRetainedUnderCap(fileInfo.To, toBlock)
 }

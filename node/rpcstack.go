@@ -20,24 +20,21 @@
 package node
 
 import (
-	"bytes"
-	"compress/gzip"
-	"io"
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
-	"runtime"
-	"slices"
-	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/go-libdeflate"
-
+	"github.com/klauspost/compress/gzip"
 	"github.com/rs/cors"
 
+	"github.com/klauspost/compress/gzhttp"
+
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc"
@@ -67,8 +64,10 @@ type rpcAdmissionHandler struct {
 	next     http.Handler
 }
 
-var rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
-var wsConnectionRejected = metrics.GetOrCreateCounter(`ws_connection_rejected_total`)
+var (
+	rpcAdmissionRejected = metrics.GetOrCreateCounter(`rpc_admission_rejected_total`)
+	wsConnectionRejected = metrics.GetOrCreateCounter(`ws_connection_rejected_total`)
+)
 
 func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 	return &rpcAdmissionHandler{limit: limit, next: next}
@@ -184,236 +183,126 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-// gzPoolBufCap is the maximum dst capacity retained in the pool to bound RSS growth.
-const gzPoolBufCap = 1024 * 1024
-
 // minGzipBodySize is the minimum response body size to compress. Responses
 // smaller than this are sent as-is: gzip framing overhead would exceed savings.
 const minGzipBodySize = 1024
 
-var gzPool = sync.Pool{
-	New: func() any { w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed); return w },
-}
-
-func putGzip(gz *gzip.Writer) {
-	gz.Reset(io.Discard)
-	gzPool.Put(gz)
-}
-
-var libdeflateWarnOnce sync.Once
-var libdeflateCompressWarnOnce sync.Once
-var libdeflateDisabled atomic.Bool
-
+// Raw and compressed byte counters: out/in gives the live compression ratio,
+// the out rate tracks RPC egress.
+// path="streaming" is kept from the two-path counters this replaces: gzhttp only
+// streams, and dropping the label would silently break existing selectors.
 var (
-	libdeflatePoolHit      = metrics.GetOrCreateCounter(`libdeflate_pool_hit_total`)
-	libdeflatePoolMiss     = metrics.GetOrCreateCounter(`libdeflate_pool_miss_total`)
-	libdeflatePoolOverflow = metrics.GetOrCreateCounter(`libdeflate_pool_overflow_total`)
+	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
+	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
 )
 
-// libdeflateCompressorsPool pools libdeflate compressors. sync.Pool is unsafe for these: a
-// libdeflate.Compressor owns a C context freed only by Close(), and sync.Pool
-// drops entries on GC with no hook to Close them, so every evicted compressor
-// leaks its C memory. A buffered channel with Close-on-overflow instead frees the
-// C context deterministically and bounds the pooled working set.
-//
-// Each pooled compressor is a single ~653 KiB libdeflate C allocation (level 6),
-// so pool peak RAM = cap × 653 KiB. The cap floors at 64 and is capped at 512, so
-// peak stays ~41 MiB (64) .. ~326 MiB (512) regardless of GOMAXPROCS.
-var libdeflateCompressorsPool = make(chan *libdeflate.Compressor, min(512, max(64, runtime.GOMAXPROCS(0)*8)))
-
-func getLibdeflateCompressor() *libdeflate.Compressor {
-	if libdeflateDisabled.Load() {
-		return nil
-	}
-	select {
-	case c := <-libdeflateCompressorsPool:
-		libdeflatePoolHit.Inc()
-		return c
-	default:
-	}
-	libdeflatePoolMiss.Inc()
-	c, err := libdeflate.NewCompressor(libdeflate.DefaultCompression)
+// gzipWrapper compresses with klauspost's gzhttp middleware. It buffers only
+// minGzipBodySize bytes -- enough to decide whether compressing pays -- and
+// streams everything after, so no response is ever held whole. BestSpeed
+// because bytes leave as they are produced, making per-flush latency matter
+// more than ratio.
+var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
+	wrapper, err := gzhttp.NewWrapper(
+		gzhttp.MinSize(minGzipBodySize),
+		gzhttp.CompressionLevel(gzip.BestSpeed),
+		// gzhttp enables and prefers zstd by default. CompressionLevel applies
+		// only to gzip, so enabling zstd would silently serve an unmeasured
+		// encoder at its own default level to every browser that advertises it.
+		gzhttp.EnableZstd(false),
+	)
 	if err != nil {
-		libdeflateDisabled.Store(true)
-		libdeflateWarnOnce.Do(func() {
-			log.Warn("libdeflate unavailable, falling back to stdlib gzip", "err", err)
-		})
-		closePooledLibdeflateCompressors()
-		return nil
+		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))
 	}
-	return c
-}
+	return wrapper
+}()
 
-// putLibdeflateCompressor returns c for reuse, or frees its C context via Close when
-// the pool is full or libdeflate has been disabled — never dropping it uncollected
-// the way sync.Pool eviction would.
-func putLibdeflateCompressor(c *libdeflate.Compressor) {
-	if libdeflateDisabled.Load() {
-		c.Close()
-		return
-	}
-	select {
-	case libdeflateCompressorsPool <- c:
-		// If disable raced with this send, drain: once disabled, get returns nil early,
-		// so a compressor left in the pool would never be handed out again.
-		if libdeflateDisabled.Load() {
-			closePooledLibdeflateCompressors()
-		}
-	default:
-		libdeflatePoolOverflow.Inc()
-		c.Close()
-	}
-}
-
-// closePooledLibdeflateCompressors frees every compressor currently in the pool.
-// Called once libdeflate is disabled, so the pool can't retain C contexts that
-// getLibdeflateCompressor would never hand out again.
-func closePooledLibdeflateCompressors() {
-	for {
-		select {
-		case c := <-libdeflateCompressorsPool:
-			c.Close()
-		default:
-			return
-		}
-	}
-}
-
-var gzDstPool = sync.Pool{
-	New: func() any { return make([]byte, 0, 64*1024) },
-}
-
-func putDst(dst []byte) {
-	if cap(dst) <= gzPoolBufCap {
-		gzDstPool.Put(dst)
-	}
-}
-
-type gzipResponseWriter struct {
-	buf    *bytes.Buffer
-	gzw    *gzip.Writer
-	status int
+// countingResponseWriter counts body bytes while forwarding the optional
+// interfaces gzhttp probes for: Flusher for streaming responses, and Hijacker,
+// which newNoGzipResponseWriter looks for on the pass-through path.
+type countingResponseWriter struct {
 	http.ResponseWriter
+	n int
+	// afterWrite runs once the byte count has moved, so a response that never
+	// returns still advances the metrics.
+	afterWrite func()
 }
 
-func (w *gzipResponseWriter) WriteHeader(status int) {
-	if w.gzw != nil {
-		w.ResponseWriter.WriteHeader(status)
-	} else {
-		w.status = status
+func (w *countingResponseWriter) Write(b []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(b)
+	w.n += n
+	if w.afterWrite != nil {
+		w.afterWrite()
 	}
+	return n, err
 }
 
-func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	if w.gzw != nil {
-		return w.gzw.Write(b)
-	}
-	return w.buf.Write(b)
-}
-
-// Flush switches to streaming gzip on first call; subsequent calls flush incrementally.
-func (w *gzipResponseWriter) Flush() {
-	if w.gzw == nil {
-		w.ResponseWriter.Header().Set("Content-Encoding", "gzip")
-		w.ResponseWriter.Header().Del("Content-Length")
-		if w.status != 0 {
-			w.ResponseWriter.WriteHeader(w.status)
-		}
-		w.gzw = gzPool.Get().(*gzip.Writer)
-		w.gzw.Reset(w.ResponseWriter)
-		if w.buf.Len() > 0 {
-			_, _ = w.gzw.Write(w.buf.Bytes())
-			w.buf.Reset()
-		}
-	}
-	_ = w.gzw.Flush()
+func (w *countingResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+	if w.afterWrite != nil {
+		w.afterWrite()
+	}
 }
 
-func writeStdlibGzip(w http.ResponseWriter, src []byte, status int) {
-	gz := gzPool.Get().(*gzip.Writer)
-	defer putGzip(gz)
-	gz.Reset(w)
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Del("Content-Length")
-	if status != 0 {
-		w.WriteHeader(status)
+// Unwrap lets http.NewResponseController reach the real writer.
+func (w *countingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
 	}
-	_, _ = gz.Write(src)
-	_ = gz.Close()
+	return nil, nil, errors.New("http.Hijacker interface is not supported")
 }
 
-// compressLibdeflate tries to compress src with libdeflate and write the response.
-// Returns false if libdeflate is unavailable or compression fails; the caller
-// should then fall back to writeStdlibGzip.
-func compressLibdeflate(w http.ResponseWriter, src []byte, status int) bool {
-	c := getLibdeflateCompressor()
-	if c == nil {
-		return false
-	}
-	defer putLibdeflateCompressor(c)
-
-	dst := gzDstPool.Get().([]byte)
-	gzBound := c.GzipCompressBound(len(src))
-	dst = slices.Grow(dst[:0], gzBound)[:gzBound]
-	defer putDst(dst) // return the grown buffer for reuse (putDst drops it if over gzPoolBufCap)
-
-	n, err := c.CompressGzip(dst, src)
-	if err != nil {
-		libdeflateCompressWarnOnce.Do(func() {
-			log.Warn("libdeflate compression failed, falling back to stdlib gzip", "err", err)
-		})
-		return false
-	}
-
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Set("Content-Length", strconv.Itoa(n))
-	if status != 0 {
-		w.WriteHeader(status)
-	}
-	w.Write(dst[:n]) //nolint:errcheck
-	return true
+// gzipMeter counts one request on both sides of the compressor: raw sees the
+// handler's bytes, wire sees what left the process.
+type gzipMeter struct {
+	raw           countingResponseWriter
+	wire          countingResponseWriter
+	rawCommitted  int
+	wireCommitted int
 }
 
-func sendGzipResponse(w http.ResponseWriter, grw *gzipResponseWriter) {
-	defer pool.PutBuffer(grw.buf)
-
-	if grw.gzw != nil {
-		defer putGzip(grw.gzw)
-		grw.gzw.Close() //nolint:errcheck
+// commit adds what has been counted since the last call. Only a compressed response
+// has a ratio, so nothing is committed until gzhttp has settled on gzip: it passes
+// the rest through untouched -- a client without gzip, a body under MinSize, a
+// content type it skips -- where both sides count the same bytes and out/in reads 1.
+// One request is served by one goroutine, so the deltas need no lock.
+func (m *gzipMeter) commit() {
+	if !strings.EqualFold(m.wire.Header().Get("Content-Encoding"), "gzip") {
 		return
 	}
-
-	src := grw.buf.Bytes()
-	if len(src) < minGzipBodySize {
-		w.Header().Set("Content-Length", strconv.Itoa(len(src)))
-		if grw.status != 0 {
-			w.WriteHeader(grw.status)
-		}
-		w.Write(src) //nolint:errcheck
-		return
+	if d := m.raw.n - m.rawCommitted; d > 0 {
+		gzipInBytes.AddInt(d)
+		m.rawCommitted = m.raw.n
 	}
-
-	if !compressLibdeflate(w, src, grw.status) {
-		writeStdlibGzip(w, src, grw.status)
+	if d := m.wire.n - m.wireCommitted; d > 0 {
+		gzipOutBytes.AddInt(d)
+		m.wireCommitted = m.wire.n
 	}
 }
+
+type gzipMeterKey struct{}
 
 func newGzipHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m, ok := r.Context().Value(gzipMeterKey{}).(*gzipMeter)
+		if !ok {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		grw := &gzipResponseWriter{buf: pool.GetBuffer(), ResponseWriter: w}
-		// The hook activates streaming mode before the first write; absent when gzip
-		// is off so it cannot prematurely commit HTTP headers (e.g. 200 before 503).
-		r = r.WithContext(rpc.WithGzipStreamingHook(r.Context(), grw.Flush))
-		next.ServeHTTP(grw, r)
-		sendGzipResponse(w, grw)
+		m.raw.ResponseWriter = w
+		next.ServeHTTP(&m.raw, r)
+	})
+	compressed := gzipWrapper(inner)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m := &gzipMeter{}
+		m.wire.ResponseWriter = w
+		m.raw.afterWrite = m.commit
+		m.wire.afterWrite = m.commit
+		compressed.ServeHTTP(&m.wire, r.WithContext(context.WithValue(r.Context(), gzipMeterKey{}, m)))
+		m.commit()
 	})
 }
 

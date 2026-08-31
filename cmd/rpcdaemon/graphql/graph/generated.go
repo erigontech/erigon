@@ -32,6 +32,7 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 type ResolverRoot interface {
 	Account() AccountResolver
 	Block() BlockResolver
+	Log() LogResolver
 	Mutation() MutationResolver
 	Pending() PendingResolver
 	Query() QueryResolver
@@ -185,11 +186,16 @@ type AccountResolver interface {
 	Storage(ctx context.Context, obj *model.Account, slot string) (string, error)
 }
 type BlockResolver interface {
+	Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error)
+
 	TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error)
 	Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error)
 	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
 	Call(ctx context.Context, obj *model.Block, data model.CallData) (*model.CallResult, error)
 	EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error)
+}
+type LogResolver interface {
+	Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error)
 }
 type MutationResolver interface {
 	SendRawTransaction(ctx context.Context, data string) (string, error)
@@ -213,6 +219,8 @@ type QueryResolver interface {
 type TransactionResolver interface {
 	From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
 	To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
+
+	CreatedContract(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
 }
 
 // endregion ************************** generated!.gotpl **************************
@@ -2162,7 +2170,8 @@ func (ec *executionContext) _Block_miner(ctx context.Context, field graphql.Coll
 			return ec.fieldContext_Block_miner(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Miner, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Miner(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *model.Account) graphql.Marshaler {
@@ -2176,8 +2185,8 @@ func (ec *executionContext) fieldContext_Block_miner(ctx context.Context, field 
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_Account(ctx, field)
 		},
@@ -3047,7 +3056,8 @@ func (ec *executionContext) _Log_account(ctx context.Context, field graphql.Coll
 			return ec.fieldContext_Log_account(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Account, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Log().Account(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *model.Account) graphql.Marshaler {
@@ -3061,8 +3071,8 @@ func (ec *executionContext) fieldContext_Log_account(ctx context.Context, field 
 	fc = &graphql.FieldContext{
 		Object:     "Log",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_Account(ctx, field)
 		},
@@ -4295,7 +4305,8 @@ func (ec *executionContext) _Transaction_createdContract(ctx context.Context, fi
 			return ec.fieldContext_Transaction_createdContract(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.CreatedContract, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().CreatedContract(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v *model.Account) graphql.Marshaler {
@@ -4309,8 +4320,8 @@ func (ec *executionContext) fieldContext_Transaction_createdContract(ctx context
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_Account(ctx, field)
 		},
@@ -6113,10 +6124,43 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "miner":
-			out.Values[i] = ec._Block_miner(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				atomic.AddUint32(&out.Invalids, 1)
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_miner(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "extraData":
 			out.Values[i] = ec._Block_extraData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -6496,27 +6540,60 @@ func (ec *executionContext) _Log(ctx context.Context, sel ast.SelectionSet, obj 
 		case "index":
 			out.Values[i] = ec._Log_index(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "account":
-			out.Values[i] = ec._Log_account(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Log_account(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "topics":
 			out.Values[i] = ec._Log_topics(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "data":
 			out.Values[i] = ec._Log_data(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transaction":
 			out.Values[i] = ec._Log_transaction(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -7209,10 +7286,43 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "createdContract":
-			out.Values[i] = ec._Transaction_createdContract(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				atomic.AddUint32(&out.Invalids, 1)
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_createdContract(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "logs":
 			out.Values[i] = ec._Transaction_logs(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {

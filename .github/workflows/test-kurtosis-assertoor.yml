@@ -6,16 +6,18 @@ env:
   # Pinned versions of third-party containers — bump here when upgrading.
   # These are cached via actions/cache (docker save/load) to avoid re-pulling
   # on every run and to eliminate Docker Hub rate-limit exposure.
-  # LIGHTHOUSE_IMAGE, TEKU_IMAGE, LIGHTHOUSE_VC_IMAGE and the ASSERTOOR_* tags are
-  # loaded at job start from the suite .io files (single source of truth) by the
-  # "Load image versions" step, so they can't drift from what kurtosis runs. The
-  # remaining third-party tags below aren't pinned in any .io, so they stay here.
+  # The tags a suite .io pins — released CL/VC clients, assertoor, glamsterdam's
+  # genesis generator and spamoor — are loaded at job start from those files
+  # (single source of truth) by the "Load image versions" step, so the cache can't
+  # drift from what kurtosis runs. glamsterdam's devnet lighthouse stays live: it
+  # is a client under test, so serving a stale build would quietly change what the
+  # suite covers. The tags below aren't pinned in any .io, so they stay here.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
   # logs_aggregator_functions and logs_collector_functions consts in
   # kurtosis-tech/kurtosis).
-  KURTOSIS_VERSION: "1.15.2"
+  KURTOSIS_VERSION: "1.20.0"
   KURTOSIS_VECTOR_IMAGE: "timberio/vector:0.45.0-debian"
   KURTOSIS_FLUENTBIT_IMAGE: "fluent/fluent-bit:4.0.0"
   # Engine-bootstrap helpers (logs-aggregator healthcheck, reverse proxy,
@@ -33,10 +35,15 @@ env:
   BUILDKIT_IMAGE: "moby/buildkit:v0.30.0"
   # eth2-val-tools is the validator-keystore generator pulled during `kurtosis run`;
   # it publishes only :latest, so the cache serves the `latest` digest from the last
-  # warm rather than tracking live `latest`. (genesis-generator is pulled live: its
-  # version is the ethereum-package default, which varies per ethereum_package_branch,
-  # so it isn't cached here.)
+  # warm rather than tracking live `latest`.
   ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
+  # rpc-snooper is the EL/CL traffic proxy the snooper_enabled suites launch. The
+  # ethereum-package pins no tag for it, so the cache serves the `latest` digest
+  # from the last warm rather than tracking live `latest`.
+  KURTOSIS_SNOOPER_IMAGE: "ethpandaops/rpc-snooper:latest"
+  GENESIS_GENERATOR_IMAGE: "ethpandaops/ethereum-genesis-generator:4.0.4"
+  CAPLIN_GENESIS_GENERATOR_IMAGE: "ethpandaops/ethereum-genesis-generator:3.3.7"
+  KURTOSIS_PYTHON_IMAGE: "python:3.11-alpine"
 
 on:
   workflow_dispatch:
@@ -208,27 +215,66 @@ jobs:
       - name: Load image versions from the .io files (single source of truth)
         run: |
           reg=.github/workflows/kurtosis/regular-assertoor.io
+          pectra_io=.github/workflows/kurtosis/pectra.io
+          glamsterdam_io=.github/workflows/kurtosis/glamsterdam.io
+          caplin_io=.github/workflows/kurtosis/caplin-minimal-assertoor.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
-          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          pectra=$(yq -e '.assertoor_params.image' "$pectra_io")
+          glamsterdam=$(yq -e '.assertoor_params.image' "$glamsterdam_io")
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
+          genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
+          spamoor_glamsterdam=$(yq -e '.spamoor_params.image' "$glamsterdam_io")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
+          # pectra's clients and caplin-minimal's assertoor are warmed under the tag
+          # another suite pins. Bumping one alone leaves it out of the cache, which
+          # is a slow path rather than a failure: warn, and hand the tag to the
+          # pre-pull step so it is fetched with retries.
+          uncached=
+          check_warmed() { # .io file, tag it pins, tag the cache warms
+            if [ "$2" != "$3" ]; then
+              echo "::warning::$1 pins $2 but the cache warms $3; extend the cache key to warm it"
+              uncached="$uncached $2"
+            fi
+          }
+          check_warmed "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
+          check_warmed "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
+          check_warmed "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
+          echo "UNCACHED_IMAGES=${uncached# }" >> "$GITHUB_ENV"
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
+            echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
+            echo "GLAMSTERDAM_SPAMOOR_IMAGE=$spamoor_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
+          # Every cached tag stays spelled out in the cache key so a glance at the
+          # Actions cache list shows what a key holds. Only the registry/org prefix
+          # is dropped, which keeps the key clear of actions/cache's 512-char cap.
+          key=docker-cl
+          for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
+            "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
+            "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
+            "$ETH2_VAL_TOOLS_IMAGE" "$KURTOSIS_SNOOPER_IMAGE" "$pectra" "$glamsterdam" \
+            "$GENESIS_GENERATOR_IMAGE" "$CAPLIN_GENESIS_GENERATOR_IMAGE" \
+            "$genesis_glamsterdam" "$spamoor_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
+            key="$key-${image##*/}"
+          done
+          [ ${#key} -le 512 ] \
+            || echo "::warning::cache key is ${#key} chars, over the 512 actions/cache allows"
+          echo "DOCKER_CACHE_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Check whether third-party containers are already cached
         id: cache-cl-images
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
+          key: ${{ env.DOCKER_CACHE_KEY }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -258,6 +304,12 @@ jobs:
           pull "${KURTOSIS_TRAEFIK_IMAGE}"
           pull "${KURTOSIS_ALPINE_IMAGE}"
           pull "${ETH2_VAL_TOOLS_IMAGE}"
+          pull "${GENESIS_GENERATOR_IMAGE}"
+          pull "${CAPLIN_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_SPAMOOR_IMAGE}"
+          pull "${KURTOSIS_SNOOPER_IMAGE}"
+          pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
@@ -273,13 +325,19 @@ jobs:
           docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
           docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
           docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
+          docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
+          docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
+          docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
+          docker save "${GLAMSTERDAM_SPAMOOR_IMAGE}" -o /tmp/docker-cache/spamoor.tar
+          docker save "${KURTOSIS_SNOOPER_IMAGE}" -o /tmp/docker-cache/rpc-snooper.tar
+          docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       - name: Save third-party containers to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
+          key: ${{ env.DOCKER_CACHE_KEY }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -312,7 +370,7 @@ jobs:
           key: docker-buildkit-${{ env.BUILDKIT_IMAGE }}
 
   assertoor_test:
-    name: assertoor_${{ matrix.suite }}_${{ matrix.exec_mode }}_test
+    name: assertoor_${{ matrix.suite }}_${{ matrix.commitment_mode }}_test
     needs: build-erigon-image
     # On cache-warming runs build-erigon-image alone warms the kurtosis image
     # cache; there's nothing for the matrix to do (the test step is skipped).
@@ -336,52 +394,59 @@ jobs:
         # pass but pathological hangs (e.g. a node that silently stops proposing)
         # fail in reasonable time instead of burning hours.
         #
-        # Each suite runs twice — once with serial exec
-        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so divergence
-        # is caught on the PR. Matrix entries spawn separate hosted runners
-        # and run concurrently — wall-clock unchanged, runner-minutes doubled.
+        # Each suite runs twice — once with serial commitment
+        # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
+        # divergence is caught on the PR. Execution is parallel in both legs
+        # (default). Matrix entries spawn separate hosted runners and run
+        # concurrently — wall-clock unchanged, runner-minutes doubled.
         # All entries share the single erigon image built by build-erigon-image.
         include:
           - suite: regular
             package_args: .github/workflows/kurtosis/regular-assertoor.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 50
-            exec_mode: serial
+            commitment_mode: serial
           - suite: regular
             package_args: .github/workflows/kurtosis/regular-assertoor.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 50
-            exec_mode: parallel
+            commitment_mode: parallel
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
-            exec_mode: serial
+            commitment_mode: serial
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
-            exec_mode: parallel
+            commitment_mode: parallel
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
-            # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
-            # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
-            # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
+            # Pinned to 6.1.0 rather than main to keep the suite reproducible;
+            # the CLI >=1.18.1 requirement that forced the pin is now satisfied.
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
-            exec_mode: parallel
+            commitment_mode: serial
+          - suite: glamsterdam
+            package_args: .github/workflows/kurtosis/glamsterdam.io
+            # Pinned to 6.1.0 rather than main to keep the suite reproducible;
+            # the CLI >=1.18.1 requirement that forced the pin is now satisfied.
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            commitment_mode: parallel
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
-            exec_mode: serial
+            commitment_mode: serial
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
-            exec_mode: parallel
+            commitment_mode: parallel
 
     steps:
       - name: Fast checkout git repository
@@ -406,27 +471,66 @@ jobs:
       - name: Load image versions from the .io files (single source of truth)
         run: |
           reg=.github/workflows/kurtosis/regular-assertoor.io
+          pectra_io=.github/workflows/kurtosis/pectra.io
+          glamsterdam_io=.github/workflows/kurtosis/glamsterdam.io
+          caplin_io=.github/workflows/kurtosis/caplin-minimal-assertoor.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
-          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          pectra=$(yq -e '.assertoor_params.image' "$pectra_io")
+          glamsterdam=$(yq -e '.assertoor_params.image' "$glamsterdam_io")
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
+          genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
+          spamoor_glamsterdam=$(yq -e '.spamoor_params.image' "$glamsterdam_io")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
+          # pectra's clients and caplin-minimal's assertoor are warmed under the tag
+          # another suite pins. Bumping one alone leaves it out of the cache, which
+          # is a slow path rather than a failure: warn, and hand the tag to the
+          # pre-pull step so it is fetched with retries.
+          uncached=
+          check_warmed() { # .io file, tag it pins, tag the cache warms
+            if [ "$2" != "$3" ]; then
+              echo "::warning::$1 pins $2 but the cache warms $3; extend the cache key to warm it"
+              uncached="$uncached $2"
+            fi
+          }
+          check_warmed "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
+          check_warmed "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
+          check_warmed "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
+          echo "UNCACHED_IMAGES=${uncached# }" >> "$GITHUB_ENV"
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
+            echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
+            echo "GLAMSTERDAM_SPAMOOR_IMAGE=$spamoor_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
+          # Every cached tag stays spelled out in the cache key so a glance at the
+          # Actions cache list shows what a key holds. Only the registry/org prefix
+          # is dropped, which keeps the key clear of actions/cache's 512-char cap.
+          key=docker-cl
+          for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
+            "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
+            "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
+            "$ETH2_VAL_TOOLS_IMAGE" "$KURTOSIS_SNOOPER_IMAGE" "$pectra" "$glamsterdam" \
+            "$GENESIS_GENERATOR_IMAGE" "$CAPLIN_GENESIS_GENERATOR_IMAGE" \
+            "$genesis_glamsterdam" "$spamoor_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
+            key="$key-${image##*/}"
+          done
+          [ ${#key} -le 512 ] \
+            || echo "::warning::cache key is ${#key} chars, over the 512 actions/cache allows"
+          echo "DOCKER_CACHE_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Restore cached third-party containers
         id: cache-cl-images
         uses: actions/cache@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}
+          key: ${{ env.DOCKER_CACHE_KEY }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
@@ -446,6 +550,12 @@ jobs:
           docker load -i /tmp/docker-cache/traefik.tar
           docker load -i /tmp/docker-cache/alpine.tar
           docker load -i /tmp/docker-cache/eth2-val-tools.tar
+          docker load -i /tmp/docker-cache/genesis-generator.tar
+          docker load -i /tmp/docker-cache/caplin-genesis-generator.tar
+          docker load -i /tmp/docker-cache/glamsterdam-genesis-generator.tar
+          docker load -i /tmp/docker-cache/spamoor.tar
+          docker load -i /tmp/docker-cache/rpc-snooper.tar
+          docker load -i /tmp/docker-cache/python.tar
 
       - name: Pull third-party containers and save to cache
         if: steps.cache-cl-images.outputs.cache-hit != 'true'
@@ -474,6 +584,12 @@ jobs:
           pull "${KURTOSIS_TRAEFIK_IMAGE}"
           pull "${KURTOSIS_ALPINE_IMAGE}"
           pull "${ETH2_VAL_TOOLS_IMAGE}"
+          pull "${GENESIS_GENERATOR_IMAGE}"
+          pull "${CAPLIN_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_SPAMOOR_IMAGE}"
+          pull "${KURTOSIS_SNOOPER_IMAGE}"
+          pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
@@ -489,23 +605,32 @@ jobs:
           docker save "${KURTOSIS_TRAEFIK_IMAGE}" -o /tmp/docker-cache/traefik.tar
           docker save "${KURTOSIS_ALPINE_IMAGE}" -o /tmp/docker-cache/alpine.tar
           docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
+          docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
+          docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
+          docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
+          docker save "${GLAMSTERDAM_SPAMOOR_IMAGE}" -o /tmp/docker-cache/spamoor.tar
+          docker save "${KURTOSIS_SNOOPER_IMAGE}" -o /tmp/docker-cache/rpc-snooper.tar
+          docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
+
+      # An uncovered tag would otherwise be pulled inside `kurtosis run`, where a
+      # registry blip fails the whole test step. Fetch it here instead, with the
+      # same retries the cached images get; kurtosis still pulls it if this fails.
+      - name: Pre-pull suite images the cache does not cover
+        if: env.UNCACHED_IMAGES != ''
+        run: |
+          for image in ${UNCACHED_IMAGES}; do
+            for n in 1 2 3; do
+              if docker pull "$image"; then continue 2; fi
+              echo "docker pull $image failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            echo "::warning::could not pre-pull $image; kurtosis retries it at run time"
+          done
 
       - name: Install Kurtosis CLI and start engine
-        # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
-        # where a registry blip fails the whole test step. Start it here from
-        # the pre-loaded images, with cheap retries.
-        run: |
-          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
-          sudo apt-get update
-          sudo apt-get install -y kurtosis-cli=${KURTOSIS_VERSION}
-          kurtosis analytics disable
-          for n in 1 2 3; do
-            if kurtosis engine start; then exit 0; fi
-            echo "kurtosis engine start failed (attempt $n of 3)"
-            kurtosis engine stop || true
-            sleep $((10 * n))
-          done
-          exit 1
+        uses: ./.github/actions/setup-kurtosis
+        with:
+          version: ${{ env.KURTOSIS_VERSION }}
 
       - name: Download erigon image artifact
         uses: actions/download-artifact@v8
@@ -516,16 +641,16 @@ jobs:
       - name: Load erigon base image into daemon
         run: docker load -i "${RUNNER_TEMP}/erigon-base-image.tar"
 
-      - name: Bake exec_mode env into the runtime image
+      - name: Bake commitment_mode env into the runtime image
         # Kurtosis launches `test/erigon:current` as the EL participant.
-        # Add ERIGON_EXEC3_PARALLEL as an ENV layer on top of the shared
-        # base image so the matrix entries differ only in exec mode.
+        # Add ERIGON_COMMITMENT_PARALLEL as an ENV layer on top of the shared
+        # base image so the matrix entries differ only in commitment mode.
         env:
-          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           docker build -t test/erigon:current - <<EOF
           FROM test/erigon:current-base
-          ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}
+          ENV ERIGON_COMMITMENT_PARALLEL=${ERIGON_COMMITMENT_PARALLEL}
           EOF
 
       - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
@@ -538,10 +663,9 @@ jobs:
         # failures so the next investigation or retry can start sooner
         # instead of burning runner hours on a dead chain.
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
-            kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
-            enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
+            enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.commitment_mode }}-${{ github.run_id }}"
             ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
             ethereum_package_args: "${{ matrix.package_args }}"
             ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
@@ -561,8 +685,8 @@ jobs:
         continue-on-error: true
         run: |
           set -eu
-          enclave_name="kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
-          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}"
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ matrix.commitment_mode }}-${{ github.run_id }}"
+          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.commitment_mode }}"
           kurtosis enclave dump "$enclave_name" "$dump_dir" || true
 
       - name: Upload Kurtosis enclave dump
@@ -570,8 +694,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}
+          name: kurtosis-dump-${{ matrix.suite }}-${{ matrix.commitment_mode }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.commitment_mode }}
           retention-days: 7
           if-no-files-found: warn
 
