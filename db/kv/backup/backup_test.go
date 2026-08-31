@@ -18,6 +18,8 @@ package backup
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -154,4 +156,100 @@ func TestClearTablesMultiChunkWriteMap(t *testing.T) {
 		return ClearTables(t.Context(), db, tx, testTable)
 	}))
 	require.Zero(t, tableCount(t, db))
+}
+
+const dupTestTable = "TD"
+
+func mdbxFileSize(t *testing.T, dbDir string) int64 {
+	t.Helper()
+	st, err := os.Stat(filepath.Join(dbDir, "mdbx.dat"))
+	require.NoError(t, err)
+	return st.Size()
+}
+
+// TestCompactInPlace pins the swap: compaction must leave the db openable at the
+// same path with every row intact — including tables the label's schema doesn't
+// name — and must give back the pages the deletes freed.
+func TestCompactInPlace(t *testing.T) {
+	const (
+		rows    = 20_000
+		deleted = 18_000
+		batch   = 2_000
+		dups    = 3 // >1, so a lost DupSort flag can't be copied into a plain table
+	)
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	require.NoError(t, os.MkdirAll(dbDir, 0755))
+
+	open := func() kv.RwDB {
+		return mdbx.New(dbcfg.ChainDB, log.New()).Path(dbDir).
+			WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+				return kv.TableCfg{testTable: {}, dupTestTable: {Flags: kv.DupSort}}
+			}).
+			GrowthStep(4 * datasize.MB).MapSize(1 * datasize.GB).WriteMap(true).MustOpen()
+	}
+
+	db := open()
+	val := make([]byte, 1024)
+	for from := 0; from < rows; from += batch {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			c, err := tx.RwCursor(testTable)
+			require.NoError(t, err)
+			defer c.Close()
+			d, err := tx.RwCursorDupSort(dupTestTable)
+			require.NoError(t, err)
+			defer d.Close()
+			for i := from; i < from+batch; i++ {
+				require.NoError(t, c.Append(u64Key(uint64(i)), val))
+				for j := range dups {
+					require.NoError(t, d.AppendDup(u64Key(uint64(i)), u64Key(uint64(i*dups+j))))
+				}
+			}
+			return nil
+		}))
+	}
+	for from := 0; from < deleted; from += batch {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			for i := from; i < from+batch; i++ {
+				require.NoError(t, tx.Delete(testTable, u64Key(uint64(i))))
+				require.NoError(t, tx.Delete(dupTestTable, u64Key(uint64(i))))
+			}
+			return nil
+		}))
+	}
+	db.Close()
+
+	before := mdbxFileSize(t, dbDir)
+	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
+	require.Less(t, mdbxFileSize(t, dbDir), before)
+
+	db = open()
+	defer db.Close()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		n, err := tx.Count(testTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64(rows-deleted), n)
+
+		nd, err := tx.Count(dupTestTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64((rows-deleted)*dups), nd)
+
+		v, err := tx.GetOne(testTable, u64Key(deleted))
+		require.NoError(t, err)
+		require.Len(t, v, len(val))
+
+		d, err := tx.CursorDupSort(dupTestTable)
+		require.NoError(t, err)
+		defer d.Close()
+		_, _, err = d.SeekExact(u64Key(deleted))
+		require.NoError(t, err)
+		nDups, err := d.CountDuplicates()
+		require.NoError(t, err)
+		require.Equal(t, uint64(dups), nDups)
+		for j := range dups {
+			got, err := d.SeekBothRange(u64Key(deleted), u64Key(uint64(deleted*dups+j)))
+			require.NoError(t, err)
+			require.Equal(t, u64Key(uint64(deleted*dups+j)), got)
+		}
+		return nil
+	}))
 }
