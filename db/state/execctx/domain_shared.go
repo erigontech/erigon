@@ -1212,11 +1212,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// after the commit succeeds. If the commit fails, the stash is discarded, so
 	// the cache never advances ahead of durable MDBX state.
 	//
-	// The stash borrows the mem batch's buffers rather than copying them: it is
-	// consumed before Commit returns, well inside their lifetime, and each
-	// consumer copies whatever it retains. Copying here instead would hold a
-	// second image of the whole flush — hundreds of MB for a block that deploys
-	// contracts in bulk.
+	// The stash borrows the batch's buffers: it is consumed before Commit
+	// returns and each consumer copies what it retains, so copying here would
+	// hold a second image of the whole flush.
 	var pendingBranches []branchCacheUpdate
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
@@ -1252,9 +1250,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			// Only the code store needs a hash here, where every domain lock is
-			// held, and it needs one as its key. The cache reuses it when it is
-			// already in hand and otherwise hashes after the commit, off the lock.
+			// Only the code store needs the hash under the domain locks, as its
+			// key; the cache reuses it if present and otherwise hashes off-lock.
 			var codeHash []byte
 			if sd.codeStore != nil && len(v) > 0 {
 				codeHash = crypto.Keccak256(v)

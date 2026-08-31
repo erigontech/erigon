@@ -338,8 +338,7 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
 		// A short hash would be zero-padded into the content-addressed key and
-		// would also blank the collision guard that rejects a 64-bit maphash
-		// clash, so anything but a full hash is derived here instead.
+		// blank the collision guard, so anything but a full hash is re-derived.
 		prepared.codeHash = update.CodeHash
 		if len(prepared.codeHash) != len(common.Hash{}) {
 			prepared.codeHash = crypto.Keccak256(prepared.value)
@@ -521,9 +520,8 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
 	//
-	// One update is prepared at a time: preparing the batch up front held a clone
-	// of every value at once — a second image of a whole block's contract code —
-	// and cost the same fill blackout, since the clones landed inside it either way.
+	// One update is prepared at a time: preparing the batch up front held a
+	// clone of every value at once, a second image of the whole delta.
 	for i := range updates {
 		c.applyPrepared(prepareStateUpdate(updates[i]))
 	}

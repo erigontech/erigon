@@ -1613,9 +1613,8 @@ func TestPublishUsesProducerCodeHash(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
-// A malformed producer hash must be replaced, not used: hash32 would zero-pad it
-// into the content-addressed key, and an all-zero stamp also blanks the guard
-// that rejects a 64-bit maphash collision serving another contract's code.
+// A malformed producer hash must be re-derived, not used: it would be zero-padded
+// into the content-addressed key and would blank the collision guard.
 func TestPublishDerivesMalformedCodeHash(t *testing.T) {
 	t.Parallel()
 

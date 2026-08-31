@@ -104,10 +104,8 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	}
 }
 
-// Flush hands its callbacks the batch's own value buffers, and SharedDomains.Commit
-// borrows them for the whole commit rather than copying. That is only sound while a
-// later write to the same key leaves the earlier bytes alone: an in-place rewrite
-// would corrupt the caches holding them, with nothing else to catch it.
+// Commit borrows the batch's value buffers instead of copying, which is only
+// sound while a later write to the same key leaves the earlier bytes alone.
 func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 	t.Parallel()
 

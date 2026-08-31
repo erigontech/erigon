@@ -321,8 +321,8 @@ type Applier struct {
 }
 
 // StateUpdate is one committed domain mutation published to StateCache.
-// CodeHash is read only for kv.CodeDomain, and only to spare the cache hashing
-// Value again when the producer already holds the hash; nil is always valid.
+// CodeHash is optional: set for kv.CodeDomain when the producer already has the
+// full hash, nil otherwise.
 type StateUpdate struct {
 	Domain   kv.Domain
 	Key      []byte
