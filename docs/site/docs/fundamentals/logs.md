@@ -33,7 +33,7 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 
 **Downloader (torrent) logs**
 
-The torrent client inside the Downloader keeps its own JSON-formatted file, `logs/torrent.log`. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
+The torrent client inside the Downloader keeps its own JSON-formatted file at `<datadir>/logs/torrent.log`. The path is built from the datadir and does **not** follow `--log.dir.path`, so it stays there even when Erigon's own logs are redirected elsewhere. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
 
 **Log Levels**
 
