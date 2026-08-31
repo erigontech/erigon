@@ -110,7 +110,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 			err = backup.CompactDatadir(ctx, datadir.Open(datadirCli), logger)
 		} else {
 			from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-			err = backup.Kv2kv(ctx, from, to, nil, logger)
+			err = backup.Kv2kv(ctx, from, to, nil, dbcfg.ChainDB, logger)
 		}
 		if errors.Is(err, context.Canceled) {
 			return nil

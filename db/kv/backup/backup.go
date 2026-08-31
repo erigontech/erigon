@@ -111,7 +111,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	defer os.RemoveAll(tmpDir)
 
-	logger.Info("[mdbx_to_mdbx] compacting", "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
+	logger.Info("[compact] compacting", "label", label, "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
 	if err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger); err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err != nil {
 		return err
 	}
-	logger.Info("[mdbx_to_mdbx] compacted", "db", dbDir,
+	logger.Info("[compact] compacted", "label", label, "db", dbDir,
 		"before", common.ByteCount(uint64(before.Size())), "after", common.ByteCount(uint64(after.Size())))
 	return nil
 }
@@ -147,7 +147,7 @@ func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep 
 	src, dst := openPair(from, to, label, true, 0, growthStep, tables, logger)
 	defer src.Close()
 	defer dst.Close()
-	return Kv2kv(ctx, src, dst, nil, logger)
+	return Kv2kv(ctx, src, dst, nil, label, logger)
 }
 
 // tablesOnDisk lists the tables the file actually holds and reads back the flags
@@ -188,7 +188,7 @@ func tablesOnDisk(ctx context.Context, dbDir string, label kv.Label, growthStep 
 	return tables, nil
 }
 
-func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logger log.Logger) error {
+func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, label kv.Label, logger log.Logger) error {
 	srcTx, err1 := src.BeginRo(ctx)
 	if err1 != nil {
 		return err1
@@ -213,7 +213,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 		if tablesMap[name].IsDeprecated {
 			continue
 		}
-		rows, err := backupTable(ctx, src, srcTx, dst, name, logEvery, logger)
+		rows, err := backupTable(ctx, src, srcTx, dst, name, logEvery, label, logger)
 		if err != nil {
 			return err
 		}
@@ -222,11 +222,11 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 			copiedRows += rows
 		}
 	}
-	logger.Info("done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
+	logger.Info("[compact] done", "label", label, "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
-func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, logger log.Logger) (uint64, error) {
+func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, table string, logEvery *time.Ticker, label kv.Label, logger log.Logger) (uint64, error) {
 	t := time.Now()
 	srcC, err := srcTx.Cursor(table)
 	if err != nil {
@@ -242,7 +242,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		return 0, err
 	}
 	if total > 0 {
-		logger.Info("[mdbx_to_mdbx] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
+		logger.Info("[compact] copying", "label", label, "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
 	}
 
 	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
@@ -251,7 +251,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)
 		if err != nil {
-			logger.Warn("[mdbx_to_mdbx] read-ahead disabled", "table", table, "err", err)
+			logger.Warn("[compact] read-ahead disabled", "label", label, "table", table, "err", err)
 		} else {
 			ra = kv.NewReadAhead(ctx, src, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, WarmValues: true})
 		}
