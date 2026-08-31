@@ -7909,7 +7909,7 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
-If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon wires a handler only for `SIGUSR1`, so `SIGQUIT` falls through to the Go runtime's own behaviour — the same one this repository's CI watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
+If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's CI watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
 
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
