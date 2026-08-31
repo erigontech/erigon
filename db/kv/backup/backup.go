@@ -119,13 +119,13 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 
 	tmpDir := dbDir + compactDirSuffix
-	if err := os.RemoveAll(tmpDir); err != nil {
+	if err := dir.RemoveAll(tmpDir); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer dir.RemoveAll(tmpDir) //nolint:errcheck
 
 	logger.Info("[compact] compacting", "label", label, "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
 	if err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger); err != nil {
@@ -147,7 +147,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := dir.FsyncDir(dbDir); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
+	if err := dir.RemoveFile(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	after, err := os.Stat(dataFile)
