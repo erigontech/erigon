@@ -394,6 +394,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// When Fork is not supported (returns nil backend), a single goroutine falls back
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
+	if err := oracle.backend.PrepareFork(ctx); err != nil {
+		return common.Big0, nil, nil, nil, nil, nil, err
+	}
 	g, fetchCtx := errgroup.WithContext(ctx)
 	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	for range maxBlockFetchers {

@@ -83,6 +83,8 @@ func (b *gapBackend) BlockByHashNumber(context.Context, common.Hash, uint64) (*t
 	return nil, nil
 }
 
+func (b *gapBackend) PrepareFork(context.Context) error { return nil }
+
 func (b *gapBackend) Fork(context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil
 }

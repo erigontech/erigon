@@ -552,8 +552,10 @@ type GasPriceOracleBackend struct {
 	tx      kv.TemporalTx   // always a pinned view; carries the request's overlay resolution
 	baseApi *BaseAPI
 
+	parentViewID uint64
 	parentTip    canonicalMarker
 	parentTipErr error
+	forkPrepared bool
 }
 
 // canonicalMarker is one entry of the canonical number-to-hash mapping.
@@ -570,10 +572,19 @@ func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *Bas
 	if !membatchwithdb.CarriesOverlayView(tx) {
 		panic("NewGasPriceOracleBackend: tx must be pinned via rpchelper.BeginTemporalRoWithOverlay or PinToOverlay")
 	}
-	// Resolved here because Fork runs on the fan-out goroutines, which must
-	// never read the parent tx.
-	tip, _, err := edgeCanonicalMarker(tx, nil, order.Desc)
-	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi, parentTip: tip, parentTipErr: err}
+	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi, parentViewID: tx.ViewID()}
+}
+
+// PrepareFork resolves the canonical marker the parent snapshot ends on, which
+// Fork compares a fresh snapshot against. Resolving it lazily keeps the scan —
+// a remote round trip in rpcdaemon mode — off the requests the tip cache answers.
+func (b *GasPriceOracleBackend) PrepareFork(context.Context) error {
+	if b.forkPrepared {
+		return b.parentTipErr
+	}
+	b.parentTip, _, b.parentTipErr = edgeCanonicalMarker(b.tx, nil, order.Desc)
+	b.forkPrepared = true
+	return b.parentTipErr
 }
 
 // edgeCanonicalMarker reads the canonical marker the database snapshot starts
@@ -635,6 +646,9 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if b.db == nil {
 		return nil, nil, nil // Fork not supported; caller falls back to sequential
 	}
+	if !b.forkPrepared {
+		return nil, nil, errors.New("GasPriceOracleBackend.Fork: PrepareFork must run on the caller's goroutine first")
+	}
 	if b.parentTipErr != nil {
 		return nil, nil, b.parentTipErr
 	}
@@ -645,15 +659,18 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	// A fresh tx takes its own database snapshot, which can already carry a
 	// reorg the parent never saw: the pin only aligns the overlay layer. Serving
 	// one request from two chains is worse than losing the parallelism, so a
-	// disagreeing snapshot degrades to sequential reads on the parent.
-	keeps, err := b.keepsParentIdentities(tx)
-	if err != nil || !keeps {
-		tx.Rollback()
-		return nil, nil, err
+	// disagreeing snapshot degrades to sequential reads on the parent. An
+	// identical view id means the same snapshot, which needs no marker lookup.
+	if tx.ViewID() != b.parentViewID {
+		keeps, err := b.keepsParentIdentities(tx)
+		if err != nil || !keeps {
+			tx.Rollback()
+			return nil, nil, err
+		}
 	}
 	// Reuse the parent's pin (rationale on rpchelper.PinToOverlay).
 	overlay, _ := membatchwithdb.ViewOverlay(b.tx)
-	return &GasPriceOracleBackend{db: b.db, tx: rpchelper.PinToOverlay(tx, overlay), baseApi: b.baseApi, parentTip: b.parentTip},
+	return &GasPriceOracleBackend{db: b.db, tx: rpchelper.PinToOverlay(tx, overlay), baseApi: b.baseApi, parentViewID: tx.ViewID(), parentTip: b.parentTip, forkPrepared: true},
 		func() { tx.Rollback() },
 		nil
 }

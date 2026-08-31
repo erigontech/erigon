@@ -1180,20 +1180,24 @@ func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
 // published at that moment, as one consistent pair: a commit or (un)publish
 // landing between the overlay capture and the tx open can leave a head block
 // visible in neither layer, so the tx is reopened whenever the publish
-// sequence number moves around the open. Under sustained publish churn the
-// last capture is served anyway — a slightly stale pinned view beats a
-// client-visible error. The returned handle reads through the pinned view
-// and its Rollback releases the underlying tx.
+// sequence number moves around the open. A capture that never stabilizes ends
+// on an explicit no-overlay pin: the committed snapshot is coherent on its own,
+// while an overlay the helper failed to match against it may belong to another
+// chain. The returned handle reads through the pinned view and its Rollback
+// releases the underlying tx.
 func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
-	const maxAttempts = 3
+	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
 		overlay, seq := ff.OverlaySnapshot()
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
 			return nil, err
 		}
-		if _, current := ff.OverlaySnapshot(); current == seq || attempt == maxAttempts {
+		if _, current := ff.OverlaySnapshot(); current == seq {
 			return PinToOverlay(tx, overlay), nil
+		}
+		if attempt == maxAttempts {
+			return PinToOverlay(tx, nil), nil
 		}
 		tx.Rollback()
 	}

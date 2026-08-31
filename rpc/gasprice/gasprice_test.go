@@ -317,6 +317,8 @@ func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber
 	return types.NewBlock(m.head, nil, nil, nil, nil, nil), nil
 }
 
+func (m *mockOracleBackend) PrepareFork(context.Context) error { return nil }
+
 func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.AllProtocolChanges }
 
 func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {

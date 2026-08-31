@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -39,7 +40,9 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -1558,6 +1561,7 @@ func TestGasPriceOracle_ForkKeepsOverlayAfterUnpublish(t *testing.T) {
 	h.events.PublishOverlay(nil)
 	h.doms.Close()
 
+	require.NoError(t, backend.PrepareFork(h.m.Ctx))
 	forked, cleanup, err := backend.Fork(h.m.Ctx)
 	require.NoError(t, err)
 	require.NotNil(t, forked)
@@ -1708,6 +1712,7 @@ func TestGasPriceOracle_ForkSharesCallerPinnedOverlay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, h.overlayHeader.Hash(), parentHead.Hash())
 
+	require.NoError(t, backend.PrepareFork(h.m.Ctx))
 	forked, cleanup, err := backend.Fork(h.m.Ctx)
 	require.NoError(t, err)
 	require.NotNil(t, forked)
@@ -1960,18 +1965,97 @@ func TestFeeHistory_PublishCycleDuringTxAcquisition(t *testing.T) {
 // on every open), the request still serves the last capture as one pinned
 // view instead of failing: under FCU churn a slightly stale answer beats a
 // client-visible error.
+type countCanonicalScansDB struct {
+	kv.TemporalRoDB
+	scans *atomic.Int64
+}
+
+func (db *countCanonicalScansDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	return &countCanonicalScansTx{TemporalTx: tx, scans: db.scans}, nil
+}
+
+type countCanonicalScansTx struct {
+	kv.TemporalTx
+	scans *atomic.Int64
+}
+
+func (tx *countCanonicalScansTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	if table == kv.HeaderCanonical {
+		tx.scans.Add(1)
+	}
+	return tx.TemporalTx.Range(table, fromPrefix, toPrefix, asc, limit)
+}
+
+// TestGasPrice_CachedRequestSkipsCanonicalScan pins that the parent-snapshot
+// identity the fan-out needs is resolved only when the request actually fans out.
+// Capturing it while the backend is built puts a canonical scan — a remote round
+// trip in rpcdaemon mode — on every request, including those the tip cache answers.
+func TestGasPrice_CachedRequestSkipsCanonicalScan(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	var scans atomic.Int64
+	db := &countCanonicalScansDB{TemporalRoDB: h.m.DB, scans: &scans}
+	api := newEthApiForTest(h.base, db, nil, nil)
+
+	_, err := api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	cold := scans.Load()
+
+	_, err = api.GasPrice(h.m.Ctx)
+	require.NoError(t, err)
+	require.Equal(t, cold, scans.Load(),
+		"a request served from the tip cache must not scan the canonical table")
+}
+
+// TestBeginTemporalRoWithOverlay_ChurnPinsNoOverlay pins that a capture which never
+// stabilizes ends on an explicit no-overlay pin. Serving the last capture instead
+// would layer an overlay generation over a database snapshot the helper just failed
+// to match it against: if a sibling was committed in between, the two belong to
+// different chains and per-key fallback mixes them.
+func TestBeginTemporalRoWithOverlay_ChurnPinsNoOverlay(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	db := &beginHookDB{TemporalRoDB: h.m.DB, t: h.t, hook: func() error {
+		return publishOverlayHeadE(h, siblingOfOverlayHead(h))
+	}}
+
+	tx, err := h.base.filters.BeginTemporalRoWithOverlay(h.m.Ctx, db)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	overlay, pinned := membatchwithdb.ViewOverlay(tx)
+	require.True(t, pinned, "the handle must stay pinned so a later publish cannot enter")
+	require.Nil(t, overlay, "an unstable capture must not be pinned as if it were coherent")
+
+	head := rawdb.ReadCurrentHeader(tx)
+	require.NotNil(t, head)
+	require.Equal(t, uint64(overlayRaceChainSize), head.Number.Uint64(),
+		"the request must read the committed head, the only view it can vouch for")
+}
+
 func TestFeeHistory_OverlayUnstableDuringTxAcquisition(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
 	db := &beginHookDB{TemporalRoDB: h.m.DB, t: h.t, hook: func() error { return publishOverlayHeadE(h, siblingOfOverlayHead(h)) }}
 	api := newEthApiForTest(h.base, db, nil, nil)
 
+	var committed *types.Header
+	require.NoError(t, h.m.DB.View(h.m.Ctx, func(tx kv.Tx) error {
+		committed = rawdb.ReadHeaderByNumber(tx, overlayRaceChainSize)
+		return nil
+	}))
+	require.NotNil(t, committed)
+
 	got, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err,
-		"a request whose overlay capture never stabilizes must serve the last capture, not fail")
-	require.Equal(t, h.overlayHeader.Number.ToBig(), got.OldestBlock.ToInt())
-	require.Equal(t, big.NewInt(overlayRaceBaseFee+1111), got.BaseFee[0].ToInt(),
-		"the window must come from one pinned sibling view")
+		"a request whose overlay capture never stabilizes must still answer, not fail")
+	require.Equal(t, committed.Number.ToBig(), got.OldestBlock.ToInt(),
+		"the window must fall back to the committed head, the only coherent view left")
+	require.Equal(t, committed.BaseFee.ToBig(), got.BaseFee[0].ToInt())
 }
 
 // publishSiblingOnGetCache publishes the sibling overlay the first time the
@@ -2131,6 +2215,7 @@ func TestGasPriceOracle_ForkRejectsDivergentSnapshot(t *testing.T) {
 
 	commitSiblingOfCommittedBlock(t, h, overlayRaceChainSize)
 
+	require.NoError(t, backend.PrepareFork(h.m.Ctx))
 	forked, cleanup, err := backend.Fork(h.m.Ctx)
 	require.NoError(t, err)
 	if cleanup != nil {
@@ -2153,6 +2238,7 @@ func TestGasPriceOracle_ForkKeepsParallelAcrossAppend(t *testing.T) {
 
 	commitOverlayBlock(t, h)
 
+	require.NoError(t, backend.PrepareFork(h.m.Ctx))
 	forked, cleanup, err := backend.Fork(h.m.Ctx)
 	require.NoError(t, err)
 	require.NotNil(t, forked,

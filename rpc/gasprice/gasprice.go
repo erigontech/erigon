@@ -64,6 +64,12 @@ type OracleBackend interface {
 	HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
 	BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error)
 
+	// PrepareFork resolves, on the caller's goroutine, whatever identity Fork
+	// validates a forked snapshot against. It must be called before the first
+	// Fork and is a no-op afterwards: Fork runs on the fan-out goroutines,
+	// which must never read the parent transaction.
+	PrepareFork(ctx context.Context) error
+
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
 	// A (nil, nil, nil) return means no forked backend is available for this
@@ -244,6 +250,9 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 //
 // The returned slice has length count: entry i corresponds to block head-i.
 func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64, count int) ([][]*uint256.Int, error) {
+	if err := oracle.backend.PrepareFork(ctx); err != nil {
+		return nil, err
+	}
 	results := make([][]*uint256.Int, count)
 	var (
 		nextIdx atomic.Uint64
