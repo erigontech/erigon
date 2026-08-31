@@ -35,13 +35,29 @@ type emptinessScenario struct {
 	want  bool
 }
 
-func runEmptiness(t *testing.T, versioned bool, sc emptinessScenario, addr accounts.Address) bool {
+// emptinessMode is one of the three state configurations that must agree:
+// the serial path, and the versioned path with the stateObject cache on and
+// off. noMaterialize is the configuration staged sync runs.
+type emptinessMode struct {
+	name          string
+	versioned     bool
+	noMaterialize bool
+}
+
+var emptinessModes = []emptinessMode{
+	{"serial", false, false},
+	{"versioned", true, false},
+	{"versioned+noMaterialize", true, true},
+}
+
+func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr accounts.Address) bool {
 	t.Helper()
 
 	reader := NewNoopReader()
 	var ibs *IntraBlockState
-	if versioned {
+	if mode.versioned {
 		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
+		ibs.SetNoMaterialize(mode.noMaterialize)
 	} else {
 		ibs = New(reader)
 	}
@@ -56,7 +72,7 @@ func runEmptiness(t *testing.T, versioned bool, sc emptinessScenario, addr accou
 	return empty
 }
 
-// TestEmptyAfterAccountMaterialization pins the EIP-161 emptiness predicate
+// TestEmptyAccountLifecycle pins the EIP-161 emptiness predicate
 // across the account lifecycle on the versioned (parallel) path.
 //
 // EIP-161 defines empty purely by fields — no code, zero nonce, zero balance —
@@ -69,7 +85,7 @@ func runEmptiness(t *testing.T, versioned bool, sc emptinessScenario, addr accou
 //
 // The self-destruct cases are the control: they are what the gate exists for
 // under EIP-6780 and must keep reporting non-empty.
-func TestEmptyAfterAccountMaterialization(t *testing.T) {
+func TestEmptyAccountLifecycle(t *testing.T) {
 	t.Parallel()
 
 	code := []byte{0x60, 0x00}
@@ -131,6 +147,20 @@ func TestEmptyAfterAccountMaterialization(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "reverted recreate leaves the self-destruct standing",
+			steps: func(t *testing.T, ibs *IntraBlockState, addr accounts.Address) {
+				require.NoError(t, ibs.CreateAccount(addr, true))
+				require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeUnspecified))
+				_, err := ibs.Selfdestruct(addr, false)
+				require.NoError(t, err)
+				snap := ibs.PushSnapshot()
+				require.NoError(t, ibs.CreateAccount(addr, true))
+				require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeUnspecified))
+				ibs.RevertToSnapshot(snap, nil)
+			},
+			want: false,
+		},
+		{
 			name: "reverted self-destruct leaves the account judged by its fields",
 			steps: func(t *testing.T, ibs *IntraBlockState, addr accounts.Address) {
 				require.NoError(t, ibs.CreateAccount(addr, false))
@@ -146,12 +176,10 @@ func TestEmptyAfterAccountMaterialization(t *testing.T) {
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
 			t.Parallel()
-			addr := toAddr([]byte(sc.name))
-			versioned := runEmptiness(t, true, sc, addr)
-			serial := runEmptiness(t, false, sc, addr)
-			require.Equal(t, sc.want, versioned, "versioned path")
-			require.Equal(t, sc.want, serial, "serial path")
-			require.Equal(t, serial, versioned, "versioned and serial paths must agree")
+			for _, mode := range emptinessModes {
+				addr := toAddr([]byte(sc.name + mode.name))
+				require.Equal(t, sc.want, runEmptiness(t, mode, sc, addr), mode.name)
+			}
 		})
 	}
 }
