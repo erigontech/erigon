@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -60,7 +61,10 @@ func datadirDBs(dirs datadir.Dirs) ([]datadirDB, error) {
 }
 
 func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
-	exists, err := dir.FileExist(filepath.Join(path, "mdbx.dat"))
+	if strings.HasSuffix(path, compactDirSuffix) { // leftover of an interrupted run - CompactInPlace deletes it
+		return nil
+	}
+	exists, err := dir.FileExist(filepath.Join(path, dataFileName))
 	if err != nil {
 		return err
 	}

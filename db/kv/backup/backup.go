@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -43,7 +44,11 @@ const (
 )
 
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
-	return openPair(from, to, label, false, targetPageSize, growthStepFor(dataFileSize(from)), kv.TablesCfgByLabel(label), logger)
+	src, dst, err := openPair(context.Background(), from, to, label, false, targetPageSize, growthStepFor(dataFileSize(from)), kv.TablesCfgByLabel(label), logger)
+	if err != nil {
+		panic(err)
+	}
+	return src, dst
 }
 
 func dataFileSize(dbDir string) int64 {
@@ -65,31 +70,42 @@ func growthStepFor(size int64) datasize.ByteSize {
 // growthStep: opening src read-write resets its geometry to this process's
 // defaults, whose 1GB step would inflate a small db before it is even read.
 // exclusive makes mdbx refuse a src another process still has open.
-func openPair(from, to string, label kv.Label, exclusive bool, targetPageSize, growthStep datasize.ByteSize, tables kv.TableCfg, logger log.Logger) (kv.RoDB, kv.RwDB) {
+func openPair(ctx context.Context, from, to string, label kv.Label, exclusive bool, targetPageSize, growthStep datasize.ByteSize, tables kv.TableCfg, logger log.Logger) (_ kv.RoDB, _ kv.RwDB, err error) {
 	const ThreadsHardLimit = 9_000
 	tableCfg := func(_ kv.TableCfg) kv.TableCfg { return tables }
-	src := mdbx2.New(label, logger).Path(from).
+	src, err := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
 		WithTableCfg(tableCfg).
 		GrowthStep(growthStep).
 		Accede(true).
 		Exclusive(exclusive).
-		MustOpen()
+		Open(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			src.Close()
+		}
+	}()
 	if targetPageSize <= 0 {
 		targetPageSize = src.PageSize()
 	}
 	info, err := src.(*mdbx2.MdbxKV).Env().Info(nil)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
-	dst := mdbx2.New(label, logger).Path(to).
+	dst, err := mdbx2.New(label, logger).Path(to).
 		PageSize(targetPageSize).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
 		GrowthStep(growthStep).
 		WriteMap(true).
 		WithTableCfg(tableCfg).
-		MustOpen()
-	return src, dst
+		Open(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return src, dst, nil
 }
 
 // CompactInPlace rewrites the mdbx db at dbDir without its free pages: it copies
@@ -116,13 +132,19 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 		return err
 	}
 
-	if err := os.Rename(filepath.Join(tmpDir, dataFileName), dataFile); err != nil {
+	// Mode and owner are applied to the copy: after the rename there is no
+	// original left to fall back to, so nothing past it may fail the call.
+	copied := filepath.Join(tmpDir, dataFileName)
+	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
 		return err
 	}
-	if err := os.Chmod(dataFile, before.Mode().Perm()); err != nil {
+	if err := restoreOwner(before, copied); err != nil {
 		return err
 	}
-	if err := restoreOwner(before, dataFile); err != nil {
+	if err := os.Rename(copied, dataFile); err != nil {
+		return err
+	}
+	if err := dir.FsyncDir(dbDir); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
@@ -144,7 +166,10 @@ func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep 
 	if err != nil {
 		return err
 	}
-	src, dst := openPair(from, to, label, true, 0, growthStep, tables, logger)
+	src, dst, err := openPair(ctx, from, to, label, true, 0, growthStep, tables, logger)
+	if err != nil {
+		return err
+	}
 	defer src.Close()
 	defer dst.Close()
 	return Kv2kv(ctx, src, dst, nil, label, logger)
