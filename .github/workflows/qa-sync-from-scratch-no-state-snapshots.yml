@@ -17,6 +17,15 @@ permissions:
 # execution, and does the state it builds on the way match what the project
 # publishes.
 #
+# The second question is answered on the state data files only -- domain/*.kv,
+# history/*.v, idx/*.ef. The accessors built over them (.bt, .kvi, .kvei, .vi,
+# .efi) are recsplit and btree structures seeded with the salt in
+# salt-state.txt, and skipping the state download makes Erigon generate that
+# salt locally instead of taking the published one, so their hashes differ from
+# the published ones even when the data underneath is identical. A consequence
+# worth knowing: the datadir this job produces cannot seed the published
+# snapshots, only prove that executing from genesis reproduces their contents.
+#
 # Mainnet and Gnosis are not in the matrix: re-executing either from genesis
 # takes longer than a job can run here. Add them once a runner budget exists.
 jobs:
@@ -150,6 +159,9 @@ jobs:
     # snapshots it built are final. Their infohashes are what the published
     # preverified.toml lists, which makes the comparison a plain name-to-hash
     # lookup rather than a re-hash of the datadir.
+    #
+    # Restricted to the data files: accessors and indexes are salt-seeded and so
+    # are not comparable across nodes (see STATE_DATA_EXTS in the compare script).
     - name: Check produced state snapshots against the published hashes
       id: hash_check_step
       if: ${{ steps.test_step.outputs.TEST_RESULT == 'success' }}
@@ -172,6 +184,8 @@ jobs:
           --local-hashes "$GITHUB_WORKSPACE/hashes-$CHAIN.txt" \
           --published-toml "$ERIGON_DATA_DIR/snapshots/preverified.toml" \
           --chain "$CHAIN" \
+          --dirs domain,history,idx \
+          --exts kv,v,ef \
           --result-file "$GITHUB_WORKSPACE/result-state-hashes-$CHAIN.json" \
           --summary-file "$GITHUB_STEP_SUMMARY"
         compare_exit_status=$?
