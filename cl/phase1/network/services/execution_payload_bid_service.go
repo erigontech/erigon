@@ -192,21 +192,12 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 		return err
 	}
 
-	preferences, ok, err := s.matchingProposerPreferences(msg)
+	preferences, err := s.matchingProposerPreferences(msg)
 	if err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
 			return s.queueBidAwaitingDependency(msg, err)
 		}
 		return err
-	}
-	if !ok {
-		// Queue as pending — preferences may arrive later
-		if err := s.queuePendingBid(msg); err != nil {
-			return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, err)
-		}
-		log.Trace("Queued execution payload bid waiting for proposer preferences",
-			"slot", slot, "builderIndex", builderIndex)
-		return fmt.Errorf("%w: %w: proposer preferences not available", ErrIgnore, ErrBidQueued)
 	}
 
 	if err := s.validateAndStoreBid(msg, preferences); err != nil {
@@ -218,21 +209,24 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	return nil
 }
 
-func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, bool, error) {
+func (s *executionPayloadBidService) matchingProposerPreferences(msg *cltypes.SignedExecutionPayloadBid) (*cltypes.SignedProposerPreferences, error) {
 	bid := msg.Message
 	if _, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot); !ok {
-		return nil, false, fmt.Errorf("%w: parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
+		return nil, fmt.Errorf("%w: parent_block_root %v not available", errBidDependencyUnavailable, bid.ParentBlockRoot)
 	}
 	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	dependentRoot, err := s.shufflingDependentRoot(bid.ParentBlockRoot, proposalEpoch)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if dependentRoot == (common.Hash{}) {
-		return nil, false, fmt.Errorf("%w: failed to compute proposer dependent root", ErrIgnore)
+		return nil, fmt.Errorf("%w: failed to compute proposer dependent root", ErrIgnore)
 	}
 	preferences, ok := s.epbsPool.GetPreference(bid.Slot, dependentRoot)
-	return preferences, ok, nil
+	if !ok {
+		return nil, fmt.Errorf("%w: proposer preferences not available", errBidDependencyUnavailable)
+	}
+	return preferences, nil
 }
 
 func (s *executionPayloadBidService) shufflingDependentRoot(root common.Hash, epoch uint64) (common.Hash, error) {
@@ -322,7 +316,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	// [IGNORE] parent_block_hash is known in fork choice
 	if _, ok := s.forkchoiceStore.GetRecentExecutionPayloadStatus(bid.ParentBlockHash); !ok {
 		return fmt.Errorf("%w: parent_block_hash %v not known in fork choice",
-			ErrIgnore, bid.ParentBlockHash)
+			errBidDependencyUnavailable, bid.ParentBlockHash)
 	}
 
 	// [IGNORE] gas_limit compatibility check — skipped (not rejected) when parent is absent from the LRU.
@@ -520,7 +514,7 @@ func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key
 		return pendingJobRemove
 	}
 
-	preferences, ok, err := s.matchingProposerPreferences(msg)
+	preferences, err := s.matchingProposerPreferences(msg)
 	if err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
 			return pendingJobKeep
@@ -528,9 +522,6 @@ func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key
 		log.Trace("Failed to match pending execution payload bid",
 			"slot", key.slot, "builderIndex", key.builderIndex, "err", err)
 		return pendingJobRemove
-	}
-	if !ok {
-		return pendingJobKeep
 	}
 
 	if err := s.validateAndStoreBid(msg, preferences); err != nil {

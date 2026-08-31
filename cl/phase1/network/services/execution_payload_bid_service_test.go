@@ -506,7 +506,7 @@ func TestExecutionPayloadBidServiceBuilderInactiveError(t *testing.T) {
 	require.False(t, service.seenCache.Contains(seenKey))
 }
 
-func TestExecutionPayloadBidServiceParentBlockHashUnknown(t *testing.T) {
+func TestExecutionPayloadBidServiceWaitsForParentPayloadStatus(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -514,17 +514,31 @@ func TestExecutionPayloadBidServiceParentBlockHashUnknown(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	addPreferencesToPool(epbsPool, 100)
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
 
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
-	// parent_block_hash NOT in forkchoice
-	// (ExecutionPayloadStatusMap is empty for this hash)
-	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
-
 	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrBidQueued)
 	require.Contains(t, err.Error(), "parent_block_hash")
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	service.pending.processPending(context.Background())
+	require.Equal(t, int32(1), service.pending.count.Load())
+
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	service.pending.processPending(context.Background())
+
+	require.Equal(t, int32(0), service.pending.count.Load())
+	_, found := epbsPool.HighestBids.Get(pool.HighestBidKey{
+		Slot:            msg.Message.Slot,
+		ParentBlockHash: msg.Message.ParentBlockHash,
+		ParentBlockRoot: msg.Message.ParentBlockRoot,
+	})
+	require.True(t, found)
 }
 
 func TestExecutionPayloadBidServiceParentBlockRootUnknown(t *testing.T) {
