@@ -8,7 +8,8 @@ otherwise fetched from GitHub).
 
 Only the state entries are compared -- ``domain/``, ``history/``, ``idx/`` and
 ``accessor/``. Block and Caplin snapshots are downloaded rather than built, so
-their hashes say nothing about execution.
+their hashes say nothing about execution. ``--dirs`` and ``--exts`` narrow that
+further; see STATE_DATA_EXTS for why a caller may want to drop the accessors.
 
 A file present on only one side is reported but is not a failure: the node stops
 at whatever step boundary it reached, and it keeps building past the end of the
@@ -24,6 +25,12 @@ import sys
 import urllib.request
 
 STATE_DIRS = ("accessor", "domain", "history", "idx")
+
+# Data files, as opposed to the accessors built over them. Accessors (.bt, .kvi,
+# .kvei, .vi, .efi) are recsplit/btree structures seeded with the salt in
+# salt-state.txt, so two nodes with different salts index the same data into
+# different bytes. Only these extensions are comparable across nodes.
+STATE_DATA_EXTS = ("kv", "v", "ef")
 
 GITHUB_TOML_URL = "https://raw.githubusercontent.com/erigontech/erigon-snapshot/{branch}/{chain}.toml"
 
@@ -80,9 +87,11 @@ def parse_hash_toml(text):
     return entries
 
 
-def state_entries(entries, dirs=STATE_DIRS):
+def state_entries(entries, dirs=STATE_DIRS, exts=None):
     prefixes = tuple(d + "/" for d in dirs)
-    return {name: h for name, h in entries.items() if name.startswith(prefixes)}
+    suffixes = tuple("." + e for e in exts) if exts else None
+    return {name: h for name, h in entries.items()
+            if name.startswith(prefixes) and (suffixes is None or name.endswith(suffixes))}
 
 
 def compare(local, published):
@@ -178,6 +187,9 @@ def parse_args():
                         help="preverified TOML to compare against; fetched from GitHub when missing")
     parser.add_argument("--dirs", default=",".join(STATE_DIRS),
                         help="comma-separated state subdirs to compare (default: %(default)s)")
+    parser.add_argument("--exts", default="",
+                        help="comma-separated file extensions to compare, without the dot "
+                             "(default: every extension)")
     parser.add_argument("--branch", default=None,
                         help="erigon-snapshot branch to fetch (default: $SNAPS_GIT_BRANCH, "
                              "else DefaultSnapshotGitBranch from db/version/app.go)")
@@ -193,11 +205,12 @@ def main():
     repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 
     dirs = tuple(d.strip() for d in args.dirs.split(",") if d.strip())
+    exts = tuple(e.strip().lstrip(".") for e in args.exts.split(",") if e.strip())
 
     with open(args.local_hashes, encoding="utf-8") as fh:
-        local = state_entries(parse_hash_toml(fh.read()), dirs)
+        local = state_entries(parse_hash_toml(fh.read()), dirs, exts)
     published_text, source = load_published(args, repo_root)
-    published = state_entries(parse_hash_toml(published_text), dirs)
+    published = state_entries(parse_hash_toml(published_text), dirs, exts)
 
     comparison = compare(local, published)
     result = verdict(comparison)
@@ -206,6 +219,7 @@ def main():
 
     print(f"published hashes: {source}")
     print(f"comparing subdirs: {', '.join(dirs)}")
+    print(f"comparing extensions: {', '.join(exts) if exts else 'all'}")
     print(f"state snapshots: {len(local)} built, {len(published)} published")
     print(f"match: {len(comparison.matched)}, differ: {len(comparison.mismatched)}, "
           f"built locally only: {len(comparison.local_only)}, published only: {len(comparison.published_only)}")

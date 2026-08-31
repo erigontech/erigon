@@ -92,6 +92,24 @@ check("state filter can be narrowed to given subdirs",
           "idx/v1.1-code.0-1024.ef",
       ], sorted(mod.state_entries(entries, ("domain", "idx"))))
 
+salted = mod.parse_hash_toml("""\
+'domain/v1.1-accounts.0-1024.kv' = 'a'
+'domain/v1.1-accounts.0-1024.bt' = 'b'
+'domain/v1.1-accounts.0-1024.kvei' = 'c'
+'domain/v1.1-commitment.0-1024.kvi' = 'd'
+'history/v1.1-storage.0-1024.v' = 'e'
+'idx/v1.1-code.0-1024.ef' = 'f'
+""")
+check("state filter can be narrowed to given extensions",
+      sorted(mod.state_entries(salted, exts=("kv", "v", "ef"))) == [
+          "domain/v1.1-accounts.0-1024.kv",
+          "history/v1.1-storage.0-1024.v",
+          "idx/v1.1-code.0-1024.ef",
+      ], sorted(mod.state_entries(salted, exts=("kv", "v", "ef"))))
+check("extension filter does not match on a suffix of a longer extension",
+      "domain/v1.1-accounts.0-1024.kvei" not in mod.state_entries(salted, exts=("kv",)),
+      sorted(mod.state_entries(salted, exts=("kv",))))
+
 # --- compare -----------------------------------------------------------------
 
 cmp_all_match = mod.compare({"domain/a.kv": "1", "idx/b.ef": "2"},
@@ -154,6 +172,16 @@ with tempfile.TemporaryDirectory() as tmp:
                           "--dirs", "domain,history,idx", "--result-file", res])
     check("--dirs narrows what is compared", code == 0, out)
     check("--dirs leaves the excluded subdir out of the measures",
+          json.load(open(res))["measures"]["matched"] == 1)
+
+with tempfile.TemporaryDirectory() as tmp:
+    local = write(tmp, "hashes.txt", "'domain/a.kv' = '1'\n'domain/a.bt' = 'other-salt'\n")
+    published = write(tmp, "preverified.toml", "'domain/a.kv' = '1'\n'domain/a.bt' = '2'\n")
+    res = os.path.join(tmp, "result.json")
+    code, out = run_main(["--local-hashes", local, "--published-toml", published, "--chain", "chiado",
+                          "--exts", "kv,v,ef", "--result-file", res])
+    check("--exts drops the salt-dependent accessors inside domain/", code == 0, out)
+    check("--exts leaves the excluded extension out of the measures",
           json.load(open(res))["measures"]["matched"] == 1)
 
 with tempfile.TemporaryDirectory() as tmp:
