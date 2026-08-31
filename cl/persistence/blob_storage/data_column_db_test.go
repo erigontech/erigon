@@ -3,19 +3,20 @@ package blob_storage
 import (
 	"bytes"
 	"context"
+	"os"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
 )
 
 var (
@@ -37,25 +38,13 @@ func init() {
 	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
 }
 
-func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig, eth_clock.EthereumClock) {
+func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig) {
 	fs := afero.NewBasePathFs(afero.NewOsFs(), t.TempDir())
 
-	ctrl := gomock.NewController(t)
-	mockClock := eth_clock.NewMockEthereumClock(ctrl)
-
-	// Set up mock expectations
-	mockClock.EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
-	mockClock.EXPECT().GetCurrentEpoch().Return(uint64(31)).AnyTimes()
-	mockClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 {
-		return slot / 32
-	}).AnyTimes()
-
 	emitters := beaconevents.NewEventEmitter()
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock, emitters)
-	return storage, fs, globalBeaconConfig, mockClock
+	storage := NewDataColumnStore(fs, globalBeaconConfig, emitters)
+	return storage, fs, globalBeaconConfig
 }
-
-// Mock implementation removed - using eth_clock.NewMockEthereumClock instead
 
 func createTestDataColumnSidecar(slot uint64, columnIndex int64) *cltypes.DataColumnSidecar {
 	sidecar := cltypes.NewDataColumnSidecar()
@@ -68,13 +57,173 @@ func createTestDataColumnSidecar(slot uint64, columnIndex int64) *cltypes.DataCo
 	return sidecar
 }
 
+type blockingColumnFs struct {
+	afero.Fs
+	blockStatPath   string
+	blockRemovePath string
+	createPath      string
+	statEntered     chan struct{}
+	statRelease     chan struct{}
+	removeEntered   chan struct{}
+	removeRelease   chan struct{}
+	createCalled    chan struct{}
+	statOnce        sync.Once
+	removeOnce      sync.Once
+	createOnce      sync.Once
+}
+
+func (f *blockingColumnFs) Stat(name string) (os.FileInfo, error) {
+	if name == f.blockStatPath {
+		f.statOnce.Do(func() { close(f.statEntered) })
+		<-f.statRelease
+	}
+	return f.Fs.Stat(name)
+}
+
+func (f *blockingColumnFs) Remove(name string) error {
+	if name == f.blockRemovePath {
+		f.removeOnce.Do(func() { close(f.removeEntered) })
+		<-f.removeRelease
+	}
+	return f.Fs.Remove(name)
+}
+
+func (f *blockingColumnFs) Create(name string) (afero.File, error) {
+	if name == f.createPath {
+		f.createOnce.Do(func() { close(f.createCalled) })
+	}
+	return f.Fs.Create(name)
+}
+
+func TestDataColumnStorageDoesNotReportTruncatedSidecar(t *testing.T) {
+	fs := newFailingFs(afero.NewMemMapFs())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	impl := storage.(*dataColumnStorageImpl)
+	root := common.HexToHash("0x1234567890abcdef")
+	const slot = 1000
+	const index = 1
+	_, filepath := impl.path(slot, root, index)
+	fs.failWritesAfter(filepath, 1, errInducedFailure)
+	fs.failWritesAfter(filepath+tmpSuffix, 1, errInducedFailure)
+
+	err := storage.WriteColumnSidecars(t.Context(), root, index, createTestDataColumnSidecar(slot, index))
+	require.ErrorIs(t, err, errInducedFailure)
+
+	exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, index)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	saved, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.Empty(t, saved)
+}
+
+func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	root := common.HexToHash("0x1234567890abcdef")
+	sidecar := createTestDataColumnSidecar(1000, 1)
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
+	event := <-events
+	require.Equal(t, beaconevents.OpDataColumnSidecar, event.Event)
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
+	require.Len(t, events, 0)
+}
+
+func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
+	t.Run("saved index scan", func(t *testing.T) {
+		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
+		storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+		root := common.HexToHash("0x1234567890abcdef")
+		const slot = 1000
+		require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0)))
+		impl := storage.(*dataColumnStorageImpl)
+		_, statPath := impl.path(slot, root, 0)
+		_, createPath := impl.path(slot, root, 1)
+		fs.blockStatPath = statPath
+		fs.statEntered = make(chan struct{})
+		fs.statRelease = make(chan struct{})
+		fs.createPath = createPath + tmpSuffix
+		fs.createCalled = make(chan struct{})
+
+		scanDone := make(chan []uint64, 1)
+		scanErr := make(chan error, 1)
+		go func() {
+			indices, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+			scanDone <- indices
+			scanErr <- err
+		}()
+		<-fs.statEntered
+
+		writeStarted := make(chan struct{})
+		writeDone := make(chan error, 1)
+		go func() {
+			close(writeStarted)
+			writeDone <- storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
+		}()
+		<-writeStarted
+		select {
+		case <-fs.createCalled:
+			t.Fatal("write interleaved with the saved-column scan")
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(fs.statRelease)
+
+		require.NoError(t, <-scanErr)
+		require.Equal(t, []uint64{0}, <-scanDone)
+		require.NoError(t, <-writeDone)
+	})
+
+	t.Run("remove loop", func(t *testing.T) {
+		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
+		storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+		root := common.HexToHash("0x1234567890abcdef")
+		const slot = 1000
+		for index := range int64(2) {
+			require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, index, createTestDataColumnSidecar(slot, index)))
+		}
+		impl := storage.(*dataColumnStorageImpl)
+		_, removePath := impl.path(slot, root, 0)
+		_, createPath := impl.path(slot, root, 2)
+		fs.blockRemovePath = removePath
+		fs.removeEntered = make(chan struct{})
+		fs.removeRelease = make(chan struct{})
+		fs.createPath = createPath + tmpSuffix
+		fs.createCalled = make(chan struct{})
+
+		removeDone := make(chan error, 1)
+		go func() { removeDone <- storage.RemoveColumnSidecars(t.Context(), slot, root, 0, 1) }()
+		<-fs.removeEntered
+
+		writeStarted := make(chan struct{})
+		writeDone := make(chan error, 1)
+		go func() {
+			close(writeStarted)
+			writeDone <- storage.WriteColumnSidecars(t.Context(), root, 2, createTestDataColumnSidecar(slot, 2))
+		}()
+		<-writeStarted
+		select {
+		case <-fs.createCalled:
+			t.Fatal("write interleaved with the column-removal loop")
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(fs.removeRelease)
+
+		require.NoError(t, <-removeDone)
+		require.NoError(t, <-writeDone)
+	})
+}
+
 func TestNewDataColumnStore(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	beaconConfig := &clparams.BeaconChainConfig{}
-	ctrl := gomock.NewController(t)
-	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 
-	storage := NewDataColumnStore(fs, 1000, beaconConfig, mockClock, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, beaconConfig, beaconevents.NewEventEmitter())
 
 	assert.NotNil(t, storage)
 
@@ -82,26 +231,10 @@ func TestNewDataColumnStore(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, fs, impl.fs)
 	assert.Equal(t, beaconConfig, impl.beaconChainConfig)
-	assert.Equal(t, mockClock, impl.ethClock)
-	assert.Equal(t, uint64(1000), impl.slotsKept)
-}
-
-func TestDataColumnFilePath(t *testing.T) {
-	slot := uint64(1000)
-	blockRoot := common.HexToHash("0x1234567890abcdef")
-	columnIndex := uint64(2)
-
-	dir, filepath := dataColumnFilePath(slot, blockRoot, columnIndex)
-
-	expectedDir := "0" // 1000 / 10000 = 0
-	expectedFilepath := "0/0x0000000000000000000000000000000000000000000000001234567890abcdef_2"
-
-	assert.Equal(t, expectedDir, dir)
-	assert.Equal(t, expectedFilepath, filepath)
 }
 
 func TestWriteColumnSidecars(t *testing.T) {
-	storage, fs, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -113,9 +246,9 @@ func TestWriteColumnSidecars(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify file was created
-	_, filepath := dataColumnFilePath(1000, blockRoot, uint64(columnIndex))
-	_, err = fs.Stat(filepath)
+	exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, columnIndex)
 	require.NoError(t, err)
+	require.True(t, exists)
 
 	// Test writing to same location again (should not error)
 	err = storage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
@@ -123,7 +256,7 @@ func TestWriteColumnSidecars(t *testing.T) {
 }
 
 func TestReadColumnSidecarByColumnIndex(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -147,7 +280,7 @@ func TestReadColumnSidecarByColumnIndex(t *testing.T) {
 }
 
 func TestColumnSidecarExists(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -170,7 +303,7 @@ func TestColumnSidecarExists(t *testing.T) {
 }
 
 func TestColumnSidecarExistsWithInvalidParameters(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.Hash{} // Empty hash
@@ -189,14 +322,15 @@ func TestColumnSidecarExistsWithInvalidParameters(t *testing.T) {
 }
 
 func TestColumnSidecarExistsWithDirectoryError(t *testing.T) {
-	storage, fs, _, _ := setupTestDataColumnStorage(t)
+	storage, fs, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
 
 	// Create a directory with the same name as the expected file to cause a stat error
-	_, filepath := dataColumnFilePath(1000, blockRoot, uint64(columnIndex))
+	impl := storage.(*dataColumnStorageImpl)
+	_, filepath := impl.path(1000, blockRoot, uint64(columnIndex))
 	dir := filepath[:len(filepath)-2] // Remove the "_1" part
 	err := fs.MkdirAll(dir, 0o755)
 	require.NoError(t, err)
@@ -208,7 +342,7 @@ func TestColumnSidecarExistsWithDirectoryError(t *testing.T) {
 }
 
 func TestRemoveColumnSidecars(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -245,40 +379,35 @@ func TestRemoveColumnSidecars(t *testing.T) {
 	assert.False(t, exists)
 }
 
-func TestRemoveAllColumnSidecars(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+func TestRemoveColumnSidecarsContinuesPastAFailureOnAMiddleIndex(t *testing.T) {
+	fs := newRemoveFailingFs(afero.NewMemMapFs())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 	ctx := context.Background()
-
 	blockRoot := common.HexToHash("0x1234567890abcdef")
+	const slot = 1000
 
-	// Write multiple sidecars
 	for i := range int64(3) {
-		sidecar := createTestDataColumnSidecar(1000, i)
-		err := storage.WriteColumnSidecars(ctx, blockRoot, i, sidecar)
-		require.NoError(t, err)
+		require.NoError(t, storage.WriteColumnSidecars(ctx, blockRoot, i, createTestDataColumnSidecar(slot, i)))
 	}
 
-	// Verify they exist
-	for i := range int64(3) {
-		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
-		require.NoError(t, err)
-		assert.True(t, exists)
-	}
+	impl := storage.(*dataColumnStorageImpl)
+	_, failPath := impl.path(slot, blockRoot, 1)
+	fs.failOn[failPath] = errInducedFailure
 
-	// Remove all sidecars
-	err := storage.RemoveAllColumnSidecars(ctx, 1000, blockRoot)
+	err := storage.RemoveColumnSidecars(ctx, slot, blockRoot, 0, 1, 2)
+	require.ErrorIs(t, err, errInducedFailure)
+
+	exists0, err := storage.ColumnSidecarExists(ctx, slot, blockRoot, 0)
 	require.NoError(t, err)
+	require.False(t, exists0, "index before the failing one should still be removed")
 
-	// Verify all are removed
-	for i := range int64(3) {
-		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
-		require.NoError(t, err)
-		assert.False(t, exists)
-	}
+	exists2, err := storage.ColumnSidecarExists(ctx, slot, blockRoot, 2)
+	require.NoError(t, err)
+	require.False(t, exists2, "index after the failing one should still be removed")
 }
 
 func TestWriteStream(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -303,7 +432,7 @@ func TestWriteStream(t *testing.T) {
 }
 
 func TestGetSavedColumnIndex(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -328,60 +457,149 @@ func TestGetSavedColumnIndex(t *testing.T) {
 	}
 }
 
-func TestPrune(t *testing.T) {
-	storage, fs, _, mockClock := setupTestDataColumnStorage(t)
+func TestDataColumnStorePruneBelowRemovesBucketsUnderTheFloor(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	for _, bucket := range []string{"0", "1", "2", "3", "4"} {
+		require.NoError(t, fs.MkdirAll(bucket, 0o755))
+	}
 
-	// Set up mock clock expectations for pruning
-	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(50000)).AnyTimes()
+	require.NoError(t, storage.PruneBelow(40000))
 
-	// Create some test directories
-	fs.MkdirAll("0", 0o755) // slot 0-9999
-	fs.MkdirAll("1", 0o755) // slot 10000-19999
-	fs.MkdirAll("2", 0o755) // slot 20000-29999
-	fs.MkdirAll("3", 0o755) // slot 30000-39999
-	fs.MkdirAll("4", 0o755) // slot 40000-49999
+	for _, gone := range []string{"0", "1", "2", "3"} {
+		exists, err := afero.DirExists(fs, gone)
+		require.NoError(t, err)
+		require.False(t, exists, "bucket %s is below the floor", gone)
+	}
+	exists, err := afero.DirExists(fs, "4")
+	require.NoError(t, err)
+	require.True(t, exists, "the floor's own bucket survives")
+}
 
-	// Test pruning with keepSlotDistance = 10000
-	err := storage.Prune(10000)
+func TestDataColumnStorePruneBelowZeroRemovesNothing(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+
+	require.NoError(t, storage.PruneBelow(0))
+	_, err := fs.Stat("0")
 	require.NoError(t, err)
 }
 
-func TestPruneWithLargeKeepDistance(t *testing.T) {
-	storage, fs, _, mockClock := setupTestDataColumnStorage(t)
+func TestDataColumnStorePruneBelowFloorAboveEveryBucketEmptiesTheStore(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	for _, bucket := range []string{"0", "1"} {
+		require.NoError(t, fs.MkdirAll(bucket, 0o755))
+	}
 
-	// Set up mock clock expectations for pruning
-	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(100000)).AnyTimes()
+	require.NoError(t, storage.PruneBelow(50000))
 
-	// Create some test directories
-	fs.MkdirAll("0", 0o755) // slot 0-9999
-	fs.MkdirAll("1", 0o755) // slot 10000-19999
-
-	// Test pruning with very large keepSlotDistance
-	err := storage.Prune(50000)
-	require.NoError(t, err)
+	for _, gone := range []string{"0", "1"} {
+		exists, err := afero.DirExists(fs, gone)
+		require.NoError(t, err)
+		require.False(t, exists)
+	}
 }
 
-func TestPruneWithZeroKeepDistance(t *testing.T) {
-	storage, fs, _, mockClock := setupTestDataColumnStorage(t)
+func TestDataColumnStorePruneFloorRejectsLateWritesAndAllowsCleanup(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 4)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
+	oldRoot := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), oldRoot, 0, createTestDataColumnSidecar(100, 0)))
+	<-events
 
-	// Set up mock clock expectations for pruning
-	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
-
-	// Create some test directories
-	fs.MkdirAll("0", 0o755) // slot 0-9999
-
-	// Test pruning with zero keepSlotDistance
-	err := storage.Prune(0)
+	require.NoError(t, storage.PruneBelow(500))
+	require.NoError(t, storage.RemoveColumnSidecars(t.Context(), 100, oldRoot, 0))
+	exists, err := storage.ColumnSidecarExists(t.Context(), 100, oldRoot, 0)
 	require.NoError(t, err)
+	require.False(t, exists, "cleanup removes must remain available below the write floor")
+
+	lateRoot := common.Hash{2}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), lateRoot, 0, createTestDataColumnSidecar(499, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 499, lateRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Empty(t, events, "a rejected write must not emit a sidecar event")
+
+	boundaryRoot := common.Hash{3}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), boundaryRoot, 0, createTestDataColumnSidecar(500, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 500, boundaryRoot, 0)
+	require.NoError(t, err)
+	require.True(t, exists, "the floor itself remains writable")
+	require.Equal(t, beaconevents.OpDataColumnSidecar, (<-events).Event)
+
+	require.NoError(t, storage.PruneBelow(250))
+	lowerRoot := common.Hash{4}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), lowerRoot, 0, createTestDataColumnSidecar(499, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 499, lowerRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Empty(t, events, "a lower later prune must not lower the write floor")
+}
+
+func TestDataColumnStorePartialPruneStillRejectsLateWrites(t *testing.T) {
+	fs := newRemoveAllFailingFs(afero.NewMemMapFs())
+	fs.failOn["0"] = errInducedFailure
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+
+	require.ErrorIs(t, storage.PruneBelow(subdivisionSlot), errInducedFailure)
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(subdivisionSlot-1, 0)))
+	exists, err := storage.ColumnSidecarExists(t.Context(), subdivisionSlot-1, root, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
+func TestDataColumnStoreConcurrentPrunesKeepTheHighestFloor(t *testing.T) {
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, floor := range []uint64{500, 1_000} {
+		go func() {
+			<-start
+			errs <- storage.PruneBelow(floor)
+		}()
+	}
+	close(start)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+
+	root := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(999, 0)))
+	exists, err := storage.ColumnSidecarExists(t.Context(), 999, root, 0)
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(1_000, 0)))
+	exists, err = storage.ColumnSidecarExists(t.Context(), 1_000, root, 0)
+	require.NoError(t, err)
+	require.True(t, exists)
+}
+
+func TestBucketStorePruneFloorsAreIndependent(t *testing.T) {
+	first := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	second := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, beaconevents.NewEventEmitter())
+	require.NoError(t, first.PruneBelow(500))
+	root := common.Hash{1}
+	sidecar := createTestDataColumnSidecar(499, 0)
+
+	require.NoError(t, first.WriteColumnSidecars(t.Context(), root, 0, sidecar))
+	require.NoError(t, second.WriteColumnSidecars(t.Context(), root, 0, sidecar))
+	firstExists, err := first.ColumnSidecarExists(t.Context(), 499, root, 0)
+	require.NoError(t, err)
+	secondExists, err := second.ColumnSidecarExists(t.Context(), 499, root, 0)
+	require.NoError(t, err)
+	require.False(t, firstExists)
+	require.True(t, secondExists)
 }
 
 func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
 	// Create a filesystem that will fail on directory creation
 	fs := afero.NewMemMapFs()
-	ctrl := gomock.NewController(t)
-	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
@@ -393,7 +611,7 @@ func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
 }
 
 func TestReadColumnSidecarByColumnIndexErrorHandling(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
@@ -404,7 +622,7 @@ func TestReadColumnSidecarByColumnIndexErrorHandling(t *testing.T) {
 }
 
 func TestRemoveColumnSidecarsNonExistent(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 
@@ -414,7 +632,7 @@ func TestRemoveColumnSidecarsNonExistent(t *testing.T) {
 }
 
 func TestWriteStreamErrorHandling(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
@@ -426,7 +644,7 @@ func TestWriteStreamErrorHandling(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")

@@ -209,12 +209,35 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline (see payloadPublicationDivisor).
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) blockBuilderWindow {
+// unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
+// reserves the final publication share of the attestation window for processing, signing, and gossip.
+func unpreparedGrabOffset(due time.Duration) time.Duration {
+	return due - due/payloadPublicationDivisor
+}
+
+// preparedGrabOffset is the earlier collection point available to a builder that was warmed before
+// the slot. The minimum-age check below preserves the build time available on the unprepared path.
+func preparedGrabOffset(due time.Duration) time.Duration {
+	return due / payloadPublicationDivisor
+}
+
+// preparedPayloadMinimumAge is how long a primed builder must already have been running before
+// production may collect from it early. It is the gap between prepared and unprepared collection
+// offsets, so both paths give the builder the same total build time.
+func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	grabBy := slotStart.Add(due - due/payloadPublicationDivisor)
+	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
+}
+
+// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
+// reserving a publication margin before the attestation deadline.
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
+	due := attestationDue(cfg, stateVersion)
+	grabBy := slotStart.Add(unpreparedGrabOffset(due))
 	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
+	if prepared {
+		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
+	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
@@ -368,7 +391,7 @@ func pollAssembledPayload(
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		attempts++
-		if execution_client.IsUnknownPayloadError(err) {
+		if execution_client.IsUnknownPayloadError(err) || errors.Is(err, execution_client.ErrInvalidGetPayloadResponse) {
 			return nil, nil, nil, nil, err
 		}
 		if err != nil {
@@ -553,6 +576,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
+	// Cover the whole request so preparation cannot enter the execution layer while production is
+	// still deriving or collecting the block.
+	finishProduction := a.payloadPreparationGate.beginProduction()
+	defer finishProduction()
+
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
@@ -1098,9 +1126,6 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 	}
-	currEpoch := a.ethClock.GetCurrentEpoch()
-	random := baseState.GetRandaoMixes(currEpoch)
-
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever
@@ -1129,15 +1154,8 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotNumber := hexutil.Uint64(targetSlot)
-		attrs := payloadAttributes(
-			stateVersion,
-			hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-			random,
-			feeRecipient,
-			withdrawals,
-			(*common.Hash)(&blockRoot),
-			&slotNumber,
-			targetGasLimit,
+		attrs := a.payloadBuildAttributes(
+			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
 		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
@@ -1157,13 +1175,23 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
+		prepared := a.preparedPayload.matches(
+			targetSlot, idBytes, time.Now(), preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		)
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
 		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
 		if pollErr != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
 			return
+		}
+		if bundles == nil {
+			if stateVersion.AfterOrEqual(clparams.DenebVersion) {
+				executionErr = fmt.Errorf("produceBeaconBody: %w: missing blobs bundle", execution_client.ErrInvalidGetPayloadResponse)
+				return
+			}
+			bundles = &engine_types.BlobsBundle{}
 		}
 		// Determine block value
 		if blockValue == nil {
@@ -1183,6 +1211,12 @@ func (a *ApiHandler) produceBeaconBody(
 				len(bundles.Proofs) != len(bundles.Blobs)*int(a.beaconChainCfg.NumberOfColumns) {
 				executionErr = errors.New("produceBeaconBody: invalid peerdas bundle")
 				return
+			}
+			for _, proof := range bundles.Proofs {
+				if len(proof) != length.Bytes48 {
+					executionErr = errors.New("produceBeaconBody: invalid proof length")
+					return
+				}
 			}
 		}
 
@@ -2166,6 +2200,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
 ) error {
+	finishProduction := a.payloadPreparationGate.beginProduction()
+	defer finishProduction()
+
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -2428,8 +2465,9 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				attData = att.Data
 			}
 			signatures = append(signatures, att.Signature[:])
-			// set commitee bit
-			commiteeBits.SetBitAt(int(cIndex), true)
+			// set committee bit; cIndex is always < MaxCommitteesPerSlot, the
+			// vector's cap, so this cannot error.
+			_ = commiteeBits.SetBitAt(int(cIndex), true)
 			// append aggregation bits
 			for i := 0; i < att.AggregationBits.Bits(); i++ {
 				bitSlice.AppendBit(att.AggregationBits.GetBitAt(i))

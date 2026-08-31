@@ -34,7 +34,7 @@ type fixedTemporalTx struct {
 	val []byte
 }
 
-func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
+func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return g.val, 0, nil
 }
 func (g fixedTemporalTx) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
@@ -195,4 +195,25 @@ func BenchmarkCachedReaderAccountRead(b *testing.B) {
 			}
 		}
 	})
+}
+
+// returnReadList pools the list, so leaving Vals populated keeps every value the
+// transaction read — bytecode included — alive for as long as the pool holds it.
+// Not parallel: it inspects an object it has just handed back to the pool.
+func TestReturnReadListUnpinsWhatTheTxnRead(t *testing.T) {
+	lists := readListPool.Get().(ReadLists)
+	tbl := lists[kv.AccountsDomain.String()]
+	tbl.Push("k1", make([]byte, 4096))
+	tbl.Push("k2", make([]byte, 4096))
+	require.Equal(t, 2, tbl.Len())
+
+	returnReadList(lists)
+
+	require.Zero(t, tbl.Len())
+	for i, v := range tbl.Vals[:cap(tbl.Vals)] {
+		require.Nil(t, v, "Vals[%d] still pins %d bytes the txn read", i, len(v))
+	}
+	for i, k := range tbl.Keys[:cap(tbl.Keys)] {
+		require.Empty(t, k, "Keys[%d] still pins a key", i)
+	}
 }

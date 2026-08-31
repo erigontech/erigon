@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -45,6 +46,137 @@ type fcuEngineStub struct {
 
 func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return s.response, s.err
+}
+
+type getPayloadEngineStub struct {
+	engineapi.EngineAPI
+	response *engine_types.GetPayloadResponse
+	called   string
+}
+
+func (s *getPayloadEngineStub) GetPayloadV3(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V3"
+	return s.response, nil
+}
+
+func (s *getPayloadEngineStub) GetPayloadV4(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V4"
+	return s.response, nil
+}
+
+func (s *getPayloadEngineStub) GetPayloadV5(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V5"
+	return s.response, nil
+}
+
+func (s *getPayloadEngineStub) GetPayloadV6(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V6"
+	return s.response, nil
+}
+
+func TestGetAssembledBlockRoutesByVersion(t *testing.T) {
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		method  string
+	}{
+		{clparams.DenebVersion, "V3"},
+		{clparams.ElectraVersion, "V4"},
+		{clparams.FuluVersion, "V5"},
+		{clparams.GloasVersion, "V6"},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			stub := &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+				ExecutionPayload: &engine_types.ExecutionPayload{},
+				BlobsBundle:      &engine_types.BlobsBundle{},
+			}}
+			cc := &ExecutionClientEngine{engine: stub, beaconCfg: &cfg}
+
+			_, _, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, tc.version)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.method, stub.called)
+		})
+	}
+}
+
+func TestGetAssembledBlockRejectsMissingBlobsBundle(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cc := &ExecutionClientEngine{
+				engine: &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+					ExecutionPayload: &engine_types.ExecutionPayload{},
+				}},
+				beaconCfg: &cfg,
+			}
+
+			payload, bundle, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, version)
+
+			require.Nil(t, payload)
+			require.Nil(t, bundle)
+			require.ErrorIs(t, err, ErrInvalidGetPayloadResponse)
+			require.ErrorContains(t, err, "missing blobs bundle")
+		})
+	}
+}
+
+func TestGetAssembledBlockRejectsMissingExecutionPayload(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cc := &ExecutionClientEngine{
+				engine: &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+					BlobsBundle: &engine_types.BlobsBundle{},
+				}},
+				beaconCfg: &cfg,
+			}
+
+			payload, bundle, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, version)
+
+			require.Nil(t, payload)
+			require.Nil(t, bundle)
+			require.ErrorIs(t, err, ErrInvalidGetPayloadResponse)
+			require.ErrorContains(t, err, "nil execution payload")
+		})
+	}
+}
+
+func TestGetAssembledBlockAcceptsEmptyBlobsBundle(t *testing.T) {
+	for _, version := range []clparams.StateVersion{
+		clparams.DenebVersion,
+		clparams.ElectraVersion,
+		clparams.FuluVersion,
+		clparams.GloasVersion,
+	} {
+		t.Run(version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			bundle := &engine_types.BlobsBundle{}
+			cc := &ExecutionClientEngine{
+				engine: &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+					ExecutionPayload: &engine_types.ExecutionPayload{},
+					BlobsBundle:      bundle,
+				}},
+				beaconCfg: &cfg,
+			}
+
+			payload, gotBundle, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, version)
+
+			require.NoError(t, err)
+			require.NotNil(t, payload)
+			require.Same(t, bundle, gotBundle)
+		})
+	}
 }
 
 // A forkchoice update that ran out of time has not been refused: the execution layer may still
@@ -197,6 +329,37 @@ func TestExecutionPayloadFromSSZBlock_BlockAccessListGloasOnly(t *testing.T) {
 			bal, ok := m["blockAccessList"]
 			require.True(t, ok, "blockAccessList must be present in JSON for Gloas+ blocks")
 			require.Equal(t, tt.wantHex, bal)
+		})
+	}
+}
+
+func TestExecutionPayloadFromSSZBlock_TransactionsAreJSONArray(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	tests := []struct {
+		name    string
+		version clparams.StateVersion
+		json    string
+		want    []any
+	}{
+		{name: "pre-Gloas empty", version: clparams.ElectraVersion, json: "[]", want: []any{}},
+		{name: "pre-Gloas non-empty", version: clparams.ElectraVersion, json: `["0x0102"]`, want: []any{"0x0102"}},
+		{name: "Gloas empty", version: clparams.GloasVersion, json: "[]", want: []any{}},
+		{name: "Gloas non-empty", version: clparams.GloasVersion, json: `["0x0102"]`, want: []any{"0x0102"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload := cltypes.NewEth1Block(tt.version, &beaconCfg)
+			payload.Extra = solid.NewExtraData()
+			payload.Transactions = &solid.TransactionsSSZ{}
+			payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+			require.NoError(t, payload.Transactions.UnmarshalJSON([]byte(tt.json)))
+
+			raw, err := json.Marshal(engine_types.ExecutionPayloadFromSSZBlock(payload, tt.version))
+			require.NoError(t, err)
+
+			var decoded map[string]any
+			require.NoError(t, json.Unmarshal(raw, &decoded))
+			require.Equal(t, tt.want, decoded["transactions"])
 		})
 	}
 }

@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 // EthBackendAPIVersion
@@ -55,7 +54,9 @@ import (
 // 3.1.0 - add Subscribe to logs
 // 3.2.0 - add EngineGetBlobsBundleV1k
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 3, Minor: 3, Patch: 0}
+// 4.0.0 - remove BorTxnLookup and BorEvents
+// 4.1.0 - add FrozenBlocks function
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -65,7 +66,6 @@ type EthBackendServer struct {
 	notifications         *shards.Notifications
 	db                    kv.TemporalRoDB
 	blockReader           dbservices.FullBlockReader
-	bridgeStore           bridge.Store
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter     *LogsFilterAggregator
@@ -88,7 +88,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
-	bridgeStore bridge.Store, logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
@@ -96,7 +96,6 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
-		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
 		logger:                logger,
@@ -457,45 +456,6 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockNum, ok, err := s.bridgeStore.EventTxnToBlockNum(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
-	if err != nil {
-		return nil, err
-	}
-	return &remoteproto.BorTxnLookupReply{
-		BlockNumber: blockNum,
-		Present:     ok,
-	}, nil
-}
-
-func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEventsRequest) (*remoteproto.BorEventsReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	events, err := s.bridgeStore.EventsByBlock(ctx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	eventsRaw := make([][]byte, len(events))
-	for i, event := range events {
-		eventsRaw[i] = event
-	}
-
-	return &remoteproto.BorEventsReply{
-		EventRlps: eventsRaw,
-	}, nil
-}
-
 func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -575,4 +535,8 @@ func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *empty
 
 	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
+}
+
+func (s *EthBackendServer) FrozenBlocks(ctx context.Context, req *emptypb.Empty) (*remoteproto.FrozenBlocksReply, error) {
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: s.blockReader.FrozenBlocks()}, nil
 }

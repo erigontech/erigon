@@ -89,8 +89,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -104,35 +102,37 @@ type StateChangesClient interface {
 // ExecModuleTester aims to construct all parts necessary to test the PoS GRPC API of our EthereumExecModule.
 type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
-	Ctx             context.Context
-	Log             log.Logger
-	tb              testing.TB
-	cancel          context.CancelFunc
-	DB              kv.TemporalRwDB
-	Dirs            datadir.Dirs
-	Engine          rules.Engine
-	ChainConfig     *chain.Config
-	Sync            *stagedsync.Sync
-	MiningSync      *stagedsync.Sync
-	PendingBlocks   chan *types.Block
-	MinedBlocks     chan *types.BlockWithReceipts
-	sentriesClient  *sentry_multi_client.MultiClient
-	Key             *ecdsa.PrivateKey
-	Genesis         *types.Block
-	SentryClient    direct.SentryClient
-	PeerId          *typesproto.H512
-	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
-	sentMessagesMu  sync.Mutex
-	sentMessages    []*sentryproto.OutboundMessageData
-	StreamWg        sync.WaitGroup
-	ReceiveWg       sync.WaitGroup
-	Address         common.Address
-	ForkValidator   *execmodule.ForkValidator
-	ExecModule      *execmodule.ExecModule
-	BlockBuilder    *builder.Builder
-	StateCache      *execmodule.Cache
-	retirementStart chan bool
-	retirementDone  chan struct{}
+	Ctx                  context.Context
+	Log                  log.Logger
+	tb                   testing.TB
+	cancel               context.CancelFunc
+	DB                   kv.TemporalRwDB
+	Dirs                 datadir.Dirs
+	Engine               rules.Engine
+	ChainConfig          *chain.Config
+	Sync                 *stagedsync.Sync
+	MiningSync           *stagedsync.Sync
+	PendingBlocks        chan *types.Block
+	MinedBlocks          chan *types.BlockWithReceipts
+	sentriesClient       *sentry_multi_client.MultiClient
+	Key                  *ecdsa.PrivateKey
+	Genesis              *types.Block
+	SentryClient         direct.SentryClient
+	PeerId               *typesproto.H512
+	streams              map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessagesMu       sync.Mutex
+	sentMessages         []*sentryproto.OutboundMessageData
+	StreamWg             sync.WaitGroup
+	ReceiveWg            sync.WaitGroup
+	Address              common.Address
+	ForkValidator        *execmodule.ForkValidator
+	ExecModule           *execmodule.ExecModule
+	BlockBuilder         *builder.Builder
+	StateCache           *execmodule.Cache
+	retirementStart      chan bool
+	retirementDone       chan struct{}
+	stateRetirementStart chan bool
+	stateRetirementDone  chan struct{}
 
 	Notifications      *shards.Notifications
 	stateChangesClient StateChangesClient
@@ -144,7 +144,6 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
-	borSnapshots   *heimdall.RoSnapshots
 	blockRetire    dbservices.BlockRetire
 	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -165,9 +164,6 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
-	}
-	if emt.borSnapshots != nil {
-		emt.borSnapshots.Close()
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
@@ -389,6 +385,13 @@ func WithSentryProtocol(protocol uint) Option {
 	}
 }
 
+// WithStateTransitionObserver exposes execution lifecycle boundaries to tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Option {
+	return func(opts *options) {
+		opts.stateTransitionObserver = observer
+	}
+}
+
 type options struct {
 	stepSize                      *uint64
 	e2RetireStep                  *uint64
@@ -404,6 +407,7 @@ type options struct {
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
 	sentryProtocol                uint
+	stateTransitionObserver       execmodule.StateTransitionObserver
 	skipAmsterdamBuilderContracts bool
 }
 
@@ -436,8 +440,6 @@ func applyOptions(opts []Option) options {
 	// engine depends on genesis
 	if opt.engine == nil {
 		switch {
-		case opt.genesis.Config.Bor != nil:
-			opt.engine = bor.NewFaker()
 		case opt.genesis.Config.TerminalTotalDifficultyPassed:
 			opt.engine = merge.NewFaker(ethash.NewFaker())
 		default:
@@ -498,6 +500,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.StateStream = true
 	cfg.BatchSize = 5 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
+	cfg.Sync.ParallelStateFlushing = false
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
@@ -529,12 +532,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	var db kv.TemporalRwDB
+	var dbOpts []temporaltest.Option
 	if opt.stepSize != nil {
-		db = temporaltest.NewTestDBWithStepSize(tb, dirs, *opt.stepSize)
-	} else {
-		db = temporaltest.NewTestDB(tb, dirs)
+		dbOpts = append(dbOpts, temporaltest.WithStepSize(*opt.stepSize))
 	}
+	db := temporaltest.NewTestDB(tb, dirs, dbOpts...)
 
 	// Enable domains before any background goroutines start (e.g. InsertChain
 	// spawns a pipeline that calls agg.OpenFolder concurrently).
@@ -549,11 +551,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		panic(err)
 	}
 
-	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
-
-	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+	br := freezeblocks.NewBlockReader(allSnapshots)
 
 	mock := &ExecModuleTester{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
@@ -567,7 +567,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
-		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -575,6 +574,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 	mock.retirementStart, _ = mock.Notifications.Events.AddRetirementStartSubscription()
 	mock.retirementDone, _ = mock.Notifications.Events.AddRetirementDoneSubscription()
+	mock.stateRetirementStart, _ = mock.Notifications.Events.AddStateRetirementStartSubscription()
+	mock.stateRetirementDone, _ = mock.Notifications.Events.AddStateRetirementDoneSubscription()
 
 	if tb != nil {
 		tb.Cleanup(mock.Close)
@@ -608,7 +609,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock, nil)
+	mock.SentryClient, err = direct.NewSentryClientDirect(opt.sentryProtocol, mock)
 	require.NoError(tb, err)
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
@@ -666,7 +667,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.BlockReader,
 		statusDataProvider,
 		false,
-		false, /* enableWitProtocol */
 		logger,
 	)
 	if err != nil {
@@ -717,7 +717,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	)
 	mock.BlockBuilder = blkBuilder
 
-	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
@@ -776,7 +776,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
-	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
 
 	accum := &execmodule.Accumulation{
 		Accumulator:    mock.Notifications.Accumulator,
@@ -798,9 +797,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
-		onlySnapDownloadOnStart,
+		false, /* onlySnapDownloadOnStart */
 		readAheader,
 		func() error { return nil },
+		execmodule.WithStateTransitionObserver(opt.stateTransitionObserver),
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
@@ -885,9 +885,10 @@ func (emt *ExecModuleTester) ValidateChain(ctx context.Context, header *types.He
 	})
 }
 
-func (emt *ExecModuleTester) UpdateForkChoice(ctx context.Context, header *types.Header) (execmodule.ForkChoiceResult, error) {
+func (emt *ExecModuleTester) UpdateForkChoice(ctx context.Context, header *types.Header, opts ...UFCOpt) (execmodule.ForkChoiceResult, error) {
+	ufcOpts := applyUfcOpts(opts...)
 	return retryBusy(ctx, func() (execmodule.ForkChoiceResult, bool, error) {
-		result, err := emt.ExecModule.UpdateForkChoice(ctx, header.Hash(), common.Hash{}, common.Hash{})
+		result, err := emt.ExecModule.UpdateForkChoice(ctx, header.Hash(), ufcOpts.safeHash, ufcOpts.finalisedHash)
 		if err != nil {
 			return execmodule.ForkChoiceResult{}, false, err
 		}
@@ -913,7 +914,29 @@ func (emt *ExecModuleTester) WaitForBlockRetirement(ctx context.Context) error {
 	}
 }
 
-func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, blocks []*types.Block) error {
+func (emt *ExecModuleTester) WaitForStateRetirement(ctx context.Context) error {
+	select {
+	case started := <-emt.stateRetirementStart:
+		if !started {
+			return nil
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for state retirement start: %w", ctx.Err())
+	}
+
+	select {
+	case <-emt.stateRetirementDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for state retirement completion: %w", ctx.Err())
+	}
+}
+
+func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, blocks []*types.Block, opt ...IVUOpt) error {
+	ivuOpts := applyIVUOpts(opt...)
+	if len(ivuOpts.fcuOptSeq) > 0 && len(ivuOpts.fcuOptSeq) != len(blocks) {
+		panic(fmt.Errorf("length of fcuOptSeq %d must equal length of blocks %d", len(ivuOpts.fcuOptSeq), len(blocks)))
+	}
 	insertStatus, err := emt.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
@@ -921,7 +944,7 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 	if insertStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf("unexpected insertBlocks status: %s", insertStatus)
 	}
-	for _, block := range blocks {
+	for i, block := range blocks {
 		header := block.Header()
 		validationResult, err := emt.ValidateChain(ctx, header)
 		if err != nil {
@@ -931,18 +954,31 @@ func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, block
 			return fmt.Errorf("unexpected validateChain status: %s (block %d, validation error: %q)",
 				validationResult.ValidationStatus, header.Number.Uint64(), validationResult.ValidationError)
 		}
-		forkChoiceResult, err := emt.UpdateForkChoice(ctx, header)
+		var ufcOpt []UFCOpt
+		if len(ivuOpts.fcuOptSeq) > 0 {
+			ufcOpt = ivuOpts.fcuOptSeq[i]
+		}
+		forkChoiceResult, err := emt.UpdateForkChoice(ctx, header, ufcOpt...)
 		if err != nil {
 			return err
 		}
 		if forkChoiceResult.Status != execmodule.ExecutionStatusSuccess {
 			return fmt.Errorf("unexpected updateForkChoice status: %s", forkChoiceResult.Status)
 		}
+		if ivuOpts.waitForBlockRetirement {
+			err := emt.WaitForBlockRetirement(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		if ivuOpts.waitForStateFiles {
+			err := emt.WaitForStateRetirement(ctx)
+			if err != nil {
+				return err
+			}
+		}
 	}
-	if len(blocks) > 0 {
-		_, err = emt.UpdateForkChoice(ctx, blocks[len(blocks)-1].Header())
-	}
-	return err
+	return nil
 }
 
 func (emt *ExecModuleTester) AssembleBlock(ctx context.Context, params *builder.Parameters) (uint64, error) {
@@ -1017,7 +1053,7 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
+	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, emt.Genesis.Hash(), emt.Genesis.Hash())
 	if err != nil {
 		return err
 	}

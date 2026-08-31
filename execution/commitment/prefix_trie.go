@@ -22,8 +22,13 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-const prefixSlabSize = 16384
-const prefixExtChunkSize = 64 * 1024
+// Slabs and ext chunks grow geometrically: a batch touching a handful of keys must
+// not pay for a peak-sized arena, because a fresh Updates is built per block.
+const prefixSlabMin = 256
+const prefixSlabMax = 16384
+
+const prefixExtChunkMin = 4 * 1024
+const prefixExtChunkMax = 64 * 1024
 
 type prefixNode struct {
 	// ext is arena-backed: it stays valid only until the owning trie's Reset, which
@@ -36,34 +41,31 @@ type prefixNode struct {
 	bitmap       uint16
 }
 
-type prefixSlab struct {
-	nodes [prefixSlabSize]prefixNode
-}
-
 type prefixArena struct {
-	slabs       []*prefixSlab
+	slabs       [][]prefixNode
 	slabIdx     int
 	nextIdx     int
+	priorNodes  int // nodes held by slabs[:slabIdx], so nodeCount stays O(1)
 	extChunks   [][]byte
 	extChunkIdx int
 }
 
 func newPrefixArena() *prefixArena {
-	return &prefixArena{
-		slabs:     []*prefixSlab{new(prefixSlab)},
-		extChunks: [][]byte{make([]byte, 0, prefixExtChunkSize)},
-	}
+	return &prefixArena{slabs: [][]prefixNode{make([]prefixNode, prefixSlabMin)}}
 }
 
 func (a *prefixArena) allocNode() *prefixNode {
-	if a.nextIdx >= prefixSlabSize {
+	slab := a.slabs[a.slabIdx]
+	if a.nextIdx >= len(slab) {
+		a.priorNodes += len(slab)
 		a.slabIdx++
 		if a.slabIdx >= len(a.slabs) {
-			a.slabs = append(a.slabs, new(prefixSlab))
+			a.slabs = append(a.slabs, make([]prefixNode, min(len(slab)*2, prefixSlabMax)))
 		}
+		slab = a.slabs[a.slabIdx]
 		a.nextIdx = 0
 	}
-	n := &a.slabs[a.slabIdx].nodes[a.nextIdx]
+	n := &slab[a.nextIdx]
 	a.nextIdx++
 	*n = prefixNode{}
 	return n
@@ -74,16 +76,19 @@ func (a *prefixArena) allocExt(b []byte) []byte {
 	if len(b) == 0 {
 		return nil
 	}
-	if len(b) > prefixExtChunkSize {
+	if len(b) > prefixExtChunkMax {
 		own := make([]byte, len(b))
 		copy(own, b)
 		return own
+	}
+	if len(a.extChunks) == 0 {
+		a.extChunks = append(a.extChunks, make([]byte, 0, max(prefixExtChunkMin, len(b))))
 	}
 	chunk := a.extChunks[a.extChunkIdx]
 	if cap(chunk)-len(chunk) < len(b) {
 		a.extChunkIdx++
 		if a.extChunkIdx >= len(a.extChunks) {
-			a.extChunks = append(a.extChunks, make([]byte, 0, prefixExtChunkSize))
+			a.extChunks = append(a.extChunks, make([]byte, 0, min(max(cap(chunk)*2, len(b)), prefixExtChunkMax)))
 		}
 		chunk = a.extChunks[a.extChunkIdx]
 	}
@@ -95,17 +100,32 @@ func (a *prefixArena) allocExt(b []byte) []byte {
 
 func (a *prefixArena) resetArena() {
 	for i := 0; i <= a.slabIdx && i < len(a.slabs); i++ {
-		limit := prefixSlabSize
+		limit := len(a.slabs[i])
 		if i == a.slabIdx {
 			limit = a.nextIdx
 		}
-		clear(a.slabs[i].nodes[:limit])
+		clear(a.slabs[i][:limit])
+	}
+	// Keep at most one max-slab's worth of capacity so the arena settles at its
+	// steady-state size; releasing the rest is what stops a peak from being pinned.
+	keep, held := 1, len(a.slabs[0])
+	for keep < len(a.slabs) && held+len(a.slabs[keep]) <= prefixSlabMax {
+		held += len(a.slabs[keep])
+		keep++
+	}
+	// The ramp sums to less than one max slab, so an arena that reached a max-sized
+	// slab must keep that slab instead: keeping the ramp would re-allocate it on
+	// every reset, which is the per-batch allocation this arena exists to avoid.
+	if len(a.slabs[0]) < prefixSlabMax && keep < len(a.slabs) && len(a.slabs[keep]) == prefixSlabMax {
+		a.slabs[0] = a.slabs[keep]
+		keep = 1
 	}
 	// nil trailing slabs first: reslicing alone keeps them GC-reachable via the backing array.
-	clear(a.slabs[1:])
-	a.slabs = a.slabs[:1]
+	clear(a.slabs[keep:])
+	a.slabs = a.slabs[:keep]
 	a.slabIdx = 0
 	a.nextIdx = 0
+	a.priorNodes = 0
 
 	for i := range a.extChunks {
 		a.extChunks[i] = a.extChunks[i][:0]
@@ -114,7 +134,7 @@ func (a *prefixArena) resetArena() {
 }
 
 func (a *prefixArena) nodeCount() int {
-	return a.slabIdx*prefixSlabSize + a.nextIdx
+	return a.priorNodes + a.nextIdx
 }
 
 func popcount(n *prefixNode) int {
@@ -139,6 +159,10 @@ func newPrefixTrie() *prefixTrie {
 }
 
 func (t *prefixTrie) Reset() {
+	// Past len, visited still holds nodes from earlier inserts; a single one keeps a
+	// released slab's whole backing array reachable.
+	clear(t.visited[:cap(t.visited)])
+	t.visited = t.visited[:0]
 	t.arena.resetArena()
 	t.root = t.arena.allocNode()
 }
