@@ -719,6 +719,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		With("consensus_block_value", consensusValue.String())
 
 	executionPayloadIncluded := false
+	var selfBuildEnvelope *cltypes.ExecutionPayloadEnvelope
 	// [New in Gloas:EIP7732] For self-build blocks, compute the unsigned ExecutionPayloadEnvelope
 	// and include it in the response so the validator client can sign it.
 	// The beacon block root can only be computed here (after the state root is set).
@@ -745,9 +746,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						BeaconBlockRoot:       beaconBlockRoot,
 						ParentBeaconBlockRoot: denebBlock.Block.ParentRoot,
 					}
-					// Cache envelope by slot so the VC can retrieve it via
-					// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}
-					a.selfBuildEnvelopes.Add(targetSlot, envelope)
+					selfBuildEnvelope = envelope
 					// SSZ encoding only serializes Data, not Extra — only include
 					// the envelope in JSON responses to keep the header truthful.
 					if !beaconhttp.WillEncodeSSZ(r.Header.Get("Accept")) {
@@ -771,6 +770,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue(),
 		consensusValue,
 	)
+	// The slot cache must reflect only a complete, successful production result.
+	if block.Version() >= clparams.GloasVersion {
+		if selfBuildEnvelope == nil {
+			a.selfBuildEnvelopes.Remove(targetSlot)
+		} else {
+			a.selfBuildEnvelopes.Add(targetSlot, selfBuildEnvelope)
+		}
+	}
 
 	return resp, nil
 }

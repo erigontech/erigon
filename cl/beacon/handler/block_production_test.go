@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -879,6 +881,97 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
 }
 
+func TestGetEthV3ValidatorBlockClearsStaleSelfBuildEnvelopeForExternalBid(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg = fixture.block.Cfg
+	forkEpoch := state.Epoch(fixture.productionState)
+	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
+	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
+	handler.beaconChainCfg.CapellaForkEpoch = forkEpoch
+	handler.beaconChainCfg.DenebForkEpoch = forkEpoch
+	handler.beaconChainCfg.ElectraForkEpoch = forkEpoch
+	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
+	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
+	handler.beaconChainCfg.InitializeForkSchedule()
+	headState, err := fixture.productionState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, headState.SetSlot(fixture.block.Slot-1))
+	headStateRoot, err := headState.HashSSZ()
+	require.NoError(t, err)
+	headHeader := headState.LatestBlockHeader()
+	headHeader.Root = common.Hash(headStateRoot)
+	headState.SetLatestBlockHeader(&headHeader)
+	headRootRaw, err := headHeader.HashSSZ()
+	require.NoError(t, err)
+	headRoot := common.Hash(headRootRaw)
+	fixture.externalBid.Message.ParentBlockRoot = headRoot
+	fixture.bidKey.ParentBlockRoot = headRoot
+	domain, err := headState.GetDomain(handler.beaconChainCfg.DomainBeaconBuilder, state.Epoch(headState))
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(fixture.externalBid.Message, domain)
+	require.NoError(t, err)
+	copy(fixture.externalBid.Signature[:], fixture.builderKey.Sign(signingRoot[:]).Bytes())
+	syncedData := synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, headRoot))
+	handler.syncedData = syncedData
+	forkchoiceStore.HeadVal = headRoot
+	forkchoiceStore.HeadSlotVal = headState.Slot()
+	handler.epbsPool = pool.NewEpbsPool()
+	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
+	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
+		Times(2)
+	handler.syncMessagePool = syncPool
+
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = fixture.externalBid.Message.ParentBlockHash
+	payload.BlockHash = common.Hash{0x66}
+	payload.PrevRandao = fixture.externalBid.Message.PrevRandao
+	payload.FeeRecipient = common.Address{0x77}
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.SlotNumber = fixture.block.Slot
+
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil).
+		Times(2)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
+		Times(2)
+	handler.engine = engine
+
+	produce := func() *cltypes.BeaconBlock {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
+			"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&graffiti=0x01",
+			fixture.block.Slot,
+			(common.Bytes96{}).String(),
+		), http.NoBody)
+		routeContext := chi.NewRouteContext()
+		routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
+		request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+		response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+		require.NoError(t, err)
+		producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
+		require.True(t, ok)
+		return producedBlock
+	}
+
+	selfBuiltBlock := produce()
+	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	_, found := handler.selfBuildEnvelopes.Get(fixture.block.Slot)
+	require.True(t, found)
+
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+	externalBlock := produce()
+	require.Equal(t, fixture.externalBid.Message.BuilderIndex, externalBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	_, found = handler.selfBuildEnvelopes.Get(fixture.block.Slot)
+	require.False(t, found)
+}
+
 func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	fixture.block.ExecutionValue = nil
@@ -964,6 +1057,7 @@ func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
 
 type gloasBidSelectionOptions struct {
 	exitBuilder   bool
+	slotOffset    uint64
 	mutateBuilder func(*cltypes.Builder)
 	mutateBid     func(*cltypes.ExecutionPayloadBid)
 }
@@ -973,6 +1067,7 @@ type gloasBidSelectionFixture struct {
 	block           *cltypes.BlindOrExecutionBeaconBlock
 	externalBid     *cltypes.SignedExecutionPayloadBid
 	bidKey          pool.HighestBidKey
+	builderKey      *bls.PrivateKey
 }
 
 func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions) gloasBidSelectionFixture {
@@ -982,7 +1077,7 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 	cfg.PayloadBuilderVersion = 7
 	productionState := state.New(&cfg)
 	productionState.SetVersion(clparams.GloasVersion)
-	slot := cfg.SlotsPerEpoch
+	slot := cfg.SlotsPerEpoch + options.slotOffset
 	require.NoError(t, productionState.SetSlot(slot))
 	productionState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
 	productionState.SetGenesisValidatorsRoot(common.Hash{0x91})
@@ -1107,6 +1202,7 @@ func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions)
 		productionState: productionState,
 		block:           block,
 		externalBid:     externalBid,
+		builderKey:      privateKey,
 		bidKey: pool.HighestBidKey{
 			Slot:            slot,
 			ParentBlockHash: parentHash,
