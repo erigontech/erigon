@@ -495,6 +495,32 @@ set +o pipefail
 # quiescence — non-zero means a wider merge hasn't superseded them.
 stage "Phase 5: disk-clean assertion"
 if [[ "$SOAK_RC" -eq 0 ]]; then
+    # Wait for the merger to consume any v4 boundary pairs before
+    # measuring. Under ERIGON_MERGE_MIN_AGE_STEPS=0 (the soak default)
+    # the merger fires as soon as the pair is present, but it still
+    # takes wall-clock time (~1-3 min per 100k-block .kv). Poll for
+    # v4 .kv count on disk; return when 0 or when cap is hit. If the
+    # cap fires, the disk-clean assertion below counts remaining v4s
+    # as a HARD failure — a real bug (unlike the previous
+    # "informational" mode that let clean tests come out with residue).
+    MERGE_QUIESCE_CAP_SEC="${DISK_CLEAN_MERGE_QUIESCE_SEC:-600}"
+    QUIESCE_POLL_SEC="${DISK_CLEAN_MERGE_POLL_SEC:-15}"
+    QUIESCE_START=$(date +%s)
+    while true; do
+        V4_KV_COUNT=$(ls "$SNAP_DIR"/domain/v[4-9]*.kv 2>/dev/null | wc -l)
+        if [[ "$V4_KV_COUNT" -eq 0 ]]; then
+            break
+        fi
+        ELAPSED=$(( $(date +%s) - QUIESCE_START ))
+        if [[ "$ELAPSED" -ge "$MERGE_QUIESCE_CAP_SEC" ]]; then
+            echo "  merge-quiesce: cap ${MERGE_QUIESCE_CAP_SEC}s hit with $V4_KV_COUNT v4 .kv still on disk"
+            break
+        fi
+        if [[ "$ELAPSED" -gt 0 && $(( ELAPSED % 60 )) -lt "$QUIESCE_POLL_SEC" ]]; then
+            echo "  merge-quiesce: waiting ($V4_KV_COUNT v4 .kv on disk, elapsed=${ELAPSED}s cap=${MERGE_QUIESCE_CAP_SEC}s)"
+        fi
+        sleep "$QUIESCE_POLL_SEC"
+    done
     OVERLAP_COUNT=0
     GAP_COUNT=0
     ORPHAN_COUNT=0
@@ -615,12 +641,16 @@ if [[ "$SOAK_RC" -eq 0 ]]; then
         fi
     done
 
-    TOTAL=$((OVERLAP_COUNT + GAP_COUNT + ORPHAN_COUNT))
+    TOTAL=$((OVERLAP_COUNT + GAP_COUNT + ORPHAN_COUNT + V4_TRANSIENT_COUNT))
     if [[ $TOTAL -gt 0 ]]; then
+        # V4_TRANSIENT_COUNT is now a hard failure: Phase 5's
+        # merge-quiesce loop above waits up to DISK_CLEAN_MERGE_QUIESCE_SEC
+        # (default 600s) for the merger to consume any v4 pairs, and
+        # ERIGON_MERGE_MIN_AGE_STEPS=0 in the wrapper removes the
+        # publisher-window delay. A remaining v4 after that wait is a
+        # real merger regression, not expected transient state.
         echo "FAIL: disk-clean assertion — overlaps=$OVERLAP_COUNT gaps=$GAP_COUNT orphans=$ORPHAN_COUNT v4_transient=$V4_TRANSIENT_COUNT"
         SOAK_RC=2
-    elif [[ $V4_TRANSIENT_COUNT -gt 0 ]]; then
-        echo "  disk-clean: partition+orphan OK, but $V4_TRANSIENT_COUNT v4 file(s) still on disk (mode-C emit not yet superseded by merge)"
     else
         echo "  disk-clean: OK (partitions clean, no orphan sidecars, no v4 residue)"
     fi

@@ -55,6 +55,14 @@ REGIME_CYCLE=${REGIME_CYCLE:-3,3,2}
 
 echo "[verify-modec] ITER=$ITER REGIME_CYCLE=$REGIME_CYCLE DATADIR=$DATADIR"
 
+# Override the launcher's default ERIGON_MERGE_MIN_AGE_STEPS=6
+# (publisher propagation window). The soak driver's Phase 5
+# disk-clean assertion checks that no v4-boundary files linger; the
+# merger has to fire promptly for that check to come out clean.
+# Setting to 0 removes the delay so the aggregator's normal merge
+# scheduler runs as soon as the pair is present.
+export ERIGON_MERGE_MIN_AGE_STEPS=0
+
 DATADIR="$DATADIR" \
   LOG_DIR="$out" \
   LOG="$out/erigon.log" \
@@ -91,18 +99,30 @@ echo "[verify-modec] dual-root-mismatches=$mismatch_count"
 # "abort:" are failures. CSV shape:
 # iter,phase,target,pre_head,post_head,duration,errors,note
 soak_csv=""
-for candidate in "$out/soak.csv" /tmp/unwind-soak-*.csv; do
-    if [[ -f "$candidate" ]]; then
-        soak_csv="$candidate"
-        break
-    fi
-done
+# unwind-fresh-sync-then-soak.sh writes its CSV to
+# /tmp/unwind-fresh-then-soak-<timestamp>.csv and prints the path in
+# soak.log's "soak complete: rc=... csv=<path>" line. Prefer parsing
+# that line — it's the authoritative source and avoids picking up a
+# stale glob-match from a prior run.
+if [[ -f "$out/soak.log" ]]; then
+    soak_csv=$(grep -oE 'csv=/tmp/unwind-fresh-then-soak-[^ ]+\.csv' "$out/soak.log" | tail -1 | sed 's|^csv=||')
+fi
+if [[ -z "$soak_csv" || ! -f "$soak_csv" ]]; then
+    # Fall back to newest matching glob if the log parse missed.
+    for candidate in "$out/soak.csv" /tmp/unwind-fresh-then-soak-*.csv /tmp/unwind-soak-*.csv; do
+        if [[ -f "$candidate" ]]; then
+            soak_csv="$candidate"
+        fi
+    done
+fi
 csv_fails=0
 csv_total=0
 if [[ -n "$soak_csv" && -f "$soak_csv" ]]; then
-    csv_total=$(grep -cv '^#' "$soak_csv" || true)
-    # Field 8 = note. Success: starts with "ok". Failure: starts with "fail:" or "abort:".
-    csv_fails=$(grep -v '^#' "$soak_csv" | awk -F, '$8 !~ /^ok/ && $8 != "" {c++} END{print c+0}')
+    # Skip the CSV header line (first row: iter,phase,target,...) plus
+    # any leading '#' comment lines. Field 8 = note. Success: starts
+    # with "ok". Failure: starts with "fail:" or "abort:".
+    csv_total=$(tail -n +2 "$soak_csv" | grep -cv '^#' || true)
+    csv_fails=$(tail -n +2 "$soak_csv" | grep -v '^#' | awk -F, '$8 !~ /^ok/ && $8 != "" {c++} END{print c+0}')
     echo "[verify-modec] soak.csv=$soak_csv rows=$csv_total fails=$csv_fails"
 else
     echo "[verify-modec] soak.csv not found — treating as failure"
