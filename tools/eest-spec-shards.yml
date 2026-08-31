@@ -49,13 +49,11 @@
   commitment-parallel: true
 - shard: statetests-devnet-sequential
   workers: 12
-  # TODO v8.1.1 spec conformance
-  max-allowed-failures: 11917
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: statetests-devnet-parallel
   workers: 12
-  # TODO v8.1.1 spec conformance
-  max-allowed-failures: 11917
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: transactiontests-stable-race
   workers: 12
@@ -105,13 +103,11 @@
   commitment-parallel: true
 - shard: blocktests-devnet-sequential
   workers: 12
-  # TODO v8.1.1 spec conformance
-  max-allowed-failures: 15355
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: blocktests-devnet-parallel
   workers: 12
-  # TODO v8.1.1 spec conformance
-  max-allowed-failures: 15355
+  max-allowed-failures: 0
   commitment-parallel: true
 - shard: blocktests-legacy-consensus-sequential
   workers: 12
