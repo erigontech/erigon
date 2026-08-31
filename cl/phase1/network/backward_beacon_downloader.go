@@ -32,9 +32,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -51,22 +53,30 @@ type BlockChecker interface {
 	HasBlock(blockNumber uint64) bool
 }
 
+type BeaconBlockBodyReader interface {
+	ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error)
+}
+
 type BackwardBeaconDownloader struct {
-	ctx                  context.Context
-	slotToDownload       atomic.Uint64
-	expectedRoot         common.Hash
-	rpc                  *rpc.BeaconRpcP2P
-	requestBlocksByRange func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error)
-	engine               execution_client.ExecutionEngine
-	onNewBlock           OnNewBlock
-	finished             atomic.Bool
-	reqInterval          *time.Ticker
-	db                   kv.RwDB
-	sn                   *freezeblocks.CaplinSnapshots
-	neverSkip            bool
-	blockChecker         BlockChecker
-	beaconCfg            *clparams.BeaconChainConfig
-	currentSlot          func() uint64
+	ctx                    context.Context
+	slotToDownload         atomic.Uint64
+	expectedRoot           common.Hash
+	rpc                    *rpc.BeaconRpcP2P
+	requestBlocksByRange   func(context.Context, uint64, uint64) ([]*cltypes.SignedBeaconBlock, string, error)
+	requestEnvelopes       func(context.Context, [][32]byte, ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
+	engine                 execution_client.ExecutionEngine
+	onNewBlock             OnNewBlock
+	finished               atomic.Bool
+	reqInterval            *time.Ticker
+	db                     kv.RwDB
+	sn                     *freezeblocks.CaplinSnapshots
+	neverSkip              bool
+	blockChecker           BlockChecker
+	blockReader            BeaconBlockBodyReader
+	beaconCfg              *clparams.BeaconChainConfig
+	currentSlot            func() uint64
+	validateGloasSuccessor func(*cltypes.SignedBeaconBlock) error
+	validateGloasEnvelope  func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] highest block from the previous batch, used as lookahead
 	// to determine FULL/EMPTY status of the highest block in the current batch.
 	prevBatchTopBlock  *cltypes.SignedBeaconBlock
@@ -93,19 +103,123 @@ type SkippedFullBlock struct {
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB, beaconCfg *clparams.BeaconChainConfig) *BackwardBeaconDownloader {
 	b := &BackwardBeaconDownloader{
-		ctx:         ctx,
-		rpc:         rpc,
-		db:          db,
+		ctx:       ctx,
+		rpc:       rpc,
+		db:        db,
+		neverSkip: true,
+		engine:    engine,
+		sn:        sn,
+		beaconCfg: beaconCfg,
+		validateGloasEnvelope: func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+			return ValidateDownloadedGloasEnvelope(beaconCfg, block, envelope)
+		},
 		reqInterval: time.NewTicker(200 * time.Millisecond),
-		neverSkip:   true,
-		engine:      engine,
-		sn:          sn,
-		beaconCfg:   beaconCfg,
 	}
 	if rpc != nil {
 		b.requestBlocksByRange = rpc.SendBeaconBlocksByRangeReq
+		b.requestEnvelopes = func(ctx context.Context, roots [][32]byte, blocks ...*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+			return RequestEnvelopesFrantically(ctx, rpc, roots, blocks...)
+		}
 	}
 	return b
+}
+
+// NewGloasSuccessorValidator validates a direct successor from an immutable checkpoint state.
+func NewGloasSuccessorValidator(anchorState *state.CachingBeaconState, anchorRoot common.Hash) func(*cltypes.SignedBeaconBlock) error {
+	return func(block *cltypes.SignedBeaconBlock) error {
+		if anchorState == nil {
+			return errors.New("nil GLOAS anchor state")
+		}
+		if block == nil || block.Block == nil || block.Block.Body == nil {
+			return errors.New("missing GLOAS successor block")
+		}
+		if block.Block.ParentRoot != anchorRoot {
+			return fmt.Errorf("GLOAS successor parent root mismatch: expected %v, received %v", anchorRoot, block.Block.ParentRoot)
+		}
+		validationState, err := anchorState.Copy()
+		if err != nil {
+			return fmt.Errorf("copy GLOAS anchor state: %w", err)
+		}
+		if err := transition.TransitionState(validationState, block, nil, true); err != nil {
+			return fmt.Errorf("transition GLOAS successor: %w", err)
+		}
+		return nil
+	}
+}
+
+func ValidateGloasEnvelopeAgainstBid(beaconCfg *clparams.BeaconChainConfig, blockRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if beaconCfg == nil {
+		return errors.New("nil beacon chain config")
+	}
+	if bid == nil {
+		return errors.New("nil execution payload bid")
+	}
+	if env == nil || env.Message == nil || env.Message.Payload == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	envelope := env.Message
+	payload := envelope.Payload
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("beacon block root mismatch: envelope=%v block=%v", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != bid.ParentBlockRoot {
+		return fmt.Errorf("parent beacon block root mismatch: envelope=%v bid=%v", envelope.ParentBeaconBlockRoot, bid.ParentBlockRoot)
+	}
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("builder index mismatch: envelope=%d bid=%d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("block hash mismatch: envelope=%v bid=%v", payload.BlockHash, bid.BlockHash)
+	}
+	if payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("parent block hash mismatch: envelope=%v bid=%v", payload.ParentHash, bid.ParentBlockHash)
+	}
+	if payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("prev randao mismatch: envelope=%v bid=%v", payload.PrevRandao, bid.PrevRandao)
+	}
+	if payload.FeeRecipient != bid.FeeRecipient {
+		return fmt.Errorf("fee recipient mismatch: envelope=%v bid=%v", payload.FeeRecipient, bid.FeeRecipient)
+	}
+	if payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("gas limit mismatch: envelope=%d bid=%d", payload.GasLimit, bid.GasLimit)
+	}
+	if payload.SlotNumber != bid.Slot {
+		return fmt.Errorf("slot mismatch: envelope=%d bid=%d", payload.SlotNumber, bid.Slot)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("nil execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("execution requests root: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
+	if err != nil {
+		return fmt.Errorf("payload header: %w", err)
+	}
+	if header.Hash() != payload.BlockHash {
+		return fmt.Errorf("payload block hash mismatch: header=%v payload=%v", header.Hash(), payload.BlockHash)
+	}
+	return nil
+}
+
+func ValidateDownloadedGloasEnvelope(beaconCfg *clparams.BeaconChainConfig, block *cltypes.SignedBeaconBlock, env *cltypes.SignedExecutionPayloadEnvelope) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("nil Gloas beacon block")
+	}
+	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("nil signed execution payload bid")
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("beacon block root: %w", err)
+	}
+	return ValidateGloasEnvelopeAgainstBid(beaconCfg, blockRoot, signedBid.Message, env)
 }
 
 // SetThrottle sets the throttle.
@@ -123,6 +237,10 @@ func (b *BackwardBeaconDownloader) SetSlotToDownload(slot uint64) {
 // SetCurrentSlotSampler limits successor searches to slots that can already exist.
 func (b *BackwardBeaconDownloader) SetCurrentSlotSampler(currentSlot func() uint64) {
 	b.currentSlot = currentSlot
+}
+
+func (b *BackwardBeaconDownloader) SetGloasSuccessorValidator(validate func(*cltypes.SignedBeaconBlock) error) {
+	b.validateGloasSuccessor = validate
 }
 
 // SetExpectedRoot sets the expected root we expect to download.
@@ -144,6 +262,12 @@ func (b *BackwardBeaconDownloader) SetBlockChecker(checker BlockChecker) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.blockChecker = checker
+}
+
+func (b *BackwardBeaconDownloader) SetBlockReader(reader BeaconBlockBodyReader) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.blockReader = reader
 }
 
 // SetHTTPFallbackURL sets the beacon API base URL for HTTP-based block fetching
@@ -307,22 +431,22 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, responses []*cltypes.SignedBeaconBlock) error {
 	// [New in Gloas:EIP7732] Fetch envelopes for GLOAS FULL blocks before processing.
 	log.Debug("[BackwardBeaconDownloader] processResponses start", "blocks", len(responses), "slotToDownload", b.slotToDownload.Load(), "expectedRoot", b.expectedRoot)
-	if b.prevBatchTopBlock == nil {
-		expectedBlock := blockWithRoot(responses, b.expectedRoot)
-		if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion {
-			b.prevBatchTopBlock = linkedSuccessorInResponses(responses, expectedBlock)
-			if b.prevBatchTopBlock == nil {
-				successor, err := b.fetchGloasSuccessor(ctx, expectedBlock)
-				if err != nil {
-					b.httpPreferred.Store(false)
-					log.Debug("[BackwardBeaconDownloader] initial GLOAS successor fetch failed", "root", b.expectedRoot, "err", err)
-					return nil
-				}
-				if successor == nil {
-					return nil
-				}
-				b.prevBatchTopBlock = successor
+	expectedBlock := blockWithRoot(responses, b.expectedRoot)
+	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion {
+		if b.prevBatchTopBlock != nil && !isDirectSuccessor(expectedBlock, b.prevBatchTopBlock) {
+			b.clearGloasSuccessor()
+		}
+		if b.prevBatchTopBlock == nil {
+			successor, err := b.fetchGloasSuccessor(ctx, expectedBlock)
+			if err != nil {
+				b.httpPreferred.Store(false)
+				log.Debug("[BackwardBeaconDownloader] initial GLOAS successor fetch failed", "root", b.expectedRoot, "err", err)
+				return nil
 			}
+			if successor == nil {
+				return nil
+			}
+			b.prevBatchTopBlock = successor
 		}
 	}
 	canonicalResponses := canonicalBackwardResponses(responses, b.expectedRoot)
@@ -393,20 +517,20 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 
 				var envelope *cltypes.SignedExecutionPayloadEnvelope
 				if block.Version() >= clparams.GloasVersion {
+					if b.prevBatchTopBlock != nil && !isDirectSuccessor(block, b.prevBatchTopBlock) {
+						b.clearGloasSuccessor()
+					}
 					if b.prevBatchTopBlock == nil {
-						b.prevBatchTopBlock = linkedSuccessorInResponses(responses, block)
-						if b.prevBatchTopBlock == nil {
-							successor, successorErr := b.fetchGloasSuccessor(ctx, block)
-							if successorErr != nil {
-								b.httpPreferred.Store(false)
-								log.Debug("[BackwardBeaconDownloader] root-fetched GLOAS successor fetch failed", "root", b.expectedRoot, "err", successorErr)
-								return nil
-							}
-							if successor == nil {
-								return nil
-							}
-							b.prevBatchTopBlock = successor
+						successor, successorErr := b.fetchGloasSuccessor(ctx, block)
+						if successorErr != nil {
+							b.httpPreferred.Store(false)
+							log.Debug("[BackwardBeaconDownloader] root-fetched GLOAS successor fetch failed", "root", b.expectedRoot, "err", successorErr)
+							return nil
 						}
+						if successor == nil {
+							return nil
+						}
+						b.prevBatchTopBlock = successor
 					}
 					if len(determineGloasFullRoots([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock)) > 0 {
 						env, fetchErr := b.fetchSingleEnvelope(ctx, block)
@@ -455,26 +579,18 @@ func blockWithRoot(blocks []*cltypes.SignedBeaconBlock, expectedRoot common.Hash
 	return nil
 }
 
-func linkedSuccessorInResponses(responses []*cltypes.SignedBeaconBlock, block *cltypes.SignedBeaconBlock) *cltypes.SignedBeaconBlock {
-	if block == nil || block.Block == nil {
-		return nil
+func isDirectSuccessor(block, successor *cltypes.SignedBeaconBlock) bool {
+	if block == nil || block.Block == nil || successor == nil || successor.Block == nil {
+		return false
 	}
 	root, err := block.Block.HashSSZ()
-	if err != nil {
-		return nil
-	}
-	candidates := make([]*cltypes.SignedBeaconBlock, 0, len(responses))
-	for _, candidate := range responses {
-		if candidate == nil || candidate.Block == nil || candidate.Block.Slot <= block.Block.Slot {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	successor, err := connectedGloasSuccessor(candidates, root)
-	if err != nil {
-		return nil
-	}
-	return successor
+	return err == nil && successor.Block.ParentRoot == root
+}
+
+func (b *BackwardBeaconDownloader) clearGloasSuccessor() {
+	b.prevBatchTopBlock = nil
+	b.gloasSuccessorRoot = common.Hash{}
+	b.gloasSuccessorNext = 0
 }
 
 func canonicalBackwardResponses(responses []*cltypes.SignedBeaconBlock, expectedRoot common.Hash) []*cltypes.SignedBeaconBlock {
@@ -502,6 +618,9 @@ const backwardGloasSuccessorSearchBatch = uint64(64)
 func (b *BackwardBeaconDownloader) fetchGloasSuccessor(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedBeaconBlock, error) {
 	if block == nil || block.Block == nil {
 		return nil, errors.New("cannot fetch successor for nil block")
+	}
+	if b.validateGloasSuccessor == nil {
+		return nil, nil
 	}
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -555,22 +674,31 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessorRange(ctx context.Context,
 		if err == nil {
 			successor, validateErr := linkedGloasSuccessor(blocks, start, count, parentRoot)
 			if successor != nil {
-				return successor, nil
+				validateErr = b.validateGloasSuccessor(successor)
+				if validateErr == nil {
+					return successor, nil
+				}
 			}
 			sourceSucceeded = validateErr == nil
-			err = validateErr
+			err = fmt.Errorf("validate HTTP GLOAS successor: %w", validateErr)
 		}
 		firstErr = err
 	}
 	if b.requestBlocksByRange != nil {
-		blocks, _, err := b.requestBlocksByRange(ctx, start, count)
+		blocks, peerID, err := b.requestBlocksByRange(ctx, start, count)
 		if err == nil {
 			successor, validateErr := linkedGloasSuccessor(blocks, start, count, parentRoot)
 			if successor != nil {
-				return successor, nil
+				validateErr = b.validateGloasSuccessor(successor)
+				if validateErr == nil {
+					return successor, nil
+				}
+				if b.rpc != nil {
+					b.rpc.BanPeer(peerID)
+				}
 			}
 			sourceSucceeded = sourceSucceeded || validateErr == nil
-			err = validateErr
+			err = fmt.Errorf("validate P2P GLOAS successor: %w", validateErr)
 		}
 		if firstErr == nil {
 			firstErr = err
@@ -581,10 +709,13 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessorRange(ctx context.Context,
 		if err == nil {
 			successor, validateErr := linkedGloasSuccessor(blocks, start, count, parentRoot)
 			if successor != nil {
-				return successor, nil
+				validateErr = b.validateGloasSuccessor(successor)
+				if validateErr == nil {
+					return successor, nil
+				}
 			}
 			sourceSucceeded = sourceSucceeded || validateErr == nil
-			err = validateErr
+			err = fmt.Errorf("validate HTTP GLOAS successor: %w", validateErr)
 		}
 		if firstErr == nil {
 			firstErr = err
@@ -680,7 +811,6 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 	for _, r := range fullRoots {
 		fullRootSet[common.Hash(r)] = struct{}{}
 	}
-
 	if len(fullRoots) == 0 {
 		return nil, fullRootSet
 	}
@@ -689,6 +819,7 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
 		envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
 		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
+		b.discardInvalidGloasEnvelopes(responses, envelopes)
 		if result.fetched > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
 		}
@@ -696,16 +827,24 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return envelopes, fullRootSet
 	}
 
-	envelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, fullRoots)
+	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	var err error
+	if b.requestEnvelopes != nil {
+		envelopes, err = b.requestEnvelopes(ctx, fullRoots, responses...)
+	} else {
+		err = errors.New("no P2P envelope source configured")
+	}
 	if err != nil {
 		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
 	}
+	b.discardInvalidGloasEnvelopes(responses, envelopes)
 	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
 	if b.httpFallbackURL != "" && len(envelopes) < len(fullRoots) {
 		if envelopes == nil {
 			envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(fullRoots))
 		}
 		result := fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, responses, fullRoots, envelopes, b.beaconCfg)
+		b.discardInvalidGloasEnvelopes(responses, envelopes)
 		if result.fetched > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", result.fetched)
 		}
@@ -714,6 +853,29 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 	b.recordRequiredEnvelopeAttempt(fullRootSet, envelopes)
 
 	return envelopes, fullRootSet
+}
+
+func (b *BackwardBeaconDownloader) discardInvalidGloasEnvelopes(blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
+	if b.validateGloasEnvelope == nil {
+		return
+	}
+	for _, block := range blocks {
+		if block == nil || block.Block == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		envelope := envelopes[root]
+		if envelope == nil {
+			continue
+		}
+		if err := b.validateGloasEnvelope(block, envelope); err != nil {
+			delete(envelopes, root)
+			log.Debug("[BackwardBeaconDownloader] discarded invalid GLOAS envelope", "root", common.Hash(root), "err", err)
+		}
+	}
 }
 
 func (b *BackwardBeaconDownloader) recordRequiredEnvelopeAttempt(fullRootSet map[common.Hash]struct{}, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
@@ -745,25 +907,38 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context) 
 	for i, s := range b.skippedFullBlocks {
 		roots[i] = s.Root
 	}
+	blocks := blocksFromSkippedFullBlocks(b.skippedFullBlocks)
 
-	envelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, roots)
+	var envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	var err error
+	if b.requestEnvelopes != nil {
+		envelopes, err = b.requestEnvelopes(ctx, roots, blocks...)
+	} else {
+		err = errors.New("no P2P envelope source configured")
+	}
 	if err != nil {
 		log.Debug("[BackwardBeaconDownloader] envelope recovery: P2P failed", "err", err)
 	}
 	if envelopes == nil {
 		envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	}
+	b.discardInvalidGloasEnvelopes(blocks, envelopes)
 
 	// HTTP fallback for roots still missing after P2P.
 	if b.httpFallbackURL != "" && len(envelopes) < len(b.skippedFullBlocks) {
-		blocks := make([]*cltypes.SignedBeaconBlock, len(b.skippedFullBlocks))
-		for i, s := range b.skippedFullBlocks {
-			blocks[i] = s.Block
-		}
 		fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, blocks, roots, envelopes, b.beaconCfg)
+		b.discardInvalidGloasEnvelopes(blocks, envelopes)
 	}
 
 	return envelopes
+}
+
+func blocksFromSkippedFullBlocks(skipped []SkippedFullBlock) []*cltypes.SignedBeaconBlock {
+	blocks := make([]*cltypes.SignedBeaconBlock, len(skipped))
+	for i := range skipped {
+		blocks[i] = skipped[i].Block
+	}
+	return blocks
 }
 
 // trySkipToExistingBlock attempts to skip ahead if the expected block already exists in the database.
@@ -787,6 +962,10 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 	refreshTicker := time.NewTicker(5 * time.Second)
 	defer refreshTicker.Stop()
 
+	expectedRoot := b.expectedRoot
+	slotToDownload := b.slotToDownload.Load()
+	prevBatchTopBlock := b.prevBatchTopBlock
+	didSkip := false
 	for {
 		// Periodically refresh frozen block counts
 		select {
@@ -800,7 +979,7 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 		default:
 		}
 
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, expectedRoot)
 		if err != nil {
 			return err
 		}
@@ -808,22 +987,46 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			break
 		}
 
-		if !b.canSkipSlot(ctx, tx, elFrozenBlocks, clFrozenBlocks, *slot) {
+		if !b.canSkipRoot(ctx, tx, elFrozenBlocks, clFrozenBlocks, *slot, expectedRoot) {
 			break
 		}
 
-		b.slotToDownload.Store(*slot - 1)
-		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
-			return err
+		var skippedBlock *cltypes.SignedBeaconBlock
+		if b.isGloasSlot(*slot) {
+			if b.blockReader == nil {
+				break
+			}
+			skippedBlock, err = b.blockReader.ReadBlockByRoot(b.ctx, tx, expectedRoot)
+			if err != nil {
+				return err
+			}
+			if skippedBlock == nil || skippedBlock.Block == nil || skippedBlock.Version() < clparams.GloasVersion {
+				break
+			}
+			skippedRoot, hashErr := skippedBlock.Block.HashSSZ()
+			if hashErr != nil || skippedRoot != expectedRoot {
+				break
+			}
 		}
 
-		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
+		parentRoot, err := beacon_indicies.ReadParentBlockRoot(b.ctx, tx, expectedRoot)
 		if err != nil {
 			return err
 		}
+		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, expectedRoot); err != nil {
+			return err
+		}
+		slotToDownload = *slot - 1
+		expectedRoot = parentRoot
+		didSkip = true
+		if skippedBlock != nil {
+			prevBatchTopBlock = skippedBlock
+		} else {
+			prevBatchTopBlock = nil
+		}
 
 		// Clean up non-canonical slots
-		newSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+		newSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, expectedRoot)
 		if err != nil {
 			return err
 		}
@@ -837,20 +1040,34 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if didSkip {
+		b.expectedRoot = expectedRoot
+		b.slotToDownload.Store(slotToDownload)
+		b.prevBatchTopBlock = prevBatchTopBlock
+		b.gloasSuccessorRoot = common.Hash{}
+		b.gloasSuccessorNext = 0
+	}
+	return nil
 }
 
 // canSkipSlot checks if we can skip to an existing block at the given slot.
 func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64) bool {
+	return b.canSkipRoot(ctx, tx, elFrozenBlocks, clFrozenBlocks, slot, b.expectedRoot)
+}
+
+func (b *BackwardBeaconDownloader) canSkipRoot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64, blockRoot common.Hash) bool {
 	if slot <= clFrozenBlocks {
 		return false
 	}
 
 	var blockHash common.Hash
-	isGloas := b.beaconCfg != nil && b.beaconCfg.SlotsPerEpoch != 0 && b.beaconCfg.GetCurrentStateVersion(slot/b.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
+	isGloas := b.isGloasSlot(slot)
 	if isGloas {
 		var err error
-		blockHash, err = beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
+		blockHash, err = beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
 		if err != nil {
 			log.Warn("Failed to read execution block hash", "err", err)
 			return false
@@ -866,7 +1083,7 @@ func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, el
 
 	if !isGloas {
 		var err error
-		blockHash, err = beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
+		blockHash, err = beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
 		if err != nil {
 			log.Warn("Failed to read execution block hash", "err", err)
 			return false
@@ -876,7 +1093,7 @@ func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, el
 		}
 	}
 
-	blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
+	blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
 	if err != nil {
 		log.Warn("Failed to read execution block number", "err", err)
 	}
@@ -895,6 +1112,10 @@ func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, el
 
 	has, err := b.engine.HasBlock(ctx, blockHash)
 	return err == nil && has
+}
+
+func (b *BackwardBeaconDownloader) isGloasSlot(slot uint64) bool {
+	return b.beaconCfg != nil && b.beaconCfg.SlotsPerEpoch != 0 && b.beaconCfg.GetCurrentStateVersion(slot/b.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
 }
 
 // fetchBlockFromBeaconAPIByRoot fetches a single beacon block by its root hash.
@@ -951,6 +1172,57 @@ func fetchBlockFromBeaconAPIByRoot(ctx context.Context, baseURL string, root com
 // fetchSingleEnvelope fetches the execution payload envelope for a single GLOAS block.
 // Returns an envelope on success and an error for every unavailable response.
 func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	var p2pErr error
+	p2pAttempted := false
+	if !b.httpPreferred.Load() {
+		p2pAttempted = true
+		if envelope, err := b.fetchSingleEnvelopeP2P(ctx, block); err == nil {
+			return envelope, nil
+		} else {
+			p2pErr = err
+		}
+	}
+	envelope, httpErr := b.fetchSingleEnvelopeHTTP(ctx, block)
+	if httpErr == nil {
+		return envelope, nil
+	}
+	if !p2pAttempted {
+		if envelope, err := b.fetchSingleEnvelopeP2P(ctx, block); err == nil {
+			return envelope, nil
+		} else {
+			p2pErr = err
+		}
+	}
+	return nil, errors.Join(httpErr, p2pErr)
+}
+
+func (b *BackwardBeaconDownloader) fetchSingleEnvelopeP2P(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if b.requestEnvelopes == nil {
+		return nil, errors.New("no P2P envelope source configured")
+	}
+	if block == nil || block.Block == nil {
+		return nil, errors.New("cannot fetch envelope for nil block")
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("block root: %w", err)
+	}
+	envelopes, err := b.requestEnvelopes(ctx, [][32]byte{blockRoot}, block)
+	if err != nil {
+		return nil, err
+	}
+	if envelope := envelopes[blockRoot]; envelope != nil && envelope.Message != nil && envelope.Message.BeaconBlockRoot == blockRoot {
+		if b.validateGloasEnvelope != nil {
+			if err := b.validateGloasEnvelope(block, envelope); err != nil {
+				return nil, fmt.Errorf("invalid P2P GLOAS envelope: %w", err)
+			}
+		}
+		return envelope, nil
+	}
+	return nil, errExecutionPayloadEnvelopeNotFound
+}
+
+func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if b.httpFallbackURL == "" {
 		return nil, fmt.Errorf("no HTTP fallback URL configured")
 	}
@@ -1003,6 +1275,11 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	}
 	if envelope.Message == nil || envelope.Message.BeaconBlockRoot != blockRoot {
 		return nil, fmt.Errorf("envelope block root mismatch: requested %v", blockRoot)
+	}
+	if b.validateGloasEnvelope != nil {
+		if err := b.validateGloasEnvelope(block, envelope); err != nil {
+			return nil, fmt.Errorf("invalid HTTP GLOAS envelope: %w", err)
+		}
 	}
 	return envelope, nil
 }
