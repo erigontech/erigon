@@ -233,6 +233,10 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 	return hph
 }
 
+// Metrics exposes the trie's counters so a caller applying its deferred writes
+// can carry them into this trie's log and CSV totals.
+func (hph *HexPatriciaHashed) Metrics() *Metrics { return hph.metrics }
+
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
 // during commitment calculation. This is used by witness generation to capture paths
 // to HashNodes that need resolution when a FullNode is reduced to a single child.
@@ -1464,6 +1468,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if err != nil {
 		return err
 	}
+	hph.metrics.AddBranchRead(len(branchData))
 
 	// depthsToTxNum is used for per-file metrics; step is no longer available
 	// from the cache-or-DB helper (cache never had a meaningful step anyway).
@@ -2242,10 +2247,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
-		var unfoldDone func()
-		if dbg.KVReadLevelledMetrics {
-			unfoldDone = hph.metrics.StartUnfolding(plainKey)
-		}
+		unfoldDone := hph.metrics.StartUnfolding(plainKey)
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
@@ -2265,10 +2267,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-		var foldDone func()
-		if dbg.KVReadLevelledMetrics {
-			foldDone = hph.metrics.StartFolding(plainKey)
-		}
+		foldDone := hph.metrics.StartFolding(plainKey)
 		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
@@ -2489,6 +2488,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
+	hph.metrics.AddRoundKeys(updatesCount)
+	roundStart := time.Now()
+	defer func() { observeRound(hph.metrics, roundStart) }()
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)
@@ -2567,10 +2569,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		var foldDone func()
-		if dbg.KVReadLevelledMetrics {
-			foldDone = hph.metrics.StartFolding(nil)
-		}
+		foldDone := hph.metrics.StartFolding(nil)
 		if err = hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}

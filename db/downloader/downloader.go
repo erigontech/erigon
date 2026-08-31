@@ -105,6 +105,9 @@ type Downloader struct {
 	activeDownloadRequests     int
 	zeroActiveDownloadRequests sync.Cond
 
+	// Caps concurrent whole-file hashing by kept-snapshot seeding across all batches.
+	seedSem *semaphore.Weighted
+
 	// Synchronizes state-sensitive changes to things affected by Downloader.Close.
 	lock           sync.RWMutex
 	torrentClient  *torrent.Client
@@ -131,6 +134,43 @@ type Downloader struct {
 	// manifestReady is closed after the first successful P2P manifest discovery.
 	// Non-nil only when --snap.p2p-manifest is enabled.
 	manifestReady chan struct{}
+
+	// Latest aggregated stats snapshot, published by the download logging loop
+	// so eth_syncing can report download progress. Samples carry no batch
+	// identity, which is why downloadBatchLock keeps batches from overlapping.
+	lastStats atomic.Pointer[AggStats]
+
+	// Serializes download batches: overlapping batches would blend progress over
+	// disjoint file sets into one sample.
+	downloadBatchLock sync.Mutex
+}
+
+// Completed reports the latest snapshot-download progress in bytes; total is 0
+// when it is unknown.
+func (d *Downloader) Completed() (done, total uint64) {
+	s := d.lastStats.Load()
+	// Torrents still missing their metainfo are excluded from both counters, so
+	// until every one has arrived the already-complete files are measured against
+	// a partial total and progress reads far too high.
+	if s == nil || s.MetadataReady != s.NumTorrents {
+		return 0, 0
+	}
+	return s.BytesCompleted, s.BytesTotal
+}
+
+func (d *Downloader) ResetProgress() {
+	d.lastStats.Store(nil)
+}
+
+// storeStats publishes an immutable snapshot of the current stats: s is a fresh
+// copy, so the stored pointer never aliases the loop buffer being overwritten.
+// BytesCompleted counts dirty bytes and can go back down; it is held at the
+// previous sample's level so reported progress stays monotonic.
+func (d *Downloader) storeStats(s AggStats) {
+	if prev := d.lastStats.Load(); prev != nil {
+		s.BytesCompleted = max(s.BytesCompleted, prev.BytesCompleted)
+	}
+	d.lastStats.Store(&s)
 }
 
 type AggStats struct {
@@ -329,6 +369,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	d.logConfig()
 
 	d.ctx, d.stop = context.WithCancel(context.Background())
+	d.seedSem = semaphore.NewWeighted(int64(defaultSeedConcurrency()))
 
 	return d, nil
 }
@@ -529,7 +570,7 @@ func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
 	noMetadata := make([]string, 0, len(torrents))
 
 	for _, ps := range torrents {
-		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		t, ok := d.resolveSnapshotTorrent(ps)
 		if !ok {
 			// Don't report missing metainfo, because we haven't even added it yet.
 			continue
@@ -548,6 +589,19 @@ func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
 		noMetadata = append(noMetadata[:5], "...")
 	}
 	d.log(lvl, "No metadata yet", "files", amount, "list", noMetadata)
+}
+
+// resolveSnapshotTorrent resolves a requested snapshot to its live torrent: by
+// the requested infohash, or by name for a same-name torrent retained under a
+// different infohash, which never resolves by the requested hash.
+func (d *Downloader) resolveSnapshotTorrent(ps snapshot) (*torrent.Torrent, bool) {
+	if t, ok := d.torrentClient.Torrent(ps.InfoHash); ok {
+		return t, true
+	}
+	d.lock.RLock()
+	t, ok := d.torrentsByName[ps.Name]
+	d.lock.RUnlock()
+	return t, ok
 }
 
 // We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
@@ -571,7 +625,7 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	stats.NumTorrents = len(torrents)
 
 	for _, ps := range torrents {
-		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		t, ok := d.resolveSnapshotTorrent(ps)
 		if !ok {
 			// Don't report missing metainfo, because we haven't even added it yet.
 			continue
@@ -805,6 +859,8 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 // Logging is bound specific and bound to the lifetime of the call. Target is a name for what we're
 // syncing.
 func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) (err error) {
+	d.downloadBatchLock.Lock()
+	defer d.downloadBatchLock.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	wait, err := d.startSnapshotsDownload(ctx, items, target)
@@ -842,6 +898,7 @@ func (d *Downloader) startSnapshotsDownload(
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
 	var batchCtx context.Context
 	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 
 	batch.all.Go(func() {
 		d.logDownload(
@@ -865,7 +922,7 @@ func (d *Downloader) startSnapshotsDownload(
 
 	defer func() {
 		if err != nil {
-			batch.abandon()
+			err = batch.end(ctx, err)
 		}
 	}()
 	err = batch.addAllItems(ctx, items)
@@ -961,6 +1018,7 @@ func (d *Downloader) logDownload(
 	// complete, so it would always fire and produce noisy (and potentially duplicate) output
 	// when sequential download batches each start their own logging goroutine.
 	stats = d.newStats(stats, ts)
+	d.storeStats(stats)
 	d.logSyncStats(startTime, stats, target)
 
 	interval := time.Second
@@ -971,6 +1029,7 @@ func (d *Downloader) logDownload(
 		case <-time.After(interval):
 		}
 		stats = d.newStats(stats, ts)
+		d.storeStats(stats)
 		d.logSyncStats(startTime, stats, target)
 		d.logNoMetadata(getNoMetadataLvl(), ts)
 		interval = min(interval*2, 15*time.Second)
@@ -1193,11 +1252,14 @@ func (d *Downloader) prepareLocalDataForDownload(
 }
 
 // seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
-// none is on disk. Must run without d.lock: deriving it hashes the whole file.
-func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) {
-	if err := d.AddNewSeedableFile(ctx, name); err != nil && ctx.Err() == nil {
+// none is on disk. Must run without d.lock: deriving it hashes the whole file. A ctx-caused
+// failure is returned but not logged; the batch counts those into one drop total.
+func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
+	err := d.AddNewSeedableFile(ctx, name)
+	if err != nil && ctx.Err() == nil {
 		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
 	}
+	return err
 }
 
 func (d *Downloader) snapshotDataExists(name string) (bool, error) {

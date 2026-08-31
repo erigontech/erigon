@@ -239,22 +239,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	if ibs.IsVersioned() {
 		blockCtx := protocol.NewEVMBlockContext(current.Header, protocol.GetHashFn(current.Header, nil), cfg.engine, accounts.NilAddress, cfg.chainConfig)
 		blockRules := blockCtx.Rules(cfg.chainConfig)
-		var domainKeysErr error
-		domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-			av := addr.Value()
-			const addrLen, hashLen = 20, 32
-			var keys []accounts.StorageKey
-			if iterErr := sd.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-				if len(k) >= addrLen+hashLen {
-					keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-				}
-				return true, nil
-			}); iterErr != nil {
-				domainKeysErr = iterErr
-				return nil
-			}
-			return keys
-		}
+		domainStorageKeys := state.CommittedStorageKeysFn(sd, tx)
 		emptyRemoval := blockHeight != 0 && cfg.chainConfig.IsEIP161Enabled(blockHeight)
 		isAura := cfg.chainConfig.Aura != nil
 		for i, ws := range ba.BalIO().Outputs() {
@@ -262,9 +247,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 				continue
 			}
 			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
-			if domainKeysErr != nil {
-				return fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-			}
 			if normErr != nil {
 				return fmt.Errorf("normalize block writes: %w", normErr)
 			}
@@ -463,7 +445,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
+			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
 					return nil, err

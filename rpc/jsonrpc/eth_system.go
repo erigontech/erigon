@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -82,6 +83,33 @@ type CapabilitiesResult struct {
 	StateProofs CapabilityField `json:"stateproofs"`
 }
 
+// stricterRetention returns the policy that bounds availability more and
+// widerRetention the one that bounds it less. The oldest blocks alone cannot rank
+// them: a window that has not started pruning reports zero like keep-all, so a tie
+// there is resolved on the retention the policies will apply.
+func stricterRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
+	if oldestA > oldestB || (oldestA == oldestB && retentionBlocks(a) <= retentionBlocks(b)) {
+		return oldestA, a
+	}
+	return oldestB, b
+}
+
+func widerRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
+	if oldestA < oldestB || (oldestA == oldestB && retentionBlocks(a) >= retentionBlocks(b)) {
+		return oldestA, a
+	}
+	return oldestB, b
+}
+
+// retentionBlocks measures a policy by the window it keeps, every sentinel counting
+// as unbounded.
+func retentionBlocks(amount prune.BlockAmount) uint64 {
+	if d, ok := amount.(prune.Distance); ok && d.Enabled() {
+		return uint64(d)
+	}
+	return math.MaxUint64
+}
+
 // Capabilities implements eth_capabilities.
 // stateproofs is only available when --prune.include-commitment-history was set at node startup;
 // otherwise it is disabled regardless of prune mode.
@@ -123,7 +151,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
-		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
+		if d, ok := dist.(prune.Distance); ok && d.Enabled() {
 			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: hexutil.Uint64(d)}
 		}
 		return f
@@ -135,11 +163,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
-	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains that have
-	// MergeHeight set (mainnet, sepolia, gnosis…), pre-merge blocks/tx segments are
-	// never downloaded, so the oldest available block is the merge point, not 0.
-	if pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && chainConfig.MergeHeight != nil {
-		blocksOldest = *chainConfig.MergeHeight
+	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
+	// MergeHeight set, pre-merge transaction segments are never downloaded, so the oldest
+	// available block is the merge point. The same sentinel also covers a legacy archive
+	// datadir, so the field follows the boundary the gate resolves.
+	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if expiry && expiryFrom != nil {
+		blocksOldest = *expiryFrom
 	}
 
 	var stateproofs CapabilityField
@@ -157,27 +190,49 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateField := avail(stateOldest, pruneMode.History)
 	blocksField := avail(blocksOldest, pruneMode.Blocks)
 
-	var receiptsField CapabilityField
-	if persistReceipts {
-		// --prune.include-receipts widens past state-history pruning (receipts are written to
-		// RCacheDomain at execution time, not re-derived from state). The remaining bound
-		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
-		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
-		// isReceiptsSegmentPruned in db/snapshotsync). So receipts/logs fall back to
-		// blocksOldest with the same DeleteStrategy as blocks.
-		receiptsField = avail(blocksOldest, pruneMode.Blocks)
-	} else {
-		// Without --prune.include-receipts, receipts are re-executed on demand, requiring both state
-		// history and the block body. Use the more restrictive of the two oldest-block bounds.
-		if blocksOldest > stateOldest {
-			receiptsField = avail(blocksOldest, pruneMode.Blocks)
-		} else {
-			receiptsField = stateField
+	// The receipt cache exists on disk only with --prune.include-receipts, and enabling
+	// it says nothing about how much is kept: RCacheDomain is retired on its own
+	// --prune.receipts.distance window when one is set, and alongside history otherwise.
+	// Below a window of its own the read falls back to re-execution, which reaches as far
+	// as history, so the wider of the two decides. This mirrors checkReceiptsAvailable.
+	receiptsOldest, receiptsAmount := stateOldest, pruneMode.History
+	if persistReceipts && receipts.PersistedReceiptsServed() {
+		switch amount := pruneMode.ReceiptsAmount(); {
+		case amount == prune.KeepAllReceiptsPruneMode:
+			receiptsOldest, receiptsAmount = 0, amount
+		case pruneMode.ReceiptsFollowHistory():
+		default:
+			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, stateOldest, pruneMode.History)
 		}
 	}
-	// getLogsV3 uses log indexes scoped to prune.Blocks; matches in pruned blocks are silently
-	// dropped, so the effective oldest for logs equals receipts in both branches.
-	logsField := receiptsField
+	// Below Byzantium the receipt carries a post state the cache does not store, so
+	// those blocks are re-executed and reach only as far as history. This mirrors
+	// postStateCalculated, down to the shape that computes the post state at all and
+	// to a chain that never reaches the fork.
+	byzantium := uint64(math.MaxUint64)
+	if chainConfig.ByzantiumBlock != nil {
+		byzantium = *chainConfig.ByzantiumBlock
+	}
+	if receipts.PostStateCalculated(chainConfig, receiptsOldest, keepExecutionProofs, api._blockReader) {
+		if stateOldest < byzantium {
+			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+		} else {
+			// A fork height is not a window: keeping the amount would advertise a
+			// retention whose head - retentionBlocks lands below this oldest block.
+			receiptsOldest, receiptsAmount = byzantium, prune.KeepAllBlocksPruneMode
+		}
+	}
+	// Reading the receipts of a block needs its body too: the stored receipt carries no
+	// TxHash, so it is derived from the block's transaction.
+	receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, blocksOldest, pruneMode.Blocks)
+	receiptsField := avail(receiptsOldest, receiptsAmount)
+
+	// A log query filtered by address or topic searches LogAddrIdx and LogTopicIdx,
+	// standalone indices retired at the history cutoff whatever the receipt retention is.
+	// The field takes that stricter form: an unfiltered query reads straight from the
+	// receipts and reaches further back than advertised.
+	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{
 		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
@@ -256,7 +311,7 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
-func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -274,11 +329,11 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
-	return (*hexutil.Big)(gasResult.ToBig()), err
+	return (*hexutil.U256)(gasResult), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
-func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -289,7 +344,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(tipcap.ToBig()), err
+	return (*hexutil.U256)(new(uint256.Int).Set(tipcap)), err
 }
 
 type feeHistoryResult struct {
@@ -345,7 +400,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 }
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
-func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -368,11 +423,11 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(ret256.ToBig()), nil
+	return (*hexutil.U256)(&ret256), nil
 }
 
 // BaseFee returns the base fee at the current head.
-func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
+func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -391,7 +446,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return nil, nil
 	}
 	baseFee := misc.CalcBaseFee(config, header)
-	return (*hexutil.Big)(baseFee.ToBig()), nil
+	return (*hexutil.U256)(baseFee), nil
 }
 
 // EthHardForkConfig represents config of a hard-fork
@@ -526,7 +581,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 }
 
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByNumberWithSenders(ctx, b.tx, number.Uint64())
+	return b.baseApi.blockByNumberWithSenders(ctx, b.baseApi.filters.WithOverlay(b.tx), number.Uint64())
 }
 
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
@@ -561,7 +616,7 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 	if err != nil {
 		return nil, nil
 	}
-	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.baseApi.filters.WithOverlay(b.tx), latestNum)
 	if err != nil || block == nil {
 		return nil, nil
 	}
