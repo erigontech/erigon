@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"time"
@@ -34,12 +36,44 @@ import (
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
 
+const (
+	dataFileName     = "mdbx.dat"
+	lockFileName     = "mdbx.lck"
+	compactDirSuffix = "-compacting"
+)
+
 func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize, logger log.Logger) (kv.RoDB, kv.RwDB) {
+	return openPair(from, to, label, false, targetPageSize, growthStepFor(dataFileSize(from)), kv.TablesCfgByLabel(label), logger)
+}
+
+func dataFileSize(dbDir string) int64 {
+	st, err := os.Stat(filepath.Join(dbDir, dataFileName))
+	if err != nil { // a db we can't stat can't be opened either; let the open report it
+		return 0
+	}
+	return st.Size()
+}
+
+// growthStepFor scales the growth step with the db. A bulk copy wants few file
+// extensions, but mdbx rounds the file up to a whole step, so one step sized for
+// chaindata would pad every small db in a datadir to that size.
+func growthStepFor(size int64) datasize.ByteSize {
+	return min(4*datasize.GB, max(1*datasize.MB, datasize.ByteSize(size)/64))
+}
+
+// openPair opens src and creates dst with src's page size and map size. Both get
+// growthStep: opening src read-write resets its geometry to this process's
+// defaults, whose 1GB step would inflate a small db before it is even read.
+// exclusive makes mdbx refuse a src another process still has open.
+func openPair(from, to string, label kv.Label, exclusive bool, targetPageSize, growthStep datasize.ByteSize, tables kv.TableCfg, logger log.Logger) (kv.RoDB, kv.RwDB) {
 	const ThreadsHardLimit = 9_000
+	tableCfg := func(_ kv.TableCfg) kv.TableCfg { return tables }
 	src := mdbx2.New(label, logger).Path(from).
 		RoTxsLimiter(semaphore.NewWeighted(ThreadsHardLimit)).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
+		WithTableCfg(tableCfg).
+		GrowthStep(growthStep).
 		Accede(true).
+		Exclusive(exclusive).
 		MustOpen()
 	if targetPageSize <= 0 {
 		targetPageSize = src.PageSize()
@@ -51,11 +85,107 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	dst := mdbx2.New(label, logger).Path(to).
 		PageSize(targetPageSize).
 		MapSize(datasize.ByteSize(info.Geo.Upper)).
-		GrowthStep(4 * datasize.GB).
+		GrowthStep(growthStep).
 		WriteMap(true).
-		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TablesCfgByLabel(label) }).
+		WithTableCfg(tableCfg).
 		MustOpen()
 	return src, dst
+}
+
+// CompactInPlace rewrites the mdbx db at dbDir without its free pages: it copies
+// into a sibling directory, then moves the result back over the original. Needs
+// free space for a second copy of the live data, and the db must not be in use.
+func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger log.Logger) error {
+	dataFile := filepath.Join(dbDir, dataFileName)
+	before, err := os.Stat(dataFile)
+	if err != nil {
+		return err
+	}
+
+	tmpDir := dbDir + compactDirSuffix
+	if err := os.RemoveAll(tmpDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+
+	logger.Info("[mdbx_to_mdbx] compacting", "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
+	if err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger); err != nil {
+		return err
+	}
+
+	if err := os.Rename(filepath.Join(tmpDir, dataFileName), dataFile); err != nil {
+		return err
+	}
+	if err := os.Chmod(dataFile, before.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := restoreOwner(before, dataFile); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	after, err := os.Stat(dataFile)
+	if err != nil {
+		return err
+	}
+	logger.Info("[mdbx_to_mdbx] compacted", "db", dbDir,
+		"before", common.ByteCount(uint64(before.Size())), "after", common.ByteCount(uint64(after.Size())))
+	return nil
+}
+
+// copyToDir closes both databases before it returns: the caller moves the copy,
+// which must not happen while mdbx still holds the file open.
+func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) error {
+	tables, err := tablesOnDisk(ctx, from, label, growthStep, logger)
+	if err != nil {
+		return err
+	}
+	src, dst := openPair(from, to, label, true, 0, growthStep, tables, logger)
+	defer src.Close()
+	defer dst.Close()
+	return Kv2kv(ctx, src, dst, nil, logger)
+}
+
+// tablesOnDisk lists the tables the file actually holds and reads back the flags
+// mdbx stores per table. A copy driven by it neither drops a table the current
+// schema no longer names nor fails on a schema table the file predates. Exclusive:
+// this is the compaction's first open, so it is where an in-use db is rejected.
+func tablesOnDisk(ctx context.Context, dbDir string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) (kv.TableCfg, error) {
+	probe, err := mdbx2.New(label, logger).Path(dbDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{} }).
+		GrowthStep(growthStep).
+		Accede(true).
+		Exclusive(true).
+		Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer probe.Close()
+
+	if err := probe.View(ctx, func(tx kv.Tx) error {
+		names, err := tx.ListTables()
+		if err != nil {
+			return err
+		}
+		for _, name := range names {
+			if err := tx.(kv.BucketMigrator).CreateTable(name); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	tables := kv.TableCfg{}
+	for name, cfg := range probe.AllTables() {
+		tables[name] = kv.TableCfgItem{Flags: cfg.Flags}
+	}
+	return tables, nil
 }
 
 func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logger log.Logger) error {

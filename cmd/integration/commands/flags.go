@@ -66,6 +66,7 @@ var (
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 
+	inPlace          bool
 	convertSqueeze   bool
 	convertNibblesV2 bool
 	convertRestore   bool
@@ -99,6 +100,10 @@ func withFile(cmd *cobra.Command) {
 func withReferenceChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&referenceChaindata, "chaindata.reference", "", "path to the 2nd (reference/etalon) db")
 	must(cmd.MarkFlagDirname("chaindata.reference"))
+}
+
+func withInPlace(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&inPlace, "in-place", false, "compact every mdbx db of --datadir in place, instead of copying --chaindata to --chaindata.to")
 }
 
 func withToChaindata(cmd *cobra.Command) {

@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -98,20 +100,108 @@ var cmdCompareStates = &cobra.Command{
 }
 
 var cmdMdbxToMdbx = &cobra.Command{
-	Use:   "mdbx_to_mdbx",
-	Short: "copy data from '--chaindata' to '--chaindata.to'",
-	Run: func(cmd *cobra.Command, args []string) {
+	Use:          "mdbx_to_mdbx",
+	Short:        "copy data from '--chaindata' to '--chaindata.to'. With --in-place: compact every mdbx db of '--datadir' in place",
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
-		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-		err := backup.Kv2kv(ctx, from, to, nil, logger)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
+
+		var err error
+		if inPlace {
+			err = compactDatadir(ctx, logger)
+		} else {
+			from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
+			err = backup.Kv2kv(ctx, from, to, nil, logger)
 		}
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
 	},
+}
+
+type datadirDB struct {
+	path  string
+	label kv.Label
+}
+
+// caplin/blobs/chaindata is the deepest db a datadir holds.
+const maxDBDepth = 2
+
+// datadirDBs finds the mdbx databases of a datadir. It only descends into the
+// top-level dirs erigon puts a db under - never into snapshots/ or temp/ - and
+// takes the label from that dir, so each copy is sized like the node sizes it.
+func datadirDBs(dirs datadir.Dirs) ([]datadirDB, error) {
+	roots := []datadirDB{
+		{dirs.Chaindata, dbcfg.ChainDB},
+		{filepath.Join(dirs.DataDir, "aura"), dbcfg.ConsensusDB},
+		{dirs.TxPool, dbcfg.TxPoolDB},
+		{dirs.Downloader, dbcfg.DownloaderDB},
+		{dirs.Migrations, dbcfg.MigrationsDB},
+		{dirs.Nodes, dbcfg.SentryDB},
+		{filepath.Join(dirs.DataDir, "caplin"), dbcfg.CaplinDB},
+	}
+	var found []datadirDB
+	for _, root := range roots {
+		if err := findDBs(root.path, root.label, maxDBDepth, &found); err != nil {
+			return nil, err
+		}
+	}
+	return found, nil
+}
+
+func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
+	exists, err := dir.FileExist(filepath.Join(path, "mdbx.dat"))
+	if err != nil {
+		return err
+	}
+	if exists {
+		*found = append(*found, datadirDB{path, label})
+		return nil
+	}
+	if depth == 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if err := findDBs(filepath.Join(path, e.Name()), label, depth-1, found); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func compactDatadir(ctx context.Context, logger log.Logger) error {
+	dirs, l, err := datadir.Open(datadirCli).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := l.Unlock(); err != nil {
+			logger.Error("failed to unlock datadir", "err", err)
+		}
+	}()
+
+	dbs, err := datadirDBs(dirs)
+	if err != nil {
+		return err
+	}
+	for _, db := range dbs {
+		if err := backup.CompactInPlace(ctx, db.path, db.label, logger); err != nil {
+			return fmt.Errorf("compacting %s: %w", db.path, err)
+		}
+	}
+	return nil
 }
 
 var cmdFToMdbx = &cobra.Command{
@@ -151,6 +241,9 @@ func init() {
 	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
+	withInPlace(cmdMdbxToMdbx)
+	cmdMdbxToMdbx.MarkFlagsMutuallyExclusive("in-place", "chaindata")
+	cmdMdbxToMdbx.MarkFlagsMutuallyExclusive("in-place", "chaindata.to")
 
 	rootCmd.AddCommand(cmdMdbxToMdbx)
 
