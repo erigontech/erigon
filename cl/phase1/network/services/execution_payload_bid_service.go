@@ -139,7 +139,8 @@ func (s *executionPayloadBidService) newPendingQueue(ctx context.Context) *pendi
 		func(key pendingBidKey, _ *cltypes.SignedExecutionPayloadBid) {
 			log.Trace("Pending execution payload bid expired",
 				"slot", key.slot, "builderIndex", key.builderIndex)
-		})
+		},
+		nil)
 }
 
 func (s *executionPayloadBidService) Names() []string {
