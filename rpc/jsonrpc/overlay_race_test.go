@@ -1960,11 +1960,6 @@ func TestFeeHistory_PublishCycleDuringTxAcquisition(t *testing.T) {
 	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt())
 }
 
-// TestFeeHistory_OverlayUnstableDuringTxAcquisition pins that when the overlay
-// keeps changing across every acquisition attempt (a fresh sibling published
-// on every open), the request still serves the last capture as one pinned
-// view instead of failing: under FCU churn a slightly stale answer beats a
-// client-visible error.
 type countCanonicalScansDB struct {
 	kv.TemporalRoDB
 	scans *atomic.Int64
@@ -2037,6 +2032,9 @@ func TestBeginTemporalRoWithOverlay_ChurnPinsNoOverlay(t *testing.T) {
 		"the request must read the committed head, the only view it can vouch for")
 }
 
+// TestFeeHistory_OverlayUnstableDuringTxAcquisition is the end-to-end form of
+// the no-overlay pin: a request whose overlay capture never stabilizes still
+// answers, on the committed head.
 func TestFeeHistory_OverlayUnstableDuringTxAcquisition(t *testing.T) {
 	t.Parallel()
 	h := newOverlayAheadHarness(t, false)
