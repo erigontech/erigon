@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	dasmock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -222,6 +223,98 @@ func requireBlockNotAdded(t *testing.T, store *ForkChoiceStore, block *cltypes.S
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	require.NotContains(t, store.headSet, common.Hash(blockRoot))
+}
+
+// blockWithBlobCommitment makes the block take the EL GetBlobs branch. The body edit
+// invalidates the block against its state root, so callers must assert on how OnBlock
+// returns rather than on a successful import.
+func blockWithBlobCommitment(t *testing.T, store *ForkChoiceStore, block *cltypes.SignedBeaconBlock) *cltypes.SignedBeaconBlock {
+	t.Helper()
+	peerDas := dasmock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	store.InitPeerDas(peerDas)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	return block
+}
+
+// blockingBlobEngine returns a mock whose GetBlobs signals entry and then blocks.
+func blockingBlobEngine(t *testing.T) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
+	t.Helper()
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	engine.EXPECT().
+		GetBlobs(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error) {
+			entered <- struct{}{}
+			<-release
+			return nil, nil, nil
+		})
+	return engine, entered, release
+}
+
+// GetBlobs is a blocking EL call on the same pre-Gloas path, so OnBlock must not hold
+// f.mu across it either.
+func TestOnBlockYieldsForkChoiceLockDuringGetBlobs(t *testing.T) {
+	engine, blobsEntered, releaseBlobs := blockingBlobEngine(t)
+	store, block := buildOnBlockLockScopeStore(t, engine)
+	block = blockWithBlobCommitment(t, store, block)
+
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- store.OnBlock(context.Background(), block, false, true, true) }()
+	awaitSignal(t, blobsEntered, "GetBlobs to start")
+
+	tickDone := make(chan struct{})
+	go func() {
+		store.OnTick(48)
+		close(tickDone)
+	}()
+	awaitSignal(t, tickDone, "OnTick to acquire the fork-choice lock while GetBlobs is blocked")
+
+	close(releaseBlobs)
+	select {
+	case <-onBlockDone:
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("OnBlock did not finish after GetBlobs was released")
+	}
+}
+
+// GetBlobs runs with newPayload=false, where the post-NewPayload recheck never runs, so
+// the finalized-descendant checks have to be redone after this yield too.
+func TestOnBlockRechecksFinalityAfterGetBlobs(t *testing.T) {
+	t.Run("finalized past the block", func(t *testing.T) {
+		store, block, run := startOnBlockInsideGetBlobs(t)
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+		require.NoError(t, run())
+		requireBlockNotAdded(t, store, block)
+	})
+
+	t.Run("finalized onto another branch", func(t *testing.T) {
+		store, block, run := startOnBlockInsideGetBlobs(t)
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
+		require.ErrorIs(t, run(), ErrNotFinalizedDescendant)
+		requireBlockNotAdded(t, store, block)
+	})
+}
+
+func startOnBlockInsideGetBlobs(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
+	t.Helper()
+	engine, blobsEntered, releaseBlobs := blockingBlobEngine(t)
+	store, block := buildOnBlockLockScopeStore(t, engine)
+	block = blockWithBlobCommitment(t, store, block)
+	onBlockDone := make(chan error, 1)
+	go func() { onBlockDone <- store.OnBlock(context.Background(), block, false, true, true) }()
+	awaitSignal(t, blobsEntered, "GetBlobs to start")
+	return store, block, func() error {
+		close(releaseBlobs)
+		select {
+		case err := <-onBlockDone:
+			return err
+		case <-time.After(lockScopeTimeout):
+			t.Fatal("OnBlock did not finish after GetBlobs was released")
+			return nil
+		}
+	}
 }
 
 // A caller that wins admission only after someone else validated the same payload
