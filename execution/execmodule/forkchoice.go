@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -262,6 +263,12 @@ func (e *ExecModule) unwindIfNeeded(
 		}
 	}
 	unwindTarget := currentParentNumber
+	if canonicalHash != blockHash && unwindTarget < finalisedBlockNum {
+		return &ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusInvalidForkchoice,
+		}, nil
+	}
 	// Determine current canonical tip from TxNums. If unwindTarget is at or
 	// above the canonical tip, there's nothing above to roll back — skip the
 	// unwind path entirely and proceed straight to forward-filling new
@@ -297,6 +304,13 @@ func (e *ExecModule) unwindIfNeeded(
 			return nil, err
 		}
 		e.observeStateTransition(ctx, StateTransitionUnwindComplete)
+	} else {
+		execProgress, progressErr := stages.GetStageProgress(tx, stages.Execution)
+		if progressErr != nil {
+			e.logger.Warn("updateForkChoice: execution progress unavailable for skipped unwind", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "err", progressErr)
+		} else if execProgress > unwindTarget {
+			e.logger.Info("updateForkChoice: unwind skipped with executed state above reorg point", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "execProgress", execProgress)
+		}
 	}
 	// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
 	// the unwound txNum, so no whole-cache clear is needed here.
@@ -898,10 +912,10 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
 			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 			pruneTimeout := min(baseTimeout+time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
-			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
 				if e.codeStore != nil {
 					if err := e.codeStore.Evict(tx); err != nil {
-						return err
+						return nil, err
 					}
 				}
 				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)

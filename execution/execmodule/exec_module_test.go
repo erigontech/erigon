@@ -388,6 +388,15 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 // skip the unwind path, write the new canonicals, and let AppendCanonicalTxNums
 // re-extend TxNums past commitBlock.
 func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
+	testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t, false)
+}
+
+func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testing.T) {
+	testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t, true)
+}
+
+func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
+	t.Helper()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -432,6 +441,9 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		if invalidExecutionProgress {
+			require.NoError(t, tx.Put(kv.SyncStageProgress, []byte(stages.Execution), []byte{1}))
+		}
 		return nil
 	}))
 	require.Equal(t, uint64(10), commitBlock, "commitBlock should be at block 10 after the initial chain")
