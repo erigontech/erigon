@@ -22,6 +22,7 @@ format, same thresholds ([sync-tests.md](sync-tests.md)).
 | `qa-sync-from-scratch.yml` — *archive node* | `long-running` | blank | 2 h / 5–23 h per chain | `sync-from-scratch` |
 | `qa-sync-from-scratch-full-node.yml` | `long-running` | blank | 2 h / matrix | `sync-from-scratch-full-node` |
 | `qa-sync-from-scratch-minimal-node.yml` | `long-running` | blank | 2 h / 12 h | `sync-from-scratch-minimal-node` |
+| `qa-exec-from-zero.yml` — *archive node, no state download* | `long-running` | blank | 1–2 h / 6–42 h per chain | `exec-from-zero` **+** `state-snapshot-hash-check` |
 | `qa-sync-with-externalcl.yml` | `long-running` | blank, external CL (prysm / lighthouse) | 1 h / 8 h | `sync-from-scratch-<client>-minimal-node` |
 | `qa-sync-test-bisection-tool.yml` | `long-running` | blank | 2 min / 8 h | dispatch input |
 
@@ -38,6 +39,17 @@ Notes that change how you read a run:
 - `sync-from-scratch` (archive) also runs the **RPC integration suite** against
   the freshly synced datadir afterwards, for mainnet and gnosis. That step can
   fail on its own — check `rpc-test-results-<chain>`.
+- `qa-exec-from-zero` starts Erigon with `--snap.skip-state-snapshot-download`,
+  so only blocks come from BitTorrent and execution runs from genesis. It has
+  **two verdicts**: the usual sync report, then a step
+  **`Check produced state snapshots against the published hashes`** that compares
+  the state files Erigon built against `erigon-snapshot`'s preverified TOML
+  (`.github/workflows/scripts/compare_state_snapshot_hashes.py`), writing
+  `result-state-hashes-<chain>.json` under `--test_name state-snapshot-hash-check`.
+  A red run can be either one — check which step failed before reading a report.
+  Only the data files (`domain/*.kv`, `history/*.v`, `idx/*.ef`) are compared;
+  accessors are seeded with the node's `salt-state.txt`, which this flag makes
+  Erigon generate locally, so their hashes never match the published ones.
 - `qa-constrained-tip-tracking` runs Erigon in a 32 GB memory cgroup and passes
   `statistics`, adding `proc_stat.log` to the `erigon-logs-<chain>` artifact.
   A sync-time failure here means "too slow under memory pressure", not
@@ -76,6 +88,7 @@ Common shapes:
 | `metric-plots*` | `metrics-<chain>-plots_<metric>_*.png` and `_data.json` |
 | `fd-leak-analysis*` | `fd-leak-analysis-<chain>.md`, sampled every 60 s against a baseline |
 | `torrent-client-status*` | downloader torrent state at the end of the run |
+| `state-snapshot-hashes-<chain>` | exec-from-zero only: `hashes-<chain>.txt` (the local infohashes from `downloader torrent_hashes`), the datadir's `preverified.toml`, and `result-state-hashes-<chain>.json` |
 | `rpc-test-results-<chain>` | the RPC suite's result dir (`results/test_report.json`, `output.log`, `summary.md`) |
 
 ## The job log
