@@ -18,6 +18,7 @@ package payloadoptimizer_test
 
 import (
 	"context"
+	"encoding/binary"
 	"math"
 	"reflect"
 	"testing"
@@ -63,32 +64,105 @@ func testStateVersion(params *builder.Parameters) clparams.StateVersion {
 	return clparams.ElectraVersion
 }
 
+func testBeaconConfigFor(stateVersion clparams.StateVersion) *clparams.BeaconChainConfig {
+	config := &clparams.BeaconChainConfig{
+		SlotsPerEpoch:      32,
+		AltairForkEpoch:    0,
+		BellatrixForkEpoch: 0,
+		CapellaForkEpoch:   0,
+		DenebForkEpoch:     0,
+		ElectraForkEpoch:   0,
+		FuluForkEpoch:      math.MaxUint64,
+		GloasForkEpoch:     math.MaxUint64,
+		ElectraForkVersion: 0x05000000,
+		FuluForkVersion:    0x06000000,
+		GloasForkVersion:   0x07000000,
+		FarFutureEpoch:     math.MaxUint64,
+	}
+	if stateVersion >= clparams.FuluVersion {
+		config.FuluForkEpoch = 0
+	}
+	if stateVersion >= clparams.GloasVersion {
+		config.GloasForkEpoch = 0
+	}
+	return config
+}
+
+func newTestBuildContext(params *builder.Parameters, stateVersion clparams.StateVersion, forkVersion [4]byte, requests types.FlatRequests, parentGasLimit uint64, defaults ...payloadoptimizer.BuildDefaults) (payloadoptimizer.BuildContext, error) {
+	config := testBeaconConfigFor(stateVersion)
+	configuredForkVersion := clparams.ConfigForkVersion(binary.BigEndian.Uint32(forkVersion[:]))
+	switch stateVersion {
+	case clparams.ElectraVersion:
+		config.ElectraForkVersion = configuredForkVersion
+	case clparams.FuluVersion:
+		config.FuluForkVersion = configuredForkVersion
+	case clparams.GloasVersion:
+		config.GloasForkVersion = configuredForkVersion
+	}
+	proposalSlot := uint64(64)
+	if params != nil && params.SlotNumber != nil {
+		proposalSlot = *params.SlotNumber
+	}
+	ownedParams := params
+	if params != nil && stateVersion < clparams.GloasVersion {
+		ownedParams = params.Copy()
+		if len(defaults) == 0 && ownedParams.TargetGasLimit != nil {
+			targetGasLimit := *ownedParams.TargetGasLimit
+			defaults = []payloadoptimizer.BuildDefaults{{TargetGasLimit: &targetGasLimit}}
+		}
+		ownedParams.TargetGasLimit = nil
+	}
+	return payloadoptimizer.NewBuildContext(ownedParams, config, proposalSlot, requests, parentGasLimit, defaults...)
+}
+
 func TestBuildContextRequiresStateVersionForkShape(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		version    clparams.StateVersion
-		slotNumber *uint64
-		wantErr    bool
+		name         string
+		proposalSlot uint64
+		version      clparams.StateVersion
+		withSlot     bool
+		slotNumber   uint64
+		wantErr      bool
 	}{
-		{name: "Electra without slot", version: clparams.ElectraVersion},
-		{name: "Fulu without slot", version: clparams.FuluVersion},
-		{name: "Gloas without slot", version: clparams.GloasVersion, wantErr: true},
-		{name: "Electra with slot", version: clparams.ElectraVersion, slotNumber: new(uint64), wantErr: true},
-		{name: "Fulu with slot", version: clparams.FuluVersion, slotNumber: new(uint64), wantErr: true},
-		{name: "Gloas with slot", version: clparams.GloasVersion, slotNumber: new(uint64)},
+		{name: "Electra without slot", proposalSlot: 63, version: clparams.ElectraVersion},
+		{name: "Fulu without slot", proposalSlot: 64, version: clparams.FuluVersion},
+		{name: "Gloas without slot", proposalSlot: 96, version: clparams.GloasVersion, wantErr: true},
+		{name: "Electra with slot", proposalSlot: 63, version: clparams.ElectraVersion, withSlot: true, slotNumber: 63, wantErr: true},
+		{name: "Fulu with slot", proposalSlot: 64, version: clparams.FuluVersion, withSlot: true, slotNumber: 64, wantErr: true},
+		{name: "Gloas with matching slot", proposalSlot: 96, version: clparams.GloasVersion, withSlot: true, slotNumber: 96},
+		{name: "Gloas after activation with matching slot", proposalSlot: 128, version: clparams.GloasVersion, withSlot: true, slotNumber: 128},
+		{name: "Gloas with mismatched slot", proposalSlot: 96, version: clparams.GloasVersion, withSlot: true, slotNumber: 97, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			params, forkVersion, requests := baseBuildContextInput()
-			params.SlotNumber = tc.slotNumber
-			ctx, err := payloadoptimizer.NewBuildContext(params, tc.version, forkVersion, requests, baseParentGasLimit)
+			params, _, requests := baseBuildContextInput()
+			if tc.version < clparams.GloasVersion {
+				params.TargetGasLimit = nil
+			}
+			if tc.withSlot {
+				params.SlotNumber = &tc.slotNumber
+			}
+			config := testBeaconConfigFor(clparams.ElectraVersion)
+			config.FuluForkEpoch = 2
+			config.GloasForkEpoch = 3
+			ctx, err := payloadoptimizer.NewBuildContext(params, config, tc.proposalSlot, requests, baseParentGasLimit)
 			if tc.wantErr {
 				require.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
 			require.Equal(t, tc.version, ctx.StateVersion())
+			wantForkVersion := [4]byte{}
+			binary.BigEndian.PutUint32(wantForkVersion[:], config.GetForkVersionByVersion(tc.version))
+			require.Equal(t, wantForkVersion, ctx.ForkVersion())
 		})
 	}
+	t.Run("Gloas at slot zero", func(t *testing.T) {
+		params, _, requests := baseBuildContextInput()
+		params.SlotNumber = new(uint64)
+		ctx, err := payloadoptimizer.NewBuildContext(params, testBeaconConfigFor(clparams.GloasVersion), 0, requests, baseParentGasLimit)
+		require.NoError(t, err)
+		require.Equal(t, clparams.GloasVersion, ctx.StateVersion())
+	})
 }
 
 func TestBuildContextOwnsItsInputs(t *testing.T) {
@@ -109,7 +183,7 @@ func TestBuildContextOwnsItsInputs(t *testing.T) {
 	}
 	requests := types.FlatRequests{{Type: types.DepositRequestType, RequestData: []byte{0x0c}}}
 
-	ctx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), [4]byte{0x0d}, requests, baseParentGasLimit)
+	ctx, err := newTestBuildContext(params, testStateVersion(params), [4]byte{0x0d}, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	params.ParentHash[0] = 0xff
@@ -154,27 +228,27 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	params.TargetGasLimit = nil
 	params.ExtraData = nil
 
-	resolved, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
+	resolved, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
-	require.Equal(t, defaultGas, *resolved.Parameters().TargetGasLimit)
+	require.Nil(t, resolved.Parameters().TargetGasLimit)
 	require.Equal(t, []byte{0xaa}, resolved.Parameters().ExtraData)
 	require.Equal(t, defaultBlobs, *resolved.Parameters().MaxBlobsPerBlock)
 	explicitParams := params.Copy()
-	explicitParams.TargetGasLimit = &defaultGas
 	explicitParams.ExtraData = []byte{0xaa}
 	explicitParams.MaxBlobsPerBlock = &defaultBlobs
-	explicit, err := payloadoptimizer.NewBuildContext(explicitParams, testStateVersion(explicitParams), fork, requests, baseParentGasLimit, defaults)
+	explicit, err := newTestBuildContext(explicitParams, testStateVersion(explicitParams), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
 	require.True(t, resolved.Equal(explicit))
 	require.True(t, explicit.Equal(resolved))
 
 	overrideGas, overrideBlobs := uint64(32_000_000), uint64(1)
-	params.TargetGasLimit = &overrideGas
 	params.ExtraData = []byte{0xbb}
 	params.MaxBlobsPerBlock = &overrideBlobs
-	overridden, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
+	overrideDefaults := defaults
+	overrideDefaults.TargetGasLimit = &overrideGas
+	overridden, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, overrideDefaults)
 	require.NoError(t, err)
-	require.Equal(t, overrideGas, *overridden.Parameters().TargetGasLimit)
+	require.Nil(t, overridden.Parameters().TargetGasLimit)
 	require.Equal(t, []byte{0xbb}, overridden.Parameters().ExtraData)
 	require.Equal(t, overrideBlobs, *overridden.Parameters().MaxBlobsPerBlock)
 	require.False(t, resolved.Equal(overridden))
@@ -186,9 +260,9 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	params.TargetGasLimit = nil
 	params.ExtraData = nil
 	params.MaxBlobsPerBlock = nil
-	fallback, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
+	fallback, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, defaults)
 	require.NoError(t, err)
-	require.Equal(t, baseParentGasLimit, *fallback.Parameters().TargetGasLimit)
+	require.Nil(t, fallback.Parameters().TargetGasLimit)
 	require.NotNil(t, fallback.Parameters().ExtraData)
 	require.Empty(t, fallback.Parameters().ExtraData)
 	require.Equal(t, uint64(^uint64(0)), *fallback.Parameters().MaxBlobsPerBlock)
@@ -196,7 +270,7 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 
 func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testing.T) {
 	baseParams, baseFork, baseRequests := baseBuildContextInput()
-	base, err := payloadoptimizer.NewBuildContext(baseParams, testStateVersion(baseParams), baseFork, baseRequests, baseParentGasLimit)
+	base, err := newTestBuildContext(baseParams, testStateVersion(baseParams), baseFork, baseRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.True(t, base.Equal(base)) //nolint:gocritic
 
@@ -219,8 +293,6 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 			slot := uint64(6)
 			p.SlotNumber = &slot
 		},
-		"target gas limit": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { *p.TargetGasLimit++ },
-		"gas limit nil":    func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) { p.TargetGasLimit = nil },
 		"max blobs": func(p *builder.Parameters, _ *[4]byte, _ *types.FlatRequests) {
 			maxBlobs := uint64(1)
 			p.MaxBlobsPerBlock = &maxBlobs
@@ -237,23 +309,23 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 		t.Run(name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			mutate(params, &fork, &requests)
-			other, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+			other, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			require.False(t, base.Equal(other))
 			require.False(t, other.Equal(base))
 		})
 	}
-	fulu, err := payloadoptimizer.NewBuildContext(baseParams, clparams.FuluVersion, baseFork, baseRequests, baseParentGasLimit)
+	fulu, err := newTestBuildContext(baseParams, clparams.FuluVersion, baseFork, baseRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.False(t, base.Equal(fulu))
 	require.False(t, fulu.Equal(base))
 
 	sameParams, sameFork, sameRequests := baseBuildContextInput()
 	sameParams.PayloadId = 123
-	same, err := payloadoptimizer.NewBuildContext(sameParams, testStateVersion(sameParams), sameFork, sameRequests, baseParentGasLimit)
+	same, err := newTestBuildContext(sameParams, testStateVersion(sameParams), sameFork, sameRequests, baseParentGasLimit)
 	require.NoError(t, err)
 	require.True(t, base.Equal(same))
-	differentParentGas, err := payloadoptimizer.NewBuildContext(sameParams, testStateVersion(sameParams), sameFork, sameRequests, baseParentGasLimit+1)
+	differentParentGas, err := newTestBuildContext(sameParams, testStateVersion(sameParams), sameFork, sameRequests, baseParentGasLimit+1)
 	require.NoError(t, err)
 	require.False(t, base.Equal(differentParentGas))
 	require.Equal(t, baseParentGasLimit, base.ParentGasLimit())
@@ -261,25 +333,34 @@ func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testin
 }
 
 func TestBuildContextRejectsInvalidInputs(t *testing.T) {
-	_, err := payloadoptimizer.NewBuildContext(nil, clparams.ElectraVersion, [4]byte{}, nil, baseParentGasLimit)
+	params, _, requests := baseBuildContextInput()
+	_, err := payloadoptimizer.NewBuildContext(params, nil, 64, requests, baseParentGasLimit)
+	require.ErrorContains(t, err, "beacon config")
+
+	zeroSlotsConfig := testBeaconConfigFor(clparams.ElectraVersion)
+	zeroSlotsConfig.SlotsPerEpoch = 0
+	_, err = payloadoptimizer.NewBuildContext(params, zeroSlotsConfig, 64, requests, baseParentGasLimit)
+	require.ErrorContains(t, err, "slots per epoch")
+
+	_, err = newTestBuildContext(nil, clparams.ElectraVersion, [4]byte{}, nil, baseParentGasLimit)
 	require.Error(t, err)
 	params, fork, requests := baseBuildContextInput()
-	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MinBlockGasLimit-1)
+	_, err = newTestBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MinBlockGasLimit-1)
 	require.Error(t, err)
-	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MinBlockGasLimit)
+	_, err = newTestBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MinBlockGasLimit)
 	require.NoError(t, err)
-	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MaxBlockGasLimit+1)
+	_, err = newTestBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MaxBlockGasLimit+1)
 	require.Error(t, err)
 	params, fork, requests = baseBuildContextInput()
 	params.CustomTxnProvider = contextTxnProvider{}
 
-	_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	_, err = newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.ErrorIs(t, err, payloadoptimizer.ErrCustomTxnProvider)
 
 	params, fork, requests = baseBuildContextInput()
 	params.Withdrawals = append(params.Withdrawals, nil)
 	require.NotPanics(t, func() {
-		_, err = payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+		_, err = newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	})
 	require.Error(t, err)
 }
@@ -295,19 +376,44 @@ func TestBuildContextPreservesGloasTargetGasPreference(t *testing.T) {
 	} {
 		t.Run("explicit gas "+name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
+			slot := uint64(64)
+			params.SlotNumber = &slot
 			params.TargetGasLimit = &target
-			buildContext, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
-			require.NoError(t, err)
-			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
-		})
-		t.Run("default gas "+name, func(t *testing.T) {
-			params, fork, requests := baseBuildContextInput()
-			params.TargetGasLimit = nil
-			buildContext, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{TargetGasLimit: &target})
+			buildContext, err := newTestBuildContext(params, clparams.GloasVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			require.Equal(t, target, *buildContext.Parameters().TargetGasLimit)
 		})
 	}
+}
+
+func TestBuildContextRejectsForkSpecificGasFields(t *testing.T) {
+	for _, stateVersion := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
+		t.Run(stateVersion.String(), func(t *testing.T) {
+			params, _, requests := baseBuildContextInput()
+			config := testBeaconConfigFor(stateVersion)
+			_, err := payloadoptimizer.NewBuildContext(params, config, 64, requests, baseParentGasLimit)
+			require.ErrorContains(t, err, "pre-Gloas")
+		})
+	}
+	t.Run("Gloas requires explicit target", func(t *testing.T) {
+		params, _, requests := baseBuildContextInput()
+		slot, defaultTarget := uint64(64), uint64(31_000_000)
+		params.SlotNumber = &slot
+		params.TargetGasLimit = nil
+		_, err := payloadoptimizer.NewBuildContext(params, testBeaconConfigFor(clparams.GloasVersion), slot, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{TargetGasLimit: &defaultTarget})
+		require.ErrorContains(t, err, "requires a target gas limit")
+	})
+	t.Run("Gloas after activation requires explicit target", func(t *testing.T) {
+		params, _, requests := baseBuildContextInput()
+		slot := uint64(128)
+		params.SlotNumber = &slot
+		params.TargetGasLimit = nil
+		config := testBeaconConfigFor(clparams.ElectraVersion)
+		config.FuluForkEpoch = 2
+		config.GloasForkEpoch = 3
+		_, err := payloadoptimizer.NewBuildContext(params, config, slot, requests, baseParentGasLimit)
+		require.ErrorContains(t, err, "requires a target gas limit")
+	})
 }
 
 func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
@@ -315,13 +421,13 @@ func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
 	t.Run("explicit extra above maximum", func(t *testing.T) {
 		params, fork, requests := baseBuildContextInput()
 		params.ExtraData = tooLong
-		_, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+		_, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 		require.Error(t, err)
 	})
 	t.Run("default extra above maximum", func(t *testing.T) {
 		params, fork, requests := baseBuildContextInput()
 		params.ExtraData = nil
-		_, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{ExtraData: tooLong})
+		_, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{ExtraData: tooLong})
 		require.Error(t, err)
 	})
 	for name, extra := range map[string][]byte{
@@ -331,7 +437,7 @@ func TestBuildContextEnforcesResolvedConsensusBounds(t *testing.T) {
 		t.Run("valid extra "+name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			params.ExtraData = extra
-			_, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+			_, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 		})
 	}

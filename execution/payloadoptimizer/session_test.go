@@ -106,7 +106,7 @@ func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {
 				slot := uint64(6)
 				params.SlotNumber = &slot
 			}
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, tc.stateVersion, fork, requests, baseParentGasLimit)
+			buildCtx, err := newTestBuildContext(params, tc.stateVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			called := false
 			backend := &optimizerBackend{
@@ -137,7 +137,7 @@ func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {
 
 func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	canonicalResult := validColdResult(params, requests, 100)
 	canonicalResult.Block.Block.HeaderNoCopy().Root = common.Hash{0x31}
@@ -191,7 +191,7 @@ func TestColdSessionApplyPublishesAnImmutableCanonicalCandidate(t *testing.T) {
 
 func TestSessionRejectsCandidateForDifferentParent(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            common.Hash{0xff},
@@ -231,7 +231,7 @@ func TestSessionRejectsCandidateForDifferentParent(t *testing.T) {
 
 func TestApplyDoesNotInstallAfterCallCancellation(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	header := &types.Header{
 		ParentHash:            params.ParentHash,

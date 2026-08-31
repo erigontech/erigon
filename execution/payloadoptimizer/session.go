@@ -38,11 +38,12 @@ import (
 )
 
 var (
-	ErrSessionClosed            = errors.New("payload optimizer session is closed")
-	ErrBackendBusy              = errors.New("payload optimizer backend is busy")
-	ErrUnknownPayload           = errors.New("payload optimizer backend no longer has the payload")
-	ErrPayloadNotReady          = errors.New("payload optimizer backend returned no payload")
-	ErrCandidateContextMismatch = errors.New("payload optimizer candidate does not match its build context")
+	ErrSessionClosed                 = errors.New("payload optimizer session is closed")
+	ErrBackendBusy                   = errors.New("payload optimizer backend is busy")
+	ErrUnknownPayload                = errors.New("payload optimizer backend no longer has the payload")
+	ErrPayloadNotReady               = errors.New("payload optimizer backend returned no payload")
+	ErrCandidateContextMismatch      = errors.New("payload optimizer candidate does not match its build context")
+	ErrAccountAbstractionUnsupported = errors.New("payload optimizer does not support account abstraction transactions")
 )
 
 type Backend interface {
@@ -100,6 +101,11 @@ func NewOrderflowUpdate(transactions types.Transactions) (update OrderflowUpdate
 		return OrderflowUpdate{}, errors.New("payload optimizer orderflow contains a nil transaction")
 	}
 	for i, transaction := range transactions {
+		if transaction.Type() == types.AccountAbstractionTxType {
+			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow transaction %d: %w", i, ErrAccountAbstractionUnsupported)
+		}
+	}
+	for i, transaction := range transactions {
 		if transaction.Type() != types.BlobTxType {
 			continue
 		}
@@ -114,7 +120,15 @@ func NewOrderflowUpdate(transactions types.Transactions) (update OrderflowUpdate
 	if _, err := types.MarshalTransactionsBinary(transactions); err != nil {
 		return OrderflowUpdate{}, fmt.Errorf("copy orderflow transactions: %w", err)
 	}
-	return OrderflowUpdate{transactions: copyTransactions(transactions)}, nil
+	owned := types.CopyTxs(transactions)
+	for i, transaction := range owned {
+		sender, err := transaction.Sender(*types.LatestSignerForChainID(transaction.GetChainID()))
+		if err != nil {
+			return OrderflowUpdate{}, fmt.Errorf("authenticate orderflow transaction %d: %w", i, err)
+		}
+		transaction.SetSender(sender)
+	}
+	return OrderflowUpdate{transactions: owned}, nil
 }
 
 func isNilTransaction(transaction types.Transaction) bool {
@@ -275,6 +289,11 @@ func (s *Session) Apply(ctx context.Context, update OrderflowUpdate) (*Candidate
 	if result.Block == nil || result.Block.Block == nil || result.Block.Block.HeaderNoCopy() == nil {
 		return nil, ErrPayloadNotReady
 	}
+	for _, transaction := range result.Block.Block.Transactions() {
+		if !isNilTransaction(transaction) && transaction.Type() == types.AccountAbstractionTxType {
+			return nil, ErrAccountAbstractionUnsupported
+		}
+	}
 	ownedResult, err := copyBackendResult(result)
 	if err != nil {
 		return nil, err
@@ -403,10 +422,7 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if !reflect.DeepEqual(header.SlotNumber, params.SlotNumber) {
 		return mismatch("slot number")
 	}
-	if params.TargetGasLimit != nil && !misc.IsGasLimitTargetCompatible(buildContext.parentGasLimit, header.GasLimit, *params.TargetGasLimit) {
-		return mismatch("target gas limit")
-	}
-	if params.TargetGasLimit == nil && header.GasLimit != buildContext.parentGasLimit {
+	if !misc.IsGasLimitTargetCompatible(buildContext.parentGasLimit, header.GasLimit, buildContext.targetGasLimit) {
 		return mismatch("target gas limit")
 	}
 	if !reflect.DeepEqual(header.Extra, params.ExtraData) {
@@ -473,7 +489,6 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	if len(result.Block.Receipts) != len(transactions) {
 		return mismatch("receipt cardinality")
 	}
-	validateCumulativeGas := buildContext.stateVersion < clparams.GloasVersion
 	var cumulativeGasUsed uint64
 	for _, receipt := range result.Block.Receipts {
 		if receipt == nil {
@@ -482,19 +497,17 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		if receipt.BlockNumber == nil {
 			return mismatch("receipt block number")
 		}
-		if validateCumulativeGas {
-			if receipt.CumulativeGasUsed < cumulativeGasUsed || receipt.GasUsed != receipt.CumulativeGasUsed-cumulativeGasUsed {
-				return mismatch("receipt gas used")
-			}
-			cumulativeGasUsed = receipt.CumulativeGasUsed
+		if receipt.CumulativeGasUsed < cumulativeGasUsed || receipt.GasUsed != receipt.CumulativeGasUsed-cumulativeGasUsed {
+			return mismatch("receipt gas used")
 		}
+		cumulativeGasUsed = receipt.CumulativeGasUsed
 		for _, log := range receipt.Logs {
 			if log == nil {
 				return mismatch("nil receipt log")
 			}
 		}
 	}
-	if validateCumulativeGas && cumulativeGasUsed != header.GasUsed {
+	if buildContext.stateVersion < clparams.GloasVersion && cumulativeGasUsed != header.GasUsed {
 		return mismatch("header gas used")
 	}
 	if types.DeriveSha(result.Block.Receipts) != header.ReceiptHash {

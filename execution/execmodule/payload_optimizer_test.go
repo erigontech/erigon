@@ -19,6 +19,8 @@ package execmodule_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -30,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -62,6 +65,10 @@ type stopBoundedRetainedTxnProvider struct {
 	calls   atomic.Uint64
 	entered chan struct{}
 	once    sync.Once
+}
+
+type incompleteEmptyRetainedTxnProvider struct {
+	calls atomic.Uint64
 }
 
 func (p *countedRetainedTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -102,6 +109,18 @@ func (p *stopBoundedRetainedTxnProvider) ProvideRetainedTxns(ctx context.Context
 	return builder.RetainedTxnBatch{}, ctx.Err()
 }
 
+func (p *incompleteEmptyRetainedTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	batch, err := p.ProvideRetainedTxns(ctx, opts...)
+	return batch.Transactions, err
+}
+
+func (p *incompleteEmptyRetainedTxnProvider) ProvideRetainedTxns(context.Context, ...txnprovider.ProvideOption) (builder.RetainedTxnBatch, error) {
+	if p.calls.Add(1) > 1 {
+		return builder.RetainedTxnBatch{}, errors.New("provider was retried")
+	}
+	return builder.RetainedTxnBatch{}, nil
+}
+
 func (p *oneBatchTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -113,9 +132,154 @@ func (p *oneBatchTxnProvider) ProvideTxns(ctx context.Context, _ ...txnprovider.
 	return txns, nil
 }
 
+func beaconConfigForState(stateVersion clparams.StateVersion) *clparams.BeaconChainConfig {
+	config := clparams.MainnetBeaconConfig
+	config.AltairForkEpoch = 0
+	config.BellatrixForkEpoch = 0
+	config.CapellaForkEpoch = 0
+	config.DenebForkEpoch = 0
+	config.ElectraForkEpoch = 0
+	config.FuluForkEpoch = math.MaxUint64
+	config.GloasForkEpoch = math.MaxUint64
+	if stateVersion >= clparams.FuluVersion {
+		config.FuluForkEpoch = 0
+	}
+	if stateVersion >= clparams.GloasVersion {
+		config.GloasForkEpoch = 0
+	}
+	config.GloasForkVersion = 0x07000000
+	return &config
+}
+
+func newBuildContextForState(params *builder.Parameters, stateVersion clparams.StateVersion, requests types.FlatRequests, parentGasLimit uint64, defaults ...payloadoptimizer.BuildDefaults) (payloadoptimizer.BuildContext, error) {
+	proposalSlot := uint64(64)
+	if params.SlotNumber != nil {
+		proposalSlot = *params.SlotNumber
+	}
+	owned := params
+	if stateVersion < clparams.GloasVersion {
+		owned = params.Copy()
+		if len(defaults) == 0 && owned.TargetGasLimit != nil {
+			target := *owned.TargetGasLimit
+			defaults = []payloadoptimizer.BuildDefaults{{TargetGasLimit: &target}}
+		}
+		owned.TargetGasLimit = nil
+	}
+	return payloadoptimizer.NewBuildContext(owned, beaconConfigForState(stateVersion), proposalSlot, requests, parentGasLimit, defaults...)
+}
+
+func newGloasBuildContext(params *builder.Parameters, requests types.FlatRequests, parentGasLimit uint64, defaults ...payloadoptimizer.BuildDefaults) (payloadoptimizer.BuildContext, error) {
+	owned := params.Copy()
+	if owned.TargetGasLimit == nil {
+		target := parentGasLimit
+		if len(defaults) == 1 && defaults[0].TargetGasLimit != nil {
+			target = *defaults[0].TargetGasLimit
+		}
+		owned.TargetGasLimit = &target
+	}
+	return newBuildContextForState(owned, clparams.GloasVersion, requests, parentGasLimit, defaults...)
+}
+
 func TestPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T) {
+	for _, stateVersion := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion, clparams.GloasVersion} {
+		t.Run(stateVersion.String(), func(t *testing.T) {
+			testPayloadOptimizerMatchesTheCanonicalColdBuilder(t, stateVersion)
+		})
+	}
+}
+
+func TestPayloadOptimizerAuthenticatesOrderflowSenderCache(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		signingKey   func(*execmoduletester.ExecModuleTester) *ecdsa.PrivateKey
+		cachedSender func(*execmoduletester.ExecModuleTester) common.Address
+		wrongChain   bool
+		wantTxCount  int
+	}{
+		{
+			name:       "funded signer with forged unfunded cache",
+			signingKey: func(m *execmoduletester.ExecModuleTester) *ecdsa.PrivateKey { return m.Key },
+			cachedSender: func(*execmoduletester.ExecModuleTester) common.Address {
+				return common.Address{0xfe}
+			},
+			wantTxCount: 1,
+		},
+		{
+			name: "unfunded signer with forged funded cache",
+			signingKey: func(*execmoduletester.ExecModuleTester) *ecdsa.PrivateKey {
+				key, err := crypto.GenerateKey()
+				require.NoError(t, err)
+				return key
+			},
+			cachedSender: func(m *execmoduletester.ExecModuleTester) common.Address { return m.Address },
+			wantTxCount:  0,
+		},
+		{
+			name:         "funded signer on another chain",
+			signingKey:   func(m *execmoduletester.ExecModuleTester) *ecdsa.PrivateKey { return m.Key },
+			cachedSender: func(m *execmoduletester.ExecModuleTester) common.Address { return m.Address },
+			wrongChain:   true,
+			wantTxCount:  0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+			chainPack, err := m.GenerateChain(1, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(chainPack))
+			parent := chainPack.TopBlock
+			signingChainID := m.ChainConfig.ChainID
+			if tc.wrongChain {
+				signingChainID = new(uint256.Int).Add(m.ChainConfig.ChainID, uint256.NewInt(1))
+			}
+			transaction, err := types.SignTx(
+				types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(parent.BaseFee().Uint64()+1), nil),
+				*types.LatestSignerForChainID(signingChainID),
+				tc.signingKey(m),
+			)
+			require.NoError(t, err)
+			transaction.SetSender(accounts.InternAddress(tc.cachedSender(m)))
+
+			beaconRoot := randomHash()
+			buildParams := &builder.Parameters{
+				ParentHash:            parent.Hash(),
+				Timestamp:             parent.Time() + 1,
+				PrevRandao:            parent.Header().MixDigest,
+				SuggestedFeeRecipient: common.Address{3},
+				Withdrawals:           make([]*types.Withdrawal, 0),
+				ParentBeaconBlockRoot: &beaconRoot,
+				SlotNumber:            syntheticSlotNumber(parent),
+			}
+			buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
+			require.NoError(t, err)
+			session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, session.Close()) })
+			update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{transaction})
+			require.NoError(t, err)
+			candidate, err := session.Apply(ctx, update)
+			require.NoError(t, err)
+			require.Len(t, candidate.Block().Block.Transactions(), tc.wantTxCount)
+		})
+	}
+}
+
+func testPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T, stateVersion clparams.StateVersion) {
 	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	executionConfig := chain.AllProtocolChanges.Copy()
+	if stateVersion < clparams.GloasVersion {
+		executionConfig.AmsterdamTime = common.NewUint64(math.MaxUint64)
+	}
+	if stateVersion < clparams.FuluVersion {
+		executionConfig.OsakaTime = common.NewUint64(math.MaxUint64)
+	}
+	targetGasLimit := uint64(31_000_000)
+	buildDefaults := buildercfg.BuilderConfig{GasLimit: &targetGasLimit}
+	m := execmoduletester.New(t,
+		execmoduletester.WithChainConfig(executionConfig),
+		execmoduletester.WithBuilderConfig(buildDefaults),
+	)
 	chainPack, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -150,7 +314,6 @@ func TestPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T) {
 	)
 	require.NoError(t, err)
 	orderflowTx.SetSender(accounts.InternAddress(m.Address))
-	targetGasLimit := parent.GasLimit() + 1_000_000
 	beaconRoot := randomHash()
 	buildParams := &builder.Parameters{
 		ParentHash:            parent.Hash(),
@@ -159,8 +322,10 @@ func TestPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{3},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &beaconRoot,
-		SlotNumber:            syntheticSlotNumber(parent),
-		TargetGasLimit:        &targetGasLimit,
+	}
+	if stateVersion >= clparams.GloasVersion {
+		buildParams.SlotNumber = syntheticSlotNumber(parent)
+		buildParams.TargetGasLimit = &targetGasLimit
 	}
 	oracleParams := buildParams.Copy()
 	oracleParams.CustomTxnProvider = &oneBatchTxnProvider{txns: types.Transactions{orderflowTx}}
@@ -170,7 +335,7 @@ func TestPayloadOptimizerMatchesTheCanonicalColdBuilder(t *testing.T) {
 	oracle := collectPayloadOptimizerResult(t, ctx, m.ExecModule, oracleID.PayloadID)
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newBuildContextForState(buildParams, stateVersion, nil, parent.GasLimit(), payloadoptimizer.BuildDefaultsFromConfig(buildDefaults))
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -236,7 +401,7 @@ func TestPayloadOptimizerResolvesNondefaultBuilderConfiguration(t *testing.T) {
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 
 	defaults := payloadoptimizer.BuildDefaultsFromConfig(buildDefaults)
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit(), defaults)
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit(), defaults)
 	require.NoError(t, err)
 	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
 	require.Equal(t, []byte{0xaa, 0xbb}, buildCtx.Parameters().ExtraData)
@@ -281,7 +446,7 @@ func TestPayloadOptimizerAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
 		SlotNumber:            syntheticSlotNumber(parent),
 		TargetGasLimit:        &targetGasLimit,
 	}
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
@@ -317,7 +482,7 @@ func TestPayloadOptimizerDoesNotPublishGloasIncompatibleMinimumGasCandidate(t *t
 		SlotNumber:            syntheticSlotNumber(parent),
 		TargetGasLimit:        &targetGasLimit,
 	}
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	require.Equal(t, targetGasLimit, *buildCtx.Parameters().TargetGasLimit)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
@@ -384,7 +549,7 @@ func TestPayloadOptimizerMatchesCanonicalProviderAcrossBatchBoundary(t *testing.
 	for i := range ascending {
 		descending[i] = ascending[len(ascending)-1-i]
 	}
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -453,7 +618,7 @@ func TestPayloadOptimizerReconsidersBudgetAfterStableBlobRejection(t *testing.T)
 	require.NotEmpty(t, oracleWrapper.Commitments)
 	require.NotEmpty(t, oracleWrapper.Proofs)
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -557,7 +722,7 @@ func TestPayloadOptimizerReconsidersBudgetAfterStableRlpRejection(t *testing.T) 
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 	require.Equal(t, []common.Hash{valid.Hash()}, transactionHashes(oracle.Block.Block.Transactions()))
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -611,7 +776,7 @@ func TestPayloadOptimizerStopsAfterRetainedPassWithoutProgress(t *testing.T) {
 	m.ExecModule.DiscardAssembledBlock(oracleID.PayloadID)
 	require.Empty(t, oracle.Block.Block.Transactions())
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -705,7 +870,7 @@ func TestPayloadOptimizerStopsAfterAssemblerRejectsCompletedRetainedPass(t *test
 	require.Empty(t, retained.Block.Block.Transactions())
 	require.Equal(t, uint64(2), retainedProvider.calls.Load())
 
-	buildCtx, err := payloadoptimizer.NewBuildContext(buildParams, clparams.GloasVersion, [4]byte{0x07}, nil, parent.GasLimit())
+	buildCtx, err := newGloasBuildContext(buildParams, nil, parent.GasLimit())
 	require.NoError(t, err)
 	session, err := payloadoptimizer.New(m.ExecModule).Open(ctx, buildCtx)
 	require.NoError(t, err)
@@ -722,6 +887,34 @@ func TestPayloadOptimizerStopsAfterAssemblerRejectsCompletedRetainedPass(t *test
 	require.Empty(t, actual.Block.Transactions())
 	require.Equal(t, oracle.Block.Block.Hash(), actual.Block.Hash())
 	require.Equal(t, oracle.Block.Receipts, actual.Receipts)
+}
+
+func TestPayloadOptimizerRejectsIncompleteEmptyRetainedBatch(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	parent := chainPack.TopBlock
+	provider := new(incompleteEmptyRetainedTxnProvider)
+	beaconRoot := randomHash()
+	buildParams := &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{3},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		CustomTxnProvider:     provider,
+	}
+	assembled, err := assemblePayloadOptimizerBlock(ctx, m.ExecModule, buildParams)
+	require.NoError(t, err)
+	getCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	_, err = m.ExecModule.GetAssembledBlock(getCtx, assembled.PayloadID)
+	require.ErrorContains(t, err, "incomplete empty batch")
+	require.Equal(t, uint64(1), provider.calls.Load())
 }
 
 func transactionHashes(transactions types.Transactions) []common.Hash {

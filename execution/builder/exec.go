@@ -407,6 +407,9 @@ func getNextTransactions(
 	if err != nil {
 		return nil, retainedBatchProgress{}, err
 	}
+	if cfg.retainedTxnProvider != nil && len(allTxns) == 0 && !passComplete {
+		return nil, retainedBatchProgress{}, errors.New("retained transaction provider returned an incomplete empty batch")
+	}
 
 	blockNum := executionAt + 1
 	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger, stats)

@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
@@ -89,6 +90,41 @@ func applyColdResult(t *testing.T, buildCtx payloadoptimizer.BuildContext, resul
 	return err
 }
 
+func TestSessionRejectsAccountAbstractionBackendCandidate(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	slot := uint64(64)
+	params.SlotNumber = &slot
+	buildCtx, err := newTestBuildContext(params, clparams.GloasVersion, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	result := validColdResult(params, requests, 0)
+	aa := &types.AccountAbstractionTransaction{
+		ChainID:       uint256.NewInt(1),
+		Tip:           uint256.NewInt(1),
+		FeeCap:        uint256.NewInt(1),
+		BuilderFee:    uint256.NewInt(0),
+		NonceKey:      uint256.NewInt(0),
+		SenderAddress: accounts.InternAddress(common.Address{1}),
+	}
+	header := result.Block.Block.Header()
+	result.Block.Block = types.NewBlock(header, types.Transactions{aa}, nil, nil, params.Withdrawals, nil)
+	backend := &optimizerBackend{
+		assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			return execmodule.AssembleBlockResult{PayloadID: 1}, nil
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) { return result, nil },
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	update, err := payloadoptimizer.NewOrderflowUpdate(nil)
+	require.NoError(t, err)
+
+	candidate, err := session.Apply(t.Context(), update)
+	require.ErrorIs(t, err, payloadoptimizer.ErrAccountAbstractionUnsupported)
+	require.Nil(t, candidate)
+	_, ok := session.Best()
+	require.False(t, ok)
+}
+
 func withGloasBAL(t *testing.T, result execmodule.AssembledBlockResult) execmodule.AssembledBlockResult {
 	t.Helper()
 	bal := types.BlockAccessList{}
@@ -113,7 +149,7 @@ func TestCandidateValidationRequiresGloasBALCommitmentAndSidecar(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	missing := validColdResult(params, requests, 1)
@@ -148,7 +184,7 @@ func TestCandidateValidationRejectsStaleBALCacheAlias(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 
 	err = applyColdResult(t, buildCtx, staleBALResult(t, params, requests, false))
@@ -159,7 +195,7 @@ func TestCandidateCopiesFreshBALFromCanonicalLogicalValue(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := staleBALResult(t, params, requests, true)
 	backend := &optimizerBackend{
@@ -189,7 +225,7 @@ func TestCandidateCopiesFreshBALFromCanonicalLogicalValue(t *testing.T) {
 
 func TestCandidateRejectsIncompleteOrInconsistentResultGraph(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	transaction := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 21_000}}
 	receipt := &types.Receipt{BlockNumber: uint256.NewInt(2), GasUsed: 21_000, CumulativeGasUsed: 21_000}
@@ -263,7 +299,7 @@ func TestCandidateValidatesDerivedReceiptGasAndCanonicalBlockValue(t *testing.T)
 	for _, stateVersion := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(stateVersion.String(), func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, stateVersion, fork, requests, baseParentGasLimit)
+			buildCtx, err := newTestBuildContext(params, stateVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 
 			require.NoError(t, applyColdResult(t, buildCtx, resultWithCanonicalReceiptGas(params, requests)))
@@ -288,58 +324,28 @@ func TestCandidateValidatesDerivedReceiptGasAndCanonicalBlockValue(t *testing.T)
 	}
 }
 
-func TestGloasCandidateAllowsHeaderGasToDifferFromReceiptGas(t *testing.T) {
+func TestGloasCandidateValidatesReceiptGasWithoutHeaderEquality(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	slot := uint64(6)
 	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := resultWithCanonicalReceiptGas(params, requests)
 	result.Block.Block.HeaderNoCopy().GasUsed = 31
 	result = withGloasBAL(t, result)
 
 	require.NoError(t, applyColdResult(t, buildCtx, result))
-}
-
-func TestGloasCandidateAcceptsAccountAbstractionReceiptGas(t *testing.T) {
-	params, fork, requests := baseBuildContextInput()
-	slot := uint64(6)
-	params.SlotNumber = &slot
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, clparams.GloasVersion, fork, requests, baseParentGasLimit)
-	require.NoError(t, err)
-	tx := &types.AccountAbstractionTransaction{
-		ChainID:       uint256.NewInt(1),
-		Tip:           uint256.NewInt(2),
-		FeeCap:        uint256.NewInt(2),
-		GasLimit:      100,
-		SenderAddress: accounts.InternAddress(common.Address{1}),
-		BuilderFee:    uint256.NewInt(0),
-		NonceKey:      uint256.NewInt(0),
-	}
-	receipt := &types.Receipt{
-		Type:              types.AccountAbstractionTxType,
-		BlockNumber:       uint256.NewInt(2),
-		GasUsed:           40,
-		CumulativeGasUsed: 50,
-	}
-	result := validColdResult(params, requests, 1)
-	header := result.Block.Block.Header()
-	header.GasUsed = 60
-	result.Block.Block = types.NewBlock(header, types.Transactions{tx}, nil, types.Receipts{receipt}, params.Withdrawals, nil)
-	result.Block.Receipts = types.Receipts{receipt}
-	result.BlockValue = execmodule.BlockValue(result.Block, header.BaseFee)
+	result.Block.Receipts[0].GasUsed++
 	result = withGloasBAL(t, result)
-
-	require.NoError(t, applyColdResult(t, buildCtx, result))
-	result.BlockValue.AddUint64(result.BlockValue, 1)
+	result.BlockValue = execmodule.BlockValue(result.Block, result.Block.Block.BaseFee())
 	err = applyColdResult(t, buildCtx, result)
 	require.ErrorIs(t, err, payloadoptimizer.ErrCandidateContextMismatch)
-	require.ErrorContains(t, err, "block value")
+	require.ErrorContains(t, err, "receipt gas used")
 }
 
 func TestNilExpectedRequestsAcceptsGeneratedCandidateRequests(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, nil, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, nil, baseParentGasLimit)
 	require.NoError(t, err)
 
 	require.NoError(t, applyColdResult(t, buildCtx, validColdResult(params, requests, 1)))
@@ -347,7 +353,7 @@ func TestNilExpectedRequestsAcceptsGeneratedCandidateRequests(t *testing.T) {
 
 func TestCandidateValidationCoversBuildContextFields(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	otherRoot := common.Hash{0xff}
 	otherSlot := uint64(99)
@@ -392,7 +398,7 @@ func TestCandidateValidationCoversBuildContextFields(t *testing.T) {
 
 func TestCandidateValidationAcceptsAProtocolAdjustedGasLimit(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := validColdResult(params, requests, 1)
 	require.NotEqual(t, *params.TargetGasLimit, result.Block.Block.GasLimit())
@@ -415,7 +421,7 @@ func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	maxBlobs := uint64(1)
 	params.MaxBlobsPerBlock = &maxBlobs
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	baseWrapper := candidateBlobWrapper(t, 0, 0)
 	blobTransaction := func(nonce uint64) types.Transaction {
@@ -449,7 +455,7 @@ func TestCandidateValidationRequiresValidBlobSidecars(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	maxBlobs := uint64(1)
 	params.MaxBlobsPerBlock = &maxBlobs
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	validV0 := candidateBlobWrapper(t, 0, 0)
 	validV1 := candidateBlobWrapper(t, 1, 0)
@@ -509,7 +515,11 @@ func candidateBlobWrapper(t *testing.T, version byte, nonce uint64) *types.BlobT
 	wrapper.Blobs = wrapper.Blobs[:1]
 	wrapper.Commitments = wrapper.Commitments[:1]
 	wrapper.Tx.Nonce = nonce
-	return wrapper
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signed, err := types.SignTx(wrapper, *types.LatestSignerForChainID(wrapper.GetChainID()), key)
+	require.NoError(t, err)
+	return signed.(*types.BlobTxWrapper)
 }
 
 func coldResultWithBlob(params *builder.Parameters, requests types.FlatRequests, wrapper *types.BlobTxWrapper) execmodule.AssembledBlockResult {
@@ -545,7 +555,7 @@ func TestCandidateValidationRequiresForkSpecificBlobWrapperVersion(t *testing.T)
 				slot := uint64(6)
 				params.SlotNumber = &slot
 			}
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, tc.stateVersion, fork, requests, baseParentGasLimit)
+			buildCtx, err := newTestBuildContext(params, tc.stateVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			result := coldResultWithBlob(params, requests, candidateBlobWrapper(t, tc.version, 0))
 			if tc.stateVersion >= clparams.GloasVersion {
@@ -571,7 +581,7 @@ func TestCandidateValidationUsesCanonicalParentAndTargetGasLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
 			params.TargetGasLimit = &target
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, parentGasLimit)
+			buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, parentGasLimit)
 			require.NoError(t, err)
 			want := misc.CalcGasLimit(parentGasLimit, target)
 			result := validColdResult(params, requests, 1)
@@ -589,13 +599,16 @@ func TestCandidateValidationAcceptsGloasTargetAboveHeaderBounds(t *testing.T) {
 	const parentGasLimit = uint64(30_000_000)
 	params, fork, requests := baseBuildContextInput()
 	target := uint64(math.MaxUint64)
+	slot := uint64(64)
+	params.SlotNumber = &slot
 	params.TargetGasLimit = &target
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, parentGasLimit)
+	buildCtx, err := newTestBuildContext(params, clparams.GloasVersion, fork, requests, parentGasLimit)
 	require.NoError(t, err)
 	require.Equal(t, target, *buildCtx.Parameters().TargetGasLimit)
 
 	result := validColdResult(params, requests, 1)
 	result.Block.Block.HeaderNoCopy().GasLimit = misc.CalcGasLimit(parentGasLimit, target)
+	result = withGloasBAL(t, result)
 	require.NoError(t, applyColdResult(t, buildCtx, result))
 }
 
@@ -603,7 +616,7 @@ func TestCandidateValidationRejectsAdjustedHeaderAboveMaximum(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	target := uint64(math.MaxUint64)
 	params.TargetGasLimit = &target
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MaxBlockGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, protocolparams.MaxBlockGasLimit)
 	require.NoError(t, err)
 
 	result := validColdResult(params, requests, 1)
@@ -623,7 +636,7 @@ func TestCandidateValidationRejectsAdjustedHeaderAboveMaximum(t *testing.T) {
 func TestCandidateValidationUsesParentGasLimitWithoutTarget(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	params.TargetGasLimit = nil
-	buildCtx, err := payloadoptimizer.NewBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
 	require.NoError(t, err)
 	result := validColdResult(params, requests, 1)
 	result.Block.Block.HeaderNoCopy().GasLimit = baseParentGasLimit
@@ -638,7 +651,7 @@ func TestCandidateValidationAcceptsPreGloasComputedBALWithoutHeaderCommitment(t 
 	for _, stateVersion := range []clparams.StateVersion{clparams.ElectraVersion, clparams.FuluVersion} {
 		t.Run(stateVersion.String(), func(t *testing.T) {
 			params, fork, requests := baseBuildContextInput()
-			buildCtx, err := payloadoptimizer.NewBuildContext(params, stateVersion, fork, requests, baseParentGasLimit)
+			buildCtx, err := newTestBuildContext(params, stateVersion, fork, requests, baseParentGasLimit)
 			require.NoError(t, err)
 			result := validColdResult(params, requests, 1)
 			result.Block.BlockAccessList = types.BlockAccessList{}

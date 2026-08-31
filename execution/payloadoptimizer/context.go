@@ -17,6 +17,7 @@
 package payloadoptimizer
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 	"reflect"
@@ -36,6 +37,7 @@ type BuildContext struct {
 	forkVersion       [4]byte
 	executionRequests types.FlatRequests
 	parentGasLimit    uint64
+	targetGasLimit    uint64
 }
 
 type BuildDefaults struct {
@@ -52,19 +54,22 @@ func BuildDefaultsFromConfig(config buildercfg.BuilderConfig) BuildDefaults {
 	}
 }
 
-func NewBuildContext(params *builder.Parameters, stateVersion clparams.StateVersion, forkVersion [4]byte, executionRequests types.FlatRequests, parentGasLimit uint64, configured ...BuildDefaults) (BuildContext, error) {
+func NewBuildContext(params *builder.Parameters, beaconConfig *clparams.BeaconChainConfig, proposalSlot uint64, executionRequests types.FlatRequests, parentGasLimit uint64, configured ...BuildDefaults) (BuildContext, error) {
 	if params == nil {
 		return BuildContext{}, errors.New("payload optimizer build context requires parameters")
+	}
+	if beaconConfig == nil {
+		return BuildContext{}, errors.New("payload optimizer build context requires beacon config")
+	}
+	if beaconConfig.SlotsPerEpoch == 0 {
+		return BuildContext{}, errors.New("payload optimizer beacon config requires slots per epoch")
 	}
 	if params.CustomTxnProvider != nil {
 		return BuildContext{}, ErrCustomTxnProvider
 	}
-	if stateVersion < clparams.GloasVersion && params.SlotNumber != nil {
-		return BuildContext{}, errors.New("payload optimizer pre-Gloas build context contains a slot number")
-	}
-	if stateVersion >= clparams.GloasVersion && params.SlotNumber == nil {
-		return BuildContext{}, errors.New("payload optimizer Gloas build context requires a slot number")
-	}
+	stateVersion := beaconConfig.GetCurrentStateVersion(proposalSlot / beaconConfig.SlotsPerEpoch)
+	var forkVersion [4]byte
+	binary.BigEndian.PutUint32(forkVersion[:], beaconConfig.GetForkVersionByVersion(stateVersion))
 	if parentGasLimit < protocolparams.MinBlockGasLimit || parentGasLimit > protocolparams.MaxBlockGasLimit {
 		return BuildContext{}, errors.New("payload optimizer build context has an invalid parent gas limit")
 	}
@@ -80,12 +85,29 @@ func NewBuildContext(params *builder.Parameters, stateVersion clparams.StateVers
 	if len(configured) == 1 {
 		defaults = configured[0]
 	}
-	targetGasLimit := params.TargetGasLimit
-	if targetGasLimit == nil {
-		targetGasLimit = defaults.TargetGasLimit
-		if targetGasLimit == nil {
-			targetGasLimit = &parentGasLimit
+	var targetGasLimit uint64
+	if stateVersion < clparams.GloasVersion {
+		if params.SlotNumber != nil {
+			return BuildContext{}, errors.New("payload optimizer pre-Gloas build context contains a slot number")
 		}
+		if params.TargetGasLimit != nil {
+			return BuildContext{}, errors.New("payload optimizer pre-Gloas build context contains a target gas limit")
+		}
+		targetGasLimit = parentGasLimit
+		if defaults.TargetGasLimit != nil {
+			targetGasLimit = *defaults.TargetGasLimit
+		}
+	} else {
+		if params.SlotNumber == nil {
+			return BuildContext{}, errors.New("payload optimizer Gloas build context requires a slot number")
+		}
+		if *params.SlotNumber != proposalSlot {
+			return BuildContext{}, errors.New("payload optimizer Gloas build context slot does not match proposal slot")
+		}
+		if params.TargetGasLimit == nil {
+			return BuildContext{}, errors.New("payload optimizer Gloas build context requires a target gas limit")
+		}
+		targetGasLimit = *params.TargetGasLimit
 	}
 	extraData := params.ExtraData
 	if extraData == nil {
@@ -96,9 +118,6 @@ func NewBuildContext(params *builder.Parameters, stateVersion clparams.StateVers
 	}
 	owned := params.Copy()
 	owned.PayloadId = 0
-	if owned.TargetGasLimit == nil {
-		owned.TargetGasLimit = copyUint64(targetGasLimit)
-	}
 	if owned.ExtraData == nil {
 		owned.ExtraData = append([]byte{}, extraData...)
 	}
@@ -115,6 +134,7 @@ func NewBuildContext(params *builder.Parameters, stateVersion clparams.StateVers
 		forkVersion:       forkVersion,
 		executionRequests: copyRequests(executionRequests),
 		parentGasLimit:    parentGasLimit,
+		targetGasLimit:    targetGasLimit,
 	}, nil
 }
 
@@ -154,6 +174,7 @@ func (c BuildContext) Equal(other BuildContext) bool {
 		c.stateVersion == other.stateVersion &&
 		c.forkVersion == other.forkVersion &&
 		c.parentGasLimit == other.parentGasLimit &&
+		c.targetGasLimit == other.targetGasLimit &&
 		reflect.DeepEqual(c.params, other.params) &&
 		reflect.DeepEqual(c.executionRequests, other.executionRequests)
 }
@@ -165,6 +186,7 @@ func (c BuildContext) clone() BuildContext {
 		forkVersion:       c.forkVersion,
 		executionRequests: copyRequests(c.executionRequests),
 		parentGasLimit:    c.parentGasLimit,
+		targetGasLimit:    c.targetGasLimit,
 	}
 }
 

@@ -59,6 +59,29 @@ func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 	require.False(t, b.Failed())
 }
 
+func TestBlockBuilderCopiedParametersObservePackingStop(t *testing.T) {
+	t.Parallel()
+
+	ready := make(chan struct{})
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, params *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		copied := params.Copy()
+		close(ready)
+		if copied.packingStop == nil {
+			return nil, errors.New("copied parameters lost packing stop")
+		}
+		<-copied.packingStop.ctx.Done()
+		if copied.packingStop.stopDeadline().IsZero() {
+			return nil, errors.New("copied parameters lost packing deadline")
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
+	}, &Parameters{}, time.Minute, time.Minute)
+	<-ready
+
+	result, err := b.Stop(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
 func TestBlockBuilderHasFailedOnceItErrors(t *testing.T) {
 	t.Parallel()
 

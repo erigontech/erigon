@@ -74,3 +74,16 @@ func TestParametersCopyCoversEveryField(t *testing.T) {
 	require.Equal(t, 13, reflect.TypeFor[Parameters]().NumField(),
 		"Parameters gained or lost a field; check whether Copy has to copy it")
 }
+
+func TestParametersCopyPreservesPackingStopSignal(t *testing.T) {
+	t.Parallel()
+
+	signal := newPackingStopSignal()
+	copied := (&Parameters{packingStop: signal}).Copy()
+
+	require.Same(t, signal, copied.packingStop)
+	require.False(t, copied.packingStop.stopped())
+	signal.stop()
+	require.True(t, copied.packingStop.stopped())
+	require.False(t, copied.packingStop.stopDeadline().IsZero())
+}

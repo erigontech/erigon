@@ -45,15 +45,12 @@ type Parameters struct {
 	packingStop *packingStopSignal
 }
 
-// Copy returns parameters that share nothing mutable with the receiver, except CustomTxnProvider:
-// a provider is a live object and stays shared by reference. Reference-typed fields added to
-// Parameters have to be handled here; TestParametersCopyCoversEveryField fails if one is not.
+// Copy clones owned values while preserving live collaborators and control signals.
 func (p *Parameters) Copy() *Parameters {
 	if p == nil {
 		return nil
 	}
 	copied := *p
-	copied.packingStop = nil
 	copied.ExtraData = bytes.Clone(p.ExtraData)
 	if p.Withdrawals != nil {
 		copied.Withdrawals = make([]*types.Withdrawal, len(p.Withdrawals))
