@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -51,6 +53,14 @@ import (
 type RemoteBlockReader struct {
 	client       remoteproto.ETHBACKENDClient
 	txNumsReader rawdbv3.TxNumsReader
+
+	frozenBlocksMu        sync.Mutex
+	frozenBlocksValue     uint64
+	frozenBlocksFetchedAt time.Time
+	frozenBlocksFetching  bool
+	frozenBlocksFetched   chan struct{}
+	frozenBlocksTTL       time.Duration
+	frozenBlocksTimeout   time.Duration
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -143,9 +153,85 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 }
 func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots   { panic("not implemented") }
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type              { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                   { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing  { panic("not supported") }
+
+// FrozenBlocks is answered by the backend. The context-free signature leaves no way to
+// surface an error or honor request cancellation, so the whole call is bounded by an
+// internal timeout however many rounds it takes, cached for a short TTL, and not
+// duplicated while one is in flight.
+// The count only grows, so a stale-low answer is the conservative one for the
+// availability gates and is served while a refresh runs. Zero is not: the pre-Byzantium
+// receipt paths read it as "no snapshots" and re-execute, so a failed fetch is not
+// cached, and it reaches only the callers that have no observation to wait for.
+func (r *RemoteBlockReader) FrozenBlocks() uint64 {
+	deadline := time.Now().Add(r.frozenBlocksTimeout)
+	for waited := false; ; waited = true {
+		r.frozenBlocksMu.Lock()
+		observed := !r.frozenBlocksFetchedAt.IsZero()
+		fresh := time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
+		if observed && (fresh || r.frozenBlocksFetching) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if waited && !time.Now().Before(deadline) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if r.frozenBlocksFetching {
+			fetched := r.frozenBlocksFetched
+			r.frozenBlocksMu.Unlock()
+			select {
+			case <-fetched:
+			case <-time.After(time.Until(deadline)):
+			}
+			if waited {
+				r.frozenBlocksMu.Lock()
+				value := r.frozenBlocksValue
+				r.frozenBlocksMu.Unlock()
+				return value
+			}
+			// Waiting is not asking: a caller left with nothing observed has spent no
+			// attempt of its own, and one more is worth its wait. A second is not.
+			continue
+		}
+		r.frozenBlocksFetching = true
+		r.frozenBlocksFetched = make(chan struct{})
+		fetched := r.frozenBlocksFetched
+		r.frozenBlocksMu.Unlock()
+
+		return r.fetchFrozenBlocks(fetched, deadline)
+	}
+}
+
+// fetchFrozenBlocks asks the backend, within what is left of the caller's budget, and
+// publishes what came back. Releasing the callers waiting on it is deferred: a fetch
+// that dies must not leave them on a result nobody will produce.
+func (r *RemoteBlockReader) fetchFrozenBlocks(fetched chan struct{}, deadline time.Time) uint64 {
+	defer func() {
+		r.frozenBlocksMu.Lock()
+		defer r.frozenBlocksMu.Unlock()
+		close(fetched)
+		r.frozenBlocksFetching = false
+	}()
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
+	if err != nil {
+		log.Warn("[frozen-blocks] backend did not answer", "err", err)
+	}
+
+	r.frozenBlocksMu.Lock()
+	defer r.frozenBlocksMu.Unlock()
+	if err == nil {
+		r.frozenBlocksValue = reply.FrozenBlocks
+		r.frozenBlocksFetchedAt = time.Now()
+	}
+	return r.frozenBlocksValue
+}
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -189,7 +275,9 @@ var _ dbservices.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReader {
 	br := &RemoteBlockReader{
-		client: client,
+		client:              client,
+		frozenBlocksTTL:     30 * time.Second,
+		frozenBlocksTimeout: 5 * time.Second,
 	}
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
