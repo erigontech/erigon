@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,13 +62,26 @@ var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
 	"Total pending queue admission attempts rejected at capacity",
 )
 
+var errPendingJobQueueFull = errors.New("pending job queue full")
+
+func pendingJobAdmissionError(result pendingJobEnqueueResult, err error) error {
+	if err != nil {
+		return err
+	}
+	if result == pendingJobQueueFull {
+		return errPendingJobQueueFull
+	}
+	return nil
+}
+
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
 // started by newPendingJobQueue. Jobs remain until the service callback requests
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	pendingJobQueueOptions
-	// tryProcess callbacks run sequentially without holding the entry lock.
-	// mergeDuplicate and onExpired hold it and must not enqueue the same key;
+	// tryProcess callbacks run sequentially, but may overlap mergeDuplicate.
+	// Mutable messages must synchronize their own shared state. mergeDuplicate
+	// and onExpired hold the entry lock and must not enqueue the same key;
 	// onExpired runs immediately before removal. processAfterRemove runs only
 	// after successful removal, so it may re-enqueue.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
@@ -218,8 +232,9 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueRes
 	return pendingJobEnqueued
 }
 
-// mergeStoredDuplicate confirms that existing is still current while merging
-// its state, serializing the merge with expiry and removal.
+// mergeStoredDuplicate confirms that existing is still current before merging.
+// The entry lock serializes the merge with expiry and removal; callbacks remain
+// responsible for synchronizing mutable message state with tryProcess.
 func (q *pendingJobQueue[K, M]) mergeStoredDuplicate(key K, existing *pendingJob[M], incoming M) bool {
 	existing.mu.Lock()
 	defer existing.mu.Unlock()

@@ -51,6 +51,7 @@ type proposerIndexAndSlot struct {
 }
 
 type pendingBlockJob struct {
+	// mu protects the mutable retry and processing state below. block is immutable.
 	mu                      sync.Mutex
 	block                   *cltypes.SignedBeaconBlock
 	persisted               bool

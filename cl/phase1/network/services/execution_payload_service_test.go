@@ -98,6 +98,25 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestExecutionPayloadServiceDoesNotReportQueuedWhenPendingQueueFull(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	impl := service.(*executionPayloadService)
+	impl.pending.capacity = 1
+
+	queuedRoot := common.HexToHash("0x1111")
+	require.NoError(t, impl.queuePendingEnvelope(queuedRoot, newTestSignedEnvelope(100, queuedRoot, 1)))
+	require.Equal(t, int32(1), impl.pending.count.Load())
+
+	blockRoot := common.HexToHash("0x2222")
+	output := captureServiceLogs(t)
+	err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 2))
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, errPendingJobQueueFull)
+	require.Contains(t, err.Error(), "pending job queue full")
+	require.NotContains(t, output.String(), "Queued execution payload envelope for later processing")
+}
+
 func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 
@@ -360,7 +379,7 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 	blockRoot := common.HexToHash("0xffff")
 	envelope := newTestSignedEnvelope(100, blockRoot, 999)
 
-	impl.queuePendingEnvelope(blockRoot, envelope)
+	require.ErrorIs(t, impl.queuePendingEnvelope(blockRoot, envelope), errPendingJobQueueFull)
 
 	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
 	envelopeHash, err := envelope.HashSSZ()
@@ -390,7 +409,7 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		wg.Go(func() {
 			blockRoot := common.Hash{byte(i), byte(i >> 8)}
 			envelope := newTestSignedEnvelope(100, blockRoot, uint64(10000+i))
-			impl.queuePendingEnvelope(blockRoot, envelope)
+			_ = impl.queuePendingEnvelope(blockRoot, envelope)
 		})
 	}
 	wg.Wait()

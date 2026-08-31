@@ -163,7 +163,9 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
 	if !ok {
 		// Block hasn't arrived yet, queue attestation for later processing
-		s.queuePendingAttestation(blockRoot, msg)
+		if err := s.queuePendingAttestation(blockRoot, msg); err != nil {
+			return fmt.Errorf("%w: payload attestation pending queue admission failed: %w", ErrIgnore, err)
+		}
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
 			"validatorIndex", validatorIndex)
@@ -210,14 +212,16 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 }
 
 // queuePendingAttestation defers an attestation until its referenced block is available.
-func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	_, err := s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
+// It returns an error when the pending queue cannot admit the attestation.
+func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) error {
+	result, err := s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
 		return pendingPayloadAttestationKeyFor(blockRoot, msg)
 	})
 	if err != nil {
 		log.Warn("Failed to hash payload attestation for pending queue",
 			"blockRoot", blockRoot, "validatorIndex", msg.ValidatorIndex, "err", err)
 	}
+	return pendingJobAdmissionError(result, err)
 }
 
 func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {

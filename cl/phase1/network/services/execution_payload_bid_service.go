@@ -194,7 +194,9 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	preferences, ok, err := s.matchingProposerPreferences(msg)
 	if err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
-			s.queuePendingBid(msg)
+			if queueErr := s.queuePendingBid(msg); queueErr != nil {
+				return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, queueErr)
+			}
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
 			return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, err)
@@ -203,7 +205,9 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	}
 	if !ok {
 		// Queue as pending — preferences may arrive later
-		s.queuePendingBid(msg)
+		if err := s.queuePendingBid(msg); err != nil {
+			return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, err)
+		}
 		log.Trace("Queued execution payload bid waiting for proposer preferences",
 			"slot", slot, "builderIndex", builderIndex)
 		return fmt.Errorf("%w: %w: proposer preferences not available", ErrIgnore, ErrBidQueued)
@@ -211,7 +215,9 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 
 	if err := s.validateAndStoreBid(msg, preferences); err != nil {
 		if errors.Is(err, errBidDependencyUnavailable) {
-			s.queuePendingBid(msg)
+			if queueErr := s.queuePendingBid(msg); queueErr != nil {
+				return fmt.Errorf("%w: execution payload bid pending queue admission failed: %w", ErrIgnore, queueErr)
+			}
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
 			return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, err)
@@ -482,12 +488,14 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 }
 
 // queuePendingBid defers a bid until its validation dependencies are available.
-func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
-	_, err := s.pending.enqueueLazy(msg, func() (pendingBidKey, error) { return pendingBidKeyFor(msg) })
+// It returns an error when the pending queue cannot admit the bid.
+func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) error {
+	result, err := s.pending.enqueueLazy(msg, func() (pendingBidKey, error) { return pendingBidKeyFor(msg) })
 	if err != nil {
 		log.Warn("Failed to hash execution payload bid for pending queue",
 			"slot", msg.Message.Slot, "builderIndex", msg.Message.BuilderIndex, "err", err)
 	}
+	return pendingJobAdmissionError(result, err)
 }
 
 func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) (pendingBidKey, error) {
