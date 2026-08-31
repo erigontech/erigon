@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -2791,4 +2792,58 @@ func TestFromDBLoadsUnderPoolLock(t *testing.T) {
 	<-onNewBlockDone
 	req.NoError(onNewBlockErr)
 	req.True(lockHeld, "fromDB must hold p.lock while it populates the pool")
+}
+
+// failingGetOnePoolDB hands out read transactions whose GetOne always fails, so
+// a test can make OnNewBlock fail inside the lock.
+type failingGetOnePoolDB struct {
+	kv.RwDB
+	err error
+}
+
+func (d failingGetOnePoolDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	//nolint:gocritic // pass-through: the caller owns the rollback
+	tx, err := d.RwDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return failingGetOneTx{Tx: tx, err: d.err}, nil
+}
+
+type failingGetOneTx struct {
+	kv.Tx
+	err error
+}
+
+func (t failingGetOneTx) GetOne(_ string, _ []byte) ([]byte, error) { return nil, t.err }
+
+// A block OnNewBlock failed to apply is not a block the pool has seen. The
+// failure has to reach the deferred block that advances lastSeenBlock, which the
+// same branch guards the waiter broadcast with, so a shadowed error there would
+// leave the pool claiming progress it never made.
+func TestOnNewBlockFailureKeepsChainProgress(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	// The blob lookup is the first read inside the lock, and it is the only one
+	// whose error the compiler cannot see is dropped.
+	blobTxn := newTestBlobTxnSlot(0, 0, 1, 2, 21_000)
+	blobTxn.IDHash[0] = 7
+	var unwindBlobTxns TxnSlots
+	unwindBlobTxns.Append(blobTxn, sender[:], false)
+
+	readErr := errors.New("pool read failed")
+	pool.poolDB = failingGetOnePoolDB{RwDB: poolDB, err: readErr}
+
+	before := pool.lastSeenBlock.Load()
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:      1,
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: before + 1,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+		}},
+	}
+	require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, unwindBlobTxns, TxnSlots{}), readErr)
+	require.Equal(t, before, pool.lastSeenBlock.Load())
 }
