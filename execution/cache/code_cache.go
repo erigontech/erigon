@@ -138,8 +138,7 @@ type CodeCache struct {
 	// codeHashToCode: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
 	// when the caller provides codeHash on Put, sharing L2's slice when the same
 	// Put also binds an address and holding the only copy otherwise. Independent
-	// of L1 — Get-by-codeHash bypasses addr lookup entirely. Also the memory tier
-	// of the persistent CodeStore, which promotes its hits here.
+	// of L1 — Get-by-codeHash bypasses addr lookup entirely..
 	codeHashToCode   *growLRU[codeEntry] // keccak(code) → code, jump-grow + LRU-evicting
 	codeHashCodeSize atomic.Int64        // resident bytes (stat; hard bound is the entry cap)
 

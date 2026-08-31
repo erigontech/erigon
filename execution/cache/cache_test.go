@@ -1771,29 +1771,3 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 		})
 	}
 }
-
-// TestFillCodeByHash_IgnoresAccountsFrontier pins that a codeHash-only fill is
-// not gated on the accounts frontier. That gate protects the addr binding an
-// addr-keyed fill creates; a content-addressed entry has none, so requiring it
-// would drop promotions for an unrelated domain's view.
-func TestFillCodeByHash_IgnoresAccountsFrontier(t *testing.T) {
-	t.Parallel()
-
-	c := closeOnCleanup(t, NewDefaultStateCache())
-	c.Applier().Initialize(1)
-
-	code := bytes.Repeat([]byte{0x5b}, 48)
-	codeHash := crypto.Keccak256(code)
-
-	noAccountsEnd := FrontierFunc(func(d kv.Domain) (uint64, bool) {
-		if d == kv.AccountsDomain {
-			return 0, false
-		}
-		return 100, true
-	})
-	c.View(FrontierWithStateVersion(noAccountsEnd, 1)).FillCodeByHash(code, codeHash, 20)
-
-	got, ok := c.View(nil).GetCodeByHash(codeHash)
-	require.True(t, ok, "a codeHash-only fill must not need the accounts frontier")
-	require.Equal(t, code, got)
-}

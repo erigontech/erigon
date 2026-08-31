@@ -139,11 +139,6 @@ const (
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
 
-	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
-	// persistent backing tier for the in-memory code cache so reads skip the
-	// CodeDomain decompression across restarts. Immutable (content-addressed).
-	TblCodeCache = "CodeCache"
-
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
@@ -338,7 +333,6 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
-	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,

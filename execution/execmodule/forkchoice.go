@@ -428,7 +428,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
 		// the canonical execution path running uncached against the aggTx.
 		currentContext.SetStateCache(e.stateCache)
-		currentContext.SetCodeStore(e.codeStore)
 	}
 
 	// Clear the published overlay before closing the SD, so concurrent
@@ -619,7 +618,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			freshSD.SetInMemHistoryReads(inMemHistoryReads)
 			freshSD.SetStateCache(e.stateCache)
-			freshSD.SetCodeStore(e.codeStore)
 			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()
 				freshSD.Close()
@@ -913,11 +911,6 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 			pruneTimeout := min(baseTimeout+time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
 			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
-				if e.codeStore != nil {
-					if err := e.codeStore.Evict(tx); err != nil {
-						return nil, err
-					}
-				}
 				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
 			}, e.logger)
 			if err != nil {

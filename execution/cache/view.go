@@ -18,7 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"math"
 
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -233,15 +232,9 @@ func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64
 	if !ok {
 		return
 	}
-	// The accounts frontier gates the addr binding, which a codeHash-only fill
-	// does not create — requiring it there would drop the fill for an unrelated
-	// domain's view.
-	accountsEnd := uint64(math.MaxUint64)
-	if len(addr) > 0 {
-		accountsEnd, ok = v.frontier.DomainVisibleEnd(kv.AccountsDomain)
-		if !ok {
-			return
-		}
+	accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
+	if !ok {
+		return
 	}
 	v.c.fillCodeWithHashIfFresh(addr, code, codeHash, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
 }
@@ -286,15 +279,6 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 
 func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
 	v.fillCodeWithHash(addr, bytes.Clone(code), codeHash, readTxNum)
-}
-
-// FillCodeByHash offers code resolved by codeHash alone, populating the
-// content-addressed layer without binding it to an address.
-// code must already be owned by the caller — CodeStore.GetByHash clones the
-// mmap-backed value it returns, and the cache stores that one clone rather than
-// copying every cold contract a second time.
-func (v ReadView) FillCodeByHash(code, codeHash []byte, readTxNum uint64) {
-	v.fillCodeWithHash(nil, code, codeHash, readTxNum)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account

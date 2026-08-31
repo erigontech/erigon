@@ -828,10 +828,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if dbg.UseStateCache {
 		execStateCache = cache.NewDefaultStateCache()
 	}
-	var execCodeStore *cache.CodeStore
-	if dbg.UseCodeStore {
-		execCodeStore = cache.NewCodeStore(cache.DefaultCodeStoreTableBytes)
-	}
 
 	collateAndPrune := func() error {
 		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
@@ -854,7 +850,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		// so starting at execProgress would re-target a block already executed
 		// and stopping below block would never execute the last one.
 		for bn := execProgress + 1; bn <= block; bn++ {
-			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, execCodeStore, logger); err != nil {
+			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, logger); err != nil {
 				return err
 			}
 			if err := collateAndPrune(); err != nil {
@@ -874,7 +870,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg.LockWorkersEditing()
 
 	for {
-		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, execStateCache, execCodeStore, logger)
+		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, execStateCache, logger)
 		if err != nil {
 			return err
 		}
@@ -895,7 +891,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 // SharedDomains per call avoids reusing a committed (spent) one. Pruning and
 // file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
 // stage progress after the batch.
-func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, codeStore *cache.CodeStore, logger log.Logger) (uint64, error) {
+func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, logger log.Logger) (uint64, error) {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return 0, err
@@ -909,7 +905,6 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
 	doms.SetStateCache(stateCache)
-	doms.SetCodeStore(codeStore)
 	execctx.GuardAggregatorForCache(db, stateCache)
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
