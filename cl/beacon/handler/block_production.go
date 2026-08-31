@@ -951,6 +951,15 @@ func (a *ApiHandler) processProducedBlock(
 	block *cltypes.BlindOrExecutionBeaconBlock,
 	boostFactor uint64,
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
+	return a.processProducedBlockWithProcessor(baseState, block, boostFactor, processBlockForProduction)
+}
+
+func (a *ApiHandler) processProducedBlockWithProcessor(
+	baseState *state.CachingBeaconState,
+	block *cltypes.BlindOrExecutionBeaconBlock,
+	boostFactor uint64,
+	processBlock func(*state.CachingBeaconState, *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error),
+) (*state.CachingBeaconState, *eth2.Impl, error) {
 	if block == nil {
 		return baseState, nil, errors.New("cannot process nil block")
 	}
@@ -959,13 +968,13 @@ func (a *ApiHandler) processProducedBlock(
 		return baseState, nil, errors.New("cannot process blinded Gloas block")
 	}
 	if block.Version().Before(clparams.GloasVersion) || a.epbsPool == nil {
-		blockMachine, err := processBlockForProduction(baseState, block)
+		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
 
 	selfBid := block.BeaconBody.GetSignedExecutionPayloadBid()
 	if selfBid == nil || selfBid.Message == nil {
-		blockMachine, err := processBlockForProduction(baseState, block)
+		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
 	bidKey := pool.HighestBidKey{
@@ -976,7 +985,7 @@ func (a *ApiHandler) processProducedBlock(
 	externalBid, found := a.epbsPool.HighestBids.Get(bidKey)
 	selectedValueWei, selected := selectHigherGloasBidValue(block.ExecutionValue, externalBid, boostFactor)
 	if !found || !selected {
-		blockMachine, err := processBlockForProduction(baseState, block)
+		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
 
@@ -988,7 +997,7 @@ func (a *ApiHandler) processProducedBlock(
 			"builderIndex", externalBid.Message.BuilderIndex,
 			"bidValueGwei", externalBid.Message.Value,
 			"err", err)
-		blockMachine, processErr := processBlockForProduction(baseState, block)
+		blockMachine, processErr := processBlock(baseState, block)
 		return baseState, blockMachine, processErr
 	}
 
@@ -1000,7 +1009,7 @@ func (a *ApiHandler) processProducedBlock(
 	block.KzgProofs = nil
 	block.ExecutionValue = selectedValueWei
 
-	candidateMachine, candidateErr := processBlockForProduction(candidateState, block)
+	candidateMachine, candidateErr := processBlock(candidateState, block)
 	if candidateErr == nil {
 		log.Info("GLOAS: selected external builder bid over self-build",
 			"slot", block.Slot,
@@ -1014,8 +1023,7 @@ func (a *ApiHandler) processProducedBlock(
 	block.Blobs = selfBlobs
 	block.KzgProofs = selfKzgProofs
 	block.ExecutionValue = selfExecutionValue
-	// Evict only after the same base state accepts the self-build, isolating the failure to the external bid.
-	selfBuildMachine, selfBuildErr := processBlockForProduction(baseState, block)
+	selfBuildMachine, selfBuildErr := processBlock(baseState, block)
 	if selfBuildErr != nil {
 		return baseState, selfBuildMachine, fmt.Errorf(
 			"external builder transition failed: %w; self-build fallback failed: %w",
@@ -1024,7 +1032,10 @@ func (a *ApiHandler) processProducedBlock(
 		)
 	}
 
-	removed := a.epbsPool.RemoveHighestBid(bidKey, externalBid)
+	// Candidate processing includes work unrelated to the bid. Evict only errors
+	// marked as deterministic bid-validation failures.
+	removed := errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) &&
+		a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	log.Warn("GLOAS: external builder bid failed production transition; using self-build",
 		"slot", block.Slot,
 		"builderIndex", externalBid.Message.BuilderIndex,

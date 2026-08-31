@@ -838,6 +838,38 @@ func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
 	require.Contains(t, logs(), "bidValueGwei=3")
 }
 
+func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+	transitionErr := errors.New("temporary transition failure")
+	processBlock := func(
+		productionState *state.CachingBeaconState,
+		block *cltypes.BlindOrExecutionBeaconBlock,
+	) (*eth2.Impl, error) {
+		bid := block.BeaconBody.GetSignedExecutionPayloadBid()
+		if bid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+			return nil, transitionErr
+		}
+		return processBlockForProduction(productionState, block)
+	}
+
+	selectedState, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		100,
+		processBlock,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.productionState, selectedState)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	storedBid, found := handler.epbsPool.HighestBids.Get(fixture.bidKey)
+	require.True(t, found)
+	require.Same(t, fixture.externalBid, storedBid)
+}
+
 func TestProcessProducedBlockSelectsExternalBidWithoutMutatingBaseState(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	originalRoot, err := fixture.productionState.HashSSZ()
