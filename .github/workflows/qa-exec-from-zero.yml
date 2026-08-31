@@ -1,4 +1,4 @@
-name: QA - Sync from scratch without state snapshots (archive node)
+name: QA - Exec from zero (archive node)
 on:
   schedule:
     - cron: '0 0 * * 6'  # Run on Saturday at 00:00 AM UTC
@@ -29,8 +29,8 @@ permissions:
 # Mainnet and Gnosis are not in the matrix: re-executing either from genesis
 # takes longer than a job can run here. Add them once a runner budget exists.
 jobs:
-  sync-from-scratch-no-state-snapshots-test:
-    name: sync-from-scratch-no-state-snapshots-test-${{ matrix.chain }}
+  exec-from-zero-test:
+    name: exec-from-zero-test-${{ matrix.chain }}
     runs-on: [self-hosted, qa, long-running]
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
@@ -114,7 +114,7 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: torrent-client-status-${{ env.CHAIN }}-no-state-snapshots
+        name: torrent-client-status-${{ env.CHAIN }}-exec-from-zero
         path: torrent-client-status.txt
 
     - name: Save test results
@@ -126,7 +126,7 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch "$GITHUB_REF_NAME" \
-          --test_name sync-from-scratch-no-state-snapshots \
+          --test_name exec-from-zero \
           --chain $CHAIN \
           --runner "$RUNNER_NAME" \
           --outcome $TEST_RESULT \
@@ -136,7 +136,7 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: test-results-${{ env.CHAIN }}-no-state-snapshots
+        name: test-results-${{ env.CHAIN }}-exec-from-zero
         path: |
           ${{ github.workspace }}/result-${{ env.CHAIN }}.json
           ${{ github.workspace }}/erigon_data/logs/
@@ -145,14 +145,14 @@ jobs:
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: metric-plots-${{ env.CHAIN }}-no-state-snapshots
+        name: metric-plots-${{ env.CHAIN }}-exec-from-zero
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload FD Leak Analysis
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: fd-leak-analysis-${{ env.CHAIN }}-no-state-snapshots
+        name: fd-leak-analysis-${{ env.CHAIN }}-exec-from-zero
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
     # Erigon has stopped by now, so the .torrent files it wrote for the state
