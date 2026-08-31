@@ -55,13 +55,18 @@ REGIME_CYCLE=${REGIME_CYCLE:-3,3,2}
 
 echo "[verify-modec] ITER=$ITER REGIME_CYCLE=$REGIME_CYCLE DATADIR=$DATADIR"
 
-# Override the launcher's default ERIGON_MERGE_MIN_AGE_STEPS=6
-# (publisher propagation window). The soak driver's Phase 5
-# disk-clean assertion checks that no v4-boundary files linger; the
-# merger has to fire promptly for that check to come out clean.
-# Setting to 0 removes the delay so the aggregator's normal merge
-# scheduler runs as soon as the pair is present.
-export ERIGON_MERGE_MIN_AGE_STEPS=0
+# Keep launcher's default ERIGON_MERGE_MIN_AGE_STEPS=6 (publisher
+# propagation window). Two contending requirements pinned that value:
+#   - Phase 3.5's regime-depths needs a per-step (width==1) commitment
+#     .kv to survive long enough to select as a mode-C target. With
+#     MIN_AGE_STEPS=0, merges fire immediately and width==1 files get
+#     absorbed into wider forms before regime-depths polls (cycle 19
+#     hit the 5400s cap).
+#   - Phase 5's disk-clean assertion needs the merger to eventually
+#     consume v4 boundary pairs so no residue remains. The wait cap
+#     below (DISK_CLEAN_MERGE_QUIESCE_SEC=1800) is sized to cover
+#     MIN_AGE_STEPS=6 × ~5-6 min per step of hoodi cadence.
+export DISK_CLEAN_MERGE_QUIESCE_SEC=1800
 
 DATADIR="$DATADIR" \
   LOG_DIR="$out" \
