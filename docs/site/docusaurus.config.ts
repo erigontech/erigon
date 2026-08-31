@@ -24,6 +24,11 @@ type Release = {tag_name: string; prerelease: boolean; draft: boolean};
 // semantic version instead of trusting that order.
 const {installableVersion, latestStableInSeries} = require('./src/releases.js');
 
+// Routes with no indexable content. Single source of truth: the sitemap skips
+// them and src/theme/Root.tsx keeps the llms.txt descriptor off them, because
+// the index does not list them either.
+const nonDocumentRoutes: string[] = ['/search', '/404.html'];
+
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
   if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -71,7 +76,9 @@ export default async function createConfig(): Promise<Config> {
     markdown: {mermaid: true},
     themes: ['@docusaurus/theme-mermaid'],
 
-    customFields: {latestVersion},
+    // Both lists reach src/theme/Root.tsx, which uses them to keep the llms.txt
+    // descriptor off the routes the index does not cover.
+    customFields: {latestVersion, archivedVersions, nonDocumentRoutes},
 
     headTags: [
       {
@@ -155,12 +162,21 @@ export default async function createConfig(): Promise<Config> {
         theme: {customCss: './src/css/custom.css'},
         sitemap: {
           // Emit <lastmod> per URL (from git history via showLastUpdateTime) so
-          // crawlers can prioritise changed pages. Exclude /search from the
-          // sitemap — it has no indexable content (the route itself still exists).
+          // crawlers can prioritise changed pages. The ignored routes still
+          // exist; they just have no indexable content.
           lastmod: 'date',
           changefreq: 'weekly',
           priority: 0.5,
-          ignorePatterns: ['/search'],
+          ignorePatterns: nonDocumentRoutes,
+          // The llms.txt artifacts live in static/, so Docusaurus never routes
+          // them and the default sitemap omits them — which leaves them
+          // unindexable by search. Append them explicitly. This is also how
+          // llms-full.txt stays reachable, since it is not advertised in head.
+          createSitemapItems: async ({defaultCreateSitemapItems, ...rest}) => [
+            ...(await defaultCreateSitemapItems(rest)),
+            {url: 'https://docs.erigon.tech/llms.txt', changefreq: 'weekly', priority: 0.5},
+            {url: 'https://docs.erigon.tech/llms-full.txt', changefreq: 'weekly', priority: 0.5},
+          ],
         },
       } satisfies Preset.Options],
     ],
