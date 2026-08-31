@@ -121,7 +121,7 @@ func TestNewOrderflowUpdateRevalidatesCanonicalBlobSidecar(t *testing.T) {
 	require.Empty(t, update.Transactions())
 }
 
-func TestSessionApplyAuthenticatesBeforeBlobProofVerification(t *testing.T) {
+func TestNewOrderflowUpdateAuthenticatesBeforeBlobProofVerification(t *testing.T) {
 	wrapper := candidateBlobWrapper(t, 0, 0)
 	wrapper.Tx.V = uint256.Int{}
 	wrapper.Tx.R = uint256.Int{}
