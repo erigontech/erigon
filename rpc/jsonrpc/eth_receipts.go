@@ -212,11 +212,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 
-	logs := types.RPCLogs{}
-
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return logs, beginErr
+		return nil, beginErr
 	}
 	defer tx.Rollback()
 
@@ -264,30 +262,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
-	if err != nil {
-		return nil, err
-	}
-
-	rpcLogs := make(types.RPCLogs, len(erigonLogs))
-	for i, log := range erigonLogs {
-		rpcLogs[i] = &types.RPCLog{
-			Log: types.Log{
-				Address:     log.Address,
-				Topics:      log.Topics,
-				Data:        log.Data,
-				BlockNumber: log.BlockNumber,
-				TxHash:      log.TxHash,
-				TxIndex:     log.TxIndex,
-				BlockHash:   log.BlockHash,
-				Index:       log.Index,
-				Removed:     log.Removed,
-			},
-			BlockTimestamp: log.BlockTimestamp,
-		}
-	}
-
-	return rpcLogs, nil
+	return api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
@@ -356,8 +331,8 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	return out, nil
 }
 
-func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) ([]*types.ErigonLog, error) {
-	logs := []*types.ErigonLog{} //nolint
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) (types.RPCLogs, error) {
+	logs := types.RPCLogs{}
 
 	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
@@ -381,7 +356,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Asc)
 	if err != nil {
-		return logs, err
+		return nil, err
 	}
 
 	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
@@ -412,7 +387,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			logs, err = appendErigonLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+			logs, err = appendRPCLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
 			if err != nil {
 				return nil, err
 			}
@@ -435,7 +410,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 
-		logs, err = appendErigonLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+		logs, err = appendRPCLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
 		if err != nil {
 			return nil, err
 		}
@@ -444,13 +419,13 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func appendErigonLogs(logs []*types.ErigonLog, filtered types.Logs, blockTime uint64, maxResults int) ([]*types.ErigonLog, error) {
+func appendRPCLogs(logs types.RPCLogs, filtered types.Logs, blockTime uint64, maxResults int) (types.RPCLogs, error) {
 	if maxResults != 0 && len(logs)+len(filtered) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
 		}
 	}
-	return append(logs, filtered.ToErigonLogs(blockTime)...), nil
+	return append(logs, filtered.ToRPCLogs(blockTime)...), nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
