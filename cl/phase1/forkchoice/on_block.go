@@ -50,6 +50,7 @@ var (
 	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
 	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
 	ErrForkSchemaSlotMismatch        = errors.New("block schema fork disagrees with the fork implied by its slot")
+	errBelowFinalizedSlot            = errors.New("block is at or below the finalized slot")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -86,6 +87,28 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+// checkFinalizedDescendant implements the two spec on_block finality assertions:
+// block.slot > finalized_slot, and get_ancestor(store, block.parent_root, finalized_slot)
+// == store.finalized_checkpoint.root. errBelowFinalizedSlot means the caller should
+// silently ignore the block; ErrNotFinalizedDescendant is fatal for it.
+func (f *ForkChoiceStore) checkFinalizedDescendant(finalizedCheckpoint solid.Checkpoint, blockSlot uint64, parentRoot common.Hash) error {
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// After checkpoint sync, the anchor block may sit inside (not at the start of)
+	// the finalized epoch. The fork graph only contains the anchor and its descendants,
+	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
+	// so the descendant check stays within the fork graph's horizon.
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
+	if blockSlot <= finalizedSlot {
+		return errBelowFinalizedSlot
+	}
+	if ancestorNode := f.Ancestor(parentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
+		return ErrNotFinalizedDescendant
+	}
+	return nil
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	unlocked := false
@@ -109,21 +132,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-	// After checkpoint sync, the anchor block may sit inside (not at the start of)
-	// the finalized epoch. The fork graph only contains the anchor and its descendants,
-	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
-	// so the descendant check stays within the fork graph's horizon.
-	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
-		finalizedSlot = anchorSlot
-	}
-	if block.Block.Slot <= finalizedSlot {
-		return nil
-	}
-	// Check block is a descendant of the finalized block at the checkpoint finalized slot
-	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
-		return ErrNotFinalizedDescendant
+	if err := f.checkFinalizedDescendant(f.finalizedCheckpoint.Load().(solid.Checkpoint), block.Block.Slot, block.Block.ParentRoot); err != nil {
+		if errors.Is(err, errBelowFinalizedSlot) {
+			return nil
+		}
+		return err
 	}
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
@@ -226,8 +239,22 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
 				}
 			}
-			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool {
+				return f.IsPayloadVerified(common.Hash(blockRoot))
+			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+
+			// A concurrent GetHead may have cached a head computed without this block.
+			f.headHash = common.Hash{}
+			f.headPayloadStatus = cltypes.PayloadStatusPending
+			// Finality may have advanced past this block while the lock was released, and
+			// nothing below re-checks it, so make the same decision the entry check would.
+			if err := f.checkFinalizedDescendant(f.finalizedCheckpoint.Load().(solid.Checkpoint), block.Block.Slot, block.Block.ParentRoot); err != nil {
+				if errors.Is(err, errBelowFinalizedSlot) {
+					return nil
+				}
+				return err
+			}
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
