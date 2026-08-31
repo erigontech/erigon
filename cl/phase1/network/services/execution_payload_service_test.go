@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -95,6 +96,17 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	// Note: OnExecutionPayload mock returns nil by default
 	err = service.ProcessMessage(context.Background(), nil, envelope)
 	require.NoError(t, err)
+}
+
+func TestExecutionPayloadServiceDoesNotWarnForExpectedEarlyEnvelope(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+	output := captureServiceLogs(t)
+
+	err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1))
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.NotContains(t, output.String(), "Failed to eagerly store pending execution payload envelope in forkchoice")
 }
 
 func TestExecutionPayloadServiceDoesNotReportQueuedWhenPendingQueueFull(t *testing.T) {

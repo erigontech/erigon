@@ -144,7 +144,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		// Also retain the envelope in fork choice so it can be applied as soon as the
 		// block arrives. Payload validation must remain enabled for both arrival orders;
 		// otherwise the envelope can be marked processed without notifying the EL.
-		if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil {
+		if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil && !errors.Is(err, forkchoice.ErrIgnore) {
 			log.Warn("Failed to eagerly store pending execution payload envelope in forkchoice",
 				"beaconBlockRoot", beaconBlockRoot, "builderIndex", builderIndex, "err", err)
 		}
