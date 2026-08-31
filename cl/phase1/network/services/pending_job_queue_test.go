@@ -394,62 +394,38 @@ func TestPendingJobQueueEnqueueDeduplicates(t *testing.T) {
 	require.Equal(t, "original", stored.(*pendingJob[string]).msg)
 }
 
-func TestPendingJobQueueSameKeyEnqueueAndRemovalOrderings(t *testing.T) {
-	t.Run("duplicate confirmed before removal", func(t *testing.T) {
-		queue := newTestPendingJobQueueWithOptions(canceledPendingQueueContext(t), pendingJobQueueOptions{
-			name:          t.Name(),
-			capacity:      2,
-			expiry:        time.Minute,
-			checkInterval: time.Millisecond,
-		})
-		original := storePendingJob(t, queue, 1, "original", time.Now())
+func TestPendingJobQueueExpiryRemovesBeforeCallback(t *testing.T) {
+	var queue *pendingJobQueue[int, string]
+	callbackSawStoredJob := false
+	enqueueResult := pendingJobEnqueueError
+	queue = newPendingJobQueue(canceledPendingQueueContext(t), pendingJobQueueOptions{
+		name:          t.Name(),
+		capacity:      1,
+		expiry:        time.Minute,
+		checkInterval: time.Millisecond,
+	},
+		func(context.Context, int, string) pendingJobDecision {
+			return pendingJobKeep
+		},
+		nil,
+		func(key int, _ string) {
+			_, callbackSawStoredJob = queue.jobs.Load(key)
+			if callbackSawStoredJob {
+				return
+			}
+			enqueueResult = enqueueTestPendingJob(queue, key, "replacement")
+		},
+	)
+	storePendingJob(t, queue, 1, "expired", time.Now().Add(-2*time.Minute))
 
-		result := enqueueTestPendingJob(queue, 1, "incoming")
+	queue.processPending(t.Context())
 
-		require.Equal(t, pendingJobDuplicate, result)
-		require.Equal(t, int32(1), queue.count.Load())
-		stored, exists := queue.jobs.Load(1)
-		require.True(t, exists)
-		require.Same(t, original, stored)
-
-		original.mu.Lock()
-		removed := queue.remove(1, original)
-		original.mu.Unlock()
-		require.True(t, removed)
-		require.Zero(t, queue.count.Load())
-	})
-
-	t.Run("removal before duplicate confirmation", func(t *testing.T) {
-		queue := newTestPendingJobQueueWithOptions(canceledPendingQueueContext(t), pendingJobQueueOptions{
-			name:          t.Name(),
-			capacity:      2,
-			expiry:        time.Minute,
-			checkInterval: time.Millisecond,
-		})
-		original := storePendingJob(t, queue, 1, "original", time.Now())
-		require.True(t, queue.reserve())
-
-		// Reproduce the storeReserved state after LoadOrStore found the original
-		// job, with the incoming enqueue still owning its capacity reservation.
-		candidate := &pendingJob[string]{msg: "incoming", creationTime: time.Now()}
-		stored, loaded := queue.jobs.LoadOrStore(1, candidate)
-		require.True(t, loaded)
-		require.Same(t, original, stored)
-
-		original.mu.Lock()
-		removed := queue.remove(1, original)
-		original.mu.Unlock()
-		require.True(t, removed)
-		require.False(t, queue.confirmStoredDuplicate(1, original))
-
-		result := queue.storeReserved(1, "incoming")
-
-		require.Equal(t, pendingJobEnqueued, result)
-		require.Equal(t, int32(1), queue.count.Load())
-		stored, exists := queue.jobs.Load(1)
-		require.True(t, exists)
-		require.Equal(t, "incoming", stored.(*pendingJob[string]).msg)
-	})
+	require.False(t, callbackSawStoredJob)
+	require.Equal(t, pendingJobEnqueued, enqueueResult)
+	require.Equal(t, int32(1), queue.count.Load())
+	stored, exists := queue.jobs.Load(1)
+	require.True(t, exists)
+	require.Equal(t, "replacement", stored.(*pendingJob[string]).msg)
 }
 
 func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {

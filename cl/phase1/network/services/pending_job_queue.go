@@ -27,7 +27,6 @@ import (
 )
 
 type pendingJob[M any] struct {
-	mu           sync.Mutex
 	msg          M
 	creationTime time.Time
 }
@@ -79,10 +78,9 @@ func pendingJobAdmissionError(result pendingJobEnqueueResult, err error) error {
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	pendingJobQueueOptions
-	// tryProcess runs sequentially without holding the entry lock and must not
-	// enqueue the same key. onExpired holds the entry lock and also must not
-	// enqueue that key. processAfterRemove runs only after successful removal,
-	// so it may re-enqueue.
+	// tryProcess runs sequentially while the job is still stored, so it must not
+	// enqueue the same key. onExpired and processAfterRemove run only after a
+	// successful removal and may re-enqueue it.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K, msg M)
@@ -191,14 +189,7 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueRes
 		msg:          msg,
 		creationTime: time.Now(),
 	}
-	for {
-		value, loaded := q.jobs.LoadOrStore(key, candidate)
-		if !loaded {
-			break
-		}
-		if !q.confirmStoredDuplicate(key, value.(*pendingJob[M])) {
-			continue
-		}
+	if _, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
 		q.count.Add(-1)
 		return pendingJobDuplicate
 	}
@@ -208,16 +199,6 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueRes
 	default:
 	}
 	return pendingJobEnqueued
-}
-
-// confirmStoredDuplicate holds the entry lock while checking that existing is
-// still current. If removal wins first, the caller retries admission instead of
-// dropping the incoming job.
-func (q *pendingJobQueue[K, M]) confirmStoredDuplicate(key K, existing *pendingJob[M]) bool {
-	existing.mu.Lock()
-	defer existing.mu.Unlock()
-	current, ok := q.jobs.Load(key)
-	return ok && current == existing
 }
 
 func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
@@ -273,13 +254,9 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		k := key.(K)
 		job := value.(*pendingJob[M])
 		if time.Since(job.creationTime) > q.expiry {
-			job.mu.Lock()
-			current, stored := q.jobs.Load(k)
-			if stored && current == job {
+			if q.remove(k, job) {
 				q.onExpired(k, job.msg)
-				q.remove(k, job)
 			}
-			job.mu.Unlock()
 			return true
 		}
 
@@ -296,9 +273,7 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 			panic("invalid pending job decision")
 		}
 
-		job.mu.Lock()
 		removed := q.remove(k, job)
-		job.mu.Unlock()
 		if removed && decision == pendingJobRemoveThenProcess {
 			q.processAfterRemove(ctx, k, job.msg)
 		}
