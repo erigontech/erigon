@@ -26,8 +26,11 @@ permissions:
 # worth knowing: the datadir this job produces cannot seed the published
 # snapshots, only prove that executing from genesis reproduces their contents.
 #
-# Mainnet and Gnosis are not in the matrix: re-executing either from genesis
-# takes longer than a job can run here. Add them once a runner budget exists.
+# The 6-hour job limit is a GitHub-hosted one and does not apply on our runners,
+# so the ceiling here is the 35-day workflow-run limit -- 50400 minutes, what
+# mainnet is set to. Keep total_time_seconds below timeout_minutes: the driver's
+# own deadline ends the run with a report, timeout_minutes just cancels the job.
+#
 jobs:
   exec-from-zero-test:
     name: exec-from-zero-test-${{ matrix.chain }}
@@ -37,18 +40,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - chain: chiado   # Chain name as specified on the erigon command line
-            tracking_time_seconds: 3600
-            total_time_seconds: 21600  # 6 hours
-            timeout_minutes: 480       # 8 hours (2h buffer for build and hash check)
-          - chain: hoodi
-            tracking_time_seconds: 3600
-            total_time_seconds: 43200  # 12 hours
-            timeout_minutes: 840       # 14 hours
-          - chain: sepolia
+          - chain: gnosis   # Chain name as specified on the erigon command line
             tracking_time_seconds: 7200
-            total_time_seconds: 151200 # 42 hours
-            timeout_minutes: 2760      # 46 hours
+            total_time_seconds: 2937600  # 34 days
+            timeout_minutes: 50400       # 35 days, the workflow-run limit
+        #  - chain: mainnet
+        #    tracking_time_seconds: 7200
+        #    total_time_seconds: 2937600  # 34 days
+        #    timeout_minutes: 50400       # 35 days, the workflow-run limit
+        #  - chain: sepolia
+        #    tracking_time_seconds: 7200
+        #    total_time_seconds: 151200 # 42 hours
+        #    timeout_minutes: 2760      # 46 hours
+        #  - chain: hoodi
+        #    tracking_time_seconds: 3600
+        #    total_time_seconds: 43200  # 12 hours
+        #    timeout_minutes: 840       # 14 hours
+        #  - chain: chiado
+        #    tracking_time_seconds: 3600
+        #    total_time_seconds: 21600  # 6 hours
+        #    timeout_minutes: 480       # 8 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
@@ -209,7 +220,7 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch "$GITHUB_REF_NAME" \
-          --test_name state-snapshot-hash-check \
+          --test_name exec-from-zero \
           --chain $CHAIN \
           --runner "$RUNNER_NAME" \
           --outcome $HASH_CHECK_RESULT \

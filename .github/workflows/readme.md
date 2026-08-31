@@ -70,7 +70,7 @@ All `qa-*` workflows run on self-hosted runners and upload results to a centrali
 
 **Triggers:** Scheduled Saturday 00:00 UTC, manual
 
-**Chains (matrix):** Chiado (6h), Hoodi (12h), Sepolia (42h). Mainnet and Gnosis are excluded: re-executing either from genesis exceeds the job budget.
+**Chains (matrix):** Gnosis (4.5 days) and Mainnet (34 days) — the 6-hour job limit is GitHub-hosted only, so the ceiling is the 35-day workflow-run limit. Sepolia, Hoodi and Chiado are commented at the moment.
 
 **Measures:**
 - Sync ability with no downloaded state

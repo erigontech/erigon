@@ -13,18 +13,18 @@ datadir**.
 All drive `qa-tests/tip-tracking/run_and_check_tip_tracking.py` — same report
 format, same thresholds ([sync-tests.md](sync-tests.md)).
 
-| Workflow | Runner labels | DB | Times | `--test_name` |
-|----------|---------------|-----|-------|---------------|
-| `qa-tip-tracking.yml` — *QA - Tip tracking & migration* | `Ethereum, tip-tracking` | pre-built | track 2 h / total 10 h | `tip-tracking` |
-| `qa-tip-tracking-gnosis.yml` | `Gnosis, tip-tracking` | pre-built | 2 h / 8 h | `tip-tracking` |
-| `qa-constrained-tip-tracking.yml` — *with constraints* | `Ethereum, tip-tracking` | pre-built, run under `cgexec -g memory:constrained_res_32G` | 2 h / 10 h | `constrained-tip-tracking` |
-| `qa-tip-tracking-with-load.yml` | `Ethereum, tip-tracking` (erigon) / `rpc-latest-geth` (geth) | pre-built | 2 h / 3 h | `tip-tracking-with-load-<client>` |
-| `qa-sync-from-scratch.yml` — *archive node* | `long-running` | blank | 2 h / 5–23 h per chain | `sync-from-scratch` |
-| `qa-sync-from-scratch-full-node.yml` | `long-running` | blank | 2 h / matrix | `sync-from-scratch-full-node` |
-| `qa-sync-from-scratch-minimal-node.yml` | `long-running` | blank | 2 h / 12 h | `sync-from-scratch-minimal-node` |
-| `qa-exec-from-zero.yml` — *archive node, no state download* | `long-running` | blank | 1–2 h / 6–42 h per chain | `exec-from-zero` **+** `state-snapshot-hash-check` |
-| `qa-sync-with-externalcl.yml` | `long-running` | blank, external CL (prysm / lighthouse) | 1 h / 8 h | `sync-from-scratch-<client>-minimal-node` |
-| `qa-sync-test-bisection-tool.yml` | `long-running` | blank | 2 min / 8 h | dispatch input |
+| Workflow | Runner labels | DB | Times                                | `--test_name` |
+|----------|---------------|-----|--------------------------------------|---------------|
+| `qa-tip-tracking.yml` — *QA - Tip tracking & migration* | `Ethereum, tip-tracking` | pre-built | track 2 h / total 10 h               | `tip-tracking` |
+| `qa-tip-tracking-gnosis.yml` | `Gnosis, tip-tracking` | pre-built | 2 h / 8 h                            | `tip-tracking` |
+| `qa-constrained-tip-tracking.yml` — *with constraints* | `Ethereum, tip-tracking` | pre-built, run under `cgexec -g memory:constrained_res_32G` | 2 h / 10 h                           | `constrained-tip-tracking` |
+| `qa-tip-tracking-with-load.yml` | `Ethereum, tip-tracking` (erigon) / `rpc-latest-geth` (geth) | pre-built | 2 h / 3 h                            | `tip-tracking-with-load-<client>` |
+| `qa-sync-from-scratch.yml` — *archive node* | `long-running` | blank | 2 h / 5–23 h per chain               | `sync-from-scratch` |
+| `qa-sync-from-scratch-full-node.yml` | `long-running` | blank | 2 h / matrix                         | `sync-from-scratch-full-node` |
+| `qa-sync-from-scratch-minimal-node.yml` | `long-running` | blank | 2 h / 12 h                           | `sync-from-scratch-minimal-node` |
+| `qa-exec-from-zero.yml` — *archive node, no state download* | `long-running` | blank | many days | `exec-from-zero` **+** `state-snapshot-hash-check` |
+| `qa-sync-with-externalcl.yml` | `long-running` | blank, external CL (prysm / lighthouse) | 1 h / 8 h                            | `sync-from-scratch-<client>-minimal-node` |
+| `qa-sync-test-bisection-tool.yml` | `long-running` | blank | 2 min / 8 h                          | dispatch input |
 
 Notes that change how you read a run:
 
