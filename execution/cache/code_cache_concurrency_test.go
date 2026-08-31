@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/elastic/go-freelru"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -198,8 +197,7 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 }
 
 // A growLRU generation reserves no external payload for a value freelru stores
-// inline, so freelruElemBytes and the per-shard charge alone have to cover it.
-// codeEntry fills freelruValueBytes, which leaves the table charge no slack.
+// inline, so the slot and per-shard charges alone have to cover it.
 func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
 	prevBudget := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
@@ -214,27 +212,63 @@ func TestGrowLRU_EnvelopeCoversInlineValueGeneration(t *testing.T) {
 	contentLayer := newGrowLRUEntries[codeEntry](1<<20, 0, nil)
 	defer contentLayer.Close()
 
-	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer.newShards, sizeLayer.avgBytes) })
-	t.Run("codeEntry", func(t *testing.T) { requireGenerationCovered(t, contentLayer.newShards, contentLayer.avgBytes) })
+	t.Run("codeSizeEntry", func(t *testing.T) { requireGenerationCovered(t, sizeLayer) })
+	t.Run("codeEntry", func(t *testing.T) { requireGenerationCovered(t, contentLayer) })
 }
 
-func requireGenerationCovered[V any](t *testing.T, newShards func(uint32) *freelru.ShardedLRU[uint64, V], payloadBytes int64) {
+func requireGenerationCovered[V any](t *testing.T, g *growLRU[V]) {
 	t.Helper()
 	for _, capacity := range []uint32{1 << 12, 1 << 14, 1 << 16} {
+		_, shards := growLRUGeneration(capacity)
+
 		// TotalAlloc rather than HeapAlloc: a collection inside the window would
 		// swamp a heap-size delta.
 		var before runtime.MemStats
 		runtime.ReadMemStats(&before)
-		gen := newShards(capacity)
+		gen := g.newShards(capacity, shards)
 		var after runtime.MemStats
 		runtime.ReadMemStats(&after)
 		runtime.KeepAlive(gen)
 
 		allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
-		charged := growLRUBytes(capacity, payloadBytes)
+		charged := g.generationBytes(capacity, shards)
 		require.Positive(t, allocated)
 		require.GreaterOrEqual(t, charged, allocated,
 			"envelope reserves %d B for %d slots but the generation allocates %d B",
 			charged, capacity, allocated)
 	}
+}
+
+// A generation's reservation must use the shard count it was built with. Go can
+// update the default GOMAXPROCS while the process runs and freelru's shard count
+// follows it, so recomputing the retiring generation with the current value
+// leaves the difference between the two counts unreserved.
+func TestGrowLRU_ReservationSurvivesGOMAXPROCSChange(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	prevProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prevProcs) })
+
+	g := newGrowLRUEntries[codeSizeEntry](1<<14, 0, nil)
+	t.Cleanup(g.Close)
+
+	// Shift the keys past the bits freelru selects the shard from, so the fill
+	// spreads over the shards instead of piling into one.
+	fill := func(from, to uint64) {
+		for i := from; i < to; i++ {
+			g.Add(i<<16, codeSizeEntry{})
+		}
+	}
+	fill(0, uint64(g.startCap)*genericCacheGrowFactor)
+	require.Greater(t, g.curCap.Load(), g.startCap, "the ladder must climb at the low shard count first")
+
+	runtime.GOMAXPROCS(16)
+	grown := g.curCap.Load()
+	fill(uint64(grown), uint64(grown)*genericCacheGrowFactor)
+	require.Greater(t, g.curCap.Load(), grown, "the ladder must climb again at the high shard count")
+
+	require.Equal(t, g.generationBytes(g.curCap.Load(), g.curShards), g.reserved,
+		"the envelope holds a reservation no generation on the ladder costs")
 }

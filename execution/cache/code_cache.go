@@ -248,7 +248,7 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	cc.codeHashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
 		func(_ uint64, e codeEntry) { cc.codeHashCodeSize.Add(-(32 + int64(len(e.code)))) })
 	// 0 payload: codeSizeEntry is stored inline in the freelru element, which
-	// freelruElemBytes already charges for.
+	// the slot charge already covers.
 	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
 		uint32(cc.codeSizeCapEntries), 0,
 		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })

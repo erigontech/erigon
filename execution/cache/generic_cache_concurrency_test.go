@@ -64,7 +64,7 @@ func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
 			allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
 			// Only the overhead share may cover the table: the payload estimate pays
 			// for values the table does not hold, and would mask an undercharge.
-			overhead := shardArrayBytes(slots, shards)
+			overhead := shardArrayBytes(slots, shards, c.elemBytes)
 			require.Positive(t, allocated)
 			require.GreaterOrEqual(t, overhead, allocated,
 				"envelope reserves %d B of slot overhead for %d slots across %d shards but the table allocates %d B",
@@ -691,11 +691,12 @@ func TestSlotCeilingClampsAboveUint32(t *testing.T) {
 	// used to be applied after.
 	overflow := func(perSlot uint64) datasize.ByteSize { return datasize.ByteSize(perSlot << 32) }
 
-	maxCap, shards := budgetedSlots(overflow(freelruSlotBytes), 0)
+	elem := elemBytesFor[entry[[]byte]]()
+	maxCap, shards := budgetedSlots(overflow(uint64(slotChargeBytes(elem))), 0, elem)
 	require.Positive(t, shards)
 	require.Equal(t, fitTableSlots(maxCacheSlots/shards)*shards, maxCap)
 
-	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+freelruSlotBytes), 0, nil)
+	g := newGrowLRU[codeSizeEntry](overflow(avgBytesPerEntry+uint64(slotChargeBytes(elemBytesFor[codeSizeEntry]()))), 0, nil)
 	t.Cleanup(g.Close)
 	require.Equal(t, fitTableSlots(maxCacheSlots), g.maxCap)
 }
@@ -722,4 +723,65 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 	val := make([]byte, avgStoragePayloadBytes-len(key))
 	external.Put(key, val, 1)
 	require.Equal(t, int64(avgStoragePayloadBytes+currentSizeEntryOverhead), external.currentSize.Load())
+}
+
+// A capacity that already sits on a fitted boundary must be kept, not dropped to
+// the boundary below: rounding down past it halves the cache, so raising the
+// byte budget can shrink it.
+func TestFitTableSlotsNoCapacityCliff(t *testing.T) {
+	t.Parallel()
+
+	prev := uint32(0)
+	for perShard := uint32(minShardStart); perShard <= 1<<17; perShard++ {
+		fitted := fitTableSlots(perShard)
+		require.LessOrEqual(t, fitted, perShard, "fitTableSlots(%d) is above its input", perShard)
+		require.GreaterOrEqual(t, fitted, prev,
+			"fitTableSlots(%d) fell to %d from fitTableSlots(%d)=%d", perShard, fitted, perShard-1, prev)
+		prev = fitted
+	}
+}
+
+// The fitted ceiling has to stay inside the per-slot charge budgetedSlots divides
+// the byte budget by; above it a cache built from that budget allocates a table
+// the envelope never reserved.
+func TestFitTableSlotsStaysWithinSlotCharge(t *testing.T) {
+	t.Parallel()
+
+	for _, perShard := range []uint32{1 << 10, 20_000, 26_212, 26_215, 1 << 20, maxCacheSlots} {
+		fitted := fitTableSlots(perShard)
+		elem := elemBytesFor[entry[[]byte]]()
+		require.LessOrEqual(t, int64(tableSlots(fitted))*elem, int64(fitted)*slotChargeBytes(elem),
+			"fitTableSlots(%d)=%d needs a %d-slot table, above the per-slot charge",
+			perShard, fitted, tableSlots(fitted))
+	}
+}
+
+// NewGenericCacheWithAvg is exported and generic. A value type larger than the
+// state caches' own grows every freelru element, so the reservation has to follow
+// T rather than assume the sizes this package happens to instantiate.
+func TestGenericCache_EnvelopeCoversLargeValueType(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[128]byte](1*datasize.GB, 8,
+		func([128]byte) int { return 128 }, ModeEvictLRU))
+
+	slots := 4096 * c.shardCount
+
+	// TotalAlloc rather than HeapAlloc: a collection inside the window would
+	// swamp a heap-size delta.
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	gen := c.newShards(slots, slots, c.shardCount)
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(gen)
+
+	allocated := int64(after.TotalAlloc) - int64(before.TotalAlloc)
+	charged := c.generationBytes(slots) - int64(slots)*c.payloadBytes
+	require.Positive(t, allocated)
+	require.GreaterOrEqual(t, charged, allocated,
+		"envelope reserves %d B of slot overhead for %d slots across %d shards but the generation allocates %d B",
+		charged, slots, c.shardCount, allocated)
 }
