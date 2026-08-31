@@ -879,6 +879,19 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
 }
 
+func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	fixture.block.ExecutionValue = nil
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "3000000000", fixture.block.GetExecutionValue().String())
+}
+
 func TestProcessProducedBlockRejectsBlindedGloasBlock(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	block := &cltypes.BlindOrExecutionBeaconBlock{

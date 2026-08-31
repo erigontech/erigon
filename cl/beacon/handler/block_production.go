@@ -980,7 +980,8 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		ParentBlockRoot: selfBid.Message.ParentBlockRoot,
 	}
 	externalBid, found := a.epbsPool.HighestBids.Get(bidKey)
-	selectedValueWei, selected := selectHigherGloasBidValue(block.ExecutionValue, externalBid)
+	selfExecutionValue := block.GetExecutionValue()
+	selectedValueWei, selected := selectHigherGloasBidValue(selfExecutionValue, externalBid)
 	if !found || !selected {
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
@@ -1000,7 +1001,6 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 
 	selfBlobs := block.Blobs
 	selfKzgProofs := block.KzgProofs
-	selfExecutionValue := block.ExecutionValue
 	block.BeaconBody.SignedExecutionPayloadBid = externalBid
 	block.Blobs = nil
 	block.KzgProofs = nil
