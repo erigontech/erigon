@@ -424,6 +424,36 @@ func TestEIP2780AuthorizationStateGasIsRuntime(t *testing.T) {
 	}, result)
 }
 
+func TestEIP8038AccessListIntrinsicGas(t *testing.T) {
+	cases := map[string]struct {
+		accessListLen  uint64
+		storageKeysLen uint64
+		expectedGas    uint64
+	}{
+		"address": {
+			accessListLen: 1,
+			expectedGas:   2_900,
+		},
+		"address and storage key": {
+			accessListLen:  1,
+			storageKeysLen: 1,
+			expectedGas:    4_900,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				AccessListLen:  tc.accessListLen,
+				StorageKeysLen: tc.storageKeysLen,
+				IsEIP2780:      true,
+			})
+			assert.False(t, overflow)
+			expectedGas := params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + tc.expectedGas
+			assert.Equal(t, expectedGas, result.ExecutionGas)
+		})
+	}
+}
+
 func TestAmsterdamAAIntrinsicGas(t *testing.T) {
 	cases := map[string]struct {
 		accessListLen     uint64
