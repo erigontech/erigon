@@ -113,22 +113,67 @@ func NewOrderflowUpdate(transactions types.Transactions) (update OrderflowUpdate
 		if !ok {
 			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d has no sidecar", i)
 		}
-		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
+		if err := validateBlobTransactionWrapperShape(wrapper); err != nil {
 			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d: %w", i, err)
 		}
 	}
-	if _, err := types.MarshalTransactionsBinary(transactions); err != nil {
-		return OrderflowUpdate{}, fmt.Errorf("copy orderflow transactions: %w", err)
-	}
 	owned := types.CopyTxs(transactions)
 	for i, transaction := range owned {
+		if transaction.Type() == types.AccountAbstractionTxType {
+			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow transaction %d: %w", i, ErrAccountAbstractionUnsupported)
+		}
+		if transaction.Type() == types.BlobTxType {
+			wrapper, ok := transaction.(*types.BlobTxWrapper)
+			if !ok {
+				return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d has no sidecar", i)
+			}
+			if err := validateBlobTransactionWrapperShape(wrapper); err != nil {
+				return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d: %w", i, err)
+			}
+		}
 		sender, err := transaction.Sender(*types.LatestSignerForChainID(transaction.GetChainID()))
 		if err != nil {
 			return OrderflowUpdate{}, fmt.Errorf("authenticate orderflow transaction %d: %w", i, err)
 		}
 		transaction.SetSender(sender)
 	}
+	for i, transaction := range owned {
+		wrapper, ok := transaction.(*types.BlobTxWrapper)
+		if !ok {
+			continue
+		}
+		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
+			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d: %w", i, err)
+		}
+	}
 	return OrderflowUpdate{transactions: owned}, nil
+}
+
+func validateBlobTransactionWrapperShape(wrapper *types.BlobTxWrapper) error {
+	if wrapper == nil {
+		return errors.New("blob transaction wrapper is nil")
+	}
+	blobCount := len(wrapper.GetBlobHashes())
+	if blobCount == 0 {
+		return errors.New("a blob txn must contain at least one blob")
+	}
+	if len(wrapper.Commitments) != blobCount || len(wrapper.Blobs) != blobCount {
+		return errors.New("blob sidecar lengths do not match")
+	}
+	switch wrapper.WrapperVersion {
+	case 0:
+		if len(wrapper.Proofs) != blobCount {
+			return errors.New("blob sidecar proof count does not match")
+		}
+	case 1:
+		cellsPerBlob := int(protocolparams.CellsPerExtBlob)
+		if len(wrapper.Proofs)%cellsPerBlob != 0 || len(wrapper.Proofs)/cellsPerBlob != blobCount {
+			return errors.New("blob sidecar cell proof count does not match")
+		}
+	default:
+		return fmt.Errorf("unsupported blob transaction wrapper version %d", wrapper.WrapperVersion)
+	}
+	return nil
 }
 
 func isNilTransaction(transaction types.Transaction) bool {
@@ -434,6 +479,12 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 	}
 	var blobCount uint64
 	for _, transaction := range transactions {
+		if transaction.Type() == types.AccountAbstractionTxType {
+			return ErrAccountAbstractionUnsupported
+		}
+		if buildContext.stateVersion >= clparams.FuluVersion && uint64(len(transaction.GetBlobHashes())) > protocolparams.MaxBlobsPerTxn {
+			return mismatch("blob transaction size")
+		}
 		if transaction.Type() == types.BlobTxType {
 			if _, ok := transaction.(*types.BlobTxWrapper); !ok {
 				return mismatch("blob transaction sidecar")
@@ -490,9 +541,15 @@ func validateCandidate(buildContext BuildContext, result execmodule.AssembledBlo
 		return mismatch("receipt cardinality")
 	}
 	var cumulativeGasUsed uint64
-	for _, receipt := range result.Block.Receipts {
+	for index, receipt := range result.Block.Receipts {
 		if receipt == nil {
 			return mismatch("nil receipt")
+		}
+		if receipt.Type == types.AccountAbstractionTxType {
+			return ErrAccountAbstractionUnsupported
+		}
+		if receipt.Type != transactions[index].Type() {
+			return mismatch("receipt type")
 		}
 		if receipt.BlockNumber == nil {
 			return mismatch("receipt block number")

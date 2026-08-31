@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type optimizerBackend struct {
@@ -42,6 +43,15 @@ type optimizerBackend struct {
 
 type panicMarshalTransaction struct {
 	types.Transaction
+}
+
+type disguisedCanonicalTransaction struct {
+	types.Transaction
+	apparentType byte
+}
+
+func (tx *disguisedCanonicalTransaction) Type() byte {
+	return tx.apparentType
 }
 
 func (*panicMarshalTransaction) MarshalBinary(io.Writer) error {
@@ -83,6 +93,44 @@ func TestOrderflowUpdateReturnsMarshalPanicsAsErrors(t *testing.T) {
 		_, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{new(panicMarshalTransaction)})
 		require.Error(t, err)
 	})
+}
+
+func TestNewOrderflowUpdateRejectsCanonicalizedAccountAbstractionType(t *testing.T) {
+	aa := &types.AccountAbstractionTransaction{
+		ChainID:       uint256.NewInt(1),
+		Tip:           uint256.NewInt(1),
+		FeeCap:        uint256.NewInt(1),
+		BuilderFee:    uint256.NewInt(0),
+		NonceKey:      uint256.NewInt(0),
+		SenderAddress: accounts.InternAddress(common.Address{1}),
+	}
+	tx := &disguisedCanonicalTransaction{Transaction: aa, apparentType: types.LegacyTxType}
+
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{tx})
+	require.ErrorIs(t, err, payloadoptimizer.ErrAccountAbstractionUnsupported)
+	require.Empty(t, update.Transactions())
+}
+
+func TestNewOrderflowUpdateRevalidatesCanonicalBlobSidecar(t *testing.T) {
+	wrapper := candidateBlobWrapper(t, 0, 0)
+	tx := &disguisedCanonicalTransaction{Transaction: wrapper, apparentType: types.LegacyTxType}
+
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{tx})
+	require.ErrorContains(t, err, "has no sidecar")
+	require.Empty(t, update.Transactions())
+}
+
+func TestNewOrderflowUpdateAuthenticatesBeforeBlobProofVerification(t *testing.T) {
+	wrapper := candidateBlobWrapper(t, 0, 0)
+	wrapper.Tx.V = uint256.Int{}
+	wrapper.Tx.R = uint256.Int{}
+	wrapper.Tx.S = uint256.Int{}
+	wrapper.Proofs[0][0] ^= 0xff
+
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{wrapper})
+	require.ErrorContains(t, err, "authenticate orderflow transaction")
+	require.NotContains(t, err.Error(), "proof verification")
+	require.Empty(t, update.Transactions())
 }
 
 func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {

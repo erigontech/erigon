@@ -19,7 +19,6 @@ package payloadoptimizer
 import (
 	"encoding/binary"
 	"errors"
-	"math"
 	"reflect"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -121,12 +120,15 @@ func NewBuildContext(params *builder.Parameters, beaconConfig *clparams.BeaconCh
 	if owned.ExtraData == nil {
 		owned.ExtraData = append([]byte{}, extraData...)
 	}
+	protocolMaxBlobs := beaconConfig.MaxBlobsPerBlockByVersion(stateVersion)
+	if stateVersion >= clparams.FuluVersion {
+		protocolMaxBlobs = beaconConfig.GetBlobParameters(proposalSlot / beaconConfig.SlotsPerEpoch).MaxBlobsPerBlock
+	}
 	if owned.MaxBlobsPerBlock == nil {
 		owned.MaxBlobsPerBlock = copyUint64(defaults.MaxBlobsPerBlock)
-		if owned.MaxBlobsPerBlock == nil {
-			unlimited := uint64(math.MaxUint64)
-			owned.MaxBlobsPerBlock = &unlimited
-		}
+	}
+	if owned.MaxBlobsPerBlock == nil || *owned.MaxBlobsPerBlock > protocolMaxBlobs {
+		owned.MaxBlobsPerBlock = &protocolMaxBlobs
 	}
 	return BuildContext{
 		params:            owned,

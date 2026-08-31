@@ -66,18 +66,20 @@ func testStateVersion(params *builder.Parameters) clparams.StateVersion {
 
 func testBeaconConfigFor(stateVersion clparams.StateVersion) *clparams.BeaconChainConfig {
 	config := &clparams.BeaconChainConfig{
-		SlotsPerEpoch:      32,
-		AltairForkEpoch:    0,
-		BellatrixForkEpoch: 0,
-		CapellaForkEpoch:   0,
-		DenebForkEpoch:     0,
-		ElectraForkEpoch:   0,
-		FuluForkEpoch:      math.MaxUint64,
-		GloasForkEpoch:     math.MaxUint64,
-		ElectraForkVersion: 0x05000000,
-		FuluForkVersion:    0x06000000,
-		GloasForkVersion:   0x07000000,
-		FarFutureEpoch:     math.MaxUint64,
+		SlotsPerEpoch:           32,
+		AltairForkEpoch:         0,
+		BellatrixForkEpoch:      0,
+		CapellaForkEpoch:        0,
+		DenebForkEpoch:          0,
+		ElectraForkEpoch:        0,
+		FuluForkEpoch:           math.MaxUint64,
+		GloasForkEpoch:          math.MaxUint64,
+		ElectraForkVersion:      0x05000000,
+		FuluForkVersion:         0x06000000,
+		GloasForkVersion:        0x07000000,
+		MaxBlobsPerBlock:        protocolparams.MaxBlobsPerTxn,
+		MaxBlobsPerBlockElectra: protocolparams.MaxBlobsPerTxn,
+		FarFutureEpoch:          math.MaxUint64,
 	}
 	if stateVersion >= clparams.FuluVersion {
 		config.FuluForkEpoch = 0
@@ -265,7 +267,55 @@ func TestBuildContextResolvesBuilderDefaultsAndOverrides(t *testing.T) {
 	require.Nil(t, fallback.Parameters().TargetGasLimit)
 	require.NotNil(t, fallback.Parameters().ExtraData)
 	require.Empty(t, fallback.Parameters().ExtraData)
-	require.Equal(t, uint64(^uint64(0)), *fallback.Parameters().MaxBlobsPerBlock)
+	require.Equal(t, uint64(protocolparams.MaxBlobsPerTxn), *fallback.Parameters().MaxBlobsPerBlock)
+}
+
+func TestBuildContextSnapshotsProtocolBlobCapAndAppliesLocalCap(t *testing.T) {
+	params, _, requests := baseBuildContextInput()
+	params.TargetGasLimit = nil
+	config := testBeaconConfigFor(clparams.ElectraVersion)
+	config.BlobSchedule = []clparams.BlobParameters{{Epoch: 2, MaxBlobsPerBlock: 4}}
+	defaultCap := uint64(7)
+	defaultGasLimit := baseParentGasLimit
+
+	electra, err := payloadoptimizer.NewBuildContext(
+		params,
+		config,
+		64,
+		requests,
+		baseParentGasLimit,
+		payloadoptimizer.BuildDefaults{TargetGasLimit: &defaultGasLimit, MaxBlobsPerBlock: &defaultCap},
+	)
+	require.NoError(t, err)
+	require.Equal(t, uint64(protocolparams.MaxBlobsPerTxn), *electra.Parameters().MaxBlobsPerBlock)
+
+	config = testBeaconConfigFor(clparams.FuluVersion)
+	config.BlobSchedule = []clparams.BlobParameters{{Epoch: 2, MaxBlobsPerBlock: 4}}
+	context, err := payloadoptimizer.NewBuildContext(
+		params,
+		config,
+		64,
+		requests,
+		baseParentGasLimit,
+		payloadoptimizer.BuildDefaults{TargetGasLimit: &defaultGasLimit, MaxBlobsPerBlock: &defaultCap},
+	)
+	require.NoError(t, err)
+	require.Equal(t, uint64(4), *context.Parameters().MaxBlobsPerBlock)
+	config.BlobSchedule[0].MaxBlobsPerBlock = 9
+	require.Equal(t, uint64(4), *context.Parameters().MaxBlobsPerBlock)
+
+	localCap := uint64(3)
+	params.MaxBlobsPerBlock = &localCap
+	context, err = payloadoptimizer.NewBuildContext(
+		params,
+		config,
+		64,
+		requests,
+		baseParentGasLimit,
+		payloadoptimizer.BuildDefaults{TargetGasLimit: &defaultGasLimit, MaxBlobsPerBlock: &defaultCap},
+	)
+	require.NoError(t, err)
+	require.Equal(t, localCap, *context.Parameters().MaxBlobsPerBlock)
 }
 
 func TestBuildContextEqualityCoversEveryExecutionFieldInBothDirections(t *testing.T) {

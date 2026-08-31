@@ -451,6 +451,43 @@ func TestCandidateValidationEnforcesResolvedBlobCap(t *testing.T) {
 	require.ErrorIs(t, applyColdResult(t, buildCtx, resultWith(2)), payloadoptimizer.ErrCandidateContextMismatch)
 }
 
+func TestCandidateValidationRejectsReceiptTypeMismatchesAndAccountAbstractionReceipts(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := newTestBuildContext(params, testStateVersion(params), fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name      string
+		receiptTy byte
+		want      error
+	}{
+		{name: "mismatched type", receiptTy: types.AccessListTxType, want: payloadoptimizer.ErrCandidateContextMismatch},
+		{name: "account abstraction receipt", receiptTy: types.AccountAbstractionTxType, want: payloadoptimizer.ErrAccountAbstractionUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := validColdResult(params, requests, 1)
+			result.Block.Receipts[0].Type = tc.receiptTy
+			header := result.Block.Block.Header()
+			result.Block.Block = types.NewBlock(header, result.Block.Block.Transactions(), nil, result.Block.Receipts, params.Withdrawals, nil)
+			result.BlockValue = execmodule.BlockValue(result.Block, header.BaseFee)
+			require.ErrorIs(t, applyColdResult(t, buildCtx, result), tc.want)
+		})
+	}
+}
+
+func TestFuluCandidateValidationEnforcesProtocolBlobLimitPerTransaction(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := newTestBuildContext(params, clparams.FuluVersion, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	wrapper := candidateBlobWrapper(t, 1, 0)
+	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, protocolparams.MaxBlobsPerTxn+1)
+	result := coldResultWithBlob(params, requests, wrapper)
+
+	err = applyColdResult(t, buildCtx, result)
+	require.ErrorIs(t, err, payloadoptimizer.ErrCandidateContextMismatch)
+	require.ErrorContains(t, err, "blob transaction size")
+}
+
 func TestCandidateValidationRequiresValidBlobSidecars(t *testing.T) {
 	params, fork, requests := baseBuildContextInput()
 	maxBlobs := uint64(1)
