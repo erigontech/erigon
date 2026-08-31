@@ -79,10 +79,10 @@ func pendingJobAdmissionError(result pendingJobEnqueueResult, err error) error {
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	pendingJobQueueOptions
-	// tryProcess callbacks run sequentially without holding the entry lock.
-	// onExpired holds it and must not enqueue the same key; it runs immediately
-	// before removal. processAfterRemove runs only after successful removal, so
-	// it may re-enqueue.
+	// tryProcess runs sequentially without holding the entry lock and must not
+	// enqueue the same key. onExpired holds the entry lock and also must not
+	// enqueue that key. processAfterRemove runs only after successful removal,
+	// so it may re-enqueue.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K, msg M)
@@ -210,7 +210,9 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueRes
 	return pendingJobEnqueued
 }
 
-// confirmStoredDuplicate serializes the identity check with expiry and removal.
+// confirmStoredDuplicate holds the entry lock while checking that existing is
+// still current. If removal wins first, the caller retries admission instead of
+// dropping the incoming job.
 func (q *pendingJobQueue[K, M]) confirmStoredDuplicate(key K, existing *pendingJob[M]) bool {
 	existing.mu.Lock()
 	defer existing.mu.Unlock()

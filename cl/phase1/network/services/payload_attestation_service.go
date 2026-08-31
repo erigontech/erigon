@@ -235,8 +235,8 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 	}, nil
 }
 
-// tryProcessPendingAttestation drops stale messages and revalidates the rest
-// once their referenced block arrives.
+// tryProcessPendingAttestation drops stale messages, keeps messages whose block
+// is unavailable, and schedules the rest for validation after removal.
 func (s *payloadAttestationService) tryProcessPendingAttestation(_ context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) pendingJobDecision {
 	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
 		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)

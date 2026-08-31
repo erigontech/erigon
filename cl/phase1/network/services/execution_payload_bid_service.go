@@ -46,6 +46,8 @@ type seenBidKey struct {
 	slot         uint64
 }
 
+// pendingBidKey keeps competing signed bids from one builder and slot separate
+// until validation, so an invalid bid cannot suppress a valid one.
 type pendingBidKey struct {
 	builderIndex uint64
 	slot         uint64
