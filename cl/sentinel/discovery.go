@@ -302,6 +302,12 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
+func (s *Sentinel) closePeer(pid peer.ID) {
+	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
+		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
+	}
+}
+
 // pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) pruneExcessPeers() {
 	peerCount := len(s.p2p.Host().Network().Peers())
@@ -408,7 +414,7 @@ func (s *Sentinel) pruneExcessPeers() {
 		}
 
 		// Disconnect the peer
-		s.p2p.Host().Network().ClosePeer(info.pid)
+		s.closePeer(info.pid)
 		s.p2p.Host().Peerstore().RemovePeer(info.pid)
 		s.peers.RemovePeer(info.pid)
 		removed++
@@ -572,7 +578,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		if s.HasTooManyPeers() && !peerHelpsSubnets {
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.p2p.Host().Network().ClosePeer(peerId)
+			s.closePeer(peerId)
 			s.peers.RemovePeer(peerId)
 			return
 		}
@@ -589,7 +595,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			// Must disconnect to avoid receiving incompatible blocks.
 			log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.p2p.Host().Network().ClosePeer(peerId)
+			s.closePeer(peerId)
 			s.peers.RemovePeer(peerId)
 			return
 		}

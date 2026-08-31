@@ -335,7 +335,7 @@ func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	db := temporaltest.NewTestDB(tb, dirs, temporaltest.WithStepSize(stepSize))
 	tx, err := db.BeginTemporalRw(tb.Context()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
@@ -579,6 +579,26 @@ func TestMemoryMutationReadViewUsesPlainTx(t *testing.T) {
 	gotValue, err := view.GetOne(kv.HeaderNumber, []byte("key"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("value"), gotValue)
+}
+
+func TestMemoryMutationReadViewRollbackDoesNotCloseOverlay(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("key"), []byte("value")))
+
+	for name, view := range map[string]kv.Tx{
+		"read view":          batch.NewReadView(nonTemporalTx{Tx: rwTx}),
+		"temporal read view": batch.NewTemporalReadView(rwTx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.NotPanics(t, view.Rollback)
+			got, err := batch.GetOne(kv.HeaderNumber, []byte("key"))
+			require.NoError(t, err)
+			require.Equal(t, []byte("value"), got)
+		})
+	}
 }
 
 func TestMemoryMutationDetachedReadViewUsesPlainTx(t *testing.T) {
