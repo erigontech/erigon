@@ -220,7 +220,7 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch "$GITHUB_REF_NAME" \
-          --test_name exec-from-zero \
+          --test_name state-snapshot-hash-check \
           --chain $CHAIN \
           --runner "$RUNNER_NAME" \
           --outcome $HASH_CHECK_RESULT \
