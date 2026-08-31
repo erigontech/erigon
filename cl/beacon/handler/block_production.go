@@ -616,11 +616,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
-	// builder boost factor controls block choice between local execution node or builder
-	builderBoostFactor := uint64(100)
+	// The V3 boost factor applies only to the legacy relay-versus-local choice.
+	legacyBuilderBoostFactor := uint64(100)
 	builderBoostFactorStr := r.URL.Query().Get("builder_boost_factor")
 	if builderBoostFactorStr != "" {
-		builderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
+		legacyBuilderBoostFactor, err = strconv.ParseUint(builderBoostFactorStr, 10, 64)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
 				http.StatusBadRequest,
@@ -667,7 +667,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		return nil, err
 	}
 	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
-	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+	block, err := a.produceBlock(ctx, legacyBuilderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
 		// produceBlock owns this record; repeating it here made one failure two.
 		return nil, err
@@ -675,7 +675,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	startConsensusProcessing := time.Now()
 
-	postState, blockBuildingMachine, err := a.processProducedBlock(baseState, block, builderBoostFactor)
+	postState, blockBuildingMachine, err := a.processProducedBlock(baseState, block)
 	if err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
@@ -777,7 +777,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 func (a *ApiHandler) produceBlock(
 	ctx context.Context,
-	boostFactor uint64,
+	legacyBuilderBoostFactor uint64,
 	baseBlockSlot uint64,
 	baseBlockRoot common.Hash,
 	baseState *state.CachingBeaconState,
@@ -885,8 +885,8 @@ func (a *ApiHandler) produceBlock(
 	// if exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100), then return a full (unblinded) block containing the execution node payload.
 	// otherwise, return a blinded block containing the builder payload header.
 	builderValue := builderHeader.BlockValue()
-	useLocalExec := preferLocalExecutionValue(localExecValue, builderValue, boostFactor)
-	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", localExecValue, "builderValue", builderValue, "boostFactor", boostFactor, "targetSlot", targetSlot)
+	useLocalExec := preferLocalExecutionValue(localExecValue, builderValue, legacyBuilderBoostFactor)
+	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", localExecValue, "builderValue", builderValue, "boostFactor", legacyBuilderBoostFactor, "targetSlot", targetSlot)
 
 	if useLocalExec {
 		block.BeaconBody = beaconBody
@@ -934,13 +934,12 @@ func preferLocalExecutionValue(localValueWei, builderValueWei *big.Int, boostFac
 func selectHigherGloasBidValue(
 	localValueWei *big.Int,
 	externalBid *cltypes.SignedExecutionPayloadBid,
-	boostFactor uint64,
 ) (*big.Int, bool) {
 	if externalBid == nil || externalBid.Message == nil {
 		return localValueWei, false
 	}
 	externalValueWei := gweiToWei(new(big.Int).SetUint64(externalBid.Message.Value))
-	if preferLocalExecutionValue(localValueWei, externalValueWei, boostFactor) {
+	if localValueWei.Cmp(externalValueWei) >= 0 {
 		return localValueWei, false
 	}
 	return externalValueWei, true
@@ -949,15 +948,13 @@ func selectHigherGloasBidValue(
 func (a *ApiHandler) processProducedBlock(
 	baseState *state.CachingBeaconState,
 	block *cltypes.BlindOrExecutionBeaconBlock,
-	boostFactor uint64,
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
-	return a.processProducedBlockWithProcessor(baseState, block, boostFactor, processBlockForProduction)
+	return a.processProducedBlockWithProcessor(baseState, block, processBlockForProduction)
 }
 
 func (a *ApiHandler) processProducedBlockWithProcessor(
 	baseState *state.CachingBeaconState,
 	block *cltypes.BlindOrExecutionBeaconBlock,
-	boostFactor uint64,
 	processBlock func(*state.CachingBeaconState, *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error),
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
 	if block == nil {
@@ -983,7 +980,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		ParentBlockRoot: selfBid.Message.ParentBlockRoot,
 	}
 	externalBid, found := a.epbsPool.HighestBids.Get(bidKey)
-	selectedValueWei, selected := selectHigherGloasBidValue(block.ExecutionValue, externalBid, boostFactor)
+	selectedValueWei, selected := selectHigherGloasBidValue(block.ExecutionValue, externalBid)
 	if !found || !selected {
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err

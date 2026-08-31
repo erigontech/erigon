@@ -725,7 +725,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 			Message: &cltypes.ExecutionPayloadBid{Value: 3},
 		}
 
-		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid, 100)
+		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
 
 		require.True(t, selected)
 		require.Equal(t, "3000000000", selectedValueWei.String())
@@ -737,7 +737,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 			Message: &cltypes.ExecutionPayloadBid{Value: 2},
 		}
 
-		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid, 100)
+		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
 
 		require.False(t, selected)
 		require.Same(t, localValueWei, selectedValueWei)
@@ -749,23 +749,11 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 		}
 		wantWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
 
-		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid, 100)
+		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid)
 
 		require.True(t, selected)
 		require.Equal(t, wantWei, selectedValueWei)
 	})
-}
-
-func TestSelectHigherGloasBidValueHonorsBoostFactor(t *testing.T) {
-	localValueWei := gweiToWei(big.NewInt(2))
-	externalBid := &cltypes.SignedExecutionPayloadBid{
-		Message: &cltypes.ExecutionPayloadBid{Value: 3},
-	}
-
-	selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid, 0)
-
-	require.False(t, selected)
-	require.Same(t, localValueWei, selectedValueWei)
 }
 
 func TestPreferLocalExecutionValueRejectsNilBuilderValue(t *testing.T) {
@@ -821,7 +809,7 @@ func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
 
-	selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block, 100)
+	selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
 
 	require.NoError(t, err)
 	require.Same(t, fixture.productionState, selectedState)
@@ -858,7 +846,6 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 	selectedState, _, err := handler.processProducedBlockWithProcessor(
 		fixture.productionState,
 		fixture.block,
-		100,
 		processBlock,
 	)
 
@@ -870,14 +857,14 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 	require.Same(t, fixture.externalBid, storedBid)
 }
 
-func TestProcessProducedBlockSelectsExternalBidWithoutMutatingBaseState(t *testing.T) {
+func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	originalRoot, err := fixture.productionState.HashSSZ()
 	require.NoError(t, err)
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
 
-	selectedState, blockMachine, err := handler.processProducedBlock(fixture.productionState, fixture.block, 100)
+	selectedState, blockMachine, err := handler.processProducedBlock(fixture.productionState, fixture.block)
 
 	require.NoError(t, err)
 	require.NotSame(t, fixture.productionState, selectedState)
@@ -900,7 +887,7 @@ func TestProcessProducedBlockRejectsBlindedGloasBlock(t *testing.T) {
 	}
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 
-	_, _, err := handler.processProducedBlock(fixture.productionState, block, 100)
+	_, _, err := handler.processProducedBlock(fixture.productionState, block)
 
 	require.ErrorContains(t, err, "cannot process blinded Gloas block")
 }
@@ -909,7 +896,7 @@ func TestProcessProducedBlockRejectsNilBlock(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 
-	_, _, err := handler.processProducedBlock(fixture.productionState, nil, 100)
+	_, _, err := handler.processProducedBlock(fixture.productionState, nil)
 
 	require.ErrorContains(t, err, "cannot process nil block")
 }
@@ -939,7 +926,7 @@ func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
 			handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
 			handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
 
-			_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block, 100)
+			_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
 
 			require.NoError(t, err)
 			require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
