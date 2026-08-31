@@ -1,6 +1,15 @@
 package sszql
 
+import (
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+)
+
 // note: derived types of Proof and Leaf can change later
+
+type SSZQLAPI interface {
+	// GetBlock(ctx context.Context, bnh rpc.BlockNumberOrHash) (types.Block, error)
+}
 
 type Path string
 
@@ -15,6 +24,11 @@ type Proof string
 type Leaf string
 
 type Result string
+
+type SSZQLImpl struct {
+	DB          kv.RoDB
+	BlockReader dbservices.FullBlockReader
+}
 
 type ResolvedPath struct {
 	Gindex Gindex

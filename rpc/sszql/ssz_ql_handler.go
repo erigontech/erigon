@@ -10,13 +10,22 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc"
 )
 
 const sszQLContentType = "application/json"
 
-var blockIDPattern = regexp.MustCompile(`^(?:latest|earliest|safe|finalized|pending|0x[0-9a-fA-F]{64}|0|[1-9][0-9]*)$`)
+var blockIDPattern = regexp.MustCompile(`^(?:latest|earliest|safe|finalized|0x[0-9a-fA-F]{64}|0|[1-9][0-9]*)$`)
 var errInvalidBlockID = errors.New("invalid block_id")
+
+func NewSSZQLAPI(db kv.RoDB, blockReader dbservices.FullBlockReader) *SSZQLImpl {
+	return &SSZQLImpl{
+		DB:          db,
+		BlockReader: blockReader,
+	}
+}
 
 func SSZQueryHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,8 +148,6 @@ func parseBlockIDs(blockID string) (rpc.BlockNumberOrHash, error) {
 		return rpc.BlockNumberOrHashWithNumber(rpc.SafeBlockNumber), nil
 	case "finalized":
 		return rpc.BlockNumberOrHashWithNumber(rpc.FinalizedBlockNumber), nil
-	case "pending":
-		return rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber), nil
 	}
 
 	if len(blockID) == 66 {
