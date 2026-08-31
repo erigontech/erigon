@@ -55,7 +55,6 @@ func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*ac
 func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *fakeStateReader) HasStorage(address accounts.Address) (bool, error)         { return false, nil }
 func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error)  { return nil, nil }
 func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {

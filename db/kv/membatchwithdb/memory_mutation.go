@@ -991,13 +991,6 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 	return m.db.GetAsOf(name, k, ts)
 }
 
-func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	if m.db == nil {
-		return nil, nil, false, nil
-	}
-	return m.db.HasPrefix(name, prefix)
-}
-
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	if m.db == nil {
 		return 0
@@ -1166,10 +1159,6 @@ func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts kv.Ge
 
 func (v *OverlayTemporalReadView) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
 	return v.temporalTx.GetLatestValSize(name, k)
-}
-
-func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return v.temporalTx.HasPrefix(name, prefix)
 }
 
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {

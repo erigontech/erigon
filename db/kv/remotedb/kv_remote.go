@@ -741,15 +741,6 @@ func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, 
 	return len(v), len(v) > 0, err
 }
 
-func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	req := &remoteproto.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
-	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
-}
-
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
 		reply, err := tx.db.remoteKV.RangeAsOf(tx.ctx, &remoteproto.RangeAsOfReq{TxId: tx.id, Table: name.String(), FromKey: fromKey, ToKey: toKey, Ts: ts, OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})

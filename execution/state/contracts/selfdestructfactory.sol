@@ -8,8 +8,7 @@ pragma solidity >=0.7.0;
 // SelfDestructInConstructor self-destructs to itself while still constructing,
 // so post-EIP-8246 it leaves a balance-only account behind. It carries no
 // constructor arguments, keeping its CREATE2 init code deterministic so the
-// factory can deploy to the same address again (EIP-7610 permits creation over
-// an account with no code, nonce or storage).
+// factory can deploy to the same address again.
 contract SelfDestructInConstructor {
     constructor() payable {
         selfdestruct(payable(address(this)));

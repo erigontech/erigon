@@ -743,7 +743,7 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 // TestEngineApiBALGlamsterdamCreate2OntoFundedAddress pins block-access-list
 // consistency for the glamsterdam-devnet-5 invalid-block pattern: a Disperse
 // contract credits many still-empty addresses, then a Gnosis-Safe-style Proxy is
-// CREATE2-deployed onto each in the same block. EIP-7610 preserves the balance, so
+// CREATE2-deployed onto each in the same block. Creation preserves the balance, so
 // the credit is the only balance change; the builder's embedded BAL must match the
 // parallel validator's recomputed one, or BuildCanonicalBlock fails with a BAL
 // mismatch. Independent senders let the parallel executor race each credit against

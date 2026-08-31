@@ -611,19 +611,6 @@ func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key account
 	return res, true, nil
 }
 
-func (tds *TrieDbState) HasStorage(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-	addrHash := crypto.Keccak256Hash(addressValue[:])
-	// check if we know about any storage updates with non-empty values
-	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
-		if len(v) > 0 {
-			return true, nil
-		}
-	}
-	// fallback to underlying state reader if we don't know of non-empty storage slots yet
-	return tds.StateReader.HasStorage(address)
-}
-
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()

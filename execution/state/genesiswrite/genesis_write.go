@@ -486,12 +486,9 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	for _, addr := range addrs {
 		account := g.Alloc[addr]
 
-		balance := new(uint256.Int)
-		if account.Balance != nil {
-			var overflow bool
-			if balance, overflow = uint256.FromBig(account.Balance); overflow {
-				panic("overflow at genesis allocs")
-			}
+		balance, overflow := uint256.FromBig(account.Balance)
+		if overflow {
+			panic("overflow at genesis allocs")
 		}
 		address := accounts.InternAddress(addr)
 		err := statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)

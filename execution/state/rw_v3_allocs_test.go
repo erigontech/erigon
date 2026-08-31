@@ -40,9 +40,6 @@ func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptio
 func (g fixedTemporalTx) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
 	return len(g.val), len(g.val) > 0, nil
 }
-func (g fixedTemporalTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
 func (g fixedTemporalTx) StepsInFiles(entitySet ...kv.Domain) kv.Step { return 0 }
 
 type histMockTx struct {
@@ -76,7 +73,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	}{
 		{"ReaderV3.ReadAccountStorage", 0, func() { _, _, _ = r.ReadAccountStorage(addr, key) }},
 		{"ReaderV3.ReadAccountData", 1, func() { _, _ = r.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"ReaderV3.HasStorage", 0, func() { _, _ = r.HasStorage(addr) }},
 		{"ReaderV3.ReadAccountCode", 0, func() { _, _ = r.ReadAccountCode(addr) }},
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
 		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
@@ -92,7 +88,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
 		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
 		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
-		{"CachedReaderV3.HasStorage", 0, func() { _, _ = cr.HasStorage(addr) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)

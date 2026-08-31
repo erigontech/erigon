@@ -568,38 +568,6 @@ func (tx *tx) getLatestValSize(name kv.Domain, dbTx kv.Tx, k []byte) (size int, 
 	return tx.aggtx.GetLatestValSize(name, k, dbTx)
 }
 
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return tx.hasPrefix(name, tx.Tx, prefix)
-}
-
-func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return tx.hasPrefix(name, tx.RwTx, prefix)
-}
-
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
-	to, ok := kv.NextSubtree(prefix)
-	if !ok {
-		to = nil
-	}
-
-	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	defer it.Close()
-	if !it.HasNext() {
-		return nil, nil, false, nil
-	}
-
-	k, v, err := it.Next()
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	return k, v, true, nil
-}
-
 func (tx *Tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
 	return tx.getLatest(name, tx.Tx, k, opts)
 }

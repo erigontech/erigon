@@ -48,10 +48,6 @@ func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) 
 	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
 }
 
-func (g *stateGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return g.sd.HasPrefix(name, prefix, g.tx)
-}
-
 func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
 }

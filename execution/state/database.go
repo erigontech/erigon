@@ -40,7 +40,6 @@ type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
-	HasStorage(address accounts.Address) (bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
 	ReadAccountCodeSize(address accounts.Address) (int, error)
 	ReadAccountIncarnation(address accounts.Address) (uint64, error)
@@ -133,7 +132,6 @@ func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (*NoopReader) HasStorage(address accounts.Address) (bool, error)               { return false, nil }
 func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)        { return nil, nil }
 func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)       { return 0, nil }
 func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }

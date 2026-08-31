@@ -561,24 +561,6 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	return reply, nil
 }
 
-func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (*remoteproto.HasPrefixReply, error) {
-	domain, err := kv.String2Domain(req.Table)
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &remoteproto.HasPrefixReply{}
-	err = s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return reply, nil
-}
-
 func (s *KvServer) HistorySeek(_ context.Context, req *remoteproto.HistorySeekReq) (reply *remoteproto.HistorySeekReply, err error) {
 	reply = &remoteproto.HistorySeekReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
