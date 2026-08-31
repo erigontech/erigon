@@ -101,14 +101,14 @@ var cmdCompareStates = &cobra.Command{
 
 var cmdMdbxToMdbx = &cobra.Command{
 	Use:          "mdbx_to_mdbx",
-	Short:        "copy data from '--chaindata' to '--chaindata.to'. With --in-place: compact every mdbx db of '--datadir' in place",
+	Short:        "compact every mdbx db of '--datadir' in place. With '--chaindata.to': copy '--chaindata' there instead",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 
 		var err error
-		if inPlace {
+		if toChaindata == "" {
 			err = compactDatadir(ctx, logger)
 		} else {
 			from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
@@ -241,9 +241,6 @@ func init() {
 	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
-	withInPlace(cmdMdbxToMdbx)
-	cmdMdbxToMdbx.MarkFlagsMutuallyExclusive("in-place", "chaindata")
-	cmdMdbxToMdbx.MarkFlagsMutuallyExclusive("in-place", "chaindata.to")
 
 	rootCmd.AddCommand(cmdMdbxToMdbx)
 
