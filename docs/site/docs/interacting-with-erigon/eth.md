@@ -185,8 +185,10 @@ transaction is built at all.
   `LegacyTx` with no chain-ID field, and the response encoder skips chain-ID derivation
   while `v` is zero. That is the `default` arm of the type switch — reached only when
   none of `authorizationList`, `blobVersionedHashes`, `maxFeePerGas` or `accessList` is
-  present. An `accessList` fill before London and a blob or authorization-list fill after
-  it are typed and carry `chainId`, even when `gasPrice` is supplied
+  present. An `accessList` fill before London and a blob fill after it are typed and
+  carry `chainId`, even when `gasPrice` is supplied. An authorization-list fill is typed
+  and carries `chainId` too, but never alongside `gasPrice` — that pair is rejected
+  outright, as the fee-field rules below explain
 * fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
   though after London it must be non-zero (`gasPrice must be non-zero after london fork`);
   before London a zero is accepted. It cannot be combined with `maxFeePerGas` or
