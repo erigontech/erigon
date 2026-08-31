@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/payloadoptimizer"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	protocolparams "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -120,7 +121,7 @@ func TestNewOrderflowUpdateRevalidatesCanonicalBlobSidecar(t *testing.T) {
 	require.Empty(t, update.Transactions())
 }
 
-func TestNewOrderflowUpdateAuthenticatesBeforeBlobProofVerification(t *testing.T) {
+func TestSessionApplyAuthenticatesBeforeBlobProofVerification(t *testing.T) {
 	wrapper := candidateBlobWrapper(t, 0, 0)
 	wrapper.Tx.V = uint256.Int{}
 	wrapper.Tx.R = uint256.Int{}
@@ -129,8 +130,107 @@ func TestNewOrderflowUpdateAuthenticatesBeforeBlobProofVerification(t *testing.T
 
 	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{wrapper})
 	require.ErrorContains(t, err, "authenticate orderflow transaction")
-	require.NotContains(t, err.Error(), "proof verification")
 	require.Empty(t, update.Transactions())
+}
+
+func TestSessionApplyRejectsBadBlobProofBeforeBackend(t *testing.T) {
+	params, fork, requests := baseBuildContextInput()
+	buildCtx, err := newTestBuildContext(params, clparams.ElectraVersion, fork, requests, baseParentGasLimit)
+	require.NoError(t, err)
+	called := false
+	backend := &optimizerBackend{
+		assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+			called = true
+			return execmodule.AssembleBlockResult{}, errors.New("backend reached")
+		},
+		get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+			return execmodule.AssembledBlockResult{}, nil
+		},
+	}
+	session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+	require.NoError(t, err)
+	wrapper := candidateBlobWrapper(t, 0, 0)
+	wrapper.Proofs[0][0] ^= 0xff
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{wrapper})
+	require.NoError(t, err)
+
+	_, err = session.Apply(t.Context(), update)
+	require.ErrorContains(t, err, "proof verification")
+	require.False(t, called)
+}
+
+func TestSessionApplyAppliesFuluBlobCountBeforeProofVerification(t *testing.T) {
+	backendErr := errors.New("backend reached")
+	for _, tc := range []struct {
+		name          string
+		stateVersion  clparams.StateVersion
+		wrapper       byte
+		blobCount     int
+		maxBlobs      uint64
+		wantForkError bool
+	}{
+		{name: "Fulu rejects seven v1 blobs", stateVersion: clparams.FuluVersion, wrapper: 1, blobCount: 7, maxBlobs: protocolparams.MaxBlobsPerTxn, wantForkError: true},
+		{name: "Fulu accepts six v1 blobs", stateVersion: clparams.FuluVersion, wrapper: 1, blobCount: int(protocolparams.MaxBlobsPerTxn), maxBlobs: protocolparams.MaxBlobsPerTxn},
+		{name: "Electra accepts seven v0 blobs below block cap", stateVersion: clparams.ElectraVersion, wrapper: 0, blobCount: 7, maxBlobs: 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params, _, requests := baseBuildContextInput()
+			config := testBeaconConfigFor(tc.stateVersion)
+			config.MaxBlobsPerBlock = tc.maxBlobs
+			config.MaxBlobsPerBlockElectra = tc.maxBlobs
+			params.TargetGasLimit = nil
+			targetGasLimit := uint64(31_000_000)
+			buildCtx, err := payloadoptimizer.NewBuildContext(params, config, 64, requests, baseParentGasLimit, payloadoptimizer.BuildDefaults{TargetGasLimit: &targetGasLimit, MaxBlobsPerBlock: &tc.maxBlobs})
+			require.NoError(t, err)
+			called := 0
+			backend := &optimizerBackend{
+				assemble: func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+					called++
+					return execmodule.AssembleBlockResult{}, backendErr
+				},
+				get: func(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
+					return execmodule.AssembledBlockResult{}, nil
+				},
+			}
+			session, err := payloadoptimizer.New(backend).Open(t.Context(), buildCtx)
+			require.NoError(t, err)
+			update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{blobWrapperWithCount(t, tc.wrapper, tc.blobCount)})
+			require.NoError(t, err)
+
+			_, err = session.Apply(t.Context(), update)
+			if tc.wantForkError {
+				require.ErrorContains(t, err, "more than")
+				require.Zero(t, called)
+				return
+			}
+			require.ErrorIs(t, err, backendErr)
+			require.Equal(t, 1, called)
+		})
+	}
+}
+
+func blobWrapperWithCount(t *testing.T, version byte, count int) *types.BlobTxWrapper {
+	t.Helper()
+	wrapper := candidateBlobWrapper(t, version, 0)
+	firstHash := wrapper.Tx.BlobVersionedHashes[0]
+	firstBlob := wrapper.Blobs[0]
+	firstCommitment := wrapper.Commitments[0]
+	proofsPerBlob := 1
+	if version == 1 {
+		proofsPerBlob = int(protocolparams.CellsPerExtBlob)
+	}
+	firstProofs := append([]types.KZGProof(nil), wrapper.Proofs[:proofsPerBlob]...)
+	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, count)
+	wrapper.Blobs = make([]types.Blob, count)
+	wrapper.Commitments = make([]types.KZGCommitment, count)
+	wrapper.Proofs = make([]types.KZGProof, count*proofsPerBlob)
+	for i := range count {
+		wrapper.Tx.BlobVersionedHashes[i] = firstHash
+		wrapper.Blobs[i] = firstBlob
+		wrapper.Commitments[i] = firstCommitment
+		copy(wrapper.Proofs[i*proofsPerBlob:], firstProofs)
+	}
+	return signOrderflowTransaction(t, wrapper).(*types.BlobTxWrapper)
 }
 
 func TestSessionAppliesForkSpecificBlobOrderflowShape(t *testing.T) {

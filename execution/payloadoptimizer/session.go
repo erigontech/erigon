@@ -137,15 +137,6 @@ func NewOrderflowUpdate(transactions types.Transactions) (update OrderflowUpdate
 		}
 		transaction.SetSender(sender)
 	}
-	for i, transaction := range owned {
-		wrapper, ok := transaction.(*types.BlobTxWrapper)
-		if !ok {
-			continue
-		}
-		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
-			return OrderflowUpdate{}, fmt.Errorf("payload optimizer orderflow blob transaction %d: %w", i, err)
-		}
-	}
 	return OrderflowUpdate{transactions: owned}, nil
 }
 
@@ -403,6 +394,12 @@ func validateOrderflowFork(stateVersion clparams.StateVersion, transactions type
 		wrapper, ok := transaction.(*types.BlobTxWrapper)
 		if !ok || wrapper.WrapperVersion != wantVersion {
 			return fmt.Errorf("payload optimizer orderflow blob transaction %d requires wrapper version %d", i, wantVersion)
+		}
+		if stateVersion >= clparams.FuluVersion && uint64(len(wrapper.GetBlobHashes())) > protocolparams.MaxBlobsPerTxn {
+			return fmt.Errorf("payload optimizer orderflow blob transaction %d contains more than %d blobs", i, protocolparams.MaxBlobsPerTxn)
+		}
+		if err := wrapper.ValidateBlobTransactionWrapper(); err != nil {
+			return fmt.Errorf("payload optimizer orderflow blob transaction %d: %w", i, err)
 		}
 	}
 	return nil

@@ -630,11 +630,15 @@ func TestNewOrderflowUpdateRequiresCompleteBlobSidecars(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, update.Transactions(), 1)
 	}
-	for _, transaction := range (types.Transactions{&validV0.Tx, missingSidecar, unknownVersion, badHash}) {
+	for _, transaction := range (types.Transactions{&validV0.Tx, missingSidecar, unknownVersion}) {
 		update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{transaction})
 		require.Error(t, err)
 		require.Empty(t, update.Transactions())
 	}
+	badHash = signOrderflowTransaction(t, badHash).(*types.BlobTxWrapper)
+	update, err := payloadoptimizer.NewOrderflowUpdate(types.Transactions{badHash})
+	require.NoError(t, err)
+	require.Len(t, update.Transactions(), 1)
 }
 
 func TestCloseCancelsActiveApplyAndPreventsLaterUse(t *testing.T) {
