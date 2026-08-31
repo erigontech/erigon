@@ -65,10 +65,10 @@ func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
 	return nil
 }
 
-// orLatest resolves an optional block selector, defaulting to the latest block
+// blockOrLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
 // whose Block parameter is optional per execution-apis (default 'latest').
-func orLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+func blockOrLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
 	if blockNrOrHash != nil {
 		return *blockNrOrHash
 	}
@@ -86,7 +86,7 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
-	blockNrOrHash := orLatest(requestedBlock)
+	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPendingState(blockNrOrHash); err != nil {
 		return nil, err
 	}
@@ -433,7 +433,7 @@ func (s StorageKeysInfo) EncodeKey() string {
 
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
