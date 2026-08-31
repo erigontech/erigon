@@ -41,73 +41,9 @@ func ProgressiveListRoot(chunks [][32]byte, logicalLength uint64) ([32]byte, err
 	return crypto.Sha256(progressiveRoot[:], lengthRoot[:]), nil
 }
 
-// MixInActiveFields computes the EIP-7495 active-fields mix-in. Bit i is
-// packed into bit i%8 of byte i/8 in a zero-padded 32-byte chunk.
-func MixInActiveFields(root [32]byte, activeFields []bool) ([32]byte, error) {
-	if err := validateActiveFields(activeFields); err != nil {
-		return [32]byte{}, err
-	}
-
-	var packed [32]byte
-	for i, active := range activeFields {
-		if active {
-			packed[i/8] |= 1 << (uint(i) % 8)
-		}
-	}
-
-	return crypto.Sha256(root[:], packed[:]), nil
-}
-
-// ProgressiveContainerRoot computes the EIP-7495 root from field roots ordered
-// by the active entries in activeFields.
-func ProgressiveContainerRoot(fieldRoots [][32]byte, activeFields []bool) ([32]byte, error) {
-	if len(fieldRoots) == 0 {
-		return [32]byte{}, errors.New("progressive container has no fields")
-	}
-	if err := validateActiveFields(activeFields); err != nil {
-		return [32]byte{}, err
-	}
-
-	var stackRoots [maxStackLeaves][32]byte
-	var expandedRoots [][32]byte
-	if len(activeFields) <= maxStackLeaves {
-		expandedRoots = stackRoots[:len(activeFields)]
-	} else {
-		expandedRoots = make([][32]byte, len(activeFields))
-	}
-
-	fieldIndex := 0
-	for i, active := range activeFields {
-		if active {
-			if fieldIndex >= len(fieldRoots) {
-				return [32]byte{}, errors.New("active field count does not match field roots")
-			}
-			expandedRoots[i] = fieldRoots[fieldIndex]
-			fieldIndex++
-		}
-	}
-	if fieldIndex != len(fieldRoots) {
-		return [32]byte{}, errors.New("active field count does not match field roots")
-	}
-
-	progressiveRoot, err := MerkleizeProgressive(expandedRoots)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return MixInActiveFields(progressiveRoot, activeFields)
-}
-
-func validateActiveFields(activeFields []bool) error {
-	if len(activeFields) == 0 {
-		return errors.New("active fields cannot be empty")
-	}
-	if len(activeFields) > 256 {
-		return errors.New("active fields exceed 256 bits")
-	}
-	if !activeFields[len(activeFields)-1] {
-		return errors.New("active fields must end with an active field")
-	}
-	return nil
+// ProgressiveByteListRoot computes the EIP-7916 root of data.
+func ProgressiveByteListRoot(data []byte) ([32]byte, error) {
+	return ProgressiveListRoot(packBits(data), uint64(len(data)))
 }
 
 func merkleizeProgressive(chunks [][32]byte, numLeaves uint64) ([32]byte, error) {

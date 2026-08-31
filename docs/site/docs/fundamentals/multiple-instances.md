@@ -95,7 +95,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 9090         | TCP      | gRPC Server (Private)    |
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
-| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
+| Sentry    | 30303        | TCP/UDP  | P2P Peering (Public)     |
 | RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
@@ -133,9 +133,6 @@ If using network-attached storage, apply these optimizations:
 # Reduce disk latency impact
 export SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
-
-# For Polygon networks
---sync.loop.block.limit=10000
 ```
 
 ### Memory Locking for Performance

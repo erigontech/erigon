@@ -78,7 +78,7 @@ func (m *merkleHasher) getBuffer(size int) [][32]byte {
 
 func (m *merkleHasher) getBufferFromFlat(xs []byte) [][32]byte {
 	buf := m.getBuffer(len(xs) / 32)
-	for i := 0; i < len(xs)/32; i = i + 1 {
+	for i := 0; i < len(xs)/32; i++ {
 		copy(buf[i][:], xs[i*32:(i+1)*32])
 	}
 	return buf

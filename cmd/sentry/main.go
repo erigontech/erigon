@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/debug"
@@ -50,14 +51,13 @@ var (
 	maxPendPeers int
 	healthCheck  bool
 	metrics      bool
-	witProtocol  bool // Enable/disable WIT protocol
 )
 
 func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
-	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(rootCmd.Flags(), &datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, utils.NATFlag.Name, utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().IntVar(&port, utils.ListenPortFlag.Name, utils.ListenPortFlag.Value, utils.ListenPortFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&staticPeers, utils.StaticPeersFlag.Name, []string{}, utils.StaticPeersFlag.Usage)
@@ -70,8 +70,6 @@ func init() {
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
 	rootCmd.Flags().BoolVar(&metrics, utils.MetricsEnabledFlag.Name, false, utils.MetricsEnabledFlag.Usage)
-	rootCmd.Flags().BoolVar(&witProtocol, utils.PolygonPosWitProtocolFlag.Name, false, utils.PolygonPosWitProtocolFlag.Usage)
-
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -103,7 +101,6 @@ var rootCmd = &cobra.Command{
 			uint(port),
 			protocol,
 			metrics,
-			witProtocol,
 		)
 		if err != nil {
 			return err

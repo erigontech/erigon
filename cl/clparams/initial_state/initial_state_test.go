@@ -28,7 +28,7 @@ import (
 )
 
 func TestMainnet(t *testing.T) {
-	state, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	state, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestMainnet(t *testing.T) {
 }
 
 func TestSepolia(t *testing.T) {
-	state, err := initial_state.GetGenesisState(chainspec.SepoliaChainID)
+	state, err := initial_state.GetGenesisState(t.Context(), chainspec.SepoliaChainID)
 	require.NoError(t, err)
 	root, err := state.HashSSZ()
 	require.NoError(t, err)

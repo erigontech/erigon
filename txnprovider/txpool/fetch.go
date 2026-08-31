@@ -741,7 +741,7 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 		if req == nil {
 			return nil
 		}
-		if err = f.handleNewPeer(req); err != nil {
+		if err := f.handleNewPeer(req); err != nil {
 			return err
 		}
 		if f.wg != nil {
@@ -754,8 +754,7 @@ func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 	if req == nil {
 		return nil
 	}
-	switch req.EventId {
-	case sentryproto.PeerEvent_Connect:
+	if req.EventId == sentryproto.PeerEvent_Connect {
 		f.pool.AddNewGoodPeer(req.PeerId)
 	}
 

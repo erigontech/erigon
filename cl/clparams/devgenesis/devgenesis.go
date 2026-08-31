@@ -99,7 +99,9 @@ func BuildGenesisState(
 
 	// Set genesis time and slot.
 	beaconState.SetGenesisTime(genesisTime)
-	beaconState.SetSlot(0)
+	if err := beaconState.SetSlot(0); err != nil {
+		return nil, nil, fmt.Errorf("set slot: %w", err)
+	}
 
 	// Set fork parameters for genesis. When multiple forks activate at
 	// epoch 0 (typical in dev mode), CurrentVersion must reflect the
@@ -155,7 +157,9 @@ func BuildGenesisState(
 			math.MaxUint64, // withdrawable epoch (far future)
 		)
 
-		beaconState.AddValidator(validator, maxEffectiveBalance)
+		if err := beaconState.AddValidator(validator, maxEffectiveBalance); err != nil {
+			return nil, nil, fmt.Errorf("add validator: %w", err)
+		}
 		allPubkeys = append(allPubkeys, common.Bytes48(pubkeyBytes))
 	}
 
@@ -181,8 +185,12 @@ func BuildGenesisState(
 		copy(aggPubkeyFixed[:], aggPubkey)
 
 		syncCommittee := solid.NewSyncCommitteeFromParameters(committeePubkeys, aggPubkeyFixed)
-		beaconState.SetCurrentSyncCommittee(syncCommittee)
-		beaconState.SetNextSyncCommittee(syncCommittee)
+		if err := beaconState.SetCurrentSyncCommittee(syncCommittee); err != nil {
+			return nil, nil, fmt.Errorf("set current sync committee: %w", err)
+		}
+		if err := beaconState.SetNextSyncCommittee(syncCommittee); err != nil {
+			return nil, nil, fmt.Errorf("set next sync committee: %w", err)
+		}
 
 		// Initialize epoch participation flags and inactivity scores.
 		beaconState.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
@@ -191,30 +199,57 @@ func BuildGenesisState(
 	}
 
 	// Compute genesis validators root.
-	validatorsRoot, err := beaconState.Validators().HashSSZ()
+	var validatorsRoot [32]byte
+	if version >= clparams.GloasVersion {
+		validatorsRoot, err = beaconState.Validators().HashSSZProgressive()
+	} else {
+		validatorsRoot, err = beaconState.Validators().HashSSZ()
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("hash validators: %w", err)
 	}
+	beaconState.Validators().SetProgressiveHashing(version >= clparams.GloasVersion)
 	beaconState.SetGenesisValidatorsRoot(common.Hash(validatorsRoot))
 
 	// Initialize RANDAO mixes with the genesis validators root.
 	for i := uint64(0); i < cfg.EpochsPerHistoricalVector; i++ {
-		beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot))
+		if err := beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot)); err != nil {
+			return nil, nil, fmt.Errorf("set randao mix: %w", err)
+		}
 	}
 
-	// Set the latest execution payload header referencing the EL genesis block.
-	execHeader := cltypes.NewEth1Header(version)
-	execHeader.BlockHash = elGenesisHash
-	beaconState.SetLatestExecutionPayloadHeader(execHeader)
+	var genesisBid *cltypes.ExecutionPayloadBid
+	if version >= clparams.GloasVersion {
+		emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, version)
+		emptyRequestsRoot, err := emptyRequests.HashSSZ()
+		if err != nil {
+			return nil, nil, fmt.Errorf("hash empty execution requests: %w", err)
+		}
+		genesisBid = &cltypes.ExecutionPayloadBid{
+			ParentBlockHash:       elGenesisHash,
+			BlobKzgCommitments:    *solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48),
+			ExecutionRequestsRoot: emptyRequestsRoot,
+		}
+		beaconState.SetLatestExecutionPayloadBid(genesisBid)
+		beaconState.SetLatestBlockHash(elGenesisHash)
+	} else {
+		execHeader := cltypes.NewEth1Header(version)
+		execHeader.BlockHash = elGenesisHash
+		beaconState.SetLatestExecutionPayloadHeader(execHeader)
+	}
 
 	// Set latest block header. The body root for genesis is the hash of
 	// an empty BeaconBlockBody at the genesis version.
 	genesisBody := cltypes.NewBeaconBody(cfg, version)
-	// Ensure the execution payload has all required sub-fields initialized.
-	genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
-	genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
-	if version >= clparams.CapellaVersion {
-		genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	if genesisBid != nil {
+		genesisBody.SignedExecutionPayloadBid.Message = genesisBid.Copy()
+	}
+	if genesisBody.ExecutionPayload != nil {
+		genesisBody.ExecutionPayload.Extra = solid.NewExtraData()
+		genesisBody.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+		if version >= clparams.CapellaVersion {
+			genesisBody.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+		}
 	}
 	if version >= clparams.AltairVersion {
 		genesisBody.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)

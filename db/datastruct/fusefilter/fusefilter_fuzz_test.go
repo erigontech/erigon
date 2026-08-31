@@ -116,7 +116,7 @@ func FuzzWriterRoundTrip(f *testing.F) {
 			z := x
 			z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
 			z = (z ^ (z >> 27)) * 0x94D049BB133111EB
-			z = z ^ (z >> 31)
+			z ^= (z >> 31)
 			keys = append(keys, z)
 			if err := w.AddHash(z); err != nil {
 				t.Fatal(err)

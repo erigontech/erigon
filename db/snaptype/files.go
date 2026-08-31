@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -36,10 +37,22 @@ import (
 )
 
 func FileName(version Version, from, to uint64, fileType string) string {
+	if to < from {
+		panic(fmt.Errorf("snap file name to < from: %d < %d", to, from))
+	}
+	if to-from < 1000 {
+		return fmt.Sprintf("%s-%09d-%09d-%s", version.String(), from, to, fileType)
+	}
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
 func FileMask(from, to uint64, fileType string) string {
+	if to < from {
+		panic(fmt.Errorf("snap file name to < from: %d < %d", to, from))
+	}
+	if to-from < 1000 {
+		return fmt.Sprintf("*-%09d-%09d-%s", from, to, fileType)
+	}
 	return fmt.Sprintf("*-%06d-%06d-%s", from/1_000, to/1_000, fileType)
 }
 
@@ -201,7 +214,14 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		if err != nil {
 			return res, false, false
 		}
-		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*1_000, uint64(to)*1_000, typeString, typeString
+		var multiplier uint64
+		switch len(fromStr) {
+		case 9: // smallest number in file name is < 1_000, so we represent it as it is
+			multiplier = 1
+		default: // smallest number in file name is > 1_000, so we represent it as /1000
+			multiplier = 1_000
+		}
+		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString, typeString
 		res.Type, ok = ParseFileType(typeString)
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
@@ -215,99 +235,8 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	return res, isStateFile, true
 }
 
-func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
-	res, ok = parseFileName(dir, fileName)
-	if ok {
-		return res, false, true
-	}
-	isStateFile := IsStateFile(fileName)
-	res.name = fileName
-	res.Path = filepath.Join(dir, fileName)
-
-	if res.From == 0 && res.To == 0 {
-		parts := strings.Split(fileName, ".")
-		partsLen := len(parts)
-		if partsLen == 3 || partsLen == 4 {
-			if fromStr, toStr, ok := strings.Cut(parts[partsLen-2], "-"); ok && !strings.Contains(toStr, "-") {
-				if from, err := strconv.ParseUint(fromStr, 10, 64); err == nil {
-					res.From = from
-				}
-				if to, err := strconv.ParseUint(toStr, 10, 64); err == nil {
-					res.To = to
-				}
-			}
-		}
-		if len(parts) > 1 {
-			secParts := strings.Split(parts[1], "-")
-			if len(secParts) > 1 {
-				println(secParts[1])
-				res.TypeString = secParts[1]
-				res.Type, _ = ParseFileType(res.TypeString)
-			}
-
-		}
-	}
-	if strings.Contains(fileName, "caplin/") {
-		return res, isStateFile, true
-	}
-	return res, isStateFile, isStateFile
-}
-
 func isSaltFile(name string) bool {
 	return strings.HasPrefix(name, "salt")
-}
-
-func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
-	ext := filepath.Ext(fileName)
-	onlyName := fileName[:len(fileName)-len(ext)]
-	parts := strings.SplitN(onlyName, "-", 4)
-	res = FileInfo{Path: filepath.Join(dir, fileName), name: fileName, Ext: ext}
-
-	if len(parts) < 2 {
-		return res, ok
-	}
-	if isSaltFile(fileName) {
-		// format for salt files is different: salt-<type>.txt
-		res.Type, ok = ParseFileType(parts[0])
-		res.CaplinTypeString = parts[0]
-		res.TypeString = parts[0]
-	} else {
-		res.Type, ok = ParseFileType(parts[len(parts)-1])
-		// This is a caplin hack - it is because with caplin state snapshots ok is always false
-		res.CaplinTypeString = parts[len(parts)-1]
-		res.TypeString = parts[len(parts)-1]
-	}
-
-	if ok {
-		res.CaplinTypeString = res.Type.Name()
-	}
-
-	if len(parts) < 3 {
-		return res, ok
-	}
-
-	var err error
-	verPart := parts[0]
-	if _, after, ok := strings.Cut(parts[0], string(filepath.Separator)); ok {
-		verPart = after
-	}
-	res.Version, err = version.ParseVersion(verPart)
-	if err != nil {
-		return res, false
-	}
-
-	from, err := strconv.ParseUint(parts[1], 10, 64)
-	if err != nil {
-		return res, false
-	}
-	res.From = from * 1_000
-	to, err := strconv.ParseUint(parts[2], 10, 64)
-	if err != nil {
-		return res, false
-	}
-	res.To = to * 1_000
-
-	return res, ok
 }
 
 var stateFileRegex = regexp.MustCompile("^v([0-9]+)(?:.([0-9]+))?-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
@@ -423,7 +352,15 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
+	if f.To < f.From {
+		panic(fmt.Errorf("file info To < From: %d < %d", f.To, f.From))
+	}
+	var name string
+	if f.To-f.From < 1_000 {
+		name = fmt.Sprintf("%s-%09d-%09d-%s%s", f.Version.String(), f.From, f.To, t, f.Ext)
+	} else {
+		name = fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
+	}
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
@@ -474,18 +411,26 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		}
 		return nil, err
 	}
+	return parseDirEntries(name, files)
+}
 
+func parseDirEntries(name string, files []os.DirEntry) (res []FileInfo, err error) {
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
-			return nil, err
+			// Deleted between ReadDir and this stat: merged-over segments are unlinked
+			// concurrently with directory scans.
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("ParseDir: %s: %w", name, err)
 		}
 		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue
 		}
 
 		meta, _, ok := ParseFileName(name, f.Name())
-		if !ok {
+		if !ok || meta.Type == nil {
 			continue
 		}
 		res = append(res, meta)

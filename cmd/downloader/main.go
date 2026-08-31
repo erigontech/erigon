@@ -44,6 +44,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -65,10 +66,7 @@ import (
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
 
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
-
-	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
-	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
+	_ "github.com/erigontech/erigon/db/snaptype2" //hack
 )
 
 func main() {
@@ -185,7 +183,7 @@ func init() {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(cmd.Flags(), &cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	panicif.Err(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	panicif.Err(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 }
@@ -247,7 +245,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	}
 
 	logger.Info(
-		"[snapshots] cli flags",
+		"[Downloader] cli flags",
 		"chain", chain,
 		"addr", downloaderApiAddr,
 		"datadir", dirs.DataDir,
@@ -312,14 +310,12 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	cfg.LogPrefix = "[snapshots] "
-
 	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[Downloader] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.HandleTorrentClientStatus(nil)
 
@@ -339,7 +335,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+		if err := d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 		if verifyFailfast {
@@ -374,7 +370,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		}
 	}
 
-	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
+	grpcServer, err := StartGrpc(ctx, bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
 	if err != nil {
 		return err
 	}
@@ -755,13 +751,13 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+func StartGrpc(ctx context.Context, snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	grpcServer := grpcutil.NewServerWithOpts(creds)
 	if snServer != nil {
 		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
-	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
+	if err := grpcutil.StartServer(ctx, grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
 		return nil, err
 	}
 	logger.Info("Started gRPC server", "on", addr)

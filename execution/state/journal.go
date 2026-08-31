@@ -57,6 +57,7 @@ const (
 	kindAccessListAddAccount
 	kindAccessListAddSlot
 	kindTransientStorage
+	kindEnd // not a kind; bounds the range TestJournalDirtySymmetry must cover
 )
 
 const (
@@ -115,14 +116,6 @@ func (j *journal) Reset() {
 	clear(j.dirties)
 }
 
-// append inserts a new modification entry to the end of the change journal.
-func (j *journal) append(e journalEntry) {
-	j.entries = append(j.entries, e)
-	if addr, isDirty := e.dirtied(); isDirty {
-		j.dirties[addr]++
-	}
-}
-
 // revert undoes a batch of journalled modifications along with any reverted
 // dirty handling too.
 func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
@@ -141,7 +134,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
-	clear(j.entries[snapshot:]) // release the reverted entries' extra pointers
+	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
 }
 
@@ -167,14 +160,21 @@ func commitFlag(wasCommitted bool) uint8 {
 
 func (je *journalEntry) committed() bool { return je.flags&flagCommitted != 0 }
 
-// --- entry constructors: one per modification kind, appended by the caller ---
+// --- entry constructors: one per modification kind ---
+//
+// Each updates dirties itself rather than deriving it from the entry: the kind
+// is fixed at the call site, and a shared helper that rediscovers it via
+// dirtied() measured materially slower. revert undoes the accounting through
+// dirtied(), so the two must agree on every kind.
 
 func (j *journal) createObjectChange(account accounts.Address) {
-	j.append(journalEntry{kind: kindCreateObject, account: account})
+	j.entries = append(j.entries, journalEntry{kind: kindCreateObject, account: account})
+	j.dirties[account]++
 }
 
 func (j *journal) resetObjectChange(account accounts.Address, prev *stateObject, prevWrites *createWriteSnapshot) {
-	j.append(journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
+	j.entries = append(j.entries, journalEntry{kind: kindResetObject, account: account, extra: &journalExtra{prevObj: prev, prevWrites: prevWrites}})
+	j.dirties[account]++
 }
 
 func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted bool) {
@@ -182,7 +182,8 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 	if prev {
 		flags |= flagSelfdestructPrev
 	}
-	j.append(journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
+	j.entries = append(j.entries, journalEntry{kind: kindSelfdestruct, account: account, value: prevbalance, flags: flags})
+	j.dirties[account]++
 }
 
 // selfdestructChangeVersioned records a self-destruct on the parallel path,
@@ -201,59 +202,67 @@ func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev boo
 		e.flags |= flagSelfdestructHadBalance
 		e.extra = &journalExtra{prevBalanceVersioned: prevBalanceVersioned}
 	}
-	j.append(e)
+	j.entries = append(j.entries, e)
+	j.dirties[account]++
 }
 
 func (j *journal) balanceChange(account accounts.Address, prev uint256.Int, wasCommitted bool) {
-	j.append(journalEntry{kind: kindBalance, account: account, value: prev, flags: commitFlag(wasCommitted)})
+	j.entries = append(j.entries, journalEntry{kind: kindBalance, account: account, value: prev, flags: commitFlag(wasCommitted)})
+	j.dirties[account]++
 }
 
 func (j *journal) balanceIncrease(account accounts.Address, increase uint256.Int) {
-	j.append(journalEntry{kind: kindBalanceIncrease, account: account, value: increase})
+	j.entries = append(j.entries, journalEntry{kind: kindBalanceIncrease, account: account, value: increase})
+	j.dirties[account]++
 }
 
 func (j *journal) balanceIncreaseTransfer(bi *BalanceIncrease) {
-	j.append(journalEntry{kind: kindBalanceIncreaseTransfer, extra: &journalExtra{bi: bi}})
+	j.entries = append(j.entries, journalEntry{kind: kindBalanceIncreaseTransfer, extra: &journalExtra{bi: bi}})
 }
 
 func (j *journal) nonceChange(account accounts.Address, prev uint64, wasCommitted bool) {
-	j.append(journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommitted)})
+	j.entries = append(j.entries, journalEntry{kind: kindNonce, account: account, aux: prev, flags: commitFlag(wasCommitted)})
+	j.dirties[account]++
 }
 
 func (j *journal) storageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int, wasCommitted bool) {
-	j.append(journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommitted)})
+	j.entries = append(j.entries, journalEntry{kind: kindStorage, account: account, key: key, value: prevalue, flags: commitFlag(wasCommitted)})
+	j.dirties[account]++
 }
 
 func (j *journal) fakeStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.append(journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
+	j.entries = append(j.entries, journalEntry{kind: kindFakeStorage, account: account, key: key, value: prevalue})
+	j.dirties[account]++
 }
 
 func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
-	j.append(journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: &journalExtra{prevcode: prevcode, prevhash: prevhash}})
+	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: &journalExtra{prevcode: prevcode, prevhash: prevhash}})
+	j.dirties[account]++
 }
 
 func (j *journal) refundChange(prev uint64) {
-	j.append(journalEntry{kind: kindRefund, aux: prev})
+	j.entries = append(j.entries, journalEntry{kind: kindRefund, aux: prev})
 }
 
 func (j *journal) addLogChange(txIndex int) {
-	j.append(journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
+	j.entries = append(j.entries, journalEntry{kind: kindAddLog, aux: uint64(txIndex)})
 }
 
 func (j *journal) touchAccount(account accounts.Address, wasCommitted bool, prev uint256.Int) {
-	j.append(journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
+	j.entries = append(j.entries, journalEntry{kind: kindTouch, account: account, value: prev, flags: commitFlag(wasCommitted)})
+	j.dirties[account]++
 }
 
 func (j *journal) accessListAddAccountChange(address accounts.Address) {
-	j.append(journalEntry{kind: kindAccessListAddAccount, account: address})
+	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddAccount, account: address})
 }
 
 func (j *journal) accessListAddSlotChange(address accounts.Address, slot accounts.StorageKey) {
-	j.append(journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
+	j.entries = append(j.entries, journalEntry{kind: kindAccessListAddSlot, account: address, key: slot})
 }
 
 func (j *journal) transientStorageChange(account accounts.Address, key accounts.StorageKey, prevalue uint256.Int) {
-	j.append(journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
+	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
 }
 
 // dirtied returns the address modified by this entry, or (NilAddress, false) for
@@ -267,7 +276,7 @@ func (je *journalEntry) dirtied() (accounts.Address, bool) {
 	case kindCreateObject, kindResetObject, kindSelfdestruct, kindBalance, kindBalanceIncrease, kindNonce, kindStorage, kindFakeStorage, kindCode, kindTouch:
 		return je.account, true
 	}
-	panic(fmt.Sprintf("dirtied: unknown journal entry kind %d", je.kind))
+	panic("dirtied: unknown journal entry kind")
 }
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
@@ -481,16 +490,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAddLog:
-		txIndex := int(je.aux)
-		if txIndex+1 >= len(s.logs) {
-			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
-		}
-		txnLogs := s.logs[txIndex+1]
-		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-		if len(s.logs[txIndex+1]) == 0 {
-			s.logs = s.logs[:len(s.logs)-1] // revert txn
-		}
-		s.logSize--
+		s.logs.revertLast(int(je.aux))
 		return nil
 
 	case kindTouch:
@@ -505,7 +505,12 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
 		// Mirror kindBalance — drop the write if the touch created it, else restore
 		// the prior value.
-		if s.versionMap != nil {
+		//
+		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
+		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
+		// here would drop that sweep on the versioned path only, leaving the
+		// account in the trie and diverging from serial's root.
+		if s.versionMap != nil && je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
 			} else if _, ok := s.versionedWrites.GetBalance(je.account); ok {

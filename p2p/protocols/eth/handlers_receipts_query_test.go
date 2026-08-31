@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 )
 
 // Per the devp2p spec, a Receipts response carries one receipt list per requested
@@ -97,7 +96,7 @@ func answerQuery(t *testing.T, f *receiptsQueryFixture) ([]rlp.RawValue, bool, e
 	tx, err := db.BeginTemporalRo(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	opts := ReceiptQueryOpts{EthVersion: direct.ETH68, SizeLimit: NoSizeLimit}
+	opts := ReceiptQueryOpts{EthVersion: ETH68, SizeLimit: NoSizeLimit}
 	return AnswerGetReceiptsQuery(context.Background(), chain.TestChainBerlinConfig, f.getter, f.br, tx, f.query, nil, opts)
 }
 
@@ -124,7 +123,7 @@ func newReceiptsQueryFixture(t *testing.T, n int) *receiptsQueryFixture {
 			ReceiptHash: common.Hash{0xde, 0xad},
 		}
 		header.Number.SetUint64(uint64(i + 1))
-		block := types.NewBlockWithHeader(header)
+		block := types.NewBlockWithHeader(header, nil)
 		hash := block.Hash()
 		parent = hash
 		receipts := types.Receipts{&types.Receipt{CumulativeGasUsed: uint64(21_000 * (i + 1))}}

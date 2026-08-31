@@ -1,0 +1,57 @@
+name: Docs - Refresh deployed version
+
+# The install page renders {ERIGON_VERSION} from the newest release at BUILD
+# time, so the published page only changes when the site is rebuilt. Nothing
+# rebuilds it when a release ships: after v3.5.5 the page advertised v3.5.4
+# until someone dispatched the deploy by hand.
+#
+# This wakes daily and presses that same button. It deliberately does no build
+# of its own — `docs-deploy.yml` lives on the docs source branch and stays the
+# only place the site is built, so there is nothing here to drift against it.
+#
+# Why a separate workflow on main rather than a `schedule:` on docs-deploy.yml:
+# scheduled events only start workflows whose file is on the default branch, and
+# docs-deploy.yml lives on the release branch. Why not `release: published`:
+# that event's ref is the tag, so it resolves the workflow file from the tagged
+# tree (no existing tag carries such a trigger) and the github-pages environment
+# grants deployments to branches only — a tag-ref run is rejected at the deploy
+# job. Both are fixable, neither for free; a daily clock bounds staleness at 24h.
+
+on:
+  schedule:
+    # 06:20 UTC — clear of the 04:00 QA cron block.
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docs-deploy-cron
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only to dispatch docs-deploy.yml; no repo contents are read.
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch docs deploy on the docs source branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          # Bump at each release cutover (e.g. 3.5 -> 3.6). Deliberately has no
+          # default: a stale hardcoded branch would keep republishing an
+          # obsolete site on green runs, which is the failure this is meant to
+          # prevent. Unset means stop and say so.
+          DEPLOY_BRANCH: ${{ vars.DOCS_DEPLOY_BRANCH }}
+        run: |
+          if [ -z "$DEPLOY_BRANCH" ]; then
+            echo "::error::Repository variable DOCS_DEPLOY_BRANCH is not set."
+            echo "Set it (Settings -> Actions -> Variables) to the branch the docs"
+            echo "site publishes from — the branch that carries docs-deploy.yml."
+            exit 1
+          fi
+          echo "Dispatching docs-deploy.yml on $DEPLOY_BRANCH"
+          gh workflow run docs-deploy.yml --ref "$DEPLOY_BRANCH"

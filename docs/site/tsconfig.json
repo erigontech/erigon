@@ -2,10 +2,39 @@
 // It is here to improve your IDE experience (type-checking, autocompletion...),
 // and can also run the package.json "typecheck" script manually.
 {
-  "extends": "@docusaurus/tsconfig",
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Inlined from @docusaurus/tsconfig, minus `baseUrl`, rather than extending it.
+  // TypeScript 7 removed baseUrl outright (TS5102). The previous
+  // `"ignoreDeprecations": "6.0"` silenced TS 6's TS5101 deprecation, but TS 7
+  // rejects the option itself, so that escape hatch is gone. Removing only our
+  // own `baseUrl` line would not help either — `extends` would just inherit
+  // upstream's, and an inherited compilerOption cannot be unset by the
+  // extending config. While @docusaurus/tsconfig still ships baseUrl (it does
+  // as of 3.10.2), `extends` and a green `npm run typecheck` are mutually
+  // exclusive under TS 7.
+  //
+  // `@site/*` is unaffected: with baseUrl gone, `paths` resolves against this
+  // file's directory, which is the same docs/site root our explicit
+  // `baseUrl: "."` was providing. (In repos that only *inherited* baseUrl it
+  // resolved to node_modules/@docusaurus/tsconfig and the alias was silently
+  // broken — that was never the case here.)
+  //
+  // scripts/check-tsconfig-drift.mjs fails CI if upstream's options change, so
+  // this copy cannot silently rot. Revert to `"extends": "@docusaurus/tsconfig"`
+  // once Docusaurus drops baseUrl.
   "compilerOptions": {
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
+    "allowJs": true,
+    "esModuleInterop": true,
+    "jsx": "preserve",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "noEmit": true,
+    "paths": {
+      "@site/*": ["./*"]
+    },
+    "skipLibCheck": true,
     "strict": true
   },
   "exclude": [".docusaurus", "build"]

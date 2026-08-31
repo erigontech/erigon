@@ -459,7 +459,7 @@ func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
 	w := NewPagedWriter(b.Context(), buf, false, 1)
 	for i := range 16 {
-		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
+		w.Add([]byte{byte(i)}, []byte{10 + byte(i)}) //nolint:errcheck
 	}
 	bts := buf.Bytes()[0]
 
@@ -660,4 +660,76 @@ func TestReaderBinarySearch(t *testing.T) {
 	g.Reset(lastOffset)
 	cmpResult = g.MatchCmp(lastKey)
 	require.Equal(t, 0, cmpResult, "exact last key should match")
+}
+
+// PagedReader.Reset seeks to a page boundary and re-decodes from there. Nothing else covers the
+// seek: every production caller builds a fresh reader per lookup, so this path is only ever
+// entered on a cold page.
+func TestPagedReaderResetSeeksToPage(t *testing.T) {
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "")
+	require := require.New(t)
+	const pageSize = 2
+	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
+	defer d.Close()
+
+	// record where each entry lives, and what it should read back as
+	type entry struct {
+		k, v      string
+		pageStart uint64
+	}
+	var entries []entry
+	g := NewPagedReader(d.MakeGetter(), pageSize, true)
+	for i := 0; g.HasNext(); i++ {
+		k, v, _, offset := g.Next2(nil)
+		entries = append(entries, entry{string(k), string(v), offset})
+	}
+	require.Len(entries, len(loremStrings))
+
+	// seeking to an entry's own page must replay that page from its first entry
+	for i, want := range entries {
+		if i == 0 || entries[i-1].pageStart == want.pageStart {
+			continue // not the first entry of its page
+		}
+		g := NewPagedReader(d.MakeGetter(), pageSize, true)
+		g.Reset(want.pageStart)
+		require.True(g.HasNext(), "seek to offset %d left the reader empty", want.pageStart)
+		k, v, _, offset := g.Next2(nil)
+		require.Equal(want.k, string(k), "seek to %d landed on the wrong key", want.pageStart)
+		require.Equal(want.v, string(v))
+		require.Equal(want.pageStart, offset)
+
+		// and the rest of the file must follow in order
+		for j := i + 1; j < len(entries) && g.HasNext(); j++ {
+			k, v, _, _ := g.Next2(nil)
+			require.Equal(entries[j].k, string(k), "entry %d after seeking to %d", j, want.pageStart)
+			require.Equal(entries[j].v, string(v))
+		}
+	}
+}
+
+// Reset to the offset the reader already sits on must not rewind it: callers seek to the same
+// page repeatedly while walking a sorted key range, and re-reading consumed entries would
+// duplicate them.
+func TestPagedReaderResetToCurrentPageKeepsPosition(t *testing.T) {
+	require := require.New(t)
+	const pageSize = 4
+	d := prepareLoremDictOnPagedWriter(t, pageSize, true)
+	defer d.Close()
+
+	ref := NewPagedReader(d.MakeGetter(), pageSize, true)
+	k0, v0, _, pageStart := ref.Next2(nil)
+	first := string(k0) + "|" + string(v0)
+	k1, v1, _, _ := ref.Next2(nil)
+	second := string(k1) + "|" + string(v1)
+	require.NotEqual(first, second)
+
+	g := NewPagedReader(d.MakeGetter(), pageSize, true)
+	_, _, _, offset := g.Next2(nil)
+	require.Equal(pageStart, offset)
+
+	g.Reset(pageStart)
+	require.True(g.HasNext(), "re-seeking the current page emptied the reader")
+	k, v, _, _ := g.Next2(nil)
+	require.Equal(second, string(k)+"|"+string(v),
+		"re-seeking the current page rewound it, so the caller re-reads a consumed entry")
 }

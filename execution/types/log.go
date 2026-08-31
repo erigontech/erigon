@@ -24,10 +24,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -112,19 +112,19 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-// UnmarshalJSON validates required fields and parses the Timestamp field.
+// UnmarshalJSON validates required fields and parses the BlockTimestamp field.
 func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	type flat struct {
-		Address     *common.Address `json:"address"`
-		Topics      *[]common.Hash  `json:"topics"`
-		Data        *hexutil.Bytes  `json:"data"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
-		TxHash      *common.Hash    `json:"transactionHash"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   *common.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
-		Timestamp   *hexutil.Uint64 `json:"timestamp"`
+		Address        *common.Address `json:"address"`
+		Topics         *[]common.Hash  `json:"topics"`
+		Data           *hexutil.Bytes  `json:"data"`
+		BlockNumber    *hexutil.Uint64 `json:"blockNumber"`
+		TxHash         *common.Hash    `json:"transactionHash"`
+		TxIndex        *hexutil.Uint   `json:"transactionIndex"`
+		BlockHash      *common.Hash    `json:"blockHash"`
+		Index          *hexutil.Uint   `json:"logIndex"`
+		Removed        *bool           `json:"removed"`
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
 	}
 	var dec flat
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -161,8 +161,8 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	if dec.Removed != nil {
 		l.Removed = *dec.Removed
 	}
-	if dec.Timestamp != nil {
-		l.Timestamp = *dec.Timestamp
+	if dec.BlockTimestamp != nil {
+		l.BlockTimestamp = *dec.BlockTimestamp
 	}
 	return nil
 }
@@ -171,7 +171,7 @@ type Logs []*Log
 
 type ErigonLog struct {
 	Log
-	Timestamp hexutil.Uint64 `json:"timestamp" codec:"-"`
+	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
 type ErigonLogs []*ErigonLog
@@ -181,8 +181,8 @@ func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
 	result := make(ErigonLogs, len(logs))
 	for i, l := range logs {
 		result[i] = &ErigonLog{
-			Log:       *l,
-			Timestamp: hexutil.Uint64(timestamp),
+			Log:            *l,
+			BlockTimestamp: hexutil.Uint64(timestamp),
 		}
 	}
 	return result
@@ -251,15 +251,37 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
+// Copy deep-copies the logs into freshly allocated shared backing arrays.
+// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	logsCopy := make(Logs, len(logs))
-	for i, log := range logs {
-		logsCopy[i] = log.Copy()
+	var totalTopics, totalData int
+	for _, l := range logs {
+		if l == nil {
+			continue
+		}
+		totalTopics += len(l.Topics)
+		totalData += len(l.Data)
 	}
-	return logsCopy
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
+	backing := make([]Log, len(logs))
+	out := make(Logs, len(logs))
+	for i, l := range logs {
+		if l == nil {
+			continue
+		}
+		dst := &backing[i]
+		nt, nd := len(l.Topics), len(l.Data)
+		// Capped so a later append to one copied log cannot bleed into the next.
+		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+		topics, data = topics[nt:], data[nd:]
+		l.copyTo(dst)
+		out[i] = dst
+	}
+	return out
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -380,6 +402,33 @@ func (l *Log) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, &rlpLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 }
 
+func (l *Log) payloadSize() int {
+	topicsLen := (1 + length.Hash) * len(l.Topics)
+	return rlp.StringLen(l.Address[:]) + rlp.ListPrefixLen(topicsLen) + topicsLen + rlp.StringLen(l.Data)
+}
+
+func (l *Log) encodingSize() int {
+	return rlp.ListLen(l.payloadSize())
+}
+
+func (l *Log) encodeRLP(w io.Writer, b []byte) error {
+	if err := rlp.EncodeListPrefix(l.payloadSize(), w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(l.Address[:], w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeListPrefix((1+length.Hash)*len(l.Topics), w, b); err != nil {
+		return err
+	}
+	for i := range l.Topics {
+		if err := rlp.EncodeString(l.Topics[i][:], w, b); err != nil {
+			return err
+		}
+	}
+	return rlp.EncodeString(l.Data, w, b)
+}
+
 // DecodeRLP implements rlp.Decoder.
 func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	var dec rlpLog
@@ -390,22 +439,47 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
-// Copy creates a deep copy of the Log.
+// RlpHashLogs hashes the logs as one RLP list, encoding them through a shared
+// buffer rather than one per entry.
+func RlpHashLogs(logs Logs) common.Hash {
+	return rlpPayloadHash(func(w io.Writer, b []byte) error {
+		payloadSize := 0
+		for _, l := range logs {
+			payloadSize += l.encodingSize()
+		}
+		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+			return err
+		}
+		for _, l := range logs {
+			if err := l.encodeRLP(w, b); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Copy creates a deep copy of the Log. Nil Topics and Data become empty, which
+// is what keeps a LOG0 entry marshalling as `"topics":[]`.
 func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	return &Log{
-		Address:     l.Address,
-		Topics:      slices.Clone(l.Topics),
-		Data:        slices.Clone(l.Data),
-		BlockNumber: l.BlockNumber,
-		TxHash:      l.TxHash,
-		TxIndex:     l.TxIndex,
-		BlockHash:   l.BlockHash,
-		Index:       l.Index,
-		Removed:     l.Removed,
+	dst := &Log{
+		Topics: make([]common.Hash, len(l.Topics)),
+		Data:   make(hexutil.Bytes, len(l.Data)),
 	}
+	l.copyTo(dst)
+	return dst
+}
+
+// copyTo overwrites dst, reusing its Topics/Data buffers. They must already be
+// long enough — anything beyond their length is dropped.
+func (l *Log) copyTo(dst *Log) {
+	t, d := dst.Topics, dst.Data
+	*dst = *l
+	dst.Topics = t[:copy(t, l.Topics)]
+	dst.Data = d[:copy(d, l.Data)]
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of

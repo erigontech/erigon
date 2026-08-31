@@ -3,6 +3,8 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -549,6 +551,21 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
+
+	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
+	// witness cache stores a shell carrying only this, so a hit serves the bytes
+	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
+	cachedJSON []byte
+}
+
+// MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
+// returns its stored bytes verbatim; a freshly built result marshals its exported
+// fields, byte-identical to the cached form so both paths agree.
+func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
+	if m.cachedJSON != nil {
+		return m.cachedJSON, nil
+	}
+	return json.Marshal(m)
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
@@ -610,6 +627,7 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Create the in-block state with the recording state as reader
 	ibs := state.New(recordingState)
+	defer ibs.Close()
 
 	// Get header for block context
 	header := block.HeaderNoCopy()
@@ -658,10 +676,8 @@ func (api *BaseAPI) buildAccessedState(
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		// A user tx that accesses the system address via an opcode keeps it in the
 		// witness; the per-tx access set captures this even on state-cache hits.
-		if acc := ibs.AccessedAddresses(); acc != nil {
-			if _, ok := acc[params.SystemAddress]; ok {
-				recordingState.MarkSystemAddrTouchedInTx()
-			}
+		if ibs.AccessedAddr(params.SystemAddress) {
+			recordingState.MarkSystemAddrTouchedInTx()
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -698,6 +714,9 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	resolvedMode, err := resolveWitnessMode(mode)
 	if err != nil {
 		return nil, err
@@ -708,6 +727,25 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode)
+	if ok {
+		return cached, nil
+	}
+
+	// A cache-only node (head-capture minimal: no commitment history) never recomputes
+	// from history — a miss is out-of-window, a by-hash request for a reorged-out block is
+	// reported distinctly, and a canonical-mode request is rejected distinctly since the
+	// cache only ever builds legacy witnesses.
+	if api.witnessCache != nil && api.witnessCache.CacheOnly() {
+		if resolvedMode != witnessModeLegacy {
+			return nil, errWitnessCanonicalUnavailable
+		}
+		if reorgedAway {
+			return nil, errWitnessReorgedAway
+		}
+		return nil, errWitnessOutOfWindow
+	}
 
 	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
@@ -721,6 +759,119 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
+
+	return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+}
+
+// serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
+// is enabled and holds an exact (num, hash) match for the requested block. A nil
+// cache, a canonical request, an unresolvable block, or a miss all report hit=false
+// so the caller falls through to the unchanged on-demand build (or, in cache-only mode,
+// to the typed out-of-window error). A by-hash request whose block number is no longer
+// canonical never serves its still-resident entry; reorgedAway then flags the distinct
+// orphan case so the cache-only caller can report it separately from a plain miss.
+func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
+	if api.witnessCache == nil || mode != witnessModeLegacy {
+		return nil, false, false
+	}
+	// Resolve without requiring canonical even when the request set requireCanonical: this
+	// function owns the by-hash canonical check below so it can flag a reorged-out orphan
+	// distinctly. A caller's requireCanonical would instead error out here, collapsing the
+	// orphan into a plain miss and losing the reorged-away signal.
+	resolve := blockNrOrHash
+	resolve.RequireCanonical = false
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
+	if err != nil {
+		witnessCacheMissCounter.Inc()
+		return nil, false, false
+	}
+	// A by-hash request can resolve to a still-resident but reorged-out block; require the
+	// hash to be canonical at its height before serving so an orphan is never returned as
+	// canonical. By-number resolves are canonical by construction.
+	if _, byHash := blockNrOrHash.Hash(); byHash {
+		canonical, canonicalOK, err := api._blockReader.CanonicalHash(ctx, tx, num)
+		if err != nil {
+			witnessCacheMissCounter.Inc()
+			return nil, false, false
+		}
+		if canonical != hash {
+			witnessCacheMissCounter.Inc()
+			return nil, false, canonicalOK // a canonical hash exists but differs → orphan
+		}
+	}
+	result, ok := api.witnessCache.Get(hash)
+	if ok {
+		witnessCacheHitCounter.Inc()
+	} else {
+		witnessCacheMissCounter.Inc()
+	}
+	return result, ok, false
+}
+
+// errWitnessVerifyFailed wraps a stateless-verification failure from the shared build
+// seam so the eager cache builder can classify build_fail_verify separately from other
+// build errors; the on-demand handler surfaces it as a normal error.
+var errWitnessVerifyFailed = errors.New("witness stateless verification failed")
+
+// Cache-only serving (head-capture minimal node) never recomputes from history, so a
+// serve miss returns one of these typed errors instead of falling through to a build.
+// errWitnessOutOfWindow covers a block that was never cached, aged out, or is ahead of
+// the tip; errWitnessReorgedAway is the distinct case of a by-hash request whose block
+// number is no longer canonical (the hash was reorged out); errWitnessCanonicalUnavailable
+// covers a canonical-mode request, which the legacy-only cache never builds.
+var (
+	errWitnessOutOfWindow          = errors.New("requested block is outside the head-capture witness cache window")
+	errWitnessReorgedAway          = errors.New("requested block hash was reorged away and is no longer canonical")
+	errWitnessCanonicalUnavailable = errors.New("canonical witness mode is unavailable on a cache-only node (serves legacy only)")
+)
+
+// headCaptureSource carries the pinned parent's commitment state for a minimal-node
+// witness build. Direct tx.GetLatest reads keep it independent of the build's
+// in-memory commitment fold.
+type headCaptureSource struct {
+	pinnedParentTx kv.TemporalTx
+}
+
+// collapseReaderFor selects the collapse-detection state reader: plain state at block
+// end in both modes, commitment from the pinned parent latest (head-capture) or the
+// parent-block history txNum (durable).
+func collapseReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock, endTxNum uint64) commitmentdb.StateReader {
+	if hc != nil {
+		return commitmentdb.NewHeadCaptureStateReader(hc.pinnedParentTx, tx, endTxNum)
+	}
+	return commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+}
+
+// trieReaderFor selects the witness-trie state reader: plain state at the parent
+// (firstTxNumInBlock) in both modes, commitment from the pinned parent latest
+// (head-capture) or the same parent history txNum (durable). Both report
+// WithHistory()==true so the read-only witness-capture fold does not write branches.
+func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock uint64) commitmentdb.StateReader {
+	if hc != nil {
+		return commitmentdb.NewHeadCaptureTrieStateReader(hc.pinnedParentTx, tx, firstTxNumInBlock)
+	}
+	return commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+}
+
+// buildWitnessResultHeadCapture builds a block's witness with parent commitment read
+// from a pinned RO snapshot (pinnedParentTx's commitment-latest) instead of commitment
+// history, for minimal nodes that keep no commitment history. Plain account/storage/code
+// state is read from committedTx's history exactly as the durable path does; only the
+// commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
+// state independent of the build's in-memory commitment fold.
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
+	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
+}
+
+// buildWitnessResult runs the witness-building pipeline for an already-resolved block
+// against an open temporal tx: re-execute to record accesses, fold the commitment trie,
+// collect ancestor headers, verify statelessly, then append the legacy empty-storage node
+// and sort. It is the single seam shared by the on-demand handler and the eager cache
+// builder, so both produce byte-identical results; never fork the build logic. A non-nil
+// hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
+// nil is the durable-history path.
+func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -734,7 +885,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, resolvedMode)
+	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -750,7 +901,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -771,25 +922,29 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	expectedParentRoot = parentHeader.Root
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if firstTxNumInBlock < commitmentStartingTxNum {
-		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
+	// Head-capture reads parent commitment from the pinned snapshot, not commitment
+	// history, so the history-availability check only applies to the durable path.
+	if hc == nil {
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if firstTxNumInBlock < commitmentStartingTxNum {
+			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
+		}
 	}
 
 	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
 	}
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, resolvedMode)
+		block.Root(), accessed, mode)
 	if err != nil {
 		return nil, err
 	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, resolvedMode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -807,13 +962,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
 	// legacy carries the empty storage-trie node (0x80) once when some account has an
 	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
 	// canonical omits it. Added after stateless verification, which rejects the bare node.
-	if resolvedMode == witnessModeLegacy {
+	if mode == witnessModeLegacy {
 		for _, node := range result.State {
 			if bytes.Contains(node, trie.EmptyRoot[:]) {
 				result.State = append(result.State, hexutil.Bytes{0x80})
@@ -960,11 +1115,12 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		_, deleted := rs.DeletedAccounts[sysAddr]
 		postOverlay, hasOverlay := rs.accountOverlay[sysAddr]
 		var postExists bool
-		if deleted {
+		switch {
+		case deleted:
 			postExists = false
-		} else if hasOverlay {
+		case hasOverlay:
 			postExists = postOverlay != nil
-		} else {
+		default:
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
@@ -1071,6 +1227,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
+	hc *headCaptureSource,
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
@@ -1078,10 +1235,11 @@ func detectCollapseSiblings(
 	accessed *accessedState,
 	mode witnessMode,
 ) (siblingPaths [][]byte, err error) {
-	// Set up split reader: commitment from block beginning, plain state from block end.
-	// withHistory=false so branch updates are written using PutBranch().
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
-	sdCtx.SetCustomHistoryStateReader(splitStateReader)
+	// Set up split reader: commitment from block beginning (durable) or the pinned
+	// parent snapshot (head-capture), plain state from block end. withHistory=false
+	// so branch updates are written using PutBranch().
+	splitStateReader := collapseReaderFor(hc, tx, firstTxNumInBlock, endTxNum)
+	sdCtx.SetStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
@@ -1114,7 +1272,7 @@ func detectCollapseSiblings(
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w\n", err)
 	}
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
@@ -1128,7 +1286,7 @@ func detectCollapseSiblings(
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
 		if mode == witnessModeCanonical {
-			childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+			childCount, err := sdCtx.BranchChildCount(c.branchPrefix)
 			if err != nil {
 				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
 			}
@@ -1149,6 +1307,7 @@ func detectCollapseSiblings(
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
+	hc *headCaptureSource,
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
@@ -1159,7 +1318,7 @@ func buildWitnessTrie(
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
-	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
@@ -1184,7 +1343,7 @@ func buildWitnessTrie(
 	}
 
 	for _, node := range witnessNodes {
-		encodedNodes = append(encodedNodes, bytes.Clone(node))
+		encodedNodes = append(encodedNodes, node)
 	}
 	return encodedNodes, nil
 }
@@ -1198,8 +1357,12 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	tx kv.TemporalTx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// TxNums and commitment history must describe the same block view.
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
 
@@ -1807,7 +1970,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %v\n", addr, err)
+				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %w\n", addr, err)
 			}
 		}
 	}
@@ -1901,6 +2064,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
+	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
 
@@ -1955,9 +2119,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	allLogs := ibs.Logs()
 	statelessReceipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
-	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
-	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
-	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
+	// only the AuRa engine uses ChainReader, and only to read headers, so its witness may need
+	// augmenting with headers accessed during engine.Finalize(). ChainReader = nil is sufficient
+	// for Ethereum.
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)

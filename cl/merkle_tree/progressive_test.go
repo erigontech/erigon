@@ -17,7 +17,6 @@
 package merkle_tree_test
 
 import (
-	"crypto/sha256"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -94,116 +93,35 @@ func TestProgressiveListRootReferenceVectors(t *testing.T) {
 	}
 }
 
-func TestMixInActiveFieldsReferenceVectors(t *testing.T) {
-	// Expected roots are pinned EIP-7495 reference vectors for these field layouts.
-	var root [32]byte
-	for i := range root {
-		root[i] = byte(i)
-	}
-
-	minimumPacked := [32]byte{0x01}
-
-	executionPayloadFields := make([]bool, 18)
-	for i := range executionPayloadFields {
-		executionPayloadFields[i] = true
-	}
-	executionPayloadPacked := [32]byte{0xff, 0xff, 0x03}
-
-	sparseFields := make([]bool, 18)
-	for _, i := range []int{0, 7, 8, 17} {
-		sparseFields[i] = true
-	}
-	sparsePacked := [32]byte{0x81, 0x01, 0x02}
-
-	boundaryFields := make([]bool, 256)
-	boundaryFields[255] = true
-	var boundaryPacked [32]byte
-	boundaryPacked[31] = 0x80
-
+func TestProgressiveByteListRootReferenceVectors(t *testing.T) {
 	tests := []struct {
-		name         string
-		activeFields []bool
-		packed       [32]byte
-		expected     string
+		name     string
+		byteLen  int
+		expected string
 	}{
-		{
-			name:         "minimum legal active fields",
-			activeFields: []bool{true},
-			packed:       minimumPacked,
-			expected:     "0xe987b42bd50123fe7764ebae4f4155beebd99b9ede2613a632484aa090e270df",
-		},
-		{
-			name:         "EIP-7807 ExecutionPayload fields",
-			activeFields: executionPayloadFields,
-			packed:       executionPayloadPacked,
-			expected:     "0xe8db024fb74db97de963cb6aa6e34ae26ed3c45b245fbff7c7ef9109e24eaccc",
-		},
-		{
-			name:         "sparse fields use little-endian bit order",
-			activeFields: sparseFields,
-			packed:       sparsePacked,
-			expected:     "0x68ef7766df9e31c60ea4cab1200dc2789a965957f087b321217c1fa3e0846d75",
-		},
-		{
-			name:         "256-bit boundary",
-			activeFields: boundaryFields,
-			packed:       boundaryPacked,
-			expected:     "0x21e35a7be0be70b70c352ff4940961f9e2492e4d5af1ed164c83c66259efb9d0",
-		},
+		{name: "empty", byteLen: 0, expected: "0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"},
+		{name: "single byte", byteLen: 1, expected: "0x905efb51c2764c2c7a4efb0548e372569df06db82115c3b1896c186632f3fe5b"},
+		{name: "before first chunk boundary", byteLen: 31, expected: "0x3e12b2d2b507ef7ffe70761d0b0b69af7a26449621227a7a3e06438917f4aebd"},
+		{name: "at first chunk boundary", byteLen: 32, expected: "0x77a8c5b3ec7b888068f0d2f0237b535b7ac6dc38c9ce75ed40a3bb6250537bc9"},
+		{name: "after first chunk boundary", byteLen: 33, expected: "0xbdb0c331db145d1efad9e022c70ab1f1c0896e7fc8bd8a83c6f0cd6ca89e1009"},
+		{name: "end four-leaf subtree", byteLen: 160, expected: "0x2927fdb091eebe601a502656169f978a3fb2cf2a641ee97aad0f25458ef0f93a"},
+		{name: "start sixteen-leaf subtree", byteLen: 161, expected: "0x14103a66a65d67d16d80e2b914241af6d1a371dc03925e610f2ebf7068d22c05"},
+		{name: "end sixteen-leaf subtree", byteLen: 672, expected: "0x03a448071ba4184a8586b78b154880195db0a7a29aef04bd865f77c3469d6d5b"},
+		{name: "start sixty-four-leaf subtree", byteLen: 673, expected: "0xd411caaeaf48519cd983b24a40115851e63996cbd47927651f686679a23c6c71"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mixed, err := merkle_tree.MixInActiveFields(root, test.activeFields)
+			data := progressiveByteListTestData(test.byteLen)
+			original := make([]byte, len(data))
+			copy(original, data)
+
+			root, err := merkle_tree.ProgressiveByteListRoot(data)
 			require.NoError(t, err)
-			require.Equal(t, [32]byte(common.HexToHash(test.expected)), mixed)
-
-			var input [64]byte
-			copy(input[:32], root[:])
-			copy(input[32:], test.packed[:])
-			require.Equal(t, sha256.Sum256(input[:]), mixed, "packed active fields differ")
+			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
+			require.Equal(t, original, data, "input bytes must not be modified")
 		})
 	}
-}
-
-func TestMixInActiveFieldsRejectsInvalidConfigurations(t *testing.T) {
-	tests := []struct {
-		name         string
-		activeFields []bool
-		expected     string
-	}{
-		{
-			name:     "empty active fields",
-			expected: "active fields cannot be empty",
-		},
-		{
-			name:         "more than 256 active fields",
-			activeFields: make([]bool, 257),
-			expected:     "active fields exceed 256 bits",
-		},
-		{
-			name:         "trailing inactive field",
-			activeFields: []bool{true, false},
-			expected:     "active fields must end with an active field",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			mixed, err := merkle_tree.MixInActiveFields([32]byte{}, test.activeFields)
-			require.EqualError(t, err, test.expected)
-			require.Zero(t, mixed)
-		})
-	}
-}
-
-func TestMixInActiveFieldsDoesNotModifyActiveFields(t *testing.T) {
-	activeFields := []bool{true, false, true}
-	original := append([]bool(nil), activeFields...)
-
-	_, err := merkle_tree.MixInActiveFields([32]byte{0x42, 0x43, 0x44}, activeFields)
-	require.NoError(t, err)
-	require.Equal(t, original, activeFields)
 }
 
 func TestProgressiveContainerRootReferenceVectors(t *testing.T) {
@@ -270,7 +188,7 @@ func TestProgressiveContainerRootReferenceVectors(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			root, err := merkle_tree.ProgressiveContainerRoot(test.fieldRoots, test.activeFields)
+			root, err := merkle_tree.ProgressiveContainerRoot(test.activeFields, progressiveTestSchema(test.fieldRoots)...)
 			require.NoError(t, err)
 			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
 		})
@@ -290,42 +208,42 @@ func TestProgressiveContainerRootRejectsInvalidConfigurations(t *testing.T) {
 		{
 			name:         "no fields",
 			activeFields: []bool{true},
-			expected:     "progressive container has no fields",
+			expected:     "progressive container has fewer fields than active bits",
 		},
 		{
 			name:       "empty active fields",
 			fieldRoots: progressiveTestChunks(1),
-			expected:   "active fields cannot be empty",
+			expected:   "invalid progressive container active fields",
 		},
 		{
 			name:         "more than 256 active fields",
 			fieldRoots:   progressiveTestChunks(1),
 			activeFields: tooManyFields,
-			expected:     "active fields exceed 256 bits",
+			expected:     "invalid progressive container active fields",
 		},
 		{
 			name:         "trailing inactive field",
 			fieldRoots:   progressiveTestChunks(1),
 			activeFields: []bool{true, false},
-			expected:     "active fields must end with an active field",
+			expected:     "invalid progressive container active fields",
 		},
 		{
 			name:         "more field roots than active fields",
 			fieldRoots:   progressiveTestChunks(2),
 			activeFields: []bool{true},
-			expected:     "active field count does not match field roots",
+			expected:     "progressive container has more fields than active bits",
 		},
 		{
 			name:         "fewer field roots than active fields",
 			fieldRoots:   progressiveTestChunks(1),
 			activeFields: []bool{true, true},
-			expected:     "active field count does not match field roots",
+			expected:     "progressive container has fewer fields than active bits",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			root, err := merkle_tree.ProgressiveContainerRoot(test.fieldRoots, test.activeFields)
+			root, err := merkle_tree.ProgressiveContainerRoot(test.activeFields, progressiveTestSchema(test.fieldRoots)...)
 			require.EqualError(t, err, test.expected)
 			require.Zero(t, root)
 		})
@@ -338,10 +256,18 @@ func TestProgressiveContainerRootDoesNotModifyInputs(t *testing.T) {
 	fieldRootsBefore := append([][32]byte(nil), fieldRoots...)
 	activeFieldsBefore := append([]bool(nil), activeFields...)
 
-	_, err := merkle_tree.ProgressiveContainerRoot(fieldRoots, activeFields)
+	_, err := merkle_tree.ProgressiveContainerRoot(activeFields, progressiveTestSchema(fieldRoots)...)
 	require.NoError(t, err)
 	require.Equal(t, fieldRootsBefore, fieldRoots)
 	require.Equal(t, activeFieldsBefore, activeFields)
+}
+
+func progressiveTestSchema(fieldRoots [][32]byte) []any {
+	schema := make([]any, len(fieldRoots))
+	for i := range fieldRoots {
+		schema[i] = fieldRoots[i][:]
+	}
+	return schema
 }
 
 func progressiveTestChunks(count int) [][32]byte {
@@ -352,4 +278,12 @@ func progressiveTestChunks(count int) [][32]byte {
 		}
 	}
 	return chunks
+}
+
+func progressiveByteListTestData(length int) []byte {
+	data := make([]byte, length)
+	for i := range data {
+		data[i] = byte(i%251 + 1)
+	}
+	return data
 }
