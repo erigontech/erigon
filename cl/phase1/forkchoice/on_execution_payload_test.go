@@ -2411,6 +2411,55 @@ func TestExecutionPayloadIngressPersistsLocallyVerifiedHashWhenEngineUnavailable
 	require.Len(t, f.pendingELPayloads, 1)
 }
 
+func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
+	for _, valid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("valid=%t", valid), func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+			if !valid {
+				envelope.Message.Payload.GasUsed++
+			}
+
+			ctrl := gomock.NewController(t)
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			injected := errors.New("injected engine transport failure")
+			engine.EXPECT().
+				NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				Return(execution_client.PayloadStatusNone, injected)
+
+			executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+			require.NoError(t, err)
+			executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
+			require.NoError(t, err)
+			eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+			require.NoError(t, err)
+			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+			f := &ForkChoiceStore{
+				beaconCfg:                cfg,
+				engine:                   engine,
+				forkGraph:                graph,
+				optimisticStore:          optimistic.NewOptimisticStore(),
+				executionPayloadStatus:   executionPayloadStatus,
+				executionPayloadGasLimit: executionPayloadGasLimit,
+				eth2Roots:                eth2Roots,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+			err = f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope)
+
+			if valid {
+				require.NoError(t, err)
+				require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				require.Len(t, f.pendingELPayloads, 1)
+			} else {
+				require.ErrorContains(t, err, "mismatching hash")
+				require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				require.Empty(t, f.pendingELPayloads)
+			}
+		})
+	}
+}
+
 func TestExecutionPayloadIngressDoesNotOverwriteConcurrentInvalidation(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
@@ -2468,57 +2517,76 @@ func TestExecutionPayloadIngressDoesNotOverwriteConcurrentInvalidation(t *testin
 	require.Empty(t, f.pendingELPayloads)
 }
 
-func TestExecutionPayloadIngressAppliesInvalidationBeforeDuplicateShortCircuit(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
-	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+func TestExecutionPayloadIngressAppliesTerminalResultBeforeDuplicateShortCircuit(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status execution_client.PayloadStatus
+	}{
+		{name: "invalidated", status: execution_client.PayloadStatusInvalidated},
+		{name: "validated", status: execution_client.PayloadStatusValidated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+			resignAdmissionEnvelope(t, cfg, blockState, envelope)
 
-	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engineStarted := make(chan struct{})
-	releaseEngine := make(chan struct{})
-	engine.EXPECT().
-		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
-			close(engineStarted)
-			<-releaseEngine
-			return execution_client.PayloadStatusInvalidated, nil
+			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+			ctrl := gomock.NewController(t)
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engineStarted := make(chan struct{})
+			releaseEngine := make(chan struct{})
+			engine.EXPECT().
+				NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+				DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+					close(engineStarted)
+					<-releaseEngine
+					return tc.status, nil
+				})
+
+			verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](1)
+			require.NoError(t, err)
+			executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+			require.NoError(t, err)
+			payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+			require.NoError(t, err)
+			executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
+			require.NoError(t, err)
+			eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+			require.NoError(t, err)
+			f := &ForkChoiceStore{
+				beaconCfg:                cfg,
+				engine:                   engine,
+				forkGraph:                graph,
+				verifiedExecutionPayload: verifiedExecutionPayload,
+				executionPayloadStatus:   executionPayloadStatus,
+				payloadStatusByRoot:      payloadStatusByRoot,
+				executionPayloadGasLimit: executionPayloadGasLimit,
+				eth2Roots:                eth2Roots,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+			done := make(chan error, 1)
+			go func() {
+				done <- f.OnExecutionPayload(context.Background(), envelope, false, true)
+			}()
+			<-engineStarted
+			require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, false))
+			close(releaseEngine)
+			err = <-done
+
+			if tc.status == execution_client.PayloadStatusInvalidated {
+				require.ErrorIs(t, err, errInvalidExecutionPayloadEnvelope)
+				require.True(t, graph.invalid.Load())
+				require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+			} else {
+				require.NoError(t, err)
+				require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+			}
+			cachedStatus, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
+			require.True(t, ok)
+			require.EqualValues(t, tc.status, cachedStatus)
 		})
-
-	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
-	require.NoError(t, err)
-	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
-	require.NoError(t, err)
-	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
-	require.NoError(t, err)
-	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
-	require.NoError(t, err)
-	f := &ForkChoiceStore{
-		beaconCfg:                cfg,
-		engine:                   engine,
-		forkGraph:                graph,
-		executionPayloadStatus:   executionPayloadStatus,
-		payloadStatusByRoot:      payloadStatusByRoot,
-		executionPayloadGasLimit: executionPayloadGasLimit,
-		eth2Roots:                eth2Roots,
 	}
-	f.finalizedCheckpoint.Store(solid.Checkpoint{})
-
-	done := make(chan error, 1)
-	go func() {
-		done <- f.OnExecutionPayload(context.Background(), envelope, false, true)
-	}()
-	<-engineStarted
-	require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, false))
-	close(releaseEngine)
-	err = <-done
-
-	require.ErrorIs(t, err, errInvalidExecutionPayloadEnvelope)
-	require.True(t, graph.invalid.Load())
-	status, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
-	require.True(t, ok)
-	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 }
 
 func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
@@ -2528,6 +2596,7 @@ func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 	}{
 		{name: "cached invalidation dominates stale accepted result", status: execution_client.PayloadStatusNotValidated},
 		{name: "invalid result dominates concurrent persistence", status: execution_client.PayloadStatusInvalidated},
+		{name: "validated result survives concurrent persistence", status: execution_client.PayloadStatusValidated},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
@@ -2544,6 +2613,8 @@ func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 					return tc.status, nil
 				})
 
+			verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](1)
+			require.NoError(t, err)
 			executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
 			require.NoError(t, err)
 			payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
@@ -2557,6 +2628,7 @@ func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 				engine:                   engine,
 				forkGraph:                graph,
 				optimisticStore:          optimistic.NewOptimisticStore(),
+				verifiedExecutionPayload: verifiedExecutionPayload,
 				executionPayloadStatus:   executionPayloadStatus,
 				payloadStatusByRoot:      payloadStatusByRoot,
 				executionPayloadGasLimit: executionPayloadGasLimit,
@@ -2569,18 +2641,29 @@ func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 				done <- f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope)
 			}()
 			<-engineStarted
-			if tc.status == execution_client.PayloadStatusInvalidated {
-				require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, false))
-			} else {
+			if tc.status == execution_client.PayloadStatusNotValidated {
 				f.MarkPayloadInvalid(envelope.Message.BeaconBlockRoot, envelope.Message.Payload.BlockHash)
+			} else {
+				require.NoError(t, f.OnExecutionPayload(context.Background(), envelope, false, false))
 			}
 			close(releaseEngine)
 
-			require.ErrorIs(t, <-done, errInvalidExecutionPayloadEnvelope)
-			require.True(t, graph.invalid.Load())
+			err = <-done
+			if tc.status == execution_client.PayloadStatusValidated {
+				require.NoError(t, err)
+				require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+			} else {
+				require.ErrorIs(t, err, errInvalidExecutionPayloadEnvelope)
+				require.True(t, graph.invalid.Load())
+				require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+			}
 			status, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
 			require.True(t, ok)
-			require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+			expectedStatus := tc.status
+			if tc.status == execution_client.PayloadStatusNotValidated {
+				expectedStatus = execution_client.PayloadStatusInvalidated
+			}
+			require.EqualValues(t, expectedStatus, status)
 		})
 	}
 }
