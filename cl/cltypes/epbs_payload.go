@@ -529,6 +529,15 @@ func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) erro
 
 // ValidateExecutionPayloadEnvelopeCommitments verifies the envelope fields committed by a beacon block's execution payload bid.
 func ValidateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	return validateExecutionPayloadEnvelopeCommitments(beaconCfg, block, signedEnvelope, true)
+}
+
+// ValidateExecutionPayloadEnvelopeBidCommitments verifies bid-bound fields while leaving payload-hash derivation to the execution engine.
+func ValidateExecutionPayloadEnvelopeBidCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	return validateExecutionPayloadEnvelopeCommitments(beaconCfg, block, signedEnvelope, false)
+}
+
+func validateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope, validateBlockHash bool) error {
 	if beaconCfg == nil {
 		return errors.New("beacon chain config is nil")
 	}
@@ -587,9 +596,11 @@ func ValidateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChain
 	if requestsRoot != bid.ExecutionRequestsRoot {
 		return fmt.Errorf("envelope execution requests root %x does not match bid execution requests root %x", requestsRoot, bid.ExecutionRequestsRoot)
 	}
-	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
-	if _, err := envelope.Payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil); err != nil {
-		return fmt.Errorf("validate envelope payload block hash: %w", err)
+	if validateBlockHash {
+		requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+		if _, err := envelope.Payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil); err != nil {
+			return fmt.Errorf("validate envelope payload block hash: %w", err)
+		}
 	}
 	return nil
 }

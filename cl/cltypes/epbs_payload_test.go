@@ -88,6 +88,12 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 
 	block, envelope := makePair(t)
 	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+	require.NoError(t, ValidateExecutionPayloadEnvelopeBidCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+
+	block, envelope = makePair(t)
+	envelope.Message.Payload.GasUsed++
+	require.NoError(t, ValidateExecutionPayloadEnvelopeBidCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+	require.Error(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
 
 	block, envelope = makePair(t)
 	envelope.Message.Payload.FeeRecipient = common.HexToAddress("0x25")

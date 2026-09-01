@@ -614,7 +614,7 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 	} else {
 		commitmentsValidated := false
 		if pending.Message != nil && !f.forkGraph.HasEnvelope(blockRoot) {
-			commitmentsValidated, err = f.validatePendingEnvelopeCommitments(pending)
+			commitmentsValidated, err = f.validatePendingEnvelopeCommitments(pending, true)
 			if err != nil {
 				err = fmt.Errorf("%w: OnBlock: invalid execution payload envelope commitments: %w", errInvalidExecutionPayloadEnvelope, err)
 			}

@@ -108,11 +108,7 @@ type commitmentFinalityRefreshForkGraph struct {
 
 type commitmentFallbackForkGraph struct {
 	persistingEnvelopeForkGraph
-	blockReads      atomic.Int32
-	fallbackEntered chan struct{}
-	releaseFallback chan struct{}
-	persistEntered  chan struct{}
-	releasePersist  chan struct{}
+	blockReads atomic.Int32
 }
 
 type dumpFailingForkGraph struct {
@@ -124,6 +120,7 @@ type persistingEnvelopeForkGraph struct {
 	dataAvailabilityForkGraph
 	mu       sync.RWMutex
 	envelope *cltypes.SignedExecutionPayloadEnvelope
+	invalid  atomic.Bool
 }
 
 type interleavingIndexRepairForkGraph struct {
@@ -190,17 +187,7 @@ func (g *commitmentFallbackForkGraph) GetBlock(root common.Hash) (*cltypes.Signe
 	if g.blockReads.Add(1) == 1 {
 		return nil, false
 	}
-	if g.blockReads.Load() == 2 {
-		close(g.fallbackEntered)
-		<-g.releaseFallback
-	}
 	return g.dataAvailabilityForkGraph.GetBlock(root)
-}
-
-func (g *commitmentFallbackForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	close(g.persistEntered)
-	<-g.releasePersist
-	return g.persistingEnvelopeForkGraph.DumpEnvelopeOnDisk(root, envelope)
 }
 
 func (g *admissionYieldForkGraph) HasEnvelope(common.Hash) bool {
@@ -228,6 +215,10 @@ func (g *persistingEnvelopeForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltype
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	return g.envelope, nil
+}
+
+func (g *persistingEnvelopeForkGraph) MarkHeaderAsInvalid(common.Hash) {
+	g.invalid.Store(true)
 }
 
 func (g blockRefreshForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -2300,6 +2291,38 @@ func TestExecutionPayloadIngressRejectsPayloadThatDoesNotDeriveClaimedBlockHash(
 	}
 }
 
+func TestExecutionPayloadIngressDoesNotPersistDerivedHashRejectedByEngine(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	envelope.Message.Payload.GasUsed++
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusInvalidated, nil)
+
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                graph,
+		executionPayloadStatus:   executionPayloadStatus,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err = f.OnExecutionPayload(context.Background(), envelope, false, true)
+
+	require.ErrorIs(t, err, errInvalidExecutionPayloadEnvelope)
+	require.True(t, graph.invalid.Load())
+	require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+}
+
 func TestGossipCommitmentValidationRefreshesBlockAfterYield(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	graph := &commitmentYieldForkGraph{
@@ -2347,77 +2370,29 @@ func TestGossipCommitmentValidationRefreshesFinalityAfterYield(t *testing.T) {
 func TestWithForkChoiceLockYieldedAllowsConcurrentLockUser(t *testing.T) {
 	f := &ForkChoiceStore{}
 	injected := errors.New("injected commitment failure")
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	result := make(chan error, 1)
-	go func() {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		result <- f.withForkChoiceLockYielded(func() error {
-			close(entered)
-			<-release
-			return injected
-		})
-	}()
-	<-entered
-	acquired := make(chan struct{})
-	go func() {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		close(acquired)
-	}()
-	select {
-	case <-acquired:
-	case <-time.After(time.Second):
-		close(release)
-		t.Fatal("concurrent fork-choice lock user did not progress while commitment work was running")
-	}
-	close(release)
-	require.ErrorIs(t, <-result, injected)
+	f.mu.Lock()
+	err := f.withForkChoiceLockYielded(func() error {
+		require.True(t, f.mu.TryLock())
+		f.mu.Unlock()
+		return injected
+	})
+	f.mu.Unlock()
+	require.ErrorIs(t, err, injected)
 }
 
-func TestExecutionPayloadCommitmentFallbackYieldsForkChoiceLock(t *testing.T) {
+func TestExecutionPayloadCommitmentFallbackRefreshesAfterYield(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	graph := &commitmentFallbackForkGraph{
 		persistingEnvelopeForkGraph: persistingEnvelopeForkGraph{
 			dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
 		},
-		fallbackEntered: make(chan struct{}),
-		releaseFallback: make(chan struct{}),
-		persistEntered:  make(chan struct{}),
-		releasePersist:  make(chan struct{}),
 	}
 	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
 	require.NoError(t, err)
 	f := &ForkChoiceStore{beaconCfg: cfg, forkGraph: graph, eth2Roots: eth2Roots}
-	result := make(chan error, 1)
-	go func() {
-		result <- f.OnExecutionPayload(t.Context(), envelope, false, false)
-	}()
-	<-graph.fallbackEntered
-
-	acquired := make(chan struct{})
-	releaseLock := make(chan struct{})
-	go func() {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		close(acquired)
-		<-releaseLock
-	}()
-	close(graph.releaseFallback)
-
-	select {
-	case <-acquired:
-		close(releaseLock)
-		<-graph.persistEntered
-		close(graph.releasePersist)
-		require.NoError(t, <-result)
-	case <-graph.persistEntered:
-		close(graph.releasePersist)
-		<-acquired
-		close(releaseLock)
-		require.Fail(t, "commitment fallback held the fork-choice lock until persistence")
-	}
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, false))
+	require.Equal(t, int32(3), graph.blockReads.Load())
+	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
 }
 
 func TestExecutionPayloadAdmissionCancellationReconcilesConcurrentOwner(t *testing.T) {
