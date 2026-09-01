@@ -39,7 +39,7 @@ const maxDBDepth = 2
 
 // datadirDBs finds the mdbx databases of a datadir. It only descends into the
 // top-level dirs erigon puts a db under - never into snapshots/ or temp/ - and
-// takes the label from that dir, so each copy is sized like the node sizes it.
+// takes the label from that dir.
 func datadirDBs(dirs datadir.Dirs) ([]datadirDB, error) {
 	roots := []datadirDB{
 		{dirs.Chaindata, dbcfg.ChainDB},

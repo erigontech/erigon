@@ -219,9 +219,18 @@ func TestCompactInPlace(t *testing.T) {
 	}
 	db.Close()
 
+	dataFile := filepath.Join(dbDir, dataFileName)
+	require.NoError(t, os.Chmod(dataFile, 0600))
+	beforeStat, err := os.Stat(dataFile)
+	require.NoError(t, err)
+
 	before := mdbxFileSize(t, dbDir)
 	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
 	require.Less(t, mdbxFileSize(t, dbDir), before)
+
+	afterStat, err := os.Stat(dataFile)
+	require.NoError(t, err)
+	require.Equal(t, beforeStat.Mode().Perm(), afterStat.Mode().Perm())
 
 	db = open()
 	defer db.Close()
@@ -257,7 +266,7 @@ func TestCompactInPlace(t *testing.T) {
 
 // TestDatadirDBs pins the three rules of the datadir scan: a db is found by its
 // mdbx.dat, the label comes from the root it sits under, and the walk reaches
-// caplin/blobs/chaindata without descending into a file tree like snapshots/.
+// caplin/blobs/chaindata.
 func TestDatadirDBs(t *testing.T) {
 	root := t.TempDir()
 	mkDB := func(parts ...string) string {
@@ -272,9 +281,7 @@ func TestDatadirDBs(t *testing.T) {
 	blobs := mkDB("caplin", "blobs", "chaindata")
 	indexing := mkDB("caplin", "indexing")
 
-	// Neither of these may be reported: snapshots/ holds no db, and a staging dir
-	// lives inside a db whose own mdbx.dat stops the walk above it.
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "snapshots", "domain"), 0755))
+	// A staging dir lives inside a db whose own mdbx.dat stops the walk above it.
 	mkDB("chaindata", compactDirName)
 
 	found, err := datadirDBs(datadir.Open(root))

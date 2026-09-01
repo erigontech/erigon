@@ -131,7 +131,9 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := dir.RemoveAll(tmpDir); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	// 0700: the copy holds the db's contents for the whole run, before the
+	// original's mode is applied to it.
+	if err := os.MkdirAll(tmpDir, 0700); err != nil {
 		return err
 	}
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
@@ -162,12 +164,13 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	if err := dir.RemoveFile(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
 		logger.Warn("[compact] stale lock file left behind", "db", dbDir, "err", err)
 	}
-	var afterSize uint64
+	args := []any{"label", label, "db", dbDir, "before", common.ByteCount(uint64(before.Size()))}
 	if after, err := os.Stat(dataFile); err == nil {
-		afterSize = uint64(after.Size())
+		args = append(args, "after", common.ByteCount(uint64(after.Size())))
+	} else {
+		logger.Warn("[compact] size after compaction unavailable", "db", dbDir, "err", err)
 	}
-	logger.Info("[compact] compacted", "label", label, "db", dbDir,
-		"before", common.ByteCount(uint64(before.Size())), "after", common.ByteCount(afterSize))
+	logger.Info("[compact] compacted", args...)
 	return nil
 }
 

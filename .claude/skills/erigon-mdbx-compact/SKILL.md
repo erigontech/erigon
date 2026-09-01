@@ -35,8 +35,11 @@ not only `chaindata`.
 ### 1. Report Size and Check Disk Space
 
 1. Run `du -sh <datadir>/chaindata/mdbx.dat` and report the size to the user.
-2. Run `df -h <datadir>` and check available space. If available space is less
-   than the largest `mdbx.dat`, **abort and tell the user**.
+2. Check free space per database, not once for the datadir: a database may sit
+   on its own volume through a symlink or mount, and its copy is staged next to
+   it. Run `for f in $(find <datadir> -name mdbx.dat); do du -sh "$f"; df -h "$(dirname "$f")" | tail -1; done`
+   and compare each database against the free space on its own volume. If any
+   has less free space than its own `mdbx.dat`, **abort and tell the user**.
 
 ### 2. Diagnose (Optional)
 
@@ -77,5 +80,7 @@ The user can now restart erigon.
   keeps whatever page size it was created with, and `mdbx_to_mdbx` passes a
   `targetPageSize` of 0, so it inherits the source's. Pre-create the new db with
   `ONLY_CREATE_DB=true erigon --datadir=<new> --chain=<chain> --db.pagesize=8kb`,
-  then `integration mdbx_to_mdbx --chaindata=<old> --chaindata.to=<new>` — the
-  full recipe is in `cmd/integration/Readme.md`.
+  then `integration mdbx_to_mdbx --datadir=<old> --chaindata=<old>/chaindata --chaindata.to=<new>/chaindata`.
+  Both `--chaindata` flags name a database directory, not a datadir root, and
+  `--datadir` is required even though the copy does not read it — the full
+  recipe is in `cmd/integration/Readme.md`.
