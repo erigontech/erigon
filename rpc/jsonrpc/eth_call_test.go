@@ -1537,3 +1537,24 @@ func TestOptimizeWarmAddrAndAdjustGas(t *testing.T) {
 		require.Equal(t, hexutil.Uint64(100), res.GasUsed) // 100 < 2400, no underflow
 	})
 }
+
+func TestBlockOrLatest(t *testing.T) {
+	number := rpc.BlockNumberOrHashWithNumber(5)
+	hash := rpc.BlockNumberOrHashWithHash(common.Hash{0x01}, true)
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+
+	for _, tc := range []struct {
+		name string
+		arg  *rpc.BlockNumberOrHash
+		want rpc.BlockNumberOrHash
+	}{
+		{name: "omitted defaults to latest", arg: nil, want: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)},
+		{name: "number is kept", arg: &number, want: number},
+		{name: "hash keeps requireCanonical", arg: &hash, want: hash},
+		{name: "pending is left to the caller to reject", arg: &pending, want: pending},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, blockOrLatest(tc.arg))
+		})
+	}
+}
