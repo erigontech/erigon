@@ -426,6 +426,7 @@ func (f *ForkChoiceStore) validatePayloadHashFallbackLocked(blockRoot, execution
 		return err
 	}
 	if f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
+		f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
 		return fmt.Errorf("%w: execution payload was invalidated during local payload hash validation", ErrInvalidExecutionPayloadEnvelope)
 	}
 	return nil
@@ -474,6 +475,14 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 	executionBlockHash := envelope.Payload.BlockHash
 	if err := validatePayloadValidationResult(payloadStatus, validationErr); err != nil {
 		return err
+	}
+	if payloadStatus != execution_client.PayloadStatusInvalidated && f.payloadInvalidatedLocked(beaconBlockRoot, executionBlockHash) {
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+		return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
+	}
+	if payloadStatus != execution_client.PayloadStatusValidated && payloadStatus != execution_client.PayloadStatusInvalidated && f.payloadValidatedLocked(beaconBlockRoot, executionBlockHash) {
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, executionBlockHash, execution_client.PayloadStatusValidated)
+		return nil
 	}
 	if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
 		retained := guard.WithRetainedBlock(beaconBlockRoot, func() {
@@ -570,12 +579,14 @@ func (f *ForkChoiceStore) applyTerminalPayloadValidationResultLocked(
 		return true, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, beaconBlockRoot)
 	}
 	if f.payloadInvalidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
 		return true, fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 	}
 	if payloadStatus == execution_client.PayloadStatusValidated {
 		return true, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, beaconBlockRoot)
 	}
 	if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusValidated)
 		return true, nil
 	}
 	return false, nil
