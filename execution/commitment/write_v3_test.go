@@ -308,3 +308,51 @@ func TestHexPatriciaHashedV3KeepsStorageMaskWhenOnlyTheAccountChanges(t *testing
 	require.Equal(t, before, storageMaskOfAccount(t, ms, branched),
 		"an account-only update must not replace the storage mask with the singleton marker")
 }
+
+// A lone slot is hoisted into the account cell and never gets a storage row, so its root exists
+// only as a local inside computeCellHash. The record has nowhere else to read it from.
+func TestHexPatriciaHashedV3RecordsStorageRootForSingleSlotAccount(t *testing.T) {
+	t.Parallel()
+
+	const solo = "ba7a3b7b095d3370c022ca655c790f0c0ead66f5"
+	const other = "8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e"
+
+	cfg := DefaultTrieConfig()
+	cfg.DeferBranchUpdates = false
+	cfg.EdgeRecords = true
+	ms := NewMockState(t)
+	ctx := &edgeRecordContext{MockState: ms}
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(other, 1233).
+		Balance(solo, 5*1e17).
+		Storage(solo, "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "0501").
+		Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	hph := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	defer hph.Release()
+	_, err := hph.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	addr := common.Hex2Bytes(solo)
+	var found bool
+	for key, record := range ms.cm {
+		if BranchData(record).IsTombstone() {
+			continue
+		}
+		var decoded cell
+		_, err := DecodeRecordInto(record, &decoded)
+		require.NoErrorf(t, err, "record %x", key)
+		if decoded.accountAddrLen != length.Addr || !bytes.Equal(decoded.accountAddr[:length.Addr], addr) {
+			continue
+		}
+		found = true
+		require.Equal(t, int16(length.Hash), decoded.hashLen, "the record must carry a storage root")
+		require.NotEqual(t, make([]byte, length.Hash), decoded.hash[:],
+			"a single-slot account must record its storage root, not zeros")
+	}
+	require.True(t, found, "no record for the single-slot account")
+}
