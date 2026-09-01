@@ -171,7 +171,6 @@ func execV3(ctx context.Context,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	defer resetExecGauges(ctx)
-	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
@@ -299,7 +298,6 @@ func execV3Serial(ctx context.Context,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	defer resetExecGauges(ctx)
-	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())

@@ -572,22 +572,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				// finalize) is applied in order; applying a phase before normalizing
 				// the next lets the next phase's stateReader fallback see it.
 				blockNum := b.header.Number.Uint64()
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
 				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
 				isAura := config.Aura != nil
 				for i, ws := range b.blockIO.Outputs() {
@@ -595,9 +580,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 						continue
 					}
 					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if domainKeysErr != nil {
-						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
 					}

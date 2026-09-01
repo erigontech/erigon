@@ -54,7 +54,9 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		}
 		return nil, err
 	}
-	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNumber)
+	// The gate runs before the cache is consulted: availability can move while an
+	// entry is still cached, and a hit must not answer below the advertised boundary.
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -115,17 +117,16 @@ func resolveLogBound(bound *big.Int, def uint64, name string) (uint64, error) {
 }
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
-func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
+func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	if err := crit.ValidateTopicPositions(); err != nil {
 		return nil, err
 	}
 
 	var begin, end uint64
-	erigonLogs := types.ErigonLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return erigonLogs, beginErr
+		return nil, beginErr
 	}
 	defer tx.Rollback()
 
@@ -152,8 +153,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
-	if err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
 		return nil, err
 	}
 
@@ -174,7 +174,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 // Examples:
 // {} or nil          matches any topics list
 // {{A}}              matches topic A in any positions. Logs with {{B}, {A}} will be matched
-func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error) {
+func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.RPCLogs, error) {
 	if logOptions.LogCount != 0 && logOptions.BlockCount != 0 {
 		return nil, errors.New("logs count & block count are ambigious")
 	}
@@ -192,12 +192,13 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: requested %d, maximum %d", errRequestedBlockCountExceedsLimit, logOptions.BlockCount, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	erigonLogs := types.ErigonLogs{}
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
 	if beginErr != nil {
-		return erigonLogs, beginErr
+		return nil, beginErr
 	}
 	defer tx.Rollback()
+
+	rpcLogs := types.RPCLogs{}
 
 	var err error
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
@@ -226,7 +227,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	// Searches the log indices and re-executes, so stored receipts cannot answer for it.
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +243,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	// The Logs should retrieve from latest to oldest order=Descend
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Desc)
 	if err != nil {
-		return erigonLogs, err
+		return nil, err
 	}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
@@ -296,7 +298,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		var blockLogs types.Logs
 
 		if logOptions.BlockCount != 0 && logOptions.BlockCount < blockCount {
-			return erigonLogs, nil
+			return rpcLogs, nil
 		}
 
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
@@ -349,32 +351,25 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, fmt.Errorf("block not found %d", blockNum)
 		}
 		for _, log := range filtered {
-			if api.getLogsMaxResults != 0 && len(erigonLogs) >= api.getLogsMaxResults {
+			if api.getLogsMaxResults != 0 && len(rpcLogs) >= api.getLogsMaxResults {
 				return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, api.getLogsMaxResults), Code: rpc.ErrCodeInvalidParams}
 			}
-			erigonLog := &types.ErigonLog{}
-			erigonLog.BlockNumber = hexutil.Uint64(blockNum)
-			erigonLog.BlockHash = blockHash
 			txi := int(log.TxIndex)
 			if txi >= len(body.Transactions) {
 				return nil, fmt.Errorf("log txIndex %d out of range in block %d with %d txns", txi, blockNum, len(body.Transactions))
 			}
-			erigonLog.TxHash = body.Transactions[txi].Hash()
-			erigonLog.BlockTimestamp = hexutil.Uint64(timestamp)
-			erigonLog.Address = log.Address
-			erigonLog.Topics = log.Topics
-			erigonLog.Data = log.Data
-			erigonLog.Index = log.Index
-			erigonLog.TxIndex = log.TxIndex
-			erigonLog.Removed = log.Removed
-			erigonLogs = append(erigonLogs, erigonLog)
+			rpcLog := &types.RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(timestamp)}
+			rpcLog.BlockNumber = hexutil.Uint64(blockNum)
+			rpcLog.BlockHash = blockHash
+			rpcLog.TxHash = body.Transactions[txi].Hash()
+			rpcLogs = append(rpcLogs, rpcLog)
 		}
 
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
-			return erigonLogs, nil
+			return rpcLogs, nil
 		}
 	}
-	return erigonLogs, nil
+	return rpcLogs, nil
 }
 
 func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]any, error) {
@@ -406,7 +401,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
