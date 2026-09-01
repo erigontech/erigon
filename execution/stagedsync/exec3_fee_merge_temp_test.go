@@ -17,6 +17,8 @@
 package stagedsync
 
 import (
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -59,7 +61,7 @@ func TestRecordFeeMerge_FirstMergeKeepsWorkerWrites(t *testing.T) {
 
 	txOut := feeMergeTestWrites(t, addr, 1)
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, txOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	be.awaitMapReleases()
 
 	require.Same(t, tip, be.blockIO.WriteSet(version.TxIndex),
@@ -76,10 +78,10 @@ func TestRecordFeeMerge_RevalidationReleasesSupersededTemp(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	first := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), first, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), first, feeCreditNew, [2]accounts.Address{addr})
 
 	second := feeMergeTestWrites(t, addr, 3)
-	be.recordFeeMerge(version, first, second, feeCreditNew)
+	be.recordFeeMerge(version, first, second, feeCreditNew, [2]accounts.Address{addr})
 	be.awaitMapReleases()
 
 	require.Same(t, second, be.feeMergeTemp[0].writes)
@@ -95,11 +97,11 @@ func TestRecordFeeMerge_AfterReExecutionKeepsStaleTemp(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	stale := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), stale, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), stale, feeCreditNew, [2]accounts.Address{addr})
 
 	reTxOut := feeMergeTestWrites(t, addr, 4)
 	tip := feeMergeTestWrites(t, addr, 5)
-	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	be.awaitMapReleases()
 
 	require.Same(t, tip, be.feeMergeTemp[0].writes)
@@ -124,7 +126,7 @@ func TestRecordFeeMerge_NoCreditKeepsWorkerWrites(t *testing.T) {
 			be := feeMergeTestExecutor(t)
 			txOut := feeMergeTestWrites(t, addr, 1)
 			be.recordWorkerWrites(version, txOut)
-			be.recordFeeMerge(version, txOut, nil, tc.outcome)
+			be.recordFeeMerge(version, txOut, nil, tc.outcome, [2]accounts.Address{addr})
 
 			require.Same(t, txOut, be.blockIO.WriteSet(version.TxIndex))
 			require.Nil(t, be.creditedWrites(version, txOut),
@@ -146,7 +148,7 @@ func TestRecordWorkerWrites_DropsCreditedTemp(t *testing.T) {
 		"the worker's own output carries no credit")
 
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, txOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	require.Same(t, tip, be.creditedWrites(version, be.blockIO.WriteSet(version.TxIndex)))
 
 	reTxOut := feeMergeTestWrites(t, addr, 3)
@@ -167,7 +169,7 @@ func TestCreditedWrites_PinsVersion(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), tip, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), tip, feeCreditNew, [2]accounts.Address{addr})
 	require.Same(t, tip, be.creditedWrites(version, tip))
 
 	reExecuted := version
@@ -192,10 +194,10 @@ func TestRecordFeeMerge_ReleaseKeepsSharedWrites(t *testing.T) {
 
 	txOut := feeMergeTestWrites(t, shared, 1)
 	temp1 := feeMergeTestWrites(t, fresh, 7)
-	be.recordFeeMerge(version, txOut, temp1, feeCreditNew)
+	be.recordFeeMerge(version, txOut, temp1, feeCreditNew, [2]accounts.Address{shared, fresh})
 
 	tipWrites := feeMergeTestWrites(t, fresh, 9)
-	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew)
+	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew, [2]accounts.Address{shared, fresh})
 	be.awaitMapReleases()
 
 	require.Equal(t, 0, temp1.Count())
@@ -293,4 +295,54 @@ func TestRecordFeeMerge_RetractsHalfOfVanishedCredit(t *testing.T) {
 	require.NotNil(t, findBalance(rebuilt, s.burntAddr), "the half that still applies stays recorded")
 	_, _, ok = r.vm.ReadSelfDestruct(s.coinbase, version.TxIndex+1)
 	require.False(t, ok, "a delete the round no longer emits must not stay in the version map")
+}
+
+func benchFeeDropSets(n int, coinbase accounts.Address) (prev, next *state.WriteSet) {
+	base := &state.WriteSet{}
+	for i := range n {
+		var a common.Address
+		binary.BigEndian.PutUint64(a[12:], uint64(i+1))
+		addr := accounts.InternAddress(a)
+		base.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}})
+		base.SetNonce(addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}})
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[24:], uint64(i+1))
+		key := accounts.InternKey(h)
+		base.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key}})
+	}
+	for _, tip := range []**state.WriteSet{&prev, &next} {
+		ws := &state.WriteSet{}
+		ws.SetBalance(coinbase, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath}})
+		ws.SetAddress(coinbase, &state.VersionedWrite[*accounts.Account]{
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.AddressPath}, Val: &accounts.Account{}})
+		*tip = base.MergeInto(ws)
+	}
+	// The half of the credit this round stopped emitting.
+	prev.SetSelfDestruct(coinbase, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.SelfDestructPath}, Val: true})
+	return prev, next
+}
+
+// BenchmarkDropStaleVersionedWrites sizes the retraction scan against the tx's
+// own write set: the credit it retracts is the same two addresses either way.
+func BenchmarkDropStaleVersionedWrites(b *testing.B) {
+	coinbase := feeMergeTestAddr("0x7777777777777777777777777777777777777777")
+	burnt := feeMergeTestAddr("0x8888888888888888888888888888888888888888")
+	version := state.Version{TxIndex: 0}
+
+	for _, n := range []int{4, 32, 256} {
+		b.Run(fmt.Sprintf("writes=%d", n*3), func(b *testing.B) {
+			be := feeMergeTestExecutor(b)
+			prev, next := benchFeeDropSets(n, coinbase)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				be.dropStaleVersionedWrites(version, prev, next, [2]accounts.Address{coinbase, burnt})
+			}
+		})
+	}
 }
