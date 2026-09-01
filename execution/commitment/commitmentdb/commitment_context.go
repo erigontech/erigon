@@ -1067,17 +1067,13 @@ func (sdc *TrieContext) branchLegacy(pref []byte) ([]byte, kv.Step, error) {
 }
 
 func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
-	legacy, legacyStep, err := sdc.readDomain(kv.CommitmentDomain, pref)
-	if err != nil {
-		return nil, 0, [16]uint16{}, 0, err
-	}
-	if bytes.Equal(pref, commitment.KeyCommitmentState) && isCommitmentStateValue(legacy) {
-		legacy = nil
-	}
-
+	// No legacy read here: a v3 node is addressed only by its child records. Reading pref would
+	// also be wrong, not just wasteful, because a compact node key and a v3 child key can be the
+	// same bytes -- HexToCompact([8, n]) equals the root's child key for nibble n.
 	var records [16][]byte
 	var recordsPresent uint16
 	var recordsStep kv.Step
+	var err error
 	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
 	if reader, ok := sdc.stateReader.(CommitmentRecordsReader); ok {
 		records, recordsPresent, recordsStep, err = reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
@@ -1086,17 +1082,14 @@ func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]
 		}
 	}
 	sdc.applyLocalEdgeWrites(nodeKey, mask, maskKnown, &records, &recordsPresent)
-	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, legacy)
+	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, nil)
 	if err != nil {
 		return nil, 0, [16]uint16{}, 0, err
-	}
-	if recordsStep > legacyStep {
-		legacyStep = recordsStep
 	}
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, read.Data)
 	}
-	return bytes.Clone(read.Data), legacyStep, read.ChildMasks, read.ChildMasksKnown, nil
+	return bytes.Clone(read.Data), recordsStep, read.ChildMasks, read.ChildMasksKnown, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
