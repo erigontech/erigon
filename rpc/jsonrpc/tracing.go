@@ -296,7 +296,8 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
-func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return err
 	}

@@ -385,6 +385,13 @@ func WithSentryProtocol(protocol uint) Option {
 	}
 }
 
+// WithStateTransitionObserver exposes execution lifecycle boundaries to tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Option {
+	return func(opts *options) {
+		opts.stateTransitionObserver = observer
+	}
+}
+
 type options struct {
 	stepSize                      *uint64
 	e2RetireStep                  *uint64
@@ -400,6 +407,7 @@ type options struct {
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
 	sentryProtocol                uint
+	stateTransitionObserver       execmodule.StateTransitionObserver
 	skipAmsterdamBuilderContracts bool
 }
 
@@ -524,7 +532,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	dbOpts := []temporaltest.Option{temporaltest.WithReorgBlockDepth(cfg.Sync.MaxReorgDepth)}
+	var dbOpts []temporaltest.Option
 	if opt.stepSize != nil {
 		dbOpts = append(dbOpts, temporaltest.WithStepSize(*opt.stepSize))
 	}
@@ -792,6 +800,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		false, /* onlySnapDownloadOnStart */
 		readAheader,
 		func() error { return nil },
+		execmodule.WithStateTransitionObserver(opt.stateTransitionObserver),
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 

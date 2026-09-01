@@ -622,7 +622,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	require.NoError(t, err)
 	t.Cleanup(func() { tx.Rollback() })
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	doms.SetDisableInlineTouchKey(true) // as parallel exec does: the calculator owns Updates
@@ -687,7 +687,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 			accountValues[string(addrBytes)] = buf
 		}
 		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
-		bList = append(bList, &types.AccountChanges{
+		bList = append(bList, types.AccountChanges{
 			Address:        accounts.InternAddress([20]byte(addrBytes)),
 			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
 			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},

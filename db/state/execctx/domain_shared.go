@@ -297,12 +297,9 @@ type SharedDomains struct {
 	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
 	changesetMu sync.Mutex
 
-	// branchCache is the aggregator-scope commitment-branch cache. It sits
-	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
-	// both miss, before the aggTx files/MDBX read), so writers' in-flight
-	// bytes always mask the cache and cross-SD pollution is impossible.
-	// May be nil for test setups whose AggTx doesn't implement
-	// commitment.BranchCacheProvider.
+	// branchCache is the aggregator-scoped commitment cache consulted after local
+	// and parent memory. It is nil when the shared branch cache is disabled or
+	// unavailable.
 	branchCache *commitment.BranchCache
 
 	// collector is the process-level KV-read metrics collector (aggregator
@@ -402,6 +399,12 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
 	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
 		sd.adaptivePinController = p.AdaptivePinController()
+	}
+
+	// After adaptivePinController is assigned: the wrapper binds it, and the
+	// bare sdCtx call would not.
+	if o.paraTrieDB != nil {
+		sd.EnableParaTrieDB(o.paraTrieDB)
 	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
@@ -535,7 +538,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
 }
 
@@ -557,7 +560,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	switcher, ok := sd.mem.(changesetSwitcher)
 	if !ok {
-		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 		return err
 	}
 
@@ -581,7 +584,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// see concurrency contract on the wrappers above.
 		defer sd.SwapCommitmentDiffLocked(cs)()
 
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
 			return err
 		}
 
@@ -590,7 +593,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 
 	// No past changeset found — write into whatever is current.
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
 	return err
 }
 
@@ -877,6 +880,13 @@ func (sd *SharedDomains) stageCacheUnwind(txNumUnwindTo uint64) {
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
 func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
+
+// GetLatestFromMemory reads local and parent memory. On a miss, maxStep is the
+// upper bound that a fallback read must honor.
+func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool) {
+	v, _, maxStep, ok = sd.latestFromMem(domain, key)
+	return v, maxStep, ok
+}
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before
