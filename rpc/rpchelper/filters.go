@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -760,21 +759,9 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	if err := criteria.ValidateTopicPositions(); err != nil {
 		return nil, "", err
 	}
-	if max := ff.config.RpcSubscriptionFiltersMaxAddresses; max > 0 && len(criteria.Addresses) > max {
-		return nil, "", &rpc.InvalidParamsError{
-			Message: fmt.Sprintf("log filter has %d addresses, maximum is %d", len(criteria.Addresses), max),
-		}
-	}
-	if max := ff.config.RpcSubscriptionFiltersMaxTopics; max > 0 {
-		topicCount := 0
-		for _, topics := range criteria.Topics {
-			topicCount += len(topics)
-		}
-		if topicCount > max {
-			return nil, "", &rpc.InvalidParamsError{
-				Message: fmt.Sprintf("log filter has %d topic alternatives, maximum is %d", topicCount, max),
-			}
-		}
+	limits := ff.config.logFilterLimits()
+	if err := limits.Validate(criteria); err != nil {
+		return nil, "", err
 	}
 	var pollingCriteria *filters.FilterCriteria
 	if protocol == ProtocolHTTP {

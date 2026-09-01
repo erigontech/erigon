@@ -17,7 +17,11 @@
 package rpchelper
 
 import (
+	"fmt"
 	"time"
+
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 // DefaultFilterTimeout matches geth's deadline for evicting idle filters; 0 disables eviction.
@@ -32,6 +36,41 @@ type FiltersConfig struct {
 	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses accepted per log subscription. Default: 0 (no limit)
 	RpcSubscriptionFiltersMaxTopics    int           // Maximum topic alternatives accepted across all positions per log subscription. Default: 0 (no limit)
 	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
+}
+
+// LogFilterLimits defines configured resource limits for log subscriptions.
+type LogFilterLimits struct {
+	MaxAddresses         int
+	MaxTopicAlternatives int
+}
+
+func (limits LogFilterLimits) Validate(criteria filters.FilterCriteria) error {
+	if limits.MaxAddresses > 0 && len(criteria.Addresses) > limits.MaxAddresses {
+		return &rpc.InvalidParamsError{
+			Message: fmt.Sprintf("log filter has %d addresses, maximum is %d", len(criteria.Addresses), limits.MaxAddresses),
+		}
+	}
+	if limits.MaxTopicAlternatives <= 0 {
+		return nil
+	}
+
+	topicCount := 0
+	for _, topics := range criteria.Topics {
+		topicCount += len(topics)
+	}
+	if topicCount > limits.MaxTopicAlternatives {
+		return &rpc.InvalidParamsError{
+			Message: fmt.Sprintf("log filter has %d topic alternatives, maximum is %d", topicCount, limits.MaxTopicAlternatives),
+		}
+	}
+	return nil
+}
+
+func (config FiltersConfig) logFilterLimits() LogFilterLimits {
+	return LogFilterLimits{
+		MaxAddresses:         config.RpcSubscriptionFiltersMaxAddresses,
+		MaxTopicAlternatives: config.RpcSubscriptionFiltersMaxTopics,
+	}
 }
 
 // DefaultFiltersConfig defines the default settings for filter configurations.

@@ -13,8 +13,6 @@ integration print_stages
 integration stage_senders
 integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
-integration stage_exec --limit=100 # execute at most 100 blocks past Execution progress
-integration stage_exec --experimental.parallel-commitment # use the parallel commitment trie
 integration stage_exec --sync.mode.chaintip # every block: `ComputeCommitment`, `rwtx.Commit()`, write diffs/changesets
 
 # Unwind single stage 10 blocks backward
@@ -56,15 +54,6 @@ For example:
 --block # stop at exact blocks
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 ```
-
-`--block` is an absolute upper bound. When it is omitted, `stage_exec` targets the current
-`Senders` progress; it never runs beyond that progress. `--limit` is relative to the current
-`Execution` progress and limits how many blocks are processed in this invocation. A value of
-`0` means no relative limit, and a lower `--block` value still takes precedence.
-
-`stage_exec` writes CPU, fgprof, heap, and mutex profiles to `<datadir>/temp` at the end of
-the run. The `--experimental.parallel-commitment` flag selects the parallel commitment trie
-for this command.
 
 ## How to unwind node
 

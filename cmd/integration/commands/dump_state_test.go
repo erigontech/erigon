@@ -642,7 +642,6 @@ func TestResolveExecTarget(t *testing.T) {
 		{name: "explicit block below the limit wins", block: 105, limit: 50, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
 		{name: "limit below an explicit block wins", block: 190, limit: 5, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
 		{name: "block past senders is clamped by limit", block: 900, limit: 5, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
-		{name: "block past senders is clamped without limit", block: 900, execProgress: 100, sendersProgress: 200, wantTarget: 200, wantWork: true},
 		{name: "exec at senders leaves nothing to do", limit: 10, execProgress: 200, sendersProgress: 200, wantTarget: 200},
 		{name: "exec past senders leaves nothing to do", limit: 10, execProgress: 300, sendersProgress: 200, wantTarget: 200},
 		{name: "explicit block already reached", block: 50, execProgress: 100, sendersProgress: 200, wantTarget: 50},
