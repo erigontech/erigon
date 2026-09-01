@@ -99,19 +99,17 @@ var cmdCompareStates = &cobra.Command{
 
 var cmdMdbxToMdbx = &cobra.Command{
 	Use:          "mdbx_to_mdbx",
-	Short:        "compact every mdbx db of '--datadir' in place. With '--chaindata.to': copy '--chaindata' there instead",
+	Short:        "copy data from '--chaindata' to '--chaindata.to'",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		logger := debug.SetupCobra(cmd, "integration")
 
-		var err error
 		if toChaindata == "" {
-			err = backup.CompactDatadir(ctx, datadir.Open(datadirCli), logger)
-		} else {
-			from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
-			err = backup.Kv2kv(ctx, from, to, nil, dbcfg.ChainDB, logger)
+			return errors.New("--chaindata.to is required: it names the db to copy --chaindata into")
 		}
+		from, to := backup.OpenPair(chaindata, toChaindata, dbcfg.ChainDB, 0, logger)
+		err := backup.Kv2kv(ctx, from, to, nil, logger)
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}

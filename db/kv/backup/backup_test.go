@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -218,9 +219,18 @@ func TestCompactInPlace(t *testing.T) {
 	}
 	db.Close()
 
+	dataFile := filepath.Join(dbDir, dataFileName)
+	require.NoError(t, os.Chmod(dataFile, 0600))
+	beforeStat, err := os.Stat(dataFile)
+	require.NoError(t, err)
+
 	before := mdbxFileSize(t, dbDir)
 	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
 	require.Less(t, mdbxFileSize(t, dbDir), before)
+
+	afterStat, err := os.Stat(dataFile)
+	require.NoError(t, err)
+	require.Equal(t, beforeStat.Mode().Perm(), afterStat.Mode().Perm())
 
 	db = open()
 	defer db.Close()
@@ -252,4 +262,40 @@ func TestCompactInPlace(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+// TestDatadirDBs pins the three rules of the datadir scan: a db is found by its
+// mdbx.dat, the label comes from the root it sits under, and the walk reaches
+// caplin/blobs/chaindata.
+func TestDatadirDBs(t *testing.T) {
+	root := t.TempDir()
+	mkDB := func(parts ...string) string {
+		p := filepath.Join(append([]string{root}, parts...)...)
+		require.NoError(t, os.MkdirAll(p, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(p, dataFileName), nil, 0644))
+		return p
+	}
+	chaindata := mkDB("chaindata")
+	txpool := mkDB("txpool")
+	nodes := mkDB("nodes", "eth68")
+	blobs := mkDB("caplin", "blobs", "chaindata")
+	indexing := mkDB("caplin", "indexing")
+
+	// A staging dir lives inside a db whose own mdbx.dat stops the walk above it.
+	mkDB("chaindata", compactDirName)
+
+	found, err := datadirDBs(datadir.Open(root))
+	require.NoError(t, err)
+
+	got := map[string]kv.Label{}
+	for _, db := range found {
+		got[db.path] = db.label
+	}
+	require.Equal(t, map[string]kv.Label{
+		chaindata: dbcfg.ChainDB,
+		txpool:    dbcfg.TxPoolDB,
+		nodes:     dbcfg.SentryDB,
+		blobs:     dbcfg.CaplinDB,
+		indexing:  dbcfg.CaplinDB,
+	}, got)
 }

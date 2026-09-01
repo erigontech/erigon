@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,7 +39,7 @@ const maxDBDepth = 2
 
 // datadirDBs finds the mdbx databases of a datadir. It only descends into the
 // top-level dirs erigon puts a db under - never into snapshots/ or temp/ - and
-// takes the label from that dir, so each copy is sized like the node sizes it.
+// takes the label from that dir.
 func datadirDBs(dirs datadir.Dirs) ([]datadirDB, error) {
 	roots := []datadirDB{
 		{dirs.Chaindata, dbcfg.ChainDB},
@@ -61,9 +60,6 @@ func datadirDBs(dirs datadir.Dirs) ([]datadirDB, error) {
 }
 
 func findDBs(path string, label kv.Label, depth int, found *[]datadirDB) error {
-	if strings.HasSuffix(path, compactDirSuffix) { // leftover of an interrupted run - CompactInPlace deletes it
-		return nil
-	}
 	exists, err := dir.FileExist(filepath.Join(path, dataFileName))
 	if err != nil {
 		return err

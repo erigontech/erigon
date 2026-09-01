@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -29,9 +29,8 @@ import (
 )
 
 var dbCommand = cli.Command{
-	Name:    "db",
-	Aliases: []string{"database"},
-	Usage:   "Managing the mdbx databases of a datadir",
+	Name:  "db",
+	Usage: "Managing the mdbx databases of a datadir",
 	Commands: []*cli.Command{
 		{
 			Name:  "compact",
