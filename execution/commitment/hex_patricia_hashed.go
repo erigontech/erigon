@@ -1533,6 +1533,8 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		nibble := bits.TrailingZeros16(bit)
 		hph.grid[row][nibble].branchMask = childMasks[nibble]
 		hph.grid[row][nibble].branchMaskKnown = true
+		// One record field carries both: a branch child's mask and a fused account's storage mask.
+		hph.grid[row][nibble].storageMask = childMasks[nibble]
 		bitset ^= bit
 	}
 	hph.depths[hph.activeRows] = depth

@@ -237,3 +237,74 @@ func TestHexPatriciaHashedV3WritesStorageMaskToAccountEdge(t *testing.T) {
 	require.Equal(t, 3, bits.OnesCount16(seen[branched]), "the branched account must carry a three-child storage mask")
 	require.Zero(t, seen[singleton], "a single-slot account must keep the zero mask that marks a singleton")
 }
+
+func storageMaskOfAccount(t *testing.T, ms *MockState, addrHex string) uint16 {
+	t.Helper()
+
+	addr := common.Hex2Bytes(addrHex)
+	for key, record := range ms.cm {
+		if BranchData(record).IsTombstone() {
+			continue
+		}
+		var decoded cell
+		if _, err := DecodeRecordInto(record, &decoded); err != nil {
+			t.Fatalf("record %x: %v", key, err)
+		}
+		if decoded.accountAddrLen == length.Addr && bytes.Equal(decoded.accountAddr[:length.Addr], addr) {
+			return decoded.storageMask
+		}
+	}
+	t.Fatalf("no account record for %s", addrHex)
+	return 0
+}
+
+// A later batch that touches only the account never unfolds its storage subtree, so the fused
+// record is rewritten from a grid cell the unfold populated. A mask that is not restored there
+// comes back as zero, which is the value reserved for a singleton slot.
+func TestHexPatriciaHashedV3KeepsStorageMaskWhenOnlyTheAccountChanges(t *testing.T) {
+	t.Parallel()
+
+	const branched = "8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e"
+	const other = "ba7a3b7b095d3370c022ca655c790f0c0ead66f5"
+
+	cfg := DefaultTrieConfig()
+	cfg.DeferBranchUpdates = false
+	cfg.EdgeRecords = true
+	ms := NewMockState(t)
+	ctx := &edgeRecordContext{MockState: ms}
+
+	keys1, updates1 := NewUpdateBuilder().
+		Balance(branched, 1233).
+		Storage(branched, "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Storage(branched, "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "0402").
+		Storage(branched, "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "0403").
+		Balance(other, 5*1e17).
+		Build()
+
+	hph := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	defer hph.Release()
+	require.NoError(t, ms.applyPlainUpdates(keys1, updates1))
+	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys1, updates1)
+	_, err := hph.Process(context.Background(), upds1, "", nil, WarmupConfig{})
+	upds1.Close()
+	require.NoError(t, err)
+
+	before := storageMaskOfAccount(t, ms, branched)
+	require.Equal(t, 3, bits.OnesCount16(before), "the account starts out with a three-slot storage mask")
+
+	blob, err := hph.EncodeCurrentState(nil)
+	require.NoError(t, err)
+
+	keys2, updates2 := NewUpdateBuilder().Balance(branched, 4321).Build()
+	restored := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	defer restored.Release()
+	require.NoError(t, restored.SetState(blob))
+	require.NoError(t, ms.applyPlainUpdates(keys2, updates2))
+	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys2, updates2)
+	_, err = restored.Process(context.Background(), upds2, "", nil, WarmupConfig{})
+	upds2.Close()
+	require.NoError(t, err)
+
+	require.Equal(t, before, storageMaskOfAccount(t, ms, branched),
+		"an account-only update must not replace the storage mask with the singleton marker")
+}
