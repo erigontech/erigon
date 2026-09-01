@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -77,4 +78,152 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 	_, ok, err := ibs.GetDelegatedDesignation(addr)
 	require.NoError(t, err)
 	assert.False(t, ok, "an empty-codehash account must not read as 7702-delegated")
+}
+
+// committedCodeIBS builds a noMaterialize IBS over one committed contract with
+// its CodePath read set warmed. accountHash, when set, makes the account record
+// disagree with the CodeDomain bytes.
+func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash) (*IntraBlockState, accounts.Address) {
+	tb.Helper()
+
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	code := make([]byte, codeLen)
+	for i := range code {
+		code[i] = byte(i)
+	}
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.Balance.SetUint64(1000)
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	if accountHash != nil {
+		acc.CodeHash = *accountHash
+	}
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: code}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 5)
+	ibs.SetVersion(0)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(tb, err)
+	require.Len(tb, got, codeLen)
+
+	return ibs, addr
+}
+
+// BenchmarkGetStateObjectAfterCodeRead measures the rebuild every account-field
+// read falls through to. Cost growing with code size means the bytes are hashed.
+func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
+	for _, codeLen := range []int{32, 1024, 24576} {
+		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
+			ibs, addr := committedCodeIBS(b, codeLen, nil)
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := ibs.getStateObject(addr, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// TestCommittedCodeHashComesFromAccountRecord pins the account record as the
+// authority for committed code. The CodeDomain is keyed by address, so it can
+// hold bytes the account no longer owns — a cleared 7702 delegation leaves them.
+func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
+	t.Run("account hash agrees with the bytes", func(t *testing.T) {
+		ibs, addr := committedCodeIBS(t, 4096, nil)
+
+		so, err := ibs.getStateObject(addr, false)
+		require.NoError(t, err)
+		require.NotNil(t, so)
+
+		expected := accounts.InternCodeHash(crypto.Keccak256Hash(so.code.Bytes))
+		require.Equal(t, expected, so.data.CodeHash)
+		require.Equal(t, expected, so.code.Hash)
+	})
+
+	t.Run("stale CodeDomain bytes do not override the account hash", func(t *testing.T) {
+		stale := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xDE, 0xAD}))
+		ibs, addr := committedCodeIBS(t, 4096, &stale)
+
+		so, err := ibs.getStateObject(addr, false)
+		require.NoError(t, err)
+		require.NotNil(t, so)
+
+		require.Equal(t, stale, so.data.CodeHash, "account record must stay authoritative")
+		require.Equal(t, stale, so.code.Hash)
+		require.Equal(t, stale, so.original.CodeHash)
+	})
+}
+
+// TestPriorTxCodeWriteHashComesFromTheCell pins the cell as the authority for a
+// prior-tx code write, so its hash is used rather than derived from its bytes.
+func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}
+	cellHash := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xBE, 0xEF}))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.EmptyCodeHash
+
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Hash: cellHash, Bytes: priorCode}, true)
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 7)
+	ibs.SetVersion(0)
+
+	so, err := ibs.getStateObject(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+
+	require.Equal(t, priorCode, so.code.Bytes)
+	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
+	require.Equal(t, cellHash, so.data.CodeHash)
+}
+
+// TestPriorTxCodeWriteHashSurvivesReadSetHit pins the same authority once the
+// read is already recorded. A dirty address bypasses the read-once gate, so the
+// rebuild re-probes the version map and lands on the read-set hit instead.
+func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}
+	cellHash := accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xBE, 0xEF}))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0xFE, 0xED}))
+
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Hash: cellHash, Bytes: priorCode}, true)
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 7)
+	ibs.SetVersion(0)
+
+	got, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Equal(t, priorCode, got)
+
+	tr, ok := ibs.versionedReads.GetCode(addr)
+	require.True(t, ok, "the first read must be recorded")
+	require.Equal(t, MapRead, tr.Source)
+
+	ibs.journal.dirties[addr] = 1
+
+	so, err := ibs.getStateObject(addr, false)
+	require.NoError(t, err)
+	require.NotNil(t, so)
+
+	require.Equal(t, priorCode, so.code.Bytes)
+	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
+	require.Equal(t, cellHash, so.data.CodeHash)
 }

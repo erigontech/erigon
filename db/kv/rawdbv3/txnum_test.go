@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -34,7 +35,7 @@ import (
 func TestTxNum(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	err := db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -87,7 +88,7 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 	const txPerBlock = 5
 
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(b, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.New()), dirs.Chaindata).MustOpen()
 	b.Cleanup(db.Close)
 	ctx := context.Background()
 
@@ -173,4 +174,25 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 			c.Close()
 		}
 	})
+}
+
+func TestMaxTxNumNilCursor(t *testing.T) {
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+
+	require.NoError(db.Update(t.Context(), func(tx kv.RwTx) error {
+		require.NoError(TxNums.Append(tx, 0, 3))
+		require.NoError(TxNums.Append(tx, 1, 99))
+		return nil
+	}))
+
+	require.NoError(db.View(t.Context(), func(tx kv.Tx) error {
+		maxTxNum, ok, err := DefaultTxBlockIndexInstance.MaxTxNum(t.Context(), tx, nil, 1)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(99, int(maxTxNum))
+		return nil
+	}))
 }

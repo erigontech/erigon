@@ -127,14 +127,14 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		ac := &bal[i]
 		entry := &types.AccountChanges{
 			Address:        accounts.InternAddress(ac.Address),
-			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
+			StorageChanges: make([]types.SlotChanges, 0, len(ac.StorageChanges)),
 			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
 			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
 			NonceChanges:   make([]*types.NonceChange, 0, len(ac.NonceChanges)),
 			CodeChanges:    make([]*types.CodeChange, 0, len(ac.CodeChanges)),
 		}
 		for _, sc := range ac.StorageChanges {
-			slotChanges := &types.SlotChanges{
+			slotChanges := types.SlotChanges{
 				Slot:    accounts.InternKey(common.BytesToHash(sc.Slot)),
 				Changes: make([]*types.StorageChange, 0, len(sc.SlotChanges)),
 			}
@@ -167,7 +167,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 				Bytecode: cc.NewCode,
 			})
 		}
-		result[i] = entry
+		result[i] = *entry
 	}
 	return result
 }
@@ -356,16 +356,13 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
-		var balBytes []byte
+		var bal types.BlockAccessList
 		if len(b.BlockAccessList) > 0 {
-			bal := b.BlockAccessList.toBAL()
-			balBytes, err = types.EncodeBlockAccessListBytes(bal)
-			if err != nil {
-				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
-			}
+			bal = b.BlockAccessList.toBAL()
 		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
+		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), types.NewBlockAccessListSidecar(bal))
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
 		var previousHead *types.Header
 		if b.BlockHeader == nil {
 			previousHead, err = m.ExecModule.CurrentHeader(m.Ctx)

@@ -41,7 +41,7 @@ const (
 	// DefaultCodeCacheBytes is the byte limit for the code cache.
 	DefaultCodeCacheBytes = 512 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
-	DefaultAddrCacheBytes = 16 * datasize.MB
+	DefaultAddrCacheBytes = 32 * datasize.MB
 	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
 	// cache (code size answers without loading bytes for
 	// EXTCODESIZE / EXTCODEHASH callers).
@@ -364,17 +364,25 @@ func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, co
 // EVM-known codeHash is already known. Eviction is LRU; freshly seen addrs
 // replace coldest entries.
 func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
+	h, _, ok := c.GetAddrCodeHashWithTxNum(addr)
+	return h, ok
+}
+
+// GetAddrCodeHashWithTxNum is GetAddrCodeHash plus the txNum of the
+// addr→codeHash mapping. A caller that uses the hash to bind cached code to
+// the address must preserve this stamp so unwind invalidation remains correct.
+func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, bool) {
 	k := common.BytesToAddress(addr)
 	coh := c.coh.Snapshot()
 	e, ok := c.addrToCodeHash.Get(k)
 	if !ok {
-		return [32]byte{}, false
+		return [32]byte{}, 0, false
 	}
 	if coh.IsStale(e.txNum, e.epoch) {
 		c.addrToCodeHash.Remove(k)
-		return [32]byte{}, false
+		return [32]byte{}, 0, false
 	}
-	return e.hash, true
+	return e.hash, e.txNum, true
 }
 
 // PutAddrCodeHash records a committed-state addr → codeHash mapping. An
@@ -559,7 +567,9 @@ func (c *CodeCache) putCodeSizeByCodeHashLocked(codeHash []byte, size int, hcs, 
 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
+	c.addrBindMu.Lock()
 	c.addrToHash.Remove(common.BytesToAddress(addr))
+	c.addrBindMu.Unlock()
 }
 
 // Clear removes every layer, resets accounting, and starts a new coherence

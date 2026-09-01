@@ -54,12 +54,17 @@ func init() {
 		With("proposer_lookahead", ProposerLookaheadTest).
 		With("historical_summaries_update", historicalSummariesUpdateTest).
 		With("builder_pending_payments", builderPendingPaymentsTest).
+		With("pending_deposits_churn", pendingDepositTest).
 		With("ptc_window", ptcWindowTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
 		With("get_head", &ForkChoice{}).
 		With("on_block", &ForkChoice{}).
+		With("on_attestation", &ForkChoice{}).
+		With("on_payload_attestation_message", &ForkChoice{}).
+		With("payload_data_availability", &ForkChoice{}).
+		With("payload_timeliness", &ForkChoice{}).
 		With("on_merge_block", &ForkChoice{}).
 		With("ex_ante", &ForkChoice{}).
 		With("on_execution_payload_envelope", &ForkChoice{}).
@@ -82,6 +87,7 @@ func init() {
 		WithFn("block_header", operationBlockHeaderHandler).
 		WithFn("deposit", operationDepositHandler).
 		WithFn("voluntary_exit", operationVoluntaryExitHandler).
+		WithFn("voluntary_exit_churn", operationVoluntaryExitHandler).
 		WithFn("sync_aggregate", operationSyncAggregateHandler).
 		WithFn("withdrawals", operationWithdrawalHandler).
 		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
@@ -116,7 +122,10 @@ func init() {
 		WithFn("compute_columns_for_custody_group", TestComputeColumnsForCustodyGroup).
 		WithFn("get_custody_groups", TestGetCustodyGroups).
 		WithFn("gossip_attester_slashing", gossipAttesterSlashingHandler).
-		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler)
+		WithFn("gossip_bls_to_execution_change", gossipBLSToExecutionChangeHandler).
+		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler).
+		WithFn("gossip_sync_committee_message", gossipSyncCommitteeMessageHandler).
+		WithFn("gossip_sync_committee_contribution_and_proof", gossipSyncContributionHandler)
 
 	addSszTests()
 }
@@ -206,7 +215,9 @@ func addSszTests() {
 		)).
 		With("Attestation", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *solid.Attestation {
-				return &solid.Attestation{}
+				attestation := &solid.Attestation{}
+				attestation.SetVersion(v)
+				return attestation
 			}, withTestJson(),
 		)).
 		With("SyncCommitteeMessage", sszStaticTestByEmptyObject(&cltypes.SyncCommitteeMessage{}, withTestJson())).
@@ -278,10 +289,11 @@ func addSszTests() {
 		With("SignedProposerPreferences", sszStaticTestByEmptyObject(&cltypes.SignedProposerPreferences{
 			Message: &cltypes.ProposerPreferences{},
 		}, runAfterVersion(clparams.GloasVersion))).
-		// Types with fixtures but no Go SSZ implementation
-		With("DepositMessage", spectest.UnimplementedHandler).
-		With("ForkData", spectest.UnimplementedHandler).
+		With("DepositMessage", sszStaticTestByEmptyObject(&depositMessage{})).
+		With("Eth1Block", sszStaticTestByEmptyObject(&validatorEth1Block{})).
+		With("ForkData", sszStaticTestByEmptyObject(&forkData{})).
 		With("HistoricalBatch", spectest.UnimplementedHandler).
-		With("PowBlock", spectest.UnimplementedHandler).
-		With("SigningData", spectest.UnimplementedHandler)
+		With("PartialDataColumnGroupID", sszStaticTestByEmptyObject(&partialDataColumnGroupID{})).
+		With("PowBlock", sszStaticTestByEmptyObject(&powBlock{})).
+		With("SigningData", sszStaticTestByEmptyObject(&signingData{}))
 }

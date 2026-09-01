@@ -45,9 +45,7 @@ func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	//if cast, ok := b.(*sortableBuffer); ok {
-	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
-	//}
+	b.Reset() // return the buffer's chunks to the pool now — see dataChunks in buffers.go
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
@@ -96,6 +94,12 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
+	if len(k) > MaxKeyLen {
+		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
+	}
+	if len(v) > MaxValLen {
+		return fmt.Errorf("%s: value of %d bytes exceeds %d", c.logPrefix, len(v), MaxValLen)
+	}
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
@@ -107,7 +111,8 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	return c.flushBuffer(false)
 }
 
-// Collect does copy `k` and `v`
+// Collect does copy `k` and `v`. It errors on a key over MaxKeyLen or a value
+// over MaxValLen - the spill format cannot spell either.
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
@@ -263,6 +268,14 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 }
 
 func (c *Collector) Close() {
+	// Providers first: a KeepInRAM one reads straight from `buf`, whose chunks
+	// Reset hands to a pool that other collectors draw from.
+	if c.dataProviders != nil { //idempotency
+		for _, p := range c.dataProviders {
+			p.Dispose()
+		}
+		c.dataProviders = nil
+	}
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
@@ -270,12 +283,6 @@ func (c *Collector) Close() {
 		} else {
 			c.buf.Reset()
 		}
-	}
-	if c.dataProviders != nil { //idempotency
-		for _, p := range c.dataProviders {
-			p.Dispose()
-		}
-		c.dataProviders = nil
 	}
 	c.allFlushed = false
 }
@@ -324,17 +331,18 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		// SortableOldestAppearedBuffer must guarantee that only 1 oldest value of key will appear
 		// but because size of buffer is limited - each flushed file does guarantee "oldest appeared"
 		// property, but files may overlap. files are sorted, just skip repeated keys here
-		if args.BufferType == SortableOldestAppearedBuffer {
+		switch args.BufferType {
+		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
+				if err := loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
 				prevK = element.Key
 			}
-		} else if args.BufferType == SortableAppendBuffer {
+		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
+					if err := loadFunc(prevK, prevV); err != nil {
 						return err
 					}
 				}
@@ -343,8 +351,8 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
-		} else {
-			if err = loadFunc(element.Key, element.Value); err != nil {
+		default:
+			if err := loadFunc(element.Key, element.Value); err != nil {
 				return err
 			}
 		}
@@ -358,7 +366,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 	if args.BufferType == SortableAppendBuffer {
 		if prevK != nil {
-			if err = loadFunc(prevK, prevV); err != nil {
+			if err := loadFunc(prevK, prevV); err != nil {
 				return err
 			}
 		}
@@ -369,13 +377,14 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 
 func makeCurrentKeyStr(k []byte) string {
 	var currentKeyStr string
-	if k == nil {
+	switch {
+	case k == nil:
 		currentKeyStr = "final"
-	} else if len(k) < 4 {
+	case len(k) < 4:
 		currentKeyStr = hex.EncodeToString(k)
-	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
+	case k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8: // if key has leading zeroes, show a bit more info
 		currentKeyStr = hex.EncodeToString(k)
-	} else {
+	default:
 		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr

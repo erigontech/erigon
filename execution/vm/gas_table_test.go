@@ -36,20 +36,18 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -64,8 +62,8 @@ func TestMemoryGasCost(t *testing.T) {
 	}
 	for i, tt := range tests {
 		v, err := vm.MemoryGasCost(&vm.CallContext{}, tt.size)
-		if (err == vm.ErrGasUintOverflow) != tt.overflow {
-			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == vm.ErrGasUintOverflow, tt.overflow)
+		if errors.Is(err, vm.ErrGasUintOverflow) != tt.overflow {
+			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, errors.Is(err, vm.ErrGasUintOverflow), tt.overflow)
 		}
 		if v != tt.cost {
 			t.Errorf("test %d: gas cost mismatch: have %v, want %v", i, v, tt.cost)
@@ -127,14 +125,14 @@ func TestEIP2200(t *testing.T) {
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			s.CreateAccount(address, true)
-			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
-			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
+			require.NoError(t, s.CreateAccount(address, true))
+			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
+			require.NoError(t, s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
 
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
@@ -170,8 +168,8 @@ var eip8038SStoreTests = []struct {
 	original byte
 	input    string
 	// gas used in each dimension and the accumulated refund, computed from the
-	// EIP-8038 SSTORE matrix (cold slot 3000, STORAGE_WRITE 10000, per-slot state
-	// gas 97920, clear refund 12480, restore refund = STORAGE_WRITE).
+	// EIP-8038 SSTORE matrix (cold slot 2100, STORAGE_WRITE 10000, per-slot state
+	// gas 97920, clear refund 11616, restore refund = STORAGE_WRITE).
 	usedExecution uint64
 	usedState     uint64
 	refund        uint64
@@ -185,12 +183,12 @@ var eip8038SStoreTests = []struct {
 		usedState:     params.StateGasPerStorageSet,
 	},
 	{
-		// 1 -> 0: delete slot. cold access + STORAGE_WRITE execution, 12480 clear refund.
+		// 1 -> 0: delete slot. cold access + STORAGE_WRITE execution, 11616 clear refund.
 		name:          "delete slot adds clear refund",
 		original:      1,
 		input:         "0x6000600055",
 		usedExecution: 2*push1 + params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038,
-		refund:        12480, // REFUND_STORAGE_CLEAR
+		refund:        11_616,
 	},
 	{
 		// 1 -> 2 -> 1: reset to original (existing) refunds the full STORAGE_WRITE.
@@ -218,7 +216,7 @@ var eip8038SStoreTests = []struct {
 }
 
 // TestEIP8038SStore pins the EIP-8038 SSTORE gas matrix (repriced cold access and
-// STORAGE_WRITE, the split execution/state dimensions on slot creation, and the 12480
+// STORAGE_WRITE, the split execution/state dimensions on slot creation, and the 11616
 // clear / full STORAGE_WRITE restore refunds) so a regression in any of those
 // constants surfaces here. Behaviour is already validated end-to-end by the devnet
 // spec shards; this locks it in cheaply at the unit level.
@@ -229,13 +227,13 @@ func TestEIP8038SStore(t *testing.T) {
 			tx, sd := testTemporalTxSD(t)
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			s.CreateAccount(address, true)
-			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
-			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
+			require.NoError(t, s.CreateAccount(address, true))
+			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified))
+			require.NoError(t, s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original))))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -262,9 +260,9 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 		expectRead bool
 		expectErr  bool
 	}{
-		{name: "stipend plus one", gas: params.SstoreSentryGasEIP2200 + 1, expectErr: true},
+		{name: "stipend plus one", gas: params.SstoreSentryGasEIP2200 + 1, expectRead: true, expectErr: true},
 		{name: "cold access minus one", gas: params.ColdStorageAccessCostEIP8038 - 1, expectErr: true},
-		{name: "cold access", gas: params.ColdStorageAccessCostEIP8038, expectRead: true, expectErr: true},
+		{name: "cold access", gas: params.ColdStorageAccessCostEIP8038, expectErr: true},
 		{name: "warm access", gas: params.WarmStorageReadCostEIP2929 + params.StorageWriteCostEIP8038 + params.StateGasPerStorageSet, warm: true, expectRead: true},
 	}
 	for _, tt := range tests {
@@ -276,7 +274,7 @@ func TestEIP7928SStoreReadRequiresAffordableAccess(t *testing.T) {
 			statedb.SetTxContext(1, 0)
 			contract := accounts.InternAddress(common.HexToAddress("0x1000"))
 			slot := accounts.InternKey(common.HexToHash("0x01"))
-			statedb.CreateAccount(contract, true)
+			require.NoError(t, statedb.CreateAccount(contract, true))
 			require.NoError(t, statedb.SetCode(contract, hexutil.MustDecode("0x6001600155"), tracing.CodeChangeUnspecified))
 			statedb.ResetVersionedReads()
 			blockCtx := evmtypes.BlockContext{
@@ -353,7 +351,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 		"60206000f3"
 	callee := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000deadbeef"))
 	// Leftover gas is hand-computed against the Amsterdam jump table (EELS pin):
-	// pre-CALL opcodes 20, warm base 100, cold access 2900, CALL_VALUE 10300,
+	// pre-CALL opcodes 20, warm base 100, cold access 2900, CALL_VALUE 11300,
 	// tail 15; NEW_ACCOUNT 183600; empty callee returns callGas + 2300 stipend.
 	for _, tt := range []struct {
 		name              string
@@ -363,19 +361,19 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 	}{
 		{
 			// zero reservoir → full NEW_ACCOUNT spills to execution.
-			// base = 500000-20-100-2900-10300-183600 = 303080; callGas = 303080 - 303080/64 = 298345;
-			// leftover = 4735 + 298345 + 2300 - 15 = 305365.
+			// base = 500000-20-100-2900-11300-183600 = 302080; callGas = 302080 - 302080/64 = 297360;
+			// leftover = 4720 + 297360 + 2300 - 15 = 304365.
 			name:              "zero reservoir, full spill",
 			pool:              mdgas.MdGas{Execution: 500_000, State: 0},
-			leftoverExecution: 305_365,
+			leftoverExecution: 304_365,
 			leftoverState:     0,
 		},
 		{
-			// funded reservoir → no spill; base = 500000-20-100-13200 = 486680;
-			// callGas = 486680 - 486680/64 = 479076; leftover = 7604 + 479076 + 2300 - 15 = 488965.
+			// funded reservoir → no spill; base = 500000-20-100-14200 = 485680;
+			// callGas = 485680 - 485680/64 = 478092; leftover = 7588 + 478092 + 2300 - 15 = 487965.
 			name:              "funded reservoir, no spill",
 			pool:              mdgas.MdGas{Execution: 500_000, State: 200_000},
-			leftoverExecution: 488_965,
+			leftoverExecution: 487_965,
 			leftoverState:     200_000 - 183_600,
 		},
 	} {
@@ -384,12 +382,12 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			tx, sd := testTemporalTxSD(t)
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
-			s.CreateAccount(caller, true)
-			s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified)
+			require.NoError(t, s.CreateAccount(caller, true))
+			require.NoError(t, s.SetCode(caller, hexutil.MustDecode(callerCode), tracing.CodeChangeUnspecified))
 			vmctx := evmtypes.BlockContext{
 				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -416,7 +414,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	tx, sd := testTemporalTxSD(t)
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
 	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
@@ -425,10 +423,10 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	factory := accounts.InternAddress(factoryAddress)
 	target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 	factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-	s.CreateAccount(factory, true)
-	s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
-	s.CreateAccount(target, false)
-	s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+	require.NoError(t, s.CreateAccount(factory, true))
+	require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
+	require.NoError(t, s.CreateAccount(target, false))
+	require.NoError(t, s.AddBalance(target, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -482,7 +480,7 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := []byte{byte(vm.STOP)}
@@ -491,8 +489,8 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 				factory := accounts.InternAddress(factoryAddress)
 				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-				s.CreateAccount(factory, true)
-				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				require.NoError(t, s.CreateAccount(factory, true))
+				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -500,7 +498,7 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 					},
 				}
 				_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
-				s.CreateAccount(target, true)
+				require.NoError(t, s.CreateAccount(target, true))
 				require.NoError(t, s.SetState(target, accounts.ZeroKey, *uint256.NewInt(1)))
 				empty, err := s.Empty(target)
 				require.NoError(t, err)
@@ -553,15 +551,15 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
 				salt := uint256.NewInt(0)
 				factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
 				factoryCode := program.New().Mstore(initCode, 0).Push(salt).Push(len(initCode)).Push(0).Push(1).Op(vm.CREATE2).Bytes()
-				s.CreateAccount(factory, true)
-				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				require.NoError(t, s.CreateAccount(factory, true))
+				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(_ evmtypes.IntraBlockState, _ accounts.Address, value uint256.Int) (bool, error) {
 						return value.IsZero(), nil
@@ -618,8 +616,8 @@ func TestCreatePropagatesAmsterdamPreparationError(t *testing.T) {
 	factory := accounts.InternAddress(common.HexToAddress("0xfac0"))
 	initCode := []byte{byte(vm.STOP)}
 	factoryCode := program.New().Create2(initCode, uint256.NewInt(0)).Bytes()
-	statedb.CreateAccount(factory, true)
-	statedb.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+	require.NoError(t, statedb.CreateAccount(factory, true))
+	require.NoError(t, statedb.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
 			return false, backendErr
@@ -648,7 +646,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
@@ -658,8 +656,8 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				factory := accounts.InternAddress(factoryAddress)
 				target := accounts.InternAddress(types.CreateAddress2(factoryAddress, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initCode))))
 				factoryCode := program.New().Create2(initCode, salt).Push(0).Op(vm.MSTORE).Return(0, 32).Bytes()
-				s.CreateAccount(factory, true)
-				s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified)
+				require.NoError(t, s.CreateAccount(factory, true))
+				require.NoError(t, s.SetCode(factory, factoryCode, tracing.CodeChangeUnspecified))
 				vmctx := evmtypes.BlockContext{
 					CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 					Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
@@ -724,52 +722,54 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	for i, tt := range createGasTests {
-		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
+		func() {
+			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-		require.NoError(t, err)
+			domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
 
-		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
+			stateReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 
-		s := state.New(stateReader)
-		defer s.Close()
-		s.CreateAccount(address, true)
-		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
+			s := state.New(stateReader)
+			defer s.Close()
+			require.NoError(t, s.CreateAccount(address, true))
+			require.NoError(t, s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified))
 
-		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
-				return nil
-			},
-		}
-		//
-		// TODO revis BlockContext and add test for eip8037?
-		//
-		_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
-		config := vm.Config{}
-		if tt.eip3860 {
-			config.ExtraEips = []int{3860}
-		}
+			vmctx := evmtypes.BlockContext{
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+					return nil
+				},
+			}
+			//
+			// TODO revis BlockContext and add test for eip8037?
+			//
+			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
+			config := vm.Config{}
+			if tt.eip3860 {
+				config.ExtraEips = []int{3860}
+			}
 
-		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
-		startGas := mdgas.MdGas{
-			Execution: math.MaxUint64,
-		}
-		_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
-		if err != nil {
-			t.Errorf("test %d execution failed: %v", i, err)
-		}
-		if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
-			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
-		}
-		domains.Close()
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
+			startGas := mdgas.MdGas{
+				Execution: math.MaxUint64,
+			}
+			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
+			if err != nil {
+				t.Errorf("test %d execution failed: %v", i, err)
+			}
+			if gasUsed := startGas.Execution - gas.Execution; gasUsed != tt.gasUsed {
+				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
+			}
+		}()
 	}
 	tx.Rollback()
 }
@@ -783,7 +783,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
 	defer s.Close()
 

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -48,8 +49,11 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false)
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -103,7 +107,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
@@ -126,7 +130,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -136,7 +140,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	newDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx, newDb)
@@ -162,7 +166,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-stepSize {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
+		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -175,7 +179,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
@@ -243,7 +247,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		acc := accounts.Account{
 			Nonce:       1,
@@ -268,7 +272,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	for txNum++; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
+		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev)
 		require.NoError(t, err)
@@ -283,7 +287,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	for i, key := range keys {
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
@@ -404,7 +408,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		}
 	})
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 	require.Equal(t, 6, onChangeCalls)
 	require.Equal(t, 7, onDelCalls)
@@ -432,11 +436,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }
@@ -506,7 +510,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(maxTx)
+	err = agg.BuildFiles(maxTx, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	buildTx, err := db.BeginTemporalRw(t.Context())
@@ -618,7 +622,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	//t.Logf("expected hash: %x", expectedHash)
-	err = agg.BuildFiles(stepSize * 16)
+	err = agg.BuildFiles(stepSize*16, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -709,7 +713,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	rwTx, err = db.BeginTemporalRw(t.Context())
@@ -726,16 +730,25 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
+func TestAggregatorV3_BuildFiles_WithFinalityContext(t *testing.T) {
+	testAggregatorV3BuildFilesWithFinalityContext(t, false)
+}
+
+func TestAggregatorV3_BuildFiles2_WithFinalityContext(t *testing.T) {
+	testAggregatorV3BuildFilesWithFinalityContext(t, true)
+}
+
+func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 bool) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("slow test")
 	}
 	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).ReorgBlockDepth(5).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	agg := state.NewTest(dirs).StepSize(2).Logger(logger).MustOpen(ctx, db)
 	t.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(t, err)
@@ -761,9 +774,14 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	err = agg.BuildFiles(txnNums)
+	finalityCtx := execfinality.NewContext(blocks, 0, 5, true)
+	if buildFiles2 {
+		err = agg.BuildFiles2(ctx, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
+		agg.WaitForFiles()
+	} else {
+		err = agg.BuildFiles(txnNums, finalityCtx)
+	}
 	require.NoError(t, err)
-	// blocks up to 13 (incl) are outside the reorg depth, which adds to 13 txns, which is 6 steps
 	require.Equal(t, uint64(12), agg.EndTxNumMinimax())
 	require.Equal(t, kv.Step(6), kv.Step(agg.EndTxNumMinimax()/agg.StepSize()))
 }

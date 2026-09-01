@@ -25,13 +25,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/stretchr/testify/require"
 )
 
 type bundle struct {
@@ -624,9 +625,9 @@ func TestDUClassifyFile(t *testing.T) {
 		{"caplin", "v1.0-beaconblocks.0-100.seg", duCatCaplin},
 
 		// block segments (top-level snapshots dir)
-		{"snapshots", "v1.0-0-500-headers.seg", duCatBlocks},
-		{"snapshots", "v1.0-0-500-bodies.seg", duCatBlocks},
-		{"snapshots", "v1.0-0-500-transactions.idx", duCatBlocks},
+		{"snapshots", "v1.0-000000-000500-headers.seg", duCatBlocks},
+		{"snapshots", "v1.0-000000-000500-bodies.seg", duCatBlocks},
+		{"snapshots", "v1.0-000000-000500-transactions.idx", duCatBlocks},
 
 		// consensus-layer segments also live in the top-level snapshots dir,
 		// but their retention follows the caplin flags, not --prune.mode
@@ -644,7 +645,7 @@ func TestDUClassifyFile(t *testing.T) {
 
 		// non-segment files → other
 		{"snapshots", "salt.txt", duCatOther},
-		{"snapshots", "v1.0-0-500-headers.torrent", duCatOther},
+		{"snapshots", "v1.0-000000-000500-headers.torrent", duCatOther},
 	}
 
 	for _, tt := range tests {
@@ -684,7 +685,7 @@ func TestDUWalkSnapshots(t *testing.T) {
 	writeFile(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg", 600)
 
 	// block segment files (top-level snapshots dir)
-	writeFile(dirs.Snap, "v1.0-0-500-headers.seg", 800)
+	writeFile(dirs.Snap, "v1.0-000000-000500-headers.seg", 800)
 
 	files, err := duWalkSnapshots(dirs)
 	require.NoError(t, err)
@@ -721,7 +722,7 @@ func TestDUWalkSnapshots(t *testing.T) {
 
 	// Check block segment is not a state file.
 	for _, f := range files {
-		if f.Name == "v1.0-0-500-headers.seg" {
+		if f.Name == "v1.0-000000-000500-headers.seg" {
 			require.False(t, f.IsState)
 			// Block file ranges are multiplied by 1000 by ParseFileName
 			require.Equal(t, uint64(0), f.From)
@@ -951,8 +952,8 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
 			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
 			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 50},
-			{Name: "0-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
-			{Name: "300-2000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
+			{Name: "000000-000300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
+			{Name: "000300-002000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
 		}
 		require.Equal(t, "blocks", duDetectNodeType(files))
 	})

@@ -64,7 +64,6 @@ type TxContext struct {
 	TxHash     common.Hash
 	Origin     accounts.Address // Provides information for ORIGIN
 	GasPrice   uint256.Int      // Provides information for GASPRICE
-	BlobFee    uint256.Int      // The fee for blobs(blobGas * blobGasPrice) incurred in the txn
 	BlobHashes []common.Hash    // Provides versioned blob hashes for BLOBHASH
 }
 
@@ -124,7 +123,7 @@ type (
 	GetHashFunc func(uint64) (common.Hash, error)
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
-	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
+	// Used to clear out the authority code at end of tx.
 	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 )
 

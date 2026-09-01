@@ -112,7 +112,6 @@ func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
 func (back *RemoteBackend) Snapshots() dbservices.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
@@ -120,9 +119,6 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 
 func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
-func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
-	return back.blockReader.FrozenBorBlocks(align)
-}
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }

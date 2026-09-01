@@ -22,12 +22,16 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
@@ -50,7 +54,7 @@ func confirmStatusCode(t *testing.T, got, want int) {
 
 func confirmRequestValidationCode(t *testing.T, method, contentType, body string, expectedStatusCode int) {
 	t.Helper()
-	request := httptest.NewRequest(method, "http://url.com", strings.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), method, "http://url.com", strings.NewReader(body))
 	if len(contentType) > 0 {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -93,7 +97,7 @@ func confirmHTTPRequestYieldsStatusCode(t *testing.T, method, contentType, body 
 	ts := httptest.NewServer(&s)
 	defer ts.Close()
 
-	request, err := http.NewRequest(method, ts.URL, strings.NewReader(body))
+	request, err := http.NewRequestWithContext(t.Context(), method, ts.URL, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("failed to create a valid HTTP request: %v", err)
 	}
@@ -160,7 +164,10 @@ func TestHTTPBatchPreservesOrderWithStreaming(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"test_echo","params":["four",4,{"S":"y"}]}` +
 		`]`
 
-	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), "POST", ts.URL, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -227,16 +234,6 @@ func TestHTTPPeerInfo(t *testing.T) {
 	}
 }
 
-// TestWithGzipStreamingHookPanicsOnNilHook pins the write-side contract of the gzip-streaming
-// hook mechanism: WithGzipStreamingHook must never store a nil hook, since a typed-nil func()
-// stored under httpFlusherContextKey silently disables gzip streaming instead of activating it.
-// Misuse must fail loudly here rather than degrade quietly at the runMethod call site.
-func TestWithGzipStreamingHookPanicsOnNilHook(t *testing.T) {
-	require.Panics(t, func() {
-		WithGzipStreamingHook(context.Background(), nil)
-	})
-}
-
 func signJwt(t *testing.T, secret []byte) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"iat": time.Now().Unix()})
@@ -267,9 +264,76 @@ func TestCheckJwtSecretAuthScheme(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodPost, "http://url.com", nil)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://url.com", nil)
 			r.Header.Set("Authorization", tc.header)
 			require.Equal(t, tc.want, CheckJwtSecret(httptest.NewRecorder(), r, secret))
 		})
 	}
+}
+
+// overloadService stands in for a method whose DB gate rejected the request,
+// once per callback shape: a plain method answers through writeTo, a streamable
+// one writes its own envelope before the rejection happens.
+type overloadService struct{}
+
+func (*overloadService) Reject(context.Context) (string, error) { return "", kv.ErrReadTxLimitExceeded }
+
+func (*overloadService) RejectStreaming(_ context.Context, _ jsonstream.Stream) error {
+	return kv.ErrReadTxLimitExceeded
+}
+
+// TestOverloadedRequestGets503 pins that a single request rejected by the DB gate
+// answers 503, not 200, on the streaming path. The JSON-RPC error body is written
+// before ServeHTTP can set the status, so anything that puts those bytes on the
+// wire early makes net/http commit 200 and discard the real status. Batch requests
+// and disabled streaming answer 200 through plumbing this test does not reach.
+func TestOverloadedRequestGets503(t *testing.T) {
+	for _, method := range []string{"test_reject", "test_rejectStreaming"} {
+		t.Run(method, func(t *testing.T) {
+			srv := NewServer(50, false, false, false /* disableStreaming */, log.Root(), 100)
+			defer srv.Stop()
+			require.NoError(t, srv.RegisterName("test", new(overloadService)))
+
+			body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":[]}`
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code, "body: %s", rec.Body.String())
+			require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+		})
+	}
+}
+
+// hangUpWriter accepts headers, then fails every body write, standing in for a
+// client that goes away mid-response.
+type hangUpWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *hangUpWriter) Header() http.Header { return w.header }
+func (w *hangUpWriter) WriteHeader(s int)   { w.status = s }
+func (w *hangUpWriter) Write([]byte) (int, error) {
+	return 0, errors.New("connection reset by peer")
+}
+
+// TestUndeliveredResponseIsCounted pins that a reply the client never received
+// is recorded. The status is already sent by then, so the counter is the only
+// place a truncated reply can show up.
+func TestUndeliveredResponseIsCounted(t *testing.T) {
+	srv := NewServer(50, false, false, false /* disableStreaming */, log.Root(), 100)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("test", new(testService)))
+
+	before := undeliveredGauge.GetValueUint64()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",1]}`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(&hangUpWriter{header: make(http.Header)}, req)
+
+	require.Greater(t, undeliveredGauge.GetValueUint64(), before,
+		"a response the client never received was not recorded")
 }

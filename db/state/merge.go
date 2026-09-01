@@ -448,13 +448,21 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	var cp CursorHeap
 	heap.Init(&cp)
+	// the getters go into cp and outlive the loop, so the views close with the merge
+	var views seg.SequentialViews
+	defer func() { views.Close() }()
 	for _, item := range domainFiles {
-		view, err := item.decompressor.OpenSequentialView(seqReadahead)
-		if err != nil {
-			return nil, nil, nil, err
+		var g *seg.Reader
+		if seqReadahead {
+			view, err := item.decompressor.OpenSequentialView()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			views = append(views, view)
+			g = seg.NewReader(view.MakeGetter(), dt.d.Compression)
+		} else {
+			g = seg.NewReader(item.decompressor.MakeGetter(), dt.d.Compression)
 		}
-		defer view.Close()
-		g := seg.NewReader(view.MakeGetter(), dt.d.Compression)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -539,7 +547,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if err = kvWriter.Compress(); err != nil {
+	if err := kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
 	kvWriter.Close()
@@ -635,13 +643,14 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var cp CursorHeap
 	heap.Init(&cp)
 
-	seqReadahead := true
+	var views seg.SequentialViews
+	defer func() { views.Close() }()
 	for _, item := range files {
-		view, err := item.decompressor.OpenSequentialView(seqReadahead)
+		view, err := item.decompressor.OpenSequentialView()
 		if err != nil {
 			return nil, err
 		}
-		defer view.Close()
+		views = append(views, view)
 		g := seg.NewReader(view.MakeGetter(), iit.ii.Compression)
 		g.Reset(0)
 		if g.HasNext() {
@@ -718,7 +727,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			p.Processed.Store(i)
 		}
 	}
-	if err = write.Compress(); err != nil {
+	if err := write.Compress(); err != nil {
 		return nil, err
 	}
 	comp.Close()
@@ -805,12 +814,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 		var cp CursorHeap
 		heap.Init(&cp)
+		var views seg.SequentialViews
+		defer func() { views.Close() }()
 		for _, item := range indexFiles {
-			idxView, err := item.decompressor.OpenSequentialView(true)
+			idxView, err := item.decompressor.OpenSequentialView()
 			if err != nil {
 				return nil, nil, err
 			}
-			defer idxView.Close()
+			views = append(views, idxView)
 			g := seg.NewReader(idxView.MakeGetter(), ht.h.InvertedIndex.Compression)
 			g.Reset(0)
 			if g.HasNext() {
@@ -823,11 +834,11 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 						}
 
-						histView, err := hi.decompressor.OpenSequentialView(true)
+						histView, err := hi.decompressor.OpenSequentialView()
 						if err != nil {
 							return nil, nil, err
 						}
-						defer histView.Close()
+						views = append(views, histView)
 						g2 = seg.NewPagedReader(seg.NewReader(histView.MakeGetter(), ht.h.Compression), compressedPageValuesCount, true)
 						break
 					}
@@ -881,7 +892,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
 
-					if err = pagedWr.Add(histKeyBuf, v); err != nil {
+					if err := pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -905,7 +916,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err := ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

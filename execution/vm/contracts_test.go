@@ -24,6 +24,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -446,10 +448,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 	task := "0000000000000000000000000000000008d8c4a16fb9d8800cce987c0eadbb6b3b005c213d44ecb5adeed713bae79d606041406df26169c35df63cf972c94be1" +
 		"0000000000000000000000000000000011bc8afe71676e6730702a46ef817060249cd06cd82e6981085012ff6d013aa4470ba3a2c71e13ef653e1e223d1ccfe9" +
 		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
-	input := task
-	for range 4787 {
-		input += task
-	}
+	input := strings.Repeat(task, 4788)
 	testcase := precompiledTest{
 		Input:       input,
 		Expected:    "0000000000000000000000000000000005a6310ea6f2a598023ae48819afc292b4dfcb40aabad24a0c2cb6c19769465691859eeb2a764342a810c5038d700f18000000000000000000000000000000001268ac944437d15923dc0aec00daa9250252e43e4b35ec7a19d01f0d6cd27f6e139d80dae16ba1c79cc7f57055a93ff5",
@@ -466,10 +465,7 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		"00000000000000000000000000000000055dbc4eca768714e098bbe9c71cf54b40f51c26e95808ee79225a87fb6fa1415178db47f02d856fea56a752d185f86b" +
 		"000000000000000000000000000000001239b7640f416eb6e921fe47f7501d504fadc190d9cf4e89ae2b717276739a2f4ee9f637c35e23c480df029fd8d247c7" +
 		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
-	input := task
-	for range 1040 {
-		input += task
-	}
+	input := strings.Repeat(task, 1041)
 
 	testcase := precompiledTest{
 		Input:       input,
@@ -494,4 +490,115 @@ func TestPrecompiledP256Verify(t *testing.T) {
 	t.Parallel()
 	testJson("p256Verify", "100", t)
 	testJson("p256Verify-EIP-7951", "a100", t)
+}
+
+// precompileSuccessVectors names, per precompile address, a fixture holding at
+// least one input that precompile accepts. 0x02, 0x03 and 0x04 accept anything
+// and have no fixture.
+var precompileSuccessVectors = map[string]string{
+	"01": "ecRecover", "05": "modexp", "a5": "modexp_eip2565", "b5": "modexp_eip7883",
+	"06": "bn254Add", "07": "bn254ScalarMul", "08": "bn254Pairing", "09": "blake2F",
+	"0a": "pointEvaluation", "0b": "blsG1Add", "0c": "blsG1MultiExp", "0d": "blsG2Add",
+	"0e": "blsG2MultiExp", "0f": "blsPairing", "10": "blsMapG1", "11": "blsMapG2",
+	"100": "p256Verify", "a100": "p256Verify-EIP-7951",
+}
+
+// precompiledContractSets is every fork's live precompile set.
+var precompiledContractSets = []PrecompiledContracts{
+	PrecompiledContractsHomestead, PrecompiledContractsByzantium, PrecompiledContractsIstanbul,
+	PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsPrague,
+	PrecompiledContractsOsaka,
+}
+
+// checkNoAlias runs p against rawInput from a backing array with a spare tail,
+// mirroring the shorter-than-capacity slice Memory.GetPtr hands a precompile at
+// runtime, then flips every backing byte -- including the tail, which an output
+// could alias without ever being written to. A first, throwaway run sizes that
+// tail: an output appended into the input's spare capacity only lands there when
+// the tail can hold it, so a fixed bound would pass silently for any output
+// wider than it. Reports whether the call produced the non-empty success a
+// coverage requirement needs.
+func checkNoAlias(t *testing.T, p PrecompiledContract, rawInput []byte) bool {
+	t.Helper()
+	probe, err := p.Run(bytes.Clone(rawInput))
+	if err != nil || len(probe) == 0 {
+		return false
+	}
+
+	backing := make([]byte, len(rawInput)+len(probe))
+	copy(backing, rawInput)
+	input := backing[:len(rawInput)]
+
+	out, err := p.Run(input)
+	require.NoError(t, err, "precompile %s", p.Name())
+	want := bytes.Clone(out)
+	for i := range backing {
+		backing[i] ^= 0xff
+	}
+	require.Equal(t, want, out, "precompile %s output aliases its input", p.Name())
+	return true
+}
+
+// TestPrecompileOutputDoesNotAliasInput pins the invariant the CALL opcodes
+// rely on: a precompile's output never shares memory with its input, which is
+// what lets the caller keep it as return data without copying it first.
+func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
+	t.Parallel()
+
+	covered := map[common.Address]bool{}
+	for hexAddr, fixture := range precompileSuccessVectors {
+		addr := common.HexToAddress(hexAddr)
+		p := allPrecompiles[addr]
+		require.NotNil(t, p, "no precompile at %s", hexAddr)
+		tests, err := loadJson(fixture)
+		require.NoError(t, err)
+		for _, test := range tests {
+			if checkNoAlias(t, p, common.Hex2Bytes(test.Input)) {
+				covered[addr] = true
+			}
+		}
+	}
+	for _, hexAddr := range []string{"02", "03", "04"} {
+		addr := common.HexToAddress(hexAddr)
+		if checkNoAlias(t, allPrecompiles[addr], bytes.Repeat([]byte{0xa5}, 128)) {
+			covered[addr] = true
+		}
+	}
+	for addr, p := range allPrecompiles {
+		require.True(t, covered[addr], "precompile %s at %x produced no non-empty output, so it was never checked", p.Name(), addr)
+	}
+
+	// allPrecompiles is hand-maintained and can omit a fork-only implementation,
+	// such as the Byzantium bn254 wrappers that later forks superseded at the
+	// same address. Cover every concrete type each live fork set actually runs.
+	fixtureByAddr := make(map[common.Address]string, len(precompileSuccessVectors))
+	for hexAddr, fixture := range precompileSuccessVectors {
+		fixtureByAddr[common.HexToAddress(hexAddr)] = fixture
+	}
+	seenTypes := map[reflect.Type]bool{}
+	for _, p := range allPrecompiles {
+		seenTypes[reflect.TypeOf(p)] = true
+	}
+	for _, set := range precompiledContractSets {
+		for addr, p := range set {
+			typ := reflect.TypeOf(p)
+			if seenTypes[typ] {
+				continue
+			}
+			seenTypes[typ] = true
+
+			a := addr.Value()
+			fixture, ok := fixtureByAddr[a]
+			require.True(t, ok, "no success-vector fixture for precompile %s at %s", p.Name(), a)
+			tests, err := loadJson(fixture)
+			require.NoError(t, err)
+			ran := false
+			for _, test := range tests {
+				if checkNoAlias(t, p, common.Hex2Bytes(test.Input)) {
+					ran = true
+				}
+			}
+			require.True(t, ran, "precompile %s produced no non-empty output, so it was never checked", p.Name())
+		}
+	}
 }

@@ -13,9 +13,9 @@ name: Cache Warming — Kurtosis CL images
 #   - schedule (daily) -> safety net if LRU-evicted
 #   - workflow_dispatch -> manual (use once to bootstrap)
 #
-# The cache key is derived from the pinned image versions: the kurtosis-infra and
-# eth2-val-tools tags in test-kurtosis-assertoor.yml plus the CL / assertoor tags it
-# reads from the kurtosis .io files — hence the paths filter covers both.
+# The cache key is derived from the pinned third-party tags in
+# test-kurtosis-assertoor.yml plus the CL / assertoor tags it reads from the
+# kurtosis .io files — hence the paths filter covers both.
 
 on:
   push:

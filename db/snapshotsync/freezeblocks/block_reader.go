@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -46,12 +48,19 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type RemoteBlockReader struct {
 	client       remoteproto.ETHBACKENDClient
 	txNumsReader rawdbv3.TxNumsReader
+
+	frozenBlocksMu        sync.Mutex
+	frozenBlocksValue     uint64
+	frozenBlocksFetchedAt time.Time
+	frozenBlocksFetching  bool
+	frozenBlocksFetched   chan struct{}
+	frozenBlocksTTL       time.Duration
+	frozenBlocksTimeout   time.Duration
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -150,12 +159,86 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots    { panic("not implemented") }
-func (r *RemoteBlockReader) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type               { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                    { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64       { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing   { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots  { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
+
+// FrozenBlocks is answered by the backend. The context-free signature leaves no way to
+// surface an error or honor request cancellation, so the whole call is bounded by an
+// internal timeout however many rounds it takes, cached for a short TTL, and not
+// duplicated while one is in flight.
+// The count only grows, so a stale-low answer is the conservative one for the
+// availability gates and is served while a refresh runs. Zero is not: the pre-Byzantium
+// receipt paths read it as "no snapshots" and re-execute, so a failed fetch is not
+// cached, and it reaches only the callers that have no observation to wait for.
+func (r *RemoteBlockReader) FrozenBlocks() uint64 {
+	deadline := time.Now().Add(r.frozenBlocksTimeout)
+	for waited := false; ; waited = true {
+		r.frozenBlocksMu.Lock()
+		observed := !r.frozenBlocksFetchedAt.IsZero()
+		fresh := time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
+		if observed && (fresh || r.frozenBlocksFetching) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if waited && !time.Now().Before(deadline) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if r.frozenBlocksFetching {
+			fetched := r.frozenBlocksFetched
+			r.frozenBlocksMu.Unlock()
+			select {
+			case <-fetched:
+			case <-time.After(time.Until(deadline)):
+			}
+			if waited {
+				r.frozenBlocksMu.Lock()
+				value := r.frozenBlocksValue
+				r.frozenBlocksMu.Unlock()
+				return value
+			}
+			// Waiting is not asking: a caller left with nothing observed has spent no
+			// attempt of its own, and one more is worth its wait. A second is not.
+			continue
+		}
+		r.frozenBlocksFetching = true
+		r.frozenBlocksFetched = make(chan struct{})
+		fetched := r.frozenBlocksFetched
+		r.frozenBlocksMu.Unlock()
+
+		return r.fetchFrozenBlocks(fetched, deadline)
+	}
+}
+
+// fetchFrozenBlocks asks the backend, within what is left of the caller's budget, and
+// publishes what came back. Releasing the callers waiting on it is deferred: a fetch
+// that dies must not leave them on a result nobody will produce.
+func (r *RemoteBlockReader) fetchFrozenBlocks(fetched chan struct{}, deadline time.Time) uint64 {
+	defer func() {
+		r.frozenBlocksMu.Lock()
+		defer r.frozenBlocksMu.Unlock()
+		close(fetched)
+		r.frozenBlocksFetching = false
+	}()
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
+	if err != nil {
+		log.Warn("[frozen-blocks] backend did not answer", "err", err)
+	}
+
+	r.frozenBlocksMu.Lock()
+	defer r.frozenBlocksMu.Unlock()
+	if err == nil {
+		r.frozenBlocksValue = reply.FrozenBlocks
+		r.frozenBlocksFetchedAt = time.Now()
+	}
+	return r.frozenBlocksValue
+}
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -199,7 +282,9 @@ var _ dbservices.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReader {
 	br := &RemoteBlockReader{
-		client: client,
+		client:              client,
+		frozenBlocksTTL:     30 * time.Second,
+		frozenBlocksTimeout: 5 * time.Second,
 	}
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
@@ -331,6 +416,11 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 	if err != nil {
 		return nil, err
 	}
+	if body == nil {
+		// A nil body still encodes as an empty list, which a caller cannot tell
+		// apart from a block that genuinely holds no transactions.
+		return nil, nil
+	}
 	bodyRlp, err = rlp.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
@@ -373,7 +463,6 @@ func (r *RemoteBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn           *blocksnapshots.RoSnapshots
-	borSn        *heimdall.RoSnapshots
 	txNumsReader rawdbv3.TxNumsReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
@@ -384,10 +473,9 @@ type BlockReader struct {
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 var canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
 
-func NewBlockReader(snapshots dbservices.BlockSnapshots, borSnapshots dbservices.BlockSnapshots) *BlockReader {
-	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
+func NewBlockReader(snapshots dbservices.BlockSnapshots) *BlockReader {
 	sn, _ := snapshots.(*blocksnapshots.RoSnapshots)
-	br := &BlockReader{sn: sn, borSn: borSn}
+	br := &BlockReader{sn: sn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	br.canonicalHashCache, _ = lru.New[uint64, common.Hash](canonicalHashCacheSize)
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
@@ -397,47 +485,11 @@ func NewBlockReader(snapshots dbservices.BlockSnapshots, borSnapshots dbservices
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
-func (r *BlockReader) Snapshots() dbservices.BlockSnapshots { return r.sn }
-func (r *BlockReader) BorSnapshots() dbservices.BlockSnapshots {
-	if r.borSn != nil {
-		return r.borSn
-	}
-
-	return nil
-}
-
-func (r *BlockReader) Ready(ctx context.Context) <-chan error {
-	if r.borSn == nil {
-		return r.sn.Ready(ctx)
-	}
-
-	ch := make(chan error)
-
-	go func() {
-		if err := <-r.sn.Ready(ctx); err != nil {
-			ch <- err
-			return
-		}
-
-		if r.borSn != nil {
-			if err := <-r.borSn.Ready(ctx); err != nil {
-				ch <- err
-				return
-			}
-		}
-		ch <- nil
-	}()
-
-	return ch
-}
+func (r *BlockReader) Snapshots() dbservices.BlockSnapshots   { return r.sn }
+func (r *BlockReader) Ready(ctx context.Context) <-chan error { return r.sn.Ready(ctx) }
 
 func (r *BlockReader) AllTypes() []snaptype.Type {
-	var types []snaptype.Type
-	types = append(types, r.sn.Types()...)
-	if r.borSn != nil {
-		types = append(types, r.borSn.Types()...)
-	}
-	return types
+	return slices.Clone(r.sn.Types())
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
@@ -487,28 +539,6 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
 
 	result := binary.BigEndian.Uint64(secondKey[:8])
 	return result, nil
-}
-func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
-	if r.borSn == nil {
-		return 0
-	}
-
-	frozen := r.borSn.BlocksAvailable()
-
-	if !align {
-		return frozen
-	}
-
-	for _, t := range r.borSn.Types() {
-
-		available := r.borSn.VisibleBlocksAvailable(t.Enum())
-
-		if available < frozen {
-			frozen = available
-		}
-	}
-
-	return frozen
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
@@ -698,6 +728,42 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 	return h, true, nil
 }
 
+// frozenHashAt returns the hash of the header the block files hold at
+// blockHeight. Segments are indexed by height only, so a positional read there
+// can only answer for this one block: callers that decode a body - which
+// carries no hash of its own - compare against this before trusting it, and
+// fall back to the (hash, height)-keyed db when it does not match. A zero hash
+// carries no such constraint and skips the comparison entirely.
+func (r *BlockReader) frozenHashAt(tx kv.Getter, blockHeight uint64) (common.Hash, bool, error) {
+	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	if !ok {
+		return emptyHash, false, nil
+	}
+	defer release()
+
+	h, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
+	if err != nil {
+		return emptyHash, false, err
+	}
+	if h == nil {
+		return emptyHash, false, nil
+	}
+	return h.Hash(), true, nil
+}
+
+// frozenHashMatches reports whether a positional read at blockHeight answers for
+// hash. See frozenHashAt.
+func (r *BlockReader) frozenHashMatches(tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
+	if hash == emptyHash {
+		return true, nil
+	}
+	frozenHash, ok, err := r.frozenHashAt(tx, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	return ok && frozenHash == hash, nil
+}
+
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
 	//TODO: investigate why code blolow causing getting error `Could not set forkchoice                 app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: unknown ancestor"`
 	//maxBlockNumInFiles := r.sn.BlocksAvailable()
@@ -724,6 +790,11 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
+	}
+	if h != nil && hash != emptyHash && h.Hash() != hash {
+		// The db read above already covered the requested hash, so there is
+		// nothing left to fall back to. See frozenHashAt.
+		return nil, nil
 	}
 	return h, nil
 }
@@ -838,6 +909,20 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	}
 	defer release()
 
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		if dbgLogs {
+			log.Info(dbgPrefix + "requested hash is not the block held at this height")
+		}
+		if tx == nil {
+			return nil, nil
+		}
+		return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+	}
+
 	var baseTxnID uint64
 	var txCount uint32
 	var buf []byte
@@ -888,6 +973,11 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 	if err != nil {
 		return nil, err
 	}
+	if body == nil {
+		// A nil body still encodes as an empty list, which a caller cannot tell
+		// apart from a block that genuinely holds no transactions.
+		return nil, nil
+	}
 	bodyRlp, err = rlp.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
@@ -911,6 +1001,18 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 	}
 	defer release()
 
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !matches {
+		if tx == nil {
+			return
+		}
+		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
+		return body, txCount, nil
+	}
+
 	body, _, txCount, _, err = r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, 0, err
@@ -921,6 +1023,16 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		return rawdb.HasSenders(tx, hash, blockHeight)
+	}
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	if !matches {
+		if tx == nil {
+			return false, nil
+		}
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
 	return true, nil
@@ -1011,8 +1123,18 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			log.Info(dbgPrefix + "got nil header from file")
 		}
 		return
-	} else {
-		hash = h.Hash()
+	}
+	if hash != emptyHash && h.Hash() != hash {
+		// See frozenHashAt: the files answer for h.Hash() only, so the
+		// requested block can still be in the db until this height is pruned.
+		if dbgLogs {
+			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match header %x held at this height", h.Hash()))
+		}
+		release()
+		if tx == nil {
+			return
+		}
+		return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 	}
 	release()
 
@@ -1061,7 +1183,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
+	block = types.NewBlockFromStorage(h.Hash(), h, txs, b.Uncles, b.Withdrawals, nil)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -1465,21 +1587,26 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	view, release := r.view(tx)
 	defer release()
 	for _, sn := range view.Bodies() {
-		defer sn.Src().MadvSequential().DisableReadAhead()
+		if err := func() error {
+			defer sn.Src().MadvSequential().DisableReadAhead()
 
-		var buf []byte
-		g := sn.Src().MakeGetter()
-		blockNum := sn.From()
-		var b types.BodyOnlyTxn
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			if err := b.DecodeRLPBytes(buf); err != nil {
-				return err
+			var buf []byte
+			g := sn.Src().MakeGetter()
+			blockNum := sn.From()
+			var b types.BodyOnlyTxn
+			for g.HasNext() {
+				buf, _ = g.Next(buf[:0])
+				if err := b.DecodeRLPBytes(buf); err != nil {
+					return err
+				}
+				if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
+					return err
+				}
+				blockNum++
 			}
-			if err := f(blockNum, b.BaseTxnID.U64(), uint64(b.TxCount)); err != nil {
-				return err
-			}
-			blockNum++
+			return nil
+		}(); err != nil {
+			return err
 		}
 	}
 	return nil

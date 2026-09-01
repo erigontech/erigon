@@ -16,70 +16,125 @@
 
 package commitment
 
-import "math/bits"
+import (
+	"math/bits"
 
-const prefixSlabSize = 16384
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+)
 
-// prefixNode is a path-compressed prefix-trie node keyed on nibbles (each ext byte is one nibble 0x00..0x0F).
-// children is dense: len == popcount(bitmap). subtreeCount is the number of distinct keys in the
-// subtree; re-inserting an existing key merges its update without bumping it.
+// Slabs and ext chunks grow geometrically: a batch touching a handful of keys must
+// not pay for a peak-sized arena, because a fresh Updates is built per block.
+const prefixSlabMin = 256
+const prefixSlabMax = 16384
+
+const prefixExtChunkMin = 4 * 1024
+const prefixExtChunkMax = 64 * 1024
+
 type prefixNode struct {
+	// ext is arena-backed: it stays valid only until the owning trie's Reset, which
+	// recycles the chunk in place. A reader that must outlive the batch copies it.
 	ext          []byte
 	children     []*prefixNode
-	plainKey     []byte  // set only where a key terminates
-	update       *Update // carried value (nil = re-read from ctx); set only where a key terminates
+	plainKey     []byte
+	update       *Update
 	subtreeCount uint32
 	bitmap       uint16
 }
 
-// prefixSlab is a fixed-size backing array for prefixNodes; pointers into it stay stable until freed.
-type prefixSlab struct {
-	nodes [prefixSlabSize]prefixNode
-}
-
-// prefixArena bump-allocates prefixNodes from a list of slabs.
 type prefixArena struct {
-	slabs   []*prefixSlab
-	slabIdx int
-	nextIdx int
+	slabs       [][]prefixNode
+	slabIdx     int
+	nextIdx     int
+	priorNodes  int // nodes held by slabs[:slabIdx], so nodeCount stays O(1)
+	extChunks   [][]byte
+	extChunkIdx int
 }
 
 func newPrefixArena() *prefixArena {
-	return &prefixArena{slabs: []*prefixSlab{new(prefixSlab)}}
+	return &prefixArena{slabs: [][]prefixNode{make([]prefixNode, prefixSlabMin)}}
 }
 
 func (a *prefixArena) allocNode() *prefixNode {
-	if a.nextIdx >= prefixSlabSize {
+	slab := a.slabs[a.slabIdx]
+	if a.nextIdx >= len(slab) {
+		a.priorNodes += len(slab)
 		a.slabIdx++
 		if a.slabIdx >= len(a.slabs) {
-			a.slabs = append(a.slabs, new(prefixSlab))
+			a.slabs = append(a.slabs, make([]prefixNode, min(len(slab)*2, prefixSlabMax)))
 		}
+		slab = a.slabs[a.slabIdx]
 		a.nextIdx = 0
 	}
-	n := &a.slabs[a.slabIdx].nodes[a.nextIdx]
+	n := &slab[a.nextIdx]
 	a.nextIdx++
 	*n = prefixNode{}
 	return n
 }
 
-// resetArena clears touched nodes for reuse, keeping the first slab and releasing the rest.
+// On overflow, swaps in a fresh chunk, keeping prior slices valid.
+func (a *prefixArena) allocExt(b []byte) []byte {
+	if len(b) == 0 {
+		return nil
+	}
+	if len(b) > prefixExtChunkMax {
+		own := make([]byte, len(b))
+		copy(own, b)
+		return own
+	}
+	if len(a.extChunks) == 0 {
+		a.extChunks = append(a.extChunks, make([]byte, 0, max(prefixExtChunkMin, len(b))))
+	}
+	chunk := a.extChunks[a.extChunkIdx]
+	if cap(chunk)-len(chunk) < len(b) {
+		a.extChunkIdx++
+		if a.extChunkIdx >= len(a.extChunks) {
+			a.extChunks = append(a.extChunks, make([]byte, 0, min(max(cap(chunk)*2, len(b)), prefixExtChunkMax)))
+		}
+		chunk = a.extChunks[a.extChunkIdx]
+	}
+	off := len(chunk)
+	chunk = append(chunk, b...)
+	a.extChunks[a.extChunkIdx] = chunk
+	return chunk[off:len(chunk):len(chunk)]
+}
+
 func (a *prefixArena) resetArena() {
 	for i := 0; i <= a.slabIdx && i < len(a.slabs); i++ {
-		limit := prefixSlabSize
+		limit := len(a.slabs[i])
 		if i == a.slabIdx {
 			limit = a.nextIdx
 		}
-		clear(a.slabs[i].nodes[:limit])
+		clear(a.slabs[i][:limit])
 	}
-	// Nil out trailing slabs so the GC reclaims them; the reslice below keeps them alive via the backing array otherwise.
-	clear(a.slabs[1:])
-	a.slabs = a.slabs[:1]
+	// Keep at most one max-slab's worth of capacity so the arena settles at its
+	// steady-state size; releasing the rest is what stops a peak from being pinned.
+	keep, held := 1, len(a.slabs[0])
+	for keep < len(a.slabs) && held+len(a.slabs[keep]) <= prefixSlabMax {
+		held += len(a.slabs[keep])
+		keep++
+	}
+	// The ramp sums to less than one max slab, so an arena that reached a max-sized
+	// slab must keep that slab instead: keeping the ramp would re-allocate it on
+	// every reset, which is the per-batch allocation this arena exists to avoid.
+	if len(a.slabs[0]) < prefixSlabMax && keep < len(a.slabs) && len(a.slabs[keep]) == prefixSlabMax {
+		a.slabs[0] = a.slabs[keep]
+		keep = 1
+	}
+	// nil trailing slabs first: reslicing alone keeps them GC-reachable via the backing array.
+	clear(a.slabs[keep:])
+	a.slabs = a.slabs[:keep]
 	a.slabIdx = 0
 	a.nextIdx = 0
+	a.priorNodes = 0
+
+	for i := range a.extChunks {
+		a.extChunks[i] = a.extChunks[i][:0]
+	}
+	a.extChunkIdx = 0
 }
 
 func (a *prefixArena) nodeCount() int {
-	return a.slabIdx*prefixSlabSize + a.nextIdx
+	return a.priorNodes + a.nextIdx
 }
 
 func popcount(n *prefixNode) int {
@@ -92,11 +147,10 @@ func childIndex(n *prefixNode, nib byte) (int, bool) {
 	return idx, n.bitmap&mask != 0
 }
 
-// prefixTrie is a path-compressed nibble trie; Insert is not safe for concurrent use.
 type prefixTrie struct {
 	root    *prefixNode
 	arena   *prefixArena
-	visited []*prefixNode // Insert scratch: path nodes pending a subtreeCount bump
+	visited []*prefixNode
 }
 
 func newPrefixTrie() *prefixTrie {
@@ -104,24 +158,15 @@ func newPrefixTrie() *prefixTrie {
 	return &prefixTrie{root: a.allocNode(), arena: a}
 }
 
-// Reset clears the trie and reuses the underlying arena.
 func (t *prefixTrie) Reset() {
+	// Past len, visited still holds nodes from earlier inserts; a single one keeps a
+	// released slab's whole backing array reachable.
+	clear(t.visited[:cap(t.visited)])
+	t.visited = t.visited[:0]
 	t.arena.resetArena()
 	t.root = t.arena.allocNode()
 }
 
-func commonPrefixLen(a, b []byte) int {
-	n := min(len(b), len(a))
-	for i := range n {
-		if a[i] != b[i] {
-			return i
-		}
-	}
-	return n
-}
-
-// Insert adds hashedKey (nibble form), recording plainKey and optional update (nil = re-read from ctx) at its terminating node.
-// Re-inserting merges updates copy-on-write so a snapshot of the old update stays intact; plainKey backing must outlive the trie.
 func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew bool) {
 	node := t.root
 	keyOffset := 0
@@ -135,10 +180,9 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		t.visited = append(t.visited, node)
 
 		remain := hashedKey[keyOffset:]
-		m := commonPrefixLen(remain, node.ext)
+		m := nibbles.CommonPrefixLen(remain, node.ext)
 
 		if m < len(node.ext) {
-			// Partial match: split the node at position m.
 			oldExt := node.ext
 			oldBitmap := node.bitmap
 			oldChildren := node.children
@@ -155,10 +199,9 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 			node.plainKey = nil
 			node.update = nil
 
-			node.ext = oldExt[:m]
+			node.ext = oldExt[:m:m]
 
 			if m == len(remain) {
-				// Key ends inside the old extension: one child, no new sibling.
 				node.bitmap = uint16(1) << oldExt[m]
 				node.children = []*prefixNode{oldChild}
 				node.plainKey = plainKey
@@ -169,7 +212,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 
 			newLeaf := t.arena.allocNode()
 			newNib := remain[m]
-			newLeaf.ext = append([]byte(nil), remain[m+1:]...)
+			newLeaf.ext = t.arena.allocExt(remain[m+1:])
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
 			newLeaf.update = update
@@ -210,7 +253,7 @@ func (t *prefixTrie) Insert(hashedKey, plainKey []byte, update *Update) (isNew b
 		idx, ok := childIndex(node, nib)
 		if !ok {
 			newLeaf := t.arena.allocNode()
-			newLeaf.ext = append([]byte(nil), hashedKey[keyOffset+1:]...)
+			newLeaf.ext = t.arena.allocExt(hashedKey[keyOffset+1:])
 			newLeaf.subtreeCount = 1
 			newLeaf.plainKey = plainKey
 			newLeaf.update = update

@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func callValueTransferGas(rules *chain.Rules) uint64 {
@@ -179,7 +178,9 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			evm.IntraBlockState().SubRefund(params.NetSstoreClearRefund)
+			if err := evm.IntraBlockState().SubRefund(params.NetSstoreClearRefund); err != nil {
+				return mdgas.MdGas{}, err
+			}
 		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState().AddRefund(params.NetSstoreClearRefund)
 		}
@@ -237,7 +238,9 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200)
+			if err := evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200); err != nil {
+				return mdgas.MdGas{}, err
+			}
 		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
@@ -489,7 +492,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
 	var accountGas, stateGas uint64
-	var address = accounts.InternAddress(callContext.Stack.back(1).Bytes20())
+	var address = evm.internAddress(callContext.Stack.back(1))
 	rules := evm.ChainRules()
 	callContext.newAccountCharged = false
 	if rules.IsEIP161Enabled() {
@@ -708,7 +711,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Execution = params.SelfdestructGasEIP150
-		var address = callContext.peekAddress()
+		var address = callContext.peekAddress(evm)
 
 		if evm.ChainRules().IsEIP161Enabled() {
 			// if empty and transfers value

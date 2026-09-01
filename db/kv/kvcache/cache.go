@@ -194,15 +194,15 @@ func New(cfg CoherentConfig) *Coherent {
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
 		cfg:          cfg,
-		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
-		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
-		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
+		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name=%q}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name=%q}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name=%q}`, cfg.MetricsLabel)),
+		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name=%q}`, cfg.MetricsLabel)),
+		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name=%q}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name=%q}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name=%q}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -396,9 +396,9 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	c.miss.Inc()
 
 	if len(k) == 20 {
-		v, _, err = tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err = tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 	} else {
-		v, _, err = tx.GetLatest(kv.StorageDomain, k)
+		v, _, err = tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	}
 	if err != nil {
 		return nil, err
@@ -428,7 +428,7 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 	c.codeMiss.Inc()
 
-	v, _, err = tx.GetLatest(kv.CodeDomain, k)
+	v, _, err = tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -548,7 +548,7 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 			}
 
 			// check the db
-			inDb, _, err := tx.GetLatest(domain, val.K)
+			inDb, _, err := tx.GetLatest(domain, val.K, kv.GetLatestOptions{})
 			if err != nil {
 				return false, keys, err
 			}

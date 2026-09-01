@@ -32,7 +32,7 @@ import (
 )
 
 func TestSlotData(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	m := &SlotData{
 		Version:                       clparams.ElectraVersion,
@@ -61,7 +61,7 @@ func TestSlotData(t *testing.T) {
 }
 
 func TestSlotDataGloas(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	m := &SlotData{
 		Version:                       clparams.GloasVersion,
@@ -89,7 +89,7 @@ func TestSlotDataGloas(t *testing.T) {
 }
 
 func TestSlotDataGloasDefaultHash(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	// Test with zero-value hash to ensure it round-trips correctly
 	m := &SlotData{
@@ -121,7 +121,7 @@ func TestSlotDataGloasDefaultHash(t *testing.T) {
 // correctly when all fields carry non-trivial values (including Eth1Data with
 // non-zero sub-fields and large uint64 values).
 func TestSlotDataGloasAllFieldsNonZero(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	m := &SlotData{
@@ -168,7 +168,7 @@ func TestSlotDataGloasAllFieldsNonZero(t *testing.T) {
 // populated on the struct, they are NOT included in the serialized form.
 // After deserialization, the GLOAS fields must be zero-valued.
 func TestSlotDataPreGloasDoesNotIncludeGloasFields(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	for _, version := range []clparams.StateVersion{
@@ -253,7 +253,7 @@ func TestSlotDataGloasEncodesMoreBytesThanElectra(t *testing.T) {
 // mock GetValFn that simulates reading from the kv.SlotData table. This tests
 // the integration between WriteTo, ReadSlotData, and the SlotData DB encoding.
 func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	testCases := []struct {
@@ -326,7 +326,7 @@ func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
 // TestSlotDataReadSlotDataPreGloasReturnsZeroGloasFields reads an Electra SlotData
 // via ReadSlotData and confirms the GLOAS fields are zero.
 func TestSlotDataReadSlotDataPreGloasReturnsZeroGloasFields(t *testing.T) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	m := &SlotData{

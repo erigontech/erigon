@@ -14,11 +14,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/verify"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
 
 // TestHistoryVerification_SimpleBlocks is an integration test that generates blocks
 // with state changes, builds snapshot files, and verifies history via re-execution.
@@ -61,7 +64,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	const batchSize = 100
 	for batchStart := 0; batchStart < numBlocks; batchStart += batchSize {
 		batchEnd := min(batchStart+batchSize, numBlocks)
-		chainResult, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
+		chainResult, err := m.GenerateChainFrom(parent, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 		})
 		require.NoError(t, err)
@@ -81,7 +84,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(lastTxNum)
+	err = agg.BuildFiles(lastTxNum, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {
@@ -147,7 +150,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	nonce := uint64(0)
 	recipient := common.Address{0xDE, 0xAD}
 
-	chainResult, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, numBlocks, func(i int, b *blockgen.BlockGen) {
+	chainResult, err := m.GenerateChain(numBlocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// Add 2 ETH transfers per block.
 		for range 2 {
@@ -175,7 +178,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(lastTxNum)
+	err = agg.BuildFiles(lastTxNum, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {

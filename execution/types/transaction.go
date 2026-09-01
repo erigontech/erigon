@@ -428,18 +428,19 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	}
 
 	var plainV byte
-	if isProtectedV(v) {
+	switch {
+	case isProtectedV(v):
 		chainID, err := DeriveChainId(v)
 		if err != nil {
 			return err
 		}
 		plainV = byte(v.Uint64() - 35 - 2*chainID.Uint64())
-	} else if maybeProtected {
+	case maybeProtected:
 		// Only EIP-155 signatures can be optionally protected. Since
 		// we determined this v value is not protected, it must be a
 		// raw 27 or 28.
 		plainV = byte(v.Uint64() - 27)
-	} else {
+	default:
 		// If the signature is not optionally protected, we assume it
 		// must already be equal to the recovery id.
 		plainV = byte(v.Uint64())
@@ -566,12 +567,11 @@ func (m *Message) SetIsFree(isFree bool) {
 }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
-	gas := globalGasCap
-	if gas == 0 {
+	gas := desiredGas
+	// Only when no cap is configured does an unset limit mean "no limit": a
+	// desired gas of zero is a limit the caller asked for, not a missing value.
+	if globalGasCap == 0 && gas == 0 {
 		gas = uint64(math.MaxUint64 / 2)
-	}
-	if desiredGas > 0 {
-		gas = desiredGas
 	}
 	if globalGasCap != 0 && globalGasCap < gas {
 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)

@@ -342,11 +342,12 @@ func (sc *StateCache) DebugPrintAccounts() error {
 	rw := sc.writes[id]
 	rw.Ascend(func(i btree.Item) bool {
 		it := i.(*AccountHashWriteItem)
-		if it.ai.HasFlag(AbsentFlag) || it.ai.HasFlag(DeletedFlag) {
+		switch {
+		case it.ai.HasFlag(AbsentFlag) || it.ai.HasFlag(DeletedFlag):
 			fmt.Printf("deleted: %x\n", it.ai.addrHashPrefix)
-		} else if it.ai.HasFlag(ModifiedFlag) {
+		case it.ai.HasFlag(ModifiedFlag):
 			fmt.Printf("modified: %x\n", it.ai.addrHashPrefix)
-		} else {
+		default:
 			fmt.Printf("normal: %x\n", it.ai.addrHashPrefix)
 		}
 		return true

@@ -17,12 +17,15 @@
 package engineapitester
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,15 +36,20 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
@@ -108,7 +116,6 @@ type EngineXTestRunner struct {
 	preAllocs          map[PreAllocHash]*PreAlloc
 	mu                 sync.Mutex
 	testers            map[Fork]map[PreAllocHash]testerEntry
-	wg                 sync.WaitGroup
 	profileHook        RequestProfileHook
 	warmupKzgCtxOnInit bool
 }
@@ -235,13 +242,129 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
 	name := testNameFromContext(ctx)
+	// reset back to genesis before test new payloads
+	var fcuVersion string
+	if len(test.NewPayloads) > 0 {
+		fcuVersion = test.NewPayloads[0].FcuVersion
+	} else {
+		fcuVersion = fcuVersionFromTimestamp(tester.ChainConfig, tester.GenesisBlock.Time())
+	}
+	err := processFcu(ctx, tester, tester.GenesisBlock.Hash(), fcuVersion, name, extr.profileHook)
+	if err != nil {
+		return fmt.Errorf("reset head to genesis: %w", err)
+	}
 	for _, newPayload := range test.NewPayloads {
 		err := processNewPayload(ctx, tester, newPayload, name, extr.profileHook)
 		if err != nil {
 			return err
 		}
 	}
+	return verifyEngineXResult(ctx, tester.RpcApiClient, test)
+}
+
+func fcuVersionFromTimestamp(config *chain.Config, timestamp uint64) string {
+	switch {
+	case config.IsAmsterdam(timestamp):
+		return "4"
+	case config.IsCancun(timestamp):
+		return "3"
+	case config.IsShanghai(timestamp):
+		return "2"
+	default:
+		return "1"
+	}
+}
+
+type engineXResultReader interface {
+	GetBlockByNumber(context.Context, rpc.BlockNumber, bool) (*requests.Block, error)
+	GetProof(context.Context, common.Address, []common.Hash, rpc.BlockReference) (*accounts.AccProofResult, error)
+}
+
+func verifyEngineXResult(ctx context.Context, reader engineXResultReader, test EngineXTestDefinition) error {
+	blockRef := rpc.LatestBlock
+	if test.LastBlockHash != nil {
+		block, err := reader.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		if err != nil {
+			return fmt.Errorf("get final head: %w", err)
+		}
+		if block == nil {
+			return errors.New("get final head: block not found")
+		}
+		if block.Hash != *test.LastBlockHash {
+			return fmt.Errorf("final head mismatch: want %s, got %s", test.LastBlockHash, block.Hash)
+		}
+		blockRef = rpc.AsBlockReference(*test.LastBlockHash)
+	}
+	if test.PostStateDiff == nil {
+		return nil
+	}
+	addresses := make([]common.Address, 0, len(*test.PostStateDiff))
+	for address := range *test.PostStateDiff {
+		addresses = append(addresses, address)
+	}
+	slices.SortFunc(addresses, func(a, b common.Address) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	for _, address := range addresses {
+		proof, err := reader.GetProof(ctx, address, nil, blockRef)
+		if err != nil {
+			return fmt.Errorf("get proof for %s: %w", address, err)
+		}
+		if err := verifyEngineXAccount(address, (*test.PostStateDiff)[address], proof); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func verifyEngineXAccount(address common.Address, expected *types.GenesisAccount, proof *accounts.AccProofResult) error {
+	if proof == nil || proof.Balance == nil {
+		return fmt.Errorf("postStateDiff account %s: incomplete proof", address)
+	}
+	if expected == nil {
+		if proof.Balance.ToInt().Sign() != 0 || proof.Nonce != 0 || proof.CodeHash != (common.Hash{}) || proof.StorageHash != (common.Hash{}) {
+			return fmt.Errorf("postStateDiff account %s: expected account to be absent", address)
+		}
+		return nil
+	}
+	expectedBalance := expected.Balance
+	if expectedBalance == nil {
+		expectedBalance = new(big.Int)
+	}
+	if proof.Balance.ToInt().Cmp(expectedBalance) != 0 {
+		return fmt.Errorf("postStateDiff account %s balance mismatch: want %s, got %s", address, expectedBalance, proof.Balance.ToInt())
+	}
+	if uint64(proof.Nonce) != expected.Nonce {
+		return fmt.Errorf("postStateDiff account %s nonce mismatch: want %d, got %d", address, expected.Nonce, proof.Nonce)
+	}
+	expectedCodeHash := crypto.Keccak256Hash(expected.Code)
+	if proof.CodeHash != expectedCodeHash {
+		return fmt.Errorf("postStateDiff account %s code hash mismatch: want %s, got %s", address, expectedCodeHash, proof.CodeHash)
+	}
+	expectedStorageRoot := engineXStorageRoot(expected.Storage)
+	if proof.StorageHash != expectedStorageRoot {
+		return fmt.Errorf("postStateDiff account %s storage root mismatch: want %s, got %s", address, expectedStorageRoot, proof.StorageHash)
+	}
+	return nil
+}
+
+func engineXStorageRoot(storage map[common.Hash]common.Hash) common.Hash {
+	storageTrie := trie.NewInMemoryTrie(nil)
+	keys := make([]common.Hash, 0, len(storage))
+	for key := range storage {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b common.Hash) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	for _, key := range keys {
+		value := storage[key]
+		trimmed := bytes.TrimLeft(value[:], "\x00")
+		if len(trimmed) != 0 {
+			storageTrie.Update(crypto.Keccak256(key[:]), trimmed)
+		}
+	}
+	return storageTrie.Hash()
 }
 
 // getOrCreateTester returns a cached tester for (fork, preAllocHash) if one
@@ -304,7 +427,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 	forkConfig = &forkConfigCopy
 	var genesis types.Genesis
 	if alloc.Environment.GasLimit != 0 {
-		// New format: build genesis from environment fields
+		// Earlier builder format stores genesis inputs as environment fields.
 		env := alloc.Environment
 		genesis = types.Genesis{
 			Config:     forkConfig,
@@ -331,7 +454,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 			genesis.SlotNumber = &v
 		}
 	} else {
-		// Old format: genesis parsed directly from JSON
+		// Final pre-allocation groups contain the genesis header directly.
 		genesis = alloc.Genesis
 		genesis.Alloc = alloc.Alloc
 		genesis.Config = forkConfig
@@ -499,9 +622,25 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 }
 
 type EngineXTestDefinition struct {
-	Fork         Fork                    `json:"network"`
-	PreAllocHash PreAllocHash            `json:"prehash"`
-	NewPayloads  []EngineXTestNewPayload `json:"engineNewPayloads"`
+	Fork          Fork                    `json:"network"`
+	PreAllocHash  PreAllocHash            `json:"preHash"`
+	LastBlockHash *common.Hash            `json:"lastblockhash"`
+	PostStateDiff *EngineXPostStateDiff   `json:"postStateDiff"`
+	NewPayloads   []EngineXTestNewPayload `json:"engineNewPayloads"`
+}
+
+type EngineXPostStateDiff map[common.Address]*types.GenesisAccount
+
+func (diff *EngineXPostStateDiff) UnmarshalJSON(input []byte) error {
+	var decoded map[common.UnprefixedAddress]*types.GenesisAccount
+	if err := json.Unmarshal(input, &decoded); err != nil {
+		return err
+	}
+	*diff = make(EngineXPostStateDiff, len(decoded))
+	for address, account := range decoded {
+		(*diff)[common.Address(address)] = account
+	}
+	return nil
 }
 
 type EngineXTestNewPayload struct {
@@ -532,7 +671,7 @@ type PreAlloc struct {
 	Alloc       types.GenesisAlloc `json:"pre"`
 }
 
-// EngineXEnvironment maps the "environment" field from engine-x pre-alloc JSON files.
+// EngineXEnvironment maps the legacy builder-form pre-allocation fields.
 type EngineXEnvironment struct {
 	Coinbase      common.Address       `json:"currentCoinbase"`
 	GasLimit      math.HexOrDecimal64  `json:"currentGasLimit"`

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -147,7 +146,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	engine := api.engine()
 
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api.stateCache, api._txNumReader, tx, int(txIndex))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +176,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
 			tracer.Hooks.OnTxEnd(nil, err)
 		}
-		return nil, fmt.Errorf("tracing failed: %v", err)
+		return nil, fmt.Errorf("tracing failed: %w", err)
 	}
 
 	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
@@ -309,7 +308,7 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	return ret, nil
 }
 
-func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (*big.Int, error) {
+func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
 	var fee, gasUsed, totalFees uint256.Int
 	isLondon := chainConfig.IsLondon(block.NumberU64())
 	baseFee := block.BaseFee()
@@ -329,15 +328,17 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 		totalFees.Add(&totalFees, &fee)
 	}
 
-	return totalFees.ToBig(), nil
+	return totalFees, nil
 }
 
-func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+// getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
+// once and uses the same one for everything it derives from the block.
+func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, []common.Address, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil, nil // not error, see also other cases https://github.com/erigontech/erigon/issues/1645
@@ -362,24 +363,29 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	}
 	defer tx.Rollback()
 
+	// One selected view for resolution, gate and reads: a background commit can publish
+	// or drop the overlay between two selections, leaving the gate on one generation and
+	// the block or its receipts on another.
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+
 	var b *types.Block
 	if number == rpc.PendingBlockNumber {
-		b, _, err = api.getBlockWithSenders(ctx, number, tx)
+		b, _, err = api.getBlockWithSenders(ctx, number, overlayTx)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNum); err != nil {
 			return nil, err
 		}
-		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
+		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), overlayTx)
 		if err != nil {
 			return nil, err
 		}
@@ -388,18 +394,18 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(ctx, tx)
+	chainConfig, err := api.chainConfig(ctx, overlayTx)
 	if err != nil {
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, true)
+	getBlockRes, err := delegateGetBlockByNumber(overlayTx, b, number, true)
 	if err != nil {
 		return nil, err
 	}
 
 	// Receipts
-	receipts, err := api.getReceipts(ctx, tx, b)
+	receipts, err := api.getReceipts(ctx, overlayTx, b)
 	if err != nil {
 		return nil, err
 	}

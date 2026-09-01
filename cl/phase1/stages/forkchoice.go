@@ -14,12 +14,15 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -30,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -80,8 +82,15 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
-			err = fmt.Errorf("failed to run forkchoice: %w", err)
-			return
+			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+			// to lose by carrying on: the next head will send another one.
+			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
+				err = nil
+			} else {
+				err = fmt.Errorf("failed to run forkchoice: %w", err)
+				return
+			}
 		}
 	}
 
@@ -251,19 +260,11 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		log.Warn("failed to get proposer index", "err", err)
 		return err
 	}
-	withdrawals := []*types.Withdrawal{}
 	expWithdrawals, err := state.GetExpectedWithdrawals(s, epoch)
 	if err != nil {
 		return err
 	}
-	for _, w := range expWithdrawals.Withdrawals {
-		withdrawals = append(withdrawals, &types.Withdrawal{
-			Amount:    w.Amount,
-			Index:     w.Index,
-			Validator: w.Validator,
-			Address:   w.Address,
-		})
-	}
+	withdrawals := cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(expWithdrawals.Withdrawals)
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,
@@ -305,27 +306,71 @@ func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) er
 	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
+	var rootPath string
+	if st.Version() >= clparams.GloasVersion {
+		rootFileName := checkpoint_sync.FinalizedStateRootFileName(dat)
+		rootPath = filepath.Join(dirs.CaplinLatest, rootFileName)
+		rootTmpPath := rootPath + ".tmp"
+		stateRoot := st.PeekPreviousStateRoot()
+		if err := replaceDurableFile(rootTmpPath, rootPath, checkpoint_sync.EncodeFinalizedStateRoot(dat, stateRoot)); err != nil {
+			return fmt.Errorf("failed to replace finalized state root: %w", err)
+		}
+	}
 	tmpName := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp")
-	tmp, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
-		return fmt.Errorf("failed to create temp finalized state file: %w", err)
+	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	if err := replaceDurableFile(tmpName, statePath, dat); err != nil {
+		return fmt.Errorf("failed to replace finalized state: %w", err)
 	}
-	defer func() { _ = dir.RemoveFile(tmpName) }()
-	if _, err := tmp.Write(dat); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to write finalized state to disk: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("failed to sync finalized state temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("failed to close finalized state temp file: %w", err)
-	}
-	if err := os.Rename(tmpName, filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)); err != nil {
-		return fmt.Errorf("failed to rename finalized state file: %w", err)
+	if rootPath != "" {
+		if err := checkpoint_sync.RemoveObsoleteFinalizedStateRoots(dirs.CaplinLatest, rootPath); err != nil {
+			return fmt.Errorf("failed to remove obsolete finalized state roots: %w", err)
+		}
+		if err := syncDirectory(dirs.CaplinLatest); err != nil {
+			return fmt.Errorf("failed to sync finalized state root cleanup: %w", err)
+		}
 	}
 	return nil
+}
+
+func replaceDurableFile(tmpPath, finalPath string, data []byte) (err error) {
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, tmp.Close())
+		}
+		_ = dir.RemoveFile(tmpPath)
+	}()
+	if _, err = tmp.Write(data); err != nil {
+		return err
+	}
+	if syncErr := tmp.Sync(); syncErr != nil {
+		return syncErr
+	}
+	closeErr := tmp.Close()
+	closed = true
+	if closeErr != nil {
+		return closeErr
+	}
+	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
+		return renameErr
+	}
+	return syncDirectory(filepath.Dir(finalPath))
+}
+
+func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 // saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a
@@ -363,8 +408,12 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
-	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+	if err := emitHeadEvent(cfg, headSlot, headRoot, headState); err != nil {
+		logger.Warn("failed to emit head event", "err", err)
+	}
+	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
+		logger.Warn("failed to emit next payload attributes event", "err", err)
+	}
 
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
@@ -447,11 +496,12 @@ func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cf
 
 		// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
 		epochsToCache := []uint64{currentEpoch + 1}
-		if currentEpoch >= 2 {
+		switch {
+		case currentEpoch >= 2:
 			epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
-		} else if currentEpoch >= 1 {
+		case currentEpoch >= 1:
 			epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
-		} else {
+		default:
 			epochsToCache = append(epochsToCache, currentEpoch)
 		}
 

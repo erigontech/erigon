@@ -187,7 +187,8 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 		if br {
 			break
 		}
-		if cmp == 0 {
+		switch {
+		case cmp == 0:
 			if !bytes.Equal(tgVal, gethVal) {
 				errsNum++
 				fmt.Println(common.Bytes2Hex(tgKey))
@@ -207,7 +208,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				return
 
 			}
-		} else if cmp < 0 {
+		case cmp < 0:
 			gethMissed++
 			tgKey, tgVal, err1 = tgCursor.Next()
 			if err1 != nil {
@@ -215,7 +216,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				return
 
 			}
-		} else if cmp > 0 {
+		case cmp > 0:
 			tgMissed++
 			gethKey, gethVal, err2 = gethCursor.Next()
 			if err2 != nil {

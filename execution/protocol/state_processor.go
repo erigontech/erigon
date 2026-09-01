@@ -92,7 +92,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, err
 	}
 	gasUsed.Receipt += result.ReceiptGasUsed

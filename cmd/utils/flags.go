@@ -49,16 +49,19 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/iouring"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -72,13 +75,10 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // These are all the command line flags we support.
@@ -327,6 +327,51 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: nodecfg.DefaultHTTPPort,
 	}
+	HTTPURLFlag = cli.StringFlag{
+		Name:  "http.url",
+		Usage: "HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix",
+		Value: "",
+	}
+	HTTPSEnabledFlag = cli.BoolFlag{
+		Name:  "https.enabled",
+		Usage: "Enable HTTPS server",
+		Value: false,
+	}
+	HTTPSListenAddrFlag = cli.StringFlag{
+		Name:  "https.addr",
+		Usage: "rpc HTTPS server listening interface",
+		Value: nodecfg.DefaultHTTPHost,
+	}
+	HTTPSPortFlag = cli.IntFlag{
+		Name:  "https.port",
+		Usage: "rpc HTTPS server listening port. default to http.port + 363 if not set",
+		Value: 0,
+	}
+	HTTPSURLFlag = cli.StringFlag{
+		Name:  "https.url",
+		Usage: "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix",
+		Value: "",
+	}
+	HTTPSCertFlag = cli.StringFlag{
+		Name:  "https.cert",
+		Usage: "certificate for rpc HTTPS server",
+		Value: "",
+	}
+	HTTPSKeyFlag = cli.StringFlag{
+		Name:  "https.key",
+		Usage: "key file for rpc HTTPS server",
+		Value: "",
+	}
+	SocketEnabledFlag = cli.BoolFlag{
+		Name:  "socket.enabled",
+		Usage: "Enable IPC server",
+		Value: false,
+	}
+	SocketURLFlag = cli.StringFlag{
+		Name:  "socket.url",
+		Usage: "IPC server listening url. prefix supported are tcp, unix",
+		Value: "unix:///var/run/erigon.sock",
+	}
 	AuthRpcAddr = cli.StringFlag{
 		Name:  "authrpc.addr",
 		Usage: "HTTP-RPC server listening interface for the Engine API",
@@ -434,12 +479,12 @@ var (
 	}
 	RpcGetLogsMaxResults = cli.IntFlag{
 		Name:  "rpc.logs.maxresults",
-		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
+		Usage: "Maximum number of logs returned by eth_getLogs, eth_getFilterLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
 	}
 	RpcLogQueryLimit = cli.IntFlag{
 		Name:  "rpc.logs.querylimit",
-		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs filter criteria (<=0 = unlimited)",
+		Usage: "Maximum number of alternative addresses or topics allowed per search position in eth_getLogs and eth_getFilterLogs filter criteria (<=0 = unlimited)",
 		Value: 1_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
@@ -803,7 +848,7 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "DB is split to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
+		Usage: "DB is split to 'pages' of fixed size. Can't change after DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
 		Value: ethconfig.DefaultChainDBPageSize.String(),
 	}
 	DbSizeLimitFlag = cli.StringFlag{
@@ -826,28 +871,6 @@ var (
 		Name:  "webseed",
 		Usage: "Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
 		Value: "",
-	}
-
-	HeimdallURLFlag = cli.StringFlag{
-		Name:  "bor.heimdall",
-		Usage: "URL of Heimdall service",
-		Value: "http://localhost:1317",
-	}
-
-	// WithoutHeimdallFlag no heimdall (for testing purpose)
-	WithoutHeimdallFlag = cli.BoolFlag{
-		Name:  "bor.withoutheimdall",
-		Usage: "Run without Heimdall service (for testing purposes)",
-	}
-
-	BorBlockPeriodFlag = cli.BoolFlag{
-		Name:  "bor.period",
-		Usage: "Override the bor block period (for testing purposes)",
-	}
-
-	BorBlockSizeFlag = cli.BoolFlag{
-		Name:  "bor.minblocksize",
-		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
 	}
 
 	AAFlag = cli.BoolFlag{
@@ -958,12 +981,12 @@ var (
 	}
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: []string{},
 	}
 	SentinelStaticPeers = cli.StringSliceFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: []string{},
 	}
 
@@ -1039,8 +1062,8 @@ var (
 	}
 	CaplinColumnKeepSlotsFlag = cli.Uint64Flag{
 		Name:  "caplin.columns-keep-slots",
-		Usage: "number of slots to retain PeerDAS data column sidecars (default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH = 131072, ~18 days); increase for DA oracle or rollup nodes that need longer column history",
-		Value: 131072,
+		Usage: "number of slots to retain PeerDAS data column sidecars; 0 uses the chain's spec window (MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH), increase for DA oracle or rollup nodes that need longer column history",
+		Value: 0,
 	}
 	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
 		Name:  "caplin.checkpoint-sync.disable",
@@ -1100,32 +1123,12 @@ var (
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
-	PolygonPosSingleSlotFinalityFlag = cli.BoolFlag{
-		Name:  "polygon.pos.ssf",
-		Usage: "Enabling Polygon PoS Single Slot Finality",
-	}
-	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Uint64Flag{
-		Name:  "polygon.pos.ssf.block",
-		Usage: "Enabling Polygon PoS Single Slot Finality since block",
-	}
-	PolygonPosWitProtocolFlag = cli.BoolFlag{
-		Name:  "polygon.wit-protocol",
-		Usage: "Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains)",
-	}
 	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
 	// (ModeParallel) for commitment computation. Default off; flip to compare
 	// root hashes against a sequential sync before enabling broadly.
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
 		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
-		Value: false,
-	}
-	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
-	// overlaps commitment fold work with block execution. Default off; takes
-	// precedence over the parallel flag when set.
-	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.streaming-commitment",
-		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
 		Value: false,
 	}
 	GDBMeFlag = cli.BoolFlag{
@@ -1160,11 +1163,6 @@ var (
 		Name:  "fcu.background.prune",
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
-	}
-	FcuBackgroundCommitFlag = cli.BoolFlag{
-		Name:  "fcu.background.commit",
-		Usage: "Enables background flush and commit",
-		Value: ethconfig.Defaults.FcuBackgroundCommit,
 	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
@@ -1217,7 +1215,7 @@ var (
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:  "exec.no-prune",
-		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
 		Value: false,
 	}
 	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
@@ -1381,7 +1379,7 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port uint,
 	protocol uint,
-	metricsEnabled, witProtocol bool,
+	metricsEnabled bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -1401,18 +1399,17 @@ func NewP2PConfig(
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:        fmt.Sprintf(":%d", port),
-		MaxPeers:          maxPeers,
-		MaxPendingPeers:   maxPendPeers,
-		NAT:               nat.Any(),
-		NoDiscovery:       nodiscover,
-		DiscoveryV5:       !nodiscover,
-		PrivateKey:        serverKey,
-		Name:              nodeName,
-		NodeDatabase:      enodeDBPath,
-		TmpDir:            dirs.Tmp,
-		MetricsEnabled:    metricsEnabled,
-		EnableWitProtocol: witProtocol,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		DiscoveryV5:     !nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		NodeDatabase:    enodeDBPath,
+		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1487,7 +1484,7 @@ func setEtherbase(ctx *cli.Command, cfg *ethconfig.Config) {
 		}
 	}
 
-	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev || chainName == networkname.BorDevnet {
+	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev {
 		if etherbase == "" {
 			cfg.Builder.Etherbase = devnetEtherbase
 		}
@@ -1524,8 +1521,6 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 	setBoolIfSet(&cfg.DiscoveryV4, &DiscoveryV4Flag)
 	setBoolIfSet(&cfg.DiscoveryV5, &DiscoveryV5Flag)
 	setBoolIfSet(&cfg.MetricsEnabled, &MetricsEnabledFlag)
-	setBoolIfSet(&cfg.EnableWitProtocol, &PolygonPosWitProtocolFlag)
-
 	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
 
 	if netrestrict := ctx.String(NetrestrictFlag.Name); netrestrict != "" {
@@ -1748,33 +1743,15 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
-	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
-	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
-
-	heimdall.RecordWayPoints(true)
-
-	spec, _ := chainspec.ChainSpecByName(ctx.String(ChainFlag.Name))
-	if !spec.IsEmpty() && spec.Config.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) { // IsBor?
-		// override default max devp2p peers for polygon as per
-		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
-		// which encourages high peer count
-		nodeConfig.P2P.MaxPeers = 100
-		logger.Info("Maximum peer count default sanitizing for bor", "total", nodeConfig.P2P.MaxPeers)
-	}
-
-	cfg.PolygonPosSingleSlotFinality = ctx.Bool(PolygonPosSingleSlotFinalityFlag.Name)
-	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
-}
-
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
-	if ctx.IsSet(MinerExtraDataFlag.Name) {
+	switch {
+	case ctx.IsSet(MinerExtraDataFlag.Name):
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
-	} else if len(version.GitCommit) > 0 {
+	case len(version.GitCommit) > 0:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + version.VersionWithCommit(version.GitCommit))
-	} else {
+	default:
 		cfg.ExtraData = []byte(ctx.Root().Name + "-" + ctx.Root().Version)
 	}
 	maxExtra := min(int(params.MaximumExtraDataSize), types.ExtraVanityLength)
@@ -1965,12 +1942,19 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
-	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
+	if ctx.IsSet(SentinelStaticPeers.Name) {
+		cfg.CaplinConfig.StaticPeers = []string{}
+		for _, staticPeer := range ctx.StringSlice(SentinelStaticPeers.Name) {
+			if staticPeer != "" {
+				cfg.CaplinConfig.StaticPeers = append(cfg.CaplinConfig.StaticPeers, staticPeer)
+			}
+		}
+	}
 
 	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
+	} else if chain != networkname.Dev {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
 			Fatalf("chain name is not recognized: %s", chain)
@@ -2005,7 +1989,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
-	setBorConfig(ctx, cfg, nodeConfig, logger)
 	if err := setBeaconAPI(ctx, cfg); err != nil {
 		log.Error("Failed to set beacon API", "err", err)
 	}
@@ -2018,13 +2001,8 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		cfg.ExperimentalParallelCommitment = true
 	}
 
-	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
-		cfg.ExperimentalStreamingCommitment = true
-	}
-
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
-	cfg.FcuBackgroundCommit = ctx.Bool(FcuBackgroundCommitFlag.Name)
 
 	// Executor performance toggles. When the user explicitly sets the CLI
 	// flag, it overrides the env-var default that dbg read at package init.
@@ -2052,10 +2030,24 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
 	}
+	// Disable io_uring experiments at startup when their reads cannot run.
+	if (dbg.FilesBlockingAsyncIO || dbg.FilesBlockingAsyncIOMultiPage) && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("blocking async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+		dbg.FilesBlockingAsyncIO = false
+		dbg.FilesBlockingAsyncIOMultiPage = false
+	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
-		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
+		warmupWorkers := dbg.BALCommitmentWarmupReaders()
+		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
+		parallelCommitmentReaders := 0
+		if cfg.ExperimentalParallelCommitment || statecfg.ExperimentalParallelCommitment {
+			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
+		}
+		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
-				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount)
+				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,
+				"parallelCommitmentReaders", parallelCommitmentReaders, "warmupWorkers", warmupWorkers,
+				"blockReadAheadWorkers", blockReadAheadWorkers)
 		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {
@@ -2257,7 +2249,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(cfg.Genesis, cfg.Dirs, logger)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}

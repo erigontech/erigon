@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -26,22 +25,19 @@ type AggOpts struct { //nolint:gocritic
 	stepSize                        uint64 // != 0 mean override erigondb.toml settings
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
-	reorgBlockDepth                 uint64
+	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
-	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
-
-	genSaltIfNeed      bool
-	sanityOldNaming    bool // prevent start directory with old file names
-	disableFsync       bool // for tests speed
-	disableHistory     bool // for temp/inmem aggregator instances
-	disableBranchCache bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	genSaltIfNeed       bool
+	sanityOldNaming     bool // prevent start directory with old file names
+	disableFsync        bool // for tests speed
+	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck bool
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
-		reorgBlockDepth: dbg.MaxReorgDepth,
 		genSaltIfNeed:   false,
 		sanityOldNaming: false,
 		disableFsync:    false,
@@ -49,7 +45,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -65,7 +61,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.reorgBlockDepth, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +70,9 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
 	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
-	a.disableHistory = opts.disableHistory
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
+	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
 
 	a.savedSalt = salt
 
@@ -115,14 +111,11 @@ func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //no
 	opts.erigondbDomainStepsInFrozenFile = steps
 	return opts
 }
-func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
-	opts.reorgBlockDepth = d
-	return opts
-}
-func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }     //nolint:gocritic
-func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }            //nolint:gocritic
-func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts }   //nolint:gocritic
-func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
+func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
+func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
+func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
+
+func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
@@ -143,9 +136,10 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 
 type workersCfg struct {
 	mu              sync.Mutex
-	editLocks       int // >0 while background build/merge pins config; Preset* writes are no-ops
+	editLocks       int // >0 while background build/merge pins config
 	merge           int // usually 1
 	collateAndBuild int
+	pending         []func() // requests that arrived while pinned
 }
 
 func (w *workersCfg) getMerge() int {
@@ -155,11 +149,7 @@ func (w *workersCfg) getMerge() int {
 }
 
 func (w *workersCfg) setMerge(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		w.merge = n
-	}
+	w.trySet(func() { w.merge = n })
 }
 
 func (w *workersCfg) getCollateAndBuild() int {
@@ -169,20 +159,19 @@ func (w *workersCfg) getCollateAndBuild() int {
 }
 
 func (w *workersCfg) setCollateAndBuild(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		w.collateAndBuild = n
-	}
+	w.trySet(func() { w.collateAndBuild = n })
 }
 
-// trySet runs fn under mu only while editing is unlocked (no background op holds it).
+// trySet runs fn under mu, or queues it for the last unlockEditing while a background op pins
+// the config: dropping the request loses it for the process — a restart merges before any preset.
 func (w *workersCfg) trySet(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		fn()
+	if w.editLocks > 0 {
+		w.pending = append(w.pending, fn)
+		return
 	}
+	fn()
 }
 
 // lockEditing is reentrant: overlapping build/merge ops each hold a lock, and
@@ -199,15 +188,17 @@ func (w *workersCfg) unlockEditing() {
 	if w.editLocks > 0 {
 		w.editLocks--
 	}
+	if w.editLocks != 0 {
+		return
+	}
+	for _, fn := range w.pending {
+		fn()
+	}
+	w.pending = nil
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
-	directories := []string{
-		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
-		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
-	}
-	for _, dirPath := range directories {
+	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				if os.IsNotExist(err) { //skip magically disappeared files

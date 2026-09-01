@@ -2,8 +2,11 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"math/big"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -15,6 +18,7 @@ import (
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -25,6 +29,479 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+type selectedHeadEnvelopeTestStore struct {
+	mu                    sync.Mutex
+	envelopes             map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	onExecutionPayloadErr error
+	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
+}
+
+func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.envelopes[root] != nil
+}
+
+func (s *selectedHeadEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.onExecutionPayload != nil {
+		if err := s.onExecutionPayload(envelope); err != nil {
+			return err
+		}
+	}
+	if s.onExecutionPayloadErr != nil {
+		return s.onExecutionPayloadErr
+	}
+	s.envelopes[envelope.Message.BeaconBlockRoot] = envelope
+	return nil
+}
+
+func TestWaitForSelectedHeadEnvelopeRequestsAndAppliesPeerEnvelope(t *testing.T) {
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	requests := make(chan [][32]byte, 1)
+
+	waitForSelectedHeadEnvelope(context.Background(), store, func(_ context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests <- roots
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}, headRoot, time.Second, true, false, selectedHeadEnvelopeRequestHooks{})
+
+	require.Equal(t, [][32]byte{headRoot}, <-requests)
+	require.True(t, store.HasEnvelope(headRoot))
+}
+
+func TestSelectedHeadEnvelopeRequestRetriesAfterLateResponse(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	requestDone := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	helpDone := make(chan struct{})
+	go func() {
+		defer close(helpDone)
+		waitForSelectedHeadEnvelope(ctx, store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+			close(requestStarted)
+			<-releaseResponse
+			return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+		}, headRoot, time.Second, true, false, selectedHeadEnvelopeRequestHooks{
+			done: func() {
+				releaseSelectedHeadEnvelopeRequest(cfg, claim)
+				close(requestDone)
+			},
+			retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
+		})
+	}()
+	<-requestStarted
+	cancel()
+	<-helpDone
+	close(releaseResponse)
+	<-requestDone
+
+	_, request, wait = claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+}
+
+func TestSelectedHeadEnvelopeRequestRetriesAfterCanceledApply(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+	store := &selectedHeadEnvelopeTestStore{
+		envelopes:             make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		onExecutionPayloadErr: context.DeadlineExceeded,
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	requestDone := make(chan struct{})
+	waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}, headRoot, 20*time.Millisecond, true, false, selectedHeadEnvelopeRequestHooks{
+		done: func() {
+			releaseSelectedHeadEnvelopeRequest(cfg, claim)
+			close(requestDone)
+		},
+		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
+	})
+	<-requestDone
+
+	_, request, wait = claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+}
+
+func TestClaimedSelectedHeadEnvelopeBoundsAttemptDeadlineRetries(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requestCalls := 0
+	request := func(requestCtx context.Context, _ [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		<-requestCtx.Done()
+		return nil, requestCtx.Err()
+	}
+
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 2, requestCalls)
+}
+
+func TestClaimedSelectedHeadEnvelopeRetriesAfterParentCancellation(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requestStarted := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		waitForClaimedSelectedHeadEnvelope(ctx, cfg, store, func(requestCtx context.Context, _ [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+			close(requestStarted)
+			<-requestCtx.Done()
+			return nil, requestCtx.Err()
+		}, headRoot, time.Second, false)
+	}()
+	<-requestStarted
+	cancel()
+	<-done
+	require.Eventually(t, func() bool {
+		cfg.gloasHeadEnvelopeRequestMu.Lock()
+		defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+		_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+		return !active
+	}, time.Second, time.Millisecond)
+
+	_, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+}
+
+func TestClaimedSelectedHeadEnvelopeBoundsApplyFailureRetries(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	store := &selectedHeadEnvelopeTestStore{
+		envelopes:             make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		onExecutionPayloadErr: errors.New("invalid envelope"),
+	}
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}
+
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 2, requestCalls)
+}
+
+func TestClaimedSelectedHeadEnvelopeBoundsEmptyResponseRetries(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}, nil
+	}
+
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 2, requestCalls)
+}
+
+func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+	store := &selectedHeadEnvelopeTestStore{
+		envelopes:             make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		onExecutionPayloadErr: errors.New("invalid envelope"),
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	requestDone := make(chan struct{})
+	waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}, headRoot, 20*time.Millisecond, true, false, selectedHeadEnvelopeRequestHooks{
+		done: func() {
+			releaseSelectedHeadEnvelopeRequest(cfg, claim)
+			close(requestDone)
+		},
+		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
+	})
+	<-requestDone
+
+	_, request, wait = claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+}
+
+func TestClaimedSelectedHeadEnvelopeRetriesTransientApplyFailure(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	applyCalls := 0
+	store := &selectedHeadEnvelopeTestStore{
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		onExecutionPayload: func(*cltypes.SignedExecutionPayloadEnvelope) error {
+			applyCalls++
+			if applyCalls == 1 {
+				return forkchoice.ErrEIP7594ColumnDataNotAvailable
+			}
+			return nil
+		},
+	}
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}
+
+	waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+	require.Eventually(t, func() bool {
+		cfg.gloasHeadEnvelopeRequestMu.Lock()
+		defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+		_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+		return !active
+	}, time.Second, time.Millisecond)
+	waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 60*time.Millisecond, false)
+
+	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 2, applyCalls)
+	require.True(t, store.HasEnvelope(headRoot))
+}
+
+func TestSelectedHeadEnvelopeRequestReleasesUnusedClaim(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	require.True(t, request)
+	require.True(t, wait)
+	store := &selectedHeadEnvelopeTestStore{envelopes: map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+		headRoot: {Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}},
+	}}
+
+	waitForSelectedHeadEnvelope(context.Background(), store, nil, headRoot, time.Second, true, false, selectedHeadEnvelopeRequestHooks{
+		done: func() { releaseSelectedHeadEnvelopeRequest(cfg, claim) },
+	})
+
+	cfg.gloasHeadEnvelopeRequestMu.Lock()
+	_, claimed := cfg.gloasHeadEnvelopeRequests[headRoot]
+	cfg.gloasHeadEnvelopeRequestMu.Unlock()
+	require.False(t, claimed)
+}
+
+func TestGloasRecoveryUsesTargetForkVersion(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 9
+	cfg.GloasForkEpoch = 10
+	cfg.GloasForkVersion = 0x80000038
+	cfg.InitializeForkSchedule()
+
+	require.False(t, shouldRecoverMissingEnvelopes(&cfg, cfg.GloasForkEpoch*cfg.SlotsPerEpoch-1))
+	require.True(t, shouldRecoverMissingEnvelopes(&cfg, cfg.GloasForkEpoch*cfg.SlotsPerEpoch))
+}
+
+func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
+	cfg := &Cfg{}
+	firstHead := common.HexToHash("0x1234")
+	secondHead := common.HexToHash("0x5678")
+
+	firstAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
+	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, ok)
+	require.False(t, wait)
+	observeSelectedHeadEnvelopeRequest(cfg, secondHead)
+	observeSelectedHeadEnvelopeRequest(cfg, firstHead)
+	thirdAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, thirdAttempt)
+
+	observeSelectedHeadEnvelopeRequest(cfg, secondHead)
+	secondHeadAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, secondHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondHeadAttempt)
+	secondAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
+	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
+}
+
+func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
+	cfg := &Cfg{}
+	scanRoot := common.HexToHash("0x1234")
+
+	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, false)
+	require.Equal(t, scanRoot, cfg.gloasEnvelopeRecoveryCursor)
+
+	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, true)
+	require.Equal(t, common.Hash{}, cfg.gloasEnvelopeRecoveryCursor)
+}
+
+func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
+	completeBatch := true
+	require.True(t, continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch))
+	require.True(t, completeBatch)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	completeBatch = true
+	require.False(t, continueGloasVerificationAfterItemFailure(canceled, &completeBatch))
+	require.False(t, completeBatch)
+}
+
+func TestGloasVerificationImmediateFailureDoesNotFreezeBatch(t *testing.T) {
+	completeBatch := true
+	processed := 0
+	items := []*gloasVerificationItem{{}, {}}
+	process := func(gloasVerificationItem) bool {
+		processed++
+		if processed == 1 {
+			return continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch)
+		}
+		return true
+	}
+
+	processImmediateGloasVerificationItems(items[0], items[1], process, &completeBatch)
+
+	require.Equal(t, 2, processed)
+	require.True(t, completeBatch)
+}
+
+func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
+	require.False(t, blockSupportsExecutionPayloadEnvelope(nil))
+	require.False(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{}))
+	require.False(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Body: &cltypes.BeaconBody{Version: clparams.FuluVersion}},
+	}))
+	require.True(t, blockSupportsExecutionPayloadEnvelope(&cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{Body: &cltypes.BeaconBody{Version: clparams.GloasVersion}},
+	}))
+}
+
+func TestGloasNewPayloadArgsUseEmptyVersionedHashes(t *testing.T) {
+	cfg, _, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+
+	anchorHashes, _, err := buildAnchorNewPayloadArgs(cfg, bid, env)
+	require.NoError(t, err)
+	require.NotNil(t, anchorHashes)
+	require.Empty(t, anchorHashes)
+
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: &cltypes.BeaconBody{Version: clparams.GloasVersion}}}
+	block.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: bid}
+	chainTipHashes, _, err := buildGloasNewPayloadArgs(&Cfg{beaconCfg: cfg}, block, env)
+	require.NoError(t, err)
+	require.NotNil(t, chainTipHashes)
+	require.Empty(t, chainTipHashes)
+}
+
+func TestWaitForSelectedHeadEnvelopeDoesNotRequestUnclaimedHead(t *testing.T) {
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requests := make(chan struct{}, 1)
+	waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests <- struct{}{}
+		return nil, nil
+	}, common.HexToHash("0x1234"), time.Millisecond, false, false, selectedHeadEnvelopeRequestHooks{})
+
+	select {
+	case <-requests:
+		t.Fatal("unclaimed head triggered a peer request")
+	default:
+	}
+}
+
+func TestWaitForSelectedHeadEnvelopeBoundsEmptyPeerResponse(t *testing.T) {
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	requests := make(chan struct{}, 1)
+	waitForSelectedHeadEnvelope(context.Background(), store, func(requestCtx context.Context, _ [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requests <- struct{}{}
+		<-requestCtx.Done()
+		return nil, requestCtx.Err()
+	}, common.HexToHash("0x1234"), 10*time.Millisecond, true, false, selectedHeadEnvelopeRequestHooks{})
+
+	require.Len(t, requests, 1)
+}
+
+func TestWaitForSelectedHeadEnvelopeDoesNotJoinLateRequester(t *testing.T) {
+	headRoot := common.HexToHash("0x1234")
+	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
+	release := make(chan struct{})
+	requestDone := make(chan struct{})
+	returned := make(chan struct{})
+	go func() {
+		waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+			defer close(requestDone)
+			<-release
+			return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+				headRoot: {Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}},
+			}, nil
+		}, headRoot, 10*time.Millisecond, true, false, selectedHeadEnvelopeRequestHooks{})
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		<-returned
+		t.Fatal("selected-head wait joined a late requester")
+	}
+	close(release)
+	<-requestDone
+	require.False(t, store.HasEnvelope(headRoot))
+}
 
 func TestValidateAnchorEnvelope(t *testing.T) {
 	cfg, st, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
@@ -181,34 +658,54 @@ func TestGloasPayloadHelpers(t *testing.T) {
 	require.Equal(t, want, hash)
 }
 
-func TestStandaloneExecutionClientDoesNotRunLocalGloasRetry(t *testing.T) {
-	require.False(t, canRetryGloasPayloads(&Cfg{}))
-	require.False(t, canRetryGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
-	require.True(t, canRetryGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
+func TestGloasVerificationHeadUsesForkChoiceHead(t *testing.T) {
+	want := common.HexToHash("0x22")
+	fc := &mock_services.ForkChoiceStorageMock{HeadVal: want}
+
+	got, err := gloasVerificationHeadRoot(fc)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
 
-func TestValidateAnchorPayloadIfLocalELFollowsSupportInsertion(t *testing.T) {
+func TestGloasPayloadValidationRequiresExecutionClient(t *testing.T) {
+	require.False(t, canValidateGloasPayloads(&Cfg{}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}))
+	require.True(t, canValidateGloasPayloads(&Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}))
+}
+
+func TestForwardSyncValidatesOnlyWhenInsertionIsUnavailable(t *testing.T) {
+	localEL := &Cfg{executionClient: &testExecutionEngine{supportInsertion: true}}
+	remoteEL := &Cfg{executionClient: &testExecutionEngine{supportInsertion: false}}
+
+	require.False(t, shouldValidateForwardSyncPayload(localEL, true))
+	require.True(t, shouldValidateForwardSyncPayload(remoteEL, false))
+	require.False(t, shouldValidateForwardSyncPayload(&Cfg{}, false))
+}
+
+func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 	remoteEL := &testExecutionEngine{
 		supportInsertion: false,
-		payloadStatus:    execution_client.PayloadStatusInvalidated,
+		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
 
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
-		beaconCfg:       cfg,
-		executionClient: remoteEL,
-		forkChoice:      &forkchoice.ForkChoiceStore{},
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
+		beaconCfg:             cfg,
+		executionClient:       remoteEL,
+		gloasPayloadValidator: remoteEL,
+		forkChoice:            &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
-	require.Equal(t, 0, remoteEL.newPayloadCalls)
+	require.Equal(t, 1, remoteEL.newPayloadCalls)
 
 	localEL := &testExecutionEngine{
 		supportInsertion: true,
 		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
-	require.NoError(t, validateAnchorPayloadIfLocalEL(context.Background(), &Cfg{
-		beaconCfg:       cfg,
-		executionClient: localEL,
-		forkChoice:      &forkchoice.ForkChoiceStore{},
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
+		beaconCfg:             cfg,
+		executionClient:       localEL,
+		gloasPayloadValidator: localEL,
+		forkChoice:            &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
 	require.Equal(t, 1, localEL.newPayloadCalls)
 }
@@ -251,15 +748,65 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	fc.RequeuePendingELPayload(pending)
 
 	drainPendingGloasPayloads(context.Background(), &Cfg{
-		beaconCfg:       &cfg,
-		executionClient: engine,
-		forkChoice:      fc,
+		beaconCfg:             &cfg,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+		forkChoice:            fc,
 	})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	queued := fc.DrainPendingELPayloads()
 	require.Len(t, queued, 1)
 	require.Equal(t, blockRoot, queued[0].Envelope.Message.BeaconBlockRoot)
+}
+
+func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	engine := &testExecutionEngine{supportInsertion: false}
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		<-ctx.Done()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+	fc := &forkchoice.ForkChoiceStore{}
+	for i := byte(1); i <= 3; i++ {
+		root := common.Hash{i}
+		payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+		payload.BlockHash = common.Hash{i + 10}
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+		envelope.Message.BeaconBlockRoot = root
+		envelope.Message.Payload = payload
+		body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+		body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+		}}
+		fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+			Block:    &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}},
+			Envelope: envelope,
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc})
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Len(t, fc.DrainPendingELPayloads(), 3)
+}
+
+func TestGloasPayloadRetryPhasesRotateFirstClass(t *testing.T) {
+	calls := [3]int{}
+	for offset := range uint32(3) {
+		phases := make([]func(context.Context), 3)
+		for i := range phases {
+			index := i
+			phases[i] = func(ctx context.Context) {
+				calls[index]++
+				<-ctx.Done()
+			}
+		}
+		runGloasPayloadRetryPhases(context.Background(), 20*time.Millisecond, offset, phases...)
+	}
+	require.Equal(t, [3]int{1, 1, 1}, calls)
 }
 
 func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.BeaconChainConfig, *state2.CachingBeaconState, *cltypes.ExecutionPayloadBid, *cltypes.SignedExecutionPayloadEnvelope, common.Hash) {
@@ -273,7 +820,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 
 	st := state2.New(&cfg)
 	st.SetVersion(clparams.GloasVersion)
-	st.SetSlot(64)
+	require.NoError(t, st.SetSlot(64))
 	st.SetGenesisValidatorsRoot(common.HexToHash("0x01"))
 	st.SetFork(&cltypes.Fork{
 		PreviousVersion: utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion)),
@@ -286,7 +833,7 @@ func validAnchorEnvelopeFixture(t *testing.T, builderIndex uint64) (*clparams.Be
 	require.NoError(t, err)
 	pubkey := common.Bytes48(bls.CompressPublicKey(privKey.PublicKey()))
 
-	st.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance)
+	require.NoError(t, st.AddValidator(solid.NewValidatorFromParameters(pubkey, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch), cfg.MaxEffectiveBalance))
 	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
 	if builderIndex != clparams.BuilderIndexSelfBuild {
 		for i := uint64(0); i <= builderIndex; i++ {
@@ -392,11 +939,19 @@ type testExecutionEngine struct {
 	supportInsertion bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
+	newPayloadFn     func(context.Context) (execution_client.PayloadStatus, error)
 }
 
-func (t *testExecutionEngine) NewPayload(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+func (t *testExecutionEngine) NewPayload(ctx context.Context, _ *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
 	t.newPayloadCalls++
+	if t.newPayloadFn != nil {
+		return t.newPayloadFn(ctx)
+	}
 	return t.payloadStatus, nil
+}
+
+func (t *testExecutionEngine) NewPayloadWithAdmission(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, hashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	return t.NewPayload(ctx, payload, parentRoot, hashes, requests)
 }
 
 func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
@@ -405,11 +960,11 @@ func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, com
 
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }
 
-func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {
+func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) error {
 	return nil
 }
 
-func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block, []byte) error { return nil }
+func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
 func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return nil, nil }
 
