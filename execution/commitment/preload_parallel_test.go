@@ -147,7 +147,7 @@ func breadthFirstOrder(tree syntheticTree, exclude map[string]bool) []string {
 func TestPreloadParallel_FullBudget_BreadthFirst(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestPreloadParallel_BudgetCutoff(t *testing.T) {
 		budget += estimatedEntryOverheadBytes + len(nibbles.HexToCompact([]byte(order[i]))) + valSz
 	}
 	budget += 10
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, err := PreloadContractTrunkParallel(hash, budget, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestPreloadParallel_NotFoundStopsDescent(t *testing.T) {
 		}
 	}
 	r2 := root + string([]byte{2})
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, map[string]bool{r2: true}, 100, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -243,7 +243,7 @@ func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
 		}
 		return base(keys)
 	}
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, err := PreloadContractTrunkParallel(hash, budget, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func TestPreloadParallel_DbTombstoneDropsBranch(t *testing.T) {
 	rootKey := nibbles.HexToCompact([]byte(root))
 	dbBranches := map[string][]byte{string(rootKey): {}}
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, err := PreloadContractTrunkParallel(hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +297,7 @@ func TestPreloadParallel_DbHitsShadowFiles(t *testing.T) {
 	freshR1[4] = 0xAB
 	dbBranches := map[string][]byte{string(nibbles.HexToCompact([]byte(r1))): freshR1}
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, err := PreloadContractTrunkParallel(hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -392,7 +392,7 @@ func TestPreloadParallel_ResolverError(t *testing.T) {
 			root = p
 		}
 	}
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	_, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, nil, 100, root+string([]byte{1})), c, nil)
 	if err == nil {
 		t.Fatal("expected error from the resolver")
@@ -407,12 +407,12 @@ func TestContractTrunkPreloadParallel_ResumeAcrossSteps(t *testing.T) {
 	const valSz = 100
 	resolve := fakeResolver(tree, nil, valSz, "")
 
-	cRef := NewBranchCache(64)
+	cRef := NewBranchCache(64, false)
 	if _, err := PreloadContractTrunkParallel(hash, 1<<20, nil, resolve, cRef, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -455,7 +455,7 @@ func TestContractTrunkPreloadParallel_RunAfterCompleteIsNoOp(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
 	resolve := fakeResolver(tree, nil, valSz, "")
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -490,7 +490,7 @@ func TestContractTrunkPreloadParallel_StepBudgetCaps(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
 	resolve := fakeResolver(tree, nil, valSz, "")
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -534,7 +534,7 @@ func TestContractTrunkPreloadParallel_ResumeAfterResolverError(t *testing.T) {
 	const valSz = 100
 	failingResolve := fakeResolver(tree, nil, valSz, root+string([]byte{1}))
 	healthyResolve := fakeResolver(tree, nil, valSz, "")
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -581,7 +581,7 @@ func TestContractTrunkPreloadParallel_DbBranchesPerStep(t *testing.T) {
 	freshRoot[4] = 0xAB
 	dbWave0 := map[string][]byte{string(nibbles.HexToCompact([]byte(root))): freshRoot}
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -619,7 +619,7 @@ func TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
 	resolve := fakeResolver(tree, nil, valSz, "")
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -682,7 +682,7 @@ func TestPreloadContractTrunkParallel_NilCacheWithLoggerReturnsError(t *testing.
 
 func TestContractTrunkPreloadParallel_NilResolverError(t *testing.T) {
 	hash := make([]byte, 32)
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		t.Fatal(err)
@@ -710,7 +710,7 @@ func TestContractTrunkPreloadParallel_RunReleasesScratch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	n, queueEmpty, err := p.Run(1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -767,7 +767,7 @@ func TestContractTrunkPreloadParallel_ExactBudgetFillTerminates(t *testing.T) {
 	rootVal := branchVal(tree[root], valSz)
 	dbBranches := map[string][]byte{string(rootKey): rootVal}
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	defer c.Close()
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
@@ -848,7 +848,7 @@ func TestContractTrunkPreloadParallel_StepBudgetSweepTerminates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			c := NewBranchCache(64)
+			c := NewBranchCache(64, false)
 			defer c.Close()
 
 			results := make(chan sweepResult, 1)
@@ -927,7 +927,7 @@ func TestContractTrunkPreloadParallel_NoPinWaveEndsStep(t *testing.T) {
 				return base(keys)
 			}
 
-			c := NewBranchCache(64)
+			c := NewBranchCache(64, false)
 			defer c.Close()
 			p, err := NewContractTrunkPreloadParallel(hash)
 			if err != nil {
@@ -988,7 +988,7 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 	r1Key := bytes.Clone(nibbles.HexToCompact([]byte(r1)))
 	dbBranches := map[string][]byte{string(r1Key): branchVal(tree[r1], valSz)}
 
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	defer c.Close()
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
@@ -1055,7 +1055,7 @@ func TestContractTrunkPreloadParallel_DeferWithDbHitsInSameWave(t *testing.T) {
 func TestContractTrunkPreloadParallel_DepthCeilingReportsDoneOnAnyBudget(t *testing.T) {
 	hash := make([]byte, 32)
 	resolve := func(keys [][]byte) ([][]byte, error) { return make([][]byte, len(keys)), nil }
-	c := NewBranchCache(64)
+	c := NewBranchCache(64, false)
 	defer c.Close()
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {

@@ -30,7 +30,7 @@ import (
 )
 
 func TestBranchCache_AccountTrunkRouting(t *testing.T) {
-	c := NewBranchCache(10)
+	c := NewBranchCache(10, false)
 
 	trunkKey := []byte{0xa0, 0xb0}
 	c.Put(trunkKey, []byte("trunk-data"), 0, 100)
@@ -71,7 +71,7 @@ func TestBranchCache_PinnedCountSurvivesConcurrentInvalidate(t *testing.T) {
 			prefix := newPrefix(1, storageNibbles)
 
 			for range 20000 {
-				c := NewBranchCache(100)
+				c := NewBranchCache(100, false)
 				c.PinEntry(prefix, []byte("v0"), 0, 100)
 
 				var wg sync.WaitGroup
@@ -93,7 +93,7 @@ func TestBranchCache_PinnedCountSurvivesConcurrentInvalidate(t *testing.T) {
 }
 
 func TestBranchCache_StorageTrunkPin(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
 	prefix := make([]byte, 33)
 	for i := 1; i < 33; i++ {
@@ -113,7 +113,7 @@ func TestBranchCache_StorageTrunkPin(t *testing.T) {
 }
 
 func TestBranchCache_ShortKeyPinning(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
 	shortKey := []byte{0x10}
 	deepKey := []byte{0x12, 0x34, 0x56}
@@ -134,7 +134,7 @@ func TestBranchCache_ShortKeyPinning(t *testing.T) {
 }
 
 func TestBranchCache_ShortKeySurvivesEvictionPressure(t *testing.T) {
-	c := NewBranchCache(10)
+	c := NewBranchCache(10, false)
 	shortKey := []byte{0x10}
 	c.Put(shortKey, []byte("SHORT-PERSISTS"), 0, 0)
 
@@ -150,7 +150,7 @@ func TestBranchCache_ShortKeySurvivesEvictionPressure(t *testing.T) {
 }
 
 func TestBranchCache_Invalidate(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	shortKey := []byte{0x10}
 	deepKey := []byte{0x12, 0x34}
 	c.Put(shortKey, []byte("s"), 0, 0)
@@ -166,7 +166,7 @@ func TestBranchCache_Invalidate(t *testing.T) {
 }
 
 func TestBranchCache_Clear(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	shortKey := []byte{0x10}
 	deepKey := []byte{0x12, 0x34, 0x56}
 	c.Put(shortKey, []byte("s"), 0, 0)
@@ -187,7 +187,7 @@ func TestBranchCache_Clear(t *testing.T) {
 }
 
 func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 	c.Unwind(300)
 
@@ -230,7 +230,7 @@ func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write
 }
 
 func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 	c.Unwind(300)
 
@@ -244,7 +244,7 @@ func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
 }
 
 func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 	c.Unwind(300)
 
@@ -259,7 +259,7 @@ func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
 }
 
 func TestBranchCache_Stats(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	tailHit := []byte{0x12, 0x34, 0x56}
 	tailMiss := []byte{0x12, 0x34, 0x57}
 	shortKey := []byte{0x10}
@@ -284,7 +284,7 @@ func TestBranchCache_Stats(t *testing.T) {
 const twoTailKeyCapacity = 2 * branchCacheTailShards
 
 func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
-	c := NewBranchCache(twoTailKeyCapacity)
+	c := NewBranchCache(twoTailKeyCapacity, false)
 
 	shortKey := []byte{0x10}
 	tailKeyKeep := []byte{0x1a, 0xb0, 0x00}
@@ -306,7 +306,7 @@ func TestBranchCache_Unwind_DropsStaleAboveFloorLazily(t *testing.T) {
 }
 
 func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
 	shortKey := []byte{0x10}
 	trunkKey := []byte{0xa0, 0xb0}
@@ -329,7 +329,7 @@ func TestBranchCache_Unwind_AcrossAllTiers(t *testing.T) {
 }
 
 func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
-	c := NewBranchCache(twoTailKeyCapacity)
+	c := NewBranchCache(twoTailKeyCapacity, false)
 
 	belowKey := []byte{0x1a, 0xb0, 0x00}
 	atKey := []byte{0x1a, 0xb0, 0x01}
@@ -346,7 +346,7 @@ func TestBranchCache_Unwind_FloorBoundary(t *testing.T) {
 }
 
 func TestBranchCache_Unwind_CurrentEpochSurvives(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 
 	key := []byte{0xa0, 0xb0}
 	c.Put(key, []byte("old-fork"), 0, 100)
@@ -359,7 +359,7 @@ func TestBranchCache_Unwind_CurrentEpochSurvives(t *testing.T) {
 }
 
 func TestBranchCache_Unwind_FrozenSurvives(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	key := []byte{0xa0, 0xb0}
 	c.Put(key, []byte("frozen"), 0, 0)
 	c.Unwind(50)
@@ -400,7 +400,7 @@ func TestBranchCache_LegacyStateKeyDoesNotBlockRoot(t *testing.T) {
 }
 
 func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
-	c := NewBranchCache(DefaultBranchCacheTailCapacity)
+	c := NewBranchCache(DefaultBranchCacheTailCapacity, false)
 	defer c.Close()
 
 	const n = 64
@@ -424,7 +424,7 @@ func TestBranchCache_ShardedTailUnwindAcrossShards(t *testing.T) {
 }
 
 func TestBranchCache_ConcurrentTailGrow(t *testing.T) {
-	c := NewBranchCache(4096)
+	c := NewBranchCache(4096, false)
 	defer c.Close()
 
 	const (
@@ -482,7 +482,7 @@ func TestBranchCache_StorageRouteRejectsTerminator(t *testing.T) {
 	}
 	for _, flag := range []byte{0x20, 0x30} {
 		prefix[0] = flag
-		c := NewBranchCache(100)
+		c := NewBranchCache(100, false)
 		var nibBuf [4]byte
 		_, _, routed := c.storageRoute(prefix, true, &nibBuf)
 		require.Falsef(t, routed, "terminator-flagged prefix (%#x) must fall through to the tail", flag)
@@ -496,7 +496,7 @@ func TestBranchCache_StorageRouteRejectsTerminator(t *testing.T) {
 }
 
 func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
-	c := NewBranchCache(100)
+	c := NewBranchCache(100, false)
 	defer c.Close()
 
 	even := make([]byte, 33)
@@ -540,7 +540,7 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 		}
 
 		t.Run(fmt.Sprintf("depth%d", depth), func(t *testing.T) {
-			c := NewBranchCache(100)
+			c := NewBranchCache(100, false)
 			defer c.Close()
 			want := fmt.Sprintf("d%d", depth)
 			c.PinEntry(prefix, []byte(want), 0, 100)

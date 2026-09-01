@@ -135,7 +135,7 @@ func (c *AdaptivePinController) PerContractBudgetBytes() int {
 }
 
 func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
-	hash, ok := ContractHashFromPrefix(prefix)
+	hash, ok := c.cache.ContractHash(prefix)
 	if !ok {
 		return
 	}

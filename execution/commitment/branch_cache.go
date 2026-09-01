@@ -23,6 +23,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -297,11 +298,58 @@ func (c *BranchCache) tailLen() int {
 	return 0
 }
 
+// v3EdgeDepth reports the trie depth of the edge a v3 record key addresses -- the parent path
+// length plus its child nibble. ok=false for anything that is not a record key.
+func v3EdgeDepth(prefix []byte) (int, bool) {
+	if len(prefix) < 2 || prefix[len(prefix)-1]&0xf0 != 0x80 {
+		return 0, false
+	}
+	switch term := prefix[len(prefix)-2]; {
+	case term == 0x00:
+		return 2*len(prefix) - 3, true
+	case term&0xf0 == 0xf0:
+		return 2*len(prefix) - 2, true
+	default:
+		return 0, false
+	}
+}
+
+// v3EdgeNibble returns nibble i of the edge path a v3 record key addresses.
+func v3EdgeNibble(prefix []byte, depth, i int) byte {
+	switch {
+	case i == depth-1:
+		return prefix[len(prefix)-1] & 0x0f
+	case depth&1 == 0 && i == depth-2: // odd parent path: its last nibble lives in the term byte
+		return prefix[len(prefix)-2] & 0x0f
+	case i&1 == 0:
+		return prefix[i/2] >> 4
+	default:
+		return prefix[i/2] & 0x0f
+	}
+}
+
+// v3TrunkSlot routes by the edge path a record key spells out. Reading it as a compact key instead
+// drops the first byte from the index, so two edges differing only in their first nibbles alias.
+func (c *BranchCache) v3TrunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
+	depth, ok := v3EdgeDepth(prefix)
+	if !ok || depth > trunkDepthFull {
+		return nil
+	}
+	var nib [4]byte
+	for i := range depth {
+		nib[i] = v3EdgeNibble(prefix, depth, i)
+	}
+	return c.accountTrunk.slot(&nib, depth, forWrite)
+}
+
 // trunkSlot: bit 4 of byte 0 is the odd-length flag; the low nibble of byte 0
 // is the first nibble when odd.
 func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
 	if c.trunkDisabled {
 		return nil
+	}
+	if c.edgeRecordsInCommitment.Load() {
+		return c.v3TrunkSlot(prefix, forWrite)
 	}
 	switch len(prefix) {
 	case 1:
@@ -333,28 +381,50 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 
 // storageRoute: ok=false means non-storage, caller falls through to the tail.
 func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
-	if len(prefix) < 33 || prefix[0]&0x20 != 0 {
+	edgeRecords := c.edgeRecordsInCommitment.Load()
+	if !edgeRecords && (len(prefix) < 33 || prefix[0]&0x20 != 0) {
 		return nil, 0, false
 	}
 	p := c.pinned.Load()
 	if !create && p == nil {
 		return nil, 0, false
 	}
-	acctHash, ok := ContractHashFromPrefix(prefix)
+	acctHash, ok := contractHashFromPrefix(prefix, edgeRecords)
 	if !ok {
 		return nil, 0, false
 	}
 	packed := acctHash[:]
 	if p != nil {
 		if st, found := p.Get(packed); found {
-			return st, storageNibbles(prefix, nibBuf), true
+			return st, storageNibblesFor(prefix, nibBuf, edgeRecords), true
 		}
 	}
 	if !create {
 		return nil, 0, false
 	}
 	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
-	return st, storageNibbles(prefix, nibBuf), true
+	return st, storageNibblesFor(prefix, nibBuf, edgeRecords), true
+}
+
+func storageNibblesFor(prefix []byte, nib *[4]byte, edgeRecords bool) int {
+	if edgeRecords {
+		return v3StorageNibbles(prefix, nib)
+	}
+	return storageNibbles(prefix, nib)
+}
+
+// v3StorageNibbles is storageNibbles for the edge-record layout: the number of edge nibbles below
+// the account boundary, with the first 4 written into nib.
+func v3StorageNibbles(prefix []byte, nib *[4]byte) (n int) {
+	depth, _ := v3EdgeDepth(prefix)
+	n = depth - 64
+	if n > 4 {
+		return n
+	}
+	for i := range n {
+		nib[i] = v3EdgeNibble(prefix, depth, 64+i)
+	}
+	return n
 }
 
 func (c *BranchCache) pinnedForWrite() *maphash.Map[*trunk] {
@@ -369,6 +439,24 @@ func (c *BranchCache) pinnedForWrite() *maphash.Map[*trunk] {
 	p := maphash.NewMap[*trunk]()
 	c.pinned.Store(p)
 	return p
+}
+
+// ContractHash decodes the contract a storage prefix belongs to, in whichever record format this
+// cache holds. ok=false for non-storage prefixes.
+func (c *BranchCache) ContractHash(prefix []byte) (hash [32]byte, ok bool) {
+	return contractHashFromPrefix(prefix, c.edgeRecordsInCommitment.Load())
+}
+
+func contractHashFromPrefix(prefix []byte, edgeRecords bool) (hash [32]byte, ok bool) {
+	if !edgeRecords {
+		return ContractHashFromPrefix(prefix)
+	}
+	depth, ok := v3EdgeDepth(prefix)
+	if !ok || depth <= 64 {
+		return hash, false
+	}
+	copy(hash[:], prefix[:length.Hash])
+	return hash, true
 }
 
 // ContractHashFromPrefix: ok=false for non-storage prefixes.
