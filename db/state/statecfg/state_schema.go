@@ -205,6 +205,11 @@ func CommitmentEdgeRecords(fileVersion version.Version) bool {
 // COMMITMENT_PARALLEL env var (or the CLI flag) turns it on.
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", false)
 
+// ExperimentalCommitmentEdgeRecords selects the record format new commitment.kv files are written
+// in: v3 edge records, one per trie edge, or the legacy bundled row. The two are incompatible and a
+// datadir keeps whichever it was built with, so this is read once at startup and never flipped.
+var ExperimentalCommitmentEdgeRecords = dbg.EnvBool("COMMITMENT_EDGE_RECORDS", true)
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,
@@ -279,7 +284,7 @@ var Schema = SchemaGen{
 
 		Accessors:                      AccessorBTree | AccessorExistence,
 		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
-		EdgeRecordsInCommitment:        true,
+		EdgeRecordsInCommitment:        ExperimentalCommitmentEdgeRecords,
 		KVWriteVersion:                 commitmentKVWriteVersion,
 
 		Hist: HistCfg{
