@@ -294,43 +294,34 @@ func TestCommitmentV3MergedFileHoldsLatestRecords(t *testing.T) {
 	require.Equal(t, lastRoot, recomputeAcceptanceRoot(t, db), "post-merge fresh commitment read")
 }
 
-func TestCommitmentV3ReadsMixedLegacyAndV3Files(t *testing.T) {
+// A datadir keeps one record format for its whole life: v2 and v3 are incompatible, and moving
+// between them means converting to a fresh set of files rather than flipping the flag mid-stream.
+// So every commitment file a DB produces has to match the format its own version advertises.
+func TestCommitmentV3FilesMatchTheirVersion(t *testing.T) {
 	db, agg := newAcceptanceDB(t, 1, 2)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
 	batches := acceptanceBatches()
 
-	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
-	applyAcceptanceBatch(t, db, batches[0], 1)
-	applyAcceptanceBatch(t, db, batches[1], 2)
-	require.NoError(t, agg.BuildFiles(3))
-
-	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
-	v3Root := applyAcceptanceBatch(t, db, batches[2], 3)
+	var v3Root []byte
+	for batchNumber, batch := range batches {
+		v3Root = applyAcceptanceBatch(t, db, batch, uint64(batchNumber+1))
+	}
 	require.NoError(t, agg.BuildFiles(4))
 
 	files := acceptanceCommitmentFiles(t, agg)
-	var legacyFiles, v3Files int
+	require.NotEmpty(t, files, "arm produced no commitment files")
 	for _, file := range files {
-		edgeRecords := statecfg.CommitmentEdgeRecords(file.Version())
-		if edgeRecords {
-			v3Files++
-		} else {
-			legacyFiles++
-		}
+		require.Truef(t, statecfg.CommitmentEdgeRecords(file.Version()),
+			"a v3 arm produced a legacy-stamped file %s", file.Fullpath())
 		keys, values := readKVFile(t, agg, file.Fullpath())
 		for i, key := range keys {
 			if commitment.IsCommitmentStateKey(key) || len(values[i]) == 0 {
 				continue
 			}
-			record := commitment.BranchData(values[i])
-			if edgeRecords {
-				require.Truef(t, record.IsEdgeRecord(), "v3 file %s contains a bundled row for key %x", file.Fullpath(), key)
-			} else {
-				require.Falsef(t, record.IsEdgeRecord(), "legacy file %s contains an edge record for key %x", file.Fullpath(), key)
-			}
+			require.Truef(t, commitment.BranchData(values[i]).IsEdgeRecord(),
+				"v3 file %s contains a bundled row for key %x", file.Fullpath(), key)
 		}
 	}
-	require.Positive(t, legacyFiles, "expected a legacy commitment file")
-	require.Positive(t, v3Files, "expected a v3 commitment file")
 
 	controlDB, controlAgg := newAcceptanceDB(t, 1, 2)
 	controlAgg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
@@ -338,6 +329,6 @@ func TestCommitmentV3ReadsMixedLegacyAndV3Files(t *testing.T) {
 	for batchNumber, batch := range batches {
 		controlRoot = applyAcceptanceBatch(t, controlDB, batch, uint64(batchNumber+1))
 	}
-	require.Equal(t, controlRoot, v3Root, "mixed-version root must match the legacy-only root")
-	require.Equal(t, v3Root, recomputeAcceptanceRoot(t, db), "mixed-version fresh commitment read")
+	require.Equal(t, controlRoot, v3Root, "v3 root must match the legacy-only root")
+	require.Equal(t, v3Root, recomputeAcceptanceRoot(t, db), "post-build fresh commitment read")
 }
