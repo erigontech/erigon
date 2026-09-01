@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -699,7 +698,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 		a := toJson(generated.Logs[i])
 		b := toJson(fromDB.Logs[i])
 		if a != b {
-			panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+			panic(fmt.Sprintf("assert: generated=%s, fromDB=%s, bn=%d, txnIdx=%d", a, b, generated.BlockNumber.Uint64(), generated.TransactionIndex))
 		}
 	}
 	fromDB.Logs, generated.Logs = nil, nil
@@ -707,7 +706,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	a := toJson(generated)
 	b := toJson(fromDB)
 	if a != b {
-		panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+		panic(fmt.Sprintf("assert: generated=%s, fromDB=%s, bn=%d, txnIdx=%d", a, b, generated.BlockNumber.Uint64(), generated.TransactionIndex))
 	}
 }
 
