@@ -362,3 +362,7 @@ func (s *EthBackendClientDirect) BlockForTxNum(ctx context.Context, in *remotepr
 func (s *EthBackendClientDirect) MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
 	return s.server.MinimumBlockAvailable(ctx, in)
 }
+
+func (s *EthBackendClientDirect) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	return s.server.FrozenBlocks(ctx, in)
+}
