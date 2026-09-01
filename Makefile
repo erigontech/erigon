@@ -378,11 +378,11 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-# Pull the pinned devnet tarball URL and branch straight from test-fixtures.json
+# Pull the pinned devnet tarball URL and EELS git ref from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
 # Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
 EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
-EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
+EEST_DEVNET_REF = $(shell jq -r '."eest_devnet".ref' test-fixtures.json)
 EEST_STABLE_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0
 EEST_GLAMSTERDAM_ERIGON_FLAGS = $(EEST_STABLE_ERIGON_FLAGS) --experimental.bal
 EEST_HIVE_REPOSITORY = $(shell jq -r '.hive_repository' .github/workflows/hive-versions.json)
@@ -405,7 +405,7 @@ eest-devnet:
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_REF) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
 
 # Define the run_suite function
 define run_suite
@@ -448,10 +448,11 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
-# Pull the pinned develop tarball URL straight from test-fixtures.json
-# so this target stays in sync with the rest of the test suite. Lazy `=`
-# so unrelated targets don't shell out to jq at make-parse time.
+# Pull the pinned stable tarball URL and EELS git ref from test-fixtures.json
+# so this target stays in sync with the rest of the test suite. Lazy `=` so
+# unrelated targets don't shell out to jq at make-parse time.
 EEST_STABLE_URL = $(shell jq -r '."eest_stable".url' test-fixtures.json)
+EEST_STABLE_REF = $(shell jq -r '."eest_stable".ref' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -466,7 +467,7 @@ eest-hive:
 		grep -qF -- '$(EEST_STABLE_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg branch=$(EEST_STABLE_REF) --sim.buildarg fixtures=$(EEST_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor

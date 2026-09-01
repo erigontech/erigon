@@ -290,6 +290,10 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	// Metrics is the producing trie's, carried so the later apply still reaches
+	// that trie's log and CSV counters. The Prometheus counters do not depend on
+	// it — publishBranchWrites bills those where the write lands.
+	Metrics *Metrics
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
@@ -347,7 +351,8 @@ func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 	if be.pendingPrefixes != nil {
 		be.pendingPrefixes.Clear()
 	}
@@ -377,26 +382,29 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
-	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
-	if err != nil {
+	if _, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch, be.metrics); err != nil {
 		return err
-	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
 	}
 	return nil
 }
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// Returns the number of updates written. putBranch must copy prefix and data rather than
-// retain them: they are pooled and reused for a later, unrelated update. prevData is
-// cloned per update and carries no such constraint.
+// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
+// were written. Writes are published to the branch-write counters as they land,
+// not against a round: the caller-owned path applies from SharedDomains after the
+// producing round has already closed, so there is no round left to bill. m, when
+// non-nil, additionally carries them into that trie's log and CSV counters.
+//
+// putBranch must copy prefix and data rather than retain them: they are pooled and
+// reused for a later, unrelated update. prevData is cloned per update and carries
+// no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
+	m *Metrics,
+) (n int, err error) {
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -408,20 +416,24 @@ func ApplyDeferredBranchUpdates(
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
 
-		var written int
+		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
+			bytesOut += len(upd.encoded)
 		}
 		mxTrieBranchesUpdated.AddInt(written)
+		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -453,17 +465,20 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
-	var written int
+	var written, bytesOut int
 	for _, upd := range deferred {
 		if upd.encoded == nil {
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+			publishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
+		bytesOut += len(upd.encoded)
 	}
 	mxTrieBranchesUpdated.AddInt(written)
+	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -511,9 +526,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-	}
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	mxTrieBranchesUpdated.Inc()
 	return nil
 }
@@ -1763,6 +1776,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)

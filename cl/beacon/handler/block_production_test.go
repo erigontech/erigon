@@ -468,6 +468,22 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	calls := 0
+
+	payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, fmt.Errorf("get payload: %w", execution_client.ErrInvalidGetPayloadResponse)
+		})
+
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.Nil(t, payload)
+	require.Equal(t, 1, calls)
+}
+
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 
@@ -634,6 +650,57 @@ func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 	return body, err
+}
+
+func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.CapellaVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlock := blocks[len(blocks)-1].Block
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Zero(t, body.BlobKzgCommitments.Len())
+}
+
+func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	baseBlock := blocks[len(blocks)-1].Block
+	targetSlot := baseBlock.Slot + 1
+	h.beaconChainCfg.DenebForkEpoch = targetSlot / h.beaconChainCfg.SlotsPerEpoch
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.DenebVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.DenebVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.Nil(t, body)
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.ErrorContains(t, err, "missing blobs bundle")
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
