@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
@@ -81,9 +80,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
@@ -124,9 +121,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
@@ -190,9 +185,7 @@ func TestFilterNoAddresses(t *testing.T) {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	traceReq1 := TraceFilterRequest{
@@ -240,9 +233,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(15)
 	t.Run("second", func(t *testing.T) {
-		s := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.Wrap(s)
+		stream := jsonstream.New(nil)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
@@ -257,9 +248,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 		assert.Equal(t, []int{6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 	})
 	t.Run("first", func(t *testing.T) {
-		s := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.Wrap(s)
+		stream := jsonstream.New(nil)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
@@ -274,9 +263,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 		assert.Equal(t, []int{1, 2, 3, 4, 5}, blockNumbersFromTraces(t, stream.Buffer()))
 	})
 	t.Run("empty", func(t *testing.T) {
-		s := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.Wrap(s)
+		stream := jsonstream.New(nil)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
@@ -309,9 +296,7 @@ func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		ToAddress: []*common.Address{&contractAddr},
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
 	require.NoError(t, err)
 
@@ -342,9 +327,7 @@ func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 				ToAddress: []*common.Address{&contractAddr},
 			}
 
-			s := jsoniter.ConfigDefault.BorrowStream(nil)
-			defer jsoniter.ConfigDefault.ReturnStream(s)
-			stream := jsonstream.Wrap(s)
+			stream := jsonstream.New(nil)
 			err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 				BlockOverrides: tc.override,
 			}, stream)
@@ -373,9 +356,7 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 	}
 
 	beaconRoot := common.HexToHash("0x01")
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
 	}, stream)
@@ -404,9 +385,7 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 		ToAddress: []*common.Address{&c.bankAddress},
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
@@ -496,9 +475,7 @@ func TestFilterCountSatisfiedIgnoresLaterErrors(t *testing.T) {
 		Count:     &count,
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
@@ -531,9 +508,7 @@ func TestFilterAfterSkipsTracesBeforeExporting(t *testing.T) {
 		Count:     &count,
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), nil, stream)
 	require.NoError(t, err)
 
@@ -563,9 +538,7 @@ func TestFilterZeroCountReturnsEmptyArray(t *testing.T) {
 		Count:     &count,
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)

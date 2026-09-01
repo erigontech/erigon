@@ -343,14 +343,11 @@ func TestGetFilterLogsDoesNotKeepFilterAlive(t *testing.T) {
 }
 
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
-	m := execmoduletester.New(t)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	mining := txpoolproto.NewMiningClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, log.New(), nil)
 
 	// generate some random topics
-	topics := make([][]common.Hash, 0)
-	for range 10 {
+	topics := make([][]common.Hash, 0, filters.MaxTopicPositions)
+	for range filters.MaxTopicPositions {
 		bytes := make([]byte, length.Hash)
 		rand.Read(bytes)
 		toAdd := []common.Hash{common.BytesToHash(bytes)}
@@ -358,7 +355,7 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 
 	// generate some addresses
-	addresses := make([]common.Address, 0)
+	addresses := make([]common.Address, 0, 10)
 	for range 10 {
 		bytes := make([]byte, length.Addr)
 		rand.Read(bytes)
@@ -371,21 +368,30 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	}
 
 	ids := make([]rpchelper.LogsSubID, 1000)
+	errs := make([]error, len(ids))
+	unsubscribed := make([]bool, len(ids))
 
 	// make a lot of subscriptions
 	wg := sync.WaitGroup{}
-	for i := range 1000 {
+	for i := range ids {
 		idx := i
 		wg.Go(func() {
-			_, id, _ := ff.SubscribeLogs(32, crit, "")
-			defer func() {
-				time.Sleep(100 * time.Nanosecond)
-				ff.UnsubscribeLogs(id)
-			}()
+			_, id, err := ff.SubscribeLogs(32, crit, rpchelper.ProtocolWS)
 			ids[idx] = id
+			errs[idx] = err
+			if err != nil {
+				return
+			}
+			time.Sleep(100 * time.Nanosecond)
+			unsubscribed[idx] = ff.UnsubscribeLogs(id)
 		})
 	}
 	wg.Wait()
+	for i := range ids {
+		require.NoError(t, errs[i])
+		require.NotEmpty(t, ids[i])
+		require.True(t, unsubscribed[i])
+	}
 }
 
 func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {
