@@ -2579,11 +2579,11 @@ type feeMerge struct {
 	version state.Version
 }
 
-// requeueInvalid waits for the writer that overwrote the tx's read set, and
-// defers when addDependency cannot register a wait: the blocker may be unknown
-// (a race with an exec-loop flush names none) or already complete.
-func (be *blockExecutor) requeueInvalid(tx int, blocker int) {
-	if !be.execTasks.addDependency(blocker, tx) {
+// requeueInvalid waits for the writer that overwrote the tx's read set. It
+// defers instead when addDependency cannot register a wait, which is the common
+// case: the writer is usually unknown, and a named one is often already done.
+func (be *blockExecutor) requeueInvalid(tx int, blockerTxIndex int) {
+	if !be.execTasks.addDependency(blockerTxIndex+1, tx) {
 		be.execTasks.pushDeferred(tx)
 	}
 }

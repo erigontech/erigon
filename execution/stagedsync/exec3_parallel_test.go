@@ -2016,13 +2016,13 @@ func TestRequeueInvalid(t *testing.T) {
 		require.False(t, be.execTasks.checkPending(5), "a blocked tx must not be dispatchable")
 	})
 
-	t.Run("blocker unblocks the dependent when it completes", func(t *testing.T) {
+	t.Run("waits on the exec task of the blocking tx index, one above it", func(t *testing.T) {
 		be := newExec(8)
 
 		be.requeueInvalid(5, 2)
-		be.execTasks.setInProgress(2)
-		be.execTasks.markComplete(2)
-		be.execTasks.removeDependency(2)
+		be.execTasks.setInProgress(3)
+		be.execTasks.markComplete(3)
+		be.execTasks.removeDependency(3)
 
 		require.False(t, be.execTasks.isBlocked(5))
 		require.True(t, be.execTasks.checkPending(5), "tx must be re-dispatched once its blocker completes")
