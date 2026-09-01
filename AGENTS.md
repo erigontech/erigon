@@ -176,6 +176,10 @@ Function docstrings follow the same rule: a one-line summary, plus param/return 
 
 **For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. The forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
 
+## Code Reviews
+
+Keep review feedback focused on the behavior and code changed by the PR. Do not require unrelated pre-existing issues to be fixed in the same change. When a review uncovers one, ask the author to create a follow-up issue or PR instead. Expand the current PR only when the pre-existing issue prevents the proposed change from being correct or safe. Keeping changes focused shortens the development cycle and makes the PR easier to review.
+
 ## Pull Requests & Workflows
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
