@@ -51,3 +51,26 @@ func TestSyncStateSubscriptionUnsubscribeStopsDelivery(t *testing.T) {
 		t.Fatal("expected closed channel with no pending notifications after unsubscribe")
 	}
 }
+
+func TestStateRetirementSubscriptionsReceiveNotifications(t *testing.T) {
+	events := NewEvents()
+	start, unsubscribeStart := events.AddStateRetirementStartSubscription()
+	defer unsubscribeStart()
+	done, unsubscribeDone := events.AddStateRetirementDoneSubscription()
+	defer unsubscribeDone()
+
+	events.OnStateRetirementStart(true)
+	events.OnStateRetirementDone()
+
+	select {
+	case started := <-start:
+		require.True(t, started)
+	default:
+		t.Fatal("expected a state retirement start notification")
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("expected a state retirement completion notification")
+	}
+}

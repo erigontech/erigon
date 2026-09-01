@@ -17,11 +17,14 @@
 package execmoduletester_test
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 )
@@ -44,6 +47,36 @@ func TestInsertChain(t *testing.T) {
 	require.NoError(t, err)
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
+}
+
+func TestStateTransitionObserver(t *testing.T) {
+	t.Parallel()
+	observed := make(map[execmodule.StateTransitionPoint]int)
+	var mu sync.Mutex
+	m := execmoduletester.New(t, execmoduletester.WithStateTransitionObserver(func(_ context.Context, point execmodule.StateTransitionPoint) {
+		mu.Lock()
+		observed[point]++
+		mu.Unlock()
+	}))
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+	m.ExecModule.WaitIdle(t.Context())
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, point := range []execmodule.StateTransitionPoint{
+		execmodule.StateTransitionOverlayPublished,
+		execmodule.StateTransitionCommitComplete,
+		execmodule.StateTransitionOverlayCleared,
+	} {
+		require.Positivef(t, observed[point], "state transition %d was not observed", point)
+	}
+	published := observed[execmodule.StateTransitionOverlayPublished]
+	require.Equal(t, published, observed[execmodule.StateTransitionCommitComplete], "each published FCU result must become durable")
+	require.Equal(t, published, observed[execmodule.StateTransitionOverlayCleared], "only a published overlay may emit a clear event")
 }
 
 func TestReorgsWithInsertChain(t *testing.T) {
