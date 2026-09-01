@@ -19,10 +19,12 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"math/bits"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -165,4 +167,73 @@ func TestHexPatriciaHashedV3WritesFoldedMasksToParentEdges(t *testing.T) {
 	for key := range ms.cm {
 		require.NotEqual(t, nibbles.EncodeKeyV3(nil), []byte(key), "the root node key must not be persisted")
 	}
+}
+
+// A multi-slot account carries its storage branch mask in the fused record, and a single-slot
+// account carries a zero mask. The two cases are pinned together because a zero mask is what
+// marks a singleton slot, so a producer that never runs looks exactly like an account with one slot.
+func TestHexPatriciaHashedV3WritesStorageMaskToAccountEdge(t *testing.T) {
+	t.Parallel()
+
+	const branched = "8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e"
+	const singleton = "ba7a3b7b095d3370c022ca655c790f0c0ead66f5"
+
+	cfg := DefaultTrieConfig()
+	cfg.DeferBranchUpdates = false
+	cfg.EdgeRecords = true
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(length.Addr, ms, cfg)
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(branched, 1233).
+		Storage(branched, "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
+		Storage(branched, "0fa41642c48ecf8f2059c275353ce4fee173b3a8ce5480f040c4d2901603d14e", "0402").
+		Storage(branched, "de3fea338c95ca16954e80eb603cd81a261ed6e2b10a03d0c86cf953fe8769a4", "0403").
+		Balance(singleton, 5*1e17).
+		Storage(singleton, "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "0501").
+		Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer upds.Close()
+
+	_, err := hph.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	// storageMask has to equal the storage children actually persisted under the account.
+	wantMask := func(addr []byte) uint16 {
+		nodeKey := nibbles.EncodeKeyV3(KeyToHexNibbleHash(addr))
+		var mask uint16
+		for key := range ms.cm {
+			if len(key) != len(nodeKey)+1 || key[:len(nodeKey)] != string(nodeKey) {
+				continue
+			}
+			if last := key[len(nodeKey)]; last >= 0x80 && last <= 0x8f {
+				mask |= 1 << (last & 0x0f)
+			}
+		}
+		return mask
+	}
+
+	seen := make(map[string]uint16)
+	for key, record := range ms.cm {
+		if BranchData(record).IsTombstone() {
+			continue
+		}
+		var decoded cell
+		if _, err := DecodeRecordInto(record, &decoded); err != nil {
+			t.Fatalf("record %x: %v", key, err)
+		}
+		if decoded.accountAddrLen != length.Addr {
+			continue
+		}
+		addr := decoded.accountAddr[:decoded.accountAddrLen]
+		seen[common.Bytes2Hex(addr)] = decoded.storageMask
+		require.Equalf(t, wantMask(addr), decoded.storageMask,
+			"account %x storage mask does not match its persisted storage children", addr)
+	}
+
+	require.Contains(t, seen, branched)
+	require.Contains(t, seen, singleton)
+	require.Equal(t, 3, bits.OnesCount16(seen[branched]), "the branched account must carry a three-child storage mask")
+	require.Zero(t, seen[singleton], "a single-slot account must keep the zero mask that marks a singleton")
 }

@@ -1750,6 +1750,12 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 	upCell.branchMask = hph.afterMap[row]
 	upCell.branchMaskKnown = hph.cfg.EdgeRecords
+	if upDepth == 64 {
+		// upCell is the account and this row is its storage branch, so the row's afterMap is the
+		// storage mask the fused account record carries. Only a branch fold sets it: a lone slot
+		// folds through foldPropagate and must keep the zero mask that marks a singleton.
+		upCell.storageMask = hph.afterMap[row]
+	}
 	if hph.touchMap[row] != 0 { // any modifications
 		if row == 0 {
 			hph.rootTouched = true
