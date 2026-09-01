@@ -265,6 +265,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
+| eth_getHeaderByHash                        | Yes     |                                                       |
+| eth_getHeaderByNumber                      | Yes     |                                                       |
 | eth_getBlockTransactionCountByHash         | Yes     |                                                       |
 | eth_getBlockTransactionCountByNumber       | Yes     |                                                       |
 | eth_getUncleByBlockHashAndIndex            | Yes     |                                                       |
