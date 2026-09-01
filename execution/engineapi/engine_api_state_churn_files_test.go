@@ -167,7 +167,6 @@ func TestEngineApiUnwindToSnapshotBoundaryPreservesDeletedSlots(t *testing.T) {
 		EthConfigTweaker: func(c *ethconfig.Config) {
 			c.Snapshot.ProduceE3 = true
 			c.AlwaysGenerateChangesets = true
-			c.MaxReorgDepth = 400 // the boundary sits deep below the tip
 		},
 	})
 	require.NoError(t, err)

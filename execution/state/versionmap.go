@@ -165,7 +165,7 @@ type VersionMap struct {
 	trace bool
 }
 
-func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
+func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 	vm := &VersionMap{}
 	vm.WriteChanges(changes)
 	return vm
@@ -209,8 +209,9 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 // type is enforced at compile time — a future BAL field-type change that
 // breaks the contract surfaces as a build error here rather than a runtime
 // panic on the first read of the cell.
-func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
-	for _, accountChanges := range changes {
+func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
+	for i := range changes {
+		accountChanges := &changes[i]
 		if dbg.TraceBALFeed {
 			fmt.Printf(
 				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",

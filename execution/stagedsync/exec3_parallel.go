@@ -1153,10 +1153,10 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// blockResults on a separate goroutine) can find this block's
 		// saved changeset via GetChangesetByBlockNum at compute time.
 		// In per-block compute mode (changeset window), the
-		// calculator switches the accumulator to this saved CS for the
-		// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-		// so branch writes land in block N's CS rather than whatever the
-		// exec loop has installed as current. If we saved AFTER sendResult,
+		// calculator passes this saved CS to ComputeCommitment as an explicit
+		// diff (committer.go:computeWithBlockAccumulator) so branch writes land
+		// in block N's CS rather than whatever the exec loop has installed as
+		// current. If we saved AFTER sendResult,
 		// the calculator could race ahead and look up an unsaved CS,
 		// causing branch deltas to leak into the next block's CS and
 		// produce wrong-trie-root chains on subsequent reorg-driven
@@ -3070,28 +3070,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// committed for addr (sd.mem + domain files), so a self-destruct
 					// emits the full StoragePath=0 cascade — covers genesis-allocated
 					// and prior-block storage that vm.StorageKeys doesn't see.
-					var domainKeysErr error
-					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-						var keys []accounts.StorageKey
-						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
-							return nil
-						}
-						return keys
-					}
+					domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-					if domainKeysErr != nil {
-						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
 					}
@@ -3341,28 +3323,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
 				// redundant.
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 				emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 				var normErr error
 				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
-				if domainKeysErr != nil {
-					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
-				}
 				if normErr != nil {
 					return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
 				}
