@@ -267,7 +267,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	// In GLOAS, ExecutionPayload and BlobKzgCommitments are nil in BeaconBlock.
 	// These fields are handled separately in OnExecutionPayload when the envelope arrives.
 	startEngine := time.Now()
-	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
+	isVerifiedExecutionPayload := f.IsPayloadVerified(blockRoot)
 	if blockVersion < clparams.GloasVersion {
 		// Find the versioned hashes from blob commitments
 		var versionedHashes []common.Hash
