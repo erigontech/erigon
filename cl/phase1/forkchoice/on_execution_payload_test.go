@@ -2791,6 +2791,13 @@ func TestCachedTerminalHashProjectsToSiblingRoot(t *testing.T) {
 			wantStatus:     execution_client.PayloadStatusValidated,
 		},
 		{
+			name:           "invalidated_dominates_none",
+			cachedStatus:   execution_client.PayloadStatusInvalidated,
+			incomingStatus: execution_client.PayloadStatusNone,
+			wantStatus:     execution_client.PayloadStatusInvalidated,
+			wantInvalid:    true,
+		},
+		{
 			name:           "invalidated_dominates_not_validated",
 			cachedStatus:   execution_client.PayloadStatusInvalidated,
 			incomingStatus: execution_client.PayloadStatusNotValidated,
@@ -2884,7 +2891,17 @@ func TestSiblingInvalidationRevokesVerifiedExecutionHash(t *testing.T) {
 	f.MarkPayloadInvalid(rootB, executionHash)
 
 	require.False(t, f.IsPayloadVerified(rootA))
+	require.False(t, verifiedExecutionPayload.Contains(rootA))
 	status, ok := f.GetRecentExecutionPayloadStatusByRoot(rootA)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	executionPayloadStatus.Add(common.HexToHash("0x04"), execution_client.PayloadStatusValidated)
+	executionPayloadStatus.Add(common.HexToHash("0x05"), execution_client.PayloadStatusValidated)
+	require.False(t, f.IsPayloadVerified(rootA))
+	rootC := common.HexToHash("0x06")
+	f.MarkPayloadVerified(rootC, executionHash)
+	require.False(t, f.IsPayloadVerified(rootC))
+	status, ok = f.GetRecentExecutionPayloadStatus(executionHash)
 	require.True(t, ok)
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 }

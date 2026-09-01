@@ -474,9 +474,8 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 	if err := validatePayloadValidationResult(payloadStatus, validationErr); err != nil {
 		return err
 	}
-	if payloadStatus != execution_client.PayloadStatusInvalidated && f.payloadInvalidatedLocked(beaconBlockRoot, executionBlockHash) {
-		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
-		return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", errInvalidExecutionPayloadEnvelope)
+	if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, beaconBlockRoot, executionBlockHash); err != nil {
+		return err
 	}
 	if payloadStatus != execution_client.PayloadStatusValidated && payloadStatus != execution_client.PayloadStatusInvalidated && f.payloadValidatedLocked(beaconBlockRoot, executionBlockHash) {
 		f.markPayloadVerifiedLocked(beaconBlockRoot, executionBlockHash)
@@ -525,7 +524,20 @@ func validatePayloadValidationResult(payloadStatus execution_client.PayloadStatu
 	return nil
 }
 
+func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus execution_client.PayloadStatus, blockRoot, executionBlockHash common.Hash) error {
+	if payloadStatus == execution_client.PayloadStatusInvalidated || !f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
+		return nil
+	}
+	f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
+	return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", errInvalidExecutionPayloadEnvelope)
+}
+
 func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
+	if f.invalidatedExecutionPayloads != nil {
+		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
+			return true
+		}
+	}
 	if f.payloadStatusByRoot != nil {
 		if status, ok := f.payloadStatusByRoot.Get(blockRoot); ok && status == execution_client.PayloadStatusInvalidated {
 			return true

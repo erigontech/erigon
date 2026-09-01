@@ -231,6 +231,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
+			if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, blockRoot, executionBlockHash); err != nil {
+				return err
+			}
 			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
 			f.executionPayloadGasLimit.Add(executionBlockHash, block.Block.Body.ExecutionPayload.GasLimit)
 
@@ -246,7 +249,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 			case execution_client.PayloadStatusInvalidated:
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
-				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+				f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
 				// remove from optimistic candidate
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
@@ -258,7 +261,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				if err := f.optimisticStore.ValidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to validate block in optimistic store: %w", err)
 				}
-				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+				f.markPayloadVerifiedLocked(blockRoot, executionBlockHash)
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
