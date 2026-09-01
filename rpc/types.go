@@ -253,6 +253,10 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		bn := SafeBlockNumber
 		bnh.BlockNumber = &bn
 		return nil
+	case "latestExecuted":
+		bn := LatestExecutedBlockNumber
+		bnh.BlockNumber = &bn
+		return nil
 	default:
 		if len(input) == 66 {
 			hash := common.Hash{}
