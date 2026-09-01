@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/bits"
 
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -98,8 +99,18 @@ func scanCommitmentRecordFile(dt *DomainRoTx, fileIndex int, nodeKey []byte, wan
 	index := dt.statelessBtree(fileIndex)
 	reader := dt.reusableReader(fileIndex)
 	return scanCommitmentRecordRun(nodeKey, wanted, present, records, func(key []byte) (commitmentRecordCursor, error) {
-		return index.Seek(reader, key)
+		return commitmentCursor(index.Seek(reader, key))
 	})
+}
+
+// commitmentCursor converts Seek's result. Seek yields a nil *Cursor past the end of the
+// index, and returning that straight into the interface would make a non-nil interface
+// holding a nil pointer, which no == nil check catches.
+func commitmentCursor(cursor *btindex.Cursor, err error) (commitmentRecordCursor, error) {
+	if cursor == nil {
+		return nil, err
+	}
+	return cursor, err
 }
 
 type commitmentRecordCursor interface {

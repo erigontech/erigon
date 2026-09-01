@@ -124,3 +124,13 @@ func TestScanCommitmentRecordRunAdvancesPastIntruderWhenSlotAbsent(t *testing.T)
 	require.Equal(t, []byte{0xa3}, records[3])
 	require.Nil(t, records[0])
 }
+
+// A nil *btindex.Cursor returned straight into the interface is a non-nil interface holding
+// a nil pointer, so scanCommitmentRecordRun's == nil check misses it and Key() segfaults.
+func TestCommitmentCursorPastEndOfIndexIsNilInterface(t *testing.T) {
+	t.Parallel()
+
+	cursor, err := commitmentCursor(nil, nil)
+	require.NoError(t, err)
+	require.True(t, cursor == nil, "a nil *btindex.Cursor must not become a non-nil interface")
+}
