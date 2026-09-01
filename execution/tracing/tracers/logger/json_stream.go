@@ -127,12 +127,20 @@ func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
 }
 
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	// no log entry are producer
-	if l.firstCapture {
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectField("structLogs")
-		l.stream.WriteArrayStart()
+	l.writePrologueOnce()
+}
+
+// writePrologueOnce opens the response object and the structLogs array. Every
+// frame exits through OnExit, and the caller closes one object and one array, so
+// a second prologue would leave the response unbalanced.
+func (l *JsonStreamLogger) writePrologueOnce() {
+	if !l.firstCapture {
+		return
 	}
+	l.firstCapture = false
+	l.stream.WriteObjectStart()
+	l.stream.WriteObjectField("structLogs")
+	l.stream.WriteArrayStart()
 }
 
 // OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
@@ -156,13 +164,8 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.opcodeSteps++
 	if !l.firstCapture {
 		l.stream.WriteMore()
-	} else {
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectField("structLogs")
-		l.stream.WriteArrayStart()
-
-		l.firstCapture = false
 	}
+	l.writePrologueOnce()
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract

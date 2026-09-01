@@ -391,7 +391,7 @@ func pollAssembledPayload(
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		attempts++
-		if execution_client.IsUnknownPayloadError(err) {
+		if execution_client.IsUnknownPayloadError(err) || errors.Is(err, execution_client.ErrInvalidGetPayloadResponse) {
 			return nil, nil, nil, nil, err
 		}
 		if err != nil {
@@ -1186,6 +1186,13 @@ func (a *ApiHandler) produceBeaconBody(
 			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
 			return
 		}
+		if bundles == nil {
+			if stateVersion.AfterOrEqual(clparams.DenebVersion) {
+				executionErr = fmt.Errorf("produceBeaconBody: %w: missing blobs bundle", execution_client.ErrInvalidGetPayloadResponse)
+				return
+			}
+			bundles = &engine_types.BlobsBundle{}
+		}
 		// Determine block value
 		if blockValue == nil {
 			executionValue = 0
@@ -1204,6 +1211,12 @@ func (a *ApiHandler) produceBeaconBody(
 				len(bundles.Proofs) != len(bundles.Blobs)*int(a.beaconChainCfg.NumberOfColumns) {
 				executionErr = errors.New("produceBeaconBody: invalid peerdas bundle")
 				return
+			}
+			for _, proof := range bundles.Proofs {
+				if len(proof) != length.Bytes48 {
+					executionErr = errors.New("produceBeaconBody: invalid proof length")
+					return
+				}
 			}
 		}
 
