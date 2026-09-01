@@ -1284,9 +1284,8 @@ func TestKeptLocalSnapshotWithMalformedMetainfoIsSeeded(t *testing.T) {
 	require.True(registered, "a corrupt .torrent left the kept snapshot unseedable")
 }
 
-// metainfo.Load never unmarshals InfoBytes, so a whole-file-valid bencode dict without an
-// "info" key parses cleanly here and only fails later in SetInfoBytes, where the kept
-// snapshot is already registered against an info-less torrent.
+// A bencode dict without an "info" key parses cleanly, so only SetInfoBytes rejects it --
+// by then the kept snapshot is registered against an info-less torrent.
 func TestKeptLocalSnapshotWithInfolessMetainfoIsSeeded(t *testing.T) {
 	require := require.New(t)
 	d, _, name, path := newLocalSnapshotTest(t)
