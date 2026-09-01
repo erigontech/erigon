@@ -273,9 +273,8 @@ func TestGrowLRU_ReservationSurvivesGOMAXPROCSChange(t *testing.T) {
 		"the envelope holds a reservation no generation on the ladder costs")
 }
 
-// A grow after GOMAXPROCS drops can cost less than the generation it replaces.
-// Reserve ignores a non-positive argument, so tracking such a delta without
-// releasing it strands the difference in the envelope for the life of the process.
+// A grow after GOMAXPROCS drops can cost less than the generation it replaces, and
+// tracking that delta without releasing it strands the difference in the envelope.
 func TestGrowLRU_BudgetBalancedAfterShardCountDrop(t *testing.T) {
 	prevBudget := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prevBudget })
@@ -284,9 +283,7 @@ func TestGrowLRU_BudgetBalancedAfterShardCountDrop(t *testing.T) {
 	prevProcs := runtime.GOMAXPROCS(16)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prevProcs) })
 
-	// A ceiling the last step reaches without crossing a table boundary: 4096 and 6552
-	// both round to 8192 slots, so only the shard charge moves and a shard-count drop
-	// can outweigh it.
+	// 4096 and 6552 both round to 8192 slots, so the last step moves only the shard charge.
 	g := newGrowLRUEntries[codeSizeEntry](6552, 0, nil)
 	fill := func(from, to uint64) {
 		for i := from; i < to; i++ {
@@ -311,10 +308,9 @@ func TestGrowLRU_BudgetBalancedAfterShardCountDrop(t *testing.T) {
 	require.Zero(t, cachebudget.Global.Used(), "Close must return every byte the cache took")
 }
 
-// Purge rebuilds the start generation, which a GOMAXPROCS rise can make more
-// expensive than what is reserved. Release ignores a non-positive argument, so
-// raising the tracked reservation without taking the bytes lets Close hand back
-// more than the cache ever held.
+// A GOMAXPROCS rise can make the start generation Purge rebuilds dearer than what is
+// reserved, and raising the tracked reservation without taking the bytes lets Close
+// hand back more than the cache ever held.
 func TestGrowLRU_BudgetBalancedAfterPurgeAtHigherShardCount(t *testing.T) {
 	prevBudget := cachebudget.Global
 	t.Cleanup(func() { cachebudget.Global = prevBudget })

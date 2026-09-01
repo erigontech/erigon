@@ -162,10 +162,8 @@ func (g *growLRU[V]) maybeGrow() {
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
 	_, newShards := growLRUGeneration(newCap)
-	// A step that stays inside one table boundary moves only the shard charge, so a
-	// GOMAXPROCS drop can make the wider generation the cheaper one. Reserve ignores a
-	// non-positive argument, so the release has to be spelled out -- and it comes after
-	// the swap, to not hand the envelope bytes the old generation still holds.
+	// A GOMAXPROCS drop can make the wider generation the cheaper one, and Reserve
+	// ignores a non-positive argument. Release after the swap, not before it.
 	delta := g.generationBytes(newCap, newShards) - g.generationBytes(curCap, g.curShards)
 	if delta > 0 && !cachebudget.Global.Reserve(delta) {
 		return
@@ -193,9 +191,8 @@ func (g *growLRU[V]) Len() int          { return g.cur.Load().Len() }
 func (g *growLRU[V]) Purge() {
 	g.resizeMu.Lock()
 	defer g.resizeMu.Unlock()
-	// A GOMAXPROCS rise since this cache was built can make the start generation the
-	// more expensive one. Take, not Reserve: it is allocated either way, as in the
-	// constructor.
+	// A GOMAXPROCS rise can make the start generation the dearer one. Take, not
+	// Reserve: it is allocated either way.
 	_, shards := growLRUGeneration(g.startCap)
 	start := g.generationBytes(g.startCap, shards)
 	if start > g.reserved {
