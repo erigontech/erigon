@@ -309,13 +309,14 @@ func TestHexPatriciaHashedV3KeepsStorageMaskWhenOnlyTheAccountChanges(t *testing
 		"an account-only update must not replace the storage mask with the singleton marker")
 }
 
-// A lone slot is hoisted into the account cell and never gets a storage row, so its root exists
-// only as a local inside computeCellHash. The record has nowhere else to read it from.
-func TestHexPatriciaHashedV3RecordsStorageRootForSingleSlotAccount(t *testing.T) {
+// A lone slot is hoisted into the account cell and has no storage root of its own, so the record
+// carries the slot key. Losing it strands the storage subtree: nothing else can address it.
+func TestHexPatriciaHashedV3RecordsHoistedSlotOnAccountEdge(t *testing.T) {
 	t.Parallel()
 
 	const solo = "ba7a3b7b095d3370c022ca655c790f0c0ead66f5"
 	const other = "8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e"
+	const slot = "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033"
 
 	cfg := DefaultTrieConfig()
 	cfg.DeferBranchUpdates = false
@@ -326,7 +327,7 @@ func TestHexPatriciaHashedV3RecordsStorageRootForSingleSlotAccount(t *testing.T)
 	plainKeys, updates := NewUpdateBuilder().
 		Balance(other, 1233).
 		Balance(solo, 5*1e17).
-		Storage(solo, "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "0501").
+		Storage(solo, slot, "0501").
 		Build()
 	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
@@ -338,6 +339,7 @@ func TestHexPatriciaHashedV3RecordsStorageRootForSingleSlotAccount(t *testing.T)
 	require.NoError(t, err)
 
 	addr := common.Hex2Bytes(solo)
+	want := append(common.Hex2Bytes(solo), common.Hex2Bytes(slot)...)
 	var found bool
 	for key, record := range ms.cm {
 		if BranchData(record).IsTombstone() {
@@ -350,9 +352,53 @@ func TestHexPatriciaHashedV3RecordsStorageRootForSingleSlotAccount(t *testing.T)
 			continue
 		}
 		found = true
-		require.Equal(t, int16(length.Hash), decoded.hashLen, "the record must carry a storage root")
-		require.NotEqual(t, make([]byte, length.Hash), decoded.hash[:],
-			"a single-slot account must record its storage root, not zeros")
+		require.Equal(t, int16(length.Addr+length.Hash), decoded.storageAddrLen,
+			"the record must carry the hoisted slot key")
+		require.Equal(t, want, decoded.storageAddr[:decoded.storageAddrLen])
 	}
 	require.True(t, found, "no record for the single-slot account")
+}
+
+// The two fused shapes have to survive a round trip: a real storage branch keeps its root and mask,
+// a hoisted slot keeps its key. Neither may be decoded as the other.
+func TestEncodeLeafChildFusedShapesRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hoisted slot", func(t *testing.T) {
+		var c cellEncodeData
+		c.accountAddrLen = length.Addr
+		copy(c.accountAddr[:], bytes.Repeat([]byte{0x31}, length.Addr))
+		c.storageAddrLen = length.Addr + length.Hash
+		copy(c.storageAddr[:], append(bytes.Repeat([]byte{0x31}, length.Addr), bytes.Repeat([]byte{0x72}, length.Hash)...))
+		c.stateHashLen = length.Hash
+		copy(c.stateHash[:], bytes.Repeat([]byte{0xab}, length.Hash))
+
+		var decoded cell
+		mask, err := DecodeRecordInto(EncodeLeafChild(&c), &decoded)
+		require.NoError(t, err)
+		require.Zero(t, mask)
+		require.Equal(t, int16(length.Addr+length.Hash), decoded.storageAddrLen)
+		require.Equal(t, c.storageAddr[:c.storageAddrLen], decoded.storageAddr[:decoded.storageAddrLen])
+		require.Equal(t, c.accountAddr[:length.Addr], decoded.accountAddr[:decoded.accountAddrLen])
+		require.Zero(t, decoded.hashLen, "a hoisted slot has no storage root to record")
+	})
+
+	t.Run("storage branch", func(t *testing.T) {
+		var c cellEncodeData
+		c.accountAddrLen = length.Addr
+		copy(c.accountAddr[:], bytes.Repeat([]byte{0x44}, length.Addr))
+		c.hashLen = length.Hash
+		copy(c.hash[:], bytes.Repeat([]byte{0xcd}, length.Hash))
+		c.storageMask = 0x4208
+		c.stateHashLen = length.Hash
+		copy(c.stateHash[:], bytes.Repeat([]byte{0xef}, length.Hash))
+
+		var decoded cell
+		mask, err := DecodeRecordInto(EncodeLeafChild(&c), &decoded)
+		require.NoError(t, err)
+		require.Equal(t, uint16(0x4208), mask)
+		require.Equal(t, int16(length.Hash), decoded.hashLen)
+		require.Equal(t, c.hash[:length.Hash], decoded.hash[:decoded.hashLen])
+		require.Zero(t, decoded.storageAddrLen, "a storage branch has no slot key to record")
+	})
 }

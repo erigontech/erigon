@@ -1201,12 +1201,6 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			hadToReset.Add(1)
 		}
 	}
-	// A hoisted slot is the account's whole storage subtree. Legacy records it by the slot address
-	// and rebuilds this hash on every read; a v3 record has only the root, so it has to be kept.
-	if storageRootHashIsSet && cell.accountAddrLen > 0 && hph.cfg.EdgeRecords {
-		copy(cell.hash[:], storageRootHash[:])
-		cell.hashLen = length.Hash
-	}
 	if cell.accountAddrLen > 0 {
 		if err := cell.hashAccKey(hph.keccak, depth, hph.cellHashBuf[:]); err != nil {
 			return nil, err

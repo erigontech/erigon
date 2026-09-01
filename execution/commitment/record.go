@@ -33,7 +33,8 @@ const (
 	recordFlagStorageLeaf  byte = 1 << 2
 	recordFlagHasStorage   byte = 1 << 3
 	recordFlagHash         byte = 1 << 4
-	recordFlagsAll              = recordFlagLeaf | recordFlagExtensionOdd | recordFlagStorageLeaf | recordFlagHasStorage | recordFlagHash
+	recordFlagStorageAddr  byte = 1 << 5
+	recordFlagsAll              = recordFlagLeaf | recordFlagExtensionOdd | recordFlagStorageLeaf | recordFlagHasStorage | recordFlagHash | recordFlagStorageAddr
 )
 
 var (
@@ -138,6 +139,10 @@ func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {
 func EncodeLeafChild(cell *cellEncodeData) []byte {
 	storageLeaf := cell.accountAddrLen == 0 && cell.storageAddrLen > 0
 	hasStorage := cell.accountAddrLen > 0 && (cell.hashLen > 0 || cell.storageAddrLen > 0 || cell.storageMask != 0)
+	// A hoisted slot is the account's whole storage subtree and has no root of its own: the root is
+	// the collapsed leaf, which only exists once the slot is hashed at the account boundary. Record
+	// the slot instead, as legacy does with fieldStorageAddr.
+	hoistedSlot := hasStorage && cell.hashLen == 0 && cell.storageAddrLen > 0
 	stateHashPresent := cell.stateHashLen == length.Hash
 
 	flags := recordFlagLeaf
@@ -145,6 +150,9 @@ func EncodeLeafChild(cell *cellEncodeData) []byte {
 		flags |= recordFlagStorageLeaf
 	} else if hasStorage {
 		flags |= recordFlagHasStorage
+	}
+	if hoistedSlot {
+		flags |= recordFlagStorageAddr
 	}
 	if stateHashPresent {
 		flags |= recordFlagHash
@@ -161,6 +169,8 @@ func EncodeLeafChild(cell *cellEncodeData) []byte {
 	switch {
 	case storageLeaf:
 		baseLen += length.Hash
+	case hoistedSlot:
+		baseLen += 2 + length.Addr + length.Hash
 	case hasStorage:
 		baseLen += length.Hash + length.Hash + 2 + length.Addr
 	default:
@@ -175,6 +185,13 @@ func EncodeLeafChild(cell *cellEncodeData) []byte {
 	switch {
 	case storageLeaf:
 		record = append(record, recordStorageSlot(cell)...)
+	case hoistedSlot:
+		var encodedMask [2]byte
+		binary.BigEndian.PutUint16(encodedMask[:], cell.storageMask)
+		record = append(record, encodedMask[:]...)
+		record = append(record, cell.accountAddr[:]...)
+		record = append(record, recordStorageSlot(cell)...)
+		record = appendRecordExtension(record, cell, extLen)
 	case hasStorage:
 		record = append(record, cell.hash[:]...)
 		var encodedMask [2]byte
@@ -255,6 +272,30 @@ func DecodeRecordInto(record []byte, c *cell) (mask uint16, err error) {
 		copy(c.stateHash[:], record[pos:pos+length.Hash])
 		c.stateHashLen = length.Hash
 		pos += length.Hash
+	}
+
+	if flags&recordFlagStorageAddr != 0 {
+		if flags&recordFlagHasStorage == 0 {
+			return 0, malformedRecord("storage address without the storage flag 0x%x", flags)
+		}
+		const fixedLen = 2 + length.Addr + length.Hash
+		if len(record) < pos+fixedLen {
+			return 0, malformedRecord("account storage address fields are truncated")
+		}
+		mask = binary.BigEndian.Uint16(record[pos : pos+2])
+		c.storageMask = mask
+		pos += 2
+		copy(c.accountAddr[:], record[pos:pos+length.Addr])
+		c.accountAddrLen = length.Addr
+		copy(c.storageAddr[:length.Addr], record[pos:pos+length.Addr])
+		pos += length.Addr
+		copy(c.storageAddr[length.Addr:length.Addr+length.Hash], record[pos:pos+length.Hash])
+		c.storageAddrLen = length.Addr + length.Hash
+		pos += length.Hash
+		if err := decodeRecordExtension(flags, record[pos:], c); err != nil {
+			return 0, err
+		}
+		return mask, nil
 	}
 
 	if flags&recordFlagHasStorage != 0 {
