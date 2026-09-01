@@ -111,6 +111,7 @@ func (j *journal) release() {
 	journalPool.Put(j)
 }
 func (j *journal) Reset() {
+	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
 }
@@ -133,6 +134,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 			}
 		}
 	}
+	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
 }
 
@@ -488,16 +490,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAddLog:
-		txIndex := int(je.aux)
-		if txIndex+1 >= len(s.logs) {
-			panic(fmt.Sprintf("can't revert log index %v, max: %v", txIndex, len(s.logs)-1))
-		}
-		txnLogs := s.logs[txIndex+1]
-		s.logs[txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
-		if len(s.logs[txIndex+1]) == 0 {
-			s.logs = s.logs[:len(s.logs)-1] // revert txn
-		}
-		s.logSize--
+		s.logs.revertLast(int(je.aux))
 		return nil
 
 	case kindTouch:

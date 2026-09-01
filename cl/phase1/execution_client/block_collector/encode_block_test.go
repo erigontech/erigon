@@ -63,9 +63,9 @@ func TestEncodeDecodeBlockRoundTrip(t *testing.T) {
 		encoded, err := c.encodeBlock(payload, tc.bb.ParentRoot, tc.bb.Body.GetExecutionRequestsList())
 		require.NoError(t, err)
 
-		decoded, bal, err := c.decodeBlock(encoded)
+		decoded, err := c.decodeBlock(encoded)
 		require.NoError(t, err)
-		require.Empty(t, bal)
+		require.Empty(t, decoded.BlockAccessList())
 		require.Equal(t, payload.BlockHash, decoded.Hash())
 		require.Equal(t, payload.BlockNumber, decoded.NumberU64())
 		require.Equal(t, payload.ParentHash, decoded.ParentHash())

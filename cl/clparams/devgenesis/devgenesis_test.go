@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -65,6 +66,43 @@ func TestBuildGenesisState_Deterministic(t *testing.T) {
 	require.NoError(t, err)
 	r3, _ := s3.HashSSZ()
 	require.NotEqual(t, r1, r3, "different seed should produce different state root")
+}
+
+func TestBuildGenesisState_GloasValidatorsRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	elHash := common.HexToHash("0x1234")
+	genesisState, _, err := BuildGenesisState("gloas-seed", 16, &cfg, 1000, elHash)
+	require.NoError(t, err)
+
+	progressiveRoot, err := genesisState.Validators().HashSSZProgressive()
+	require.NoError(t, err)
+	legacyRoot, err := genesisState.Validators().HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(progressiveRoot), genesisState.GenesisValidatorsRoot())
+	require.NotEqual(t, legacyRoot, progressiveRoot)
+	require.Equal(t, elHash, genesisState.GetLatestBlockHash())
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	require.NoError(t, err)
+	bid := genesisState.GetLatestExecutionPayloadBid()
+	require.NotNil(t, bid)
+	require.Equal(t, common.Hash{}, bid.BlockHash)
+	require.Equal(t, elHash, bid.ParentBlockHash)
+	require.Equal(t, common.Hash(emptyRequestsRoot), bid.ExecutionRequestsRoot)
+
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid.Message = bid.Copy()
+	bodyRoot, err := body.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(bodyRoot), genesisState.LatestBlockHeader().BodyRoot)
 }
 
 func TestDeriveSignerKey(t *testing.T) {

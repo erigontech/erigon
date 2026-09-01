@@ -23,26 +23,26 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// MdGas represents multi-dimensional gas (regular + state) for reservoirs
+// MdGas represents multi-dimensional gas (execution + state) for reservoirs
 // and leftover balances. Both fields are non-negative by construction.
 type MdGas struct {
-	Regular uint64
-	State   uint64
+	Execution uint64
+	State     uint64
 }
 
 func (g MdGas) Plus(other MdGas) MdGas {
 	return MdGas{
-		Regular: g.Regular + other.Regular,
-		State:   g.State + other.State,
+		Execution: g.Execution + other.Execution,
+		State:     g.State + other.State,
 	}
 }
 
 func (g MdGas) Total() uint64 {
-	return g.Regular + g.State
+	return g.Execution + g.State
 }
 
-func NewFullMdGas(regular, state, blob uint64) FullMdGas {
-	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
+func NewFullMdGas(execution, state, blob uint64) FullMdGas {
+	return FullMdGas{MdGas: MdGas{Execution: execution, State: state}, Blob: blob}
 }
 
 // FullMdGas extends MdGas with blob gas.
@@ -53,14 +53,14 @@ type FullMdGas struct {
 
 // MdGasUsage reports per-frame gas usage.
 type MdGasUsage struct {
-	Regular    uint64
+	Execution  uint64
 	State      int64 // can be negative due to state clearing (e.g. SSTORE clear)
 	StateSpill uint64
 }
 
-// PlusIntrinsic folds intrinsic regular gas into the frame-usage report.
+// PlusIntrinsic folds intrinsic execution gas into the frame-usage report.
 func (u MdGasUsage) PlusIntrinsic(intrinsicGas uint64) MdGasUsage {
-	u.Regular += intrinsicGas
+	u.Execution += intrinsicGas
 	return u
 }
 
@@ -73,27 +73,27 @@ func (u MdGasUsage) StateClamped() uint64 {
 }
 
 func (u MdGasUsage) Total() uint64 {
-	return u.Regular + u.StateClamped()
+	return u.Execution + u.StateClamped()
 }
 
 // Consume atomically deducts a charge and records its multidimensional usage.
 func Consume(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) bool {
 	switch typ {
-	case RegularGas:
-		if remaining.Regular < amount {
+	case ExecutionGas:
+		if remaining.Execution < amount {
 			return false
 		}
-		remaining.Regular -= amount
-		used.Regular += amount
+		remaining.Execution -= amount
+		used.Execution += amount
 		return true
 	case StateGas:
 		stateGas := min(amount, remaining.State)
 		spill := amount - stateGas
-		if remaining.Regular < spill {
+		if remaining.Execution < spill {
 			return false
 		}
 		remaining.State -= stateGas
-		remaining.Regular -= spill
+		remaining.Execution -= spill
 		used.State += int64(amount)
 		used.StateSpill += spill
 		return true
@@ -105,12 +105,12 @@ func Consume(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) b
 // Refill reverses a gas charge, restoring state-gas spill before reservoir gas.
 func Refill(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) {
 	switch typ {
-	case RegularGas:
-		remaining.Regular += amount
-		used.Regular -= amount
+	case ExecutionGas:
+		remaining.Execution += amount
+		used.Execution -= amount
 	case StateGas:
 		spill := min(amount, used.StateSpill)
-		remaining.Regular += spill
+		remaining.Execution += spill
 		remaining.State += amount - spill
 		used.State -= int64(amount)
 		used.StateSpill -= spill
@@ -122,14 +122,14 @@ func Refill(remaining *MdGas, used *MdGasUsage, amount uint64, typ MdGasType) {
 type MdGasType uint8
 
 const (
-	RegularGas MdGasType = iota
+	ExecutionGas MdGasType = iota
 	StateGas
 )
 
 func (t MdGasType) String() string {
 	switch t {
-	case RegularGas:
-		return "regularGas"
+	case ExecutionGas:
+		return "executionGas"
 	case StateGas:
 		return "stateGas"
 	default:
@@ -137,23 +137,23 @@ func (t MdGasType) String() string {
 	}
 }
 
-// SplitTxnGasLimit splits a transaction's gas limit into regular and state dimensions.
-// EIP-8037: when tx.gas > TX_MAX_GAS_LIMIT, excess gas beyond the regular budget
+// SplitTxnGasLimit splits a transaction's gas limit into execution and state dimensions.
+// EIP-8037: when tx.gas > TX_MAX_GAS_LIMIT, excess gas beyond the execution budget
 // becomes the state gas reservoir, which state-creation opcodes (SSTORE, CREATE,
-// code deposit) draw from before spilling to regular gas.
-// Pre-Amsterdam: all gas is regular (state reservoir is 0).
+// code deposit) draw from before spilling to execution gas.
+// Pre-Amsterdam: all gas is execution gas (state reservoir is 0).
 // See process_transaction in EIP-8037.
 func SplitTxnGasLimit(txnGasLimit, intrinsicGas uint64, rules *chain.Rules) MdGas {
 	if rules.IsAmsterdam {
-		//execution_gas = tx.gas - intrinsic_gas
-		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_gas
-		//gas_left = min(regular_gas_budget, execution_gas)
-		//state_gas_reservoir = execution_gas - gas_left
-		executionGas := txnGasLimit - intrinsicGas
-		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
-		gasLeft := min(regularGasBudget, executionGas)
-		stateGasReservoir := executionGas - gasLeft
-		return MdGas{Regular: gasLeft, State: stateGasReservoir}
+		// evm_gas = tx.gas - intrinsic_gas
+		// execution_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_gas
+		// gas_left = min(execution_gas_budget, evm_gas)
+		// state_gas_reservoir = evm_gas - gas_left
+		evmGas := txnGasLimit - intrinsicGas
+		executionGasBudget := params.MaxTxnGasLimit - intrinsicGas
+		gasLeft := min(executionGasBudget, evmGas)
+		stateGasReservoir := evmGas - gasLeft
+		return MdGas{Execution: gasLeft, State: stateGasReservoir}
 	}
-	return MdGas{Regular: txnGasLimit - intrinsicGas}
+	return MdGas{Execution: txnGasLimit - intrinsicGas}
 }

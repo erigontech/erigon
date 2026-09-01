@@ -185,6 +185,35 @@ def case_attempts_final_failed_reconciled():
         check("attempts/reconcile: final marked failed", "2 · ❌ failed" in out)
 
 
+def case_attempts_saved_json_overrides_log():
+    # A failed attempt whose results were saved as results_attempt_N/ carries an
+    # authoritative test_report.json: the trail must use its counts (the log
+    # heuristic undercounts here) and the failed tests must be listed.
+    rows = [{"transport_type": "http", "test_name": f"debug_traceBlockByNumber/test_{i}.json",
+             "result": "FAILED", "error_message": "diff mismatch"} for i in (41, 42, 43, 44)]
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "output.log", ATTEMPTS_LOG)
+        write(tmp, "results/test_report.json", report(0, []))
+        write(tmp, "results_attempt_2/test_report.json", report(4, rows))
+        out = render(tmp, result="success")
+        check("attempts/json: trail uses report count", "2 · ❌ 4 failing tests" in out)
+        check("attempts/json: log-only attempt keeps log status", "1 · ❌ sync failed" in out)
+        check("attempts/json: details block present", "<details><summary>Attempt 2 — 4 failed tests</summary>" in out)
+        check("attempts/json: details lists test name", "debug_traceBlockByNumber/test_41.json" in out)
+
+
+def case_attempts_saved_json_without_log():
+    # Saved attempt dirs must surface even when output.log is missing.
+    rows = [{"transport_type": "http", "test_name": "eth_getLogs/test_03.json",
+             "result": "FAILED", "error_message": "json diff"}]
+    with tempfile.TemporaryDirectory() as tmp:
+        write(tmp, "results/test_report.json", report(0, []))
+        write(tmp, "results_attempt_1/test_report.json", report(1, rows))
+        out = render(tmp, result="success")
+        check("attempts/no-log: details block present", "<details><summary>Attempt 1 — 1 failed test</summary>" in out)
+        check("attempts/no-log: details lists test name", "eth_getLogs/test_03.json" in out)
+
+
 def case_success_report_with_failed_count():
     # result=success but the report's summary still counts failures and lists none:
     # must not claim all-passed (Copilot review).
@@ -204,7 +233,8 @@ def main():
     for fn in (case_report_all_passed, case_report_failures, case_no_report_with_log,
                case_setup_failure, case_unknown_result_no_false_pass, case_malformed_json_shape,
                case_empty_log, case_missing_dir, case_attempts_multi, case_attempts_single_hidden,
-               case_attempts_final_failed_reconciled, case_success_report_with_failed_count,
+               case_attempts_final_failed_reconciled, case_attempts_saved_json_overrides_log,
+               case_attempts_saved_json_without_log, case_success_report_with_failed_count,
                case_main_setup_failure_message):
         fn()
     print(f"\n{passed} passed, {failed} failed")

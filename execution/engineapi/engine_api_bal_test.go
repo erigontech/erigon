@@ -296,7 +296,7 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 		// Verify at least one storage slot was written at the mint tx index
 		foundStorageChange := false
 		for _, slotChange := range contractChanges.StorageChanges {
-			if findStorageChange(slotChange, balIndex) != nil {
+			if findStorageChange(&slotChange, balIndex) != nil {
 				foundStorageChange = true
 				break
 			}
@@ -476,7 +476,7 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 		require.NotNilf(t, contractChanges, "missing contract changes\n%s", bal.DebugString())
 		foundStorageChange := false
 		for _, slotChange := range contractChanges.StorageChanges {
-			if findStorageChange(slotChange, mintIdx) != nil {
+			if findStorageChange(&slotChange, mintIdx) != nil {
 				foundStorageChange = true
 				break
 			}
@@ -609,7 +609,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 		require.NotNilf(t, changerChanges, "missing changer contract\n%s", bal.DebugString())
 		foundStorageAtChange := false
 		for _, slotChange := range changerChanges.StorageChanges {
-			if findStorageChange(slotChange, changeIdx) != nil {
+			if findStorageChange(&slotChange, changeIdx) != nil {
 				foundStorageAtChange = true
 				break
 			}
@@ -1088,9 +1088,9 @@ func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) 
 }
 
 func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types.AccountChanges {
-	for _, ac := range bal {
-		if ac != nil && ac.Address == addr {
-			return ac
+	for i := range bal {
+		if bal[i].Address == addr {
+			return &bal[i]
 		}
 	}
 	return nil
@@ -1170,9 +1170,20 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		if executionRequests == nil {
 			executionRequests = []hexutil.Bytes{}
 		}
+		setBlockHash := func(elPayload *enginetypes.ExecutionPayload) {
+			response := *payload.GetPayloadResponse
+			response.ExecutionPayload = elPayload
+			payloadCopy := *payload
+			payloadCopy.GetPayloadResponse = &response
+			header := engineapitester.MockClPayloadToHeader(&payloadCopy)
+			balHash := crypto.Keccak256Hash(*elPayload.BlockAccessList)
+			header.BlockAccessListHash = &balHash
+			elPayload.BlockHash = header.Hash()
+		}
 		sendWithBAL := func(bal hexutil.Bytes) (*enginetypes.PayloadStatus, error) {
 			elPayload := *payload.ExecutionPayload
 			elPayload.BlockAccessList = &bal
+			setBlockHash(&elPayload)
 			return eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
 		}
 		for name, malformed := range map[string]hexutil.Bytes{
@@ -1198,5 +1209,42 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		require.NotNil(t, status.ValidationError)
 		require.ErrorContains(t, status.ValidationError.Error(), "access list",
 			"INVALID must originate from block-access-list validation, not e.g. a block-hash mismatch")
+
+		unknownParentPayload := *payload.ExecutionPayload
+		unknownParentPayload.ParentHash = common.Hash{0xff}
+		unknownParentBAL := hexutil.Bytes(duplicateAccounts)
+		unknownParentPayload.BlockAccessList = &unknownParentBAL
+		setBlockHash(&unknownParentPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &unknownParentPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "access list")
+
+		oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+			Address: accounts.InternAddress(common.Address{1}),
+		}})
+		require.NoError(t, err)
+		oversizedBytes := hexutil.Bytes(oversized)
+		elPayload := *payload.ExecutionPayload
+		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
+		elPayload.Transactions = []hexutil.Bytes{}
+		elPayload.BlockAccessList = &oversizedBytes
+		setBlockHash(&elPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
+
+		elPayload = *payload.ExecutionPayload
+		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
+		elPayload.BlockAccessList = &oversizedBytes
+		setBlockHash(&elPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
 	})
 }

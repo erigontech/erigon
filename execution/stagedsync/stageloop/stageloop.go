@@ -52,7 +52,7 @@ import (
 // an implementation defined in another package (e.g. execmodule.Dispatcher)
 // without creating a circular import.
 type NotificationSender interface {
-	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+	Dispatch(ctx context.Context, tx kv.Tx, stateVersion uint64, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
 }
 
 type FrozenBlocksReader interface {
@@ -148,8 +148,15 @@ func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
 	if err != nil {
 		return err
 	}
+	var stateVersion uint64
+	if h.notifications.Accumulator != nil {
+		stateVersion, err = rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+	}
 	return h.dispatcher.Dispatch(
-		h.ctx, tx,
+		h.ctx, tx, stateVersion,
 		h.notifications.Accumulator,
 		h.notifications.RecentReceipts,
 		finishProgressBefore,
@@ -176,6 +183,15 @@ func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) 
 	return nil
 }
 
+// ClearSnapshotDownloadPin drops the download-completion pin from the sync
+// state; see Notifications.ClearSnapshotDownloadPin.
+func (h *Hook) ClearSnapshotDownloadPin() bool {
+	if h == nil || h.notifications == nil {
+		return false
+	}
+	return h.notifications.ClearSnapshotDownloadPin()
+}
+
 // NotifySyncState publishes the sync status on the event bus if it changed;
 // dedup and ordering live in Notifications.PublishSyncState.
 func (h *Hook) NotifySyncState(tx kv.Tx) {
@@ -185,6 +201,20 @@ func (h *Hook) NotifySyncState(tx kv.Tx) {
 	if err := h.notifications.PublishSyncState(tx, h.frozenBlocksReader.FrozenBlocks()); err != nil {
 		h.logger.Warn("[hook] sync state notification skipped", "err", err)
 	}
+}
+
+func (h *Hook) NotifyStateRetirementStart(started bool) {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil {
+		return
+	}
+	h.notifications.Events.OnStateRetirementStart(started)
+}
+
+func (h *Hook) NotifyStateRetirementDone() {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil {
+		return
+	}
+	h.notifications.Events.OnStateRetirementDone()
 }
 
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
@@ -236,11 +266,11 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 	if chainReader != nil {
 		if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 			log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
+			return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
 		}
 		if err := engine.VerifyUncles(chainReader, currentHeader, currentBody.Uncles); err != nil {
 			log.Warn("Unlcles Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
+			return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
 		}
 	}
 	// Prepare memory state for block execution
@@ -306,7 +336,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
 		}
-		if err = stateSync.RunUnwind(sd, tx); err != nil {
+		if err := stateSync.RunUnwind(sd, tx); err != nil {
 			return err
 		}
 	}
@@ -401,7 +431,6 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
-		stagedsync.StageWitnessProcessingCfg(controlServer.ChainConfig, controlServer.WitnessBuffer),
 	)
 }
 

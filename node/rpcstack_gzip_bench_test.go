@@ -25,10 +25,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const rpcEndpoint = "http://localhost:8545"
@@ -49,9 +53,12 @@ var historicalBlocks = []struct {
 
 // --- stdlib gzip handler (reference implementation) ---
 
+// The stdlib writer runs at BestSpeed to match the production Klauspost level,
+// so the benchmark isolates the library difference rather than mixing in a
+// compression-level difference.
 var stdlibGzPool = sync.Pool{
 	New: func() any {
-		w, _ := gzip.NewWriterLevel(io.Discard, gzip.DefaultCompression)
+		w, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed)
 		return w
 	},
 }
@@ -131,7 +138,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
 	for range 10 {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
 		if resp != nil {
@@ -142,7 +149,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 
 	latencies := make([]time.Duration, 0, requests)
 	for range requests {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
 		resp, err := client.Do(req)
@@ -171,7 +178,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 	// Warmup + fetch payload size
 	var payloadKB int
 	for i := range 10 {
-		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, err := client.Do(req)
@@ -188,7 +195,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 
 	latencies := make([]time.Duration, 0, requests)
 	for range requests {
-		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
@@ -232,7 +239,12 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 		`{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":[%q,true]}`,
 		blockTag,
 	)
-	resp, err := http.Post(rpcEndpoint, "application/json", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, rpcEndpoint, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Skipf("local node not reachable at %s: %v", rpcEndpoint, err)
 		return nil
@@ -262,7 +274,7 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 	return data
 }
 
-// --- Test: handler-level compression (libdeflate vs stdlib, payload from node) ---
+// --- Test: handler-level compression (klauspost vs stdlib, payload from node) ---
 
 func TestGzipHandlerLatency(t *testing.T) {
 	for _, blk := range historicalBlocks {
@@ -271,11 +283,11 @@ func TestGzipHandlerLatency(t *testing.T) {
 			if payload == nil {
 				return
 			}
-			lib := measureHandlerLatency(t, payload, newGzipHandler)
+			kp := measureHandlerLatency(t, payload, newGzipHandler)
 			std := measureHandlerLatency(t, payload, newStdlibGzipHandler)
-			t.Logf("libdeflate  %s", lib)
-			t.Logf("stdlib      %s", std)
-			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(lib.p50), float64(std.p99)/float64(lib.p99))
+			t.Logf("klauspost  %s", kp)
+			t.Logf("stdlib     %s", std)
+			t.Logf("speedup p50=%.2fx  p99=%.2fx", float64(std.p50)/float64(kp.p50), float64(std.p99)/float64(kp.p99))
 		})
 	}
 }
@@ -323,7 +335,7 @@ func benchmarkGzipHandler(b *testing.B, payload []byte, wrap func(http.Handler) 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
 	for range 5 {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
+		req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
 		if resp != nil {
@@ -338,7 +350,7 @@ func benchmarkGzipHandler(b *testing.B, payload []byte, wrap func(http.Handler) 
 
 	var totalLatency time.Duration
 	for i := 0; i < b.N; i++ {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload))
+		req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
 		resp, err := client.Do(req)
@@ -365,10 +377,214 @@ func getBenchPayload(b *testing.B) []byte {
 	return benchPayload
 }
 
-func BenchmarkLibdeflateGzip(b *testing.B) {
+func BenchmarkKlauspostGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newGzipHandler)
 }
 
-func BenchmarkStdlibGzip(b *testing.B) {
+func BenchmarkStdlibGzipBestSpeed(b *testing.B) {
 	benchmarkGzipHandler(b, getBenchPayload(b), newStdlibGzipHandler)
+}
+
+// syntheticBlockJSON builds a payload shaped like eth_getBlockByNumber output:
+// many repeated tx objects with high-entropy hex fields, so the compressor sees
+// realistic redundancy rather than a trivially compressible run.
+func syntheticBlockJSON(targetBytes int) []byte {
+	var b bytes.Buffer
+	b.WriteString(`{"jsonrpc":"2.0","id":1,"result":{"number":"0xc65d58","transactions":[`)
+	i := 0
+	for b.Len() < targetBytes {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"hash":"0x%064x","from":"0x%040x","to":"0x%040x","value":"0x%x","gas":"0x%x","input":"0x%0128x"}`,
+			i*2654435761, i*40503, i*2246822519, i*97, 21000+i, uint64(i)*11400714819323198485)
+		i++
+	}
+	b.WriteString(`]}}`)
+	return b.Bytes()
+}
+
+// BenchmarkGzipOneShotThroughput measures server throughput: concurrent clients,
+// unlike the sequential per-request loop in rpcstack_gzip_bench_test.go which
+// reports latency. -cpu controls the client concurrency.
+func BenchmarkGzipOneShotThroughput(b *testing.B) {
+	for _, gz := range []bool{false, true} {
+		for _, size := range []int{16 << 10, 256 << 10, 768 << 10, 2 << 20} {
+			payload := syntheticBlockJSON(size)
+			b.Run(fmt.Sprintf("gzip=%v/payload=%dKB", gz, len(payload)>>10), func(b *testing.B) {
+				inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					w.Write(payload) //nolint:errcheck
+				})
+				var handler http.Handler = inner
+				if gz {
+					handler = newGzipHandler(inner)
+				}
+				srv := httptest.NewServer(handler)
+				defer srv.Close()
+
+				b.SetBytes(int64(len(payload)))
+				b.ReportAllocs()
+				b.ResetTimer()
+				b.RunParallel(func(pb *testing.PB) {
+					client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+					for pb.Next() {
+						req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := client.Do(req)
+						if err != nil {
+							b.Error(err)
+							return
+						}
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+				})
+			})
+		}
+	}
+}
+
+// stepsPerTracedTxn is how many trace steps the benchmark puts between flushes,
+// standing in for a transaction: debug_trace* flushes at every txn boundary.
+const stepsPerTracedTxn = 250
+
+// BenchmarkGzipStreamingThroughput drives the streaming path the way
+// debug_trace* does: a jsonstream writing through the gzip middleware. On a
+// several-hundred-MB trace that is tens of thousands of write calls through the
+// middleware.
+func BenchmarkGzipStreamingThroughput(b *testing.B) {
+	for _, gz := range []bool{false, true} {
+		for _, entries := range []int{2000, 60000} {
+			name := fmt.Sprintf("gzip=%v/entries=%d", gz, entries)
+			b.Run(name, func(b *testing.B) {
+				// Precomputed: formatting inside the write loop would make the
+				// benchmark measure fmt rather than the streaming path.
+				stackWords := make([]string, 64)
+				for i := range stackWords {
+					stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
+				}
+				inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					stream := jsonstream.New(w)
+					stream.WriteArrayStart()
+					for i := range entries {
+						if i > 0 {
+							stream.WriteMore()
+						}
+						stream.WriteObjectStart()
+						stream.WriteObjectField("pc")
+						stream.WriteInt(i)
+						stream.WriteMore()
+						stream.WriteObjectField("op")
+						stream.WriteString("SSTORE")
+						stream.WriteMore()
+						stream.WriteObjectField("stack")
+						stream.WriteString(stackWords[i%len(stackWords)])
+						stream.WriteObjectEnd()
+						// A traced txn ends by flushing (rpc/jsonrpc/tracing.go),
+						// so the middleware sees a run of writes rather than one
+						// whole body handed over at the end.
+						if (i+1)%stepsPerTracedTxn == 0 {
+							stream.Flush() //nolint:errcheck
+						}
+					}
+					stream.WriteArrayEnd()
+					stream.Flush() //nolint:errcheck
+				})
+				var handler http.Handler = inner
+				if gz {
+					handler = newGzipHandler(inner)
+				}
+				srv := httptest.NewServer(handler)
+				defer srv.Close()
+
+				// One warmup request to learn the uncompressed size for MB/s.
+				req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+				req.Header.Set("Accept-Encoding", "gzip")
+				if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
+					io.Copy(io.Discard, resp.Body) //nolint:errcheck
+					resp.Body.Close()
+				}
+				b.SetBytes(int64(entries) * 96) // approx bytes of JSON per entry
+				b.ReportAllocs()
+				b.ResetTimer()
+				b.RunParallel(func(pb *testing.PB) {
+					client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+					for pb.Next() {
+						req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := client.Do(req)
+						if err != nil {
+							b.Error(err)
+							return
+						}
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+				})
+			})
+		}
+	}
+}
+
+// BenchmarkGzipPeakMemoryParallel reports peak live heap while many clients
+// request a large response at once. Per-request throughput hides this: the
+// one-shot path holds the whole uncompressed response per in-flight request,
+// so peak memory scales with concurrency, not with response size.
+func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
+	for _, clients := range []int{8, 64} {
+		b.Run(fmt.Sprintf("clients=%d/payload=2MB", clients), func(b *testing.B) {
+			payload := syntheticBlockJSON(2 << 20)
+			srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write(payload) //nolint:errcheck
+			})))
+			defer srv.Close()
+
+			var peak atomic.Uint64
+			done := make(chan struct{})
+			var sampler sync.WaitGroup
+			// Before the sampler starts: it only ever raises peak, so setup garbage
+			// or a previous sub-benchmark would otherwise stay the recorded maximum.
+			runtime.GC()
+			sampler.Go(func() {
+				var ms runtime.MemStats
+				for {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					runtime.ReadMemStats(&ms)
+					if ms.HeapInuse > peak.Load() {
+						peak.Store(ms.HeapInuse)
+					}
+				}
+			})
+
+			b.ResetTimer()
+			var wg sync.WaitGroup
+			for range clients {
+				wg.Go(func() {
+					c := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 4}}
+					for range b.N {
+						req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := c.Do(req)
+						if err != nil {
+							return
+						}
+						io.Copy(io.Discard, resp.Body) //nolint:errcheck
+						resp.Body.Close()
+					}
+				})
+			}
+			wg.Wait()
+			b.StopTimer()
+			close(done)
+			sampler.Wait()
+			b.ReportMetric(float64(peak.Load())/(1<<20), "peak-heap-MiB")
+		})
+	}
 }

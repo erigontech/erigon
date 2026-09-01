@@ -25,7 +25,6 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var activators = map[int]func(*JumpTable){
@@ -207,7 +206,7 @@ func enable1153(jt *JumpTable) {
 // opTload implements TLOAD opcode
 func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
-	key := accounts.InternKey(loc.Bytes32())
+	key := evm.internStorageKey(loc)
 	val := evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
 	*loc = val
 	return pc, nil, nil
@@ -218,9 +217,10 @@ func opTstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	loc := scope.Stack.popCopy()
+	key := evm.internStorageKey(scope.Stack.peek())
+	scope.Stack.drop()
 	val := scope.Stack.popCopy()
-	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), accounts.InternKey(loc.Bytes32()), val)
+	evm.IntraBlockState().SetTransientState(scope.Contract.Address(), key, val)
 	return pc, nil, nil
 }
 

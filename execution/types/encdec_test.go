@@ -1098,17 +1098,6 @@ func BenchmarkLogJSON(b *testing.B) {
 			benchJSONSink, _ = json.Marshal(rpcLog)
 		}
 	})
-
-	erigonLog := &ErigonLog{
-		Log:       *log,
-		Timestamp: hexutil.Uint64(1700000000),
-	}
-	b.Run("ErigonLog/Single", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			benchJSONSink, _ = json.Marshal(erigonLog)
-		}
-	})
 }
 
 var benchLogSink Log
@@ -1127,7 +1116,8 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 	}
 
 	log := mkLog()
-	encoded, _ := json.Marshal(log)
+	encoded, err := json.Marshal(log)
+	require.NoError(b, err)
 
 	b.Run("Log/Single", func(b *testing.B) {
 		b.ReportAllocs()
@@ -1137,22 +1127,13 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 	})
 
 	rpcLog := &RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(1700000000)}
-	rpcEncoded, _ := json.Marshal(rpcLog)
+	rpcEncoded, err := json.Marshal(rpcLog)
+	require.NoError(b, err)
 	var rpcSink RPCLog
 	b.Run("RPCLog/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			_ = json.Unmarshal(rpcEncoded, &rpcSink)
-		}
-	})
-
-	erigonLog := &ErigonLog{Log: *log, Timestamp: hexutil.Uint64(1700000000)}
-	erigonEncoded, _ := json.Marshal(erigonLog)
-	var erigonSink ErigonLog
-	b.Run("ErigonLog/Single", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			_ = json.Unmarshal(erigonEncoded, &erigonSink)
 		}
 	})
 }

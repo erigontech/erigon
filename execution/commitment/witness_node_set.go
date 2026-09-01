@@ -21,8 +21,6 @@ import (
 	"fmt"
 )
 
-// witnessNodeSet collects consensus trie nodes emitted during a witness fold,
-// deduplicated by node hash.
 type witnessNodeSet struct {
 	byHash map[string][]byte
 }
@@ -37,9 +35,6 @@ func (s *witnessNodeSet) onNode(rlp, hash []byte) {
 	s.byHash[k] = bytes.Clone(rlp)
 }
 
-// nodes returns the captured nodes root first, per the RLPDecode contract that
-// treats index 0 as the trie root. A non-empty set missing its root is an error
-// rather than a silently mis-rooted trie.
 func (s *witnessNodeSet) nodes(root []byte) ([][]byte, error) {
 	if len(s.byHash) == 0 {
 		return nil, nil
@@ -50,7 +45,7 @@ func (s *witnessNodeSet) nodes(root []byte) ([][]byte, error) {
 		return nil, fmt.Errorf("witness root %x absent from captured node set", root)
 	}
 	out := make([][]byte, 0, len(s.byHash))
-	out = append(out, r)
+	out = append(out, r) // RLPDecode requires index 0 to be the root
 	for k, v := range s.byHash {
 		if k != rootKey {
 			out = append(out, v)

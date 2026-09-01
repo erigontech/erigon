@@ -58,7 +58,7 @@ func NextFreePort() (int, error) {
 		}
 
 		portNum = nextPortNum(portNum)
-		listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.FormatInt(portNum, 10))
+		listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.FormatInt(portNum, 10)) //nolint:noctx
 		if err != nil {
 			continue
 		}
@@ -73,7 +73,8 @@ func NextFreePort() (int, error) {
 }
 
 func nextPortNum(port int64) int64 {
-	if port == 0 { // init case
+	switch {
+	case port == 0: // init case
 		// generate a random starting point to avoid clashes
 		// if more than 1 "go test ./erigon " processes are run on the same machine at the same time
 		// randomly pick 1 of numBuckets non-overlapping buckets
@@ -81,9 +82,9 @@ func nextPortNum(port int64) int64 {
 		rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 		n := rnd.Intn(numBuckets)
 		return minPort + int64(n)*bucketSize
-	} else if port >= maxPort {
+	case port >= maxPort:
 		return minPort
-	} else {
+	default:
 		return port + 1
 	}
 }

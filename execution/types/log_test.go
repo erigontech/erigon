@@ -29,7 +29,48 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 )
+
+func TestLogsCopyPreservesNilEntries(t *testing.T) {
+	logs := Logs{
+		nil,
+		{
+			Address: common.HexToAddress("0x1"),
+			Topics:  []common.Hash{common.HexToHash("0xaa")},
+			Data:    []byte{1, 2},
+		},
+		nil,
+	}
+	cp := logs.Copy()
+	require.Len(t, cp, 3)
+	require.Nil(t, cp[0])
+	require.Nil(t, cp[2])
+	require.NotSame(t, logs[1], cp[1])
+	require.Equal(t, logs[1], cp[1])
+
+	logs[1].Topics[0] = common.HexToHash("0xbb")
+	logs[1].Data[0] = 0xff
+	require.Equal(t, common.HexToHash("0xaa"), cp[1].Topics[0])
+	require.Equal(t, hexutil.Bytes{1, 2}, cp[1].Data)
+}
+
+// A LOG0 entry carries nil Topics. Both copy paths normalize that to an empty
+// slice, which is what keeps the JSON at `"topics":[]`.
+func TestLogCopyNormalizesNilTopics(t *testing.T) {
+	src := &Log{Address: common.HexToAddress("0x1"), Data: []byte{1}}
+	require.Nil(t, src.Topics)
+
+	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": Logs{src}.Copy()[0]} {
+		t.Run(name, func(t *testing.T) {
+			require.NotNil(t, cp.Topics)
+			require.Empty(t, cp.Topics)
+			b, err := json.Marshal(cp)
+			require.NoError(t, err)
+			require.Contains(t, string(b), `"topics":[]`)
+		})
+	}
+}
 
 var unmarshalLogTests = map[string]struct {
 	input     string
@@ -302,5 +343,102 @@ func TestFilterWithTopicMapEquivalence(t *testing.T) {
 		if !reflect.DeepEqual(want, got) {
 			t.Errorf("case %q: Filter=%v FilterWithTopicMap=%v", tc.name, testFLExtractAddress(want), testFLExtractAddress(got))
 		}
+	}
+}
+
+func TestRPCLogJSONBlockTimestamp(t *testing.T) {
+	t.Parallel()
+
+	el := &RPCLog{
+		Log: Log{
+			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Topics:  []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
+			Data:    hexutil.MustDecode("0x112233"),
+			TxHash:  common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+		},
+		BlockTimestamp: hexutil.Uint64(1700000000),
+	}
+
+	b, err := json.Marshal(el)
+	require.NoError(t, err)
+	s := string(b)
+
+	require.Contains(t, s, `"blockTimestamp":"0x6553f100"`)
+	require.NotContains(t, s, `"timestamp"`)
+
+	var decoded RPCLog
+	require.NoError(t, json.Unmarshal(b, &decoded))
+	require.Equal(t, el.BlockTimestamp, decoded.BlockTimestamp)
+	require.Equal(t, el.Address, decoded.Address)
+	require.Equal(t, el.TxHash, decoded.TxHash)
+}
+
+func TestRPCLogUnmarshalJSONBlockTimestamp(t *testing.T) {
+	t.Parallel()
+
+	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
+
+	var log RPCLog
+	require.NoError(t, json.Unmarshal([]byte(input), &log))
+	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
+}
+
+func TestRPCLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
+	t.Parallel()
+
+	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
+
+	var log RPCLog
+	require.NoError(t, json.Unmarshal([]byte(input), &log))
+	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
+}
+
+func TestToRPCLogs(t *testing.T) {
+	t.Parallel()
+
+	logs := Logs{
+		{
+			Address:     common.HexToAddress("0x5555555555555555555555555555555555555555"),
+			Topics:      []common.Hash{common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")},
+			Data:        hexutil.Bytes{0xaa},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+			TxIndex:     7,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       1,
+			Removed:     false,
+		},
+		{
+			Address:     common.HexToAddress("0x6666666666666666666666666666666666666666"),
+			Topics:      []common.Hash{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
+			Data:        hexutil.Bytes{0xbb},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x2222333344445555666677778888999900001111aaaabbbbccccddddeeeeffff"),
+			TxIndex:     8,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       2,
+			Removed:     true,
+		},
+	}
+
+	rpcLogs := logs.ToRPCLogs(1900000000)
+
+	require.Len(t, rpcLogs, len(logs))
+	for i, rpcLog := range rpcLogs {
+		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
+		require.Equal(t, *logs[i], rpcLog.Log)
+	}
+}
+
+func TestToRPCLogsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Non-nil empty, so eth_getLogs/erigon_getLogs serialise `[]` and not `null`.
+	for _, logs := range []Logs{{}, nil} {
+		rpcLogs := logs.ToRPCLogs(1)
+		require.NotNil(t, rpcLogs)
+		require.Len(t, rpcLogs, 0)
 	}
 }

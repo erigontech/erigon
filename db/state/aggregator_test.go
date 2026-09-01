@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -169,7 +170,7 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
@@ -368,7 +369,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		fullpath := filepath.Join(dirs.SnapDomain, file)
 		ofile, err := os.Create(fullpath)
 		require.NoError(t, err)
-		ofile.Close()
+		require.NoError(t, ofile.Close())
 	}
 
 	t.Run("v1.0 files", func(t *testing.T) {
@@ -380,7 +381,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
@@ -406,7 +407,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
@@ -432,7 +433,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
@@ -458,7 +459,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
@@ -599,7 +600,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	// Ask the aggregator to build up through step 11.
 	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
 	// → refuse. No new accounts file gets produced.
-	require.NoError(t, agg.BuildFiles(11*stepSize))
+	require.NoError(t, agg.BuildFiles(11*stepSize, unboundedFinalityCtx))
 
 	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
@@ -628,7 +629,7 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 
 	// BuildFiles must not refuse — the guard's `step > 0` clause should let
 	// this through.
-	require.NoError(t, agg.BuildFiles(2*stepSize))
+	require.NoError(t, agg.BuildFiles(2*stepSize, unboundedFinalityCtx))
 }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
@@ -807,4 +808,25 @@ func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uin
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
+}
+
+// TestRunningMergesGaugeIgnoresEmptyStep pins that domain_running_merges counts merges
+// and not merge polls: mergeLoopStep still runs findMergeRange and cleanAfterMerge when
+// there is no range, and a scrape landing there used to read one merge in flight.
+// mxRunningMerges is process-global, so this test must stay non-parallel - Go suspends
+// the t.Parallel() mergers in this package while it runs.
+func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
+	_, agg := testDbAndAggregatorv3(t, 10)
+
+	var duringCleanup float64
+	var cleanupRan bool
+	agg.OnFilesChange(func([]string) {}, func([]string) {
+		duringCleanup = mxRunningMerges.GetValue()
+		cleanupRan = true
+	})
+
+	before := mxRunningMerges.GetValue()
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
+	require.Equal(t, before, duringCleanup, "no range to merge, so this step must not count as one")
 }

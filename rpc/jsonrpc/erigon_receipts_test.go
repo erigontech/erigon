@@ -83,12 +83,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make(types.ErigonLogs, 0)
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
-		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLog.Log,
-			Timestamp: expectedLog.Timestamp,
-		})
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
@@ -97,9 +94,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.Equal(expectedErigonLogs, actual)
+	assert.Equal(expectedRPCLogs, actual)
 
-	expectedLog := &types.ErigonLog{
+	expectedLog := &types.RPCLog{
 		Log: types.Log{
 			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
 			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
@@ -111,7 +108,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Index:       0,
 			Removed:     false,
 		},
-		Timestamp: 100,
+		BlockTimestamp: 100,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
@@ -123,12 +120,9 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make([]*types.ErigonLog, 0)
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
-		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLog.Log,
-			Timestamp: expectedLog.Timestamp,
-		})
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 
 	var lastBlock uint64
@@ -150,7 +144,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.EqualValues(expectedErigonLogs, actual)
+	assert.EqualValues(expectedRPCLogs, actual)
 }
 
 var (
@@ -416,6 +410,61 @@ func TestGetLatestLogs_ExplicitRangeWithBlockCount_NoRangeCheck(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestErigonGetLogsByHash_UnknownHash_ReturnsNull(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLogsByHash(m.Ctx, common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"))
+	require.NoError(t, err)
+	require.Nil(t, logs)
+}
+
+func TestErigonGetLogsByHash_NonCanonicalHash_ReturnsError(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	orphanedBlock := orphanedChain[0].Blocks[0]
+	_, err := api.GetLogsByHash(m.Ctx, orphanedBlock.Hash())
+	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", orphanedBlock.Hash()))
+}
+
+func TestErigonGetLogsByHash_ReorgedBlock_NotServedFromCache(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
+	signer := types.LatestSignerForChainID(nil)
+
+	shortChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		if i == 0 {
+			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, uint256.NewInt(10000), params.TxGas, nil, nil), *signer, testKey)
+			block.AddTx(tx)
+		}
+	})
+	require.NoError(t, err)
+	longChain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(shortChain))
+
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	staleHash := shortChain.Blocks[0].Hash()
+
+	logs, err := api.GetLogsByHash(m.Ctx, staleHash)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+
+	require.NoError(t, m.InsertChain(longChain))
+
+	_, err = api.GetLogsByHash(m.Ctx, staleHash)
+	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", staleHash))
+}
+
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
@@ -428,9 +477,26 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 		execmoduletester.WithKey(testKey),
 	)
 	if blocks > 0 {
-		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
-		err := m.InsertChain(chain)
+		chain, err := m.GenerateChain(blocks, generator)
+		require.NoError(t, err)
+		err = m.InsertChain(chain)
 		require.NoError(t, err)
 	}
 	return m
+}
+
+// TestGetLogsByHashZeroLogReceipt pins the documented array-per-transaction shape: a
+// transaction emitting no logs must serialize as [] and not as null.
+func TestGetLogsByHashZeroLogReceipt(t *testing.T) {
+	m, chainPack, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLogsByHash(m.Ctx, chainPack.Blocks[0].Hash())
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.NotNil(t, logs[0])
+
+	encoded, err := json.Marshal(logs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[[]]`, string(encoded))
 }

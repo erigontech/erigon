@@ -214,7 +214,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 			param = pb
 		}
 		buf := new(bytes.Buffer)
-		json.NewEncoder(buf).Encode(jsonrpcMessage{
+		_ = json.NewEncoder(buf).Encode(jsonrpcMessage{ //nolint:errchkjson
 			ID:     json.RawMessage(id),
 			Method: method_up,
 			Params: param,
@@ -241,29 +241,6 @@ func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 // httpOverloadedKey signals that the inner DB gate (kv.ErrReadTxLimitExceeded) rejected this request.
 // ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
 type httpOverloadedKey struct{}
-
-// httpFlusherContextKey carries a gzip-activation hook for the current request.
-// It must only be set by the gzip middleware (not by a generic http.Flusher check),
-// so that it is absent when gzip is disabled and cannot prematurely commit HTTP headers.
-type httpFlusherContextKey struct{}
-
-// WithGzipStreamingHook stores hook in ctx so that runMethod will call it before
-// writing the first byte of a streamable response, switching the gzip middleware from
-// one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
-func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
-	if hook == nil {
-		panic("rpc: WithGzipStreamingHook called with a nil hook")
-	}
-	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
-}
-
-// withoutGzipStreamingHook masks any gzip-streaming hook set on an ancestor context. Batch
-// sub-calls write into a private per-item buffer rather than the HTTP response writer, so
-// the hook must not fire for them; calling it concurrently from multiple batch goroutines is
-// unsafe, since the underlying gzip.Writer it activates is not safe for concurrent use.
-func withoutGzipStreamingHook(ctx context.Context) context.Context {
-	return context.WithValue(ctx, httpFlusherContextKey{}, nil)
-}
 
 func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
 	flag := new(bool)
@@ -315,9 +292,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
 	ctx, overloaded := withOverloadedFlag(ctx)
-	// Note: the gzip-streaming hook (httpFlusherContextKey) is injected by the gzip
-	// middleware via WithGzipStreamingHook, not here, to avoid prematurely committing
-	// HTTP headers when gzip is disabled.
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
@@ -342,7 +316,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer codec.Close()
 	var stream jsonstream.Stream
 	if !s.disableStreaming {
-		stream = jsonstream.New(w)
+		stream = jsonstream.Get(w)
+		defer jsonstream.Put(stream)
 	}
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)
@@ -359,7 +334,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		stream.Flush()
+		if err := stream.Flush(); err != nil {
+			// The status is already sent, so this is the only place a truncated
+			// reply can show up.
+			undeliveredGauge.Inc()
+			if common.FastContextErr(ctx) != nil {
+				s.logger.Trace("rpc: client stopped reading", "url", r.URL.String())
+			} else {
+				s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
+			}
+		}
 	}
 }
 

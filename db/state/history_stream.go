@@ -402,6 +402,20 @@ func (hi *HistoryRangeAsOfDB) Next() ([]byte, []byte, error) {
 	return bytes.Clone(hi.kBackup), bytes.Clone(hi.vBackup), nil
 }
 
+// bufRotor hands out one buffer per value, cycling through three of them. Two is not enough for a
+// stream that stream.UnionKV wraps: Union pre-fetches, so it burns one Next() of validity before
+// the caller ever sees the value, and a two-slot rotation would overwrite what the caller holds.
+type bufRotor struct {
+	bufs [3][]byte
+	i    int
+}
+
+func (r *bufRotor) put(v []byte) []byte {
+	r.i = (r.i + 1) % len(r.bufs)
+	r.bufs[r.i] = append(r.bufs[r.i][:0], v...)
+	return r.bufs[r.i]
+}
+
 // HistoryChangesIterFiles - producing state-patch for Unwind - return state-patch for Unwind: "what keys changed between `[from, to)` and what was their value BEFORE txNum"
 // Performs multi-way Union of frozen files. Later files override earlier files for same key
 type HistoryChangesIterFiles struct {
@@ -414,9 +428,9 @@ type HistoryChangesIterFiles struct {
 	startTxKey [8]byte
 	txnKey     [8]byte
 
-	k, v, kBackup, vBackup []byte
-	err                    error
-	limit                  int
+	kRot, vRot bufRotor
+	err        error
+	limit      int
 
 	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
@@ -511,14 +525,12 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 		return nil, nil, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
-
-	// Satisfy iter.Duo Invariant 2
-	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
+	// Satisfy stream.Duo Invariant 2 without copying on every Next.
+	k, v := hi.kRot.put(hi.nextKey), hi.vRot.put(hi.nextVal)
 	if err := hi.advance(); err != nil {
 		return nil, nil, err
 	}
-	return hi.kBackup, hi.vBackup, nil
+	return k, v, nil
 }
 
 type HistoryChangesIterDB struct {
@@ -860,8 +872,11 @@ func (ht *HistoryTraceKeyFiles) Next() (uint64, []byte, error) {
 	default:
 	}
 
-	defer ht.advance()
-	return ht.txNum, ht.v, nil
+	txNum, v := ht.txNum, ht.v
+	if err := ht.advance(); err != nil {
+		return 0, nil, err
+	}
+	return txNum, v, nil
 }
 
 type HistoryTraceKeyDB struct {

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -116,7 +117,7 @@ type storedReceiptRLP struct {
 	CumulativeGasUsed uint64
 	FirstLogIndex     uint32 // Logs have their own incremental Index within block. To allow calc it without re-executing whole block - can store it in Receipt
 
-	Logs []*LogForStorage
+	Logs []rlpStorageLog
 
 	TransactionIndex uint
 	ContractAddress  common.Address
@@ -146,6 +147,9 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
+	if !hasStandardReceiptPayload(r.Type) {
+		return ErrTxTypeNotSupported
+	}
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
 	if err := r.encodeTyped(data, buf); err != nil {
@@ -160,6 +164,9 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 //
 //	receiptₙ = [tx-type, post-state-or-status, cumulative-gas, logs]
 func (r Receipt) EncodeRLP69(w io.Writer) error {
+	if r.Type != LegacyTxType && !hasStandardReceiptPayload(r.Type) {
+		return ErrTxTypeNotSupported
+	}
 	data := &receiptRLP69{r.Type, r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
 	return rlp.Encode(w, data)
 }
@@ -174,6 +181,9 @@ func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
 func (r *Receipt) MarshalBinary() ([]byte, error) {
 	if r.Type == LegacyTxType {
 		return rlp.EncodeToBytes(r)
+	}
+	if !hasStandardReceiptPayload(r.Type) {
+		return nil, ErrTxTypeNotSupported
 	}
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	var buf bytes.Buffer
@@ -208,18 +218,15 @@ func (r *Receipt) decodeTyped(b []byte) error {
 	if len(b) <= 1 {
 		return errShortTypedReceipt
 	}
-	switch b[0] {
-	case DynamicFeeTxType, AccessListTxType, BlobTxType, SetCodeTxType:
-		var data receiptRLP
-		err := rlp.DecodeBytes(b[1:], &data)
-		if err != nil {
-			return err
-		}
-		r.Type = b[0]
-		return r.setFromRLP(data)
-	default:
+	if !hasStandardReceiptPayload(b[0]) {
 		return ErrTxTypeNotSupported
 	}
+	var data receiptRLP
+	if err := rlp.DecodeBytes(b[1:], &data); err != nil {
+		return err
+	}
+	r.Type = b[0]
+	return r.setFromRLP(data)
 }
 
 func (r *Receipt) decodePayload(s *rlp.Stream) error {
@@ -231,7 +238,9 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
 	}
-	r.setStatus(b)
+	if err := r.setStatus(b); err != nil {
+		return err
+	}
 	if r.CumulativeGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
@@ -262,7 +271,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 			return fmt.Errorf("close Log: %w", err)
 		}
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 		return fmt.Errorf("open Log: %w", err)
 	}
 	if err = s.ListEnd(); err != nil {
@@ -291,25 +300,24 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 	case rlp.String:
 		// EIP-2718 typed txn receipt. Read the envelope as raw bytes,
 		// then decode from them using a fresh stream.
-		if size == 0 {
-			// Empty string is not a valid typed receipt. Return a real error
-			// rather than rlp.EOL: as a slice element EOL would be read as
-			// end-of-list and silently drop the receipt.
+		if size <= 1 {
+			// A type byte with no payload is not a valid typed receipt, and
+			// neither is the empty string. Return a real error rather than
+			// rlp.EOL: as a slice element EOL would be read as end-of-list
+			// and silently drop the receipt.
 			return errShortTypedReceipt
 		}
 		b := make([]byte, size)
 		if err = s.ReadBytes(b); err != nil {
 			return fmt.Errorf("read typed receipt: %w", err)
 		}
-		r.Type = b[0]
-		switch r.Type {
-		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
-			inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
-			if err := r.decodePayload(inner); err != nil {
-				return err
-			}
-		default:
+		if !hasStandardReceiptPayload(b[0]) {
 			return ErrTxTypeNotSupported
+		}
+		r.Type = b[0]
+		inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
+		if err := r.decodePayload(inner); err != nil {
+			return err
 		}
 	default:
 		return rlp.ErrExpectedList
@@ -373,25 +381,58 @@ type ReceiptForStorage Receipt
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
+	if !storableReceiptType(r.Type) {
+		return fmt.Errorf("invalid receipt type %d", r.Type)
+	}
 	if r.FirstLogIndexWithinBlock == 0 && len(r.Logs) > 0 {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
 
-	logsForStorage := make([]*LogForStorage, len(r.Logs))
-	for i, l := range r.Logs {
-		logsForStorage[i] = (*LogForStorage)(l)
+	s := storedReceiptScratchPool.Get().(*storedReceiptScratch)
+	defer s.release()
+
+	s.logs = slices.Grow(s.logs[:0], len(r.Logs))
+	for _, l := range r.Logs {
+		s.logs = append(s.logs, rlpStorageLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 	}
-	return rlp.Encode(w, &storedReceiptRLP{
+	s.rec = storedReceiptRLP{
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
 		FirstLogIndex:     r.FirstLogIndexWithinBlock,
 
-		Logs:             logsForStorage,
+		Logs:             s.logs,
 		GasUsed:          r.GasUsed,
 		ContractAddress:  r.ContractAddress,
 		TransactionIndex: r.TransactionIndex,
-	})
+	}
+	return rlp.Encode(w, &s.rec)
+}
+
+// storedReceiptScratch keeps the reflection encoder's input off the heap: the
+// encoder needs an addressable struct and a log slice, and a receipt is encoded
+// once per transaction executed.
+type storedReceiptScratch struct {
+	rec  storedReceiptRLP
+	logs []rlpStorageLog
+}
+
+var storedReceiptScratchPool = sync.Pool{New: func() any { return new(storedReceiptScratch) }}
+
+// maxPooledLogs bounds what one pooled scratch keeps alive; a receipt with an
+// outlier log count is not worth pinning its backing array in the pool.
+const maxPooledLogs = 1024
+
+// release drops the borrowed topic and data slices so a pooled scratch never
+// keeps a receipt's logs alive.
+func (s *storedReceiptScratch) release() {
+	if cap(s.logs) > maxPooledLogs {
+		s.logs = nil
+	} else {
+		clear(s.logs)
+	}
+	s.rec = storedReceiptRLP{}
+	storedReceiptScratchPool.Put(s)
 }
 
 func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
@@ -425,6 +466,9 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	}
 	if dec.Type, err = s.Uint8(); err != nil {
 		return fmt.Errorf("read Type: %w", err)
+	}
+	if !storableReceiptType(dec.Type) {
+		return fmt.Errorf("invalid receipt type %d", dec.Type)
 	}
 	kind, size, err := s.Kind()
 	if err != nil {
@@ -496,36 +540,21 @@ func (rs Receipts) Copy() Receipts {
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
-	switch r.Type {
-	case LegacyTxType:
+	if r.Type == LegacyTxType {
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}
-	case AccessListTxType:
-		//nolint:errcheck
-		w.WriteByte(AccessListTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case DynamicFeeTxType:
-		w.WriteByte(DynamicFeeTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case BlobTxType:
-		w.WriteByte(BlobTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case SetCodeTxType:
-		w.WriteByte(SetCodeTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	default:
-		// For unsupported types, write nothing. Since this is for
-		// DeriveSha, the error will be caught matching the derived hash
-		// to the block.
+		return
+	}
+	if !hasStandardReceiptPayload(r.Type) {
+		// Write nothing, as before. This runs under DeriveSha on the block
+		// path, so a type with no encoding here has to surface as a receipts
+		// root mismatch that rejects the block, not as a panic a peer can
+		// reach by sending one.
+		return
+	}
+	if err := r.encodeTyped(data, w); err != nil {
+		panic(err)
 	}
 }
 

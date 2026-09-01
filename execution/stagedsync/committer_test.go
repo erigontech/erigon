@@ -17,16 +17,21 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -37,7 +42,7 @@ import (
 //
 // In BatchCommitments mode the calculator only computes on
 // commitComputeRequest. The very first batch of an exec3 cycle that runs
-// only the genesis block produces lastBlockResult.BlockNum=0. The dedup
+// only the genesis block produces lastTarget.blockNum=0. The dedup
 // check used to be `lastBlockResult.BlockNum > lastComputedBlock`, which
 // for the (very common) initial state lastComputedBlock=0 evaluates to
 // `0 > 0 == false`. So the calculator silently skipped computing and
@@ -50,9 +55,10 @@ import (
 // computed" from "computed block 0".
 func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 0,
-		hasComputed:       false,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  0,
+		hasComputed:        false,
+		hasSeenBlockResult: true,
 	}
 	assert.True(t, cc.shouldComputeOnRequest(),
 		"first batch covering only genesis (block 0) MUST compute, "+
@@ -66,9 +72,10 @@ func TestShouldComputeOnRequest_GenesisFirstBatch(t *testing.T) {
 // new block boundary should NOT recompute.
 func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 0,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  0,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"no new block boundary since last compute — skip and publish empty")
@@ -78,9 +85,10 @@ func TestShouldComputeOnRequest_AlreadyComputedSameBlock(t *testing.T) {
 // a new block arrived since the last compute, recompute.
 func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 5},
-		lastComputedBlock: 3,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 5},
+		lastComputedBlock:  3,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.True(t, cc.shouldComputeOnRequest(),
 		"new block boundary advanced past the last compute — recompute")
@@ -91,9 +99,10 @@ func TestShouldComputeOnRequest_AdvancedBlock(t *testing.T) {
 // we publish the empty result instead of computing against nothing.
 func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   nil,
-		lastComputedBlock: 0,
-		hasComputed:       false,
+		lastTarget:         commitTarget{},
+		lastComputedBlock:  0,
+		hasComputed:        false,
+		hasSeenBlockResult: false,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"no blockResult to compute against — publish empty so drainBeforeExit unblocks")
@@ -104,9 +113,10 @@ func TestShouldComputeOnRequest_NoBlockResult(t *testing.T) {
 // fires because we already advanced past it.
 func TestShouldComputeOnRequest_BlockZeroAfterAdvance(t *testing.T) {
 	cc := &commitmentCalculator{
-		lastBlockResult:   &blockResult{BlockNum: 0},
-		lastComputedBlock: 5,
-		hasComputed:       true,
+		lastTarget:         commitTarget{blockNum: 0},
+		lastComputedBlock:  5,
+		hasComputed:        true,
+		hasSeenBlockResult: true,
 	}
 	assert.False(t, cc.shouldComputeOnRequest(),
 		"stale block 0 result while we've already computed block 5 — skip")
@@ -260,4 +270,125 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+// TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends
+// compute-ahead for the whole batch: the chain is anchored at the last block that
+// advanced the commitment domain, so every later block reads a stale baseline and
+// stays on the incremental path, however contiguous it is with its own predecessor.
+func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	cc := &commitmentCalculator{
+		signalCtx:     ctx,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  1 << 62, // all blocks pre-window, so none owns a changeset
+		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
+		hasComputedAhead:       true,
+		lastComputedAheadBlock: 5,
+		hasSeenBlockResult:     true,
+	}
+
+	for n := uint64(7); n <= 12; n++ {
+		cc.lastBlockResultSeen = n - 1 // gate open: only the contiguity guard may reject
+		cc.pending[n] = &pendingBlock{
+			req:  &blockRequest{blockNum: n, bal: make(types.BlockAccessList, 1)},
+			mode: calcModeBALDriven,
+		}
+		cc.maybeComputeAhead(ctx, n)
+		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
+		assert.True(t, cc.computeAheadStopped, "the fall back to incremental must be reported at block %d", n)
+	}
+	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+}
+
+func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
+	first := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	second := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	cc := &commitmentCalculator{updates: first, spare: second}
+
+	touch := func(u *commitment.Updates, addr byte) {
+		u.TouchPlainKey(string(bytes.Repeat([]byte{addr}, 20)), nil, u.TouchAccount)
+	}
+
+	touch(cc.updates, 1)
+	handed := cc.handOffUpdates()
+	require.Same(t, first, handed, "the filled buffer must be the one handed off")
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, second, cc.updates, "the spare must rotate in")
+	require.Zero(t, cc.updates.Size(), "the rotated-in buffer must be empty")
+
+	touch(cc.updates, 2)
+	handed = cc.handOffUpdates()
+	require.Same(t, second, handed)
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
+	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
+}
+
+// TestHandleMessage_MarksProcessedUnderFlag pins the calculator half of the
+// COMMITMENT_AFTER_EXEC barrier, which markProcessed-driven tests cannot see.
+// The *blockResult arm is the sole production caller: without it the exec loop
+// parks on the first block with no escape — processedWake never closes, done
+// needs a Stop() deferred behind the parked loop, and the ctx needs a decideStop
+// downstream of it. The dbg guard on the call is what keeps the default path off
+// the mutex and the per-block channel allocation.
+func TestHandleMessage_MarksProcessedUnderFlag(t *testing.T) {
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	defer func(p bool) { dbg.CommitmentAfterExec = p }(dbg.CommitmentAfterExec)
+	// Batch mode with the changeset window out of reach keeps the arm on its
+	// accumulate-only path, so nothing computes against the nil domains.
+	dbg.BatchCommitments = true
+
+	const blockNum = 7
+	for _, tc := range []struct {
+		name string
+		flag bool
+	}{
+		{name: "flag on releases the barrier", flag: true},
+		{name: "flag off leaves the barrier alone", flag: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbg.CommitmentAfterExec = tc.flag
+			cc := &commitmentCalculator{
+				in:            make(chan applyResult),
+				done:          make(chan struct{}),
+				pending:       map[uint64]*pendingBlock{},
+				computedAhead: map[uint64]bool{},
+				balRoots:      map[uint64][]byte{},
+				perBlockFrom:  math.MaxUint64,
+				processedWake: make(chan struct{}),
+			}
+
+			waiting := make(chan error, 1)
+			go func() { waiting <- cc.WaitProcessed(context.Background(), blockNum) }()
+
+			cc.handleMessage(context.Background(), newTestBlockResult(blockNum, common.Hash{0x01}, blockNum, false))
+
+			if tc.flag {
+				select {
+				case err := <-waiting:
+					require.NoError(t, err)
+				case <-time.After(2 * time.Second):
+					t.Fatal("handleMessage never marked the block processed: the exec loop parks here with no escape")
+				}
+				return
+			}
+			select {
+			case <-waiting:
+				t.Fatal("markProcessed ran with COMMITMENT_AFTER_EXEC off: the default path pays a lock and a channel per block")
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(cc.done)
+			require.NoError(t, <-waiting)
+		})
+	}
 }

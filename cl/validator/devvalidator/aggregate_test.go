@@ -25,11 +25,35 @@ func TestBuildAggregateAttestation(t *testing.T) {
 		Signature:      sig,
 	}
 
-	agg := buildAggregateAttestation(single, 1, 4, &cfg)
+	agg, err := buildAggregateAttestation(single, 1, 4, &cfg)
+	require.NoError(t, err)
 	require.NotNil(t, agg)
 	require.Equal(t, sig, agg.Signature)
 	require.True(t, agg.CommitteeBits.GetBitAt(2), "committee bit for index 2 must be set")
 	require.Equal(t, testAttData().Slot, agg.Data.Slot)
+}
+
+func TestBuildAggregateAttestationUsesSlotForkVersion(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	single := &solid.SingleAttestation{
+		Data:      testAttData(),
+		Signature: common.Bytes96{0x01},
+	}
+
+	aggregate, err := buildAggregateAttestation(single, 0, 4, &cfg)
+	require.NoError(t, err)
+	got, err := aggregate.HashSSZ()
+	require.NoError(t, err)
+	want, err := aggregate.HashSSZProgressive()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
 
 // TestSignedAggregateAndProof_RoundTrip verifies a SignedAggregateAndProof
@@ -43,10 +67,12 @@ func TestSignedAggregateAndProof_RoundTrip(t *testing.T) {
 		Data:           testAttData(),
 		Signature:      common.Bytes96{0x02},
 	}
+	aggregate, err := buildAggregateAttestation(single, 0, 4, &cfg)
+	require.NoError(t, err)
 	signed := &cltypes.SignedAggregateAndProof{
 		Message: &cltypes.AggregateAndProof{
 			AggregatorIndex: 9,
-			Aggregate:       buildAggregateAttestation(single, 0, 4, &cfg),
+			Aggregate:       aggregate,
 			SelectionProof:  common.Bytes96{0x03},
 		},
 		Signature: common.Bytes96{0x04},

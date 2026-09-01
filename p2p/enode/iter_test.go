@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/erigontech/erigon/p2p/enr"
@@ -160,31 +161,36 @@ func TestFairMixEmpty(t *testing.T) {
 
 // This test checks closing a source while Next runs.
 func TestFairMixRemoveSource(t *testing.T) {
-	mix := NewFairMix(1 * time.Second)
-	source := make(blockingIter)
-	mix.AddSource(source)
+	synctest.Test(t, func(t *testing.T) {
+		mix := NewFairMix(1 * time.Second)
+		defer mix.Close()
+		source := make(blockingIter)
+		mix.AddSource(source)
 
-	sig := make(chan *Node)
-	go func() {
-		<-sig
-		mix.Next()
-		sig <- mix.Node()
-	}()
+		sig := make(chan *Node)
+		go func() {
+			mix.Next()
+			sig <- mix.Node()
+		}()
 
-	sig <- nil
-	runtime.Gosched()
-	source.Close()
+		// Pin the interleaving: Next must be parked on the blocking source before it
+		// is closed, and must have dropped it before the replacement is added.
+		// Otherwise Next returns a node without ever deleting the dead source.
+		synctest.Wait()
+		source.Close()
+		synctest.Wait()
 
-	wantNode := testNode(0, 0)
-	mix.AddSource(CycleNodes([]*Node{wantNode}))
-	n := <-sig
+		wantNode := testNode(0, 0)
+		mix.AddSource(CycleNodes([]*Node{wantNode}))
+		n := <-sig
 
-	if len(mix.sources) != 1 {
-		t.Fatalf("have %d sources, want one", len(mix.sources))
-	}
-	if n != wantNode {
-		t.Fatalf("mixer returned wrong node")
-	}
+		if len(mix.sources) != 1 {
+			t.Fatalf("have %d sources, want one", len(mix.sources))
+		}
+		if n != wantNode {
+			t.Fatalf("mixer returned wrong node")
+		}
+	})
 }
 
 type blockingIter chan struct{}

@@ -225,18 +225,126 @@ func TestPrefixTrieArenaReuse(t *testing.T) {
 	assert.Equal(t, first, tr.arena.nodeCount())
 }
 
+func TestPrefixArenaAllocExt(t *testing.T) {
+	t.Run("capEqualsLen", func(t *testing.T) {
+		a := newPrefixArena()
+		ext := a.allocExt([]byte{1, 2, 3, 4, 5})
+		assert.Equal(t, []byte{1, 2, 3, 4, 5}, ext)
+		assert.Equal(t, len(ext), cap(ext), "allocExt must not hand out spare capacity")
+	})
+
+	t.Run("emptyInputReturnsNil", func(t *testing.T) {
+		a := newPrefixArena()
+		assert.Nil(t, a.allocExt(nil))
+		assert.Nil(t, a.allocExt([]byte{}))
+	})
+
+	t.Run("appendPastCapDoesNotAliasNextExtension", func(t *testing.T) {
+		a := newPrefixArena()
+		first := a.allocExt([]byte{1, 2, 3})
+		second := a.allocExt([]byte{4, 5, 6})
+
+		first = append(first, 0xFF, 0xFF, 0xFF, 0xFF)
+
+		assert.Equal(t, []byte{4, 5, 6}, second, "growing one extension past its cap must not corrupt the next")
+		assert.Equal(t, []byte{1, 2, 3, 0xFF, 0xFF, 0xFF, 0xFF}, first)
+	})
+}
+
+func TestPrefixTrieExtSurvivesChunkBoundary(t *testing.T) {
+	tr := newPrefixTrie()
+
+	const keyLen = 32
+	const total = 2 * prefixExtChunkMax / keyLen
+	want := make(map[string]bool, total)
+	for i := range total {
+		k := make([]byte, keyLen)
+		v := i
+		for j := range 4 {
+			k[j] = byte(v % 16)
+			v /= 16
+		}
+		want[string(k)] = true
+		tr.Insert(k, nil, nil)
+	}
+	require.Greater(t, len(tr.arena.extChunks), 1, "test must actually cross a chunk boundary")
+
+	got := make(map[string]bool, total)
+	for _, e := range collectWalk(tr) {
+		if len(e.prefix) == keyLen {
+			got[string(e.prefix)] = true
+		}
+	}
+	assert.Equal(t, want, got, "leaf extensions must reproduce their original key bytes after crossing a chunk boundary")
+}
+
+func TestPrefixTrieArenaReusesExtChunkBacking(t *testing.T) {
+	tr := newPrefixTrie()
+	tr.Insert(nibs(0x01, 0x02, 0x03, 0x04), nil, nil)
+
+	chunk := tr.arena.extChunks[0]
+	full := chunk[:cap(chunk)]
+
+	tr.Reset()
+
+	require.Len(t, tr.arena.extChunks, 1, "Reset must trim trailing chunks")
+	assert.Empty(t, tr.arena.extChunks[0], "Reset must truncate the reused chunk's length")
+	assert.Equal(t, cap(chunk), cap(tr.arena.extChunks[0]), "Reset must keep the chunk's capacity")
+
+	tr.Insert(nibs(0x05, 0x06, 0x07, 0x08), nil, nil)
+	require.Len(t, tr.root.children, 1)
+	newExt := tr.root.children[0].ext
+	assert.Equal(t, nibs(0x06, 0x07, 0x08), newExt)
+	assert.Equal(t, newExt, full[:len(newExt)], "post-reset extension must land in the same backing array as before Reset")
+}
+
 func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	tr := newPrefixTrie()
-	// Allocate directly to cross the slab boundary; reaching it via inserts needs >prefixSlabSize keys.
-	for range prefixSlabSize + 5 {
+	for range prefixSlabMax + 5 {
 		tr.arena.allocNode()
 	}
-	assert.Equal(t, prefixSlabSize+5+1 /*root*/, tr.arena.nodeCount())
+	assert.Equal(t, prefixSlabMax+5+1 /*root*/, tr.arena.nodeCount())
 	assert.GreaterOrEqual(t, len(tr.arena.slabs), 2)
+
+	grown := len(tr.arena.slabs)
 
 	tr.Reset()
 	assert.Equal(t, 1, tr.arena.nodeCount())
-	assert.Len(t, tr.arena.slabs, 1, "Reset must trim trailing slabs")
+	assert.Less(t, len(tr.arena.slabs), grown, "Reset must drop the slabs past the budget")
+	held := 0
+	for _, s := range tr.arena.slabs {
+		held += len(s)
+	}
+	assert.LessOrEqual(t, held, prefixSlabMax, "Reset must not retain more than one max slab's worth")
+}
+
+func TestPrefixArenaGrowsGeometrically(t *testing.T) {
+	a := newPrefixArena()
+	require.Len(t, a.slabs, 1)
+	require.Len(t, a.slabs[0], prefixSlabMin, "a fresh arena must not pay for a peak-sized slab")
+	require.Empty(t, a.extChunks, "a fresh arena must not pay for an ext chunk")
+
+	for range prefixSlabMin + 1 {
+		a.allocNode()
+	}
+	require.Len(t, a.slabs, 2)
+	require.Len(t, a.slabs[1], 2*prefixSlabMin, "each slab must double the previous one")
+	require.Equal(t, prefixSlabMin+1, a.nodeCount())
+
+	a.allocExt([]byte{1, 2, 3})
+	require.Len(t, a.extChunks, 1)
+	require.Equal(t, prefixExtChunkMin, cap(a.extChunks[0]), "the first ext chunk must start small")
+}
+
+func TestPrefixArenaSlabSizeIsCapped(t *testing.T) {
+	a := newPrefixArena()
+	for range 4 * prefixSlabMax {
+		a.allocNode()
+	}
+	for i, s := range a.slabs {
+		require.LessOrEqual(t, len(s), prefixSlabMax, "slab %d exceeds the cap", i)
+	}
+	require.Equal(t, 4*prefixSlabMax, a.nodeCount())
 }
 
 func TestPrefixTrieWalkDFSOrder(t *testing.T) {
@@ -272,7 +380,6 @@ func TestPrefixTrieChildIndex(t *testing.T) {
 		idx, ok = childIndex(n, 0x0A)
 		assert.True(t, ok)
 		assert.Equal(t, 2, idx)
-		// missing nibble: idx is the insertion position, not a hit
 		idx, ok = childIndex(n, 0x03)
 		assert.False(t, ok)
 		assert.Equal(t, 1, idx)
@@ -372,7 +479,6 @@ func TestParallelUpdateAppendDeferredSequential(t *testing.T) {
 	assert.Same(t, c, pu.deferredCombined[2])
 }
 
-// Run with -race to catch data races in appendDeferred under contention.
 func TestParallelUpdateAppendDeferredConcurrent(t *testing.T) {
 	pu := newParallelUpdate()
 
@@ -428,6 +534,109 @@ func TestPrefixTrieInsertDuplicateMerges(t *testing.T) {
 	assert.Equal(t, uint64(100), got.Balance.Uint64())
 	assert.Equal(t, uint64(5), got.Nonce)
 
-	// Merge is copy-on-write: a concurrent fold snapshot may still hold the prior update pointer.
 	assert.Equal(t, BalanceUpdate, first.Flags, "merge must not mutate the previously stored update")
+}
+
+func TestPrefixArenaAllocExt_OversizeAndReuse(t *testing.T) {
+	t.Run("extension larger than a chunk gets its own backing", func(t *testing.T) {
+		a := newPrefixArena()
+		big := bytes.Repeat([]byte{0x7}, prefixExtChunkMax+1)
+		got := a.allocExt(big)
+		require.Equal(t, big, got)
+		require.Equal(t, len(got), cap(got))
+		require.Empty(t, a.extChunks, "an oversize extension must not force a chunk into being")
+	})
+
+	t.Run("reset refills existing chunks instead of reallocating", func(t *testing.T) {
+		a := newPrefixArena()
+		block := make([]byte, prefixExtChunkMax/4)
+		for range 12 {
+			a.allocExt(block)
+		}
+		require.Greater(t, len(a.extChunks), 1, "test must cross a chunk boundary")
+		grown := len(a.extChunks)
+		backing := make([]*byte, grown)
+		for i := range a.extChunks {
+			backing[i] = &a.extChunks[i][:1][0]
+		}
+
+		a.resetArena()
+		require.Len(t, a.extChunks, grown, "reset must keep the grown chunks")
+		for i := range a.extChunks {
+			require.Empty(t, a.extChunks[i])
+		}
+		for range 12 {
+			a.allocExt(block)
+		}
+		require.Len(t, a.extChunks, grown, "refill must reuse chunks, not allocate new ones")
+		for i := range a.extChunks {
+			require.Same(t, backing[i], &a.extChunks[i][:1][0], "chunk backing array must be reused")
+		}
+	})
+}
+
+func TestPlainKeyArenaGrowsGeometrically(t *testing.T) {
+	var a plainKeyArena
+	a.intern([]byte("addr"))
+	require.Equal(t, plainKeyArenaChunkMin, cap(a.buf), "a fresh key arena must not pay for a full chunk")
+
+	block := make([]byte, plainKeyArenaChunkMin)
+	a.intern(block)
+	require.Equal(t, 2*plainKeyArenaChunkMin, cap(a.buf), "each chunk must double the previous one")
+
+	for cap(a.buf) < plainKeyArenaChunkMax {
+		a.intern(block)
+	}
+	require.Equal(t, plainKeyArenaChunkMax, cap(a.buf))
+	for range 128 {
+		a.intern(block)
+	}
+	require.Equal(t, plainKeyArenaChunkMax, cap(a.buf), "chunk size must stay capped")
+
+	a.reset()
+	require.Empty(t, a.buf)
+	require.Positive(t, cap(a.buf), "reset must keep the grown capacity")
+}
+
+func TestPrefixArenaKeepsMaxSlabAcrossReset(t *testing.T) {
+	a := newPrefixArena()
+	for range prefixSlabMax + 1 {
+		a.allocNode()
+	}
+	var maxSlab *prefixNode
+	for _, s := range a.slabs {
+		if len(s) == prefixSlabMax {
+			maxSlab = &s[0]
+			break
+		}
+	}
+	require.NotNil(t, maxSlab, "test must actually reach a max-sized slab")
+
+	a.resetArena()
+	for range prefixSlabMax {
+		a.allocNode()
+	}
+	for _, s := range a.slabs {
+		if len(s) == prefixSlabMax {
+			require.Same(t, maxSlab, &s[0], "refill must reuse the max slab, not allocate a new one")
+			return
+		}
+	}
+	t.Fatal("no max-sized slab after refill")
+}
+
+func TestPrefixTrieResetClearsVisited(t *testing.T) {
+	tr := newPrefixTrie()
+	for i := range 64 {
+		k := make([]byte, 64)
+		k[0] = byte(i % 16)
+		k[1] = byte(i / 16)
+		tr.Insert(k, nil, nil)
+	}
+	require.NotZero(t, cap(tr.visited), "test must actually populate visited")
+
+	tr.Reset()
+	for i, n := range tr.visited[:cap(tr.visited)] {
+		require.Nil(t, n, "Reset left a node pointer at visited[%d], pinning a dropped slab", i)
+	}
 }
