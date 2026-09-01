@@ -2776,6 +2776,88 @@ func TestCachedValidatedStatusSurvivesPersistenceFailureRetry(t *testing.T) {
 	}
 }
 
+func TestCachedTerminalHashProjectsToSiblingRoot(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		cachedStatus   execution_client.PayloadStatus
+		incomingStatus execution_client.PayloadStatus
+		wantStatus     execution_client.PayloadStatus
+		wantInvalid    bool
+	}{
+		{
+			name:           "validated_dominates_none",
+			cachedStatus:   execution_client.PayloadStatusValidated,
+			incomingStatus: execution_client.PayloadStatusNone,
+			wantStatus:     execution_client.PayloadStatusValidated,
+		},
+		{
+			name:           "invalidated_dominates_not_validated",
+			cachedStatus:   execution_client.PayloadStatusInvalidated,
+			incomingStatus: execution_client.PayloadStatusNotValidated,
+			wantStatus:     execution_client.PayloadStatusInvalidated,
+			wantInvalid:    true,
+		},
+		{
+			name:           "incoming_invalidation_dominates_cached_validation",
+			cachedStatus:   execution_client.PayloadStatusValidated,
+			incomingStatus: execution_client.PayloadStatusInvalidated,
+			wantStatus:     execution_client.PayloadStatusInvalidated,
+			wantInvalid:    true,
+		},
+		{
+			name:           "cached_invalidation_dominates_incoming_validation",
+			cachedStatus:   execution_client.PayloadStatusInvalidated,
+			incomingStatus: execution_client.PayloadStatusValidated,
+			wantStatus:     execution_client.PayloadStatusInvalidated,
+			wantInvalid:    true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+			executionHash := envelope.Message.Payload.BlockHash
+			root := envelope.Message.BeaconBlockRoot
+			verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](2)
+			require.NoError(t, err)
+			executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+			require.NoError(t, err)
+			payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+			require.NoError(t, err)
+			executionPayloadGasLimit, err := lru.New[common.Hash, uint64](2)
+			require.NoError(t, err)
+			executionPayloadStatus.Add(executionHash, tc.cachedStatus)
+			graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+			f := &ForkChoiceStore{
+				beaconCfg:                cfg,
+				forkGraph:                graph,
+				optimisticStore:          optimistic.NewOptimisticStore(),
+				verifiedExecutionPayload: verifiedExecutionPayload,
+				executionPayloadStatus:   executionPayloadStatus,
+				payloadStatusByRoot:      payloadStatusByRoot,
+				executionPayloadGasLimit: executionPayloadGasLimit,
+			}
+
+			err = f.applyPayloadValidationResultLocked(tc.incomingStatus, nil, envelope.Message, block, root)
+
+			if tc.wantInvalid {
+				require.ErrorIs(t, err, errInvalidExecutionPayloadEnvelope)
+				require.True(t, graph.invalid.Load())
+				require.False(t, f.IsPayloadVerified(root))
+			} else {
+				require.NoError(t, err)
+				require.True(t, f.IsPayloadVerified(root))
+				require.False(t, graph.invalid.Load())
+			}
+			status, ok := executionPayloadStatus.Get(executionHash)
+			require.True(t, ok)
+			require.EqualValues(t, tc.wantStatus, status)
+			rootStatus, ok := payloadStatusByRoot.Get(root)
+			require.True(t, ok)
+			require.EqualValues(t, tc.wantStatus, rootStatus)
+			require.False(t, f.optimisticStore.IsOptimistic(root))
+		})
+	}
+}
+
 func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
