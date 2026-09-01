@@ -53,9 +53,11 @@ for upper tree reconstruction and total ~36 MB for the entire chain.
 ### How it maps to existing modes
 
 The `History` distance is in **blocks** (not steps). Full mode uses
-`DefaultPruneDistance` = 1,100,000 blocks. On Ethereum mainnet this is slightly
-above the consensus layer's 1,056,768-slot `MIN_EPOCHS_FOR_BLOCK_REQUESTS`
-window. Minimal mode uses
+`DefaultPruneDistance` = 1,100,000 blocks. The consensus-layer request window
+is measured in slots, with at most one execution block per slot. On Ethereum
+mainnet, this conservatively covers the 1,056,768-slot
+`MIN_EPOCHS_FOR_BLOCK_REQUESTS` window with a 43,232-block margin; missed slots
+extend the covered time span. Minimal mode uses
 `MinimalPruneDistance` = 100,000 blocks. At ~100 txns/block and a step size of
 390,625 entries, full keeps ~110M entries (~282 steps); minimal keeps ~10M
 entries (~26 steps). Using the projected 237 GB at 22M blocks above, those
