@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -110,6 +111,10 @@ type AddressEntry struct {
 	// mu guards this account's cell maps. Held RLock for reads (readFloor and
 	// the per-path scans) and Lock for writes (putCell / Delete / markFlag).
 	mu sync.RWMutex
+	// selfDestructs is set before the SelfDestruct path gets its first cell, so
+	// a destruct probe on an account that never destructed costs no read lock.
+	// Never cleared: a deleted cell only leaves the answer conservative.
+	selfDestructs atomic.Bool
 }
 
 // putCell sets or updates a typed cell at txIdx. Caller must hold e.mu.Lock().
@@ -173,6 +178,9 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
+	if vm == nil {
+		return nil
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
@@ -297,6 +305,7 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
+	e.selfDestructs.Store(true)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct)
@@ -383,18 +392,16 @@ func flagFor(complete bool) statusFlag {
 // the conflict-detection metadata (depIdx, incarnation), and ok=true when a
 // cell exists.
 
-// readFloor performs the floor read shared by every typed ReadX primitive:
-// it descends sel(e)'s btree for the highest write strictly below txIdx and
-// returns its value plus the conflict-detection metadata (depIdx and, when the
-// floor cell is Done, its incarnation). sel extracts the per-path cell map from
-// the address entry, returning nil when the path is unset.
-func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func(*AddressEntry) *btree.Map[int, *WriteCell[T]]) (val T, res ReadResult, ok bool) {
+// entryFloor performs the floor read shared by every typed ReadX primitive: it
+// descends sel(e)'s btree for the highest write strictly below txIdx and returns
+// its value plus the conflict-detection metadata (depIdx and, when the floor
+// cell is Done, its incarnation). sel extracts the per-path cell map from the
+// address entry, returning nil when the path is unset. Taking the entry rather
+// than the address lets a caller probing several paths of one account resolve
+// it once instead of re-hashing the address per probe.
+func entryFloor[T any](e *AddressEntry, txIdx int, sel func(*AddressEntry) *btree.Map[int, *WriteCell[T]]) (val T, res ReadResult, ok bool) {
 	res.depIdx = UnknownDep
 	res.incarnation = -1
-	if vm == nil {
-		return val, res, false
-	}
-	e := vm.load(addr)
 	if e == nil {
 		return val, res, false
 	}
@@ -497,44 +504,58 @@ func uncommittedDestructAtLocked(e *AddressEntry, idx int) bool {
 	return ok && cell.Value && cell.flag == FlagEstimate
 }
 
+// Per-path cell-map selectors, shared by the addr-keyed ReadX primitives and
+// the entry-keyed probes. Static function values, so passing one costs nothing.
+func selAddress(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address }
+func selSelfDestruct(e *AddressEntry) *btree.Map[int, *WriteCell[bool]]         { return e.SelfDestruct }
+func selBalance(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]]       { return e.Balance }
+func selNonce(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]]              { return e.Nonce }
+func selIncarnation(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]]        { return e.Incarnation }
+func selCode(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]]        { return e.Code }
+func selCodeHash(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.CodeHash]] {
+	return e.CodeHash
+}
+func selCodeSize(e *AddressEntry) *btree.Map[int, *WriteCell[int]]        { return e.CodeSize }
+func selCreateContract(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.CreateContract }
+
 func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (*accounts.Account, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[*accounts.Account]] { return e.Address })
+	return entryFloor(vm.load(addr), txIdx, selAddress)
 }
 
 func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.SelfDestruct })
+	return entryFloor(vm.load(addr), txIdx, selSelfDestruct)
 }
 
 func (vm *VersionMap) ReadBalance(addr accounts.Address, txIdx int) (uint256.Int, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] { return e.Balance })
+	return entryFloor(vm.load(addr), txIdx, selBalance)
 }
 
 func (vm *VersionMap) ReadNonce(addr accounts.Address, txIdx int) (uint64, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
+	return entryFloor(vm.load(addr), txIdx, selNonce)
 }
 
 func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (uint64, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Incarnation })
+	return entryFloor(vm.load(addr), txIdx, selIncarnation)
 }
 
 func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) (accounts.Code, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
+	return entryFloor(vm.load(addr), txIdx, selCode)
 }
 
 func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (accounts.CodeHash, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.CodeHash]] { return e.CodeHash })
+	return entryFloor(vm.load(addr), txIdx, selCodeHash)
 }
 
 func (vm *VersionMap) ReadCodeSize(addr accounts.Address, txIdx int) (int, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[int]] { return e.CodeSize })
+	return entryFloor(vm.load(addr), txIdx, selCodeSize)
 }
 
 func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (bool, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[bool]] { return e.CreateContract })
+	return entryFloor(vm.load(addr), txIdx, selCreateContract)
 }
 
 func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (uint256.Int, ReadResult, bool) {
-	return readFloor(vm, addr, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
+	return entryFloor(vm.load(addr), txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
 		if e.Storage == nil {
 			return nil
 		}
@@ -544,30 +565,43 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 
 // ReadStatus returns a path's read outcome (Status/Version/DepIdx/Incarnation)
 // for callers that need only version/status (the validator's common path,
-// revival checks). It dispatches to the typed ReadX and discards the value.
+// revival checks). It dispatches on the path and discards the value.
 func (vm *VersionMap) ReadStatus(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
+	if vm == nil {
+		return entryStatus(nil, path, key, txIdx)
+	}
+	return entryStatus(vm.load(addr), path, key, txIdx)
+}
+
+// entryStatus is ReadStatus against an already-resolved entry.
+func entryStatus(e *AddressEntry, path AccountPath, key accounts.StorageKey, txIdx int) ReadResult {
 	var res ReadResult
 	switch path {
 	case AddressPath:
-		_, res, _ = vm.ReadAddress(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selAddress)
 	case BalancePath:
-		_, res, _ = vm.ReadBalance(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selBalance)
 	case NoncePath:
-		_, res, _ = vm.ReadNonce(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selNonce)
 	case IncarnationPath:
-		_, res, _ = vm.ReadIncarnation(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selIncarnation)
 	case CodePath:
-		_, res, _ = vm.ReadCode(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selCode)
 	case CodeHashPath:
-		_, res, _ = vm.ReadCodeHash(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selCodeHash)
 	case CodeSizePath:
-		_, res, _ = vm.ReadCodeSize(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selCodeSize)
 	case SelfDestructPath:
-		_, res, _ = vm.ReadSelfDestruct(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selSelfDestruct)
 	case CreateContractPath:
-		_, res, _ = vm.ReadCreateContract(addr, txIdx)
+		_, res, _ = entryFloor(e, txIdx, selCreateContract)
 	case StoragePath:
-		_, res, _ = vm.ReadStorage(addr, key, txIdx)
+		_, res, _ = entryFloor(e, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
+			if e.Storage == nil {
+				return nil
+			}
+			return e.Storage[key]
+		})
 	default:
 		panic(fmt.Errorf("ReadStatus: unknown path %v", path))
 	}
@@ -928,8 +962,13 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 	if vm == nil || hi <= lo {
 		return Version{}, false
 	}
-	e := vm.load(addr)
-	if e == nil {
+	return findDoneSelfDestructOn(vm.load(addr), lo, hi, target)
+}
+
+// findDoneSelfDestructOn is FindDoneSelfDestructInRange against an
+// already-resolved entry.
+func findDoneSelfDestructOn(e *AddressEntry, lo, hi int, target bool) (Version, bool) {
+	if e == nil || hi <= lo || !e.selfDestructs.Load() {
 		return Version{}, false
 	}
 	e.mu.RLock()
@@ -992,6 +1031,7 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 			e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellAccount)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
+			e.selfDestructs.Store(true)
 			e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
 		}
 		if vw, ok := writes.balance[addr]; ok {
@@ -1243,9 +1283,9 @@ const (
 // same path and eq compares them for the rare value tiebreaker. The recursive
 // cross-path core (validateReadImpl) is value-less — it probes other paths of
 // other types, so it cannot itself be generic over T.
-func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+func validateRead[T any](vm *VersionMap, e *AddressEntry, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	readVal T,
-	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
+	readLive func(*AddressEntry, accounts.StorageKey, int) (T, ReadResult, bool),
 	eq func(a, b T) bool,
 	isAbsent func(T) bool,
 	recordField func(*accounts.Account) T,
@@ -1255,26 +1295,32 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	// live value (for the rare tiebreaker) — no second lookup, no boxing. The
 	// tiebreaker branch in validateReadImpl only fires when rr is Done, so eq
 	// compares against the value that came with rr.
-	live, rr, ok := readLive(vm, addr, key, txIndex)
-	matchesLive := func() bool { return ok && eq(readVal, live) }
+	live, rr, ok := readLive(e, key, txIndex)
 	// A recorded zero/absent value means the read concluded absence; the
 	// destroyed-account relaxations are only sound for those. Typed check —
 	// the eq helpers carry dead-equivalence semantics, not zero-ness.
 	absent := isAbsent(readVal)
-	// A read folded onto the account record tiebreaks against the live record's
-	// field: record churn that keeps the field unchanged is not a conflict. A
-	// non-Done or absent record cannot prove equality (fail-safe: re-execute).
-	var matchesRecord func() bool
-	if recordField != nil {
-		matchesRecord = func() bool {
-			acc, arr, aok := vm.ReadAddress(addr, txIndex)
-			if !aok || arr.Status() != MVReadResultDone || acc == nil {
-				return false
+	// Each tiebreaker is read only by the status branch it belongs to, so only
+	// that branch's is built. A read folded onto the account record tiebreaks
+	// against the live record's field: record churn that keeps the field
+	// unchanged is not a conflict, while a non-Done or absent record cannot
+	// prove equality (fail-safe: re-execute).
+	var matchesLive, matchesRecord func() bool
+	switch rr.Status() {
+	case MVReadResultDone:
+		matchesLive = func() bool { return ok && eq(readVal, live) }
+	case MVReadResultNone:
+		if recordField != nil {
+			matchesRecord = func() bool {
+				acc, arr, aok := entryFloor(e, txIndex, selAddress)
+				if !aok || arr.Status() != MVReadResultDone || acc == nil {
+					return false
+				}
+				return eq(readVal, recordField(acc))
 			}
-			return eq(readVal, recordField(acc))
 		}
 	}
-	valid := vm.validateReadImpl(txIndex, addr, path, key, source, version, rr, matchesLive, matchesRecord, absent, checkVersion, traceInvalid, tracePrefix, false)
+	valid := vm.validateReadImpl(e, txIndex, addr, path, key, source, version, rr, matchesLive, matchesRecord, absent, checkVersion, traceInvalid, tracePrefix, false)
 	if dbg.TraceReexec && valid == VersionInvalid {
 		fmt.Printf(
 			"VINV tx=%d %x %s src=%s rv=(%d.%d) cell=(%d.%d,st=%d) readVal=%v live=%v liveOK=%v\n",
@@ -1297,30 +1343,35 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 
 // Typed live-value readers (uniform signature so validateRead can thread them
 // generically) and equality helpers for the value tiebreaker.
-func liveBalance(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
-	return vm.ReadBalance(a, tx)
+func liveBalance(e *AddressEntry, _ accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+	return entryFloor(e, tx, selBalance)
 }
-func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
-	return vm.ReadNonce(a, tx)
+func liveNonce(e *AddressEntry, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
+	return entryFloor(e, tx, selNonce)
 }
-func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
-	return vm.ReadIncarnation(a, tx)
+func liveIncarnation(e *AddressEntry, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
+	return entryFloor(e, tx, selIncarnation)
 }
-func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
-	return vm.ReadCodeHash(a, tx)
+func liveCodeHash(e *AddressEntry, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
+	return entryFloor(e, tx, selCodeHash)
 }
-func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
-	return vm.ReadAddress(a, tx)
+func liveAddress(e *AddressEntry, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
+	return entryFloor(e, tx, selAddress)
 }
-func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
-	return vm.ReadStorage(a, k, tx)
+func liveStorage(e *AddressEntry, key accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
+	return entryFloor(e, tx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint256.Int]] {
+		if e.Storage == nil {
+			return nil
+		}
+		return e.Storage[key]
+	})
 }
-func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ([]byte, ReadResult, bool) {
-	c, res, ok := vm.ReadCode(a, tx)
+func liveCode(e *AddressEntry, _ accounts.StorageKey, tx int) ([]byte, ReadResult, bool) {
+	c, res, ok := entryFloor(e, tx, selCode)
 	return c.Bytes, res, ok
 }
-func liveCodeSize(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (int, ReadResult, bool) {
-	return vm.ReadCodeSize(a, tx)
+func liveCodeSize(e *AddressEntry, _ accounts.StorageKey, tx int) (int, ReadResult, bool) {
+	return entryFloor(e, tx, selCodeSize)
 }
 
 func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
@@ -1392,7 +1443,7 @@ func eqAccountStrict(a, b *accounts.Account) bool {
 // probes (AddressPath / SelfDestructPath / IncarnationPath) pass recursive=true
 // so they can be distinguished from a top-level read — a synthetic probe carries
 // no recorded value of its own and must not invalidate on a bare Done entry.
-func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+func (vm *VersionMap) validateReadImpl(e *AddressEntry, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	rr ReadResult,
 	matchesLive func() bool,
 	matchesRecord func() bool,
@@ -1437,7 +1488,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// is existence-only, so it stays valid unless the account is dead
 		// (destroyed, unrevived, no live floor).
 		if valid == VersionValid && path == AddressPath {
-			if _, ok := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); ok &&
+			if _, ok := findDoneSelfDestructOn(e, rr.Version().TxIndex+1, txIndex, true); ok &&
 				vm.destroyedAndUnrevived(addr, txIndex) {
 				valid = VersionInvalid
 				invReason = "sd-stale"
@@ -1460,7 +1511,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			if path == StoragePath || path == CodePath || path == CodeSizePath || path == NoncePath {
 				lo = rr.Version().TxIndex
 			}
-			if _, ok := vm.FindDoneSelfDestructInRange(addr, lo, txIndex, true); ok {
+			if _, ok := findDoneSelfDestructOn(e, lo, txIndex, true); ok {
 				valid = VersionInvalid
 				invReason = "sd-stale"
 			}
@@ -1475,7 +1526,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// (version mismatch against this record), and the destruct going away
 		// fails the recorded SelfDestruct witness.
 		if source == MapRead && absent && version.TxIndex >= 0 {
-			if _, ok := vm.FindDoneSelfDestructInRange(addr, version.TxIndex, version.TxIndex+1, true); ok {
+			if _, ok := findDoneSelfDestructOn(e, version.TxIndex, version.TxIndex+1, true); ok {
 				break
 			}
 		}
@@ -1485,8 +1536,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			// A sub-field read with no dedicated cell is recorded folded onto
 			// AddressPath (its source/version), so validate it against AddressPath
 			// at that version — with the record-field value as the tiebreaker.
-			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-				version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), matchesRecord, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
+			valid = vm.validateReadImpl(e, txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+				version, entryStatus(e, AddressPath, accounts.StorageKey{}, txIndex), matchesRecord, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 			if valid == VersionInvalid {
 				invReason = "fold-addr"
 			}
@@ -1500,21 +1551,21 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// self-destructed the account, invalidating storage reads of
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
-					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, AddressPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
-						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
+					if valid = vm.validateReadImpl(e, txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, entryStatus(e, AddressPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						valid = vm.validateReadImpl(e, txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, entryStatus(e, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 						if valid == VersionInvalid {
 							invReason = "xval-sd"
 						}
 					} else {
 						invReason = "xval-addr"
-						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
+						vm.validateReadImpl(e, txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, entryStatus(e, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
-					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
+					valid = vm.validateReadImpl(e, txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+						version, entryStatus(e, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, nil, absent, checkVersion, traceInvalid, tracePrefix, true)
 					if valid == VersionInvalid {
 						invReason = "addr-xval-sd"
 					}
@@ -1534,7 +1585,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 					// probe finds), while a non-empty committed value is stale
 					// under any lifecycle churn, which clears fields.
 					if valid == VersionValid {
-						if _, incRR, ok := vm.ReadIncarnation(addr, txIndex); ok && incRR.Status() == MVReadResultDone {
+						if _, incRR, ok := entryFloor(e, txIndex, selIncarnation); ok && incRR.Status() == MVReadResultDone {
 							stale := !absent
 							if !recursive {
 								stale = absent != vm.destroyedAndUnrevived(addr, txIndex)
@@ -1603,10 +1654,10 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
 	// noValueRead validates a path whose recorded value carries no tiebreaker
 	// (self-destruct / create-contract / code / code-size): the version/status
-	// check is authoritative. One ReadStatus, no value comparison.
-	noValueRead := func(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
-		return vm.validateReadImpl(txIdx, addr, path, key, hdr.Source, hdr.Version,
-			vm.ReadStatus(addr, path, key, txIdx), nil, nil, false, checkVersion, traceInvalid, tracePrefix, false)
+	// check is authoritative. One status probe, no value comparison.
+	noValueRead := func(e *AddressEntry, addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) VersionValidity {
+		return vm.validateReadImpl(e, txIdx, addr, path, key, hdr.Source, hdr.Version,
+			entryStatus(e, path, key, txIdx), nil, nil, false, checkVersion, traceInvalid, tracePrefix, false)
 	}
 
 	// Value paths go through the generic validateRead so the recorded value stays
@@ -1621,38 +1672,39 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		if eip161 {
 			eqAccount = func(x *accounts.Account, y *accounts.Account) bool { return vm.eqAccountDead(txIdx, a, isAura, x, y) }
 		}
-		if !ok(validateRead(vm, txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, absentAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, AddressPath, accounts.NilKey, tr.Source, tr.Version, rv, liveAddress, eqAccount, absentAccount, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.balance {
-		if !ok(validateRead(vm, txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, absentUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, BalancePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveBalance, eqUint256, absentUint256, recordBalance, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.nonce {
-		if !ok(validateRead(vm, txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, absentUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, NoncePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveNonce, eqUint64, absentUint64, recordNonce, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.incarnation {
-		if !ok(validateRead(vm, txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, absentUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, IncarnationPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveIncarnation, eqUint64, absentUint64, recordIncarnation, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeHash {
-		if !ok(validateRead(vm, txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, CodeHashPath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeHash, eqCodeHash, absentCodeHash, recordCodeHash, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, inner := range rs.storage {
+		e := vm.load(a)
 		for k, tr := range inner {
-			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, absentUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
+			if !ok(validateRead(vm, e, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, absentUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
 				return
 			}
 		}
 	}
-	validateSelfDestruct := func(a accounts.Address, tr VersionedRead[bool]) bool {
+	validateSelfDestruct := func(e *AddressEntry, a accounts.Address, tr VersionedRead[bool]) bool {
 		// A MapRead record names the concrete SelfDestruct cell it consumed —
 		// e.g. the historical destruct behind a wiped read — and a later
 		// revival cell must not shadow it: valid iff the cell at the recorded
@@ -1660,7 +1712,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		// changed value re-executes, fail-safe). Storage-versioned records
 		// keep the floor check: any destruct appearing invalidates them.
 		if tr.Source == MapRead && tr.Version.TxIndex >= 0 {
-			if _, found := vm.FindDoneSelfDestructInRange(a, tr.Version.TxIndex, tr.Version.TxIndex+1, tr.Val); !found {
+			if _, found := findDoneSelfDestructOn(e, tr.Version.TxIndex, tr.Version.TxIndex+1, tr.Val); !found {
 				if traceInvalid && dbg.TraceReexec {
 					fmt.Printf("VINV-R tx=%d %x SelfDestruct src=%s reason=sd-witness rv=(%d.%d)\n",
 						txIdx, a, tr.Source, tr.Version.TxIndex, tr.Version.Incarnation)
@@ -1670,33 +1722,34 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 			}
 			return true
 		}
-		return ok(noValueRead(a, SelfDestructPath, accounts.NilKey, tr.ReadHeader))
+		return ok(noValueRead(e, a, SelfDestructPath, accounts.NilKey, tr.ReadHeader))
 	}
 	// Every distinct destruct a tx consumed is re-checked: a conclusion can
 	// rest on several destroy/recreate cycles of one address, and losing any
 	// one of them to re-execution invalidates the tx.
 	for a, tr := range rs.selfDestruct {
-		if !validateSelfDestruct(a, tr) {
+		e := vm.load(a)
+		if !validateSelfDestruct(e, a, tr) {
 			return
 		}
 		for _, w := range rs.selfDestructWitnesses[a] {
-			if !validateSelfDestruct(a, w) {
+			if !validateSelfDestruct(e, a, w) {
 				return
 			}
 		}
 	}
 	for a, tr := range rs.createContract {
-		if !ok(noValueRead(a, CreateContractPath, accounts.NilKey, tr.ReadHeader)) {
+		if !ok(noValueRead(vm.load(a), a, CreateContractPath, accounts.NilKey, tr.ReadHeader)) {
 			return
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentBytes, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentBytes, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
 	for a, tr := range rs.codeSize {
-		if !ok(validateRead(vm, txIdx, a, CodeSizePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeSize, eqInt, absentInt, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, vm.load(a), txIdx, a, CodeSizePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCodeSize, eqInt, absentInt, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}

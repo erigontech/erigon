@@ -829,6 +829,7 @@ func TestValidateRead_MapReadValueTiebreaker(t *testing.T) {
 	}
 	valid := validateRead(
 		vm,
+		vm.load(addr),
 		10,
 		addr,
 		BalancePath,
@@ -847,6 +848,7 @@ func TestValidateRead_MapReadValueTiebreaker(t *testing.T) {
 	assert.Equal(t, VersionValid, valid)
 	valid2 := validateRead(
 		vm,
+		vm.load(addr),
 		10,
 		addr,
 		BalancePath,
@@ -2132,4 +2134,118 @@ func TestValidateRead_DistinctDestructWitnessesBothValidated(t *testing.T) {
 	t.Run("the tx20 destruct re-executed away must invalidate", func(t *testing.T) {
 		require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, newIO(), validateEqualVersion, true, false, false, ""))
 	})
+}
+
+// BenchmarkValidateVersion measures read-set validation against a version map
+// holding a block's worth of writes. Every read is recorded by reading the map
+// at the validating tx index, so the whole read set validates — the worst case,
+// since an invalid read short-circuits the scan.
+func BenchmarkValidateVersion(b *testing.B) {
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+	benchAddr := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	benchKey := func(i int) accounts.StorageKey {
+		return accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
+	}
+
+	build := func(numTxs, hotAddrs, slots, coldAddrs int) (*VersionMap, *VersionedIO) {
+		vm := NewVersionMap(nil)
+		coinbase := benchAddr(0)
+		hot := make([]accounts.Address, hotAddrs)
+		for i := range hot {
+			hot[i] = benchAddr(1 + i)
+		}
+		sender := func(tx int) accounts.Address { return benchAddr(1 + hotAddrs + tx) }
+		cold := func(tx, i int) accounts.Address {
+			return benchAddr(1 + hotAddrs + numTxs + tx*coldAddrs + i)
+		}
+
+		for tx := range numTxs {
+			v := Version{TxIndex: tx, Incarnation: 0}
+			s := sender(tx)
+			acc := &accounts.Account{Nonce: uint64(tx)}
+			acc.Balance.SetUint64(uint64(tx))
+			vm.WriteAddress(s, v, acc, true)
+			vm.WriteBalance(s, v, *uint256.NewInt(uint64(tx)), true)
+			vm.WriteNonce(s, v, uint64(tx), true)
+			vm.WriteBalance(coinbase, v, *uint256.NewInt(uint64(tx) * 21000), true)
+			for _, h := range hot {
+				for k := range slots {
+					vm.WriteStorage(h, benchKey(k), v, *uint256.NewInt(uint64(tx + k)), true)
+				}
+			}
+		}
+
+		hdr := func(res ReadResult) ReadHeader {
+			if res.Status() == MVReadResultDone {
+				return ReadHeader{Source: MapRead, Version: res.Version()}
+			}
+			return ReadHeader{Source: StorageRead, Version: UnknownVersion}
+		}
+		readAccount := func(rs *ReadSet, addr accounts.Address, tx int) {
+			acc, res, _ := vm.ReadAddress(addr, tx)
+			rs.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr(res), Val: NewAccountView(acc)})
+			bal, res, _ := vm.ReadBalance(addr, tx)
+			rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr(res), Val: bal})
+			nonce, res, _ := vm.ReadNonce(addr, tx)
+			rs.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr(res), Val: nonce})
+		}
+
+		io := NewVersionedIO(numTxs)
+		for tx := range numTxs {
+			rs := ReadSet{}
+			readAccount(&rs, sender(tx), tx)
+			readAccount(&rs, coinbase, tx)
+			for i := range coldAddrs {
+				readAccount(&rs, cold(tx, i), tx)
+			}
+			for _, h := range hot {
+				readAccount(&rs, h, tx)
+				ch, res, _ := vm.ReadCodeHash(h, tx)
+				rs.SetCodeHash(h, VersionedRead[accounts.CodeHash]{ReadHeader: hdr(res), Val: ch})
+				code, res, _ := vm.ReadCode(h, tx)
+				rs.SetCode(h, VersionedRead[[]byte]{ReadHeader: hdr(res), Val: code.Bytes})
+				size, res, _ := vm.ReadCodeSize(h, tx)
+				rs.SetCodeSize(h, VersionedRead[int]{ReadHeader: hdr(res), Val: size})
+				for k := range slots {
+					key := benchKey(k)
+					val, res, _ := vm.ReadStorage(h, key, tx)
+					rs.SetStorage(h, key, VersionedRead[uint256.Int]{ReadHeader: hdr(res), Val: val})
+				}
+			}
+			io.RecordReads(Version{TxIndex: tx, Incarnation: 0}, rs)
+		}
+		return vm, io
+	}
+
+	shapes := []struct {
+		name                               string
+		numTxs, hotAddrs, slots, coldAddrs int
+	}{
+		{"transfer", 128, 0, 0, 1},
+		{"contract", 128, 2, 8, 4},
+		{"wide", 128, 4, 32, 12},
+	}
+	for _, s := range shapes {
+		b.Run(s.name, func(b *testing.B) {
+			vm, io := build(s.numTxs, s.hotAddrs, s.slots, s.coldAddrs)
+			for tx := range s.numTxs {
+				if v := vm.ValidateVersion(tx, io, checkVersionEqual, true, false, false, ""); v != VersionValid {
+					b.Fatalf("fixture tx %d is %s, want valid", tx, v)
+				}
+			}
+			b.ReportAllocs()
+			for i := 0; b.Loop(); i++ {
+				if vm.ValidateVersion(i%s.numTxs, io, checkVersionEqual, true, false, false, "") != VersionValid {
+					b.Fatal("invalid")
+				}
+			}
+		})
+	}
 }
