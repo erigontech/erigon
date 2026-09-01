@@ -2005,6 +2005,15 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	}
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
+	if upDepth == 64 {
+		// The account edge carries one mask, and it names the node the storage extension leads to.
+		// fillFromLowerCell brings up the survivor's own storageMask, which describes a different
+		// node and goes stale the moment this one gains a child. A hoisted slot keeps the zero mask.
+		upCell.storageMask = 0
+		if cell.accountAddrLen == 0 && cell.storageAddrLen == 0 {
+			upCell.storageMask = cell.branchMask
+		}
+	}
 
 	if err := hph.collectDeleteUpdate(updateKey, row); err != nil {
 		return err

@@ -75,6 +75,10 @@ type depthFixture struct {
 
 	slot00, slot01, slot3 []byte // deep0 storage: [0,0], [0,1], [3]
 	lone                  []byte // a slot for mid, kept alone so it stays hoisted
+
+	// wide0 storage, all under nibble 2, so the storage root holds a single child and collapses
+	// into the account edge while the node below it stays a branch.
+	sunk9, sunkF, sunk6 []byte
 }
 
 func newDepthFixture(t *testing.T) *depthFixture {
@@ -94,6 +98,10 @@ func newDepthFixture(t *testing.T) *depthFixture {
 		slot01: mineSlot(t, 0, 1),
 		slot3:  mineSlot(t, 3),
 		lone:   mineSlot(t, 7),
+
+		sunk9: mineSlot(t, 2, 9),
+		sunkF: mineSlot(t, 2, 0xf),
+		sunk6: mineSlot(t, 2, 6),
 	}
 }
 
@@ -135,10 +143,19 @@ func depthBatches(f *depthFixture) [][]acceptanceEntry {
 		},
 		{
 			depthAccount(f.mirror0, 2, 400), depthAccount(f.mirror1, 2, 401),
+			// wide0's storage root collapses onto the account edge here, so the edge record is the
+			// only place the node below it can name its children.
+			depthStorage(f.wide0, f.sunk9, 6), depthStorage(f.wide0, f.sunkF, 7),
+		},
+		{
+			// A child arrives under the collapsed node: the account edge has to be rewritten with
+			// the wider mask, or the next read never asks for it.
+			depthStorage(f.wide0, f.sunk6, 8),
 		},
 		{
 			depthAccount(f.deep0, 2, 500), depthAccount(f.upper, 2, 501),
 			depthStorage(f.deep0, f.slot00, 5),
+			depthStorage(f.wide0, f.sunk9, 9),
 		},
 	}
 }
