@@ -236,10 +236,10 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 }
 
 // NewGenericCacheWithAvg is NewGenericCache with an explicit per-domain average
-// for the payload an entry holds outside the freelru element — the key and value
-// bytes, not the element or the bookkeeping inside it, which the slot cost
-// already charges (accounts ≈ 70 B, storage ≈ 64 B). Folding those in charges
-// them twice and shrinks the ceiling. It starts small and jump-grows toward the
+// for the bytes an entry points at — what a slice or string header refers to,
+// not T's own inline bytes, which the slot cost already charges along with the
+// element and its bookkeeping (accounts ≈ 70 B, storage ≈ 64 B). Folding either
+// in charges them twice and shrinks the ceiling. It starts small and jump-grows toward the
 // ceiling on demand, funding each step from the shared envelope.
 func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
 	if avgBytes == 0 {

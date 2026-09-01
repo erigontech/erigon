@@ -170,8 +170,8 @@ func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 	return evicted
 }
 
-// growStep reports the next capacity for shard i, the slots it reserved from the
-// envelope, and whether the step is funded. Called with the shard lock held.
+// growStep reports the next and current capacities for shard i, and whether the
+// step is funded. Called with the shard lock held.
 func (s *shardedLRU[V]) growStep(i uint64) (newCap, oldCap uint32, ok bool) {
 	if s.curCap[i] >= s.maxCap || s.shards[i].Len() < int(s.curCap[i]) {
 		return 0, 0, false
