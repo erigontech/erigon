@@ -327,7 +327,9 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		nil,
 		"testnet",
 		false,
-		downloadercfg.NewCfgOpts{},
+		// afterAdd attaches the public trackers. Stops the scrapers only, so the
+		// announce list still fills.
+		downloadercfg.NewCfgOpts{DisableTrackers: g.Some(true)},
 	)
 	require.NoError(err)
 
@@ -688,9 +690,15 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	require.FileExists(path)
 	require.NoFileExists(path + ".part")
 	d.lock.RLock()
-	_, registered := d.torrentsByName[name]
+	tor, registered := d.torrentsByName[name]
 	d.lock.RUnlock()
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
+
+	// Registration alone is not seeding: addTorrent starts every torrent with
+	// DisallowDataUpload, and only afterAdd lifts it. The tracker list stands in
+	// for that call — both come from it, and the upload flag has no getter.
+	require.NotEmpty(tor.Metainfo().AnnounceList,
+		"a kept snapshot must reach afterAdd, or it is registered and still cannot upload")
 }
 
 // goSeed must never exceed the seed semaphore's capacity.

@@ -775,9 +775,16 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
 	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
-	_, _, err = d.addCompleteTorrent(name)
+	t, isNew, err := d.addCompleteTorrent(name)
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
+	}
+	// addTorrent starts every torrent with DisallowDataUpload, so a seedable file
+	// that never reaches afterAdd is registered and still cannot upload a byte.
+	// AddTorrentsFromDisk runs afterAdd over its own new torrents; this is the
+	// other path that adds one.
+	if isNew {
+		d.afterAdd(t)
 	}
 	return nil
 }
