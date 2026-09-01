@@ -33,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+var ErrAccessListPreBerlin = errors.New("eip-2930 transactions require Berlin")
+
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
 	Address     common.Address `json:"address"`
@@ -372,7 +374,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 	}
 
 	if !rules.IsBerlin {
-		return nil, errors.New("eip-2930 transactions require Berlin")
+		return nil, ErrAccessListPreBerlin
 	}
 
 	var err error

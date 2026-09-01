@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -1019,7 +1020,10 @@ func TestBlobGasPreservedOnReject(t *testing.T) {
 			false, false, true, false,
 			uint256.NewInt(1), // maxFeePerBlobGas
 		)
-		m.SetBlobVersionedHashes(make([]common.Hash, 2))
+		m.SetBlobVersionedHashes([]common.Hash{
+			{kzg.BlobCommitmentVersionKZG},
+			{kzg.BlobCommitmentVersionKZG},
+		})
 		return m
 	}
 
@@ -1292,5 +1296,107 @@ func BenchmarkSysCallContract(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+	})
+}
+
+// runPreCheckMsg executes msg against cfg and returns the resulting error.
+func runPreCheckMsg(t *testing.T, cfg *chain.Config, msg *types.Message, blobGas uint64) error {
+	t.Helper()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := newTestEVM(ibs, cfg, 30_000_000)
+	gp := new(GasPool).AddGas(30_000_000).AddBlobGas(blobGas)
+	_, err := NewTxnExecutor(evm, msg, gp).Execute(true, false)
+	return err
+}
+
+// TestPreCheckAccessListRequiresBerlin pins that a message carrying an access
+// list is rejected before EIP-2930 activates. Typed transactions are already
+// gated by AccessListTx.AsMessage, but eth_call builds its Message directly.
+func TestPreCheckAccessListRequiresBerlin(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	preBerlin := chain.TestChainBerlinConfig.Copy()
+	preBerlin.BerlinBlock = nil
+
+	newMsg := func(al types.AccessList) *types.Message {
+		return types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), 100_000,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, al,
+			false, false, false, false, nil,
+		)
+	}
+	populated := types.AccessList{{
+		Address:     common.HexToAddress("0x3333333333333333333333333333333333333333"),
+		StorageKeys: []common.Hash{{0x01}},
+	}}
+
+	t.Run("populated access list pre-Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, runPreCheckMsg(t, preBerlin, newMsg(populated), 0), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("empty but present access list pre-Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, runPreCheckMsg(t, preBerlin, newMsg(types.AccessList{}), 0), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("absent access list pre-Berlin is accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, preBerlin, newMsg(nil), 0))
+	})
+
+	t.Run("access list from Berlin on is accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainBerlinConfig, newMsg(populated), 0))
+	})
+}
+
+// TestPreCheckBlobPrerequisites pins the EIP-4844 structural rules for messages
+// that carry blob hashes without having been decoded as a BlobTx.
+func TestPreCheckBlobPrerequisites(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
+
+	newMsg := func(to accounts.Address, hashes []common.Hash) *types.Message {
+		msg := types.NewMessage(
+			sender, to, 0, uint256.NewInt(0), 100_000,
+			uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+			nil, nil,
+			false, false, false, false, nil,
+		)
+		msg.SetBlobVersionedHashes(hashes)
+		return msg
+	}
+
+	t.Run("blob hashes pre-Cancun are rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainBerlinConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob)
+		require.ErrorIs(t, err, types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("blob contract creation is rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(accounts.NilAddress, []common.Hash{validHash}), params.GasPerBlob)
+		require.ErrorIs(t, err, types.ErrNilToFieldTx)
+	})
+
+	t.Run("empty but present blob hash list is rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{}), 0)
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+	})
+
+	t.Run("wrong versioned hash version byte is rejected", func(t *testing.T) {
+		err := runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{{0x02}}), params.GasPerBlob)
+		require.ErrorIs(t, err, types.ErrBlobTxnInvalidVersionedHash)
+	})
+
+	t.Run("absent blob hashes are accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, nil), 0))
+	})
+
+	t.Run("well formed blob hashes are accepted", func(t *testing.T) {
+		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob))
 	})
 }

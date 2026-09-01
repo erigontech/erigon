@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -1557,4 +1558,140 @@ func TestBlockOrLatest(t *testing.T) {
 			require.Equal(t, tc.want, blockOrLatest(tc.arg))
 		})
 	}
+}
+
+// TestCallRejectsMalformedBlobArgs pins that eth_call applies the EIP-4844
+// structural rules to caller-supplied blobVersionedHashes. Typed transactions
+// are checked when decoded; a Message built from CallArgs never is.
+func TestCallRejectsMalformedBlobArgs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	callData := hexutil.Bytes(contractInvocationData(1))
+	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
+
+	t.Run("well formed blob hashes are accepted", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &contractAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{validHash},
+		}, nil, nil, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("wrong version byte is rejected", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &contractAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{{0x02}},
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrBlobTxnInvalidVersionedHash)
+	})
+
+	t.Run("empty blob hash list is rejected", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &contractAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{},
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrBlobTxnEmptyBlobs)
+	})
+
+	t.Run("blob contract creation is rejected", func(t *testing.T) {
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			Data:                &callData,
+			BlobVersionedHashes: []common.Hash{validHash},
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, types.ErrNilToFieldTx)
+	})
+}
+
+// TestCallRejectsAccessListBeforeBerlin covers the JSON-RPC conversion path:
+// CallArgs.ToMessage builds a Message without the per-type AsMessage gate, so
+// an EIP-2930 access list would otherwise be accepted before Berlin.
+func TestCallRejectsAccessListBeforeBerlin(t *testing.T) {
+	preBerlin := chain.TestChainBerlinConfig.Copy()
+	preBerlin.BerlinBlock = nil
+
+	recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	accessList := types.AccessList{{
+		Address:     common.HexToAddress("0x4444444444444444444444444444444444444444"),
+		StorageKeys: []common.Hash{{0x01}},
+	}}
+
+	call := func(t *testing.T, cfg *chain.Config, al *types.AccessList) error {
+		t.Helper()
+		m, _, bankAddr := fundedBankGenesis(t, cfg)
+		api := newTestEthAPIWithFilters(t, m)
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:       &bankAddr,
+			To:         &recipient,
+			AccessList: al,
+		}, nil, nil, nil)
+		return err
+	}
+
+	t.Run("access list before Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preBerlin, &accessList), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("empty but present access list before Berlin is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preBerlin, &types.AccessList{}), types.ErrAccessListPreBerlin)
+	})
+
+	t.Run("absent access list before Berlin is accepted", func(t *testing.T) {
+		require.NoError(t, call(t, preBerlin, nil))
+	})
+
+	t.Run("access list from Berlin on is accepted", func(t *testing.T) {
+		require.NoError(t, call(t, chain.TestChainBerlinConfig, &accessList))
+	})
+}
+
+// TestCallRejectsBlobHashesBeforeCancun is the blob counterpart: blobVersionedHashes
+// supplied through CallArgs never reach BlobTx.AsMessage, which is what normally
+// gates EIP-4844 on Cancun.
+func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
+	preCancun := chain.TestChainOsakaConfig.Copy()
+	preCancun.CancunTime = nil
+	preCancun.PragueTime = nil
+	preCancun.OsakaTime = nil
+
+	recipient := common.HexToAddress("0x3333333333333333333333333333333333333333")
+	validHash := common.Hash{kzg.BlobCommitmentVersionKZG}
+
+	call := func(t *testing.T, cfg *chain.Config, hashes []common.Hash) error {
+		t.Helper()
+		m, _, bankAddr := fundedBankGenesis(t, cfg)
+		api := newTestEthAPIWithFilters(t, m)
+		_, err := api.Call(context.Background(), ethapi.CallArgs{
+			From:                &bankAddr,
+			To:                  &recipient,
+			BlobVersionedHashes: hashes,
+		}, nil, nil, nil)
+		return err
+	}
+
+	t.Run("blob hashes before Cancun are rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{validHash}), types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("empty but present blob hash list before Cancun is rejected", func(t *testing.T) {
+		require.ErrorIs(t, call(t, preCancun, []common.Hash{}), types.ErrBlobTxnPreCancun)
+	})
+
+	t.Run("absent blob hashes before Cancun are accepted", func(t *testing.T) {
+		require.NoError(t, call(t, preCancun, nil))
+	})
+
+	t.Run("blob hashes from Cancun on are accepted", func(t *testing.T) {
+		require.NoError(t, call(t, chain.TestChainOsakaConfig, []common.Hash{validHash}))
+	})
 }

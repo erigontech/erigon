@@ -350,6 +350,17 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			}
 		}
 	}
+
+	// eth_call builds a Message directly, bypassing the per-type AsMessage gates.
+	if st.msg.AccessList() != nil && !rules.IsBerlin {
+		return upfrontTxnFees{}, types.ErrAccessListPreBerlin
+	}
+	if st.msg.BlobHashes() != nil {
+		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {
+			return upfrontTxnFees{}, err
+		}
+	}
+
 	// EIP-4844.
 	var maxFeePerBlobGas uint256.Int
 	hasBlobGas := rules.IsCancun && blobGas > 0
