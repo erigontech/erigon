@@ -182,9 +182,10 @@ func newBenchDB(t testing.TB, dir string, stepSize uint64, cache bool) (kv.Tempo
 	rawDB := mdbx.New(dbcfg.ChainDB, logger).
 		InMem(dirs.Chaindata).
 		AutoRemove(false).
-		GrowthStep(32 * datasize.MB).
+		GrowthStep(256 * datasize.MB).
 		DirtySpace(uint64(512 * datasize.MB)).
-		MapSize(16 * datasize.GB).
+		// InMem caps the map at 16GB, which a million blocks of chaindata outgrows.
+		MapSize(512 * datasize.GB).
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
