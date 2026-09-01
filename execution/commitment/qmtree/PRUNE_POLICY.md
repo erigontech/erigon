@@ -39,7 +39,7 @@ in `db/kv/prune/` applies:
 
 ```
 --prune.mode=archive    → keep all qmtree entries (full proof history)
---prune.mode=full       → keep entries within DefaultPruneDistance (262,144 blocks)
+--prune.mode=full       → keep entries within DefaultPruneDistance (1,100,000 blocks)
 --prune.mode=blocks     → keep entries within DefaultPruneDistance (matches full for qmtree)
 --prune.mode=minimal    → keep entries within MinimalPruneDistance (100,000 blocks)
 ```
@@ -53,17 +53,17 @@ for upper tree reconstruction and total ~36 MB for the entire chain.
 ### How it maps to existing modes
 
 The `History` distance is in **blocks** (not steps). Full mode uses
-`DefaultPruneDistance` = 262,144 blocks (EIP-8252's `REORG_RETENTION_WINDOW`,
-~36.4 days); minimal mode uses `MinimalPruneDistance` = 100,000 blocks
-(deliberately sub-EIP-8252 for operators trading state retention for disk).
-At ~100 txns/block and a step size of 390,625 entries, full keeps ~26M
-entries (~67 steps); minimal keeps ~10M entries (~26 steps).
+`DefaultPruneDistance` = 1,100,000 blocks, slightly above the consensus layer's
+1,056,768-slot `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window. Minimal mode uses
+`MinimalPruneDistance` = 100,000 blocks. At ~100 txns/block and a step size of
+390,625 entries, full keeps ~110M entries (~282 steps); minimal keeps ~10M
+entries (~26 steps).
 
 | `--prune.mode` | Entry retention | Root retention | Proof capability |
 |----------------|----------------|----------------|-----------------|
 | `archive` | all | all | full historical proofs |
-| `full` | last 262K blocks (~67 steps, ~6.5 GB) | all | proofs within window |
-| `blocks` | last 262K blocks (~67 steps, ~6.5 GB) | all | proofs within window |
+| `full` | last 1.1M blocks (~282 steps, ~27 GB) | all | proofs within window |
+| `blocks` | last 1.1M blocks (~282 steps, ~27 GB) | all | proofs within window |
 | `minimal` | last 100K blocks (~26 steps, ~2.5 GB) | all | proofs within window |
 
 QMTree entry files are step-aligned, so the block-based distance is converted

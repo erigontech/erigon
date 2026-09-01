@@ -89,9 +89,9 @@ func TestModeString_LegacyShapes(t *testing.T) {
 	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	assert.Equal(t, "full(legacy) --prune.distance=100000", legacyFull.String())
 
-	// Pre-EIP-8252 full with the current default history distance (262_144) —
+	// Legacy full with the current default history distance —
 	// label as plain "full(legacy)" with no override clause.
-	legacyFullCurrentHistory := Mode{Initialised: true, History: Distance(262_144), Blocks: KeepPostMergeBlocksPruneMode}
+	legacyFullCurrentHistory := Mode{Initialised: true, History: FullMode.History, Blocks: KeepPostMergeBlocksPruneMode}
 	assert.Equal(t, "full(legacy)", legacyFullCurrentHistory.String())
 
 	// Pre-EIP-8252 blocks mode persisted as {Blocks: KeepAllBlocksPruneMode,
@@ -508,7 +508,7 @@ func TestEnsureNotChanged_LegacyMinimalNoOp(t *testing.T) {
 
 func TestEnsureNotChanged_BlocksHistoryBumpRewritesDB(t *testing.T) {
 	// Pre-rescope blocks mode: {KeepAllBlocksPruneMode, Distance(100_000)}.
-	// The new binary's BlocksMode has History=Distance(262_144). The compat
+	// The new binary's BlocksMode has the current default History distance. The compat
 	// shim should accept the finite→finite History change, return the new mode,
 	// and persist it so the next restart sees no mismatch.
 	_, tx := mdbxtest.NewTestTx(t)
@@ -526,11 +526,10 @@ func TestEnsureNotChanged_BlocksHistoryBumpRewritesDB(t *testing.T) {
 
 func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
 	// Pre-rescope full mode: {KeepPostMergeBlocksPruneMode (sentinel), Distance(100_000)}.
-	// New FullMode has Blocks=Distance(262_144). The shim treats this specific
+	// New FullMode has a finite Blocks distance. The shim treats this specific
 	// one-way KeepPostMergeBlocksPruneMode→finite transition on Blocks as a
 	// retention-window change so existing full nodes upgrade without operator
-	// intervention. (Frozen .seg files won't actually be deleted until #21306
-	// lands; the config-level transition is still recorded.)
+	// intervention.
 	_, tx := mdbxtest.NewTestTx(t)
 	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	initStoredMode(t, tx, legacyFull)
@@ -542,6 +541,50 @@ func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
 	persisted, err := Get(tx)
 	require.NoError(t, err)
 	assert.Equal(t, FullMode, persisted, "shim must rewrite the persisted value")
+}
+
+const previousDefaultPruneDistance = Distance(262_144)
+
+func TestEnsureNotChanged_FullDefaultBumpRewritesDB(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	previousFull := Mode{
+		Initialised:       true,
+		History:           previousDefaultPruneDistance,
+		Blocks:            previousDefaultPruneDistance,
+		CommitmentHistory: KeepAllBlocksPruneMode,
+		Receipts:          KeepAllBlocksPruneMode,
+	}
+	initStoredMode(t, tx, previousFull)
+
+	got, err := EnsureNotChanged(tx, FullMode)
+	require.NoError(t, err)
+	assert.Equal(t, Distance(1_100_000), got.History)
+	assert.Equal(t, Distance(1_100_000), got.Blocks)
+
+	persisted, err := Get(tx)
+	require.NoError(t, err)
+	assert.Equal(t, FullMode, persisted)
+}
+
+func TestEnsureNotChanged_BlocksDefaultBumpRewritesDB(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	previousBlocks := Mode{
+		Initialised:       true,
+		History:           previousDefaultPruneDistance,
+		Blocks:            KeepAllBlocksPruneMode,
+		CommitmentHistory: KeepAllBlocksPruneMode,
+		Receipts:          KeepAllBlocksPruneMode,
+	}
+	initStoredMode(t, tx, previousBlocks)
+
+	got, err := EnsureNotChanged(tx, BlocksMode)
+	require.NoError(t, err)
+	assert.Equal(t, Distance(1_100_000), got.History)
+	assert.Equal(t, KeepAllBlocksPruneMode, got.Blocks)
+
+	persisted, err := Get(tx)
+	require.NoError(t, err)
+	assert.Equal(t, BlocksMode, persisted)
 }
 
 func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {

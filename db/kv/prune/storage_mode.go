@@ -336,14 +336,14 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 			(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
 			return pruneMode, nil
 		}
-		// Retention-window changes (e.g., the EIP-8252 default bump from 100k
-		// to 262_144, or any operator-initiated --prune.distance change) are
+		// Retention-window changes (e.g., a named-mode default bump or any
+		// operator-initiated --prune.distance change) are
 		// safe in both directions: widening cannot bring back already-pruned
 		// state but is operationally fine going forward, and narrowing just
 		// causes the next prune pass to delete more. On Blocks specifically
 		// the shim also accepts either-direction transitions between a finite
 		// Distance and KeepPostMergeBlocksPruneMode (chain-history-expiry policy)
-		// so that existing full-mode datadirs can adopt the EIP-8252 default
+		// so that existing full-mode datadirs can adopt the current default
 		// without operator intervention, and operators can revert if needed
 		// even after the auto-upgrade rewrites the persisted value. Accept
 		// such changes, rewrite the persisted value so we don't warn on
@@ -375,8 +375,8 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 //
 // For Blocks: finite↔finite, plus either-direction transitions between a
 // finite Distance and KeepPostMergeBlocksPruneMode (the chain-history-expiry
-// sentinel) are accepted. KeepPostMergeBlocksPruneMode → finite is the EIP-8252
-// upgrade path; the reverse lets operators revert to chain-history-expiry
+// sentinel) are accepted. KeepPostMergeBlocksPruneMode → finite upgrades legacy
+// full nodes; the reverse lets operators revert to chain-history-expiry
 // even after the auto-upgrade has rewritten the persisted value. Any
 // transition involving KeepAllBlocksPruneMode remains a mode-shape change.
 func isRetentionWindowChange(persisted, requested Mode) bool {
