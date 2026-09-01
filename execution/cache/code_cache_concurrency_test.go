@@ -272,3 +272,66 @@ func TestGrowLRU_ReservationSurvivesGOMAXPROCSChange(t *testing.T) {
 	require.Equal(t, g.generationBytes(g.curCap.Load(), g.curShards), g.reserved,
 		"the envelope holds a reservation no generation on the ladder costs")
 }
+
+// A grow after GOMAXPROCS drops can cost less than the generation it replaces.
+// Reserve ignores a non-positive argument, so tracking such a delta without
+// releasing it strands the difference in the envelope for the life of the process.
+func TestGrowLRU_BudgetBalancedAfterShardCountDrop(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	prevProcs := runtime.GOMAXPROCS(16)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prevProcs) })
+
+	// A ceiling the last step reaches without crossing a table boundary: 4096 and 6552
+	// both round to 8192 slots, so only the shard charge moves and a shard-count drop
+	// can outweigh it.
+	g := newGrowLRUEntries[codeSizeEntry](6552, 0, nil)
+	fill := func(from, to uint64) {
+		for i := from; i < to; i++ {
+			g.Add(i<<16, codeSizeEntry{})
+		}
+	}
+	fill(0, uint64(g.startCap)*genericCacheGrowFactor)
+	grown := g.curCap.Load()
+	require.Greater(t, grown, g.startCap, "the ladder must climb at the high shard count first")
+	beforeShards := g.curShards
+
+	runtime.GOMAXPROCS(1)
+	fill(uint64(grown), uint64(grown)*genericCacheGrowFactor)
+	require.Equal(t, g.maxCap, g.curCap.Load(), "the ladder must reach the ceiling at the low shard count")
+	require.Less(t, g.curShards, beforeShards, "the last step must cost less than the generation it replaces")
+	require.Equal(t, g.generationBytes(g.curCap.Load(), g.curShards), g.reserved,
+		"the tracked reservation must be what the live generation costs")
+	require.Equal(t, g.reserved, cachebudget.Global.Used(),
+		"the envelope must hold exactly what the cache tracks")
+
+	g.Close()
+	require.Zero(t, cachebudget.Global.Used(), "Close must return every byte the cache took")
+}
+
+// Purge rebuilds the start generation, which a GOMAXPROCS rise can make more
+// expensive than what is reserved. Release ignores a non-positive argument, so
+// raising the tracked reservation without taking the bytes lets Close hand back
+// more than the cache ever held.
+func TestGrowLRU_BudgetBalancedAfterPurgeAtHigherShardCount(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	prevProcs := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prevProcs) })
+
+	g := newGrowLRUEntries[codeSizeEntry](1<<14, 0, nil)
+
+	runtime.GOMAXPROCS(64)
+	g.Purge()
+	require.Equal(t, g.generationBytes(g.curCap.Load(), g.curShards), g.reserved,
+		"the tracked reservation must be what the purged generation costs")
+	require.Equal(t, g.reserved, cachebudget.Global.Used(),
+		"the envelope must hold exactly what the cache tracks")
+
+	g.Close()
+	require.Zero(t, cachebudget.Global.Used(), "Close must not release bytes the cache never took")
+}
