@@ -104,3 +104,98 @@ func TestMetricsResetClearsEveryCounter(t *testing.T) {
 	assert.Zero(t, v.Unfolds)
 	assert.Zero(t, v.SpentFolding)
 }
+
+func TestRoundKeysAreDistinctNotTraversals(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	var got *CommitProgress
+	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	m := got.Metrics
+	assert.EqualValues(t, len(keys), m.RoundKeys,
+		"RoundKeys is the distinct key count handed to the trie")
+	assert.GreaterOrEqual(t, m.AddressKeys+m.StorageKeys, m.RoundKeys,
+		"traversals count cell visits, so they never undercount distinct keys")
+	assert.Positive(t, m.BranchWriteBytes, "branch write bytes are counted")
+}
+
+// Two rounds on one trie must report the second round's own numbers. Tries come
+// from a pool whose Release does not clear counters, and the parallel trie used
+// to accumulate across rounds, so both ends of the merge could carry history in.
+func TestRoundCountersDoNotAccumulateAcrossRounds(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+
+	round := func() *CommitProgress {
+		t.Helper()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		var got *CommitProgress
+		_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		return got
+	}
+
+	first := round()
+	second := round()
+
+	assert.EqualValues(t, len(keys), first.Metrics.RoundKeys)
+	assert.EqualValues(t, len(keys), second.Metrics.RoundKeys,
+		"the second round reports its own key count, not the running total")
+	// Strictly less than 2x: with the pooled reset removed a worker enters the
+	// second round holding the first's traversals and adds its own, landing on
+	// exactly 2x — which an inclusive bound would admit.
+	assert.Less(t, second.Metrics.AddressKeys, first.Metrics.AddressKeys*2,
+		"traversals are per-round; a pooled worker must not carry its last round in")
+}
+
+// A branch write must reach the Prometheus counter exactly once. Billing it both
+// where it lands and again from the round's snapshot is invisible in the trie's
+// own MetricValues, so this reads the published counter instead.
+func TestBranchWritesArePublishedOnce(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	beforePuts := mxBranchPuts.GetValueUint64()
+	beforeBytes := mxWriteBytes.GetValueUint64()
+
+	var got *CommitProgress
+	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	require.Positive(t, got.Metrics.UpdateBranch, "the round wrote branches at all")
+	assert.EqualValues(t, got.Metrics.UpdateBranch, mxBranchPuts.GetValueUint64()-beforePuts,
+		"commitment_branch_writes_total counts each write once")
+	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
+		"commitment_branch_write_bytes_total counts each write once")
+}

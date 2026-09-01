@@ -142,7 +142,15 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		ni, ch := nib, child
 		g.Go(func() error {
 			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
-			defer p.metrics.Merge(w.metrics)
+			// Tries come from a pool and Release does not clear their counters,
+			// so a checkout carries the previous round's numbers into the merge.
+			w.metrics.Reset()
+			// Merge before releasing: Release pools the trie, after which another
+			// goroutine may check it out and write these same counters.
+			release := func() {
+				p.metrics.Merge(w.metrics)
+				w.Release()
+			}
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {
 				w.traceW = tracePrefix(p.template.traceW, fmt.Sprintf("[mnt %x] ", ni))
@@ -173,7 +181,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				return sr, err
 			})
 			if buildErr != nil {
-				w.Release()
+				release()
 				return fmt.Errorf("mount[%x] build: %w", ni, buildErr)
 			}
 			var tf time.Time
@@ -186,7 +194,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				foldDur[ni] = time.Since(tf)
 			}
 			if err != nil {
-				w.Release()
+				release()
 				return fmt.Errorf("mount[%x] fold: %w", ni, err)
 			}
 			cells[ni] = c
@@ -194,7 +202,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
 				pu.appendDeferred(deferred)
 			}
-			w.Release()
+			release()
 			return nil
 		})
 		childIdx++

@@ -55,7 +55,8 @@ import (
 // 3.2.0 - add EngineGetBlobsBundleV1k
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
 // 4.0.0 - remove BorTxnLookup and BorEvents
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 0, Patch: 0}
+// 4.1.0 - add FrozenBlocks function
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -534,4 +535,8 @@ func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *empty
 
 	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
+}
+
+func (s *EthBackendServer) FrozenBlocks(ctx context.Context, req *emptypb.Empty) (*remoteproto.FrozenBlocksReply, error) {
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: s.blockReader.FrozenBlocks()}, nil
 }
