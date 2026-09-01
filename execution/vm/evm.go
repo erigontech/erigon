@@ -383,7 +383,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// The interpreter rejects a value-bearing CALL from a static frame while
 	// charging gas, so that frame never reaches here. A stateful precompile
-	// calling back in through PrecompileContext.Evm does, and has to be refused
+	// calling back in through PrecompileContext.EVM does, and has to be refused
 	// on the same terms — above the tracer and BAL hooks below, or a refusal
 	// would record an address access (consensus-relevant under EIP-7928) and an
 	// Enter/Exit pair that the opcode path never produces.
@@ -499,7 +499,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Caller:   frameCaller,
 				Value:    &callValue,
 				ReadOnly: evm.readOnly || typ == STATICCALL,
-				Evm:      evm,
+				EVM:      evm,
 
 				frameValue: value,
 			}
@@ -921,6 +921,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 		GasPrice:        evm.TxContext.GasPrice,
 		ChainConfig:     evm.ChainConfig(),
 		IntraBlockState: evm.IntraBlockState(),
+		L2Version:       evm.chainRules.L2Version,
 		TxHash:          evm.TxHash,
 	}
 }

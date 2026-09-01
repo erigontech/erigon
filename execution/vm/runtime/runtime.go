@@ -60,6 +60,7 @@ type Config struct {
 	Value       uint256.Int
 	EVMConfig   vm.Config
 	BaseFee     uint256.Int
+	L2Version   uint64
 
 	State     *state.IntraBlockState
 	GetHashFn func(n uint64) (common.Hash, error)

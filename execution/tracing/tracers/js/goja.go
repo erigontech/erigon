@@ -242,6 +242,7 @@ func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 	blockContext := evmtypes.BlockContext{
 		BlockNumber: env.BlockNumber,
 		Time:        env.Time,
+		L2Version:   env.L2Version,
 	}
 	rules := blockContext.Rules(env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)

@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -194,7 +196,7 @@ func (r *reenteringStatefulPrecompile) RunStateful(input []byte, gas *vm.Precomp
 }
 
 // TestStatefulPrecompileReentryHitsDepthLimit pins that a stateful precompile
-// re-entering the EVM through ctx.Evm counts against CallCreateDepth.
+// re-entering the EVM through ctx.EVM counts against CallCreateDepth.
 func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	const chainID = 900403
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8a}))
@@ -258,7 +260,7 @@ func (p nestedCallStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGa
 }
 
 // TestStatefulPrecompileStaticContextInherited pins that a nested call made
-// through ctx.Evm from inside a STATICCALL'd precompile keeps write
+// through ctx.EVM from inside a STATICCALL'd precompile keeps write
 // protection, like nested bytecode frames do.
 func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	const chainID = 900405
@@ -435,7 +437,7 @@ func (p *staticEscapePrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ct
 
 // TestStatefulPrecompileCannotEscapeStaticContext pins the value transfer and
 // the account creation, which the interpreter refuses while charging gas for
-// CALL and CREATE — a path ctx.Evm skips entirely.
+// CALL and CREATE — a path ctx.EVM skips entirely.
 func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 	const chainID = 900410
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
@@ -460,7 +462,7 @@ func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
 	require.True(t, balance.IsZero(), "no value may leave a static frame")
 
 	// Control arm: the same precompile under a plain CALL still moves value,
-	// so the gate is scoped to the static context and not to ctx.Evm.
+	// so the gate is scoped to the static context and not to ctx.EVM.
 	p.callErr, p.createErr = nil, nil
 	cfg2 := newStatefulTestConfig(t, chainID)
 	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
@@ -863,4 +865,60 @@ func TestStatefulPrecompilePanicReleasesTheGasHandle(t *testing.T) {
 	require.Equal(t, mdgas.MdGas{}, p.stashed.Remaining(),
 		"a handle that outlived its frame must report nothing")
 	require.False(t, p.stashed.ChargeExecution(1), "and must refuse to charge")
+}
+
+// l2VersionRules stands in for an L2 stack's version oracle: it stamps the
+// block context's version onto the resolved rules, which is what gates a
+// registered provider.
+type l2VersionRules struct{}
+
+func (l2VersionRules) Name() string { return "test-l2" }
+
+func (l2VersionRules) ResolveRules(l2Version, _, _ uint64, rules *chain.Rules) {
+	rules.L2Version = l2Version
+}
+
+// TestVersionGatedPrecompileIsPrecompiledToTracers pins that an address the EVM
+// activates at an L2 version is a precompile to the tracers too. They rebuild
+// Rules from the VMContext instead of reading the EVM's, so a dropped L2Version
+// makes 4byte record precompile input as a contract selector, flat traces keep
+// calls they should filter, and JS isPrecompiled return false.
+func TestVersionGatedPrecompileIsPrecompiledToTracers(t *testing.T) {
+	const chainID = 900432
+	const activeAt = 30
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x99}))
+	plainAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9a}))
+	rec := &recordingStatefulPrecompile{}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(l2Version uint64) vm.PrecompiledContracts {
+		if l2Version < activeAt {
+			return nil
+		}
+		return vm.PrecompiledContracts{precompileAddr: rec}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	cfg.ChainConfig.L2 = l2VersionRules{}
+	cfg.L2Version = activeAt
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	input := []byte{0x01, 0x02, 0x03, 0x04}
+	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, input,
+		mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, rec.calls, 1, "the EVM has to dispatch the gated address as a precompile")
+
+	tracer, err := tracers.New("4byteTracer", nil, nil)
+	require.NoError(t, err)
+	tracer.OnTxStart(vmenv.GetVMContext(), nil, cfg.Origin)
+
+	tracer.OnEnter(1, byte(vm.CALL), cfg.Origin, precompileAddr, true, input, 0, uint256.Int{}, nil)
+	res, err := tracer.GetResult()
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(res), "a call into the gated precompile is not a contract selector")
+
+	tracer.OnEnter(1, byte(vm.CALL), cfg.Origin, plainAddr, false, input, 0, uint256.Int{}, nil)
+	res, err = tracer.GetResult()
+	require.NoError(t, err)
+	require.JSONEq(t, `{"0x01020304-0":1}`, string(res), "a plain call still records its selector")
 }
