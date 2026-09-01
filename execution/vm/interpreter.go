@@ -181,6 +181,15 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 	return ok
 }
 
+// mergeChildStateGas takes over the child's state-gas spill, then absorbs state
+// gas the child left in the reservoir, up to the spill available in this frame.
+func (c *CallContext) mergeChildStateGas(childSpill uint64) {
+	c.stateGasSpill += childSpill
+	misplaced := min(c.stateGas, c.stateGasSpill)
+	c.stateGas -= misplaced
+	c.refillStateGas(misplaced) // LIFO: gas_left first
+}
+
 func (c *CallContext) refillStateGas(amount uint64) {
 	remaining := c.Gas()
 	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}

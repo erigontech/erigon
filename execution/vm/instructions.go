@@ -1052,7 +1052,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		if suberr != nil && preparation.chargeNewAccount {
 			scope.refillStateGas(params.StateGasNewAccount)
 		} else if suberr == nil {
-			scope.stateGasSpill += childGasUsed.StateSpill
+			scope.mergeChildStateGas(childGasUsed.StateSpill)
 		}
 	}
 	// Push item on the stack based on the returned error. If the ruleset is
@@ -1131,7 +1131,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam {
 		if err == nil {
-			scope.stateGasSpill += childGasUsage.StateSpill
+			scope.mergeChildStateGas(childGasUsage.StateSpill)
 		} else if scope.newAccountCharged {
 			scope.refillStateGas(params.StateGasNewAccount)
 		}
@@ -1183,7 +1183,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		scope.mergeChildStateGas(childGasUsage.StateSpill)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1218,7 +1218,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		scope.mergeChildStateGas(childGasUsage.StateSpill)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1263,7 +1263,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.stateGasSpill += childGasUsage.StateSpill
+		scope.mergeChildStateGas(childGasUsage.StateSpill)
 	}
 	evm.returnData = ret
 	return pc, ret, nil
