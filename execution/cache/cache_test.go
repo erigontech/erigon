@@ -1613,8 +1613,8 @@ func TestPublishUsesProducerCodeHash(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
-// A malformed producer hash must be re-derived, not used: it would be zero-padded
-// into the content-addressed key and would blank the collision guard.
+// A malformed producer hash must be re-derived, not used: it would file the entry
+// under a content address no reader queries, since lookups pass a 32-byte keccak.
 func TestPublishDerivesMalformedCodeHash(t *testing.T) {
 	t.Parallel()
 
@@ -1638,5 +1638,5 @@ func TestPublishDerivesMalformedCodeHash(t *testing.T) {
 	require.Equal(t, code, got)
 
 	_, ok = c.View(nil).GetCodeByHash(short)
-	require.False(t, ok, "the zero-padded short hash must not key the entry")
+	require.False(t, ok, "the short hash must not key the entry")
 }

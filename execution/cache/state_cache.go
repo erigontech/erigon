@@ -337,8 +337,8 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
-		// A short hash would be zero-padded into the content-addressed key and
-		// blank the collision guard, so anything but a full hash is re-derived.
+		// A short hash files the entry under a content address no reader queries:
+		// GetCodeByHash is called with a 32-byte keccak. Re-derive anything else.
 		prepared.codeHash = update.CodeHash
 		if len(prepared.codeHash) != len(common.Hash{}) {
 			prepared.codeHash = crypto.Keccak256(prepared.value)

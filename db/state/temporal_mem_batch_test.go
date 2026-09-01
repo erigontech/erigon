@@ -109,29 +109,48 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 	t.Parallel()
 
-	sd := &TemporalMemBatch{
-		stepSize:          16,
-		storage:           btree2.NewMap[string, []dataWithTxNum](128),
-		metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
-		inMemHistoryReads: true,
-	}
-	for d := range sd.domains {
-		sd.domains[d] = map[string][]dataWithTxNum{}
-	}
+	// inMemHistoryReads picks which arm a later txNum takes: append, or overwrite
+	// the slot in place. Both must leave the earlier bytes alone.
+	for _, inMemHistoryReads := range []bool{true, false} {
+		t.Run(fmt.Sprintf("inMemHistoryReads=%v", inMemHistoryReads), func(t *testing.T) {
+			t.Parallel()
 
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		key := "k-" + domain.String()
-		sd.putLatest(domain, key, []byte("first"), 1)
-		borrowed, _, ok := sd.GetLatest(domain, []byte(key))
-		require.True(t, ok)
-		require.Equal(t, []byte("first"), borrowed)
+			sd := &TemporalMemBatch{
+				stepSize:          16,
+				storage:           btree2.NewMap[string, []dataWithTxNum](128),
+				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+				inMemHistoryReads: inMemHistoryReads,
+			}
+			for d := range sd.domains {
+				sd.domains[d] = map[string][]dataWithTxNum{}
+			}
 
-		// Same txNum (replaces the entry), a later one (appends), and a longer
-		// value than the first — every shape a rewrite could take.
-		sd.putLatest(domain, key, []byte("second"), 1)
-		sd.putLatest(domain, key, []byte("third-and-longer"), 2)
+			// Each case is the FIRST write after the borrow, so the slot still holds
+			// the borrowed buffer when the arm runs. A shorter value fits that buffer,
+			// which is what an arm recycling it would overwrite.
+			for _, next := range []struct {
+				name  string
+				val   string
+				txNum uint64
+			}{
+				{"same txNum", "second", 1},
+				{"later txNum", "third", 2},
+				{"later txNum, longer value", "third-and-longer-than-the-first-value", 2},
+			} {
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+					key := "k-" + domain.String() + "-" + next.name
+					first := []byte("first-and-long-enough-to-be-reused")
+					sd.putLatest(domain, key, first, 1)
+					borrowed, _, ok := sd.GetLatest(domain, []byte(key))
+					require.True(t, ok)
+					require.Equal(t, first, borrowed)
 
-		require.Equal(t, []byte("first"), borrowed,
-			"%s: a borrowed value must survive later writes to its key", domain)
+					sd.putLatest(domain, key, []byte(next.val), next.txNum)
+
+					require.Equal(t, first, borrowed,
+						"%s/%s: a borrowed value must survive a later write to its key", domain, next.name)
+				}
+			}
+		})
 	}
 }
