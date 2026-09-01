@@ -193,12 +193,11 @@ const minGzipBodySize = 1024
 // Raw and compressed byte counters: out/in gives the live compression ratio,
 // the out rate tracks RPC egress.
 var (
-	// path="streaming" is kept from the two-path counters these replace: gzhttp only
-	// streams, and dropping the label would silently break existing selectors.
+	// path="streaming" is kept from the counters these replace: dropping it would
+	// break existing selectors.
 	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
 	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
-	// New series, so no selector pins the label. It is carried for symmetry, to keep
-	// `sum by (path)` uniform across both encoders.
+	// New series: no selector pins the label, it is carried for symmetry.
 	zstdInBytes  = metrics.GetOrCreateCounter(`rpc_zstd_in_bytes_total{path="streaming"}`)
 	zstdOutBytes = metrics.GetOrCreateCounter(`rpc_zstd_out_bytes_total{path="streaming"}`)
 )

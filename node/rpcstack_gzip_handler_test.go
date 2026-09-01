@@ -379,10 +379,9 @@ func TestZstdNegotiation(t *testing.T) {
 	}
 }
 
-// TestZstdHandlerStreaming verifies that a handler which writes, flushes, then writes
-// again still produces a fully decodable zstd stream. The flush ends a block inside the
-// frame, and a dropped final frame or a corrupt block would show up only as a short,
-// undecodable body -- exactly what a size-only check cannot catch.
+// TestZstdHandlerStreaming verifies that a handler which writes, flushes, then writes again
+// still produces a fully decodable zstd stream -- a dropped frame or corrupt block shows up
+// only as a short body, which a size-only check cannot catch.
 func TestZstdHandlerStreaming(t *testing.T) {
 	parts := [][]byte{
 		[]byte(`{"jsonrpc":"2.0","result":`),
@@ -394,8 +393,7 @@ func TestZstdHandlerStreaming(t *testing.T) {
 		for _, p := range parts {
 			_, _ = w.Write(p)
 		}
-		// Pad past minGzipBodySize: below it a response is sent verbatim, so the
-		// flush would never reach the encoder.
+		// Pad past minGzipBodySize: below it a response is sent verbatim.
 		_, _ = w.Write(bytes.Repeat([]byte(" "), minGzipBodySize))
 		w.(http.Flusher).Flush()
 		_, _ = w.Write(tail)
