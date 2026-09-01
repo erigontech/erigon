@@ -187,3 +187,36 @@ func TestContextReadyForCollationUsesTransactionVisibleTxNums(t *testing.T) {
 		})
 	}
 }
+
+// A node that downloaded blocks to tip while execution lags far behind keeps only the
+// recent end of MaxTxNum, so a step from the executed range ends below the table's
+// floor. FindBlockNum answers that with the floor rather than !ok, which would gate
+// collation until execution passed a block millions ahead of the step.
+func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) {
+	const (
+		firstBlockInDB = uint64(25_472_999)
+		firstTxInDB    = uint64(3_630_627_978)
+		headBlockNum   = uint64(20_899_437)
+		stepLastTxNum  = uint64(2_574_609_374)
+	)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		// Genesis is always kept; the pruned window starts at the second key.
+		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
+			return err
+		}
+		for i := uint64(0); i < 3; i++ {
+			if err := rawdbv3.TxNums.Append(tx, firstBlockInDB+i, firstTxInDB+i); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	ctx := NewContext(headBlockNum, 25_837_750, 96, true)
+	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, stepLastTxNum)
+	require.NoError(t, err)
+	require.Zero(t, lastBlockInStep, "a step below the table floor resolves to no block, not to the floor")
+	require.True(t, ready, "the step's blocks are frozen, so it is collatable")
+}

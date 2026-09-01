@@ -94,15 +94,28 @@ func (c finalityContext) MaxReorgDepth() uint64 {
 func (c finalityContext) ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
 	err = db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, stepLastTxNum)
-		if err != nil {
-			return err
+		// A step ending below the range MaxTxNum still holds belongs to blocks that are
+		// already frozen, so it is collatable. BlockNumber's search floors at the second
+		// key, so such a query comes back as that floor with ok=true rather than !ok,
+		// which reads as a step far ahead of the head and gates collation forever -- the
+		// shape a re-executing node has, with blocks downloaded to tip and execution
+		// millions of blocks behind. Genesis is always key one, hence the second.
+		_, secondTxInDB, ferr := rawdbv3.TxNums.Second(tx)
+		if ferr != nil {
+			return ferr
 		}
-		if !ok {
-			lastBlockInStep = 0
+		if secondTxInDB == 0 || stepLastTxNum >= secondTxInDB {
+			var found bool
+			lastBlockInStep, found, ferr = rawdbv3.TxNums.FindBlockNum(ctx, tx, stepLastTxNum)
+			if ferr != nil {
+				return ferr
+			}
+			if !found {
+				lastBlockInStep = 0
+			}
 		}
-		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
-		return err
+		lastBlockInDB, lastTxInDB, ferr = rawdbv3.TxNums.Last(tx)
+		return ferr
 	})
 	ok = err == nil && c.retentionBlockNum > 0 && lastBlockInStep <= c.collateToBlockNum
 	return
