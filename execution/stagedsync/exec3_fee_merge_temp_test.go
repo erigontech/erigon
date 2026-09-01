@@ -17,7 +17,9 @@
 package stagedsync
 
 import (
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -332,4 +334,54 @@ func TestBlockResult_HandsSupersededToApplyLoop(t *testing.T) {
 		require.True(t, handed.Released())
 		require.False(t, later.Released(), "a set collected after the handoff has no reader releasing it yet")
 	})
+}
+
+func benchFeeDropSets(n int, coinbase accounts.Address) (prev, next *state.WriteSet) {
+	base := &state.WriteSet{}
+	for i := range n {
+		var a common.Address
+		binary.BigEndian.PutUint64(a[12:], uint64(i+1))
+		addr := accounts.InternAddress(a)
+		base.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}})
+		base.SetNonce(addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}})
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[24:], uint64(i+1))
+		key := accounts.InternKey(h)
+		base.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key}})
+	}
+	for _, tip := range []**state.WriteSet{&prev, &next} {
+		ws := &state.WriteSet{}
+		ws.SetBalance(coinbase, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath}})
+		ws.SetAddress(coinbase, &state.VersionedWrite[*accounts.Account]{
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.AddressPath}, Val: &accounts.Account{}})
+		*tip = base.MergeInto(ws)
+	}
+	// The half of the credit this round stopped emitting.
+	prev.SetSelfDestruct(coinbase, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.SelfDestructPath}, Val: true})
+	return prev, next
+}
+
+// BenchmarkDropStaleVersionedWrites sizes the retraction scan against the tx's
+// own write set: the credit it retracts is the same two addresses either way.
+func BenchmarkDropStaleVersionedWrites(b *testing.B) {
+	coinbase := feeMergeTestAddr("0x7777777777777777777777777777777777777777")
+	burnt := feeMergeTestAddr("0x8888888888888888888888888888888888888888")
+	version := state.Version{TxIndex: 0}
+
+	for _, n := range []int{4, 32, 256} {
+		b.Run(fmt.Sprintf("writes=%d", n*3), func(b *testing.B) {
+			be := feeMergeTestExecutor(b)
+			prev, next := benchFeeDropSets(n, coinbase)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				be.dropStaleVersionedWrites(version, prev, next, [2]accounts.Address{coinbase, burnt})
+			}
+		})
+	}
 }
