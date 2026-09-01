@@ -245,3 +245,23 @@ func TestContextReadyForCollationResolvesStepsInsideTheTxNumWindow(t *testing.T)
 	require.Equal(t, uint64(25_473_001), lastBlockInStep)
 	require.False(t, ready, "step above the finalised head stays gated")
 }
+
+// Only the floor block's max txnum is known, so a step can end inside it. When that block
+// is still inside the reorg window the clamp must stand and the gate must hold.
+func TestContextReadyForCollationGatesStepsInsideTheFloorBlock(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, e := range []struct{ blockNum, maxTxNum uint64 }{{0, 1}, {1000, 5000}, {1001, 5200}} {
+			if err := rawdbv3.TxNums.Append(tx, e.blockNum, e.maxTxNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	_, lastBlockInStep, _, _, ready, err := NewContext(1050, 0, 96, true).
+		ReadyForCollation(t.Context(), db, 4900)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1000), lastBlockInStep, "must not shortcut past the floor block")
+	require.False(t, ready, "a step inside the reorg window stays gated")
+}

@@ -94,13 +94,17 @@ func (c finalityContext) MaxReorgDepth() uint64 {
 func (c finalityContext) ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
 	err = db.View(ctx, func(tx kv.Tx) error {
-		var secondTxInDB uint64
+		var secondBlockInDB, secondTxInDB uint64
 		// Below the table's coverage the step is unresolvable here, not a step at the
-		// floor: BlockNumber's search clamps to the second key.
-		if _, secondTxInDB, err = rawdbv3.TxNums.Second(tx); err != nil {
+		// floor: BlockNumber's search clamps to the second key. Only the floor's max
+		// txnum is known, not its base, so a step could still end inside that block --
+		// trust the clamp unless the floor is past the reorg window entirely.
+		if secondBlockInDB, secondTxInDB, err = rawdbv3.TxNums.Second(tx); err != nil {
 			return err
 		}
-		if secondTxInDB == 0 || stepLastTxNum >= secondTxInDB {
+		belowWindow := secondBlockInDB > 0 && stepLastTxNum < secondTxInDB &&
+			secondBlockInDB > c.collateToBlockNum+c.maxReorgDepth
+		if !belowWindow {
 			lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, stepLastTxNum)
 			if err != nil {
 				return err
