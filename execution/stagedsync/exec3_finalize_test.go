@@ -1784,7 +1784,8 @@ func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	if outcome == feeCreditNew {
 		credit = copyWrites(tip)
 	}
-	r.be.recordFeeMerge(version, recorded, tip, outcome)
+	r.be.recordFeeMerge(version, recorded, tip, outcome,
+		[2]accounts.Address{r.result.Coinbase, r.result.ExecutionResult.BurntContractAddress})
 	r.vm.FlushVersionedWrites(r.recorded(), true, "")
 	return credit
 }

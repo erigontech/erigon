@@ -60,7 +60,7 @@ func TestRecordFeeMerge_FirstMergeKeepsWorkerWrites(t *testing.T) {
 
 	txOut := feeMergeTestWrites(t, addr, 1)
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, txOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
 	require.Same(t, tip, be.blockIO.WriteSet(version.TxIndex),
@@ -77,10 +77,10 @@ func TestRecordFeeMerge_RevalidationReleasesSupersededTemp(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	first := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), first, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), first, feeCreditNew, [2]accounts.Address{addr})
 
 	second := feeMergeTestWrites(t, addr, 3)
-	be.recordFeeMerge(version, first, second, feeCreditNew)
+	be.recordFeeMerge(version, first, second, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
 	require.Same(t, second, be.feeMergeTemp[0].writes)
@@ -96,11 +96,11 @@ func TestRecordFeeMerge_AfterReExecutionKeepsStaleTemp(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	stale := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), stale, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), stale, feeCreditNew, [2]accounts.Address{addr})
 
 	reTxOut := feeMergeTestWrites(t, addr, 4)
 	tip := feeMergeTestWrites(t, addr, 5)
-	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
 	require.Same(t, tip, be.feeMergeTemp[0].writes)
@@ -125,7 +125,7 @@ func TestRecordFeeMerge_NoCreditKeepsWorkerWrites(t *testing.T) {
 			be := feeMergeTestExecutor(t)
 			txOut := feeMergeTestWrites(t, addr, 1)
 			be.recordWorkerWrites(version, txOut)
-			be.recordFeeMerge(version, txOut, nil, tc.outcome)
+			be.recordFeeMerge(version, txOut, nil, tc.outcome, [2]accounts.Address{addr})
 
 			require.Same(t, txOut, be.blockIO.WriteSet(version.TxIndex))
 			require.Nil(t, be.creditedWrites(version, txOut),
@@ -147,7 +147,7 @@ func TestRecordWorkerWrites_DropsCreditedTemp(t *testing.T) {
 		"the worker's own output carries no credit")
 
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, txOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	require.Same(t, tip, be.creditedWrites(version, be.blockIO.WriteSet(version.TxIndex)))
 
 	reTxOut := feeMergeTestWrites(t, addr, 3)
@@ -168,7 +168,7 @@ func TestCreditedWrites_PinsVersion(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), tip, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), tip, feeCreditNew, [2]accounts.Address{addr})
 	require.Same(t, tip, be.creditedWrites(version, tip))
 
 	reExecuted := version
@@ -193,10 +193,10 @@ func TestRecordFeeMerge_ReleaseKeepsSharedWrites(t *testing.T) {
 
 	txOut := feeMergeTestWrites(t, shared, 1)
 	temp1 := feeMergeTestWrites(t, fresh, 7)
-	be.recordFeeMerge(version, txOut, temp1, feeCreditNew)
+	be.recordFeeMerge(version, txOut, temp1, feeCreditNew, [2]accounts.Address{shared, fresh})
 
 	tipWrites := feeMergeTestWrites(t, fresh, 9)
-	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew)
+	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew, [2]accounts.Address{shared, fresh})
 	be.superseded.release()
 
 	require.True(t, temp1.Released(), "the superseded set's maps must go back to the pool")
