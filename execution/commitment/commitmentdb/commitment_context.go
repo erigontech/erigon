@@ -493,7 +493,16 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
-		return rootHash, err
+		if err != nil {
+			return nil, err
+		}
+		if saveState {
+			trieContext := sdc.trieContext(tx, blockNum, txNum, ctx, putter)
+			if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+				return nil, err
+			}
+		}
+		return rootHash, nil
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
