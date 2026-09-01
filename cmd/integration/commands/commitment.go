@@ -237,23 +237,21 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 	Info(msg string, ctx ...any)
 }) error {
 	compactKey := nibbles.HexToCompact(prefix)
-	if recordsReader, ok := stateReader.(commitmentdb.CommitmentRecordsReader); ok {
-		nodeKey := nibbles.EncodeKeyV3(prefix)
-		records, present, step, err := recordsReader.ReadCommitmentRecords(nodeKey, 0, false)
+	nodeKey := nibbles.EncodeKeyV3(prefix)
+	records, present, step, err := stateReader.ReadCommitmentRecords(nodeKey, 0, false)
+	if err != nil {
+		return fmt.Errorf("failed to get edge records for prefix %x: %w", prefix, err)
+	}
+	if present != 0 {
+		fmt.Printf("Prefix: 0x%s\n", hex.EncodeToString(prefix))
+		fmt.Printf("Step: %d\n", step)
+		fmt.Printf("Edge records (present mask: 0x%04x):\n", present)
+		rendered, err := formatCommitmentEdgeRecords(nodeKey, records, present)
 		if err != nil {
-			return fmt.Errorf("failed to get edge records for prefix %x: %w", prefix, err)
+			return err
 		}
-		if present != 0 {
-			fmt.Printf("Prefix: 0x%s\n", hex.EncodeToString(prefix))
-			fmt.Printf("Step: %d\n", step)
-			fmt.Printf("Edge records (present mask: 0x%04x):\n", present)
-			rendered, err := formatCommitmentEdgeRecords(nodeKey, records, present)
-			if err != nil {
-				return err
-			}
-			fmt.Print(rendered)
-			return nil
-		}
+		fmt.Print(rendered)
+		return nil
 	}
 
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)

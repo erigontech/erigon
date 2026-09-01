@@ -1075,11 +1075,9 @@ func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]
 	var recordsStep kv.Step
 	var err error
 	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
-	if reader, ok := sdc.stateReader.(CommitmentRecordsReader); ok {
-		records, recordsPresent, recordsStep, err = reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
-		if err != nil {
-			return nil, 0, [16]uint16{}, 0, err
-		}
+	records, recordsPresent, recordsStep, err = sdc.stateReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+	if err != nil {
+		return nil, 0, [16]uint16{}, 0, err
 	}
 	sdc.applyLocalEdgeWrites(nodeKey, mask, maskKnown, &records, &recordsPresent)
 	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, nil)

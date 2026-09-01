@@ -23,9 +23,10 @@ type StateReader interface {
 	// workers never touch the main goroutine's lock-free accumulator (a race)
 	// or take the global metrics lock.
 	CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader
-}
-
-type CommitmentRecordsReader interface {
+	// ReadCommitmentRecords resolves the v3 edge records of nodeKey's children,
+	// restricted to mask when maskKnown. Part of the interface rather than an
+	// optional one a caller type-asserts: a reader that silently answered "no
+	// records" would read an empty v3 trie and compute a wrong root.
 	ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
 }
 
@@ -297,11 +298,7 @@ func (r *SplitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (
 }
 
 func (r *SplitStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
-	reader, ok := r.commitmentReader.(CommitmentRecordsReader)
-	if !ok {
-		return records, 0, 0, nil
-	}
-	return reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+	return r.commitmentReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
 }
 
 func (r *SplitStateReader) Clone(tx kv.TemporalTx) StateReader {
@@ -466,11 +463,7 @@ func (r *RebuildStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 }
 
 func (r *RebuildStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
-	reader, ok := r.commitmentReader.(CommitmentRecordsReader)
-	if !ok {
-		return records, 0, 0, nil
-	}
-	return reader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+	return r.commitmentReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
 }
 
 func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {

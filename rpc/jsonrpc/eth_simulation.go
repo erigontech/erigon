@@ -17,10 +17,12 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -41,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
@@ -986,6 +989,38 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 		return nil, 0, fmt.Errorf("simulationStateReader(GetAsOf) %q: %w", d, err)
 	}
 	return enc, kv.Step(asOf / stepSize), nil
+}
+
+// ReadCommitmentRecords routes each child record the same way Read routes a
+// branch: the in-memory batch first, so a later block sees the branches an
+// earlier simulated block wrote, then the base parent's commitment plane.
+func (r *simulationStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	wanted := mask
+	if !maskKnown {
+		wanted = ^uint16(0)
+	}
+	for bitset := wanted; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+		value, valueStep, ok := r.sd.GetMemBatch().GetLatest(kv.CommitmentDomain, key)
+		if !ok {
+			value, ok, err = r.roTx.GetAsOf(kv.CommitmentDomain, key, r.commitmentAsOfTxNum)
+			if err != nil {
+				return records, present, step, fmt.Errorf("simulationStateReader(GetAsOf) commitment record: %w", err)
+			}
+			valueStep = 0
+		}
+		if ok {
+			records[nibble] = bytes.Clone(value)
+			present |= bit
+			if valueStep > step {
+				step = valueStep
+			}
+		}
+		bitset ^= bit
+	}
+	return records, present, step, nil
 }
 
 func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
