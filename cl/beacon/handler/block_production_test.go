@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -703,9 +704,10 @@ func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
 	require.ErrorContains(t, err, "missing blobs bundle")
 }
 
-func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) (*cltypes.BeaconBody, error) {
+func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) (*cltypes.BeaconBody, *tests.MockBlockReader, error) {
 	t.Helper()
 	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, version, log.Root(), true)
+	reader := h.blockReader.(*tests.MockBlockReader)
 
 	// The engine adapter leaves Withdrawals nil when the response omits the field.
 	payload := cltypes.NewEth1Block(version, h.beaconChainCfg)
@@ -726,19 +728,20 @@ func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) 
 		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
 		common.Bytes96{0xc0}, common.Hash{},
 	)
-	return body, err
+	return body, reader, err
 }
 
 func TestProduceBeaconBodyRejectsMissingWithdrawalsAtCapella(t *testing.T) {
-	body, err := produceBodyWithNilWithdrawals(t, clparams.CapellaVersion)
+	body, reader, err := produceBodyWithNilWithdrawals(t, clparams.CapellaVersion)
 
 	require.Nil(t, body)
 	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
 	require.ErrorContains(t, err, "missing withdrawals")
+	require.Empty(t, reader.CachedBodies)
 }
 
 func TestProduceBeaconBodyAcceptsMissingWithdrawalsBeforeCapella(t *testing.T) {
-	body, err := produceBodyWithNilWithdrawals(t, clparams.BellatrixVersion)
+	body, _, err := produceBodyWithNilWithdrawals(t, clparams.BellatrixVersion)
 
 	require.NoError(t, err)
 	require.NotNil(t, body)
