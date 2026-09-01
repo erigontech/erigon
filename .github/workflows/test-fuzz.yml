@@ -105,24 +105,88 @@ jobs:
         env:
           FUZZTIME: ${{ inputs.fuzztime || '120s' }}
           ERIGON_BUILD: ${{ steps.erigon.outputs.build }}
+          PKG: ${{ matrix.pkg }}
+          FN: ${{ matrix.fn }}
+          FUZZ_DIR: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.fn }}
         run: |
           mkdir -p "$ERIGON_BUILD/fuzz"
-          echo "::group::go test -fuzz ${{ matrix.fn }} (./${{ matrix.pkg }}, ${FUZZTIME})"
-          go test "./${{ matrix.pkg }}/" -run '^$' -fuzz "^${{ matrix.fn }}$" -fuzztime "${FUZZTIME}"
+          out="${RUNNER_TEMP}/fuzz.out"
+          echo "::group::go test -fuzz ${FN} (./${PKG}, ${FUZZTIME})"
+          set +e
+          go test "./${PKG}/" -run '^$' -fuzz "^${FN}\$" -fuzztime "${FUZZTIME}" 2>&1 | tee "$out"
+          status="${PIPESTATUS[0]}"
+          set -e
           echo "::endgroup::"
+          if [ "$status" -eq 0 ]; then exit 0; fi
+          # internal/fuzz can misreport the end of the fuzztime window as a failure:
+          # it compares the timeout context's error against the child context it
+          # cancels workers with, and cancellation reaches the parent's Done channel
+          # before the child's Err is set (golang/go#75804, fixed in Go 1.27 — drop
+          # this branch once CI runs 1.27+). That path writes no reproducer and its
+          # only detail is a bare "context deadline exceeded" — unlike a real crash,
+          # which always writes a reproducer, or a failing seed corpus entry, which
+          # names the entry. Suppress only that exact combination.
+          if grep -qE '^[[:space:]]*context deadline exceeded[[:space:]]*$' "$out" \
+            && ! grep -q 'failure while testing seed corpus entry' "$out" \
+            && [ -z "$(git ls-files --others --exclude-standard -- "$FUZZ_DIR" 2>/dev/null)" ]; then
+            echo "::warning::Fuzz ${FN} (${PKG}): engine reported 'context deadline exceeded' at the end of the fuzztime window — upstream race, no defect found"
+            exit 0
+          fi
+          exit "$status"
 
-      # On a crash, `go test` writes the minimized reproducing input to
-      # <pkg>/testdata/fuzz/<Fn>/. Upload it so the failure is replayable.
-      - name: Upload crash reproducer
+      # Reaching here means a real failure. A crash leaves a minimized reproducer
+      # under <pkg>/testdata/fuzz/<Fn>/ as an untracked file (committed seeds are
+      # tracked, so they don't count); anything else — a failing seed corpus entry,
+      # a build error, the runner running out of memory — leaves none and still
+      # needs a human. Record a per-leg marker either way so `notify` can list
+      # exactly what failed.
+      - name: Classify failure
+        id: classify
         if: failure()
+        env:
+          FUZZ_DIR: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.fn }}
+          NAME: ${{ matrix.name }}
+          PKG: ${{ matrix.pkg }}
+          FN: ${{ matrix.fn }}
+        run: |
+          mkdir -p crash-repro fuzz-failure
+          kind=no-reproducer
+          if [ -d "$FUZZ_DIR" ]; then
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              cp "$f" crash-repro/
+              kind=crash
+            done < <(git ls-files --others --exclude-standard -- "$FUZZ_DIR")
+          fi
+          printf '%s\t%s\t%s\t%s\n' "$NAME" "$PKG" "$FN" "$kind" > "fuzz-failure/${NAME}.tsv"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+          if [ "$kind" = crash ]; then
+            echo "::error::Fuzz crash in $FN ($PKG) — reproducer written under $FUZZ_DIR"
+          else
+            echo "::error::Fuzz $FN ($PKG) failed without writing a reproducer — check the step log"
+          fi
+
+      - name: Upload crash reproducer
+        if: failure() && steps.classify.outputs.kind == 'crash'
         uses: actions/upload-artifact@v7
         with:
           name: fuzz-crash-${{ matrix.name }}
-          path: ${{ matrix.pkg }}/testdata/fuzz/${{ matrix.fn }}/
+          path: crash-repro/
           if-no-files-found: ignore
 
+      - name: Upload failure marker
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-failure-${{ matrix.name }}
+          path: fuzz-failure/${{ matrix.name }}.tsv
+          if-no-files-found: ignore
+
+      # Keep $GOCACHE/fuzz: the corpus cache entry above is saved after this step.
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+        with:
+          clean-fuzzcache: 'false'
 
   notify:
     needs: [fuzz]
@@ -134,22 +198,64 @@ jobs:
       contents: read
       issues: write
     steps:
+      - name: Download failure markers
+        uses: actions/download-artifact@v8
+        with:
+          pattern: fuzz-failure-*
+          path: fuzz-failures
+          merge-multiple: true
+
+      # Fold the per-leg markers into one Markdown bullet list and crash/flake
+      # counts, shared by the issue body, the run annotation, and the Discord ping.
+      - name: Summarize failed targets
+        id: summary
+        run: |
+          list=""
+          crashes=0
+          norepro=0
+          for f in fuzz-failures/*.tsv; do
+            [ -e "$f" ] || continue
+            while IFS=$'\t' read -r name pkg fn kind; do
+              if [ "$kind" = crash ]; then
+                list="${list}- \`${name}\` — ${fn} (${pkg}): **crash, reproducer attached** (artifact \`fuzz-crash-${name}\`)"$'\n'
+                crashes=$((crashes + 1))
+              else
+                list="${list}- \`${name}\` — ${fn} (${pkg}): **failed without a reproducer** — read the step log"$'\n'
+                norepro=$((norepro + 1))
+              fi
+            done < "$f"
+          done
+          [ -n "$list" ] || list="- (per-target markers unavailable — see the red matrix legs on the run)"$'\n'
+          {
+            echo "list<<MARKERS_EOF"
+            printf '%s' "$list"
+            echo "MARKERS_EOF"
+            echo "crashes=$crashes"
+            echo "norepro=$norepro"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Open or update tracking issue
+        id: issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FAILED_LIST: ${{ steps.summary.outputs.list }}
         run: |
           gh label create nightly-fuzz --color B60205 \
             --description "Crash found by the nightly fuzz workflow" --force --repo "$REPO" || true
 
           body=$(cat <<EOF
-          The nightly **Fuzz** workflow found one or more crashing inputs.
+          The nightly **Fuzz** workflow reported one or more failing targets.
 
           - Run: ${RUN_URL}
-          - The red matrix legs on that run show which targets crashed.
-          - Each crash's minimized reproducer is attached to the run as an
-            artifact named \`fuzz-crash-<target>\`.
+
+          Failed targets:
+          ${FAILED_LIST}
+          Legs marked **crash** have a minimized reproducer uploaded as a
+          \`fuzz-crash-<target>\` artifact on the run. Legs with **no reproducer**
+          failed some other way — a failing seed corpus entry, a build error, the
+          runner running out of memory — and the step log says which.
 
           Per repo policy a fuzz crash must be **investigated and fixed**, not
           skipped. To reproduce locally, drop the reproducer file into the
@@ -162,22 +268,49 @@ jobs:
             --json number --jq '.[0].number')
           if [ -n "$num" ]; then
             gh issue comment "$num" --repo "$REPO" --body "$body"
+            url="${GITHUB_SERVER_URL}/${REPO}/issues/${num}"
             echo "Updated existing tracking issue #${num}"
           else
-            gh issue create --repo "$REPO" --label nightly-fuzz \
-              --title "Nightly fuzz crash(es) detected" --body "$body"
+            url=$(gh issue create --repo "$REPO" --label nightly-fuzz \
+              --title "Nightly fuzz crash(es) detected" --body "$body")
           fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Back-reference so the run itself points at the tracking issue: a notice
+      # annotation at the top of the run plus a job summary with the breakdown.
+      - name: Annotate run with issue link
+        env:
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          FAILED_LIST: ${{ steps.summary.outputs.list }}
+          CRASHES: ${{ steps.summary.outputs.crashes }}
+          NOREPRO: ${{ steps.summary.outputs.norepro }}
+        run: |
+          echo "::notice title=Nightly fuzz tracking issue::${ISSUE_URL} — ${CRASHES} crash(es), ${NOREPRO} no-reproducer leg(s). See job summary for the target list."
+          {
+            echo "## Nightly fuzz failure"
+            echo ""
+            echo "Tracking issue: ${ISSUE_URL}"
+            echo ""
+            echo "Crashes: ${CRASHES} · no reproducer: ${NOREPRO}"
+            echo ""
+            echo "### Failed targets"
+            echo ""
+            printf '%s\n' "$FAILED_LIST"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Notify Discord
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          CRASHES: ${{ steps.summary.outputs.crashes }}
+          NOREPRO: ${{ steps.summary.outputs.norepro }}
         run: |
           if [ -z "${DISCORD_WEBHOOK:-}" ]; then
             echo "DISCORD_WEBHOOK not set — skipping Discord notification."
             exit 0
           fi
-          msg=":x: **Nightly fuzz failure** — one or more targets crashed.\nRun: ${RUN_URL}\nReproducers are uploaded as \`fuzz-crash-*\` artifacts; a tracking issue (label \`nightly-fuzz\`) was opened/updated."
+          msg=":x: **Nightly fuzz failure** — ${CRASHES} crash(es), ${NOREPRO} no-reproducer leg(s).\nRun: ${RUN_URL}\nIssue: ${ISSUE_URL}\nReproducers are uploaded as \`fuzz-crash-*\` artifacts."
           payload=$(printf '{"content": "%s"}' "$msg")
           curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
             && echo "Discord notified." \

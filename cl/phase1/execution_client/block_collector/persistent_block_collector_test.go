@@ -62,7 +62,7 @@ func makeTestHeader(number uint64, parent common.Hash, extra []byte) *types.Head
 // at the same number produce distinct SSZ roots — mimicking competing beacon variants.
 func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash, txs ...types.Transaction) *cltypes.BeaconBlock {
 	t.Helper()
-	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{})
+	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{}, nil)
 
 	bb := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	bb.Body.ExecutionPayload = cltypes.NewEth1BlockFromHeaderAndBody(block.Header(), block.RawBody(), &clparams.MainnetBeaconConfig)
@@ -99,8 +99,8 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 
 	h := &flushTestHarness{}
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen).AnyTimes()
-	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
+	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blocks []*types.Block) error {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		},
@@ -153,7 +153,7 @@ func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
 		"missing requests hash":    append([]byte{byte(clparams.ElectraVersion)}, make([]byte, 32)...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := c.decodeBlock(utils.CompressSnappy(raw))
+			_, err := c.decodeBlock(utils.CompressSnappy(raw))
 			require.ErrorContains(t, err, "persistent block value too short")
 		})
 	}

@@ -17,6 +17,7 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -37,11 +38,8 @@ type LogsFilterAggregator struct {
 	events         *shards.Events
 }
 
-// LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
-// and "aggregated" log filter representing a union of all subscribers. Therefore, the values in
-// the mappings are counters (of type int) and they get deleted when counter goes back to 0
-// Also, addAddr and allTopic are int instead of bool because they are also counter, counting
-// how many subscribers have this set on
+// LogsFilter represents one subscriber or the aggregate of all subscribers.
+// Aggregate address and topic values are reference counts.
 type LogsFilter struct {
 	allAddrs  int
 	addrs     map[common.Address]int
@@ -160,7 +158,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF { // termination
+	if !errors.Is(recvErr, io.EOF) { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)
 	}
 	return nil
@@ -244,5 +242,6 @@ func logNotificationToProto(lg *notifications.LogNotification) *remoteproto.Subs
 		TransactionHash:  gointerfaces.ConvertHashToH256(lg.TxHash),
 		TransactionIndex: uint64(lg.TxIndex),
 		Removed:          lg.Removed,
+		BlockTimestamp:   lg.BlockTimestamp,
 	}
 }

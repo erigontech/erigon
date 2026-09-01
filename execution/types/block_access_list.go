@@ -9,10 +9,12 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -22,7 +24,126 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-type BlockAccessList []*AccountChanges
+type BlockAccessList []AccountChanges
+
+// BlockAccessListSidecar carries immutable decoded and encoded BAL representations.
+type BlockAccessListSidecar struct {
+	bal               BlockAccessList
+	raw               atomic.Pointer[[]byte]
+	hash              atomic.Pointer[common.Hash]
+	validated         atomic.Bool
+	validatedGasLimit atomic.Uint64
+}
+
+// NewBlockAccessListSidecar wraps a decoded BAL that must not be mutated afterwards.
+func NewBlockAccessListSidecar(bal BlockAccessList) *BlockAccessListSidecar {
+	if bal == nil {
+		return nil
+	}
+	return &BlockAccessListSidecar{bal: bal}
+}
+
+// DecodeBlockAccessListSidecar decodes a BAL and copies its canonical RLP bytes.
+func DecodeBlockAccessListSidecar(data []byte) (*BlockAccessListSidecar, error) {
+	return DecodeBlockAccessListSidecarOwned(bytes.Clone(data))
+}
+
+// DecodeBlockAccessListSidecarOwned decodes a BAL and takes ownership of its canonical RLP bytes.
+// The caller must not mutate data after the call.
+func DecodeBlockAccessListSidecarOwned(data []byte) (*BlockAccessListSidecar, error) {
+	bal, err := DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	sidecar := &BlockAccessListSidecar{bal: bal}
+	sidecar.raw.Store(&data)
+	return sidecar, nil
+}
+
+// BlockAccessList returns the immutable decoded BAL.
+func (s *BlockAccessListSidecar) BlockAccessList() BlockAccessList {
+	if s == nil {
+		return nil
+	}
+	return s.bal
+}
+
+// Bytes returns the immutable canonical RLP bytes.
+func (s *BlockAccessListSidecar) Bytes() ([]byte, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if raw := s.raw.Load(); raw != nil {
+		return *raw, nil
+	}
+	raw, err := EncodeBlockAccessListBytes(s.bal)
+	if err != nil {
+		return nil, err
+	}
+	if s.raw.CompareAndSwap(nil, &raw) {
+		return raw, nil
+	}
+	return *s.raw.Load(), nil
+}
+
+// Hash returns the memoized Keccak-256 hash of the encoded BAL.
+func (s *BlockAccessListSidecar) Hash() (common.Hash, error) {
+	if s == nil {
+		return common.Hash{}, nil
+	}
+	if hash := s.hash.Load(); hash != nil {
+		return *hash, nil
+	}
+	raw, err := s.Bytes()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return s.cacheHash(raw), nil
+}
+
+func (s *BlockAccessListSidecar) cacheHash(raw []byte) common.Hash {
+	hash := crypto.Keccak256Hash(raw)
+	if s.hash.CompareAndSwap(nil, &hash) {
+		return hash
+	}
+	return *s.hash.Load()
+}
+
+// ValidateForBlock validates once for each distinct gas limit.
+func (s *BlockAccessListSidecar) ValidateForBlock(gasLimit uint64) error {
+	if s == nil {
+		return nil
+	}
+	if s.validated.Load() && s.validatedGasLimit.Load() == gasLimit {
+		return nil
+	}
+	if err := s.bal.ValidateForBlock(gasLimit); err != nil {
+		return err
+	}
+	s.validatedGasLimit.Store(gasLimit)
+	s.validated.Store(true)
+	return nil
+}
+
+func (s *BlockAccessListSidecar) copy() *BlockAccessListSidecar {
+	if s == nil {
+		return nil
+	}
+	cpy := &BlockAccessListSidecar{bal: s.bal.Copy()}
+	if raw := s.raw.Load(); raw != nil {
+		rawCopy := bytes.Clone(*raw)
+		cpy.raw.Store(&rawCopy)
+	}
+	if hash := s.hash.Load(); hash != nil {
+		hashCopy := *hash
+		cpy.hash.Store(&hashCopy)
+	}
+	if s.validated.Load() {
+		cpy.validatedGasLimit.Store(s.validatedGasLimit.Load())
+		cpy.validated.Store(true)
+	}
+	return cpy
+}
 
 // DOS protection from very large RLP inputs, remove later if unnecessary
 const (
@@ -39,7 +160,7 @@ const (
 
 type AccountChanges struct {
 	Address        accounts.Address
-	StorageChanges []*SlotChanges
+	StorageChanges []SlotChanges
 	StorageReads   []accounts.StorageKey
 	BalanceChanges []*BalanceChange
 	NonceChanges   []*NonceChange
@@ -71,6 +192,55 @@ type CodeChange struct {
 	Bytecode []byte
 }
 
+// Copy returns a deep copy of bal.
+func (bal BlockAccessList) Copy() BlockAccessList {
+	if bal == nil {
+		return nil
+	}
+	cpy := make(BlockAccessList, len(bal))
+	for i := range bal {
+		account := &bal[i]
+		accountCopy := *account
+		accountCopy.StorageChanges = slices.Clone(account.StorageChanges)
+		for j := range account.StorageChanges {
+			slot := &account.StorageChanges[j]
+			changes := make([]*StorageChange, len(slot.Changes))
+			for k, change := range slot.Changes {
+				if change != nil {
+					changeCopy := *change
+					changes[k] = &changeCopy
+				}
+			}
+			accountCopy.StorageChanges[j].Changes = changes
+		}
+		accountCopy.StorageReads = slices.Clone(account.StorageReads)
+		accountCopy.BalanceChanges = slices.Clone(account.BalanceChanges)
+		for j, change := range account.BalanceChanges {
+			if change != nil {
+				changeCopy := *change
+				accountCopy.BalanceChanges[j] = &changeCopy
+			}
+		}
+		accountCopy.NonceChanges = slices.Clone(account.NonceChanges)
+		for j, change := range account.NonceChanges {
+			if change != nil {
+				changeCopy := *change
+				accountCopy.NonceChanges[j] = &changeCopy
+			}
+		}
+		accountCopy.CodeChanges = slices.Clone(account.CodeChanges)
+		for j, change := range account.CodeChanges {
+			if change != nil {
+				changeCopy := *change
+				changeCopy.Bytecode = bytes.Clone(change.Bytecode)
+				accountCopy.CodeChanges[j] = &changeCopy
+			}
+		}
+		cpy[i] = accountCopy
+	}
+	return cpy
+}
+
 // indexedChange interface for generic validation of change types with indices
 type indexedChange interface {
 	*StorageChange | *BalanceChange | *NonceChange | *CodeChange
@@ -83,14 +253,36 @@ func (nc *NonceChange) GetIndex() uint32   { return nc.Index }
 func (cc *CodeChange) GetIndex() uint32    { return cc.Index }
 func (sc *StorageChange) GetIndex() uint32 { return sc.Index }
 
+func encodingSizeSlotChanges(list []SlotChanges) int {
+	size := 0
+	for i := range list {
+		s := list[i].EncodingSize()
+		size += rlp.ListPrefixLen(s) + s
+	}
+	return size
+}
+
+func encodeSlotChanges(list []SlotChanges, w io.Writer, b []byte) error {
+	total := encodingSizeSlotChanges(list)
+	if err := rlp.EncodeListPrefix(total, w, b); err != nil {
+		return err
+	}
+	for i := range list {
+		if err := list[i].EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (ac *AccountChanges) EncodingSize() int {
 	size := 21 // address (1 prefix + 20 bytes)
-	storageChangesLen := EncodingSizeGenericList(ac.StorageChanges)
+	storageChangesLen := encodingSizeSlotChanges(ac.StorageChanges)
 	size += rlp.ListPrefixLen(storageChangesLen) + storageChangesLen
 	storageReadsLen := encodingSizeHashList(ac.StorageReads)
-	balanceChangesLen := EncodingSizeGenericList(ac.BalanceChanges)
-	nonceChangesLen := EncodingSizeGenericList(ac.NonceChanges)
-	codeChangesLen := EncodingSizeGenericList(ac.CodeChanges)
+	balanceChangesLen := encodingSizeBlockAccessList(ac.BalanceChanges)
+	nonceChangesLen := encodingSizeBlockAccessList(ac.NonceChanges)
+	codeChangesLen := encodingSizeBlockAccessList(ac.CodeChanges)
 	size += storageReadsLen
 	size += rlp.ListPrefixLen(balanceChangesLen) + balanceChangesLen
 	size += rlp.ListPrefixLen(nonceChangesLen) + nonceChangesLen
@@ -99,9 +291,6 @@ func (ac *AccountChanges) EncodingSize() int {
 }
 
 func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
-	if err := ac.validate(); err != nil {
-		return err
-	}
 	encodingSize := ac.EncodingSize()
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
@@ -119,7 +308,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := encodeBlockAccessList(ac.StorageChanges, w, b[:]); err != nil {
+	if err := encodeSlotChanges(ac.StorageChanges, w, b[:]); err != nil {
 		return err
 	}
 	if err := encodeHashList(ac.StorageReads, w, b[:]); err != nil {
@@ -150,7 +339,15 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	ac.StorageChanges = list
+	ac.StorageChanges = nil
+	if len(list) > 0 {
+		ac.StorageChanges = make([]SlotChanges, len(list))
+		for i, sc := range list {
+			if sc != nil {
+				ac.StorageChanges[i] = *sc
+			}
+		}
+	}
 
 	reads, err := decodeStorageKeys(s)
 	if err != nil {
@@ -176,24 +373,20 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	}
 	ac.CodeChanges = codes
 
-	if err := ac.validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
-	}
-
 	return s.ListEnd()
 }
 
 func (ac *AccountChanges) Normalize() {
 	if len(ac.StorageChanges) > 1 {
-		slices.SortFunc(ac.StorageChanges, func(a, b *SlotChanges) int {
+		slices.SortFunc(ac.StorageChanges, func(a, b SlotChanges) int {
 			return a.Slot.Cmp(b.Slot)
 		})
 	}
 
-	for _, slotChange := range ac.StorageChanges {
-		if len(slotChange.Changes) > 1 {
-			sortByIndex(slotChange.Changes)
-			slotChange.Changes = dedupByIndex(slotChange.Changes)
+	for i := range ac.StorageChanges {
+		if len(ac.StorageChanges[i].Changes) > 1 {
+			sortByIndex(ac.StorageChanges[i].Changes)
+			ac.StorageChanges[i].Changes = dedupByIndex(ac.StorageChanges[i].Changes)
 		}
 	}
 
@@ -218,16 +411,12 @@ func (ac *AccountChanges) Normalize() {
 
 func (sc *SlotChanges) EncodingSize() int {
 	size := rlp.Uint256Len(hashToUint256(sc.Slot.Value())) // minimal slot key
-	changesLen := EncodingSizeGenericList(sc.Changes)
+	changesLen := encodingSizeBlockAccessList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
 }
 
 func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
-	if err := sc.validate(); err != nil {
-		return err
-	}
-
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
 
@@ -258,10 +447,6 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	sc.Changes = changes
-
-	if err := sc.validate(); err != nil {
-		return err
-	}
 
 	return s.ListEnd()
 }
@@ -461,20 +646,39 @@ func sortByIndex[T interface{ GetIndex() uint32 }](changes []T) {
 	})
 }
 
-func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
-	slices.SortFunc(items, func(a, b T) int {
-		return bytes.Compare(a.GetBytes(), b.GetBytes())
-	})
-}
-
 func sortHashes(hashes []accounts.StorageKey) {
 	slices.SortFunc(hashes, func(a, b accounts.StorageKey) int {
 		return a.Cmp(b)
 	})
 }
 
-func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
-	total := EncodingSizeGenericList(items)
+type blockAccessListRLPItem interface {
+	rlpEncodable
+	*AccountChanges | *SlotChanges | *StorageChange | *BalanceChange | *NonceChange | *CodeChange
+}
+
+func encodingSizeBlockAccessList[T blockAccessListRLPItem](items []T) int {
+	var total int
+	for _, item := range items {
+		if item == nil {
+			total += rlp.ListPrefixLen(0)
+			continue
+		}
+		size := item.EncodingSize()
+		total += rlp.ListPrefixLen(size) + size
+	}
+	return total
+}
+
+func encodeBlockAccessList[T blockAccessListRLPItem](items []T, w io.Writer, buf []byte) error {
+	var total int
+	for i, item := range items {
+		if item == nil {
+			return fmt.Errorf("nil block access list item at index %d", i)
+		}
+		size := item.EncodingSize()
+		total += rlp.ListPrefixLen(size) + size
+	}
 	if err := rlp.EncodeListPrefix(total, w, buf); err != nil {
 		return err
 	}
@@ -487,9 +691,6 @@ func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) e
 }
 
 func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error {
-	if err := validateStorageReads(hashes); err != nil {
-		return err
-	}
 	total := 0
 	for i := range hashes {
 		total += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
@@ -513,9 +714,7 @@ func encodingSizeHashList(hashes []accounts.StorageKey) int {
 	return rlp.ListPrefixLen(size) + size
 }
 
-// ErrInvalidBlockAccessList marks a block access list that is well-formed RLP
-// but violates EIP-7928 ordering or uniqueness rules. Callers use it to
-// distinguish an invalid list from undecodable input.
+// ErrInvalidBlockAccessList marks a well-formed but semantically invalid block access list.
 var ErrInvalidBlockAccessList = errors.New("invalid block access list")
 
 func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
@@ -534,17 +733,10 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		return fmt.Errorf("block access list payload exceeds maximum size (%d bytes)", size)
 	}
 	var changes []*AccountChanges
-	var prevAddr common.Address
-	var hasPrev bool
 
 	for {
 		var ac AccountChanges
 		if err = ac.DecodeRLP(s); err != nil {
-			break
-		}
-		address := ac.Address.Value()
-		if hasPrev && bytes.Compare(prevAddr[:], address[:]) >= 0 {
-			err = fmt.Errorf("%w: addresses must be strictly increasing (prev=%s current=%s)", ErrInvalidBlockAccessList, prevAddr.Hex(), address.Hex())
 			break
 		}
 		acCopy := ac
@@ -553,10 +745,8 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 			err = fmt.Errorf("block access list exceeds maximum accounts (%d)", maxBlockAccessAccounts)
 			break
 		}
-		prevAddr = address
-		hasPrev = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return err
 	}
 	if len(changes) == 0 {
@@ -565,11 +755,17 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		*out = make(BlockAccessList, 0)
 		return nil
 	}
-	*out = changes
+	bal := make(BlockAccessList, len(changes))
+	for i, ac := range changes {
+		if ac != nil {
+			bal[i] = *ac
+		}
+	}
+	*out = bal
 	return nil
 }
 
-// DecodeBlockAccessListBytes decodes an RLP-encoded block access list and returns it.
+// DecodeBlockAccessListBytes decodes a syntactically valid RLP block access list.
 func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	stream := rlp.NewStream(bytes.NewReader(data), 0)
 	var bal BlockAccessList
@@ -585,20 +781,33 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	return bal, nil
 }
 
-// EncodeBlockAccessListBytes encodes a block access list into RLP bytes.
+// EncodeBlockAccessListBytes encodes a block access list without semantic validation.
 func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
-	if err := bal.Validate(); err != nil {
-		return nil, err
-	}
 	var buf bytes.Buffer
 	encBuf := rlp.NewEncodingBuf()
 	defer encBuf.Release()
-	if err := encodeBlockAccessList(bal, &buf, encBuf[:]); err != nil {
+	if err := encodeAccountChanges(bal, &buf, encBuf[:]); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
+func encodeAccountChanges(list []AccountChanges, w io.Writer, b []byte) error {
+	var total int
+	for i := range list {
+		size := list[i].EncodingSize()
+		total += rlp.ListPrefixLen(size) + size
+	}
+	if err := rlp.EncodeListPrefix(total, w, b); err != nil {
+		return err
+	}
+	for i := range list {
+		if err := list[i].EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 	var err error
 	var size uint64
@@ -612,16 +821,9 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 		return nil, fmt.Errorf("slot changes list payload exceeds maximum size (%d bytes)", size)
 	}
 	var out []*SlotChanges
-	var prevSlot common.Hash
-	var hasPrev bool
 	for {
 		sc := new(SlotChanges)
 		if err = sc.DecodeRLP(s); err != nil {
-			break
-		}
-		slot := sc.Slot.Value()
-		if hasPrev && bytes.Compare(prevSlot[:], slot[:]) >= 0 {
-			err = fmt.Errorf("%w: storage slot list must be strictly increasing (prev=%x current=%x)", ErrInvalidBlockAccessList, prevSlot, sc.Slot)
 			break
 		}
 		out = append(out, sc)
@@ -629,14 +831,9 @@ func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 			err = fmt.Errorf("storage slot change list exceeds maximum entries (%d)", maxSlotChangesPerAccount)
 			break
 		}
-		prevSlot = slot
-		hasPrev = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
-	}
-	if err := validateSlotChangeList(out); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -661,11 +858,8 @@ func decodeStorageChanges(s *rlp.Stream) ([]*StorageChange, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
-	}
-	if err := validateStorageChangeEntries(out); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -690,11 +884,8 @@ func decodeBalanceChanges(s *rlp.Stream) ([]*BalanceChange, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
-	}
-	if err := validateBalanceChangeList(out); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -708,15 +899,9 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 		return nil, err
 	}
 	var out []*NonceChange
-	var lastIdx uint32
-	var hasLast bool
 	for {
 		change := new(NonceChange)
 		if err = change.DecodeRLP(s); err != nil {
-			break
-		}
-		if hasLast && change.Index <= lastIdx {
-			err = fmt.Errorf("%w: nonce change indices must be strictly increasing (prev=%d current=%d)", ErrInvalidBlockAccessList, lastIdx, change.Index)
 			break
 		}
 		out = append(out, change)
@@ -724,14 +909,9 @@ func decodeNonceChanges(s *rlp.Stream) ([]*NonceChange, error) {
 			err = fmt.Errorf("nonce change list exceeds maximum entries (%d)", maxIndexedChangesPerAccount)
 			break
 		}
-		lastIdx = change.Index
-		hasLast = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
-	}
-	if err := validateNonceChangeList(out); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -745,8 +925,6 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 		return nil, err
 	}
 	var out []*CodeChange
-	var lastIdx uint32
-	var hasLast bool
 	for {
 		change := new(CodeChange)
 		if err = change.DecodeRLP(s); err != nil {
@@ -757,18 +935,9 @@ func decodeCodeChanges(s *rlp.Stream) ([]*CodeChange, error) {
 			err = fmt.Errorf("code change list exceeds maximum entries (%d)", maxIndexedChangesPerAccount)
 			break
 		}
-		if hasLast && change.Index <= lastIdx {
-			err = fmt.Errorf("%w: code change indices must be strictly increasing (prev=%d current=%d)", ErrInvalidBlockAccessList, lastIdx, change.Index)
-			break
-		}
-		lastIdx = change.Index
-		hasLast = true
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
-	}
-	if err := validateCodeChangeList(out); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return out, nil
 }
@@ -798,11 +967,8 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 			break
 		}
 	}
-	if err = checkErrListEnd(s, err); err != nil {
+	if err := checkErrListEnd(s, err); err != nil {
 		return nil, err
-	}
-	if err := validateStorageReads(hashes); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
 	}
 	return hashes, nil
 }
@@ -842,10 +1008,8 @@ func (bal BlockAccessList) Validate() error {
 	}
 	var prev common.Address
 	var hasPrev bool
-	for i, account := range bal {
-		if account == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
+	for i := range bal {
+		account := &bal[i]
 		address := account.Address.Value()
 		if hasPrev && bytes.Compare(prev[:], address[:]) >= 0 {
 			return fmt.Errorf("account addresses must be strictly increasing (index %d)", i)
@@ -859,15 +1023,27 @@ func (bal BlockAccessList) Validate() error {
 	return nil
 }
 
+// ValidateForBlock validates a block access list against its block gas limit.
+func (bal BlockAccessList) ValidateForBlock(gasLimit uint64) error {
+	err := bal.Validate()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
+	}
+	if err = bal.ValidateMaxItems(gasLimit); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidBlockAccessList, err)
+	}
+	return nil
+}
+
 // ValidateMaxItems checks the EIP-7928 constraint: bal_items <= blockGasLimit / BalItemCost
 // where bal_items = count(addresses) + count(storage keys across all accounts).
 func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
 	maxItems := blockGasLimit / BalItemCost
 	var items uint64
-	for _, ac := range bal {
+	for i := range bal {
 		items++ // each address counts as 1 item
-		items += uint64(len(ac.StorageChanges))
-		items += uint64(len(ac.StorageReads))
+		items += uint64(len(bal[i].StorageChanges))
+		items += uint64(len(bal[i].StorageReads))
 	}
 	if items > maxItems {
 		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)
@@ -879,7 +1055,7 @@ func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
 	}
-	if err := validateSlotChangeList(ac.StorageChanges); err != nil {
+	if err := validateSlotChanges(ac.StorageChanges); err != nil {
 		return fmt.Errorf("storage_changes: %w", err)
 	}
 	if err := validateStorageReads(ac.StorageReads); err != nil {
@@ -905,16 +1081,6 @@ func (ac *AccountChanges) validate() error {
 	}
 	if err := validateCodeChangeList(ac.CodeChanges); err != nil {
 		return fmt.Errorf("code_changes: %w", err)
-	}
-	return nil
-}
-
-func (sc *SlotChanges) validate() error {
-	if sc == nil {
-		return errors.New("nil slot change entry")
-	}
-	if err := validateStorageChangeEntries(sc.Changes); err != nil {
-		return err
 	}
 	return nil
 }
@@ -995,19 +1161,15 @@ func validateHashOrdering(hashes []accounts.StorageKey, maxCount int, typeName s
 	return nil
 }
 
-// validateSlotChangeList validates a slice of SlotChanges with hash ordering and nil checks
-func validateSlotChangeList(slots []*SlotChanges) error {
+func validateSlotChanges(slots []SlotChanges) error {
 	if len(slots) == 0 {
 		return nil
 	}
 	if len(slots) > maxSlotChangesPerAccount {
 		return fmt.Errorf("too many storage slot entries (%d > %d)", len(slots), maxSlotChangesPerAccount)
 	}
-	for i, slot := range slots {
-		if slot == nil {
-			return fmt.Errorf("entry %d is nil", i)
-		}
-		if err := validateStorageChangeEntries(slot.Changes); err != nil {
+	for i := range slots {
+		if err := validateStorageChangeEntries(slots[i].Changes); err != nil {
 			return fmt.Errorf("entry %d: %w", i, err)
 		}
 	}
@@ -1030,11 +1192,8 @@ func (bal BlockAccessList) DebugString() string {
 
 func (bal BlockAccessList) DebugPrint(w io.Writer) {
 	fmt.Fprintf(w, "accounts=%d", len(bal))
-	for i, account := range bal {
-		if account == nil {
-			fmt.Fprintf(w, "\n[%d] <nil>", i)
-			continue
-		}
+	for i := range bal {
+		account := &bal[i]
 		fmt.Fprintf(w, "\n[%d] addr=%s", i, account.Address.Value().Hex())
 		if len(account.StorageChanges) > 0 {
 			fmt.Fprint(w, "\n  storageChanges:")
@@ -1116,13 +1275,13 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 	}
 	bal := make(BlockAccessList, len(protoList))
 	for i, acc := range protoList {
-		bal[i] = &AccountChanges{
+		bal[i] = AccountChanges{
 			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(acc.Address)),
 		}
 		if acc.StorageChanges != nil {
-			bal[i].StorageChanges = make([]*SlotChanges, len(acc.StorageChanges))
+			bal[i].StorageChanges = make([]SlotChanges, len(acc.StorageChanges))
 			for j, sc := range acc.StorageChanges {
-				bal[i].StorageChanges[j] = &SlotChanges{
+				bal[i].StorageChanges[j] = SlotChanges{
 					Slot: accounts.InternKey(gointerfaces.ConvertH256ToHash(sc.Slot)),
 				}
 				if sc.Changes != nil {
@@ -1184,17 +1343,13 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 		return nil
 	}
 	out := make([]*typesproto.BlockAccessListAccount, 0, len(bal))
-	for _, account := range bal {
-		if account == nil {
-			continue
-		}
+	for ai := range bal {
+		account := &bal[ai]
 		balAccount := &typesproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
-		for _, storageChange := range account.StorageChanges {
-			if storageChange == nil {
-				continue
-			}
+		for si := range account.StorageChanges {
+			storageChange := &account.StorageChanges[si]
 			slotChanges := &typesproto.BlockAccessListSlotChanges{
 				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
 			}
@@ -1268,17 +1423,13 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 		return nil
 	}
 	out := make([]*executionproto.BlockAccessListAccount, 0, len(bal))
-	for _, account := range bal {
-		if account == nil {
-			continue
-		}
+	for ai := range bal {
+		account := &bal[ai]
 		rpcAccount := &executionproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
-		for _, storageChange := range account.StorageChanges {
-			if storageChange == nil {
-				continue
-			}
+		for si := range account.StorageChanges {
+			storageChange := &account.StorageChanges[si]
 			slotChanges := &executionproto.BlockAccessListSlotChanges{
 				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
 			}
@@ -1368,7 +1519,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 					Value: *val,
 				})
 			}
-			accountChanges.StorageChanges = append(accountChanges.StorageChanges, slotChanges)
+			accountChanges.StorageChanges = append(accountChanges.StorageChanges, *slotChanges)
 		}
 		for readIdx, read := range account.StorageReads {
 			if read == nil {
@@ -1412,7 +1563,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 				Bytecode: data,
 			})
 		}
-		out = append(out, accountChanges)
+		out = append(out, *accountChanges)
 	}
 	if err := out.Validate(); err != nil {
 		return nil, fmt.Errorf("blockAccessList validate: %w", err)

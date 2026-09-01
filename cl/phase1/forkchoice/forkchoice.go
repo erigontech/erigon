@@ -159,18 +159,26 @@ type ForkChoiceStore struct {
 
 	emitters *beaconevents.EventEmitter
 	// event sends queued under f.mu, emitted after release (see queueEmit)
-	queuedEmits  []func()
-	queuedPrunes []uint64
-	synced       atomic.Bool
+	queuedEmits           []func()
+	queuedPrunes          []uint64
+	queuedOperationPrunes []solid.Checkpoint
+	operationPruneMu      sync.Mutex
+	operationPruneTarget  solid.Checkpoint
+	operationPrunePending bool
+	operationPruneRunning bool
+	synced                atomic.Bool
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects read-modify-write on payloadTimelinessVote and payloadDataAvailabilityVote
+	ptcVoteMu                   sync.Mutex // protects payload vote updates and first-valid gossip tracking
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadAttestationSeenSlot  uint64
+	payloadAttestationSeen      map[uint64]struct{}
+	payloadAttestationContexts  *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -194,13 +202,22 @@ type ForkChoiceStore struct {
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
 	// eventually receives the blocks.
-	pendingELPayloadsMu sync.Mutex
-	pendingELPayloads   []PendingELPayload
+	pendingELPayloadsMu        sync.Mutex
+	pendingELPayloads          []PendingELPayload
+	payloadValidationOnce      sync.Once
+	payloadValidationAdmission chan struct{}
+	envelopeIndexWrites        sync.Map
 
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
 	// index writes are skipped.
 	db kv.RwDB
+}
+
+type envelopeIndexWrite struct {
+	done     chan struct{}
+	err      error
+	envelope *cltypes.SignedExecutionPayloadEnvelope
 }
 
 // PendingELPayload holds a block+envelope pair that needs to be fed to the EL.
@@ -330,6 +347,10 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	payloadAttestationContexts, err := newPayloadAttestationValidationContexts()
+	if err != nil {
+		return nil, err
+	}
 
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
@@ -387,6 +408,7 @@ func NewForkChoiceStore(
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,
 		executionPayloadGasLimit:       executionPayloadGasLimit,
+		payloadAttestationContexts:     payloadAttestationContexts,
 		db:                             db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
@@ -547,14 +569,6 @@ func (f *ForkChoiceStore) JustifiedSlot() uint64 {
 // (spec: store.unrealized_justifications[block_root])
 func (f *ForkChoiceStore) getUnrealizedJustification(blockRoot common.Hash) (solid.Checkpoint, bool) {
 	obj, ok := f.unrealizedJustifications.Load(blockRoot)
-	if !ok {
-		return solid.Checkpoint{}, false
-	}
-	return obj.(solid.Checkpoint), true
-}
-
-func (f *ForkChoiceStore) getUnrealizedFinalization(blockRoot common.Hash) (solid.Checkpoint, bool) {
-	obj, ok := f.unrealizedFinalizations.Load(blockRoot)
 	if !ok {
 		return solid.Checkpoint{}, false
 	}
@@ -1086,10 +1100,25 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 // DrainPendingELPayloads returns and clears all queued EL payloads.
 // The stages layer calls this before Flush() to retry them with engine.NewPayload.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
+	return f.DrainPendingELPayloadsLimit(maxPendingELPayloads)
+}
+
+func (f *ForkChoiceStore) DrainPendingELPayloadsLimit(limit int) []PendingELPayload {
+	if limit <= 0 {
+		return nil
+	}
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
 	if len(f.pendingELPayloads) == 0 {
 		return nil
+	}
+	if len(f.pendingELPayloads) > limit {
+		result := make([]PendingELPayload, limit)
+		copy(result, f.pendingELPayloads[:limit])
+		copy(f.pendingELPayloads, f.pendingELPayloads[limit:])
+		clear(f.pendingELPayloads[len(f.pendingELPayloads)-limit:])
+		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-limit]
+		return result
 	}
 	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
 		result := f.pendingELPayloads

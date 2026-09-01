@@ -156,11 +156,10 @@ func TestLivenessEndpoint_ValidatorLiveViaParticipation(t *testing.T) {
 	body, err := json.Marshal([]string{"0", "1"})
 	require.NoError(t, err)
 
-	resp, err := server.Client().Post(
-		server.URL+"/eth/v1/validator/liveness/"+epochStr(epoch),
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/liveness/"+epochStr(epoch), bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -214,11 +213,10 @@ func TestLivenessEndpoint_NoParticipationNotLive(t *testing.T) {
 	body, err := json.Marshal([]string{"5"})
 	require.NoError(t, err)
 
-	resp, err := server.Client().Post(
-		server.URL+"/eth/v1/validator/liveness/"+epochStr(epoch),
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/liveness/"+epochStr(epoch), bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -257,11 +255,10 @@ func TestLivenessEndpoint_FutureEpochReturnsError(t *testing.T) {
 	body, err := json.Marshal([]string{"0"})
 	require.NoError(t, err)
 
-	resp, err := server.Client().Post(
-		server.URL+"/eth/v1/validator/liveness/"+epochStr(futureEpoch),
-		"application/json",
-		bytes.NewReader(body),
-	)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/liveness/"+epochStr(futureEpoch), bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

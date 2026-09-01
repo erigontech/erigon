@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
@@ -96,7 +96,7 @@ func realisticHeader(blockNum uint64) *types.Header {
 // This is the first step of CanonicalHash on every call; it is identical on
 // main and on this branch.
 func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
-	db := memdb.NewTestDB(b, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(b, dbcfg.ChainDB)
 
 	rwTx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -201,7 +201,7 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 		b.Skip("no blocks available in snapshot dir")
 	}
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	// Use an empty memdb so every lookup misses the DB and falls through to snapshots.
 	tx, err := db.BeginRo(context.Background())
@@ -260,7 +260,7 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 		b.Skip("no blocks available in snapshot dir")
 	}
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	ctx := context.Background()
 	tx, err := db.BeginRo(ctx)
@@ -321,7 +321,7 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 		b.Skip("no blocks available in snapshot dir")
 	}
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {

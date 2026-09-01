@@ -130,17 +130,7 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) (
 	res := make([]types.Log, len(rpcLogs))
 
 	for i, log := range rpcLogs {
-		res[i] = types.Log{
-			Address:     log.Address,
-			Topics:      log.Topics,
-			Data:        log.Data,
-			BlockNumber: log.BlockNumber,
-			TxHash:      log.TxHash,
-			TxIndex:     log.TxIndex,
-			BlockHash:   log.BlockHash,
-			Index:       log.Index,
-			Removed:     log.Removed,
-		}
+		res[i] = log.Log
 	}
 
 	return res, nil
@@ -161,12 +151,12 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query bind.Filte
 				close(closec)
 				return nil
 			case res := <-resc:
-				log, ok := res.(*types.Log)
+				log, ok := res.(*types.RPCLog)
 				if !ok {
 					return fmt.Errorf("unexpected type %T in SubscribeFilterLogs", res)
 				}
 
-				ch <- *log
+				ch <- log.Log
 			}
 		}
 	})
@@ -201,25 +191,10 @@ func CallArgsFromCallMsg(callMsg bind.CallMsg) ethapi.CallArgs {
 		gas = (*hexutil.Uint64)(&callMsg.Gas)
 	}
 
-	var gasPrice *hexutil.Big
-	if callMsg.GasPrice != nil {
-		gasPrice = (*hexutil.Big)(callMsg.GasPrice.ToBig())
-	}
-
-	var feeCap *hexutil.Big
-	if callMsg.FeeCap != nil {
-		feeCap = (*hexutil.Big)(callMsg.FeeCap.ToBig())
-	}
-
-	var maxFeePerBlobGas *hexutil.Big
-	if callMsg.MaxFeePerBlobGas != nil {
-		maxFeePerBlobGas = (*hexutil.Big)(callMsg.MaxFeePerBlobGas.ToBig())
-	}
-
-	var value *hexutil.Big
-	if callMsg.Value != nil {
-		value = (*hexutil.Big)(callMsg.Value.ToBig())
-	}
+	gasPrice := (*hexutil.U256)(callMsg.GasPrice)
+	feeCap := (*hexutil.U256)(callMsg.FeeCap)
+	maxFeePerBlobGas := (*hexutil.U256)(callMsg.MaxFeePerBlobGas)
+	value := (*hexutil.U256)(callMsg.Value)
 
 	var data *hexutil.Bytes
 	if callMsg.Data != nil {

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // The merge goroutine BuildFiles2 spawns must register on wg before the build
@@ -42,11 +43,11 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 	logger := log.New()
 	for range 64 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
 		require.NoError(t, agg.OpenFolder())
 
-		require.NoError(t, agg.BuildFiles2(t.Context(), 0, 0, true))
+		require.NoError(t, agg.BuildFiles2(t.Context(), 0, 0, unboundedFinalityCtx, true))
 		agg.background.Wait()
 		agg.Close()
 		db.Close()
@@ -61,7 +62,7 @@ func TestAggregatorCloseVsConcurrentMergeLoop(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
 		require.NoError(t, agg.OpenFolder())
 
@@ -87,7 +88,7 @@ func TestAggregatorCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
 		require.NoError(t, agg.OpenFolder())
 
@@ -98,7 +99,7 @@ func TestAggregatorCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				fins <- agg.BuildFilesInBackground(1_000_000)
+				fins <- agg.BuildFilesInBackground(1_000_000, unboundedFinalityCtx)
 			})
 		}
 		close(start)
@@ -118,7 +119,7 @@ func TestAggregatorCloseVsConcurrentBuildFiles2(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
 		require.NoError(t, agg.OpenFolder())
 
@@ -128,7 +129,7 @@ func TestAggregatorCloseVsConcurrentBuildFiles2(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				_ = agg.BuildFiles2(context.Background(), 0, 0, true)
+				_ = agg.BuildFiles2(context.Background(), 0, 0, unboundedFinalityCtx, true)
 			})
 		}
 		close(start)
@@ -144,7 +145,7 @@ func TestAggregatorConcurrentClose(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
 		require.NoError(t, agg.OpenFolder())
 
@@ -171,7 +172,7 @@ func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	defer db.Close()
 	agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
 	require.NoError(t, agg.OpenFolder())

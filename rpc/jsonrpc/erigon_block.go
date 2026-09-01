@@ -91,6 +91,8 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, err
 	}
 	defer tx.Rollback()
+	// Use one overlay view for the timestamp search and block assembly so the
+	// head, bounds, and lookups cannot switch generations.
 	overlayTx := api.filters.WithOverlay(tx)
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
@@ -102,7 +104,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
-	firstHeader, err := api.headerByNumber(ctx, 0, tx)
+	firstHeader, err := api.headerByNumber(ctx, 0, overlayTx)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return currentHeader.Time >= uintTimestamp
 	})
 
-	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), overlayTx)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +156,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	for resultingHeader.Time > uintTimestamp {
-		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, tx)
+		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, overlayTx)
 		if err != nil {
 			return nil, err
 		}
@@ -198,7 +200,7 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 
 	additionalFields := make(map[string]any)
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, additionalFields)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -209,14 +211,14 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 	return response, err
 }
 
-func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
+func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	balancesMapping := make(map[common.Address]*hexutil.Big)
+	balancesMapping := make(map[common.Address]*hexutil.U256)
 
 	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
@@ -259,7 +261,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 		var oldAcc accounts.Account
 		if len(v) > 0 {
-			if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
+			if err := accounts.DeserialiseV3(&oldAcc, v); err != nil {
 				return nil, err
 			}
 		}
@@ -277,8 +279,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		}
 
 		if !oldBalance.Eq(newBalance) {
-			newBalanceDesc := (*hexutil.Big)(newBalance.ToBig())
-			balancesMapping[address.Value()] = newBalanceDesc
+			balancesMapping[address.Value()] = (*hexutil.U256)(newBalance)
 		}
 	}
 

@@ -28,28 +28,28 @@ import (
 // that callers feed to CheckBlockGasInclusion:
 //
 //	pre-Amsterdam: (gas, 0)
-//	Amsterdam:     regular = min(MaxTxnGasLimit, tx.gas), state = tx.gas
+//	Amsterdam:     execution = min(MaxTxnGasLimit, tx.gas), state = tx.gas
 //
 // The full gas_limit is reserved in both dimensions (EIP-8037 check_transaction
-// checks min(TX_MAX_GAS_LIMIT, tx.gas) against the regular reservoir and tx.gas
+// checks min(TX_MAX_GAS_LIMIT, tx.gas) against the execution reservoir and tx.gas
 // against the state reservoir); no intrinsic gas is subtracted.
 func TestInclusionContributions(t *testing.T) {
 	t.Run("pre-Amsterdam returns (gas, 0)", func(t *testing.T) {
-		regular, state := InclusionContributions(100_000, false)
-		require.Equal(t, uint64(100_000), regular)
+		execution, state := InclusionContributions(100_000, false)
+		require.Equal(t, uint64(100_000), execution)
 		require.Equal(t, uint64(0), state)
 	})
 
 	t.Run("Amsterdam reserves the full gas_limit in both dimensions", func(t *testing.T) {
-		regular, state := InclusionContributions(50_000, true)
-		require.Equal(t, uint64(50_000), regular)
+		execution, state := InclusionContributions(50_000, true)
+		require.Equal(t, uint64(50_000), execution)
 		require.Equal(t, uint64(50_000), state)
 	})
 
-	t.Run("Amsterdam caps regular at MaxTxnGasLimit, leaves state uncapped", func(t *testing.T) {
+	t.Run("Amsterdam caps execution at MaxTxnGasLimit, leaves state uncapped", func(t *testing.T) {
 		gas := params.MaxTxnGasLimit + 1_000_000
-		regular, state := InclusionContributions(gas, true)
-		require.Equal(t, params.MaxTxnGasLimit, regular)
+		execution, state := InclusionContributions(gas, true)
+		require.Equal(t, params.MaxTxnGasLimit, execution)
 		require.Equal(t, gas, state)
 	})
 }

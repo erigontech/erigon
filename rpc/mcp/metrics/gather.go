@@ -159,18 +159,19 @@ func matchPattern(pattern, name string) bool {
 	starIdx, matchIdx := -1, 0
 
 	for i < len(name) {
-		if j < len(pattern) && (pattern[j] == name[i] || pattern[j] == '?') {
+		switch {
+		case j < len(pattern) && (pattern[j] == name[i] || pattern[j] == '?'):
 			i++
 			j++
-		} else if j < len(pattern) && pattern[j] == '*' {
+		case j < len(pattern) && pattern[j] == '*':
 			starIdx = j
 			matchIdx = i
 			j++
-		} else if starIdx != -1 {
+		case starIdx != -1:
 			j = starIdx + 1
 			matchIdx++
 			i = matchIdx
-		} else {
+		default:
 			return false
 		}
 	}

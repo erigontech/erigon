@@ -33,20 +33,20 @@ func TestParseVersion(t *testing.T) {
 			false,
 		},
 		{
-			"v1.0-008800-008900-bormilestones.seg",
-			args{v: "v1.0-008800-008900-bormilestones.seg"},
+			"v1.0-008800-008900-accessors.seg",
+			args{v: "v1.0-008800-008900-accessors.seg"},
 			V1_0,
 			false,
 		},
 		{
-			"v1-008800-008900-bormilestones.seg",
-			args{v: "v1-008800-008900-bormilestones.seg"},
+			"v1-008800-008900-accessors.seg",
+			args{v: "v1-008800-008900-accessors.seg"},
 			V1_0,
 			false,
 		},
 		{
-			"v2.0-008800-008900-bormilestones.seg",
-			args{v: "v2.0-008800-008900-bormilestones.seg"},
+			"v2.0-008800-008900-accessors.seg",
+			args{v: "v2.0-008800-008900-accessors.seg"},
 			V2_0,
 			false,
 		},
@@ -178,6 +178,49 @@ func TestFindFilesWithVersionsByPattern_InvalidPattern(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("expected ok == false on error, got true")
+	}
+}
+
+func TestGroupByMaskedName(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{
+		"v1.0-accounts.0-64.kv",
+		"v1.1-accounts.0-64.kv", // same logical file, different version
+		"v1.0-storage.0-64.kv",
+		"v1.0-accounts.0-64.kv.tmp", // .tmp leftover, must be skipped
+		"salt-blocks.txt",           // unversioned, must be skipped
+	} {
+		if err := touch(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("failed to create %q: %v", name, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "history"), 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+
+	groups, err := GroupByMaskedName(filepath.Join(dir, "*"))
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 masked groups, got %d: %v", len(groups), groups)
+	}
+	if got := groups["*-accounts.0-64.kv"]; len(got) != 2 {
+		t.Fatalf("expected 2 versions of accounts, got %d: %v", len(got), got)
+	}
+	if got := groups["*-storage.0-64.kv"]; len(got) != 1 {
+		t.Fatalf("expected 1 version of storage, got %d: %v", len(got), got)
+	}
+}
+
+func TestGroupByMaskedName_MissingDir(t *testing.T) {
+	groups, err := GroupByMaskedName(filepath.Join(t.TempDir(), "does-not-exist", "*"))
+	if err != nil {
+		t.Fatalf("expected no error for missing dir, got %v", err)
+	}
+	if len(groups) != 0 {
+		t.Fatalf("expected empty result, got %v", groups)
 	}
 }
 

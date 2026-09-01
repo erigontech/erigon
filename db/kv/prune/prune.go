@@ -18,6 +18,7 @@ type Stat struct {
 	MaxTxNum         uint64
 	PruneCountTx     uint64
 	PruneCountValues uint64
+	ScanCountKeys    uint64
 	DupsDeleted      uint64
 	LastPrunedValue  []byte
 	LastPrunedKey    []byte
@@ -135,7 +136,7 @@ func HashSeekingPrune(
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, binary.BigEndian.Uint64(txnm))
 			}
-			if err = valDelCursor.DeleteCurrent(); err != nil {
+			if err := valDelCursor.DeleteCurrent(); err != nil {
 				return err
 			}
 		case DefaultStorageMode:
@@ -168,7 +169,7 @@ func HashSeekingPrune(
 				break
 			}
 			stat.PruneCountTx++
-			if err = keysCursor.Delete(txnb); err != nil {
+			if err := keysCursor.Delete(txnb); err != nil {
 				return nil, err
 			}
 		}
@@ -252,7 +253,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
 			}
 		}
@@ -333,6 +334,7 @@ func tableScanningPrune(
 		if ctx.Err() != nil {
 			return bytes.Clone(val), nil
 		}
+		stat.ScanCountKeys++
 
 		// Different storage modes have different dup-iteration orders:
 		//   - StepValueStorageMode (^step||val): FirstDup = newest, LastDup = oldest
@@ -414,7 +416,7 @@ func tableScanningPrune(
 				}
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = valDelCursor.DeleteCurrent(); err != nil {
+				if err := valDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 				stat.PruneCountValues++
@@ -434,7 +436,7 @@ func tableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			args := []any{"name", filenameBase, "pruned values", stat.PruneCountValues}
+			args := []any{"name", filenameBase, "scanned keys", stat.ScanCountKeys, "pruned values", stat.PruneCountValues}
 			if keysCursor != nil {
 				args = append(args, "pruned tx", stat.PruneCountTx)
 			}
