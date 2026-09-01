@@ -277,7 +277,6 @@ func TestSimulateV1RejectsNonCanonicalBlockHash(t *testing.T) {
 func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
-	statecfg.Schema.CommitmentDomain.EdgeRecordsInCommitment = false
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, _, _ := chainWithDeployedContract(t)

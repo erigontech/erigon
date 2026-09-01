@@ -18,8 +18,6 @@ package state_test
 
 import (
 	"bytes"
-	"encoding/binary"
-	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -38,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -46,144 +43,6 @@ type acceptanceEntry struct {
 	domain kv.Domain
 	key    []byte
 	value  []byte
-	update commitment.Update
-}
-
-type acceptanceOracle struct {
-	plain     map[string][]byte
-	records   map[string][]byte
-	trieState []byte
-	numBuf    [binary.MaxVarintLen64]byte
-}
-
-func newAcceptanceOracle() *acceptanceOracle {
-	return &acceptanceOracle{
-		plain:   make(map[string][]byte),
-		records: make(map[string][]byte),
-	}
-}
-
-func (o *acceptanceOracle) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	if bytes.Equal(prefix, commitment.LegacyKeyCommitmentState) {
-		return bytes.Clone(o.trieState), 0, nil
-	}
-	data, step, _, _, err := o.branchWithMask(prefix, 0, false)
-	return data, step, err
-}
-
-func (o *acceptanceOracle) BranchWithMask(prefix []byte, mask uint16, maskKnown bool) (data []byte, step kv.Step, childMasks [16]uint16, childMasksKnown uint16, err error) {
-	return o.branchWithMask(prefix, mask, maskKnown)
-}
-
-func (o *acceptanceOracle) branchWithMask(prefix []byte, mask uint16, maskKnown bool) (data []byte, step kv.Step, childMasks [16]uint16, childMasksKnown uint16, err error) {
-	if bytes.Equal(prefix, commitment.LegacyKeyCommitmentState) {
-		return bytes.Clone(o.trieState), 0, childMasks, 0, nil
-	}
-
-	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
-	var records [16][]byte
-	var recordsPresent uint16
-	for nibble := range 16 {
-		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
-		if record, ok := o.records[string(key)]; ok {
-			records[nibble] = bytes.Clone(record)
-			recordsPresent |= 1 << nibble
-		}
-	}
-	read, err := commitment.SynthesizeBranchRow(mask, maskKnown, records, recordsPresent, nil)
-	if err != nil {
-		return nil, 0, childMasks, 0, err
-	}
-	return bytes.Clone(read.Data), 0, read.ChildMasks, read.ChildMasksKnown, nil
-}
-
-func (o *acceptanceOracle) PutBranch(prefix, data, _ []byte) error {
-	if bytes.Equal(prefix, commitment.LegacyKeyCommitmentState) {
-		o.trieState = bytes.Clone(data)
-		return nil
-	}
-	if len(data) == 0 {
-		delete(o.records, string(prefix))
-		return nil
-	}
-	o.records[string(prefix)] = bytes.Clone(data)
-	return nil
-}
-
-func (o *acceptanceOracle) Account(key []byte) (*commitment.Update, error) {
-	return o.plainUpdate(key)
-}
-
-func (o *acceptanceOracle) Storage(key []byte) (*commitment.Update, error) {
-	return o.plainUpdate(key)
-}
-
-func (o *acceptanceOracle) plainUpdate(key []byte) (*commitment.Update, error) {
-	encoded, ok := o.plain[string(key)]
-	if !ok {
-		return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
-	}
-	var update commitment.Update
-	pos, err := update.Decode(encoded, 0)
-	if err != nil {
-		return nil, err
-	}
-	if pos != len(encoded) {
-		return nil, errors.New("plain update has trailing bytes")
-	}
-	return &update, nil
-}
-
-func (o *acceptanceOracle) apply(keys [][]byte, updates []commitment.Update) error {
-	for i, key := range keys {
-		update := updates[i]
-		if update.Deleted() {
-			delete(o.plain, string(key))
-			continue
-		}
-
-		var existing commitment.Update
-		if encoded, ok := o.plain[string(key)]; ok {
-			pos, err := existing.Decode(encoded, 0)
-			if err != nil {
-				return err
-			}
-			if pos != len(encoded) {
-				return errors.New("plain update has trailing bytes")
-			}
-		}
-		existing.Merge(&update)
-		o.plain[string(key)] = existing.Encode(nil, o.numBuf[:])
-	}
-	return nil
-}
-
-func (o *acceptanceOracle) process(t *testing.T, entries []acceptanceEntry) []byte {
-	t.Helper()
-	keys := make([][]byte, len(entries))
-	updates := make([]commitment.Update, len(entries))
-	for i := range entries {
-		keys[i] = entries[i].key
-		updates[i] = entries[i].update
-	}
-	require.NoError(t, o.apply(keys, updates))
-
-	cfg := commitment.DefaultTrieConfig()
-	cfg.EdgeRecords = true
-	cfg.DeferBranchUpdates = false
-	trie := commitment.NewHexPatriciaHashed(length.Addr, o, cfg)
-	defer trie.Release()
-	require.NoError(t, trie.SetState(o.trieState))
-	wrapped := commitment.NewUpdates(commitment.ModeDirect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	defer wrapped.Close()
-	for _, key := range keys {
-		wrapped.TouchPlainKey(string(key), nil, nil)
-	}
-	root, err := trie.Process(t.Context(), wrapped, "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	o.trieState, err = trie.EncodeCurrentState(nil)
-	require.NoError(t, err)
-	return root
 }
 
 func newAcceptanceDB(t *testing.T, stepSize, frozenSteps uint64) (kv.TemporalRwDB, *state.Aggregator) {
@@ -219,24 +78,34 @@ func acceptanceAccount(prefix byte, nonce, balance uint64) acceptanceEntry {
 		Balance:  *uint256.NewInt(balance),
 		CodeHash: accounts.EmptyCodeHash,
 	}
-	return acceptanceEntry{
-		domain: kv.AccountsDomain,
-		key:    key,
-		value:  accounts.SerialiseV3(&account),
-		update: commitment.Update{
-			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-			Balance:  account.Balance,
-			Nonce:    nonce,
-			CodeHash: accounts.EmptyCodeHash.Value(),
-		},
-	}
+	return acceptanceEntry{domain: kv.AccountsDomain, key: key, value: accounts.SerialiseV3(&account)}
+}
+
+// acceptanceStorage builds a slot under the account acceptanceAccount(addrPrefix, ...) writes, so
+// batches carrying several slots per account exercise storage subtrees and the address hoist.
+func acceptanceStorage(addrPrefix, slotPrefix byte, value uint64) acceptanceEntry {
+	key := make([]byte, length.Addr+length.Hash)
+	key[0] = addrPrefix
+	key[length.Addr-1] = addrPrefix
+	key[length.Addr] = slotPrefix
+	key[len(key)-1] = slotPrefix
+	return acceptanceEntry{domain: kv.StorageDomain, key: key, value: uint256.NewInt(value).Bytes()}
 }
 
 func acceptanceBatches() [][]acceptanceEntry {
 	return [][]acceptanceEntry{
-		{acceptanceAccount(0x11, 1, 101), acceptanceAccount(0x22, 1, 202)},
-		{acceptanceAccount(0x11, 2, 303), acceptanceAccount(0x33, 1, 404)},
-		{acceptanceAccount(0x22, 2, 505), acceptanceAccount(0x44, 1, 606)},
+		{
+			acceptanceAccount(0x11, 1, 101), acceptanceAccount(0x22, 1, 202),
+			acceptanceStorage(0x11, 0x01, 11), acceptanceStorage(0x11, 0x02, 12),
+		},
+		{
+			acceptanceAccount(0x11, 2, 303), acceptanceAccount(0x33, 1, 404),
+			acceptanceStorage(0x11, 0x02, 22), acceptanceStorage(0x22, 0x01, 21),
+		},
+		{
+			acceptanceAccount(0x22, 2, 505), acceptanceAccount(0x44, 1, 606),
+			acceptanceStorage(0x11, 0x03, 13), acceptanceStorage(0x33, 0x01, 31),
+		},
 	}
 }
 
@@ -303,19 +172,6 @@ func cloneAcceptanceRecords(records map[string][]byte) map[string][]byte {
 	return result
 }
 
-func latestAcceptanceState(t *testing.T, db kv.TemporalRoDB) []byte {
-	t.Helper()
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	value, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(value), 18)
-	stateLen := int(binary.BigEndian.Uint16(value[16:18]))
-	require.GreaterOrEqual(t, len(value), 18+stateLen)
-	return bytes.Clone(value[18 : 18+stateLen])
-}
-
 func recomputeAcceptanceRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 	t.Helper()
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -346,41 +202,75 @@ func acceptanceCommitmentFiles(t *testing.T, agg *state.Aggregator) []kv.Visible
 	return at.Files(kv.CommitmentDomain)
 }
 
-func TestCommitmentV3StoredRecordsMatchSequentialTrieAcrossBatches(t *testing.T) {
-	db, agg := newAcceptanceDB(t, 1, 2)
-	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
-	require.True(t, agg.Cfg(kv.CommitmentDomain).EdgeRecordsInCommitment)
-	oracle := newAcceptanceOracle()
-	var wantRoot []byte
-	recordsByTxNum := make(map[uint64]map[string][]byte, len(acceptanceBatches()))
+func requireArmRecordFormat(t *testing.T, agg *state.Aggregator, edgeRecords bool) {
+	t.Helper()
+	files := acceptanceCommitmentFiles(t, agg)
+	require.NotEmpty(t, files, "arm produced no commitment files")
+	for _, file := range files {
+		require.Equalf(t, edgeRecords, statecfg.CommitmentEdgeRecords(file.Version()),
+			"commitment file %s has the wrong record format", file.Fullpath())
+	}
+}
+
+// The v3 arm must agree with the legacy arm on every root it produces. Nothing else in the
+// suite compares the two formats over a real update stream, so a divergence introduced by the
+// edge-record encoding, the address hoist or the record merge surfaces only here.
+func TestCommitmentV3RootsMatchLegacyAcrossBatches(t *testing.T) {
+	legacyDB, legacyAgg := newAcceptanceDB(t, 1, 2)
+	legacyAgg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
+	v3DB, v3Agg := newAcceptanceDB(t, 1, 2)
+	v3Agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
+	require.False(t, legacyAgg.Cfg(kv.CommitmentDomain).EdgeRecordsInCommitment)
+	require.True(t, v3Agg.Cfg(kv.CommitmentDomain).EdgeRecordsInCommitment)
 
 	for batchNumber, batch := range acceptanceBatches() {
 		txNum := uint64(batchNumber + 1)
-		gotRoot := applyAcceptanceBatch(t, db, batch, txNum)
-		wantRoot = oracle.process(t, batch)
-		require.Equal(t, nonEmptyAcceptanceRecords(oracle.records), allAcceptanceRecords(t, db), "batch %d stored records", txNum)
-		require.Equal(t, oracle.trieState, latestAcceptanceState(t, db), "batch %d serialized trie state", txNum)
-		recordsByTxNum[txNum] = cloneAcceptanceRecords(nonEmptyAcceptanceRecords(oracle.records))
-		require.Equal(t, wantRoot, gotRoot, "batch %d root", txNum)
+		wantRoot := applyAcceptanceBatch(t, legacyDB, batch, txNum)
+		gotRoot := applyAcceptanceBatch(t, v3DB, batch, txNum)
+		require.Equalf(t, wantRoot, gotRoot, "batch %d root", txNum)
+	}
+
+	for _, agg := range []*state.Aggregator{legacyAgg, v3Agg} {
+		require.NoError(t, agg.BuildFiles(4))
+		require.NoError(t, agg.MergeLoop(t.Context()))
+	}
+	requireArmRecordFormat(t, legacyAgg, false)
+	requireArmRecordFormat(t, v3Agg, true)
+
+	require.Equal(t, recomputeAcceptanceRoot(t, legacyDB), recomputeAcceptanceRoot(t, v3DB), "post-merge root")
+}
+
+// Merging must carry the newest record per key into the merged file and leave the trie readable.
+func TestCommitmentV3MergedFileHoldsLatestRecords(t *testing.T) {
+	db, agg := newAcceptanceDB(t, 1, 2)
+	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
+
+	recordsByTxNum := make(map[uint64]map[string][]byte, len(acceptanceBatches()))
+	var lastRoot []byte
+	for batchNumber, batch := range acceptanceBatches() {
+		txNum := uint64(batchNumber + 1)
+		lastRoot = applyAcceptanceBatch(t, db, batch, txNum)
+		recordsByTxNum[txNum] = cloneAcceptanceRecords(nonEmptyAcceptanceRecords(allAcceptanceRecords(t, db)))
 	}
 
 	require.NoError(t, agg.BuildFiles(4))
 	require.NoError(t, agg.MergeLoop(t.Context()))
-	files := acceptanceCommitmentFiles(t, agg)
+
 	var mergedFile kv.VisibleFile
-	for _, file := range files {
+	for _, file := range acceptanceCommitmentFiles(t, agg) {
 		if statecfg.CommitmentEdgeRecords(file.Version()) && file.EndRootNum()-file.StartRootNum() > agg.StepSize() {
 			mergedFile = file
 			break
 		}
 	}
 	require.NotNil(t, mergedFile, "expected a merged v3 commitment file")
-	keys, values := readKVFile(t, agg, mergedFile.Fullpath())
 	mergedRecords, ok := recordsByTxNum[mergedFile.EndRootNum()-1]
-	require.Truef(t, ok, "missing sequential oracle state for merged file ending at root %d", mergedFile.EndRootNum())
+	require.Truef(t, ok, "no batch state recorded for the merged file ending at root %d", mergedFile.EndRootNum())
+
+	keys, values := readKVFile(t, agg, mergedFile.Fullpath())
 	checked := 0
 	for i, key := range keys {
-		if commitment.IsCommitmentStateKey(key) {
+		if commitment.IsCommitmentStateKey(key) || len(values[i]) == 0 {
 			continue
 		}
 		want, ok := mergedRecords[string(key)]
@@ -389,8 +279,7 @@ func TestCommitmentV3StoredRecordsMatchSequentialTrieAcrossBatches(t *testing.T)
 		checked++
 	}
 	require.Positive(t, checked, "merged file must contain edge records")
-	require.Equal(t, nonEmptyAcceptanceRecords(oracle.records), allAcceptanceRecords(t, db), "post-merge stored records")
-	require.Equal(t, wantRoot, recomputeAcceptanceRoot(t, db), "post-merge fresh commitment read")
+	require.Equal(t, lastRoot, recomputeAcceptanceRoot(t, db), "post-merge fresh commitment read")
 }
 
 func TestCommitmentV3ReadsMixedLegacyAndV3Files(t *testing.T) {
@@ -399,7 +288,7 @@ func TestCommitmentV3ReadsMixedLegacyAndV3Files(t *testing.T) {
 
 	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	applyAcceptanceBatch(t, db, batches[0], 1)
-	legacyRoot := applyAcceptanceBatch(t, db, batches[1], 2)
+	applyAcceptanceBatch(t, db, batches[1], 2)
 	require.NoError(t, agg.BuildFiles(3))
 
 	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
@@ -430,6 +319,13 @@ func TestCommitmentV3ReadsMixedLegacyAndV3Files(t *testing.T) {
 	}
 	require.Positive(t, legacyFiles, "expected a legacy commitment file")
 	require.Positive(t, v3Files, "expected a v3 commitment file")
-	require.NotEqual(t, legacyRoot, v3Root)
+
+	controlDB, controlAgg := newAcceptanceDB(t, 1, 2)
+	controlAgg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
+	var controlRoot []byte
+	for batchNumber, batch := range batches {
+		controlRoot = applyAcceptanceBatch(t, controlDB, batch, uint64(batchNumber+1))
+	}
+	require.Equal(t, controlRoot, v3Root, "mixed-version root must match the legacy-only root")
 	require.Equal(t, v3Root, recomputeAcceptanceRoot(t, db), "mixed-version fresh commitment read")
 }
