@@ -68,9 +68,10 @@ var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for
 var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 
 type EngineServer struct {
-	blockDownloader *engine_block_downloader.EngineBlockDownloader
-	config          *chain.Config
-	beaconCfg       atomic.Pointer[clparams.BeaconChainConfig]
+	blockDownloader       *engine_block_downloader.EngineBlockDownloader
+	latestBlockBuiltStore *builder.LatestBlockBuiltStore
+	config                *chain.Config
+	beaconCfg             atomic.Pointer[clparams.BeaconChainConfig]
 	// Block proposing for proof-of-stake
 	proposing bool
 	// Block consuming for proof-of-stake
@@ -125,6 +126,10 @@ func NewEngineServer(
 	srv.consuming.Store(consuming)
 
 	return srv
+}
+
+func (e *EngineServer) SetLatestBlockBuiltStore(store *builder.LatestBlockBuiltStore) {
+	e.latestBlockBuiltStore = store
 }
 
 func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
@@ -1178,6 +1183,33 @@ func (e *EngineServer) HandleForkChoice(
 	headerNumber, err := e.chainRW.HeaderNumber(ctx, headerHash)
 	if err != nil {
 		return nil, err
+	}
+
+	// A locally built payload may be selected by the CL after a newer competing
+	// payload has been built. Recover it through the ordinary new-payload
+	// insertion/validation path before falling back to peer download.
+	if headerNumber == nil && e.latestBlockBuiltStore != nil {
+		if locallyBuilt := e.latestBlockBuiltStore.BlockBuiltByHash(headerHash); locallyBuilt != nil {
+			e.logger.Debug(fmt.Sprintf("[%s] Fork choice: recovering locally built head", logPrefix),
+				"height", locallyBuilt.NumberU64(), "hash", headerHash)
+
+			payloadStatus, recoverErr := e.HandleNewPayload(ctx, logPrefix+"LocalBuilt", locallyBuilt, nil)
+			if recoverErr != nil {
+				return nil, recoverErr
+			}
+			if payloadStatus == nil {
+				return nil, errors.New("locally built payload recovery returned nil status")
+			}
+			switch payloadStatus.Status {
+			case engine_types.InvalidStatus, engine_types.SyncingStatus:
+				return payloadStatus, nil
+			}
+
+			headerNumber, err = e.chainRW.HeaderNumber(ctx, headerHash)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// We do not have header, download.

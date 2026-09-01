@@ -19,27 +19,63 @@ package builder
 import (
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type LatestBlockBuiltStore struct {
-	block *types.Block
+const recentBlockBuiltCapacity = 16
 
-	lock sync.Mutex
+type LatestBlockBuiltStore struct {
+	block  *types.Block
+	blocks map[common.Hash]*types.Block
+	order  []common.Hash
+
+	lock sync.RWMutex
 }
 
 func NewLatestBlockBuiltStore() *LatestBlockBuiltStore {
-	return &LatestBlockBuiltStore{}
+	return &LatestBlockBuiltStore{
+		blocks: make(map[common.Hash]*types.Block),
+	}
 }
 
 func (s *LatestBlockBuiltStore) AddBlockBuilt(block *types.Block) {
+	if block == nil {
+		return
+	}
+
+	hash := block.Hash()
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
+
 	s.block = block
+
+	if s.blocks == nil {
+		s.blocks = make(map[common.Hash]*types.Block)
+	}
+
+	if _, ok := s.blocks[hash]; !ok {
+		s.order = append(s.order, hash)
+	}
+
+	s.blocks[hash] = block
+
+	for len(s.order) > recentBlockBuiltCapacity {
+		oldest := s.order[0]
+		s.order = s.order[1:]
+		delete(s.blocks, oldest)
+	}
 }
 
 func (s *LatestBlockBuiltStore) BlockBuilt() *types.Block {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.block
+}
+
+func (s *LatestBlockBuiltStore) BlockBuiltByHash(hash common.Hash) *types.Block {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return s.blocks[hash]
 }

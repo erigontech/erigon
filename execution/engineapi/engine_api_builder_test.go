@@ -1123,3 +1123,48 @@ func lastBalanceChange(ac *types.AccountChanges) *types.BalanceChange {
 	}
 	return last
 }
+
+func TestEngineApiForkChoiceRecoversOlderLocallyBuiltPayload(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, eat.Close()) })
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		baseTimestamp := eat.MockCl.State().ParentElTimestamp
+		var first *engineapitester.MockClPayload
+		var latest *engineapitester.MockClPayload
+
+		for i := uint64(1); i <= 4; i++ {
+			payload, err := eat.MockCl.BuildNewPayload(ctx, engineapitester.WithTimestamp(baseTimestamp+i))
+			require.NoError(t, err)
+			if first == nil {
+				first = payload
+			}
+			latest = payload
+		}
+
+		require.NotNil(t, first)
+		require.NotNil(t, latest)
+		require.Equal(t, first.ExecutionPayload.BlockNumber, latest.ExecutionPayload.BlockNumber)
+		require.NotEqual(t, first.ExecutionPayload.BlockHash, latest.ExecutionPayload.BlockHash)
+
+		forkChoice := enginetypes.ForkChoiceState{
+			HeadHash:           first.ExecutionPayload.BlockHash,
+			SafeBlockHash:      eat.GenesisBlock.Hash(),
+			FinalizedBlockHash: eat.GenesisBlock.Hash(),
+		}
+
+		var response *enginetypes.ForkChoiceUpdatedResponse
+		if eat.ChainConfig.AmsterdamTime != nil {
+			response, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoice, nil, nil)
+		} else {
+			response, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoice, nil)
+		}
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Equal(t, enginetypes.ValidStatus, response.PayloadStatus.Status,
+			"forkchoice must recover an older locally built payload instead of returning SYNCING")
+	})
+}

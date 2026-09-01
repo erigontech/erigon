@@ -30,3 +30,26 @@ func TestLatestBlockBuilt(t *testing.T) {
 	s.AddBlockBuilt(b)
 	assert.Equal(t, b.Header(), s.BlockBuilt().Header())
 }
+
+func TestLatestBlockBuiltKeepsRecentBlocksByHash(t *testing.T) {
+	t.Parallel()
+
+	s := NewLatestBlockBuiltStore()
+	blocks := make([]*types.Block, recentBlockBuiltCapacity+1)
+
+	for i := range blocks {
+		blocks[i] = types.NewBlockWithHeader(
+			&types.Header{Time: uint64(i + 1)},
+			nil,
+		)
+		s.AddBlockBuilt(blocks[i])
+	}
+
+	assert.Nil(t, s.BlockBuiltByHash(blocks[0].Hash()))
+
+	for _, block := range blocks[1:] {
+		assert.Same(t, block, s.BlockBuiltByHash(block.Hash()))
+	}
+
+	assert.Same(t, blocks[len(blocks)-1], s.BlockBuilt())
+}

@@ -962,6 +962,7 @@ func New(
 		config.FcuTimeout,
 		config.MaxReorgDepth,
 	)
+	engineBackendRPC.SetLatestBlockBuiltStore(latestBlockBuiltStore)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
 	if config.InternalCL && (clparams.EmbeddedSupported(config.NetworkID) || config.CaplinConfig.IsDevnet()) {
