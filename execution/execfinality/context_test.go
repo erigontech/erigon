@@ -200,7 +200,8 @@ func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) 
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
+		// Genesis spans two txnums, so its max is 1.
+		if err := rawdbv3.TxNums.Append(tx, 0, 1); err != nil {
 			return err
 		}
 		for i := uint64(0); i < 3; i++ {
