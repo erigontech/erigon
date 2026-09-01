@@ -536,6 +536,11 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 	unwind.Reason = s.unwindReason
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
+		if stageState.BlockNumber == unwind.UnwindPoint {
+			s.logger.Info("unwind skipped, stage exactly at unwind point", "stage", stage.ID, "unwindPoint", unwind.UnwindPoint)
+		} else {
+			s.logger.Debug("unwind skipped, stage below unwind point", "stage", stage.ID, "progress", stageState.BlockNumber, "unwindPoint", unwind.UnwindPoint)
+		}
 		return nil
 	}
 
