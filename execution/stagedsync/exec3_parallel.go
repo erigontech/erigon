@@ -2579,15 +2579,13 @@ type feeMerge struct {
 	version state.Version
 }
 
-// requeueInvalid re-queues a tx whose read set the validator rejected. When the
-// writer that overwrote the cell is known and can still deliver a wakeup, the tx
-// waits for it; otherwise it is deferred, since a validator-invalid may instead
-// be race-induced (a worker racing an exec-loop flush) with no blocker to name.
+// requeueInvalid waits for the writer that overwrote the tx's read set, and
+// defers when addDependency cannot register a wait: the blocker may be unknown
+// (a race with an exec-loop flush names none) or already complete.
 func (be *blockExecutor) requeueInvalid(tx int, blocker int) {
-	if blocker != state.UnknownDep && be.execTasks.addDependency(blocker, tx) {
-		return
+	if !be.execTasks.addDependency(blocker, tx) {
+		be.execTasks.pushDeferred(tx)
 	}
-	be.execTasks.pushDeferred(tx)
 }
 
 // recordWorkerWrites installs a worker result's write set and drops the fee
