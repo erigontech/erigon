@@ -813,6 +813,21 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		if err != nil {
 			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block: %w", err)
 		}
+		if payloadStatus == execution_client.PayloadStatusNone {
+			if err := f.validateEnvelopeCommitmentsWhileYieldingForkChoiceLock(block, signedEnvelope); err != nil {
+				return false, fmt.Errorf("%w: OnExecutionPayload: EL did not validate payload hash and local validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
+			}
+			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+				return false, nil
+			}
+			block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
+			if err != nil {
+				if missingMode == queueMissingEnvelope {
+					f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+				}
+				return false, fmt.Errorf("OnExecutionPayload: failed to refresh block after local payload hash validation: %w", err)
+			}
+		}
 		if err := f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot)); err != nil {
 			if errors.Is(err, errELBehind) {
 				// EL is behind (e.g. parent block not yet available after forward sync).
