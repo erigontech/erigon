@@ -55,17 +55,21 @@ REGIME_CYCLE=${REGIME_CYCLE:-3,3,2}
 
 echo "[verify-modec] ITER=$ITER REGIME_CYCLE=$REGIME_CYCLE DATADIR=$DATADIR"
 
-# Keep launcher's default ERIGON_MERGE_MIN_AGE_STEPS=6 (publisher
-# propagation window). Two contending requirements pinned that value:
+# Override the launcher's publisher-propagation MIN_AGE_STEPS=6 with
+# 2 — the balance point between two contending requirements:
 #   - Phase 3.5's regime-depths needs a per-step (width==1) commitment
-#     .kv to survive long enough to select as a mode-C target. With
+#     .kv to persist long enough to select as a mode-C target. With
 #     MIN_AGE_STEPS=0, merges fire immediately and width==1 files get
-#     absorbed into wider forms before regime-depths polls (cycle 19
-#     hit the 5400s cap).
-#   - Phase 5's disk-clean assertion needs the merger to eventually
-#     consume v4 boundary pairs so no residue remains. The wait cap
-#     below (DISK_CLEAN_MERGE_QUIESCE_SEC=1800) is sized to cover
-#     MIN_AGE_STEPS=6 × ~5-6 min per step of hoodi cadence.
+#     absorbed before regime-depths polls (cycle 19 hit the 5400s cap).
+#     MIN_AGE_STEPS=2 keeps per-step files for ~10-12 min at hoodi
+#     cadence — well within Phase 3.5's 90 min poll window.
+#   - Phase 5's disk-clean assertion needs the merger to consume v4
+#     boundary pairs. The merger holds a file until current_max_endTxN
+#     >= file.endTxN + MIN_AGE_STEPS*stepSize. Cycle 20 showed
+#     MIN_AGE_STEPS=6 needs the chain to advance ~30-40 min beyond the
+#     last v4 emit — more than any reasonable wait cap. MIN_AGE_STEPS=2
+#     needs only ~10-15 min chain advance so 1800s covers it comfortably.
+export ERIGON_MERGE_MIN_AGE_STEPS=2
 export DISK_CLEAN_MERGE_QUIESCE_SEC=1800
 
 DATADIR="$DATADIR" \
