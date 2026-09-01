@@ -1999,3 +1999,63 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 
 	assert.Len(t, txResult.Logs, syscalls)
 }
+
+func TestRequeueInvalid(t *testing.T) {
+	newExec := func(size int) (*blockExecutor, *execStatusList) {
+		be := &blockExecutor{}
+		be.execTasks.ensureLen(size)
+		return be, &be.execTasks
+	}
+
+	t.Run("known blocker is waited on, not respeculated", func(t *testing.T) {
+		be, m := newExec(8)
+
+		be.requeueInvalid(5, 2)
+
+		require.True(t, m.isBlocked(5), "tx must wait for the writer that invalidated its read")
+		require.False(t, m.checkPending(5), "a blocked tx must not be dispatchable")
+	})
+
+	t.Run("blocker unblocks the dependent when it completes", func(t *testing.T) {
+		be, m := newExec(8)
+
+		be.requeueInvalid(5, 2)
+		m.setInProgress(2)
+		m.markComplete(2)
+		m.removeDependency(2)
+
+		require.False(t, m.isBlocked(5))
+		require.True(t, m.checkPending(5), "tx must be re-dispatched once its blocker completes")
+	})
+
+	t.Run("unknown blocker falls back to deferred", func(t *testing.T) {
+		be, m := newExec(8)
+
+		be.requeueInvalid(5, state.UnknownDep)
+
+		require.False(t, m.isBlocked(5))
+		m.drainDeferred()
+		require.True(t, m.checkPending(5))
+	})
+
+	t.Run("already-complete blocker falls back to deferred", func(t *testing.T) {
+		be, m := newExec(8)
+		m.setComplete(2)
+
+		be.requeueInvalid(5, 2)
+
+		require.False(t, m.isBlocked(5), "a completed blocker cannot deliver a wakeup")
+		m.drainDeferred()
+		require.True(t, m.checkPending(5))
+	})
+
+	t.Run("blocker at or above the dependent falls back to deferred", func(t *testing.T) {
+		be, m := newExec(8)
+
+		be.requeueInvalid(5, 5)
+
+		require.False(t, m.isBlocked(5))
+		m.drainDeferred()
+		require.True(t, m.checkPending(5))
+	})
+}

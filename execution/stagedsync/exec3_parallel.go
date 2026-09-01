@@ -2579,6 +2579,17 @@ type feeMerge struct {
 	version state.Version
 }
 
+// requeueInvalid re-queues a tx whose read set the validator rejected. When the
+// writer that overwrote the cell is known and can still deliver a wakeup, the tx
+// waits for it; otherwise it is deferred, since a validator-invalid may instead
+// be race-induced (a worker racing an exec-loop flush) with no blocker to name.
+func (be *blockExecutor) requeueInvalid(tx int, blocker int) {
+	if blocker != state.UnknownDep && be.execTasks.addDependency(blocker, tx) {
+		return
+	}
+	be.execTasks.pushDeferred(tx)
+}
+
 // recordWorkerWrites installs a worker result's write set and drops the fee
 // credit with it: the credit belongs to the incarnation this result replaces.
 func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *state.WriteSet) {
@@ -2925,12 +2936,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.recordFeeMerge(txVersion, existingWrites, tipWrites, outcome)
 		}
 
+		blocker := state.UnknownDep
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
 			func(readVersion, writtenVersion state.Version) state.VersionValidity {
 				vv := state.VersionValid
 
 				if readVersion != writtenVersion {
 					vv = state.VersionInvalid
+					blocker = writtenVersion.TxIndex
 				} else if writtenVersion.TxIndex == state.UnknownDep && tx-1 > be.validateTasks.maxComplete() {
 					vv = state.VersionTooEarly
 				}
@@ -3110,9 +3123,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
 			be.execTasks.clearComplete(tx)
-			// Defer: validator-invalid may be race-induced (worker raced an
-			// exec-loop flush). Drain predicate in scheduleExecution waits.
-			be.execTasks.pushDeferred(tx)
+			be.requeueInvalid(tx, blocker)
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
 			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
