@@ -2,11 +2,13 @@ package solid
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func TestAttestationDecodeSSZWithConfigRejectsWrongCommitteeBitsSize(t *testing.T) {
@@ -84,6 +86,26 @@ func TestAttestationDecodeSSZStrictRejectsOffsetGap(t *testing.T) {
 			malformed = append(malformed, encoded[fixedSize:]...)
 			binary.LittleEndian.PutUint32(malformed, uint32(fixedSize+4))
 			require.Error(t, new(Attestation).DecodeSSZStrictWithConfig(malformed, int(test.version), &clparams.MainnetBeaconConfig))
+		})
+	}
+}
+
+func TestAttestationDecodeSSZRejectsOffsetPastBufferBeforeAllocation(t *testing.T) {
+	const fixedHeaderSize = 4 + AttestationDataSize + 96
+	buf := make([]byte, fixedHeaderSize+1)
+	binary.LittleEndian.PutUint32(buf[:4], 1<<20)
+
+	for _, strict := range []bool{false, true} {
+		t.Run(map[bool]string{false: "permissive", true: "strict"}[strict], func(t *testing.T) {
+			decoded := new(Attestation)
+			var err error
+			if strict {
+				err = decoded.DecodeSSZStrict(buf, int(clparams.GloasVersion))
+			} else {
+				err = decoded.DecodeSSZ(buf, int(clparams.GloasVersion))
+			}
+			require.True(t, errors.Is(err, ssz.ErrBadOffset), err)
+			require.Nil(t, decoded.CommitteeBits)
 		})
 	}
 }

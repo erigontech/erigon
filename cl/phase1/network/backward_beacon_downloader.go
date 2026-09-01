@@ -93,7 +93,10 @@ type BackwardBeaconDownloader struct {
 	mu sync.Mutex
 }
 
-var errExecutionPayloadEnvelopeNotFound = errors.New("execution payload envelope not found")
+var (
+	errExecutionPayloadEnvelopeNotFound   = errors.New("execution payload envelope not found")
+	errCanonicalGloasSuccessorUnavailable = errors.New("canonical GLOAS successor source is not configured")
+)
 
 // SkippedFullBlock records a GLOAS FULL block whose envelope was unavailable during backward download.
 type SkippedFullBlock struct {
@@ -320,7 +323,17 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	}
 
 	if err := b.processResponses(ctx, responses); err != nil {
-		return err
+		if !errors.Is(err, errCanonicalGloasSuccessorUnavailable) || !b.neverSkip {
+			return err
+		}
+		expectedRoot, slotToDownload := b.expectedRoot, b.slotToDownload.Load()
+		if skipErr := b.trySkipToExistingBlock(ctx); skipErr != nil {
+			return skipErr
+		}
+		if b.expectedRoot == expectedRoot && b.slotToDownload.Load() == slotToDownload {
+			return err
+		}
+		return nil
 	}
 
 	if !b.neverSkip {
@@ -439,6 +452,9 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 		if b.prevBatchTopBlock == nil {
 			successor, err := b.fetchGloasSuccessor(ctx, expectedBlock)
 			if err != nil {
+				if errors.Is(err, errCanonicalGloasSuccessorUnavailable) {
+					return err
+				}
 				b.httpPreferred.Store(false)
 				log.Debug("[BackwardBeaconDownloader] initial GLOAS successor fetch failed", "root", b.expectedRoot, "err", err)
 				return nil
@@ -667,64 +683,24 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessorRange(ctx context.Context,
 	if count == 0 {
 		return nil, nil
 	}
-	var firstErr error
-	sourceSucceeded := false
-	if b.httpPreferred.Load() && b.httpFallbackURL != "" {
-		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
-		if err == nil {
-			successor, validateErr := linkedGloasSuccessor(blocks, start, count, parentRoot)
-			if successor != nil {
-				validateErr = b.validateGloasSuccessor(successor)
-				if validateErr == nil {
-					return successor, nil
-				}
-			}
-			sourceSucceeded = validateErr == nil
-			err = fmt.Errorf("validate HTTP GLOAS successor: %w", validateErr)
-		}
-		firstErr = err
+	if b.httpFallbackURL == "" {
+		return nil, errCanonicalGloasSuccessorUnavailable
 	}
-	if b.requestBlocksByRange != nil {
-		blocks, peerID, err := b.requestBlocksByRange(ctx, start, count)
-		if err == nil {
-			successor, validateErr := linkedGloasSuccessor(blocks, start, count, parentRoot)
-			if successor != nil {
-				validateErr = b.validateGloasSuccessor(successor)
-				if validateErr == nil {
-					return successor, nil
-				}
-				if b.rpc != nil {
-					b.rpc.BanPeer(peerID)
-				}
-			}
-			sourceSucceeded = sourceSucceeded || validateErr == nil
-			err = fmt.Errorf("validate P2P GLOAS successor: %w", validateErr)
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
+	blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
+	if err != nil {
+		return nil, err
 	}
-	if !b.httpPreferred.Load() && b.httpFallbackURL != "" {
-		blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
-		if err == nil {
-			successor, validateErr := linkedGloasSuccessor(blocks, start, count, parentRoot)
-			if successor != nil {
-				validateErr = b.validateGloasSuccessor(successor)
-				if validateErr == nil {
-					return successor, nil
-				}
-			}
-			sourceSucceeded = sourceSucceeded || validateErr == nil
-			err = fmt.Errorf("validate HTTP GLOAS successor: %w", validateErr)
-		}
-		if firstErr == nil {
-			firstErr = err
-		}
+	successor, err := linkedGloasSuccessor(blocks, start, count, parentRoot)
+	if err != nil {
+		return nil, fmt.Errorf("validate HTTP GLOAS successor: %w", err)
 	}
-	if firstErr != nil && !sourceSucceeded {
-		return nil, firstErr
+	if successor == nil {
+		return nil, nil
 	}
-	return nil, nil
+	if err := b.validateGloasSuccessor(successor); err != nil {
+		return nil, fmt.Errorf("validate HTTP GLOAS successor: %w", err)
+	}
+	return successor, nil
 }
 
 func linkedGloasSuccessor(blocks []*cltypes.SignedBeaconBlock, start, count uint64, parentRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
