@@ -48,7 +48,8 @@ type BoundaryAssembler interface {
 	// body is fully pre-executed + recorded as the extending-fork flashblock (so a follow-up assemblePreconfirmed
 	// seals it with zero re-execution). Called from GetAssembledBlock, the GetPayload path — and CRUCIALLY the
 	// caller must NOT hold the exec semaphore while awaiting, or the commits-handler PreExecute (which needs the
-	// semaphore to record the body) deadlocks against it. Returns an error if the marker does not commit in time.
+	// semaphore to record the body) deadlocks against it. Returns an error (non-fatal) if the marker does not
+	// commit in time; the CL skips the slot and retries, and the retry adopts the block if it sealed meanwhile.
 	AwaitBoundary(ctx context.Context, params *builder.Parameters) error
 }
 
@@ -477,6 +478,13 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	txs := br.Block.Transactions()
 	var gas, txValue uint256.Int
 	for i := range txs {
+		// Receipts can lag the tx list on some assembled-block paths (e.g. an L2 block surfaced
+		// before its receipts are attached); indexing past them panicked and crashed block
+		// production. blockValue is a reported fee-recipient value, not consensus state, so a
+		// partial/zero value is safe — stop rather than fault the chain.
+		if i >= len(br.Receipts) {
+			break
+		}
 		gas.SetUint64(br.Receipts[i].GasUsed)
 
 		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
@@ -501,7 +509,8 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		// then the block is retrieved by its parent hash. The CL is riding behind the marker-driven close.
 		if err := e.boundaryAssembler.AwaitBoundary(ctx, params); err != nil {
 			// Marker not committed in time (e.g. a quiet DAG at boot). Drop it and return no block — the CL
-			// skips this slot and retries; nothing to canonicalise yet. Not fatal.
+			// skips this slot and retries on the NEXT slot with a fresh boundary; if the marker committed
+			// meanwhile, that retry's AwaitBoundary adopts the already-sealed block. Not fatal.
 			e.pendingBoundaryMu.Lock()
 			delete(e.pendingBoundary, payloadID)
 			e.pendingBoundaryMu.Unlock()

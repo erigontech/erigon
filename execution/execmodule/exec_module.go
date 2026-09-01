@@ -622,7 +622,14 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		// committed state (Max(prev) misses the frontier predecessor) and lands the resume point inside the
 		// PRIOR block. The overlay merges the copied index → Min returns THIS block's true start.
 		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, doms.BlockOverlay(), blockNumber); merr == nil {
-			doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
+			// minTxNum is the block-START system txNum. The maintained SD already ran block-start (and the
+			// PrefixLen already-executed regular txs) during the pre-exec rounds, so the close must resume PAST
+			// both: +1 skips the block-start txNum, +PrefixLen skips the executed regular prefix. Omitting the +1
+			// made an EMPTY block (PrefixLen==0) resume AT block-start and RE-RUN it; re-touching the block-start
+			// system keys re-folds the commitment and, for some account/trie layouts, yields a root that diverges
+			// from the pre-exec (open) root — the empty-successor seal flake. (For a non-empty block PrefixLen>=1
+			// pushed the resume past block-start, so the bug only surfaced on empty blocks.)
+			doms.SetPreExecStart(minTxNum + 1 + uint64(flashUpdate.PrefixLen))
 			defer doms.ClearPreExecStart()
 		}
 		tx = doms.BlockOverlay()
