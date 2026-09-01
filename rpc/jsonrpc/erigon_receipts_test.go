@@ -83,12 +83,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make(types.ErigonLogs, 0)
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
-		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:            expectedLog.Log,
-			BlockTimestamp: expectedLog.BlockTimestamp,
-		})
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
@@ -97,9 +94,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.Equal(expectedErigonLogs, actual)
+	assert.Equal(expectedRPCLogs, actual)
 
-	expectedLog := &types.ErigonLog{
+	expectedLog := &types.RPCLog{
 		Log: types.Log{
 			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
 			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
@@ -123,12 +120,9 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make([]*types.ErigonLog, 0)
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
-		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:            expectedLog.Log,
-			BlockTimestamp: expectedLog.BlockTimestamp,
-		})
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 
 	var lastBlock uint64
@@ -150,7 +144,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.EqualValues(expectedErigonLogs, actual)
+	assert.EqualValues(expectedRPCLogs, actual)
 }
 
 var (

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
@@ -40,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -47,8 +49,9 @@ import (
 )
 
 type CustomTraceCfg struct {
-	db       kv.TemporalRwDB
-	ExecArgs *exec.ExecArgs
+	db            kv.TemporalRwDB
+	ExecArgs      *exec.ExecArgs
+	maxReorgDepth uint64
 
 	Produce Produce
 }
@@ -98,9 +101,10 @@ func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs
 		Workers:     syncCfg.ExecWorkerCount,
 	}
 	return CustomTraceCfg{
-		db:       db,
-		ExecArgs: execArgs,
-		Produce:  NewProduce(produce),
+		db:            db,
+		ExecArgs:      execArgs,
+		maxReorgDepth: syncCfg.MaxReorgDepth,
+		Produce:       NewProduce(produce),
 	}
 }
 
@@ -188,7 +192,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	batchSize := uint64(50_000)
 	for startBlock < endBlock {
 		to := min(endBlock+1, startBlock+batchSize)
-		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, startBlock, to, "custom_trace", logger); err != nil {
+		if err := customTraceBatchProduce(ctx, cfg.Produce, cfg.ExecArgs, cfg.db, cfg.maxReorgDepth, startBlock, to, "custom_trace", logger); err != nil {
 			return err
 		}
 		startBlock = to
@@ -242,7 +246,7 @@ Loop:
 // it doesn't need to account for "half-block execution" case, because it
 // must have some stage_exec progress, which means it resumes from full blocks.
 // also, it appends/puts to db blockResults and not "txResult".
-func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
+func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.ExecArgs, db kv.TemporalRwDB, maxReorgDepth, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		if _, err := tx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
@@ -259,7 +263,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		doms, err := newCustomTraceSharedDomains(ctx, db, tx, logger)
 		if err != nil {
 			return err
 		}
@@ -285,12 +289,17 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	var fromStep, toStep kv.Step
+	var finalityCtx dbfinality.Context
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		var err error
+		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false)
+		if err != nil {
+			return err
+		}
 		fromStep = firstStepNotInFiles(tx, produce)
 		// toStep must reflect what this batch actually re-derived, not the commitment
 		// frontier: when rebuilding a subset of domains, commitment can be ahead, which
 		// would build empty files past the domain's data and desync pruning.
-		var err error
 		lastTxNum, err = cfg.BlockReader.TxnumReader().Max(ctx, tx, toBlock-1)
 		if err != nil {
 			return err
@@ -302,7 +311,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	}); err != nil {
 		return err
 	}
-	if err := agg.BuildFiles2(ctx, fromStep, toStep, true); err != nil {
+	if err := agg.BuildFiles2(ctx, fromStep, toStep, finalityCtx, true); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -523,4 +532,13 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 		}
 	}
 	return tx.Commit()
+}
+
+func newCustomTraceSharedDomains(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx, logger log.Logger) (*execctx.SharedDomains, error) {
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return nil, err
+	}
+	doms.EnableParaTrieDB(db)
+	return doms, nil
 }

@@ -369,18 +369,26 @@ func parseArgumentArray(dec *json.Decoder, types []reflect.Type) ([]reflect.Valu
 		if i >= len(types) {
 			return args, fmt.Errorf("too many arguments, want at most %d", len(types))
 		}
-		argval := reflect.New(types[i])
-		if err := dec.Decode(argval.Interface()); err != nil {
+		var elem json.RawMessage
+		if err := dec.Decode(&elem); err != nil {
 			return args, fmt.Errorf("invalid argument %d: %w", i, err)
 		}
-		if argval.IsNil() && types[i].Kind() != reflect.Pointer {
+		if types[i].Kind() != reflect.Pointer && isJSONNull(elem) {
 			return args, fmt.Errorf("missing value for required argument %d", i)
+		}
+		argval := reflect.New(types[i])
+		if err := json.Unmarshal(elem, argval.Interface()); err != nil {
+			return args, fmt.Errorf("invalid argument %d: %w", i, err)
 		}
 		args = append(args, argval.Elem())
 	}
 	// Read end of args array.
 	_, err := dec.Token()
 	return args, err
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
 }
 
 // parseSubscriptionName extracts the subscription name from an encoded argument array.
