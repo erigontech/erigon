@@ -2411,6 +2411,149 @@ func TestExecutionPayloadIngressPersistsLocallyVerifiedHashWhenEngineUnavailable
 	require.Len(t, f.pendingELPayloads, 1)
 }
 
+func TestExecutionPayloadIngressDoesNotOverwriteConcurrentInvalidation(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engineStarted := make(chan struct{})
+	releaseEngine := make(chan struct{})
+	injected := errors.New("injected engine transport failure")
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(engineStarted)
+			<-releaseEngine
+			return execution_client.PayloadStatusNone, injected
+		})
+
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+	require.NoError(t, err)
+	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	optimisticStore := optimistic.NewOptimisticStore()
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                graph,
+		optimisticStore:          optimisticStore,
+		executionPayloadStatus:   executionPayloadStatus,
+		payloadStatusByRoot:      payloadStatusByRoot,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+		eth2Roots:                eth2Roots,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- f.OnExecutionPayload(context.Background(), envelope, false, true)
+	}()
+	<-engineStarted
+	f.MarkPayloadInvalid(envelope.Message.BeaconBlockRoot, envelope.Message.Payload.BlockHash)
+	close(releaseEngine)
+
+	require.ErrorIs(t, <-done, errInvalidExecutionPayloadEnvelope)
+	status, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+	require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+	require.False(t, optimisticStore.IsOptimistic(envelope.Message.BeaconBlockRoot))
+	require.Empty(t, f.pendingELPayloads)
+}
+
+func TestExecutionPayloadIngressDoesNotMarkVerifiedWhenEngineReturnsValidationError(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	injected := errors.New("injected validation error")
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusValidated, injected)
+
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](1)
+	require.NoError(t, err)
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                graph,
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		executionPayloadStatus:   executionPayloadStatus,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err = f.OnExecutionPayload(context.Background(), envelope, false, true)
+
+	require.ErrorIs(t, err, injected)
+	require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+	_, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
+	require.False(t, ok)
+	require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+}
+
+func TestExecutionPayloadIngressPersistsEngineAcceptedPayload(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, _ []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			bal, err := execution_client.DecodeAndValidateBlockAccessList(payload)
+			if err != nil {
+				return execution_client.PayloadStatusInvalidated, err
+			}
+			requestsHash := cltypes.ComputeExecutionRequestHash(requests)
+			if _, err := payload.RlpHeader(parentRoot, requestsHash, bal); err != nil {
+				return execution_client.PayloadStatusInvalidated, err
+			}
+			return execution_client.PayloadStatusNotValidated, nil
+		})
+
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
+	require.NoError(t, err)
+	executionPayloadGasLimit, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	eth2Roots, err := lru.New[common.Hash, common.Hash](1)
+	require.NoError(t, err)
+	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	optimisticStore := optimistic.NewOptimisticStore()
+	f := &ForkChoiceStore{
+		beaconCfg:                cfg,
+		engine:                   engine,
+		forkGraph:                graph,
+		optimisticStore:          optimisticStore,
+		executionPayloadStatus:   executionPayloadStatus,
+		executionPayloadGasLimit: executionPayloadGasLimit,
+		eth2Roots:                eth2Roots,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{})
+
+	err = f.OnExecutionPayload(context.Background(), envelope, false, true)
+
+	require.NoError(t, err)
+	require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+	status, ok := executionPayloadStatus.Get(envelope.Message.Payload.BlockHash)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
+	require.Empty(t, f.pendingELPayloads)
+}
+
 func TestGossipCommitmentValidationRefreshesBlockAfterYield(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	graph := &commitmentYieldForkGraph{
