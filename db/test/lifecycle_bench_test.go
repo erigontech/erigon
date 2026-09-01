@@ -232,7 +232,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 		if step > 3 {
 			collateStart := time.Now()
 			buildTo := txNum - 2*stepSize
-			err = agg.BuildFiles(buildTo)
+			err = agg.BuildFiles(buildTo, unboundedFinalityCtx)
 			require.NoError(b, err)
 			timings.collate += time.Since(collateStart)
 		}
@@ -478,7 +478,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 		for b.Loop() {
-			err := agg.BuildFiles(txNum - 2*stepSize)
+			err := agg.BuildFiles(txNum-2*stepSize, unboundedFinalityCtx)
 			require.NoError(b, err)
 		}
 	})
@@ -530,7 +530,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, key := range storageKeys {
-				_, _, err := rwTx.GetLatest(kv.StorageDomain, key)
+				_, _, err := rwTx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 				require.NoError(b, err)
 			}
 		}
@@ -540,7 +540,7 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			for _, key := range accountKeys {
-				_, _, err := rwTx.GetLatest(kv.AccountsDomain, key)
+				_, _, err := rwTx.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 				require.NoError(b, err)
 			}
 		}

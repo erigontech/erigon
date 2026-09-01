@@ -600,7 +600,7 @@ func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
 	// Ask the aggregator to build up through step 11.
 	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
 	// → refuse. No new accounts file gets produced.
-	require.NoError(t, agg.BuildFiles(11*stepSize))
+	require.NoError(t, agg.BuildFiles(11*stepSize, unboundedFinalityCtx))
 
 	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
 	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
@@ -629,7 +629,7 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 
 	// BuildFiles must not refuse — the guard's `step > 0` clause should let
 	// this through.
-	require.NoError(t, agg.BuildFiles(2*stepSize))
+	require.NoError(t, agg.BuildFiles(2*stepSize, unboundedFinalityCtx))
 }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
@@ -808,4 +808,25 @@ func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uin
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
+}
+
+// TestRunningMergesGaugeIgnoresEmptyStep pins that domain_running_merges counts merges
+// and not merge polls: mergeLoopStep still runs findMergeRange and cleanAfterMerge when
+// there is no range, and a scrape landing there used to read one merge in flight.
+// mxRunningMerges is process-global, so this test must stay non-parallel - Go suspends
+// the t.Parallel() mergers in this package while it runs.
+func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
+	_, agg := testDbAndAggregatorv3(t, 10)
+
+	var duringCleanup float64
+	var cleanupRan bool
+	agg.OnFilesChange(func([]string) {}, func([]string) {
+		duringCleanup = mxRunningMerges.GetValue()
+		cleanupRan = true
+	})
+
+	before := mxRunningMerges.GetValue()
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
+	require.Equal(t, before, duringCleanup, "no range to merge, so this step must not count as one")
 }

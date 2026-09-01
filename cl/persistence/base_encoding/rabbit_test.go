@@ -161,10 +161,9 @@ func leScalars(vs ...uint64) []byte {
 
 func zstdCompress(t *testing.T, payload []byte) io.Reader {
 	t.Helper()
-	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer putComp(compressor)
 	var b bytes.Buffer
-	compressor.Reset(&b)
+	compressor := getZstdWriter(&b)
+	defer putZstdWriter(compressor)
 	_, err := compressor.Write(payload)
 	require.NoError(t, err)
 	require.NoError(t, compressor.Close())

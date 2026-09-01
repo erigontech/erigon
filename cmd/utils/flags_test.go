@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/p2p"
 )
 
@@ -119,7 +120,7 @@ func TestResolveChainName(t *testing.T) {
 		{"--networkid=1 only → mainnet", []string{"--networkid=1"}, "mainnet"},
 		{"--networkid=11155111 only → sepolia (known id)", []string{"--networkid=11155111"}, "sepolia"},
 		{"--networkid=99999 only → empty (unknown id)", []string{"--networkid=99999"}, ""},
-		{"--networkid=1337 only → bor-devnet (registered id)", []string{"--networkid=1337"}, "bor-devnet"},
+		{"--networkid=100 only → gnosis (registered id)", []string{"--networkid=100"}, "gnosis"},
 		{"--networkid=99999 --chain=mainnet → mainnet (explicit chain wins)", []string{"--networkid=99999", "--chain=mainnet"}, "mainnet"},
 		{"--networkid=99999 --chain=sepolia → sepolia (explicit chain wins)", []string{"--networkid=99999", "--chain=sepolia"}, "sepolia"},
 		{"--networkid=1 --chain=sepolia → sepolia (explicit chain wins over mainnet id)", []string{"--networkid=1", "--chain=sepolia"}, "sepolia"},
@@ -287,7 +288,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 
 func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 	newCfg := func(nodiscover bool) *p2p.Config {
-		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false, false)
+		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
 		require.NoError(t, err)
 		return cfg
 	}
@@ -303,6 +304,28 @@ func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 		require.True(t, cfg.NoDiscovery)
 		require.False(t, cfg.DiscoveryV5)
 	})
+}
+
+// The spec states column retention in epochs, so its slot count depends on SLOTS_PER_EPOCH.
+// Zero is the pruner's signal to derive the window from the active chain config, so an unset
+// flag must stay zero rather than pin one chain's slot count.
+func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
+	parse := func(args ...string) uint64 {
+		keepSlots := CaplinColumnKeepSlotsFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&keepSlots},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg.CaplinConfig.ColumnKeepSlots
+	}
+
+	require.Zero(t, parse(), "unset must defer to the chain config, not pin mainnet's slot count")
+	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }
 
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {

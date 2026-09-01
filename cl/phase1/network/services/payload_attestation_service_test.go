@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,10 +31,69 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
+
+type blockingPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	active  atomic.Int32
+	max     atomic.Int32
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ bool) error {
+	active := f.active.Add(1)
+	defer f.active.Add(-1)
+	for {
+		maxActive := f.max.Load()
+		if active <= maxActive || f.max.CompareAndSwap(maxActive, active) {
+			break
+		}
+	}
+	f.started <- struct{}{}
+	select {
+	case <-f.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type retryPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	calls        atomic.Int32
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+type candidatePayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	started chan byte
+	release chan struct{}
+}
+
+func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, _ bool) error {
+	candidate := msg.Signature[0]
+	f.started <- candidate
+	<-f.release
+	if candidate != 3 {
+		return errors.New("invalid signature")
+	}
+	return nil
+}
+
+func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+	if f.calls.Add(1) == 1 {
+		close(f.firstStarted)
+		<-f.releaseFirst
+		return errors.New("invalid signature")
+	}
+	return nil
+}
 
 func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*payloadAttestationService, *mock_services.ForkChoiceStorageMock, *eth_clock.MockEthereumClock) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
@@ -48,10 +108,275 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 		netCfg:                nil, // Not used in current implementation
 		seenAttestationsCache: seenCache,
 		emitters:              beaconevents.NewEventEmitter(),
-		pendingCond:           sync.NewCond(&sync.Mutex{}), // Needed for queuePendingAttestation
+		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
+	service.pending = service.newPendingQueue()
 
 	return service, forkchoiceMock, ethClockMock
+}
+
+func TestPayloadAttestationServiceBoundsKnownBlockValidation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	service.validationAdmission = make(chan struct{}, 1)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	blockingForkchoice := &blockingPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan struct{}, 1),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- service.ProcessMessage(context.Background(), nil, &cltypes.PayloadAttestationMessage{
+			ValidatorIndex: 1,
+			Data:           &cltypes.PayloadAttestationData{Slot: 100, BeaconBlockRoot: blockRoot},
+		})
+	}()
+	<-blockingForkchoice.started
+
+	secondCtx, cancelSecond := context.WithCancel(context.Background())
+	cancelSecond()
+	err := service.ProcessMessage(secondCtx, nil, &cltypes.PayloadAttestationMessage{
+		ValidatorIndex: 2,
+		Data:           &cltypes.PayloadAttestationData{Slot: 100, BeaconBlockRoot: blockRoot},
+	})
+	require.ErrorIs(t, err, ErrIgnore)
+	close(blockingForkchoice.release)
+	require.NoError(t, <-firstDone)
+}
+
+func TestPayloadAttestationServiceBackpressuresInsteadOfDroppingValidCandidate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	service.validationAdmission = make(chan struct{}, 1)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	validations := &candidatePayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan byte, 2),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = validations
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	invalid := newTestPayloadAttestationMessage(100, 1, blockRoot)
+	invalid.Signature[0] = 1
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- service.ProcessMessage(context.Background(), nil, invalid) }()
+	require.Equal(t, byte(1), <-validations.started)
+
+	valid := newTestPayloadAttestationMessage(100, 1, blockRoot)
+	valid.Signature[0] = 3
+	secondResult := make(chan error, 1)
+	go func() { secondResult <- service.ProcessMessage(context.Background(), nil, valid) }()
+	select {
+	case err := <-secondResult:
+		close(validations.release)
+		t.Fatalf("valid candidate returned before admission was released: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(validations.release)
+	require.Error(t, <-firstResult)
+	require.NoError(t, <-secondResult)
+}
+
+func TestPayloadAttestationServiceDoesNotDropValidCandidateBehindInvalidCandidates(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	blockingForkchoice := &candidatePayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan byte, 3),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(3)
+
+	results := make(chan error, 3)
+	for candidate := byte(1); candidate <= 3; candidate++ {
+		msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+		msg.Signature[0] = candidate
+		go func() { results <- service.ProcessMessage(context.Background(), nil, msg) }()
+		if candidate == 1 {
+			require.Equal(t, byte(1), <-blockingForkchoice.started)
+		}
+	}
+	for range 2 {
+		select {
+		case <-blockingForkchoice.started:
+		case <-time.After(time.Second):
+			close(blockingForkchoice.release)
+			t.Fatal("candidate was dropped before validation")
+		}
+	}
+	close(blockingForkchoice.release)
+
+	var successes int
+	for range 3 {
+		if <-results == nil {
+			successes++
+		}
+	}
+	require.Equal(t, 1, successes)
+}
+
+func TestPayloadAttestationServiceAllowsConcurrentValidationForDifferentValidators(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	blockingForkchoice := &blockingPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan struct{}, 8),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(8)
+
+	var wg sync.WaitGroup
+	results := make(chan error, 8)
+	for i := range 8 {
+		wg.Go(func() {
+			msg := newTestPayloadAttestationMessage(100, uint64(i), blockRoot)
+			results <- service.ProcessMessage(context.Background(), nil, msg)
+		})
+	}
+
+	for range 8 {
+		select {
+		case <-blockingForkchoice.started:
+		case <-time.After(time.Second):
+			close(blockingForkchoice.release)
+			wg.Wait()
+			require.FailNow(t, "validation was throttled")
+		}
+	}
+	close(blockingForkchoice.release)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	require.Equal(t, int32(8), blockingForkchoice.max.Load())
+}
+
+func TestPayloadAttestationServiceAllowsConcurrentValidationForSameValidator(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	blockingForkchoice := &blockingPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan struct{}, 2),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			results <- service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+		}()
+	}
+
+	<-blockingForkchoice.started
+	select {
+	case <-blockingForkchoice.started:
+	case <-time.After(time.Second):
+		close(blockingForkchoice.release)
+		t.Fatal("second candidate did not reach validation")
+	}
+	close(blockingForkchoice.release)
+
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	require.Equal(t, int32(2), blockingForkchoice.max.Load())
+}
+
+func TestPayloadAttestationServiceRetriesAfterInvalidDuplicate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+
+	retryForkchoice := &retryPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		firstStarted:      make(chan struct{}),
+		releaseFirst:      make(chan struct{}),
+	}
+	service.forkchoiceStore = retryForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+	}()
+	<-retryForkchoice.firstStarted
+
+	secondResult := make(chan error, 1)
+	go func() {
+		second := newTestPayloadAttestationMessage(100, 42, blockRoot)
+		second.Signature[0] = 1
+		secondResult <- service.ProcessMessage(context.Background(), nil, second)
+	}()
+
+	require.Eventually(t, func() bool { return retryForkchoice.calls.Load() == 2 }, time.Second, time.Millisecond)
+	close(retryForkchoice.releaseFirst)
+
+	require.ErrorContains(t, <-firstResult, "invalid signature")
+	require.NoError(t, <-secondResult)
+	require.Equal(t, int32(2), retryForkchoice.calls.Load())
+}
+
+func TestPayloadAttestationServiceIgnoresCanceledDuplicateWaiter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, ethClockMock := setupPayloadAttestationService(t, ctrl)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	blockingForkchoice := &blockingPayloadAttestationForkchoice{
+		ForkChoiceStorage: fcu,
+		started:           make(chan struct{}, 1),
+		release:           make(chan struct{}),
+	}
+	service.forkchoiceStore = blockingForkchoice
+	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
+
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+	}()
+	<-blockingForkchoice.started
+
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := service.ProcessMessage(waiterCtx, nil, newTestPayloadAttestationMessage(100, 42, blockRoot))
+	require.ErrorIs(t, err, ErrIgnore)
+
+	close(blockingForkchoice.release)
+	require.NoError(t, <-firstResult)
 }
 
 func newTestPayloadAttestationMessage(slot uint64, validatorIndex uint64, blockRoot common.Hash) *cltypes.PayloadAttestationMessage {
@@ -152,11 +477,11 @@ func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
 	require.True(t, errors.Is(err, ErrAttestationQueued))
 
 	// Verify attestation was queued
-	require.Equal(t, int32(1), service.pendingCount.Load())
+	require.Equal(t, int32(1), service.pending.count.Load())
 
 	// Verify the pending key
 	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-	_, exists := service.pendingAttestations.Load(key)
+	_, exists := service.pending.jobs.Load(key)
 	require.True(t, exists)
 }
 
@@ -175,10 +500,10 @@ func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t 
 	service.queuePendingAttestation(blockRoot, first)
 	service.queuePendingAttestation(blockRoot, second)
 
-	require.Equal(t, int32(2), service.pendingCount.Load())
-	_, firstExists := service.pendingAttestations.Load(pendingPayloadAttestationKeyFor(blockRoot, first))
+	require.Equal(t, int32(2), service.pending.count.Load())
+	_, firstExists := service.pending.jobs.Load(pendingPayloadAttestationKeyFor(blockRoot, first))
 	require.True(t, firstExists)
-	_, secondExists := service.pendingAttestations.Load(pendingPayloadAttestationKeyFor(blockRoot, second))
+	_, secondExists := service.pending.jobs.Load(pendingPayloadAttestationKeyFor(blockRoot, second))
 	require.True(t, secondExists)
 }
 
@@ -273,17 +598,17 @@ func TestPayloadAttestationServicePendingExpiry(t *testing.T) {
 
 	// Add expired job directly
 	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-	service.pendingAttestations.Store(key, &pendingPayloadAttestationJob{
+	service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{
 		msg:          msg,
 		creationTime: time.Now().Add(-pendingPayloadAttestationExpiry - time.Second), // expired
 	})
-	service.pendingCount.Store(1)
+	service.pending.count.Store(1)
 
 	// Process pending - should remove expired
-	service.processPendingAttestations(context.Background())
+	service.pending.processPending(context.Background())
 
-	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, exists := service.pendingAttestations.Load(key)
+	require.Equal(t, int32(0), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -298,20 +623,20 @@ func TestPayloadAttestationServicePendingSlotMismatch(t *testing.T) {
 
 	// Add pending job
 	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-	service.pendingAttestations.Store(key, &pendingPayloadAttestationJob{
+	service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{
 		msg:          msg,
 		creationTime: time.Now(),
 	})
-	service.pendingCount.Store(1)
+	service.pending.count.Store(1)
 
 	// Mock: slot 100 is no longer current
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(false)
 
 	// Process pending - should remove due to slot mismatch
-	service.processPendingAttestations(context.Background())
+	service.pending.processPending(context.Background())
 
-	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, exists := service.pendingAttestations.Load(key)
+	require.Equal(t, int32(0), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -326,16 +651,16 @@ func TestPayloadAttestationServicePendingProcessing(t *testing.T) {
 
 	// Add pending job
 	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-	service.pendingAttestations.Store(key, &pendingPayloadAttestationJob{
+	service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{
 		msg:          msg,
 		creationTime: time.Now(),
 	})
-	service.pendingCount.Store(1)
+	service.pending.count.Store(1)
 
 	// First process: slot ok, but block not available
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
-	service.processPendingAttestations(context.Background())
-	require.Equal(t, int32(1), service.pendingCount.Load()) // Still pending
+	service.pending.processPending(context.Background())
+	require.Equal(t, int32(1), service.pending.count.Load()) // Still pending
 
 	// Now add block header
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
@@ -345,10 +670,10 @@ func TestPayloadAttestationServicePendingProcessing(t *testing.T) {
 	// Second process: slot ok, block available -> should process
 	// ProcessMessage will be called, which calls IsSlotCurrentSlotWithMaximumClockDisparity again
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(2)
-	service.processPendingAttestations(context.Background())
+	service.pending.processPending(context.Background())
 
-	require.Equal(t, int32(0), service.pendingCount.Load())
-	_, exists := service.pendingAttestations.Load(key)
+	require.Equal(t, int32(0), service.pending.count.Load())
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 
 	// Attestation should be marked as seen
@@ -368,15 +693,15 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	msg2 := newTestPayloadAttestationMessage(100, 2, blockRoot)
 
 	// Add both as pending
-	service.pendingAttestations.Store(pendingPayloadAttestationKeyFor(blockRoot, msg1), &pendingPayloadAttestationJob{
+	service.pending.jobs.Store(pendingPayloadAttestationKeyFor(blockRoot, msg1), &pendingJob[*cltypes.PayloadAttestationMessage]{
 		msg:          msg1,
 		creationTime: time.Now(),
 	})
-	service.pendingAttestations.Store(pendingPayloadAttestationKeyFor(blockRoot, msg2), &pendingPayloadAttestationJob{
+	service.pending.jobs.Store(pendingPayloadAttestationKeyFor(blockRoot, msg2), &pendingJob[*cltypes.PayloadAttestationMessage]{
 		msg:          msg2,
 		creationTime: time.Now(),
 	})
-	service.pendingCount.Store(2)
+	service.pending.count.Store(2)
 
 	// Add block header
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
@@ -387,9 +712,9 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true).Times(4)
 
 	// Process - both should be processed
-	service.processPendingAttestations(context.Background())
+	service.pending.processPending(context.Background())
 
-	require.Equal(t, int32(0), service.pendingCount.Load())
+	require.Equal(t, int32(0), service.pending.count.Load())
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 2}))
 }
@@ -401,7 +726,7 @@ func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
 	service, _, _ := setupPayloadAttestationService(t, ctrl)
 
 	// Fill the queue to the cap
-	service.pendingCount.Store(maxPendingAttestations)
+	service.pending.count.Store(maxPendingAttestations)
 
 	blockRoot := common.HexToHash("0xffff")
 	msg := newTestPayloadAttestationMessage(100, 999, blockRoot)
@@ -409,9 +734,9 @@ func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
 	service.queuePendingAttestation(blockRoot, msg)
 
 	// Should still be at cap — new item was rejected
-	require.Equal(t, int32(maxPendingAttestations), service.pendingCount.Load())
+	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
 	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-	_, exists := service.pendingAttestations.Load(key)
+	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -422,7 +747,7 @@ func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
 	service, _, _ := setupPayloadAttestationService(t, ctrl)
 
 	// Start near cap so only a few slots remain
-	service.pendingCount.Store(maxPendingAttestations - 5)
+	service.pending.count.Store(maxPendingAttestations - 5)
 
 	var wg sync.WaitGroup
 	for i := range 100 {
@@ -434,9 +759,9 @@ func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, int32(maxPendingAttestations), service.pendingCount.Load())
+	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
 	stored := 0
-	service.pendingAttestations.Range(func(_, _ any) bool {
+	service.pending.jobs.Range(func(_, _ any) bool {
 		stored++
 		return true
 	})
