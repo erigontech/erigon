@@ -735,8 +735,17 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 	if local {
 		applied, err = f.applyLocalSelfBuildEnvelope(ctx, pending, retryQueuedEnvelope)
 	} else {
-		receivedAt := f.pendingEnvelopeReceivedAt(pending, time.Now())
-		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, retryQueuedEnvelope, receivedAt)
+		commitmentsValidated := false
+		if pending.Message != nil && !f.forkGraph.HasEnvelope(blockRoot) {
+			commitmentsValidated, err = f.validatePendingEnvelopeCommitments(pending)
+			if err != nil {
+				err = fmt.Errorf("%w: OnBlock: invalid execution payload envelope commitments: %w", ErrInvalidExecutionPayloadEnvelope, err)
+			}
+		}
+		if err == nil {
+			receivedAt := f.pendingEnvelopeReceivedAt(pending, time.Now())
+			applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, commitmentsValidated, retryQueuedEnvelope, receivedAt)
+		}
 	}
 	if err != nil {
 		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
