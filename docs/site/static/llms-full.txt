@@ -109,7 +109,9 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+
+### Ethereum mainnet
 
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
@@ -119,6 +121,8 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 
 _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows._
 
+### Gnosis Chain
+
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | 673.59 GB | 1 TB                        | 16 GB              | 32 GB                 |
@@ -127,17 +131,23 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
+### Sepolia
+
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
 | Archive        | 1.10 TB |
 
 _Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
 
+### Hoodi
+
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
 | Archive        | 133.73 GB |
 
 _Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
+### Chiado
 
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
@@ -202,6 +212,8 @@ The recommended approach involves running and syncing an **Erigon node alongside
 
 You can choose whether to migrate to Erigon + Caplin (the simplest setup) or continue using your existing CL.
 
+#### Migrate to Erigon + Caplin (Internal CL)
+
 This path offers the simplest validator configuration by using Erigon's embedded consensus client, Caplin. You will no longer need your external Consensus Layer (CL) client or a JWT secret for CL-EL communication.
 
 **Steps for Minimal Downtime**
@@ -221,6 +233,8 @@ This path offers the simplest validator configuration by using Erigon's embedded
    * To restart Erigon, there's no need to specify `--port`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
    * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally.
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
+
+#### Migrate to Erigon + External CL
 
 Switch to an Erigon Execution Layer (EL) while keeping your current external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) and your existing JWT secret. Start by syncing Erigon with Caplin as the CL, then configure it to use the external CL.
 
@@ -245,6 +259,8 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 
 This is the simplest option as it requires no configuration adjustments. However, the node will be down until Erigon finishes syncing.
 
+#### Erigon + Caplin (Fastest Sync)
+
 This path is the fastest way to get Erigon running. It utilizes **Erigon's embedded consensus client, Caplin**, requiring no external CL client or JWT secret. This is ideal for home users with limited disk space and no critical uptime requirements.
 
 **Steps for Quickest Start**
@@ -255,6 +271,8 @@ This path is the fastest way to get Erigon running. It utilizes **Erigon's embed
 4. **Synchronization**: Start syncing Erigon with the default Caplin configuration (Caplin does not use the Engine API).
 5. **Final Setup**: Once Erigon is fully synced, your node is online.
 6. **Monitoring**: Monitor the sync progress using `eth_syncing` or the health check, and ensure no errors appear in Erigon's logs.
+
+#### Erigon + External CL (Reuse Existing CL)
 
 This path retains your existing **external Consensus Layer (CL)** client (e.g., Prysm, Lighthouse) but swaps the old EL client for Erigon. Since downtime is accepted, this process requires simpler port management.
 
@@ -357,13 +375,19 @@ URL: https://docs.erigon.tech/get-started/installation
 
 To install Erigon, begin by choosing an installation method suited to your operating system and technical preference. Options range from the simplest to the most complex, including pre-built images, containers, or source compilation.
 
+### Linux
+
 Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
 Docker — Run Erigon in an isolated container. Recommended for most users.
 Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
 Ethereum on ARM — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).
 
+### macOS
+
 Docker — Run Erigon in an isolated container. The recommended method on macOS.
 Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
+
+### Windows
 
 Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
 WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
@@ -1108,6 +1132,8 @@ scheduled forks, not after.
 
 ## Erigon with Prysm as the external CL
 
+### Prysm
+
 1.  Start Erigon adding the `--externalcl` flag:
 
     ```bash
@@ -1131,6 +1157,8 @@ scheduled forks, not after.
     --checkpoint-sync-url=https://mainnet.checkpoint.sigp.io \
     --genesis-beacon-api-url=https://mainnet.checkpoint.sigp.io
     ```
+
+### Lighthouse
 
 1.  Start Erigon adding the `--externalcl` flag:
 
@@ -1424,16 +1452,22 @@ URL: https://docs.erigon.tech/fundamentals/basic-usage
 
 Erigon is mainly operated through the command line. The commands may vary based on your installation method.
 
+## Pre-Built Binaries
+
 Open your terminal and simply start Erigon with the command:
 
 ```text
 erigon [options]
 ```
 
+## Docker
+
 * You can use Docker Compose like in this [example](/get-started/easy-nodes/how-to-run-an-ethereum-node#a-create-the-configuration-file)
 *   Alternatively you can use the Docker syntax, for example:
 
     `docker run -it erigontech/erigon:v{ERIGON_VERSION} [options]`
+
+## Built from Source
 
 Open your terminal and move to the directory where you installed Erigon
 
@@ -1446,6 +1480,8 @@ You can then start Erigon with the below command:
 ```shell
 ./build/bin/erigon [options]
 ```
+
+## Windows
 
 To run Erigon after a native compilation, enter the following command in your Command Prompt or PowerShell:
 
@@ -3921,6 +3957,8 @@ When something looks wrong with your node, ask the assistant to sift through log
 
 Add the following to your Claude Desktop configuration file (`~/.config/claude-desktop/config.json` on Linux/macOS, `%APPDATA%\claude-desktop\config.json` on Windows):
 
+### JSON-RPC mode
+
 ```json
 {
   "mcpServers": {
@@ -3932,6 +3970,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 }
 ```
 
+### Datadir mode
+
 ```json
 {
   "mcpServers": {
@@ -3942,6 +3982,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
   }
 }
 ```
+
+### Embedded (SSE)
 
 ```json
 {
@@ -3993,12 +4035,16 @@ claude mcp remove erigon
 
 [OpenAI Codex CLI](https://github.com/openai/codex) supports MCP servers via `~/.codex/config.yaml`. Add the `mcp_servers` key to your existing config file:
 
+### Embedded SSE
+
 ```yaml
 mcp_servers:
   erigon:
     type: sse
     url: http://127.0.0.1:8553/sse
 ```
+
+### Standalone stdio
 
 ```yaml
 mcp_servers:
