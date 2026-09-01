@@ -40,9 +40,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// setupEdgeRecordTest is setupStepTest with the v3 edge-record format on. The
-// test aggregator pins the legacy format (AggOpts.NewTest), so the format the
-// binary ships with is only reached by asking for it.
+// setupStepTest with edge records on: AggOpts.NewTest pins the legacy format, so the
+// format the binary ships with is only reached by asking for it.
 func setupEdgeRecordTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
 	ctx := context.Background()
@@ -72,10 +71,8 @@ func setupEdgeRecordTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execc
 	return db, tx, doms
 }
 
-// The second block's compute has to read back the trie the first one wrote, which
-// under v3 edge records means resolving the root's child records through the
-// calculator's own state reader. A reader that cannot resolve them reads an empty
-// trie and fails on the root's own mask ("missing record for mask bit N").
+// Block 2's compute reads back the trie block 1 wrote. A state reader that cannot
+// resolve v3 records sees an empty trie and fails on the root's own mask.
 func TestHandleMessage_SecondComputeReadsFirstComputesTrie(t *testing.T) {
 	ctx := context.Background()
 	db, tx, doms := setupEdgeRecordTest(t)
@@ -101,8 +98,7 @@ func TestHandleMessage_SecondComputeReadsFirstComputesTrie(t *testing.T) {
 		cc.handleMessage(ctx, newTestBlockResult(blockNum, common.Hash{byte(blockNum)}, txNum, false))
 	}
 
-	// Enough accounts in block 1 that the root is a branch, so block 2 cannot fold
-	// without first resolving the root's children.
+	// Enough accounts that the root is a branch block 2 must resolve before folding.
 	writeBlock(1, 96)
 	writeBlock(2, 8)
 	cc.Stop()
@@ -110,8 +106,7 @@ func TestHandleMessage_SecondComputeReadsFirstComputesTrie(t *testing.T) {
 	for {
 		select {
 		case r := <-out:
-			// The fixture's headers carry no real state root, so a root mismatch is
-			// the expected outcome and says nothing about the read path.
+			// The fixture's headers carry no real state root.
 			if r.err != nil && !errors.Is(r.err, ErrWrongTrieRoot) {
 				require.NoError(t, r.err, "block %d compute", r.blockNum)
 			}

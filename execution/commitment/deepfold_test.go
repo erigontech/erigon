@@ -338,59 +338,56 @@ func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibb
 	return k1, u1, k2, u2
 }
 
+func withMixedCorpus(seed int64, n int, k [][]byte, u []Update) ([][]byte, []Update) {
+	fk, fu := buildMixedCorpus(seed, n)
+	return append(append([][]byte{}, fk...), k...), append(append([]Update{}, fu...), u...)
+}
+
 // Deep-folding a touched subset must preserve the untouched on-disk first-nibble siblings.
 func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
-	wide := nibs(0, 1, 2, 3, 4, 5, 6, 7)
-	touch := nibs(0, 1, 2)
-	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260622, wide, touch, 60, 420)
-	fk, fu := buildMixedCorpus(7777, 200)
-	k1 = append(append([][]byte{}, fk...), k1...)
-	u1 = append(append([]Update{}, fu...), u1...)
-	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260622, nibs(0, 1, 2, 3, 4, 5, 6, 7), nibs(0, 1, 2), 60, 420)
+	k1, u1 = withMixedCorpus(7777, 200, k1, u1)
+	forEachFormat(t, func(t *testing.T, opts ...stateOpt) {
+		requireAllEnginesParity(t, k1, u1, k2, u2, 4, opts...)
+		require.Positive(t, incrementalDeepFolds(t, 4, k1, u1, k2, u2, opts...),
+			"a whale with a branch storage root must take the concurrent deep fold")
+	})
 }
 
 // Single-nibble on-disk storage has no branch record at the account prefix; unfoldStorageBase
 // must still recover it rather than seeding an empty base.
 func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
-	onDisk := nibs(0)
-	touch := nibs(3, 7)
-	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260702, onDisk, touch, 120, 700)
-	fk, fu := buildMixedCorpus(4242, 200)
-	k1 = append(append([][]byte{}, fk...), k1...)
-	u1 = append(append([]Update{}, fu...), u1...)
-	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260702, nibs(0), nibs(3, 7), 120, 700)
+	k1, u1 = withMixedCorpus(4242, 200, k1, u1)
+	forEachFormat(t, func(t *testing.T, opts ...stateOpt) {
+		requireAllEnginesParity(t, k1, u1, k2, u2, 4, opts...)
+	})
 }
 
 // A fresh whale has nothing on disk beneath its prefix, so the fold must run concurrently.
 func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
-	fk, fu := buildMixedCorpus(555, 200)
-	keys := append(append([][]byte{}, fk...), k1...)
-	upds := append(append([]Update{}, fu...), u1...)
-
-	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
-	require.Equal(t, seqRoot, parRoot)
-	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
+	keys, upds := withMixedCorpus(555, 200, k1, u1)
+	forEachFormat(t, func(t *testing.T, opts ...stateOpt) {
+		seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds, opts...)
+		ms := newMockState(t, modeParallel, opts...)
+		parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+		require.Equal(t, seqRoot, parRoot)
+		require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
+	})
 }
 
 func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260708, nibs(0), nibs(3, 7), 1, 700)
-	fk, fu := buildMixedCorpus(556, 200)
-	k1 = append(append([][]byte{}, fk...), k1...)
-	u1 = append(append([]Update{}, fu...), u1...)
-
-	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
-	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
-	require.Equal(t, seqRoot, parRoot)
-	require.Zero(t, deepFolds, "an account present in the pre-state must keep the serial demotion")
+	k1, u1 = withMixedCorpus(556, 200, k1, u1)
+	forEachFormat(t, func(t *testing.T, opts ...stateOpt) {
+		seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2, opts...)
+		ms := newMockState(t, modeParallel, opts...)
+		_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
+		parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+		require.Equal(t, seqRoot, parRoot)
+		require.Zero(t, deepFolds, "an account present in the pre-state must keep the serial demotion")
+	})
 }
 
 // A streaming collapse leaves an afterMap==0 tombstone at the account prefix, distinct from

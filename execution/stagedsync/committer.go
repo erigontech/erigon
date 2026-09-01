@@ -1140,8 +1140,6 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	return enc, step, err
 }
 
-// ReadCommitmentRecords resolves v3 edge records the way Read resolves a branch:
-// latest, since the calculator is the only writer and writes sequentially.
 func (r *asOfStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
 	return r.sd.ReadCommitmentRecords(r.roTx, nodeKey, mask, maskKnown)
 }

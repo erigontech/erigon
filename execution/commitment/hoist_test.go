@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func storageLeafBranch(t *testing.T, nibble byte, account, slot []byte) BranchData {
@@ -188,40 +187,6 @@ func TestStorageAddressHoistSurvivesStateRoundTrip(t *testing.T) {
 	require.Equal(t, hph.root.accountAddr[:], restored.root.accountAddr[:])
 }
 
-type edgeRecordContext struct {
-	*MockState
-}
-
-func (c *edgeRecordContext) BranchWithMask(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
-	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
-	wanted := mask
-	if !maskKnown {
-		wanted = ^uint16(0)
-	}
-	var records [16][]byte
-	var present uint16
-	for bitset := wanted; bitset != 0; bitset &= bitset - 1 {
-		bit := bitset & -bitset
-		nibble := bitsTrailingZeros16(bit)
-		if record, ok := c.cm[string(nibbles.ChildKeyV3(nodeKey, byte(nibble)))]; ok {
-			records[nibble] = bytes.Clone(record)
-			present |= bit
-		}
-	}
-	read, err := SynthesizeBranchRow(mask, maskKnown, records, present, nil)
-	return read.Data, 0, read.ChildMasks, read.ChildMasksKnown, err
-}
-
-// Branch mirrors TrieContext.Branch under edge records: a v3 node is addressed only by its
-// child records, so a mask-less read has to synthesize the row rather than look up the node key.
-func (c *edgeRecordContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	if IsCommitmentStateKey(pref) {
-		return c.MockState.Branch(pref)
-	}
-	data, step, _, _, err := c.BranchWithMask(pref, 0, false)
-	return data, step, err
-}
-
 func TestStorageLeafAddressHoistAcrossRestoredTrie(t *testing.T) {
 	t.Parallel()
 
@@ -237,8 +202,8 @@ func TestStorageLeafAddressHoistAcrossRestoredTrie(t *testing.T) {
 	cfg := DefaultTrieConfig()
 	cfg.EdgeRecords = true
 	ms := NewMockState(t)
-	ctx := &edgeRecordContext{MockState: ms}
-	hph := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	ms.SetEdgeRecords(true)
+	hph := NewHexPatriciaHashed(length.Addr, ms, cfg)
 	defer hph.Release()
 	require.NoError(t, ms.applyPlainUpdates(keys1, updates1))
 	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys1, updates1)
@@ -248,7 +213,7 @@ func TestStorageLeafAddressHoistAcrossRestoredTrie(t *testing.T) {
 	state, err := hph.EncodeCurrentState(nil)
 	require.NoError(t, err)
 
-	restored := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	restored := NewHexPatriciaHashed(length.Addr, ms, cfg)
 	defer restored.Release()
 	require.NoError(t, restored.SetState(state))
 	require.NoError(t, ms.applyPlainUpdates(keys2, updates2))

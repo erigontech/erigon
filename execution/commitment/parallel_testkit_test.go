@@ -104,14 +104,31 @@ const (
 	modeParallel
 )
 
+// stateOpt configures the MockState a kit entry point builds; the trie config follows from it.
+type stateOpt func(*MockState)
+
+func withEdgeRecords() stateOpt { return func(ms *MockState) { ms.SetEdgeRecords(true) } }
+
+func newMockState(t *testing.T, mode runMode, opts ...stateOpt) *MockState {
+	t.Helper()
+	ms := NewMockState(t)
+	if mode != modeSeq {
+		ms.SetConcurrentCommitment(true)
+	}
+	for _, opt := range opts {
+		opt(ms)
+	}
+	return ms
+}
+
 func newSeqTrie(t *testing.T, ms *MockState) *HexPatriciaHashed {
 	t.Helper()
-	return NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	return NewHexPatriciaHashed(length.Addr, ms, ms.TrieConfig())
 }
 
 func newParTrie(t *testing.T, ms *MockState, workers int) *ParallelPatriciaHashed {
 	t.Helper()
-	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
+	tr := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, ms.TrieConfig())
 	tr.SetNumWorkers(workers)
 	tr.ResetContext(ms)
 	return tr
@@ -179,12 +196,9 @@ func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]b
 	return root, encoded, tr.DeepLocalFolds()
 }
 
-func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
+func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update, opts ...stateOpt) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	if mode != modeSeq {
-		ms.SetConcurrentCommitment(true)
-	}
+	ms := newMockState(t, mode, opts...)
 	return processModeBatch(t, ms, mode, workers, keys, upds), ms
 }
 
@@ -193,31 +207,43 @@ func sequentialRoot(t *testing.T, keys [][]byte, upds []Update) ([]byte, *MockSt
 	return engineRoot(t, modeSeq, 0, keys, upds)
 }
 
-func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
+func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, opts ...stateOpt) ([]byte, *MockState) {
 	t.Helper()
-	ms := NewMockState(t)
-	if mode != modeSeq {
-		ms.SetConcurrentCommitment(true)
-	}
+	ms := newMockState(t, mode, opts...)
 	_, blob := processModeBatchState(t, ms, mode, workers, k1, u1, nil)
 	root, _ := processModeBatchState(t, ms, mode, workers, k2, u2, blob)
 	return root, ms
 }
 
-func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int) []byte {
+func forEachFormat(t *testing.T, body func(t *testing.T, opts ...stateOpt)) {
 	t.Helper()
-	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
-	parRoot, _ := engineRoot(t, modeParallel, workers, keys, upds)
+	t.Run("v2", func(t *testing.T) { body(t) })
+	t.Run("v3", func(t *testing.T) { body(t, withEdgeRecords()) })
+}
+
+// incrementalDeepFolds reports how many storage subtrees the second batch deep-folded.
+func incrementalDeepFolds(t *testing.T, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, opts ...stateOpt) uint64 {
+	t.Helper()
+	ms := newMockState(t, modeParallel, opts...)
+	_, blob, _ := parallelBatchDeepFolds(t, ms, workers, k1, u1, nil)
+	_, _, folds := parallelBatchDeepFolds(t, ms, workers, k2, u2, blob)
+	return folds
+}
+
+func requireRootParity(t *testing.T, keys [][]byte, upds []Update, workers int, opts ...stateOpt) []byte {
+	t.Helper()
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds, opts...)
+	parRoot, _ := engineRoot(t, modeParallel, workers, keys, upds, opts...)
 	require.Equal(t, seqRoot, parRoot,
 		"sequential and parallel root hashes must match (numWorkers=%d)", workers)
 	return seqRoot
 }
 
-func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int) {
+func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, workers int, opts ...stateOpt) {
 	t.Helper()
-	seqRoot, seqMs := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+	seqRoot, seqMs := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2, opts...)
 
-	parRoot, parMs := incrementalRoot(t, modeParallel, workers, k1, u1, k2, u2)
+	parRoot, parMs := incrementalRoot(t, modeParallel, workers, k1, u1, k2, u2, opts...)
 	if !bytes.Equal(seqRoot, parRoot) {
 		branchDiff(t, seqMs, parMs)
 	}

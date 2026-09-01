@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/bits"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -33,11 +34,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type MockState struct {
-	t          testing.TB
-	concurrent atomic.Bool
+	t           testing.TB
+	concurrent  atomic.Bool
+	edgeRecords bool
 
 	mu     sync.RWMutex
 	sm     map[string][]byte
@@ -58,6 +61,15 @@ func (ms *MockState) SetConcurrentCommitment(concurrent bool) {
 	ms.concurrent.Store(concurrent)
 }
 
+func (ms *MockState) SetEdgeRecords(v bool) { ms.edgeRecords = v }
+
+// TrieConfig matches a trie to this state's record format.
+func (ms *MockState) TrieConfig() TrieConfig {
+	cfg := DefaultTrieConfig()
+	cfg.EdgeRecords = ms.edgeRecords
+	return cfg
+}
+
 func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
@@ -74,6 +86,11 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 }
 
 func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	// A v3 node is addressed only by its child records, never by the node key.
+	if ms.edgeRecords && !IsCommitmentStateKey(prefix) {
+		data, step, _, _, err := ms.BranchWithMask(prefix, 0, false)
+		return data, step, err
+	}
 	if ms.concurrent.Load() {
 		ms.mu.RLock()
 		defer ms.mu.RUnlock()
@@ -82,6 +99,30 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		return exBytes, 0, nil
 	}
 	return nil, 0, nil
+}
+
+func (ms *MockState) BranchWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+	wanted := mask
+	if !maskKnown {
+		wanted = ^uint16(0)
+	}
+	if ms.concurrent.Load() {
+		ms.mu.RLock()
+		defer ms.mu.RUnlock()
+	}
+	var records [16][]byte
+	var present uint16
+	for bitset := wanted; bitset != 0; bitset &= bitset - 1 {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		if record, ok := ms.cm[string(nibbles.ChildKeyV3(nodeKey, byte(nibble)))]; ok {
+			records[nibble] = bytes.Clone(record)
+			present |= bit
+		}
+	}
+	read, err := SynthesizeBranchRow(mask, maskKnown, records, present, nil)
+	return read.Data, 0, read.ChildMasks, read.ChildMasksKnown, err
 }
 
 func (ms *MockState) Account(plainKey []byte) (*Update, error) {

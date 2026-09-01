@@ -23,10 +23,8 @@ type StateReader interface {
 	// workers never touch the main goroutine's lock-free accumulator (a race)
 	// or take the global metrics lock.
 	CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader
-	// ReadCommitmentRecords resolves the v3 edge records of nodeKey's children,
-	// restricted to mask when maskKnown. Part of the interface rather than an
-	// optional one a caller type-asserts: a reader that silently answered "no
-	// records" would read an empty v3 trie and compute a wrong root.
+	// Required rather than an optional interface a caller type-asserts: a reader that
+	// silently answered "no records" would read an empty v3 trie.
 	ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
 }
 

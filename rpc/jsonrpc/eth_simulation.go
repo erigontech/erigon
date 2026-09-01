@@ -991,9 +991,7 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 	return enc, kv.Step(asOf / stepSize), nil
 }
 
-// ReadCommitmentRecords routes each child record the same way Read routes a
-// branch: the in-memory batch first, so a later block sees the branches an
-// earlier simulated block wrote, then the base parent's commitment plane.
+// Per-child mirror of Read's commitment routing.
 func (r *simulationStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
 	wanted := mask
 	if !maskKnown {

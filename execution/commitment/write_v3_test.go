@@ -271,7 +271,7 @@ func TestHexPatriciaHashedV3KeepsStorageMaskWhenOnlyTheAccountChanges(t *testing
 	cfg.DeferBranchUpdates = false
 	cfg.EdgeRecords = true
 	ms := NewMockState(t)
-	ctx := &edgeRecordContext{MockState: ms}
+	ms.SetEdgeRecords(true)
 
 	keys1, updates1 := NewUpdateBuilder().
 		Balance(branched, 1233).
@@ -281,7 +281,7 @@ func TestHexPatriciaHashedV3KeepsStorageMaskWhenOnlyTheAccountChanges(t *testing
 		Balance(other, 5*1e17).
 		Build()
 
-	hph := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	hph := NewHexPatriciaHashed(length.Addr, ms, cfg)
 	defer hph.Release()
 	require.NoError(t, ms.applyPlainUpdates(keys1, updates1))
 	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys1, updates1)
@@ -296,7 +296,7 @@ func TestHexPatriciaHashedV3KeepsStorageMaskWhenOnlyTheAccountChanges(t *testing
 	require.NoError(t, err)
 
 	keys2, updates2 := NewUpdateBuilder().Balance(branched, 4321).Build()
-	restored := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	restored := NewHexPatriciaHashed(length.Addr, ms, cfg)
 	defer restored.Release()
 	require.NoError(t, restored.SetState(blob))
 	require.NoError(t, ms.applyPlainUpdates(keys2, updates2))
@@ -322,7 +322,7 @@ func TestHexPatriciaHashedV3RecordsHoistedSlotOnAccountEdge(t *testing.T) {
 	cfg.DeferBranchUpdates = false
 	cfg.EdgeRecords = true
 	ms := NewMockState(t)
-	ctx := &edgeRecordContext{MockState: ms}
+	ms.SetEdgeRecords(true)
 
 	plainKeys, updates := NewUpdateBuilder().
 		Balance(other, 1233).
@@ -333,7 +333,7 @@ func TestHexPatriciaHashedV3RecordsHoistedSlotOnAccountEdge(t *testing.T) {
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer upds.Close()
 
-	hph := NewHexPatriciaHashed(length.Addr, ctx, cfg)
+	hph := NewHexPatriciaHashed(length.Addr, ms, cfg)
 	defer hph.Release()
 	_, err := hph.Process(context.Background(), upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)

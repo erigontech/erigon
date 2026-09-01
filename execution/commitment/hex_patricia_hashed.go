@@ -159,9 +159,8 @@ type HexPatriciaHashed struct {
 	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
-	// storageAccount names the account whose storage subtree a storage-only worker folds.
-	// Such a worker's grid starts below depth 64, so the account cell that a v3 storage-leaf
-	// record inherits its address from is nowhere in it.
+	// A storage-only worker's grid starts below depth 64, so no account cell is in it for
+	// a v3 storage leaf to inherit its address from.
 	storageAccount    common.Address
 	storageAccountSet bool
 
@@ -1600,7 +1599,6 @@ func (hph *HexPatriciaHashed) enclosingAccountAddr() []byte {
 	return nil
 }
 
-// SetStorageAccount names the account a storage-only worker folds beneath.
 func (hph *HexPatriciaHashed) SetStorageAccount(addr []byte) {
 	hph.storageAccountSet = len(addr) == length.Addr
 	if hph.storageAccountSet {
