@@ -328,8 +328,8 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		nil,
 		"testnet",
 		false,
-		// afterAdd attaches the public trackers, so a test reaching it would announce for
-		// real. This stops the scrapers only - the announce list is still populated.
+		// afterAdd attaches the public trackers. Stops the scrapers only, so the
+		// announce list still fills.
 		downloadercfg.NewCfgOpts{DisableTrackers: g.Some(true)},
 	)
 	require.NoError(err)
