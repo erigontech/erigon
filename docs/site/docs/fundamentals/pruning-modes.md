@@ -11,7 +11,7 @@ Erigon 3 supports four pruning modes that control how much chain history your no
 
 | **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| <p><a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the last 1,100,000 blocks (~5 months)                                  | General users, DApp interaction, fastest sync.                                           |
+| <p><a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the last 1,100,000 blocks (~5 months at Ethereum mainnet cadence)      | General users, DApp interaction, fastest sync.                                           |
 | [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
 | [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the 1,100,000-block window                         | Users needing historical block data for research or indexing.                            |
 | [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
@@ -38,7 +38,7 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks, slightly more than the consensus layer's `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots). Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks. On Ethereum mainnet this is about five months and slightly more than the consensus layer's `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots). Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. The wider window uses more disk as it fills. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
 
 To keep every post-merge block instead of only the window — pruning pre-merge block data alone — set `--prune.distance.blocks=keep-post-merge`. Decide before the first start: pruning is not reversible, and block data already discarded comes back only by re-syncing.
 
@@ -51,8 +51,8 @@ The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible
 ## Blocks node
 
 The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block
-back to genesis — while pruning **state history**. It retains state only within the last 1,100,000
-blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
+back to genesis — while pruning **state history**. It retains state only within the last 1,100,000 blocks, the same
+state retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
 paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
 (`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add

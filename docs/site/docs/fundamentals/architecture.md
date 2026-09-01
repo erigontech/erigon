@@ -121,8 +121,8 @@ Erigon 3 has one sync pipeline. The user-facing choice is *what to retain after 
 | Mode | Retained | Use case |
 |---|---|---|
 | `archive` | Entire state history + all blocks | Indexers, block explorers, deep historical queries |
-| `full` (default) | Latest state + a rolling window of recent blocks (the default prune distance, ~262k blocks) | Most users, dApps, validators |
-| `blocks` | All blocks, but no state history | Full block/receipt history without archive-size state |
+| `full` (default) | Latest state + a rolling 1,100,000-block window of block and state history | Most users, dApps, validators |
+| `blocks` | All blocks + a rolling 1,100,000-block window of state history | Complete block history without archive-size state |
 | `minimal` | Latest state only (shortest block window) | Solo stakers, constrained hardware |
 
 See [Pruning Modes](pruning-modes) for the full comparison.

@@ -27,7 +27,7 @@
 - [Architecture](https://docs.erigon.tech/fundamentals/architecture): How Erigon is built — staged sync, modular processes, flat-DB on MDBX, immutable snapshots, and an embedded consensus layer.
 - [Database](https://docs.erigon.tech/fundamentals/database): How Erigon stores chain data — MDBX engine, datadir layout, snapshot files, and real mainnet sizing numbers.
 - [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes): Full, minimal, blocks, and archive pruning modes explained — choose the right mode for your use case.
-- [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats.
+- [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and plan retention upgrades.
 - [Caplin](https://docs.erigon.tech/fundamentals/caplin): Erigon's built-in consensus layer — run a full node without an external CL client.
 - [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, and all other chains Erigon can sync.

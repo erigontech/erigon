@@ -58,6 +58,13 @@ var (
 		CommitmentHistory: KeepAllBlocksPruneMode,
 		Receipts:          KeepAllBlocksPruneMode,
 	}
+	previousFullMode = Mode{
+		Initialised:       true,
+		Blocks:            previousDefaultPruneDistance,
+		History:           previousDefaultPruneDistance,
+		CommitmentHistory: KeepAllBlocksPruneMode,
+		Receipts:          KeepAllBlocksPruneMode,
+	}
 
 	DefaultMode = ArchiveMode
 	MockMode    = Mode{
@@ -72,10 +79,11 @@ var (
 )
 
 const (
-	archiveModeStr = "archive"
-	blockModeStr   = "blocks"
-	fullModeStr    = "full"
-	minimalModeStr = "minimal"
+	archiveModeStr               = "archive"
+	blockModeStr                 = "blocks"
+	fullModeStr                  = "full"
+	minimalModeStr               = "minimal"
+	previousDefaultPruneDistance = Distance(262_144)
 )
 
 type Mode struct {
@@ -111,6 +119,8 @@ func (m Mode) String() string {
 		return blockModeStr
 	case modeEquals(m, ArchiveMode):
 		return archiveModeStr
+	case modeEquals(m, previousFullMode):
+		return fullModeStr + "(previous)"
 	}
 
 	// Recognise legacy shapes that don't match any current named mode but
@@ -330,26 +340,15 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
-		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
-		// We need to use because we are changing defaults in archive node from KeepPostMergeBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
+		// Old archive datadirs stored the history-expiry sentinel for both fields.
+		// Treat that pair as the current keep-all archive mode.
 		if (pm.History == KeepPostMergeBlocksPruneMode && pruneMode.History == KeepPostMergeBlocksPruneMode) &&
 			(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
 			return pruneMode, nil
 		}
-		// Retention-window changes (e.g., a named-mode default bump or any
-		// operator-initiated --prune.distance change) are
-		// safe in both directions: widening cannot bring back already-pruned
-		// state but is operationally fine going forward, and narrowing just
-		// causes the next prune pass to delete more. On Blocks specifically
-		// the shim also accepts either-direction transitions between a finite
-		// Distance and KeepPostMergeBlocksPruneMode (chain-history-expiry policy)
-		// so that existing full-mode datadirs can adopt the current default
-		// without operator intervention, and operators can revert if needed
-		// even after the auto-upgrade rewrites the persisted value. Accept
-		// such changes, rewrite the persisted value so we don't warn on
-		// every restart, and log the transition. KeepAllBlocksPruneMode
-		// transitions remain rejected — narrowing from "keep all" is
-		// destructive enough to require explicit operator action.
+		// Persist finite window changes so named-mode defaults can migrate. A
+		// wider window does not recover deleted data; a narrower one may delete
+		// data on the next prune pass. Keep-all transitions remain explicit.
 		if isRetentionWindowChange(pm, pruneMode) {
 			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
 				"previous", pm.String(), "current", pruneMode.String())
@@ -366,19 +365,9 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	return pm, nil
 }
 
-// isRetentionWindowChange reports whether persisted and requested differ only
-// in the size of their block-retention windows.
-//
-// For History: only finite↔finite transitions are accepted (any direction).
-// Toggling between archive (KeepPostMergeBlocksPruneMode sentinel) and a finite
-// retention is a mode-shape change that should remain explicit.
-//
-// For Blocks: finite↔finite, plus either-direction transitions between a
-// finite Distance and KeepPostMergeBlocksPruneMode (the chain-history-expiry
-// sentinel) are accepted. KeepPostMergeBlocksPruneMode → finite upgrades legacy
-// full nodes; the reverse lets operators revert to chain-history-expiry
-// even after the auto-upgrade has rewritten the persisted value. Any
-// transition involving KeepAllBlocksPruneMode remains a mode-shape change.
+// isRetentionWindowChange accepts finite history changes and block changes
+// between finite retention and chain history expiry. Keep-all transitions are
+// mode changes and remain explicit.
 func isRetentionWindowChange(persisted, requested Mode) bool {
 	if persisted.History == requested.History &&
 		persisted.Blocks == requested.Blocks &&

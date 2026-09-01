@@ -163,6 +163,20 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
+	if pruneMode.History.Enabled() {
+		onDiskOldest, err := api.stateHistoryStartBlock(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateOldest = max(stateOldest, onDiskOldest)
+	}
+	if pruneMode.Blocks.Enabled() {
+		onDiskOldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		blocksOldest = max(blocksOldest, onDiskOldest)
+	}
 	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
 	// MergeHeight set, pre-merge transaction segments are never downloaded, so the oldest
 	// available block is the merge point. The same sentinel also covers a legacy archive

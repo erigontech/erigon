@@ -485,7 +485,9 @@ const systemTxsPerBlock = 2
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func() (uint64, error) {
+		return api.stateHistoryStartBlock(ctx, tx)
+	})
 }
 
 // checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
@@ -501,7 +503,29 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 		}
 		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
 	}
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func() (uint64, error) {
+		return api._blockReader.MinimumBlockAvailable(ctx, tx)
+	})
+}
+
+func (api *BaseAPI) stateHistoryStartBlock(ctx context.Context, tx kv.Tx) (uint64, error) {
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return 0, nil
+	}
+	startTxNum := state.StateHistoryStartTxNum(ttx)
+	if startTxNum == 0 {
+		return 0, nil
+	}
+	block, ok, err := api._txNumReader.FindBlockNum(ctx, tx, startTxNum)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		return block, nil
+	}
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	return latest, err
 }
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
@@ -731,7 +755,7 @@ func (api *BaseAPI) readsUserTransaction(ctx context.Context, tx kv.Tx, blockNum
 	return ok && txn != nil, true, nil
 }
 
-func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
+func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string, onDiskFloor func() (uint64, error)) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
@@ -747,8 +771,16 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	if err != nil {
 		return err
 	}
-	if block < amount.PruneTo(latest) {
-		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, amount.PruneTo(latest))
+	floor := amount.PruneTo(latest)
+	if onDiskFloor != nil {
+		actual, err := onDiskFloor()
+		if err != nil {
+			return err
+		}
+		floor = max(floor, actual)
+	}
+	if block < floor {
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, floor)
 	}
 	return nil
 }
@@ -784,7 +816,7 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	case p.ReceiptsFollowHistory():
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
-		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available", nil)
 		if err == nil || !errors.Is(err, state.PrunedError) {
 			return err
 		}

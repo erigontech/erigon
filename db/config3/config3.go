@@ -43,8 +43,9 @@ const DefaultReferencesInCommitmentBranches = false
 
 const EnableHistoryV4InTest = true
 
-// DefaultPruneDistance is the retention window used by full and blocks prune
-// modes. It exceeds the 1,056,768-slot MIN_EPOCHS_FOR_BLOCK_REQUESTS window.
+// DefaultPruneDistance is the block and state-history window used by full mode,
+// and the state-history window used by blocks mode. It covers the consensus
+// layer MIN_EPOCHS_FOR_BLOCK_REQUESTS window on every configured network.
 const DefaultPruneDistance = 1_100_000
 
 // MinimalPruneDistance is the retention window used by the minimal prune

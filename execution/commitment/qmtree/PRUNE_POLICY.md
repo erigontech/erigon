@@ -53,18 +53,20 @@ for upper tree reconstruction and total ~36 MB for the entire chain.
 ### How it maps to existing modes
 
 The `History` distance is in **blocks** (not steps). Full mode uses
-`DefaultPruneDistance` = 1,100,000 blocks, slightly above the consensus layer's
-1,056,768-slot `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window. Minimal mode uses
+`DefaultPruneDistance` = 1,100,000 blocks. On Ethereum mainnet this is slightly
+above the consensus layer's 1,056,768-slot `MIN_EPOCHS_FOR_BLOCK_REQUESTS`
+window. Minimal mode uses
 `MinimalPruneDistance` = 100,000 blocks. At ~100 txns/block and a step size of
 390,625 entries, full keeps ~110M entries (~282 steps); minimal keeps ~10M
-entries (~26 steps).
+entries (~26 steps). Using the projected 237 GB at 22M blocks above, those
+windows retain about 12 GB and 1.1 GB of entry snapshots respectively.
 
 | `--prune.mode` | Entry retention | Root retention | Proof capability |
 |----------------|----------------|----------------|-----------------|
 | `archive` | all | all | full historical proofs |
-| `full` | last 1.1M blocks (~282 steps, ~27 GB) | all | proofs within window |
-| `blocks` | last 1.1M blocks (~282 steps, ~27 GB) | all | proofs within window |
-| `minimal` | last 100K blocks (~26 steps, ~2.5 GB) | all | proofs within window |
+| `full` | last 1.1M blocks (~282 steps, ~12 GB) | all | proofs within window |
+| `blocks` | last 1.1M blocks (~282 steps, ~12 GB) | all | proofs within window |
+| `minimal` | last 100K blocks (~26 steps, ~1.1 GB) | all | proofs within window |
 
 QMTree entry files are step-aligned, so the block-based distance is converted
 to the nearest step boundary when deciding which entry files to retain/prune.

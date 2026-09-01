@@ -770,6 +770,14 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 ## Managing your Data
 
+### v3.7 pruning-window upgrade
+
+Erigon v3.7 automatically widens the default `full` block and state-history windows, and the `blocks` mode state-history window, from 262,144 to 1,100,000 blocks. Data already pruned by an older release is not restored. The physical window grows as the node advances; re-sync the datadir if the full window is needed immediately. Plan for higher disk use while the window fills.
+
+:::warning
+Downgrading a migrated datadir to Erigon 3.6 restores that release's 262,144-block default and can permanently prune the backlog accumulated under v3.7. Before a rollback, back up the datadir and configure 1,100,000 explicitly for every finite window you need to preserve. For `full`, use `--prune.distance=1100000 --prune.distance.blocks=1100000`; for `blocks`, use `--prune.distance=1100000`.
+:::
+
 Erigon 3.1 introduces a new snapshot format while continuing to support the old one. This means that new releases are fully compatible with your existing data. However, users who want the latest data files and data-specific fixes can perform an **optional** manual data upgrade:
 
 1. Backup your datadir.
@@ -1645,8 +1653,8 @@ Erigon 3 has one sync pipeline. The user-facing choice is *what to retain after 
 | Mode | Retained | Use case |
 |---|---|---|
 | `archive` | Entire state history + all blocks | Indexers, block explorers, deep historical queries |
-| `full` (default) | Latest state + a rolling window of recent blocks (the default prune distance, ~262k blocks) | Most users, dApps, validators |
-| `blocks` | All blocks, but no state history | Full block/receipt history without archive-size state |
+| `full` (default) | Latest state + a rolling 1,100,000-block window of block and state history | Most users, dApps, validators |
+| `blocks` | All blocks + a rolling 1,100,000-block window of state history | Complete block history without archive-size state |
 | `minimal` | Latest state only (shortest block window) | Solo stakers, constrained hardware |
 
 See [Pruning Modes](pruning-modes) for the full comparison.
@@ -1790,7 +1798,7 @@ Erigon 3 supports four pruning modes that control how much chain history your no
 
 | **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Full Node(Default) | `--prune.mode=full`    | State and block data within the last 1,100,000 blocks (~5 months)                                  | General users, DApp interaction, fastest sync.                                           |
+| Full Node(Default) | `--prune.mode=full`    | State and block data within the last 1,100,000 blocks (~5 months at Ethereum mainnet cadence)      | General users, DApp interaction, fastest sync.                                           |
 | [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
 | [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the 1,100,000-block window                         | Users needing historical block data for research or indexing.                            |
 | [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
@@ -1817,7 +1825,7 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks, slightly more than the consensus layer's `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots). Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks. On Ethereum mainnet this is about five months and slightly more than the consensus layer's `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots). Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. The wider window uses more disk as it fills. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
 
 To keep every post-merge block instead of only the window — pruning pre-merge block data alone — set `--prune.distance.blocks=keep-post-merge`. Decide before the first start: pruning is not reversible, and block data already discarded comes back only by re-syncing.
 
@@ -1830,8 +1838,8 @@ The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible
 ## Blocks node
 
 The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block
-back to genesis — while pruning **state history**. It retains state only within the last 1,100,000
-blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
+back to genesis — while pruning **state history**. It retains state only within the last 1,100,000 blocks, the same
+state retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
 paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
 (`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
@@ -1882,12 +1890,12 @@ total: 1.8TB (4285 files)
 
 ── Estimated Size by Node Type ────────────────────────────────
   archive            1.8TB          —    all blocks      all history
-  full             361.2GB     -1.5TB    last 1.100.000  last 1.100.000
-  blocks             1.2TB   -589.9GB    all blocks      last 1.100.000
+  full             459.0GB     -1.4TB    last 1.100.000  last 1.100.000
+  blocks             1.3TB   -512.0GB    all blocks      last 1.100.000
   minimal          342.3GB     -1.5TB    last 100.000    last 100.000
 ```
 
-Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
+The byte totals above are illustrative rather than capacity guarantees. Sizes use Erigon's `ByteCount` format (e.g. `850.4GB`, `1.2TB` — binary scale, no space). Block/step counts and prune-window sizes use `.` as the thousands separator, matching the binary's own output.
 
 The estimator only sums files already on disk, so the **archive** row always equals the current total and no node-type estimate can exceed it. Estimates are therefore most meaningful against an archive datadir (shown above); on an already-pruned node the larger modes are capped at what is physically present. Rows are always printed in the fixed order `archive → full → blocks → minimal`.
 
@@ -1954,21 +1962,27 @@ Run `seg du` while the node is **stopped**. If Erigon is running and holds the d
 
 ## Snapshot Types (Pruning Modes)
 
-The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` detects which mode your current files correspond to when the layout is distinguishable. Young chains that have not crossed a pruning boundary can report `unknown`. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
 
 The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
 
 ---
 
-## Upgrading Snapshots in v3.5
+## Retention-window upgrades
 
-### EIP-8252 retention window change
+### v3.7 default window increase
 
-v3.5 retargets the **Full** and **Blocks** pruning modes to the EIP-8252 reorg-retention window (262,144 blocks, ~36 days), up from the previous 100,000-block window. This changes **which snapshot files are present on disk** after upgrading — most notably, full nodes prune older block segments down to the window, freeing space. Existing datadirs migrate automatically on first start.
+Erigon v3.7 increases the **Full** block and state-history windows and the **Blocks** state-history window from 262,144 to 1,100,000 blocks. Existing datadirs that use these mode defaults migrate automatically. The wider setting does not restore previously deleted data: the available window grows as the node advances, or immediately after a re-sync. Archive, minimal, and custom distances are unchanged.
 
-Decide before that first start if you need to keep more than the window: pruning is not reversible, and block data already discarded comes back only by re-syncing. To retain every post-merge block under Full mode, pass `--prune.distance.blocks=18446744073709551615` — v3.5 takes this option as a number; the readable `keep-post-merge` alias only exists from v3.6. `--prune.mode=blocks` keeps every block back to genesis. See [Pruning Modes](pruning-modes) for what each mode keeps.
+The extra snapshots increase disk use as the window fills. A downgrade to Erigon 3.6 restores its 262,144-block default and can prune the newly accumulated data. See the [Upgrading guide](../get-started/installation/upgrading#v37-pruning-window-upgrade) before rolling back.
 
-After the first prune pass, run `seg du` to inspect the resulting on-disk breakdown.
+### Historical v3.5 EIP-8252 change
+
+Erigon v3.5 retargeted the **Full** and **Blocks** pruning modes to the EIP-8252 reorg-retention window (262,144 blocks, ~36 days), up from the previous 100,000-block window. Erigon v3.7 supersedes that default with the 1,100,000-block window described above. The v3.5 change altered **which snapshot files were present on disk** after upgrading — most notably, full nodes pruned older block segments down to the window, freeing space. Existing datadirs migrated automatically on first start.
+
+Operators who needed more than that window had to set the distance before the first v3.5 start because pruning is not reversible. To retain every post-merge block under Full mode, v3.5 accepted `--prune.distance.blocks=18446744073709551615`; the readable `keep-post-merge` alias arrived in v3.6. `--prune.mode=blocks` keeps every block back to genesis. See [Pruning Modes](pruning-modes) for current behavior.
+
+After a prune pass, run `seg du` to inspect the resulting on-disk breakdown.
 
 ### Manual snapshot operations
 

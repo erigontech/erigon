@@ -104,6 +104,121 @@ func TestPruneGateArchive(t *testing.T) {
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
 }
 
+func TestHistoryGateUsesOnDiskFloor(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const floorBlock = uint64(8)
+	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, floorBlock)
+	require.NoError(t, err)
+	view := historyFloorTx{TemporalTx: tx, startTxNum: startTxNum}
+
+	err = apis.eth.checkPruneHistory(ctx, view, floorBlock-1)
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), fmt.Sprintf("history is available from block %d", floorBlock))
+	require.NoError(t, apis.eth.checkPruneHistory(ctx, view, floorBlock))
+}
+
+func TestHistoryGateKeepsLatestWithoutHistoricalState(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	view := historyFloorTx{TemporalTx: tx, startTxNum: math.MaxUint64}
+
+	require.NoError(t, apis.eth.checkPruneHistory(ctx, view, chainInfo.head))
+	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, view, chainInfo.head-1), state.PrunedError)
+}
+
+func TestHistoryEndpointsUseOnDiskFloor(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, chainInfo.old.num+1)
+	require.NoError(t, err)
+	tx.Rollback()
+	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: startTxNum}
+
+	_, err = apis.eth.GetLogs(ctx, addressFilter(chainInfo.old.num))
+	require.ErrorIs(t, err, state.PrunedError)
+	_, err = apis.eth.GetBlockReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)))
+	require.ErrorIs(t, err, state.PrunedError)
+}
+
+func TestBlocksGateUsesOnDiskFloor(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	const floorBlock = uint64(9)
+	dropBodies(t, apis.rwDB, 1, floorBlock)
+
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	err = apis.eth.checkPruneBlocks(ctx, tx, floorBlock-1)
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", floorBlock))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, floorBlock))
+
+	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(floorBlock-1), false)
+	require.ErrorIs(t, err, state.PrunedError)
+}
+
+func TestCapabilitiesUseOnDiskFloors(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	const stateFloor = uint64(8)
+	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, stateFloor)
+	require.NoError(t, err)
+	tx.Rollback()
+
+	const blocksFloor = uint64(9)
+	dropBodies(t, apis.rwDB, 1, blocksFloor)
+	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: startTxNum}
+
+	caps, err := apis.eth.Capabilities(ctx)
+	require.NoError(t, err)
+	require.Equal(t, stateFloor, uint64(*caps.State.OldestBlock))
+	require.Equal(t, blocksFloor, uint64(*caps.Logs.OldestBlock))
+	require.Equal(t, blocksFloor, uint64(*caps.Blocks.OldestBlock))
+	require.Equal(t, blocksFloor, uint64(*caps.Tx.OldestBlock))
+	require.Equal(t, blocksFloor, uint64(*caps.Receipts.OldestBlock))
+}
+
 // TestReceiptsGateFollowsRetention pins checkReceiptsAvailable against the
 // retention actually applied to the receipt cache. Enabling the cache says
 // only that it exists on disk, not how much of it is kept: RCacheDomain is

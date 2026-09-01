@@ -274,10 +274,10 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
-	// Post-#21342 production FullMode: Blocks is a finite Distance (EIP-8252 retention window),
-	// not the KeepPostMergeBlocksPruneMode sentinel. Without --prune.include-receipts, receipts/logs are
+	// Current FullMode uses a finite block distance rather than the history-expiry sentinel.
+	// Without --prune.include-receipts, receipts/logs are
 	// bounded by max(stateOldest, blocksOldest) — equal here, so both report the prune window.
-	t.Run("full_eip8252_no_persist", func(t *testing.T) {
+	t.Run("full_finite_no_persist", func(t *testing.T) {
 		t.Parallel()
 		api, head := setupAPI(t, testMinimalMode, false, false)
 		result, err := api.Capabilities(t.Context())
@@ -295,11 +295,11 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
-	// full (EIP-8252) + --prune.include-receipts: it widens past state history, but
+	// Full mode with --prune.include-receipts widens receipts past state history, but
 	// block bodies and log indexes are still pruned at prune.Blocks, so receipts/logs are
 	// bounded by blocksOldest, NOT genesis. This is the common pruned-archive config and the
 	// case a routing layer would misroute if oldestBlock were reported as 0.
-	t.Run("full_eip8252_persist_receipts", func(t *testing.T) {
+	t.Run("full_finite_persist_receipts", func(t *testing.T) {
 		t.Parallel()
 		api, head := setupAPI(t, testMinimalMode, false, true)
 		result, err := api.Capabilities(t.Context())

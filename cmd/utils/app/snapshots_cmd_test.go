@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -894,6 +895,53 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
 }
 
+func TestDUComputeEstimatesRoundsStepWindowUp(t *testing.T) {
+	files := []duFileInfo{
+		{Name: "accounts.1-2.v", Size: 10, Category: duCatHistory, IsState: true, From: 1, To: 2},
+	}
+
+	estimates := duComputeEstimates(files, 2_000_000, 3)
+	require.Equal(t, int64(10), estimates[1].TotalBytes)
+	require.Equal(t, int64(10), estimates[2].TotalBytes)
+}
+
+func TestDUComputeEstimatesCoversExpandedDefaultWindow(t *testing.T) {
+	const (
+		maxBlock        = uint64(20_000_000)
+		maxStep         = uint64(2_000)
+		previousDefault = uint64(262_144)
+	)
+	currentBlockCutoff := maxBlock - uint64(config3.DefaultPruneDistance)
+	previousBlockCutoff := maxBlock - previousDefault
+	currentStepWindow := (uint64(config3.DefaultPruneDistance)*maxStep + maxBlock - 1) / maxBlock
+	previousStepWindow := (previousDefault*maxStep + maxBlock - 1) / maxBlock
+	currentStepCutoff := maxStep - currentStepWindow
+	previousStepCutoff := maxStep - previousStepWindow
+
+	files := []duFileInfo{
+		{
+			Name:     "accounts.expanded-window.v",
+			Size:     20,
+			Category: duCatHistory,
+			IsState:  true,
+			From:     currentStepCutoff,
+			To:       currentStepCutoff + (previousStepCutoff-currentStepCutoff)/2,
+		},
+		{
+			Name:     "expanded-window-transactions.seg",
+			Size:     30,
+			Category: duCatBlocks,
+			From:     currentBlockCutoff,
+			To:       currentBlockCutoff + (previousBlockCutoff-currentBlockCutoff)/2,
+		},
+	}
+
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	require.Equal(t, int64(50), estimates[1].TotalBytes)
+	require.Equal(t, int64(50), estimates[2].TotalBytes)
+	require.Zero(t, estimates[3].TotalBytes)
+}
+
 func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
 	estimates := duComputeEstimates(nil, 0, 0)
 	require.Len(t, estimates, 4)
@@ -1001,10 +1049,7 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 5},
 			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
 		}
-		// maxStep=5 <= fullStepPruneDistance=110 → too young for archive classification,
-		// falls through to block-based detection. maxBlock=50000 <
-		// MinimalPruneDistance=100_000 → no full classification → minimal.
-		require.Equal(t, "minimal", duDetectNodeType(files))
+		require.Equal(t, "unknown", duDetectNodeType(files))
 	})
 
 	t.Run("genesis tx in [MinimalPruneDistance, DefaultPruneDistance] band not classified as blocks", func(t *testing.T) {
