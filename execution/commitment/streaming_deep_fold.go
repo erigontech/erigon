@@ -139,6 +139,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 
 	base, releaseBase := newWorker(ctx)
 	defer releaseBase()
+	base.SetStorageAccount(node.plainKey)
 
 	var accTag string
 	if base.traceW != nil {

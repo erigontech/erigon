@@ -159,6 +159,12 @@ type HexPatriciaHashed struct {
 	mountedNib int   // if 0 <= nib <= 15 means mounted to some root. If -1, means it's a storage subtrie so must not be folded above depth 63
 	mountWall  int16 // depth the mounted subtree folds down to (split depth + 1); foldMounted stops here
 
+	// storageAccount names the account whose storage subtree a storage-only worker folds.
+	// Such a worker's grid starts below depth 64, so the account cell that a v3 storage-leaf
+	// record inherits its address from is nowhere in it.
+	storageAccount    common.Address
+	storageAccountSet bool
+
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
@@ -274,6 +280,7 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	hph.mounted = false
 	hph.mountedNib = 0
 	hph.mountWall = 0
+	hph.storageAccountSet = false
 
 	// tracing
 	hph.traceW = nil
@@ -1431,7 +1438,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 			c.accountAddrLen = 0
 		}
 		if hph.cfg.EdgeRecords {
-			if err := c.inheritStorageAddress(hph.enclosingAccountCell()); err != nil {
+			if err := c.inheritStorageAddress(hph.enclosingAccountAddr()); err != nil {
 				return nil, fmt.Errorf("[witness] storage leaf at prefix %x: %w", branchPrefix, err)
 			}
 		}
@@ -1552,7 +1559,7 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 	}
 	hph.touchMap[row] = maps.TouchMap
 	hph.afterMap[row] = maps.AfterMap
-	account := hph.enclosingAccountCell()
+	account := hph.enclosingAccountAddr()
 	for bitset := maps.Bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -1573,9 +1580,9 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 	return nil
 }
 
-func (hph *HexPatriciaHashed) enclosingAccountCell() *cell {
+func (hph *HexPatriciaHashed) enclosingAccountAddr() []byte {
 	if hph.root.accountAddrLen == length.Addr {
-		return &hph.root
+		return hph.root.accountAddr[:]
 	}
 	for row := 0; row < hph.activeRows; row++ {
 		pathPos := hph.depths[row] - 1
@@ -1584,10 +1591,21 @@ func (hph *HexPatriciaHashed) enclosingAccountCell() *cell {
 		}
 		ancestor := &hph.grid[row][hph.currentKey[pathPos]]
 		if ancestor.accountAddrLen == length.Addr {
-			return ancestor
+			return ancestor.accountAddr[:]
 		}
 	}
+	if hph.storageAccountSet {
+		return hph.storageAccount[:]
+	}
 	return nil
+}
+
+// SetStorageAccount names the account a storage-only worker folds beneath.
+func (hph *HexPatriciaHashed) SetStorageAccount(addr []byte) {
+	hph.storageAccountSet = len(addr) == length.Addr
+	if hph.storageAccountSet {
+		copy(hph.storageAccount[:], addr)
+	}
 }
 
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
@@ -2786,6 +2804,7 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootPresent = true
 	hph.rootMask = 0
 	hph.rootMaskKnown = false
+	hph.storageAccountSet = false
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {

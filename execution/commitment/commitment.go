@@ -199,17 +199,17 @@ type cellEncodeData struct {
 
 var ErrStorageLeafWithoutAccount = errors.New("commitment: storage leaf has no enclosing account")
 
-func (c *cell) inheritStorageAddress(account *cell) error {
+func (c *cell) inheritStorageAddress(accountAddr []byte) error {
 	if c.accountAddrLen != 0 || c.storageAddrLen != length.Hash {
 		return nil
 	}
-	if account == nil || account.accountAddrLen != length.Addr {
+	if len(accountAddr) != length.Addr {
 		return ErrStorageLeafWithoutAccount
 	}
 
 	var slot [length.Hash]byte
 	copy(slot[:], c.storageAddr[:length.Hash])
-	copy(c.storageAddr[:length.Addr], account.accountAddr[:length.Addr])
+	copy(c.storageAddr[:length.Addr], accountAddr)
 	copy(c.storageAddr[length.Addr:], slot[:])
 	c.storageAddrLen = length.Addr + length.Hash
 	return nil

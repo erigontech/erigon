@@ -65,6 +65,9 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.afterMap[:], root.afterMap[:])
 	copy(hph.depthsToTxNum[:], root.depthsToTxNum[:])
 
+	hph.storageAccount = root.storageAccount
+	hph.storageAccountSet = root.storageAccountSet
+
 	hph.mountedNib = nibble
 	hph.mounted = true
 	hph.mountWall = root.currentKeyLen + 1
