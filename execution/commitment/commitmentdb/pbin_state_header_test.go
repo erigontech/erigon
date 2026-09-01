@@ -29,12 +29,20 @@ import (
 
 type pbinStateStubSD struct{}
 
-func (s *pbinStateStubSD) SetTxNum(uint64)                                    {}
-func (s *pbinStateStubSD) AsStateGetter(kv.TemporalTx) execctxapi.StateGetter { return nil }
+func (s *pbinStateStubSD) SetTxNum(uint64) {}
+func (s *pbinStateStubSD) AsStateGetter(kv.TemporalTx, execctxapi.StateGetterOptions) execctxapi.StateGetter {
+	return nil
+}
 func (s *pbinStateStubSD) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainMetrics) execctxapi.StateGetter {
 	return nil
 }
-func (s *pbinStateStubSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (s *pbinStateStubSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return nil }
+func (s *pbinStateStubSD) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff) kv.TemporalPutDel {
+	return nil
+}
+func (s *pbinStateStubSD) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {
+	return nil, kv.NoStepBound, false
+}
 func (s *pbinStateStubSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
 func (s *pbinStateStubSD) StepSize() uint64                                        { return 1 }
 func (s *pbinStateStubSD) Metrics() *kvmetrics.DomainMetrics                       { return nil }

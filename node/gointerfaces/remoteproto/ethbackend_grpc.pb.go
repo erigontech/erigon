@@ -43,11 +43,10 @@ const (
 	ETHBACKEND_AddTrustedPeer_FullMethodName          = "/remote.ETHBACKEND/AddTrustedPeer"
 	ETHBACKEND_RemoveTrustedPeer_FullMethodName       = "/remote.ETHBACKEND/RemoveTrustedPeer"
 	ETHBACKEND_PendingBlock_FullMethodName            = "/remote.ETHBACKEND/PendingBlock"
-	ETHBACKEND_BorTxnLookup_FullMethodName            = "/remote.ETHBACKEND/BorTxnLookup"
-	ETHBACKEND_BorEvents_FullMethodName               = "/remote.ETHBACKEND/BorEvents"
 	ETHBACKEND_AAValidation_FullMethodName            = "/remote.ETHBACKEND/AAValidation"
 	ETHBACKEND_BlockForTxNum_FullMethodName           = "/remote.ETHBACKEND/BlockForTxNum"
 	ETHBACKEND_MinimumBlockAvailable_FullMethodName   = "/remote.ETHBACKEND/MinimumBlockAvailable"
+	ETHBACKEND_FrozenBlocks_FullMethodName            = "/remote.ETHBACKEND/FrozenBlocks"
 	ETHBACKEND_SetHead_FullMethodName                 = "/remote.ETHBACKEND/SetHead"
 )
 
@@ -94,11 +93,10 @@ type ETHBACKENDClient interface {
 	RemoveTrustedPeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
-	BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error)
-	BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error)
 	AAValidation(ctx context.Context, in *AAValidationRequest, opts ...grpc.CallOption) (*AAValidationReply, error)
 	BlockForTxNum(ctx context.Context, in *BlockForTxNumRequest, opts ...grpc.CallOption) (*BlockForTxNumResponse, error)
 	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MinimumBlockAvailableReply, error)
+	FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksReply, error)
 	SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error)
 }
 
@@ -345,26 +343,6 @@ func (c *eTHBACKENDClient) PendingBlock(ctx context.Context, in *emptypb.Empty, 
 	return out, nil
 }
 
-func (c *eTHBACKENDClient) BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BorTxnLookupReply)
-	err := c.cc.Invoke(ctx, ETHBACKEND_BorTxnLookup_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *eTHBACKENDClient) BorEvents(ctx context.Context, in *BorEventsRequest, opts ...grpc.CallOption) (*BorEventsReply, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BorEventsReply)
-	err := c.cc.Invoke(ctx, ETHBACKEND_BorEvents_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *eTHBACKENDClient) AAValidation(ctx context.Context, in *AAValidationRequest, opts ...grpc.CallOption) (*AAValidationReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AAValidationReply)
@@ -389,6 +367,16 @@ func (c *eTHBACKENDClient) MinimumBlockAvailable(ctx context.Context, in *emptyp
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MinimumBlockAvailableReply)
 	err := c.cc.Invoke(ctx, ETHBACKEND_MinimumBlockAvailable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FrozenBlocksReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_FrozenBlocks_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -448,11 +436,10 @@ type ETHBACKENDServer interface {
 	RemoveTrustedPeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
-	BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error)
-	BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error)
 	AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error)
 	BlockForTxNum(context.Context, *BlockForTxNumRequest) (*BlockForTxNumResponse, error)
 	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error)
+	FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksReply, error)
 	SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
@@ -530,12 +517,6 @@ func (UnimplementedETHBACKENDServer) RemoveTrustedPeer(context.Context, *RemoveP
 func (UnimplementedETHBACKENDServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method PendingBlock not implemented")
 }
-func (UnimplementedETHBACKENDServer) BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error) {
-	return nil, status.Error(codes.Unimplemented, "method BorTxnLookup not implemented")
-}
-func (UnimplementedETHBACKENDServer) BorEvents(context.Context, *BorEventsRequest) (*BorEventsReply, error) {
-	return nil, status.Error(codes.Unimplemented, "method BorEvents not implemented")
-}
 func (UnimplementedETHBACKENDServer) AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method AAValidation not implemented")
 }
@@ -544,6 +525,9 @@ func (UnimplementedETHBACKENDServer) BlockForTxNum(context.Context, *BlockForTxN
 }
 func (UnimplementedETHBACKENDServer) MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MinimumBlockAvailable not implemented")
+}
+func (UnimplementedETHBACKENDServer) FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method FrozenBlocks not implemented")
 }
 func (UnimplementedETHBACKENDServer) SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetHead not implemented")
@@ -936,42 +920,6 @@ func _ETHBACKEND_PendingBlock_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ETHBACKEND_BorTxnLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BorTxnLookupRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).BorTxnLookup(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ETHBACKEND_BorTxnLookup_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).BorTxnLookup(ctx, req.(*BorTxnLookupRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ETHBACKEND_BorEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BorEventsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ETHBACKENDServer).BorEvents(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ETHBACKEND_BorEvents_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ETHBACKENDServer).BorEvents(ctx, req.(*BorEventsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _ETHBACKEND_AAValidation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AAValidationRequest)
 	if err := dec(in); err != nil {
@@ -1022,6 +970,24 @@ func _ETHBACKEND_MinimumBlockAvailable_Handler(srv interface{}, ctx context.Cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ETHBACKENDServer).MinimumBlockAvailable(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_FrozenBlocks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).FrozenBlocks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_FrozenBlocks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).FrozenBlocks(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1128,14 +1094,6 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ETHBACKEND_PendingBlock_Handler,
 		},
 		{
-			MethodName: "BorTxnLookup",
-			Handler:    _ETHBACKEND_BorTxnLookup_Handler,
-		},
-		{
-			MethodName: "BorEvents",
-			Handler:    _ETHBACKEND_BorEvents_Handler,
-		},
-		{
 			MethodName: "AAValidation",
 			Handler:    _ETHBACKEND_AAValidation_Handler,
 		},
@@ -1146,6 +1104,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MinimumBlockAvailable",
 			Handler:    _ETHBACKEND_MinimumBlockAvailable_Handler,
+		},
+		{
+			MethodName: "FrozenBlocks",
+			Handler:    _ETHBACKEND_FrozenBlocks_Handler,
 		},
 		{
 			MethodName: "SetHead",

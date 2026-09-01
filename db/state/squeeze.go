@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -489,7 +490,7 @@ func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockN
 
 func (b *historyBatch) Close() { b.collector.Close() }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx dbfinality.Context, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
@@ -601,7 +602,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
+		if err := a.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()
@@ -1015,7 +1016,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		defer roTx.Rollback() //nolint:gocritic
 		// A KV read slice only lives as long as its transaction, so the state is
 		// validated before the rollback rather than after it.
-		stateValue, _, readErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		stateValue, _, readErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 		if readErr == nil {
 			readErr = validatePBinRebuildState(stateValue)
 		}

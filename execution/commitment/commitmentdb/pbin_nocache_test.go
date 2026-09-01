@@ -39,12 +39,20 @@ import (
 
 type pbinStubSharedDomains struct{ sharedCache bool }
 
-func (s *pbinStubSharedDomains) SetTxNum(uint64)                                    {}
-func (s *pbinStubSharedDomains) AsStateGetter(kv.TemporalTx) execctxapi.StateGetter { return nil }
+func (s *pbinStubSharedDomains) SetTxNum(uint64) {}
+func (s *pbinStubSharedDomains) AsStateGetter(kv.TemporalTx, execctxapi.StateGetterOptions) execctxapi.StateGetter {
+	return nil
+}
 func (s *pbinStubSharedDomains) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainMetrics) execctxapi.StateGetter {
 	return nil
 }
-func (s *pbinStubSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (s *pbinStubSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return nil }
+func (s *pbinStubSharedDomains) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff) kv.TemporalPutDel {
+	return nil
+}
+func (s *pbinStubSharedDomains) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {
+	return nil, kv.NoStepBound, false
+}
 func (s *pbinStubSharedDomains) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
 func (s *pbinStubSharedDomains) StepSize() uint64                                        { return 1 }
 func (s *pbinStubSharedDomains) Metrics() *kvmetrics.DomainMetrics                       { return nil }

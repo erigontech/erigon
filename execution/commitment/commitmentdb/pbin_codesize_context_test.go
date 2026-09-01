@@ -31,8 +31,8 @@ func TestPBinTrieContextReadsCodeSizeOnlyUnderBin(t *testing.T) {
 	t.Parallel()
 
 	binCtx := pbinStateTestCtx(t, commitment.VariantBinPatriciaTrie)
-	require.True(t, binCtx.trieContext(nil, 0, 0, nil).readCodeSize)
+	require.True(t, binCtx.trieContext(nil, 0, 0, nil, nil).readCodeSize)
 
 	hexCtx := pbinStateTestCtx(t, commitment.VariantHexPatriciaTrie)
-	require.False(t, hexCtx.trieContext(nil, 0, 0, nil).readCodeSize)
+	require.False(t, hexCtx.trieContext(nil, 0, 0, nil, nil).readCodeSize)
 }

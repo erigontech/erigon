@@ -108,6 +108,6 @@ func TestPBinBranchChildCountRefusesBin(t *testing.T) {
 	t.Parallel()
 
 	binCtx := pbinStateTestCtx(t, commitment.VariantBinPatriciaTrie)
-	_, err := binCtx.BranchChildCount(nil, []byte{0x0a, 0x0b})
+	_, err := binCtx.BranchChildCount([]byte{0x0a, 0x0b})
 	require.ErrorIs(t, err, commitment.ErrPBinUnsupported)
 }

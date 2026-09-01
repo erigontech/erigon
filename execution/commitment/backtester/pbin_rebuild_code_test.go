@@ -162,7 +162,7 @@ func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.
 	t.Helper()
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinCodeStepSize)
 	stepRoots := pbinCodeForwardRun(t, db, pbinCodeStepSize, txCount, accts)
-	require.NoError(t, agg.BuildFiles(txCount))
+	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
 	collatedTxNum := pbinCodeCollatedTxNum(t, db)
 	require.Positive(t, collatedTxNum, "collation must produce domain files to rebuild from")
@@ -336,7 +336,7 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 	db, agg, dirs := pbinM1ANewDatadir(t, stepSize)
 	agg.PresetOfflineMerge() // 128 one-step collations, so build them the way the offline tool does
 	stepRoots := pbinCodeForwardRun(t, db, stepSize, txCount, accts)
-	require.NoError(t, agg.BuildFiles(txCount))
+	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
 	collatedTxNum := pbinCodeCollatedTxNum(t, db)
 	wantRoot := stepRoots[collatedTxNum-1]

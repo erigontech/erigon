@@ -44,8 +44,11 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
 
 const (
 	pbinM1AStepSize = uint64(8)
@@ -310,7 +313,7 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
 	stepRoots, forwardRoot := pbinM1AForwardRun(t, db, pbinM1AStepSize, 0, txCount)
-	require.NoError(t, agg.BuildFiles(txCount))
+	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
 	require.Equal(t, forwardRoot, pbinM1ARecomputeRoot(t, db),
 		"a full-touch recompute over the same datadir must reproduce the forward root")
@@ -367,7 +370,7 @@ func TestPBinM1ABranchRecordsSurviveCollationAndMerge(t *testing.T) {
 	require.NotEmpty(t, inDB)
 	require.Zero(t, pbinM1AFileServedRecords(t, db, inDB), "before collation every record lives in the db")
 
-	require.NoError(t, agg.BuildFiles(txCount))
+	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()

@@ -40,7 +40,8 @@ var (
 	chaindata                    string
 	databaseVerbosity            int
 	referenceChaindata           string
-	block, pruneTo, unwind       uint64
+	block, unwind                uint64
+	limit                        uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
@@ -50,7 +51,6 @@ var (
 	migration                    string
 	integrityFast, integritySlow bool
 	file                         string
-	HeimdallURL                  string
 	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
@@ -113,13 +113,13 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
 
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&limit, "limit", 0, "execute at most this many blocks past current progress, then stop (0 = unlimited, overridden by --block if --block is lower)")
+}
+
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withPruneTo(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
-}
-
 func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
@@ -187,8 +187,13 @@ func withDataDir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 }
 
+// withExperimentalCommitment binds the flag erigon uses to pick the commitment
+// trie. The default ORs erigon's own flag default with the env-derived value so
+// that flipping the default in one binary cannot leave the other on a different
+// trie.
 func withExperimentalCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
+	def := statecfg.ExperimentalParallelCommitment || utils.ExperimentalParallelCommitmentFlag.Value
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Name, statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Usage)
 	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)
 }
@@ -219,10 +224,6 @@ func withChain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chain"))
 }
 
-func withHeimdall(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
-}
-
 func withWorkers(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&syncCfg.ExecWorkerCount, "exec.workers", ethconfig.Defaults.Sync.ExecWorkerCount, "")
 }
@@ -245,13 +246,12 @@ func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
 		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
-// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, unwind.
 func withStageBase(cmd *cobra.Command) {
 	withConfig(cmd)
 	withDataDir(cmd)
 	withChain(cmd)
 	withChaosMonkey(cmd)
-	withHeimdall(cmd)
 	withUnwind(cmd)
 }
 

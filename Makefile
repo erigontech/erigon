@@ -274,10 +274,10 @@ test-fixtures-zkevm:
 test-fixtures-legacy:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
 
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
-# against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.yml (single source of truth shared with
-# .github/workflows/test-eest-spec.yml's load-matrix job and
+# EEST spec tests: run cmd/evm runners (statetest, transactiontest, blocktest,
+# enginextest, zkevmtest) against EEST fixtures. The shard list, workers, and
+# failure budgets live in tools/eest-spec-shards.yml (single source of truth
+# shared with .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
 # "-race" dispatch through the race-instrumented evm.race binary so race
 # coverage works without polluting the non-race shards. Each shard provisions
@@ -378,13 +378,14 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-# Pull the pinned devnet tarball URL and branch straight from test-fixtures.json
+# Pull the pinned devnet tarball URL and EELS git ref from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
 # Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
 EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
-EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
+EEST_DEVNET_REF = $(shell jq -r '."eest_devnet".ref' test-fixtures.json)
 EEST_STABLE_ERIGON_FLAGS = --fcu.background.prune=false --fcu.timeout=0
 EEST_GLAMSTERDAM_ERIGON_FLAGS = $(EEST_STABLE_ERIGON_FLAGS) --experimental.bal
+EEST_HIVE_REPOSITORY = $(shell jq -r '.hive_repository' .github/workflows/hive-versions.json)
 EEST_HIVE_REF = $(shell jq -r '.hive_ref' .github/workflows/hive-versions.json)
 HIVE_SIM_PARALLELISM ?= 8
 
@@ -394,7 +395,7 @@ eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone "https://github.com/$(EEST_HIVE_REPOSITORY)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -404,7 +405,7 @@ eest-devnet:
 		grep -qF -- '$(EEST_GLAMSTERDAM_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,".*/.*fork_(Amsterdam|BPO2ToAmsterdam)",--sim.buildarg branch=$(EEST_DEVNET_REF) --sim.buildarg fixtures=$(EEST_DEVNET_URL),--sim.loglevel=3 --client.checktimelimit=300s)
 
 # Define the run_suite function
 define run_suite
@@ -447,16 +448,17 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
-# Pull the pinned develop tarball URL straight from test-fixtures.json
-# so this target stays in sync with the rest of the test suite. Lazy `=`
-# so unrelated targets don't shell out to jq at make-parse time.
+# Pull the pinned stable tarball URL and EELS git ref from test-fixtures.json
+# so this target stays in sync with the rest of the test suite. Lazy `=` so
+# unrelated targets don't shell out to jq at make-parse time.
 EEST_STABLE_URL = $(shell jq -r '."eest_stable".url' test-fixtures.json)
+EEST_STABLE_REF = $(shell jq -r '."eest_stable".ref' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone "https://github.com/$(EEST_HIVE_REPOSITORY)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && git checkout --detach "$(EEST_HIVE_REF)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
 		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
@@ -465,7 +467,7 @@ eest-hive:
 		grep -qF -- '$(EEST_STABLE_ERIGON_FLAGS)' clients/erigon/erigon.sh
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-enginex,"",--sim.buildarg branch=$(EEST_STABLE_REF) --sim.buildarg fixtures=$(EEST_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -480,6 +482,10 @@ check-kurtosis:
 		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
 		exit 1; \
 	fi; \
+
+## test-kurtosis-setup:             test the bounded Kurtosis CI setup
+test-kurtosis-setup:
+	@bash .github/actions/setup-kurtosis/setup.test.sh
 
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
@@ -597,8 +603,6 @@ grpc: protoc-all $(PROTO_PATH)
 		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
 		--go_opt=Mremote/ethbackend.proto=./remoteproto \
 		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
-		--go_opt=Mremote/bor.proto=./remoteproto \
-		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
 		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
 		--go_opt=Mexecution/execution.proto=./executionproto \
@@ -608,7 +612,7 @@ grpc: protoc-all $(PROTO_PATH)
 		--go_opt=Mtxpool/mining.proto=./txpoolproto \
 		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
-		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
+		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
 		txpool/txpool.proto txpool/mining.proto
 

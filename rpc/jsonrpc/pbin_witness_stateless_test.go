@@ -690,7 +690,7 @@ func pbinVerifyBlock(t *testing.T, postRoot common.Hash, to common.Address) *typ
 		BaseFee:    uint256.NewInt(7),
 	}
 	withdrawals := []*types.Withdrawal{{Index: 0, Validator: 0, Address: to, Amount: pbinVerifyWithdrawalGwei}}
-	return types.NewBlock(header, nil, nil, nil, withdrawals)
+	return types.NewBlock(header, nil, nil, nil, withdrawals, nil)
 }
 
 // pbinVerifyGateCase is the corpus of the gate tests: the witness is pruned to

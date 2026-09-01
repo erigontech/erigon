@@ -122,7 +122,7 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 	writeShardTombstoneRange(t, db, 0, range1TxCount, 1, func(i int) (drop bool, val []byte) {
 		return false, []byte{byte(i + 1), byte(i + 2), 0xAA}
 	})
-	require.NoError(t, agg.BuildFiles(range1TxCount))
+	require.NoError(t, agg.BuildFiles(range1TxCount, unboundedFinalityCtx))
 	agg, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	writeShardTombstoneRange(t, db, range1TxCount, range2TxCount, 2, func(i int) (drop bool, val []byte) {
@@ -131,14 +131,14 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 		}
 		return false, []byte{byte(i + 1), byte(i + 2), 0xBB}
 	})
-	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount))
+	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount, unboundedFinalityCtx))
 	agg, db = reopenShardTombstoneAgg(t, agg, rawDB, dirs)
 
 	// Collation holds a step back until a write in the next one proves it closed
 	// (`step+1 records visible`, aggregator.go). Without this, range 2's own last
 	// step never seals into a file and the range never forms.
 	writeShardTombstoneGuard(t, db, range1TxCount+range2TxCount)
-	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount+shardTombstoneStepSize))
+	require.NoError(t, agg.BuildFiles(range1TxCount+range2TxCount+shardTombstoneStepSize, unboundedFinalityCtx))
 
 	return trimShardTombstoneCommitment(t, agg, rawDB, dirs), dirs
 }

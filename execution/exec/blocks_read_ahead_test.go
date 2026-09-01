@@ -81,7 +81,7 @@ func (db *singleTxRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	return db.tx, nil
 }
 
-func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
+func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
 		tx.accountReads++
 		if tx.accountReads == 1 {
@@ -91,7 +91,7 @@ func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte) ([]byte
 	return nil, 0, nil
 }
 
-func (s stubTemporalGetter) GetLatest(kv.Domain, []byte) ([]byte, kv.Step, error) {
+func (s stubTemporalGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return s.v, s.step, nil
 }
 
@@ -101,7 +101,7 @@ func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, 
 
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
-func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
+func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
 		s.accountReads++
 		return s.account, 0, nil
@@ -114,7 +114,7 @@ func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte) ([]byte
 }
 
 func (s *sharedCodeTemporalGetter) GetLatestValSize(domain kv.Domain, key []byte) (int, bool, error) {
-	value, _, err := s.GetLatest(domain, key)
+	value, _, err := s.GetLatest(domain, key, kv.GetLatestOptions{})
 	return len(value), len(value) > 0, err
 }
 
@@ -181,7 +181,7 @@ func TestBlockReadAheaderIgnoresNilGetter(t *testing.T) {
 
 func TestMakeBALWarmupTasksSplitsStorageHeavyAccount(t *testing.T) {
 	bal := types.BlockAccessList{{
-		StorageChanges: make([]*types.SlotChanges, 65),
+		StorageChanges: make([]types.SlotChanges, 65),
 		StorageReads:   make([]accounts.StorageKey, 3),
 	}}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
@@ -283,7 +283,7 @@ func TestWarmBALStateTaskDoesNotRepeatCodeForLaterChunks(t *testing.T) {
 
 func TestMakeBALWarmupTasksKeepsSmallAccountsTogether(t *testing.T) {
 	bal := types.BlockAccessList{
-		{StorageChanges: make([]*types.SlotChanges, 1)},
+		{StorageChanges: make([]types.SlotChanges, 1)},
 		{StorageReads: make([]accounts.StorageKey, 1)},
 	}
 	tasks, workers := makeBALWarmupPlan(bal, 4)
@@ -395,19 +395,22 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	require.Equal(t, accountBytes, got)
 }
 
-func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
+func TestBlockReadAheaderCarriesBlockAccessListSidecar(t *testing.T) {
 	bra := NewBlockReadAheader()
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	body := &types.Body{Transactions: []types.Transaction{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}}
 	blockHash := header.Hash()
-	bal := []byte{0xc0}
+	bal := types.BlockAccessList{}
+	balSidecar := types.NewBlockAccessListSidecar(bal)
 	sender := common.Address{1}
 	bra.AddHeaderAndBody(context.Background(), nil, nil, header, body)
-	bra.AddBlockAccessList(blockHash, bal)
+	bra.AddBlockAccessList(blockHash, balSidecar)
 	bra.AddSenders(sender[:], blockHash)
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
+	require.Same(t, balSidecar, block.BlockAccessListSidecar())
 	require.Equal(t, bal, block.BlockAccessList())
+	require.NotNil(t, block.BlockAccessList())
 }
 
 func TestBlockReadAheaderPrefersCachedBlockAccessList(t *testing.T) {
@@ -416,12 +419,10 @@ func TestBlockReadAheaderPrefersCachedBlockAccessList(t *testing.T) {
 	t.Cleanup(func() { dbg.SetReadAhead(oldReadAhead) })
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	bal := make(types.BlockAccessList, 0)
-	balBytes, err := types.EncodeBlockAccessListBytes(bal)
-	require.NoError(t, err)
 	balHash := bal.Hash()
 	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
 	bra := NewBlockReadAheader()
-	bra.AddBlockAccessList(header.Hash(), balBytes)
+	bra.AddBlockAccessList(header.Hash(), types.NewBlockAccessListSidecar(bal))
 	getter := new(countingGetter)
 	bra.AddHeaderAndBody(t.Context(), db, getter, header, new(types.Body))
 	bra.WaitForWarmup(t.Context())
@@ -584,7 +585,7 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 		seedFill(sc, domain, key, fresh, 54)
 		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: stale}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
 
-		v, _, err := cpg.GetLatest(domain, key)
+		v, _, err := cpg.GetLatest(domain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.Equal(t, stale, v, "read-through must still return the view's value")
 
@@ -592,6 +593,24 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 		require.True(t, ok, "domain %s", domain)
 		require.Equal(t, fresh, got, "domain %s: warmup must not clobber the fresher entry", domain)
 	}
+}
+
+func TestCachePopulatingGetterDoesNotCacheBoundedRead(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte("historical code")))
+	value := accounts.SerialiseV3(&account)
+	sc := newTestStateCache()
+	t.Cleanup(sc.Close)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: value}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16}
+	got, step, err := cpg.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Zero(t, step)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, addr)
+	require.False(t, ok)
+	_, ok = sc.View(nil).GetAddrCodeHash(addr)
+	require.False(t, ok)
 }
 
 // Same invariant for the code addr→code binding, which is rebound when an
@@ -604,7 +623,7 @@ func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {
 	seedFill(sc, kv.CodeDomain, addr, freshCode, 54)
 	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: staleCode}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
 
-	_, _, err := cpg.GetLatest(kv.CodeDomain, addr)
+	_, _, err := cpg.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{})
 	require.NoError(t, err)
 
 	got, ok := sc.View(nil).Get(kv.CodeDomain, addr)
@@ -654,7 +673,7 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		sc := newTestStateCache()
 		cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: val}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
-		_, _, err := cpg.GetLatest(domain, key)
+		_, _, err := cpg.GetLatest(domain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		got, ok := sc.View(nil).Get(domain, key)
 		require.True(t, ok, "domain %s", domain)
@@ -663,7 +682,7 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 
 	sc := newTestStateCache()
 	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: code}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
-	_, _, err := cpg.GetLatest(kv.CodeDomain, key)
+	_, _, err := cpg.GetLatest(kv.CodeDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	got, ok := sc.View(nil).Get(kv.CodeDomain, key)
 	require.True(t, ok)
@@ -675,7 +694,7 @@ func TestCachePopulatingGetterWarmsColdKeys(t *testing.T) {
 	// Negative results (missing account, empty slot) are cached as nil hits.
 	sc = newTestStateCache()
 	cpg = &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: nil}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 1_562_500}
-	_, _, err = cpg.GetLatest(kv.AccountsDomain, key)
+	_, _, err = cpg.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	got, ok = sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
@@ -690,7 +709,7 @@ func TestCachePopulatingGetterNegativeUsesLastVisibleTxNum(t *testing.T) {
 		TemporalGetter: stubTemporalGetter{v: nil}, stepSize: 1_562_500,
 		view: sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return visibleEnd, true })),
 	}
-	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.True(t, ok)
@@ -711,7 +730,7 @@ func TestCachePopulatingGetterUnavailableVisibleEndNeverFills(t *testing.T) {
 		TemporalGetter: stubTemporalGetter{v: nil}, stepSize: 1_562_500,
 		view: sc.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 0, false })),
 	}
-	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok, "no exact frontier — nothing may be cached")
@@ -728,7 +747,7 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1)),
 	}
 
-	_, _, err := cpg.GetLatest(kv.AccountsDomain, key)
+	_, _, err := cpg.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
 	require.False(t, ok)

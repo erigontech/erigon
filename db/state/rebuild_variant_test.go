@@ -141,7 +141,7 @@ func rebuildVariantDatadir(t *testing.T) (kv.TemporalRwDB, *state.Aggregator, da
 	}
 	require.NoError(t, sd.Flush(t.Context(), rwTx))
 	require.NoError(t, rwTx.Commit())
-	require.NoError(t, agg.BuildFiles(txCount))
+	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
 	// Collation seals a commitment file per step even with the writes discarded,
 	// and a rebuild takes any file covering a range as that range already done.

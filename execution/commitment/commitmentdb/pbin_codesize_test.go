@@ -61,7 +61,7 @@ func pbinCodeSizeSharedDomains(t *testing.T, opts []execctx.SharedDomainOption, 
 func pbinCodeSizeTrieContext(t *testing.T, readCodeSize bool, addr []byte, acc *accounts.Account, code []byte) *commitmentdb.TrieContext {
 	t.Helper()
 	sd, tx := pbinCodeSizeSharedDomains(t, nil, addr, acc, code)
-	ttx := commitmentdb.NewTrieContextRo(commitmentdb.NewLatestStateReader(tx, sd), sd.StepSize())
+	ttx := commitmentdb.NewTrieContextRo(commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{}), sd.StepSize())
 	ttx.SetReadCodeSize(readCodeSize)
 	return ttx
 }
