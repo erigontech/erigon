@@ -69,12 +69,17 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 108593
+  expected-tests: 108503
+  exclude:
+    # TODO: legacy fixtures that haven't been updated to remove EIP-7610 yet (DFI'd)
+    - &declined_eip7610_files '/GeneralStateTests/(stCreate2/(RevertInCreateInInitCreate2|create2collisionStorage)|stExtCodeHash/dynamicAccountOverwriteEmpty|stRevertTest/RevertInCreateInInit|stSStoreTest/InitCollision)(Paris|_Paris)?\.json$'
 - shard: statetests-legacy-parallel
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: true
-  expected-tests: 108593
+  expected-tests: 108503
+  exclude:
+    - *declined_eip7610_files
 - shard: rlptests-legacy-race
   workers: 12
   max-allowed-failures: 0
@@ -141,63 +146,72 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 32615
+  expected-tests: 32594
   exclude:
+    # TODO: legacy fixtures that haven't been updated to remove EIP-7610 yet (DFI'd)
+    - &declined_eip7610_constantinople_cases '::((RevertInCreateInInitCreate2|dynamicAccountOverwriteEmpty)_d0g0v0_Constantinople(Fix)?|create2collisionStorage_d[0-2]g0v0_Constantinople(Fix)?|RevertInCreateInInit_d0g0v0_(Byzantium|Constantinople(Fix)?)|InitCollision_d[0-3]g0v0_Constantinople(Fix)?)$'
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 32615
+  expected-tests: 32594
   commitment-parallel: true
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-constantinople-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 10807
+  expected-tests: 10797
   run: '_Constantinople$'
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-constantinople-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 10807
+  expected-tests: 10797
   commitment-parallel: true
   run: '_Constantinople$'
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-constantinople-fix-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 10802
+  expected-tests: 10792
   run: '_ConstantinopleFix$'
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-constantinople-fix-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 10802
+  expected-tests: 10792
   commitment-parallel: true
   run: '_ConstantinopleFix$'
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-byzantium-sequential
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 5000
+  expected-tests: 4999
   run: '_Byzantium$'
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-byzantium-parallel
   workers: 8
   max-allowed-failures: 0
-  expected-tests: 5000
+  expected-tests: 4999
   commitment-parallel: true
   run: '_Byzantium$'
   exclude:
+    - *declined_eip7610_constantinople_cases
     - '/\.meta/'
 - shard: blocktests-legacy-constantinople-race-other-forks-sequential
   workers: 12
@@ -221,110 +235,124 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 111983
+  expected-tests: 111893
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 111983
+  expected-tests: 111893
   commitment-parallel: true
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-berlin-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 14026
+  expected-tests: 14006
   run: '(_Berlin$|fork_Berlin-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-berlin-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 14026
+  expected-tests: 14006
   commitment-parallel: true
   run: '(_Berlin$|fork_Berlin-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-shanghai-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 20689
+  expected-tests: 20679
   run: '(_Shanghai$|fork_Shanghai-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-shanghai-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 20689
+  expected-tests: 20679
   commitment-parallel: true
   run: '(_Shanghai$|fork_Shanghai-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-cancun-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 21849
+  expected-tests: 21839
   run: '(_Cancun$|fork_Cancun-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-cancun-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 21849
+  expected-tests: 21839
   commitment-parallel: true
   run: '(_Cancun$|fork_Cancun-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-london-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 20337
+  expected-tests: 20317
   run: '(_London$|fork_London-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-london-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 20337
+  expected-tests: 20317
   commitment-parallel: true
   run: '(_London$|fork_London-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-paris-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 20369
+  expected-tests: 20359
   run: '(_Paris$|fork_Paris-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-paris-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 20369
+  expected-tests: 20359
   commitment-parallel: true
   run: '(_Paris$|fork_Paris-)'
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
 - shard: blocktests-legacy-cancun-race-other-forks-sequential
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 14713
+  expected-tests: 14693
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
     - '::.*(_(Berlin|Shanghai|Cancun|London|Paris)$|fork_(Berlin|Shanghai|Cancun|London|Paris)-)'
 - shard: blocktests-legacy-cancun-race-other-forks-parallel
   workers: 12
   max-allowed-failures: 0
-  expected-tests: 14713
+  expected-tests: 14693
   commitment-parallel: true
   exclude:
+    - *declined_eip7610_files
     - '/\.meta/'
     - '::.*(_(Berlin|Shanghai|Cancun|London|Paris)$|fork_(Berlin|Shanghai|Cancun|London|Paris)-)'
 - shard: enginextests-stable-sequential
@@ -417,6 +445,13 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
+  expected-tests: 25088
+  exclude: &declined_eip7610_zkevm
+    # TODO: legacy fixtures that haven't been updated to remove EIP-7610 yet (DFI'd)
+    - 'init_collision_create_opcode.*opcode_CREATE2?-non-empty-balance-correct-initcode'
+    - 'init_collision_create_tx.*tx_type_[0-2].*non-empty-balance-(correct|revert)-initcode'
+    - 'collision_with_create2_revert_in_initcode'
+    - 'create2_collision_storage'
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -471,3 +506,5 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
+  expected-tests: 25088
+  exclude: *declined_eip7610_zkevm
