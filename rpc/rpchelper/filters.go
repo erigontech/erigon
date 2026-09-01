@@ -34,6 +34,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -182,6 +183,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 	}()
 
 	go func() {
+		defer dbg.LogPanic()
 		if ethBackend == nil {
 			return
 		}
