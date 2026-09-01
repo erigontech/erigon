@@ -200,7 +200,6 @@ func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) 
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		// Genesis is always kept; the pruned window starts at the second key.
 		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
 			return err
 		}
@@ -215,6 +214,6 @@ func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) 
 	ctx := NewContext(headBlockNum, 25_837_750, 96, true)
 	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, stepLastTxNum)
 	require.NoError(t, err)
-	require.Zero(t, lastBlockInStep, "a step below the table floor resolves to no block, not to the floor")
-	require.True(t, ready, "the step's blocks are frozen, so it is collatable")
+	require.Zero(t, lastBlockInStep, "must not resolve to the floor")
+	require.True(t, ready, "frozen step must be collatable")
 }
