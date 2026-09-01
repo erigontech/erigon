@@ -18,12 +18,15 @@ package commitmentdb
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -69,7 +72,7 @@ func (db *blockingBeginDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, 
 func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 	t.Parallel()
 	sdc := &SharedDomainsCommitmentContext{sharedDomains: stubSharedDomains{}}
-	concurrent, _ := sdc.concurrentTrieContextFactory(&blockingBeginDB{}, nil, 0)
+	concurrent, _ := sdc.concurrentTrieContextFactory(&blockingBeginDB{}, nil, nil, 0)
 	factories := map[string]commitment.TrieContextFactory{
 		"warmup":     sdc.warmupTrieContextFactory(&blockingBeginDB{}, 0),
 		"concurrent": concurrent,
@@ -93,5 +96,141 @@ func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 				t.Fatal("factory did not honor warmuper ctx cancellation")
 			}
 		})
+	}
+}
+
+// snapshotTx answers every domain read with val, from a scratch buffer it
+// rewrites on each read — the aliasing a real getter has.
+type snapshotTx struct {
+	kv.TemporalTx
+	viewID  uint64
+	val     []byte
+	scratch []byte
+}
+
+func (t *snapshotTx) ViewID() uint64 { return t.viewID }
+func (t *snapshotTx) Rollback()      {}
+
+type snapshotGetter struct {
+	execctxapi.StateGetter
+	tx *snapshotTx
+}
+
+func (g *snapshotGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	g.tx.scratch = append(g.tx.scratch[:0], g.tx.val...)
+	return g.tx.scratch, 0, nil
+}
+
+type snapshotSD struct{ sd }
+
+func (snapshotSD) StepSize() uint64 { return 1 }
+func (snapshotSD) AsStateGetter(tx kv.TemporalTx, _ execctxapi.StateGetterOptions) execctxapi.StateGetter {
+	return &snapshotGetter{tx: tx.(*snapshotTx)}
+}
+func (snapshotSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (snapshotSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
+
+// snapshotDB hands every worker its own read view, as a real backend does.
+type snapshotDB struct {
+	kv.TemporalRoDB
+	viewID uint64
+	val    []byte
+}
+
+func (db *snapshotDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	return &snapshotTx{viewID: db.viewID, val: db.val}, nil
+}
+
+func newSnapshotSdc(t *testing.T) *SharedDomainsCommitmentContext {
+	t.Helper()
+	return &SharedDomainsCommitmentContext{sharedDomains: snapshotSD{}, tmpDir: t.TempDir()}
+}
+
+// A fold outside the exec-module semaphore can overlap a commit, so a worker
+// read view opened at fold time sits past the caller's snapshot. Reads have to
+// resolve on the caller's snapshot, or the root mixes two states.
+func TestConcurrentTrieContextReadsCallerSnapshot(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc := newSnapshotSdc(t)
+
+	factory, drain := sdc.concurrentTrieContextFactory(db, nil, caller, 0)
+	trieCtx, cleanup := factory(t.Context())
+	defer func() {
+		cleanup()
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	enc, _, err := trieCtx.Branch([]byte("prefix"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("caller-snapshot"), enc)
+}
+
+// Under the semaphore no commit can land, the worker view is the caller's
+// snapshot, and workers must keep their own read views.
+func TestConcurrentTrieContextKeepsWorkerTxOnSameSnapshot(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 7, val: []byte("worker-view")}
+	sdc := newSnapshotSdc(t)
+
+	factory, drain := sdc.concurrentTrieContextFactory(db, nil, caller, 0)
+	trieCtx, cleanup := factory(t.Context())
+	defer func() {
+		cleanup()
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	enc, _, err := trieCtx.Branch([]byte("prefix"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("worker-view"), enc)
+}
+
+// Workers sharing the caller's tx must not touch it concurrently, and the bytes
+// one worker gets back must survive another worker's next read.
+func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc := newSnapshotSdc(t)
+
+	factory, drain := sdc.concurrentTrieContextFactory(db, nil, caller, 0)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	const workers = 8
+	var wg sync.WaitGroup
+	errs := make([]error, workers)
+	vals := make([][]byte, workers)
+	start := make(chan struct{})
+	for i := range workers {
+		wg.Go(func() {
+			trieCtx, cleanup := factory(t.Context())
+			defer cleanup()
+			<-start
+			for range 64 {
+				enc, _, err := trieCtx.Branch([]byte{byte(i)})
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				vals[i] = append(vals[i][:0], enc...)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	for i := range workers {
+		require.NoError(t, errs[i])
+		require.Equal(t, []byte("caller-snapshot"), vals[i])
 	}
 }

@@ -3,6 +3,7 @@ package commitmentdb
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -91,6 +92,51 @@ func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {
 // per-worker accumulator. Source tx preserved, same as Clone.
 func (r *LatestStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
 	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx)))
+}
+
+// syncStateReader lets several fold workers share one reader bound to the
+// caller's snapshot: the tx behind it takes one goroutine at a time, and the
+// bytes it hands back alias a buffer its next read reuses, so the copy is made
+// under the same lock.
+type syncStateReader struct {
+	mu  *sync.Mutex
+	src StateReader
+	buf []byte
+}
+
+var _ StateReader = (*syncStateReader)(nil)
+
+func newSyncStateReader(mu *sync.Mutex, src StateReader) *syncStateReader {
+	return &syncStateReader{mu: mu, src: src}
+}
+
+func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
+
+func (r *syncStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.src.CheckDataAvailable(d, step)
+}
+
+func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	enc, step, err := r.src.Read(d, plainKey, stepSize)
+	if err != nil || enc == nil {
+		return nil, step, err
+	}
+	if r.buf == nil {
+		r.buf = make([]byte, 0, len(enc))
+	}
+	r.buf = append(r.buf[:0], enc...)
+	return r.buf, step, nil
+}
+
+// Clone/CloneForWorker keep the source reader and its lock: the point of this
+// wrapper is that every copy resolves against the one pinned snapshot.
+func (r *syncStateReader) Clone(kv.TemporalTx) StateReader { return newSyncStateReader(r.mu, r.src) }
+func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
+	return newSyncStateReader(r.mu, r.src)
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.

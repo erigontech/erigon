@@ -599,7 +599,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
 			var concurrentFactory commitment.TrieContextFactory
-			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, txNum)
+			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, tx, txNum)
 			warmupConfig.CtxFactory = concurrentFactory
 			trie.SetTrieContextFactory(concurrentFactory)
 		default:
@@ -705,6 +705,33 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
+func underlyingTx(tx kv.TemporalTx) kv.TemporalTx {
+	for tx != nil {
+		wrapper, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx })
+		if !ok {
+			return tx
+		}
+		tx = wrapper.UnderlyingTx()
+	}
+	return nil
+}
+
+// sameSnapshot reports whether workerTx resolves DB-resident reads at the
+// snapshot callerTx reads. A write-tx caller holds MDBX's single writer, so
+// nothing can commit under the fold and a fresh read view cannot drift from it.
+func sameSnapshot(callerTx, workerTx kv.TemporalTx) bool {
+	callerTx, workerTx = underlyingTx(callerTx), underlyingTx(workerTx)
+	if callerTx == nil || workerTx == nil {
+		return false
+	}
+	if _, callerWritable := callerTx.(kv.TemporalRwTx); callerWritable {
+		return true
+	}
+	// A write tx's ViewID is the snapshot it will create, not one it reads.
+	_, workerWritable := workerTx.(kv.TemporalRwTx)
+	return !workerWritable && callerTx.ViewID() == workerTx.ViewID()
+}
+
 func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
@@ -746,10 +773,11 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 // concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.TemporalRoDB, pin kv.TemporalFilesPin, tx kv.TemporalTx, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
+	var snapshotMu sync.Mutex
 
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
 		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
@@ -776,9 +804,14 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 			localCollector: collector,
 			traceW:         sdc.traceW,
 		}
-		if sdc.stateReader != nil {
+		switch {
+		case sdc.stateReader != nil:
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
-		} else {
+		case tx != nil && !sameSnapshot(tx, roTx):
+			// A read view opened at fold time sits at the then-current head, which
+			// is the caller's snapshot only while no commit can land between them.
+			warmupCtx.stateReader = newSyncStateReader(&snapshotMu, NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm)))
+		default:
 			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
