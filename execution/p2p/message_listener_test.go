@@ -169,10 +169,12 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+		observer := func(message *RawBlockBodiesInboundMessage) {
 			require.Equal(t, peerId, message.PeerId)
-			require.Equal(t, uint64(23), message.Decoded.RequestId)
-			require.Len(t, message.Decoded.BlockBodiesPacket, 1)
+			require.Equal(t, uint64(23), message.RequestId)
+			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, 1)
+			require.NoError(t, err)
+			require.Len(t, bodies, 1)
 			done.Store(true)
 		}
 
@@ -460,6 +462,16 @@ func newMockBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...*ty
 	newBlockHashesPacketBytes, err := rlp.EncodeToBytes(&newBlockHashesPacket)
 	require.NoError(t, err)
 	return newBlockHashesPacketBytes
+}
+
+func newMockRawBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...rlp.RawValue) []byte {
+	packet := eth.BlockBodiesRLPPacket66{
+		RequestId:            requestId,
+		BlockBodiesRLPPacket: bodies,
+	}
+	packetBytes, err := rlp.EncodeToBytes(&packet)
+	require.NoError(t, err)
+	return packetBytes
 }
 
 func mockExpectPenalizePeer(t *testing.T, sentryClient *direct.MockSentryClient, peerId *PeerId) {
