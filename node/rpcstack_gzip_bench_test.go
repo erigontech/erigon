@@ -21,8 +21,6 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream"
-	jsoniter "github.com/json-iterator/go"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +31,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const rpcEndpoint = "http://localhost:8545"
@@ -450,87 +450,80 @@ func BenchmarkGzipOneShotThroughput(b *testing.B) {
 const stepsPerTracedTxn = 250
 
 // BenchmarkGzipStreamingThroughput drives the streaming path the way
-// debug_trace* does: a jsonstream writing through the gzip middleware. It
-// varies the jsoniter buffer, which is InitialBufferSize=4096 in production
-// (rpc/jsonstream/factory.go) -- on a several-hundred-MB trace that is tens of
-// thousands of write calls through the middleware.
+// debug_trace* does: a jsonstream writing through the gzip middleware. On a
+// several-hundred-MB trace that is tens of thousands of write calls through the
+// middleware.
 func BenchmarkGzipStreamingThroughput(b *testing.B) {
 	for _, gz := range []bool{false, true} {
-		for _, bufSize := range []int{4096, 256 << 10} {
-			for _, entries := range []int{2000, 60000} {
-				name := fmt.Sprintf("gzip=%v/jsonbuf=%dKB/entries=%d", gz, bufSize>>10, entries)
-				if bufSize < 1024 {
-					name = fmt.Sprintf("gzip=%v/jsonbuf=%dB/entries=%d", gz, bufSize, entries)
+		for _, entries := range []int{2000, 60000} {
+			name := fmt.Sprintf("gzip=%v/entries=%d", gz, entries)
+			b.Run(name, func(b *testing.B) {
+				// Precomputed: formatting inside the write loop would make the
+				// benchmark measure fmt rather than the streaming path.
+				stackWords := make([]string, 64)
+				for i := range stackWords {
+					stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
 				}
-				b.Run(name, func(b *testing.B) {
-					// Precomputed: formatting inside the write loop would make the
-					// benchmark measure fmt rather than the streaming path.
-					stackWords := make([]string, 64)
-					for i := range stackWords {
-						stackWords[i] = fmt.Sprintf("0x%064x", i*2654435761)
-					}
-					inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						w.Header().Set("Content-Type", "application/json")
-						st := jsoniter.NewStream(jsoniter.ConfigDefault, w, bufSize)
-						stream := jsonstream.Wrap(st)
-						stream.WriteArrayStart()
-						for i := range entries {
-							if i > 0 {
-								stream.WriteMore()
-							}
-							stream.WriteObjectStart()
-							stream.WriteObjectField("pc")
-							stream.WriteInt(i)
+				inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					stream := jsonstream.New(w)
+					stream.WriteArrayStart()
+					for i := range entries {
+						if i > 0 {
 							stream.WriteMore()
-							stream.WriteObjectField("op")
-							stream.WriteString("SSTORE")
-							stream.WriteMore()
-							stream.WriteObjectField("stack")
-							stream.WriteString(stackWords[i%len(stackWords)])
-							stream.WriteObjectEnd()
-							// A traced txn ends by flushing (rpc/jsonrpc/tracing.go),
-							// so the middleware sees a run of writes rather than one
-							// whole body handed over at the end.
-							if (i+1)%stepsPerTracedTxn == 0 {
-								stream.Flush() //nolint:errcheck
-							}
 						}
-						stream.WriteArrayEnd()
-						stream.Flush() //nolint:errcheck
-					})
-					var handler http.Handler = inner
-					if gz {
-						handler = newGzipHandler(inner)
+						stream.WriteObjectStart()
+						stream.WriteObjectField("pc")
+						stream.WriteInt(i)
+						stream.WriteMore()
+						stream.WriteObjectField("op")
+						stream.WriteString("SSTORE")
+						stream.WriteMore()
+						stream.WriteObjectField("stack")
+						stream.WriteString(stackWords[i%len(stackWords)])
+						stream.WriteObjectEnd()
+						// A traced txn ends by flushing (rpc/jsonrpc/tracing.go),
+						// so the middleware sees a run of writes rather than one
+						// whole body handed over at the end.
+						if (i+1)%stepsPerTracedTxn == 0 {
+							stream.Flush() //nolint:errcheck
+						}
 					}
-					srv := httptest.NewServer(handler)
-					defer srv.Close()
+					stream.WriteArrayEnd()
+					stream.Flush() //nolint:errcheck
+				})
+				var handler http.Handler = inner
+				if gz {
+					handler = newGzipHandler(inner)
+				}
+				srv := httptest.NewServer(handler)
+				defer srv.Close()
 
-					// One warmup request to learn the uncompressed size for MB/s.
-					req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
-					req.Header.Set("Accept-Encoding", "gzip")
-					if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
+				// One warmup request to learn the uncompressed size for MB/s.
+				req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+				req.Header.Set("Accept-Encoding", "gzip")
+				if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
+					io.Copy(io.Discard, resp.Body) //nolint:errcheck
+					resp.Body.Close()
+				}
+				b.SetBytes(int64(entries) * 96) // approx bytes of JSON per entry
+				b.ReportAllocs()
+				b.ResetTimer()
+				b.RunParallel(func(pb *testing.PB) {
+					client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
+					for pb.Next() {
+						req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
+						req.Header.Set("Accept-Encoding", "gzip")
+						resp, err := client.Do(req)
+						if err != nil {
+							b.Error(err)
+							return
+						}
 						io.Copy(io.Discard, resp.Body) //nolint:errcheck
 						resp.Body.Close()
 					}
-					b.SetBytes(int64(entries) * 96) // approx bytes of JSON per entry
-					b.ReportAllocs()
-					b.ResetTimer()
-					b.RunParallel(func(pb *testing.PB) {
-						client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
-						for pb.Next() {
-							req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
-							req.Header.Set("Accept-Encoding", "gzip")
-							resp, err := client.Do(req)
-							if err != nil {
-								b.Error(err)
-								return
-							}
-							io.Copy(io.Discard, resp.Body) //nolint:errcheck
-							resp.Body.Close()
-						}
-					})
 				})
-			}
+			})
 		}
 	}
 }

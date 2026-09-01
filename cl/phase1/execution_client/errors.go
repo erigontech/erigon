@@ -24,6 +24,9 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+// ErrInvalidGetPayloadResponse marks a terminal response error that payload polling must not retry.
+var ErrInvalidGetPayloadResponse = errors.New("invalid GetPayload response")
+
 // IsUnknownPayloadError reports an unknown-payload result from local or remote execution clients.
 func IsUnknownPayloadError(err error) bool {
 	if errors.Is(err, chainreader.ErrUnknownPayload) {
