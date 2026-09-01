@@ -97,17 +97,20 @@ jobs:
           path: erigon-full
           persist-credentials: false
 
-      - name: Read pinned versions
+      - name: Read Hive checkout
         id: hive-version
         run: |
-          echo "ref=$(jq -r .hive_ref erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
-          echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' erigon-full/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
+          versions=erigon-full/.github/workflows/hive-versions.json
+          {
+            echo "repository=$(jq -r .hive_repository "$versions")"
+            echo "ref=$(jq -r .hive_ref "$versions")"
+            echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' "$versions")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v7
         with:
-          repository: ethereum/hive
-          # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
+          repository: ${{ steps.hive-version.outputs.repository }}
           ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
           persist-credentials: false

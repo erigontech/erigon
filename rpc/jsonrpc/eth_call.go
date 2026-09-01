@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -54,12 +53,22 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
-var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+var (
+	latestNumOrHash             = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	errPendingStateNotSupported = errors.New("pending state is not supported")
+)
 
-// orLatest resolves an optional block selector, defaulting to the latest block
+func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return errPendingStateNotSupported
+	}
+	return nil
+}
+
+// blockOrLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
 // whose Block parameter is optional per execution-apis (default 'latest').
-func orLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+func blockOrLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
 	if blockNrOrHash != nil {
 		return *blockNrOrHash
 	}
@@ -77,14 +86,17 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
+	blockNrOrHash := blockOrLatest(requestedBlock)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
+
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer roTx.Rollback()
 
-	// Use the block overlay if available — reads uncommitted data from the
-	// pre-commit overlay so consumers don't need to wait for DB commit.
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
@@ -94,12 +106,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		}
 	}
 
-	var blockNrOrHash rpc.BlockNumberOrHash
-	if requestedBlock != nil {
-		blockNrOrHash = *requestedBlock
-	} else {
-		blockNrOrHash = latestNumOrHash
-	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -110,7 +116,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -252,26 +258,36 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = common.Big0
 	}
 
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	if err != nil {
+		return 0, err
+	}
+	defer caller.Close()
+
+	msg := caller.Message()
+	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil()
+
+	var initialState *state.IntraBlockState
+	if feeCap.Sign() != 0 || plainTransfer {
+		initialState, _, err = caller.InitialState()
+		if err != nil {
+			return 0, err
+		}
+		defer initialState.Close()
+	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-
-		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
+		balance, err := initialState.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
 		available := balance.ToBig()
-		if args.Value != nil {
-			value := args.Value.ToInt()
-			if value.Cmp(available) >= 0 {
-				return 0, errors.New("insufficient funds for transfer")
-			}
-			available.Sub(available, value)
+		value := msg.Value().ToBig()
+		if value.Cmp(available) >= 0 {
+			return 0, errors.New("insufficient funds for transfer")
 		}
+		available.Sub(available, value)
 
 		allowance := new(big.Int).Div(available, feeCap)
 
@@ -293,26 +309,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
-	if err != nil {
-		return 0, err
-	}
-	defer caller.Close()
-
 	// If the transaction is a plain value transfer, short circuit estimation and
 	// directly try 21000. Returning 21000 without any execution is dangerous as
 	// some tx field combos might bump the price up even for plain transfers (e.g.
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
-	if args.Data == nil && args.To != nil {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
+	if plainTransfer {
+		codeSize, err := initialState.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
-			return 0, errors.New("getCodeSize failed")
+			return 0, fmt.Errorf("get code size for %x: %w", *args.To, err)
 		}
 		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
 		// single trial at the ceiling yields the exact estimate: return its actual gas
@@ -428,12 +433,15 @@ func (s StorageKeysInfo) EncodeKey() string {
 
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
 			Code:    rpc.ErrCodeInvalidParams,
 		}
+	}
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
 	}
 
 	roTx, err := api.db.BeginTemporalRo(ctx)
@@ -442,9 +450,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	// nil filters: the gate below and the commitment-history reads both go through
-	// this plain roTx, so the tag has to resolve on that same committed view.
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
+	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -452,11 +458,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	// A canonical hash exists for blocks the header stage has downloaded but
 	// execution has not reached; the commitment history getProof needs is only
 	// written by execution.
-	if err := rpchelper.CheckBlockExecuted(roTx, uint64(requestedBlockNr)); err != nil {
+	if err := rpchelper.CheckBlockExecuted(roTx, blockNumber); err != nil {
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
+	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -466,45 +472,33 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		storageKeysConverted[i].Hash.SetBytes(s)
 		storageKeysConverted[i].KeyLength = len(s)
 	}
-	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.logger)
+	return api.getProof(ctx, roTx, address, storageKeysConverted, blockNumber, isLatest, api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNumber uint64, isLatest bool, logger log.Logger) (*accounts.AccProofResult, error) {
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
+	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	if header == nil {
-		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
+		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, roTx, logger)
 	if err != nil {
 		return nil, err
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
-	if err != nil {
-		return nil, err
-	}
-	if latestBlock < blockNrOrHash.BlockNumber.Uint64() {
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNrOrHash.BlockNumber.Uint64())
-	}
-	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
+	if !isLatest {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, roTx, blockNumber+1)
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
 		}
@@ -584,7 +578,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -655,13 +649,17 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 }
 
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, logger log.Logger) (hexutil.Bytes, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
+
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -676,6 +674,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// prune-history or hard-gate error, so the caller sees one typed signal.
 	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
 		return nil, errWitnessOutOfWindow
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNr); err != nil {
+		return nil, err
 	}
 
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
@@ -783,7 +784,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		it.Close()
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -898,6 +899,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
+	}
+	if err := rejectPendingState(bNrOrHash); err != nil {
+		return nil, err
 	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)
