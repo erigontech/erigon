@@ -835,7 +835,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	collateAndPrune := func() error {
 		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle,
+				execfinality.WithoutFinalisedBlock(), execfinality.WithTxNumsReader(br.TxnumReader()))
 			if err != nil {
 				return nil, err
 			}

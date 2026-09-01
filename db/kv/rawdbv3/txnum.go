@@ -315,28 +315,6 @@ func (TxNumsReader) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
 
-// Second returns the second MaxTxNum entry. Genesis is always the first, so on a table
-// whose older blocks were pruned this is where real coverage starts.
-func (TxNumsReader) Second(tx kv.Tx) (blockNum, txNum uint64, err error) {
-	c, err := tx.Cursor(kv.MaxTxNum)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer c.Close()
-
-	if _, _, err = c.First(); err != nil {
-		return 0, 0, err
-	}
-	k, v, err := c.Next()
-	if err != nil {
-		return 0, 0, err
-	}
-	if k == nil || v == nil {
-		return 0, 0, nil
-	}
-	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
-}
-
 func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {

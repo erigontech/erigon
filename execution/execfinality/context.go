@@ -31,10 +31,12 @@ type finalityContext struct {
 	maxReorgDepth     uint64
 	retentionBlockNum uint64
 	collateToBlockNum uint64
+	txNumsReader      rawdbv3.TxNumsReader
 }
 
 type resolveOptions struct {
 	withoutFinalisedBlock bool
+	txNumsReader          rawdbv3.TxNumsReader
 }
 
 type ResolveOption func(*resolveOptions)
@@ -45,10 +47,26 @@ func WithoutFinalisedBlock() ResolveOption {
 	}
 }
 
-func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool) dbfinality.Context {
+// WithTxNumsReader resolves step boundaries through the given reader instead of
+// chaindata alone. MaxTxNum is pruned to the downloaded-blocks range, so on a node
+// re-executing from scratch a step from the executed range falls below the table and
+// the search answers with its floor; a reader backed by the block snapshots names the
+// real block.
+func WithTxNumsReader(reader rawdbv3.TxNumsReader) ResolveOption {
+	return func(options *resolveOptions) {
+		options.txNumsReader = reader
+	}
+}
+
+func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCycle bool, options ...ResolveOption) dbfinality.Context {
+	opts := resolveOptions{txNumsReader: rawdbv3.TxNums}
+	for _, option := range options {
+		option(&opts)
+	}
 	ctx := finalityContext{
 		finalisedBlockNum: finalisedBlockNum,
 		maxReorgDepth:     maxReorgDepth,
+		txNumsReader:      opts.txNumsReader,
 	}
 	if finalisedBlockNum > 0 && !initialCycle {
 		ctx.retentionBlockNum = finalisedBlockNum
@@ -76,7 +94,7 @@ func Resolve(tx kv.Tx, maxReorgDepth uint64, initialCycle bool, options ...Resol
 	if opts.withoutFinalisedBlock {
 		finalisedBlockNum = 0
 	}
-	return NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle), nil
+	return NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth, initialCycle, options...), nil
 }
 
 func (c finalityContext) PruneToBlockNum() uint64 {
@@ -94,24 +112,12 @@ func (c finalityContext) MaxReorgDepth() uint64 {
 func (c finalityContext) ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
 	err = db.View(ctx, func(tx kv.Tx) error {
-		var secondBlockInDB, secondTxInDB uint64
-		// Below the table's coverage the step is unresolvable here, not a step at the
-		// floor: BlockNumber's search clamps to the second key. Only the floor's max
-		// txnum is known, not its base, so a step could still end inside that block --
-		// trust the clamp unless the floor is past the reorg window entirely.
-		if secondBlockInDB, secondTxInDB, err = rawdbv3.TxNums.Second(tx); err != nil {
+		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
+		if err != nil {
 			return err
 		}
-		belowWindow := secondBlockInDB > 0 && stepLastTxNum < secondTxInDB &&
-			secondBlockInDB > c.collateToBlockNum+c.maxReorgDepth
-		if !belowWindow {
-			lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, stepLastTxNum)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				lastBlockInStep = 0
-			}
+		if !ok {
+			lastBlockInStep = 0
 		}
 		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		return err
