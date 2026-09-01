@@ -48,6 +48,10 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 2. **Green** — write the minimum production code needed to make the test pass. Do not write code the current failing test does not demand.
 3. **Refactor** — clean up code and tests with the suite staying green. Skipping this step is how technical debt accumulates.
 
+### Before adding a test
+
+Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
+
 ### For bug fixes
 
 Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips red → green when the fix lands.
@@ -74,6 +78,8 @@ TDD is the default for behavior changes (bug fixes, new logic, new endpoints). I
 - Pure refactors with no behavior change — existing tests are the safety net; do not write new tests just to satisfy the cycle.
 - Exploratory spikes — throw the spike away and TDD the real implementation.
 - Mechanical changes — renames, generated code regeneration, dependency bumps.
+- Trivial changes that introduce no new logic — comments, documentation, formatting, build metadata, and simple constant, fixture-value, or version updates. Use the existing test suite, build, or lint checks instead of adding a test that merely mirrors the edit.
+- Feature removals — remove or update tests for the obsolete behavior; do not add a test merely to prove that deleted code is absent. Add coverage when the removal changes remaining observable behavior or when absence is itself a required contract.
 
 When skipping TDD for one of these reasons, say so explicitly in the PR description.
 
