@@ -303,7 +303,11 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 
@@ -366,7 +370,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, blockNum)
-	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
+	if _, err := dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0); err != nil {
+		return err
+	}
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 

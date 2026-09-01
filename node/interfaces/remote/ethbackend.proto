@@ -75,6 +75,8 @@ service ETHBACKEND {
 
   rpc MinimumBlockAvailable(google.protobuf.Empty) returns (MinimumBlockAvailableReply);
 
+  rpc FrozenBlocks(google.protobuf.Empty) returns (FrozenBlocksReply);
+
   rpc SetHead(SetHeadRequest) returns (SetHeadReply);
 }
 
@@ -284,6 +286,10 @@ message BlockForTxNumResponse {
 
 message MinimumBlockAvailableReply {
   uint64 block_num = 1;
+}
+
+message FrozenBlocksReply {
+  uint64 frozen_blocks = 1;
 }
 
 message SetHeadRequest {
