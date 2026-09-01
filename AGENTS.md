@@ -184,6 +184,16 @@ Keep review feedback focused on the behavior and code changed by the PR. Do not 
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
 
+### Pull request scope
+
+Keep each PR focused on one coherent unit of work. Judge scope by the concepts changed, not only by the number of lines or files. Prefer a small diff when practical, but do not split an implementation from the tests that verify it or make a change incomplete only to reduce its size.
+
+A large PR is acceptable when one cohesive change must touch many places, such as a mass rename, an API or package migration, generated-code updates, a mechanical refactor across call sites, or applying one established pattern consistently across the codebase. Keep unrelated behavior changes out of such PRs.
+
+### Stacked pull requests
+
+For a large change with multiple dependent, independently reviewable parts, consider using stacked pull requests instead of one large PR. Keep each layer focused, buildable, testable, and safe to merge. Put foundational changes below dependent changes. Do not add unrelated work or pre-existing issues to the stack; track them in separate issues or PRs.
+
 ### Referring to numbered points in GitHub text
 
 To refer to a numbered list item, point, step, or nit in PR descriptions, issue descriptions, or comments, write it in words — "point 1", "item 1", "the first nit". Use `#N` only as a reference to a GitHub issue or PR number; GitHub auto-links it, so a bare `#1` would point at an unrelated PR.
