@@ -45,11 +45,12 @@ type StackStream struct {
 	stack  []stackItem
 }
 
-// NewStackStream creates a new StackStream with the given jsoniter.Stream
-// The stack is pre-allocated with a capacity of InitialStackSize
-func NewStackStream(stream *jsoniter.Stream) *StackStream {
+// newStackStream creates a new StackStream writing to out. Building the
+// jsoniter.Stream here rather than taking one is what pins jsoniter's
+// IndentionStep at zero.
+func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
-		stream: stream,
+		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
 		stack:  make([]stackItem, 0, InitialStackSize),
 	}
 }
@@ -178,7 +179,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 
 // WriteString writes a string value to the stream
 func (s *StackStream) WriteString(val string) {
-	s.stream.WriteString(val)
+	writeStringFast(s.stream, val)
 	s.popCommaOrField()
 }
 
@@ -218,7 +219,7 @@ func (s *StackStream) WriteMore() {
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) {
-	s.stream.WriteObjectField(fieldName)
+	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
 }
@@ -294,8 +295,8 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 		case ItemComma:
 			if i > 0 && s.stack[i-1] == ItemObject {
 				// a trailing comma inside an object needs a placeholder field to stay valid
-				s.stream.WriteObjectField("")
-				s.stream.WriteString("")
+				writeObjectFieldFast(s.stream, "")
+				writeStringFast(s.stream, "")
 			} else {
 				s.stream.WriteNil()
 			}

@@ -642,13 +642,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		return remaining
 	}
 
-	var blockPruneTo uint64
-	finalisedBlockNum := rawdb.ReadForkchoiceFinalizedNum(tx)
-	if finalisedBlockNum > 0 {
-		blockPruneTo = finalisedBlockNum
-	} else if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		blockPruneTo = s.ForwardProgress - cfg.syncCfg.MaxReorgDepth
-	}
+	blockPruneTo := s.FinalityCtx.PruneToBlockNum()
 	// AlwaysGenerateChangesets disables this prune so the node retains
 	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
 	// tool / explicit --experimental.always-generate-changesets flag).
