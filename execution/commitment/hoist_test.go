@@ -212,6 +212,16 @@ func (c *edgeRecordContext) BranchWithMask(pref []byte, mask uint16, maskKnown b
 	return read.Data, 0, read.ChildMasks, read.ChildMasksKnown, err
 }
 
+// Branch mirrors TrieContext.Branch under edge records: a v3 node is addressed only by its
+// child records, so a mask-less read has to synthesize the row rather than look up the node key.
+func (c *edgeRecordContext) Branch(pref []byte) ([]byte, kv.Step, error) {
+	if IsCommitmentStateKey(pref) {
+		return c.MockState.Branch(pref)
+	}
+	data, step, _, _, err := c.BranchWithMask(pref, 0, false)
+	return data, step, err
+}
+
 func TestStorageLeafAddressHoistAcrossRestoredTrie(t *testing.T) {
 	t.Parallel()
 
