@@ -54,7 +54,7 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		stepSize:                         stepSize,
 		disableCommitmentBranchTransform: true,
 	})
-	require.NoError(t, agg.BuildFiles(uint64(txCount)))
+	require.NoError(t, agg.BuildFiles(uint64(txCount), unboundedFinalityCtx))
 
 	var rootInFiles []byte
 	var fPaths []string
