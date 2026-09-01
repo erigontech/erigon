@@ -86,6 +86,27 @@ type branchCacheEntry struct {
 	epoch uint32
 }
 
+// keyedBranchCacheEntry adds the prefix that produced a maphash bucket. root
+// and trunk slots are addressed by exact array index and never collide, so
+// only the maphash-addressed tiers (trunk.deep, BranchCache.tail) use this;
+// Get must reject a bucket hit whose stored prefix disagrees, since maphash
+// gives no collision resolution.
+type keyedBranchCacheEntry struct {
+	branchCacheEntry
+	prefixLen uint8
+	prefix    [maxCompactKeyLen]byte
+}
+
+func newKeyedBranchCacheEntry(prefix []byte, entry branchCacheEntry) *keyedBranchCacheEntry {
+	k := &keyedBranchCacheEntry{branchCacheEntry: entry}
+	k.prefixLen = uint8(copy(k.prefix[:], prefix))
+	return k
+}
+
+func (k *keyedBranchCacheEntry) matchesPrefix(prefix []byte) bool {
+	return int(k.prefixLen) == len(prefix) && bytes.Equal(k.prefix[:k.prefixLen], prefix)
+}
+
 // MissCallback runs on the hot read path when lookup misses every tier that
 // applies to a prefix; implementations must be lock-free.
 type MissCallback func(prefix []byte)
@@ -98,7 +119,7 @@ type trunk struct {
 	d2   atomic.Pointer[[256]atomic.Pointer[branchCacheEntry]]
 	d3   atomic.Pointer[[4096]atomic.Pointer[branchCacheEntry]]
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
-	deep *maphash.Map[*branchCacheEntry]
+	deep *maphash.Map[*keyedBranchCacheEntry]
 
 	maxDepth uint8
 }
@@ -150,7 +171,7 @@ func newAccountTrunk(maxDepth uint8) *trunk {
 }
 
 func newStorageTrunk(maxDepth uint8) *trunk {
-	return &trunk{maxDepth: maxDepth, deep: maphash.NewMap[*branchCacheEntry]()}
+	return &trunk{maxDepth: maxDepth, deep: maphash.NewMap[*keyedBranchCacheEntry]()}
 }
 
 const (
@@ -453,8 +474,8 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		var entry *branchCacheEntry
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			entry = slot.Load()
-		} else {
-			entry, _ = st.deep.Get(prefix)
+		} else if ke, found := st.deep.Get(prefix); found && ke.matchesPrefix(prefix) {
+			entry = &ke.branchCacheEntry
 		}
 		if entry != nil {
 			c.pinnedHits.Add(1)
@@ -468,14 +489,14 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		c.fireOnMiss(prefix)
 		return nil, false
 	}
-	entry, ok := tail.Get(maphash.Hash(prefix))
-	if !ok {
+	ke, ok := tail.Get(maphash.Hash(prefix))
+	if !ok || !ke.matchesPrefix(prefix) {
 		c.tailMisses.Add(1)
 		c.fireOnMiss(prefix)
 		return nil, false
 	}
 	c.tailHits.Add(1)
-	return entry, true
+	return &ke.branchCacheEntry, true
 }
 
 func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
@@ -497,11 +518,11 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 			}
 			// Get is lock-free; ReplaceIfPresent locks the bucket even on a
 			// miss, and a miss is the common case here.
-		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, entry) {
+		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, newKeyedBranchCacheEntry(prefix, *entry)) {
 			return
 		}
 	}
-	c.tailForWrite().Add(maphash.Hash(prefix), entry)
+	c.tailForWrite().Add(maphash.Hash(prefix), newKeyedBranchCacheEntry(prefix, *entry))
 }
 
 // PinEntry copies data; safe to mutate the input after the call.
@@ -516,23 +537,23 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
+	entry := branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
 	var nibBuf [4]byte
 	st, n, ok := c.storageRoute(prefix, true, &nibBuf)
 	if !ok {
-		c.tailForWrite().Add(maphash.Hash(prefix), entry)
+		c.tailForWrite().Add(maphash.Hash(prefix), newKeyedBranchCacheEntry(prefix, entry))
 		return
 	}
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		// Swap publishes and reads prior occupancy in one step: eviction
 		// (Invalidate from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
-		if slot.Swap(entry) == nil {
+		if slot.Swap(&entry) == nil {
 			c.pinnedEntries.Add(1)
 		}
 		return
 	}
-	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
+	if _, loaded := st.deep.LoadAndStore(prefix, newKeyedBranchCacheEntry(prefix, entry)); !loaded {
 		c.pinnedEntries.Add(1)
 	}
 }

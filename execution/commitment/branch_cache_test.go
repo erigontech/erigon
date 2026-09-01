@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -508,6 +509,62 @@ func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 		})
 		require.Zerof(t, allocs, "storageRoute must not allocate routing to a resident contract, prefix0=%#x", prefix[0])
 	}
+}
+
+// TestBranchCache_TailCollisionServesMiss forces a genuine hash collision by
+// writing two different prefixes into the tail LRU under the same maphash
+// bucket, using tailLRU's raw uint64-keyed Add (the same seam BranchCache
+// itself writes through) rather than fabricating one via content search,
+// which is infeasible over a 64-bit hash.
+func TestBranchCache_TailCollisionServesMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefixA := []byte{0x01, 0x02, 0x03, 0x04}
+	prefixB := []byte{0x05, 0x06, 0x07, 0x08}
+	bucket := maphash.Hash(prefixA)
+
+	tail := c.tailForWrite()
+	tail.Add(bucket, newKeyedBranchCacheEntry(prefixA, branchCacheEntry{data: []byte("A-data"), epoch: c.coh.Epoch()}))
+	tail.Add(bucket, newKeyedBranchCacheEntry(prefixB, branchCacheEntry{data: []byte("B-data"), epoch: c.coh.Epoch()}))
+
+	_, _, ok := c.Get(prefixA)
+	require.False(t, ok, "prefixA's bucket is shadowed by colliding prefixB; Get must miss, not serve prefixB's bytes")
+
+	ke, found := tail.Get(bucket)
+	require.True(t, found, "the bucket itself must still hold an entry")
+	require.True(t, ke.matchesPrefix(prefixB), "the guard must discriminate, not simply always-miss: the bucket holds prefixB's entry")
+	require.Equal(t, []byte("B-data"), ke.data)
+}
+
+// TestBranchCache_DeepTierPrefixMismatchServesMiss covers the other
+// maphash-addressed tier (trunk.deep). maphash.Map only exposes byte-keyed
+// Get/Set, so a real collision can't be forced without adding a raw-hash
+// seam to that type; instead this simulates the aftermath a collision would
+// leave behind (a bucket occupied by an entry stored under a different
+// prefix) by mutating the stored entry directly.
+func TestBranchCache_DeepTierPrefixMismatchServesMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefix := make([]byte, 33+3)
+	prefix[0] = 0x10 // odd nibble count -> 5 storage nibbles, past d4's max of 4
+	for i := 1; i < len(prefix); i++ {
+		prefix[i] = byte(i * 13)
+	}
+	c.PinEntry(prefix, []byte("real-data"), 0, 0)
+
+	var nibBuf [4]byte
+	st, n, ok := c.storageRoute(prefix, false, &nibBuf)
+	require.True(t, ok)
+	require.Nil(t, st.slot(&nibBuf, n, false), "prefix must overflow into the deep tier for this test to be meaningful")
+
+	ke, found := st.deep.Get(prefix)
+	require.True(t, found)
+	ke.prefixLen = uint8(copy(ke.prefix[:], "a-different-prefix-entirely"))
+
+	_, _, ok = c.Get(prefix)
+	require.False(t, ok, "deep-tier entry whose stored prefix no longer matches must miss, not serve foreign bytes")
 }
 
 func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {

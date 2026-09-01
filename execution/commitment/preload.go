@@ -27,8 +27,10 @@ import (
 
 type CommitmentReader func(prefix []byte) (v []byte, step uint64, found bool, err error)
 
-// 168 = branchCacheEntry (~80B) + maphash slot/hash (~40B) + prefix/value slice headers (~24B each).
-const estimatedEntryOverheadBytes = 168
+// 216 = keyedBranchCacheEntry (120B, allocated from the 128B size class; deep-tier
+// PinEntry always allocates one) + maphash slot/hash (~40B) + prefix/value slice
+// headers (~24B each).
+const estimatedEntryOverheadBytes = 216
 
 type pathDepth struct {
 	path  []byte
