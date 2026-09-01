@@ -1258,9 +1258,15 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 
 func openFdCount(t *testing.T) int {
 	t.Helper()
-	ents, err := os.ReadDir("/dev/fd")
+	// Readdirnames, not ReadDir: ReadDir lstats every entry, and an fd closed by a
+	// background goroutine meanwhile fails the whole listing with EBADF, which is not
+	// IsNotExist and so is not skipped.
+	d, err := os.Open("/dev/fd")
 	require.NoError(t, err)
-	return len(ents)
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	require.NoError(t, err)
+	return len(names)
 }
 
 func TestVerifyDataFailFastClosesFiles(t *testing.T) {
