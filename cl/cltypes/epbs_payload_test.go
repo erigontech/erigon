@@ -48,6 +48,92 @@ func TestValidateExecutionPayloadEnvelopeVersion(t *testing.T) {
 	require.Error(t, ValidateExecutionPayloadEnvelopeVersion(clparams.StateVersion(255)))
 }
 
+func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
+	makePair := func(t *testing.T) (*SignedBeaconBlock, *SignedExecutionPayloadEnvelope) {
+		t.Helper()
+		block := NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+		block.Block.Slot = 9
+		block.Block.ParentRoot = common.HexToHash("0x11")
+		block.Block.Body.SyncAggregate = NewSyncAggregate()
+
+		envelope := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+		envelope.Message.ParentBeaconBlockRoot = block.Block.ParentRoot
+		envelope.Message.Payload.SlotNumber = block.Block.Slot
+		envelope.Message.Payload.ParentHash = common.HexToHash("0x21")
+		envelope.Message.Payload.PrevRandao = common.HexToHash("0x23")
+		envelope.Message.Payload.FeeRecipient = common.HexToAddress("0x24")
+		envelope.Message.Payload.GasLimit = 30_000_000
+		envelope.Message.BuilderIndex = 7
+		envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+
+		requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
+		require.NoError(t, err)
+		requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(&clparams.MainnetBeaconConfig, envelope.Message.ExecutionRequests))
+		envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+		require.NoError(t, err)
+		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+		bid.ParentBlockHash = envelope.Message.Payload.ParentHash
+		bid.BlockHash = envelope.Message.Payload.BlockHash
+		bid.PrevRandao = envelope.Message.Payload.PrevRandao
+		bid.FeeRecipient = envelope.Message.Payload.FeeRecipient
+		bid.GasLimit = envelope.Message.Payload.GasLimit
+		bid.BuilderIndex = envelope.Message.BuilderIndex
+		bid.ExecutionRequestsRoot = requestsRoot
+
+		blockRoot, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		envelope.Message.BeaconBlockRoot = blockRoot
+		return block, envelope
+	}
+
+	block, envelope := makePair(t)
+	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+	require.NoError(t, ValidateExecutionPayloadEnvelopeBidCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+
+	block, envelope = makePair(t)
+	envelope.Message.Payload.GasUsed++
+	require.NoError(t, ValidateExecutionPayloadEnvelopeBidCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+	require.Error(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+
+	block, envelope = makePair(t)
+	envelope.Message.Payload.FeeRecipient = common.HexToAddress("0x25")
+	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(&clparams.MainnetBeaconConfig, envelope.Message.ExecutionRequests))
+	var err error
+	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = envelope.Message.Payload.BlockHash
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = blockRoot
+	require.NotEqual(t, block.Block.Body.GetSignedExecutionPayloadBid().Message.FeeRecipient, envelope.Message.Payload.FeeRecipient)
+	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+
+	mutations := []struct {
+		name   string
+		mutate func(*SignedExecutionPayloadEnvelope)
+	}{
+		{"beacon block root", func(e *SignedExecutionPayloadEnvelope) { e.Message.BeaconBlockRoot[0]++ }},
+		{"parent beacon block root", func(e *SignedExecutionPayloadEnvelope) { e.Message.ParentBeaconBlockRoot[0]++ }},
+		{"payload slot", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.SlotNumber++ }},
+		{"builder index", func(e *SignedExecutionPayloadEnvelope) { e.Message.BuilderIndex++ }},
+		{"parent block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.ParentHash[0]++ }},
+		{"block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.BlockHash[0]++ }},
+		{"prev randao", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.PrevRandao[0]++ }},
+		{"fee recipient without matching block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.FeeRecipient[0]++ }},
+		{"gas limit", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.GasLimit++ }},
+		{"derived block hash", func(e *SignedExecutionPayloadEnvelope) { e.Message.Payload.GasUsed++ }},
+		{"execution requests", func(e *SignedExecutionPayloadEnvelope) {
+			e.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+		}},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			block, envelope := makePair(t)
+			mutation.mutate(envelope)
+			require.Error(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
+		})
+	}
+}
 func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {
 	envelope := &SignedExecutionPayloadEnvelope{
 		Signature: common.Bytes96{1, 2, 3},
