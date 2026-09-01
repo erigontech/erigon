@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -202,6 +203,15 @@ func acceptanceCommitmentFiles(t *testing.T, agg *state.Aggregator) []kv.Visible
 	return at.Files(kv.CommitmentDomain)
 }
 
+// Roots the legacy trie produces for acceptanceBatches, captured before any v3 work touched the
+// shared fold. The v2 arm is the oracle for root parity, so it has to be pinned independently:
+// without this a change to fold moves both arms together and the comparison goes quiet.
+var acceptanceLegacyRoots = [...]string{
+	"c7c00ebd56b4ae505a9bb96f94e1d0119f86dfb1c75ac32e6a45e314188fe672",
+	"d593f72675e698ba2e5c4650e75d3b596cc8f2ac694643a7eca54b4c62937136",
+	"bb68582092fc3e61dbe7f0b7aee9b9a1e29a5d885a5bda81ec390383a4751793",
+}
+
 func requireArmRecordFormat(t *testing.T, agg *state.Aggregator, edgeRecords bool) {
 	t.Helper()
 	files := acceptanceCommitmentFiles(t, agg)
@@ -226,6 +236,8 @@ func TestCommitmentV3RootsMatchLegacyAcrossBatches(t *testing.T) {
 	for batchNumber, batch := range acceptanceBatches() {
 		txNum := uint64(batchNumber + 1)
 		wantRoot := applyAcceptanceBatch(t, legacyDB, batch, txNum)
+		require.Equalf(t, acceptanceLegacyRoots[batchNumber], hex.EncodeToString(wantRoot),
+			"batch %d legacy root moved: the oracle is no longer independent", txNum)
 		gotRoot := applyAcceptanceBatch(t, v3DB, batch, txNum)
 		require.Equalf(t, wantRoot, gotRoot, "batch %d root", txNum)
 	}
