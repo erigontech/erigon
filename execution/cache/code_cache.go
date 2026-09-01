@@ -247,9 +247,11 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// The content-addressed layers jump-grow from a small start into the shared
 	// envelope, so a cache over few contracts (a test fixture) never pre-commits
 	// the full budget. OnEvict keeps the byte/entry counters following residency.
-	cc.hashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
+	cc.hashToCode = newGrowLRUSized[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
+		func(e codeEntry) int64 { return 8 + int64(len(e.code)) },
 		func(_ uint64, e codeEntry) { cc.codeSize.Add(-(8 + int64(len(e.code)))) })
-	cc.codeHashToCode = newGrowLRU[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
+	cc.codeHashToCode = newGrowLRUSized[codeEntry](codeCapacityBytes, avgCodeEntryBytes,
+		func(e codeEntry) int64 { return 32 + int64(len(e.code)) },
 		func(_ uint64, e codeEntry) { cc.codeHashCodeSize.Add(-(32 + int64(len(e.code)))) })
 	cc.codeSizeByCodeHash = newGrowLRU[codeSizeEntry](
 		datasize.ByteSize(DefaultCodeSizeCacheEntries*codeSizeEntryBytes), codeSizeEntryBytes,

@@ -46,6 +46,13 @@ type growLRU[V any] struct {
 	onEvict  func(uint64, V)
 	avgBytes int64
 
+	// avgBytes only estimates the entry ceiling, so a layer whose entries run
+	// larger than the estimate holds several x its configured budget. maxBytes
+	// bounds measured residency instead; 0 leaves a layer entry-bounded.
+	maxBytes int64
+	sizeOf   func(V) int64
+	curBytes atomic.Int64
+
 	startCap uint32
 	maxCap   uint32
 
@@ -56,6 +63,12 @@ type growLRU[V any] struct {
 }
 
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
+	return newGrowLRUSized(maxBytes, avgBytes, nil, onEvict)
+}
+
+// newGrowLRUSized bounds residency by what sizeOf reports rather than by the
+// avgBytes estimate. A nil sizeOf keeps the entry-only ceiling.
+func newGrowLRUSized[V any](maxBytes datasize.ByteSize, avgBytes uint32, sizeOf func(V) int64, onEvict func(uint64, V)) *growLRU[V] {
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
@@ -64,6 +77,9 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	// the ceiling — a tiny configured budget yields a tiny, still-evicting cap.
 	start := min(uint32(genericCacheStartCapacity), maxCap)
 	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap}
+	if sizeOf != nil {
+		g.sizeOf, g.maxBytes = sizeOf, int64(maxBytes)
+	}
 	g.curCap.Store(start)
 	g.reserved = int64(start) * g.avgBytes
 	cachebudget.Global.Take(g.reserved)
@@ -76,7 +92,14 @@ func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
 	if err != nil {
 		panic(fmt.Sprintf("growLRU: NewSharded(%d): %s", capacity, err))
 	}
-	if g.onEvict != nil {
+	if g.sizeOf != nil {
+		lru.SetOnEvict(func(k uint64, v V) {
+			g.curBytes.Add(-g.sizeOf(v))
+			if g.onEvict != nil {
+				g.onEvict(k, v)
+			}
+		})
+	} else if g.onEvict != nil {
 		lru.SetOnEvict(g.onEvict)
 	}
 	return lru
@@ -91,6 +114,11 @@ func (g *growLRU[V]) Add(key uint64, value V) {
 		lru = g.cur.Load()
 	}
 	lru.Add(key, value)
+	if g.sizeOf != nil {
+		// Callers Add only an absent key, so this never double-counts a replace.
+		// Across an unfenced grow it can, which is the drift the type documents.
+		g.curBytes.Add(g.sizeOf(value))
+	}
 }
 
 func (g *growLRU[V]) maybeGrow() {
@@ -101,7 +129,26 @@ func (g *growLRU[V]) maybeGrow() {
 	if curCap >= g.maxCap || old.Len() < int(curCap) {
 		return
 	}
+	// Refusing a bigger table at the budget is what bounds residency: entries
+	// already admitted are never evicted for size, so the bound is soft by up
+	// to one generation's worth of oversized entries.
+	if g.maxBytes > 0 && g.curBytes.Load() >= g.maxBytes {
+		return
+	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
+	if g.maxBytes > 0 {
+		// A x4 step taken while still under budget is what overshoots it, so the
+		// step is clamped to what the budget affords at the size entries are
+		// actually running — the estimate only sizes the first table.
+		if n := int64(old.Len()); n > 0 {
+			if avg := g.curBytes.Load() / n; avg > 0 {
+				newCap = min(newCap, uint32(min(g.maxBytes/avg, int64(g.maxCap))))
+			}
+		}
+		if newCap <= curCap {
+			return
+		}
+	}
 	delta := int64(newCap-curCap) * g.avgBytes
 	if !cachebudget.Global.Reserve(delta) {
 		return
@@ -128,6 +175,7 @@ func (g *growLRU[V]) Purge() {
 	cachebudget.Global.Release(g.reserved - int64(g.startCap)*g.avgBytes)
 	g.reserved = int64(g.startCap) * g.avgBytes
 	g.curCap.Store(g.startCap)
+	g.curBytes.Store(0)
 	g.cur.Store(g.newShards(g.startCap))
 }
 
