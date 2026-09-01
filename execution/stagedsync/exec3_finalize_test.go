@@ -1897,6 +1897,32 @@ func TestFeeEntry_RecordedInAcceptsWhatWriteToWrote(t *testing.T) {
 	}
 }
 
+// dropStaleVersionedWrites scans only feeWritePaths, so a path writeTo starts
+// emitting outside that list would leave a retracted credit in the version map
+// with nothing to report it.
+func TestFeeEntry_WriteToStaysWithinFeeWritePaths(t *testing.T) {
+	t.Parallel()
+	version := state.Version{TxIndex: 3, Incarnation: 1}
+	addr := fAddr("credited")
+
+	for _, e := range []*feeEntry{
+		{
+			addr:   addr,
+			acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
+			reason: tracing.BalanceIncreaseRewardTransactionFee,
+		},
+		{addr: addr, deleted: true},
+	} {
+		ws := &state.WriteSet{}
+		e.writeTo(ws, version)
+		require.NotZero(t, ws.Count(), "an entry that writes nothing proves nothing")
+		for h := range ws.AllHeaders() {
+			require.Contains(t, feeWritePaths[:], h.Path,
+				"writeTo emits %s, which the stale-credit scan does not look at", h.Path)
+		}
+	}
+}
+
 func TestFeeEntry_NilIsAbsent(t *testing.T) {
 	t.Parallel()
 	var absent *feeEntry
