@@ -416,6 +416,15 @@ func (d *Domain) Close() {
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte) error {
+	return w.PutWithPrevDiff(k, v, txNum, preval, w.diff)
+}
+
+// PutWithPrevDiff is PutWithPrev with an explicit diff target instead of the
+// writer's own w.diff — for a caller that is its domain's sole writer and
+// wants to route this write's diff without going through SetDiff (which is
+// shared, mutable, and would otherwise need a lock to stay race-free against
+// a concurrent SetDiff from elsewhere).
+func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
@@ -424,13 +433,19 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
 		return err
 	}
-	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, preval)
+	if diff != nil {
+		diff.DomainUpdate(k, step, preval)
 	}
 	return w.addValue(k, v, step)
 }
 
 func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte) (err error) {
+	return w.DeleteWithPrevDiff(k, txNum, prev, w.diff)
+}
+
+// DeleteWithPrevDiff is DeleteWithPrev with an explicit diff target — see
+// PutWithPrevDiff.
+func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev []byte, diff *kv.DomainDiff) (err error) {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
@@ -440,8 +455,8 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 	if err := w.h.AddPrevValue(k, txNum, prev); err != nil {
 		return err
 	}
-	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, prev)
+	if diff != nil {
+		diff.DomainUpdate(k, step, prev)
 	}
 	return w.addValue(k, nil, step)
 }
@@ -1965,20 +1980,30 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 	}
 
 	done := prg.KeyProgress == prune.Done && prg.ValueProgress == prune.Done && untilTx <= prg.TxTo
-	minStep := kv.Step(dt.d.minStepInDB(tx))
-	delta := float64(max(maxStepToPrune, minStep) - min(maxStepToPrune, minStep)) // maxStep could be 0
-	switch dt.d.FilenameBase {
-	case "account":
+
+	// Backlog comes from the values table's own prune progress: the history keys
+	// table tracks separate progress, and stays empty when history is disabled -
+	// as it is for commitment by default. prg.TxTo is the rotation's target,
+	// stored even when the scan was cut short, so only a completed rotation proves
+	// the values below it are gone; txFrom is 0, so an unfinished one bounds nothing.
+	prunedThrough := uint64(0)
+	if prg.ValueProgress == prune.Done {
+		prunedThrough = prg.TxTo
+	}
+	delta := 0.0
+	if filesEnd := dt.files.EndTxNum(); filesEnd > prunedThrough {
+		delta = float64(filesEnd-prunedThrough) / float64(dt.stepSize)
+	}
+	switch dt.name {
+	case kv.AccountsDomain:
 		mxPrunableDAcc.Set(delta)
-	case "storage":
+	case kv.StorageDomain:
 		mxPrunableDSto.Set(delta)
-	case "code":
+	case kv.CodeDomain:
 		mxPrunableDCode.Set(delta)
-	case "commitment":
+	case kv.CommitmentDomain:
 		mxPrunableDComm.Set(delta)
 	}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
-	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
 	return !done, maxStepToPrune
 }
 

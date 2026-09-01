@@ -207,6 +207,11 @@ if [[ "$shard" == *-race* ]]; then
 	export GOMEMLIMIT="${GOMEMLIMIT:-4GiB}"
 fi
 
+# 150M-gas blocks peak near 18GB RSS and get OOM-killed on a 16GB runner.
+if [[ "$shard" == *-benchmark-150m-* ]]; then
+	export GOMEMLIMIT="${GOMEMLIMIT:-12GiB}"
+fi
+
 if [[ ! -x "$evm_bin" ]]; then
 	echo "$evm_bin not found or not executable; run 'make evm' first" >&2
 	exit 2

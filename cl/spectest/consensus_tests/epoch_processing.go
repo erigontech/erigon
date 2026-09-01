@@ -111,15 +111,9 @@ var slashingsResetTest = NewEpochProcessing(statechange.ProcessSlashingsReset)
 
 var pendingDepositTest = NewEpochProcessing(statechange.ProcessPendingDeposits)
 
-var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessPendingConsolidations(s)
-	return nil
-})
+var PendingConsolidationTest = NewEpochProcessing(statechange.ProcessPendingConsolidations)
 
-var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) error {
-	statechange.ProcessProposerLookahead(s)
-	return nil
-})
+var ProposerLookaheadTest = NewEpochProcessing(statechange.ProcessProposerLookahead)
 
 var historicalSummariesUpdateTest = NewEpochProcessing(statechange.ProcessHistoricalRootsUpdate)
 

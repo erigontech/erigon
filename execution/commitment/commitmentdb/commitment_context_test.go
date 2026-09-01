@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,15 +38,18 @@ type testStateReader struct {
 	readDomain   kv.Domain
 	readKey      []byte
 	readStepSize uint64
+	readCalls    int
+	withHistory  bool
 }
 
 var _ StateReader = (*testStateReader)(nil)
 
-func (r *testStateReader) WithHistory() bool { return false }
+func (r *testStateReader) WithHistory() bool { return r.withHistory }
 
 func (r *testStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	r.readCalls++
 	r.readDomain = d
 	r.readKey = append(r.readKey[:0], key...)
 	r.readStepSize = stepSize
@@ -82,4 +87,168 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
+}
+
+type branchChildCountDomains struct {
+	stubSharedDomains
+	value   []byte
+	ok      bool
+	bound   bool
+	maxStep kv.Step
+	calls   int
+	key     []byte
+}
+
+func (d *branchChildCountDomains) GetLatestFromMemory(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
+	d.calls++
+	d.key = append(d.key[:0], key...)
+	if domain != kv.CommitmentDomain || !d.ok {
+		if d.bound {
+			return nil, d.maxStep, false
+		}
+		return nil, kv.NoStepBound, false
+	}
+	return d.value, kv.NoStepBound, true
+}
+
+func TestBranchChildCountReadsPostComputeView(t *testing.T) {
+	t.Parallel()
+
+	prefix := []byte{0x0a}
+	compactKey := nibbles.HexToCompact(prefix)
+
+	t.Run("changed branch comes from memory", func(t *testing.T) {
+		domains := &branchChildCountDomains{value: []byte{0, 0, 0, 0b0000_0111}, ok: true}
+		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: domains,
+			stateReader:   reader,
+		}
+
+		count, err := sdc.BranchChildCount(prefix)
+		require.NoError(t, err)
+		require.Equal(t, 3, count)
+		require.Equal(t, 1, domains.calls)
+		require.Equal(t, compactKey, domains.key)
+		require.Zero(t, reader.readCalls)
+	})
+
+	t.Run("unchanged branch comes from installed reader", func(t *testing.T) {
+		domains := &branchChildCountDomains{}
+		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: domains,
+			stateReader:   reader,
+		}
+
+		count, err := sdc.BranchChildCount(prefix)
+		require.NoError(t, err)
+		require.Equal(t, 2, count)
+		require.Equal(t, 1, domains.calls)
+		require.Equal(t, compactKey, domains.key)
+		require.Equal(t, 1, reader.readCalls)
+		require.Equal(t, kv.CommitmentDomain, reader.readDomain)
+		require.Equal(t, compactKey, reader.readKey)
+		require.Equal(t, uint64(1), reader.readStepSize)
+	})
+}
+
+func TestBranchChildCountRejectsIncompleteComputedView(t *testing.T) {
+	t.Parallel()
+
+	prefix := []byte{0x0a}
+	branch := []byte{0, 0, 0, 0b0000_0011}
+
+	t.Run("missing state reader", func(t *testing.T) {
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{},
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "installed state reader")
+	})
+
+	t.Run("history reader suppresses branch writes", func(t *testing.T) {
+		reader := &testStateReader{branchData: branch, withHistory: true}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{},
+			stateReader:   reader,
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "reader that permits branch writes")
+	})
+
+	t.Run("deferred branch updates are pending", func(t *testing.T) {
+		reader := &testStateReader{branchData: branch}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{},
+			stateReader:   reader,
+			pendingUpdate: &commitment.PendingCommitmentUpdate{},
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "deferred branch updates are pending")
+	})
+
+	t.Run("staged unwind bounds the fallback", func(t *testing.T) {
+		reader := &testStateReader{branchData: branch}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{bound: true, maxStep: 1},
+			stateReader:   reader,
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "staged unwind")
+	})
+}
+
+func Test_TrieContext_BranchReusesBufferAcrossReads(t *testing.T) {
+	t.Parallel()
+
+	reader := &testStateReader{branchData: []byte{1, 2, 3}, step: 7}
+	ctx := NewTrieContextRo(reader, 1)
+
+	got1, _, err := ctx.Branch([]byte{0xaa})
+	require.NoError(t, err)
+	require.Equal(t, []byte{1, 2, 3}, got1)
+
+	reader.branchData = []byte{4, 5, 6}
+	got2, _, err := ctx.Branch([]byte{0xbb})
+	require.NoError(t, err)
+	require.Equal(t, []byte{4, 5, 6}, got2)
+
+	// The contract Branch's callers rely on: the returned bytes live only until the
+	// next read on this context. A caller that keeps them sees the newer branch.
+	require.Equal(t, []byte{4, 5, 6}, got1, "second read must land in the same buffer")
+	require.Equal(t, &got1[0], &got2[0], "second read must not allocate a new buffer")
+}
+
+func Test_TrieContext_BranchKeepsNilAndEmptyDistinct(t *testing.T) {
+	t.Parallel()
+
+	// A nil branch means "absent"; callers test it with == nil, so reusing a buffer
+	// must not turn it into an empty non-nil slice.
+	reader := &testStateReader{}
+	ctx := NewTrieContextRo(reader, 1)
+
+	got, _, err := ctx.Branch([]byte{0xaa})
+	require.NoError(t, err)
+	require.Nil(t, got, "absent branch must stay nil")
+
+	reader.branchData = []byte{1, 2, 3}
+	if _, _, err = ctx.Branch([]byte{0xbb}); err != nil {
+		t.Fatal(err)
+	}
+
+	reader.branchData = []byte{}
+	got, _, err = ctx.Branch([]byte{0xcc})
+	require.NoError(t, err)
+	require.NotNil(t, got, "present-but-empty branch must stay non-nil after the buffer is warm")
+	require.Empty(t, got)
+
+	reader.branchData = nil
+	got, _, err = ctx.Branch([]byte{0xdd})
+	require.NoError(t, err)
+	require.Nil(t, got, "absent branch must stay nil after the buffer is warm")
 }

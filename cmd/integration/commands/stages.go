@@ -32,6 +32,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
+	"github.com/felixge/fgprof"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
@@ -64,6 +66,7 @@ import (
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -95,7 +98,8 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if debugVerbosity {
-				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+				// The flag name and value are hardcoded and known to be valid, so this cannot fail.
+				_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
@@ -137,13 +141,14 @@ var cmdAlloc = &cobra.Command{
 	Use:     "alloc",
 	Example: "integration allocates and holds 1Gb (or given size)",
 	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+		// The flag name and value are hardcoded and known to be valid, so this cannot fail.
+		_ = cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 		v, err := datasize.ParseString(args[0])
 		if err != nil {
 			panic(err)
 		}
 		n := make([]byte, v.Bytes())
-		common.Sleep(cmd.Context(), 265*24*time.Hour)
+		_ = common.Sleep(cmd.Context(), 265*24*time.Hour)
 		_ = n
 	},
 }
@@ -313,9 +318,11 @@ func init() {
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
+	withLimit(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
+	withExperimentalCommitment(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withStageBase(cmdStageExecReplay)
@@ -613,8 +620,82 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	return tx.Commit()
 }
 
+// startExecProfiling starts CPU, mutex, and fgprof (whole-run wall-clock) profiling
+// for the duration of the caller's stage_exec run, and returns a func that stops them
+// and flushes cpu/heap/mutex/fgprof profiles to dirs.Tmp. The caller must defer it.
+func startExecProfiling(dirs datadir.Dirs, logger log.Logger) func() {
+	// --pprof.cpuprofile may already own a CPU profile; stopping one we did not
+	// start would close it out from under its owner.
+	cpuFile := filepath.Join(dirs.Tmp, "stage_exec_cpu.pprof")
+	cpuStarted := true
+	if err := debug.Handler.StartCPUProfile(cpuFile); err != nil {
+		logger.Warn("[stage_exec] failed to start CPU profile", "err", err)
+		cpuStarted = false
+	}
+
+	prevMutexRate := runtime.SetMutexProfileFraction(1)
+
+	fgprofFile, err := os.Create(filepath.Join(dirs.Tmp, "stage_exec_fgprof.pprof"))
+	if err != nil {
+		logger.Warn("[stage_exec] failed to create fgprof file", "err", err)
+	}
+	var stopFgprof func() error
+	if fgprofFile != nil {
+		stopFgprof = fgprof.Start(fgprofFile, fgprof.FormatPprof)
+	}
+
+	return func() {
+		if cpuStarted {
+			if err := debug.Handler.StopCPUProfile(); err != nil {
+				logger.Warn("[stage_exec] failed to stop CPU profile", "err", err)
+			}
+		}
+		if err := debug.Handler.WriteMemProfile(filepath.Join(dirs.Tmp, "stage_exec_heap.pprof")); err != nil {
+			logger.Warn("[stage_exec] failed to write heap profile", "err", err)
+		}
+		if err := debug.Handler.WriteMutexProfile(filepath.Join(dirs.Tmp, "stage_exec_mutex.pprof")); err != nil {
+			logger.Warn("[stage_exec] failed to write mutex profile", "err", err)
+		}
+		runtime.SetMutexProfileFraction(prevMutexRate)
+		if stopFgprof != nil {
+			if err := stopFgprof(); err != nil {
+				logger.Warn("[stage_exec] failed to write fgprof profile", "err", err)
+			}
+		}
+		if fgprofFile != nil {
+			fgprofFile.Close()
+		}
+	}
+}
+
+// resolveExecTarget resolves stage_exec's target block from --block and --limit
+// against current progress. --block defaults to the Senders progress, --limit
+// caps how far past the Execution progress the run may go, and neither may take
+// the target past what Senders has produced. hasWork is false when the target is
+// already reached.
+func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (target uint64, hasWork bool) {
+	target = block
+	if target == 0 {
+		target = sendersProgress
+	}
+	if limit > 0 {
+		to := sendersProgress
+		if execProgress < sendersProgress {
+			if remaining := sendersProgress - execProgress; limit < remaining {
+				to = execProgress + limit
+			}
+		}
+		if to < target {
+			target = to
+		}
+	}
+	return target, !(target > 0 && target <= execProgress)
+}
+
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	defer startExecProfiling(dirs, logger)()
+
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
@@ -710,20 +791,29 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
 		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
-			panic(err)
+			if doms != nil {
+				doms.Close()
+			}
+			return err
 		}
 		_, execProgress, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
-			panic(err)
-		}
 		doms.Close()
+		if err != nil {
+			return err
+		}
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
 	}
 
-	if block == 0 {
-		block = sendersProgress
+	var hasWork bool
+	block, hasWork = resolveExecTarget(block, limit, execProgress, sendersProgress)
+	if !hasWork {
+		logger.Info("stage_exec: target block already reached, nothing to do",
+			"block", block, "stage.progress", execProgress)
+		tx.Rollback()
+		tx = nil
+		return nil
 	}
 
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
@@ -744,17 +834,26 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		return agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) error {
+		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
+			if err != nil {
+				return nil, err
+			}
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			return stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
+			pruneStage.FinalityCtx = finalityCtx
+			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
 		}, logger)
+		return err
 	}
 
 	if chainTipMode {
-		for bn := execProgress; bn < block; bn++ {
+		// Inclusive of block: execBlocksBatch's argument is the target to reach,
+		// so starting at execProgress would re-target a block already executed
+		// and stopping below block would never execute the last one.
+		for bn := execProgress + 1; bn <= block; bn++ {
 			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, execCodeStore, logger); err != nil {
 				return err
 			}
@@ -1184,6 +1283,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	var compatErr *chain2.ConfigCompatError
 	if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 		panic(genesisErr)
+	}
+	if compatErr != nil {
+		logger.Warn("Incompatible chain config, continuing on the rejected one", "err", compatErr)
 	}
 	//logger.Info("Initialised chain configuration", "config", chainConfig)
 
