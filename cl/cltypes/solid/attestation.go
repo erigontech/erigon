@@ -158,7 +158,11 @@ func (a *Attestation) decodeSSZWithConfig(buf []byte, version int, cfg *clparams
 		if len(buf) < electraFixedHeaderSize+1 {
 			return ssz.ErrLowBufferSize
 		}
-		aggrBitsOffset := int(binary.LittleEndian.Uint32(buf[:4]))
+		aggrBitsOffsetUint32 := binary.LittleEndian.Uint32(buf[:4])
+		if uint64(aggrBitsOffsetUint32) > uint64(len(buf)) {
+			return ssz.ErrBadOffset
+		}
+		aggrBitsOffset := int(aggrBitsOffsetUint32)
 		committeeBitsBytes := aggrBitsOffset - electraFixedHeaderSize
 		if committeeBitsBytes <= 0 {
 			return ssz.ErrLowBufferSize
