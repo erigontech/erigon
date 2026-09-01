@@ -540,7 +540,7 @@ func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash
 }
 
 func (f *ForkChoiceStore) payloadValidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
-	if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
+	if f.IsPayloadVerified(blockRoot) {
 		return true
 	}
 	if f.payloadStatusByRoot != nil {

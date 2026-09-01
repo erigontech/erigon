@@ -2858,6 +2858,37 @@ func TestCachedTerminalHashProjectsToSiblingRoot(t *testing.T) {
 	}
 }
 
+func TestSiblingInvalidationRevokesVerifiedExecutionHash(t *testing.T) {
+	rootA := common.HexToHash("0x01")
+	rootB := common.HexToHash("0x02")
+	executionHash := common.HexToHash("0x03")
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](2)
+	require.NoError(t, err)
+	verifiedExecutionPayloadHashes, err := lru.New[common.Hash, common.Hash](2)
+	require.NoError(t, err)
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](2)
+	require.NoError(t, err)
+	graph := &persistingEnvelopeForkGraph{}
+	f := &ForkChoiceStore{
+		forkGraph:                      graph,
+		verifiedExecutionPayload:       verifiedExecutionPayload,
+		verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
+		executionPayloadStatus:         executionPayloadStatus,
+		payloadStatusByRoot:            payloadStatusByRoot,
+	}
+
+	f.MarkPayloadVerified(rootA, executionHash)
+	require.True(t, f.IsPayloadVerified(rootA))
+	f.MarkPayloadInvalid(rootB, executionHash)
+
+	require.False(t, f.IsPayloadVerified(rootA))
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(rootA)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+}
+
 func TestLocalSelfBuildPreservesTerminalInvalidationAcrossYield(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
