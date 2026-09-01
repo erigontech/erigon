@@ -218,3 +218,30 @@ func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) 
 	require.Zero(t, lastBlockInStep, "must not resolve to the floor")
 	require.True(t, ready, "frozen step must be collatable")
 }
+
+// A synced node also prunes MaxTxNum down to a recent window, so the shortcut above must
+// not fire for a step near the head.
+func TestContextReadyForCollationResolvesStepsInsideTheTxNumWindow(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, e := range []struct{ blockNum, maxTxNum uint64 }{
+			{0, 1}, {25_472_999, 3_630_627_978}, {25_473_000, 3_630_628_100}, {25_473_001, 3_630_628_300},
+		} {
+			if err := rawdbv3.TxNums.Append(tx, e.blockNum, e.maxTxNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	ctx := NewContext(25_473_001, 25_473_000, 96, false)
+	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, 3_630_628_100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(25_473_000), lastBlockInStep)
+	require.True(t, ready)
+
+	_, lastBlockInStep, _, _, ready, err = ctx.ReadyForCollation(t.Context(), db, 3_630_628_300)
+	require.NoError(t, err)
+	require.Equal(t, uint64(25_473_001), lastBlockInStep)
+	require.False(t, ready, "step above the finalised head stays gated")
+}
