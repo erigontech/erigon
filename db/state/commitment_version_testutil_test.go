@@ -254,12 +254,12 @@ func buildMixedRegimeDatadir(t *testing.T, stepSize, frozenSteps uint64) (kv.Tem
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	writeStepsKeys(t, db, agg, setA, 0, frozenSteps)
 	writeStepsKeys(t, db, agg, setB, frozenSteps, 2*frozenSteps)
-	require.NoError(t, agg.BuildFiles(2*frozenSteps*stepSize))
+	require.NoError(t, agg.BuildFiles(2*frozenSteps*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	writeStepsKeys(t, db, agg, setB, 2*frozenSteps, 3*frozenSteps)
-	require.NoError(t, agg.BuildFiles(3*frozenSteps*stepSize))
+	require.NoError(t, agg.BuildFiles(3*frozenSteps*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	db, agg = reopenAggregator(t, db, agg, stepSize)

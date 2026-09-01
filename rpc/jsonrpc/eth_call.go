@@ -65,10 +65,10 @@ func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
 	return nil
 }
 
-// orLatest resolves an optional block selector, defaulting to the latest block
+// blockOrLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
 // whose Block parameter is optional per execution-apis (default 'latest').
-func orLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+func blockOrLatest(blockNrOrHash *rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
 	if blockNrOrHash != nil {
 		return *blockNrOrHash
 	}
@@ -86,7 +86,7 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
-	blockNrOrHash := orLatest(requestedBlock)
+	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPendingState(blockNrOrHash); err != nil {
 		return nil, err
 	}
@@ -258,26 +258,36 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		feeCap = common.Big0
 	}
 
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	if err != nil {
+		return 0, err
+	}
+	defer caller.Close()
+
+	msg := caller.Message()
+	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil()
+
+	var initialState *state.IntraBlockState
+	if feeCap.Sign() != 0 || plainTransfer {
+		initialState, _, err = caller.InitialState()
+		if err != nil {
+			return 0, err
+		}
+		defer initialState.Close()
+	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-
-		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
+		balance, err := initialState.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
 		available := balance.ToBig()
-		if args.Value != nil {
-			value := args.Value.ToInt()
-			if value.Cmp(available) >= 0 {
-				return 0, errors.New("insufficient funds for transfer")
-			}
-			available.Sub(available, value)
+		value := msg.Value().ToBig()
+		if value.Cmp(available) >= 0 {
+			return 0, errors.New("insufficient funds for transfer")
 		}
+		available.Sub(available, value)
 
 		allowance := new(big.Int).Div(available, feeCap)
 
@@ -299,26 +309,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
-	if err != nil {
-		return 0, err
-	}
-	defer caller.Close()
-
 	// If the transaction is a plain value transfer, short circuit estimation and
 	// directly try 21000. Returning 21000 without any execution is dangerous as
 	// some tx field combos might bump the price up even for plain transfers (e.g.
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
-	if args.Data == nil && args.To != nil {
-		state := state.New(stateReader)
-		if state == nil {
-			return 0, errors.New("can't get the current state")
-		}
-		defer state.Close()
-		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
+	if plainTransfer {
+		codeSize, err := initialState.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
-			return 0, errors.New("getCodeSize failed")
+			return 0, fmt.Errorf("get code size for %x: %w", *args.To, err)
 		}
 		// A transfer to a codeless recipient has a fixed, gas-independent cost, so a
 		// single trial at the ceiling yields the exact estimate: return its actual gas
@@ -434,7 +433,7 @@ func (s StorageKeysInfo) EncodeKey() string {
 
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHashArg *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if len(storageKeys) > maxGetProofKeys {
 		return nil, &rpc.CustomError{
 			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),

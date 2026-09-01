@@ -233,6 +233,10 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 	return hph
 }
 
+// Metrics exposes the trie's counters so a caller applying its deferred writes
+// can carry them into this trie's log and CSV totals.
+func (hph *HexPatriciaHashed) Metrics() *Metrics { return hph.metrics }
+
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
 // during commitment calculation. This is used by witness generation to capture paths
 // to HashNodes that need resolution when a FullNode is reduced to a single child.
@@ -1464,6 +1468,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if err != nil {
 		return err
 	}
+	hph.metrics.AddBranchRead(len(branchData))
 
 	// depthsToTxNum is used for per-file metrics; step is no longer available
 	// from the cache-or-DB helper (cache never had a meaningful step anyway).
@@ -2483,6 +2488,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
+	hph.metrics.AddRoundKeys(updatesCount)
+	roundStart := time.Now()
+	defer func() { observeRound(hph.metrics, roundStart) }()
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)

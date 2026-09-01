@@ -1403,3 +1403,54 @@ func TestTxPoolContentFrom_UsesOverlayHead(t *testing.T) {
 	require.Equal(t, overlayHeader.BaseFee.ToBig(), got.GasPrice.ToInt(),
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
 }
+
+// newOverlayReceiptsUnpublishTestAPI publishes an overlay whose head block carries a
+// transaction and executed state, then drops the overlay while its canonical hash is
+// read. A handler that selects a view once survives it; one that selects again mid-way
+// resolves against a generation that is no longer published.
+func newOverlayReceiptsUnpublishTestAPI(t *testing.T) (*BaseAPI, *execmoduletester.ExecModuleTester, *types.Header) {
+	t.Helper()
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	// Nonce zero: the receipts of this block are derived by replay, so the transaction
+	// has to be executable against the state the overlay publishes.
+	txn := signOverlayRaceTestTx(t, m, 0)
+	require.NoError(t, rawdb.WriteBody(overlay, overlayHeader.Hash(), overlayHeader.Number.Uint64(), &types.Body{Transactions: []types.Transaction{txn}}))
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayHeader.Number.Uint64()))
+	base._blockReader = &unpublishOverlayBlockReader{
+		FullBlockReader: base._blockReader,
+		events:          events,
+		blockNumber:     overlayHeader.Number.Uint64(),
+	}
+	return base, m, overlayHeader
+}
+
+func TestOtsGetBlockDetails_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayReceiptsUnpublishTestAPI(t)
+	api := NewOtterscanAPI(base, m.DB, 25)
+
+	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	require.NoError(t, err)
+	require.NotNil(t, details)
+}
+
+func TestOtsGetBlockTransactions_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayReceiptsUnpublishTestAPI(t)
+	api := NewOtterscanAPI(base, m.DB, 25)
+
+	result, err := api.GetBlockTransactions(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()), 0, 10)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+func TestGraphQLGetBlockDetails_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayReceiptsUnpublishTestAPI(t)
+	api := NewGraphQLAPI(base, m.DB, newEthApiForTest(base, m.DB, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
+
+	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	require.NoError(t, err)
+	require.NotNil(t, details)
+}
