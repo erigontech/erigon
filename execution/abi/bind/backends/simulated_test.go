@@ -1127,7 +1127,6 @@ func TestSimulatedBackendEstimateGasClassifiesRuntimeOutOfGas(t *testing.T) {
 	)
 	gasCap := params.TxBaseEIP2780 +
 		params.ColdAccountAccessEIP2780 +
-		params.TransferLogCostEIP2780 +
 		params.TxValueCostEIP2780 +
 		params.StateGasNewAccount - 1
 

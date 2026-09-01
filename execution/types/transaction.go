@@ -482,12 +482,11 @@ func (m *Message) SetIsFree(isFree bool) {
 }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
-	gas := globalGasCap
-	if gas == 0 {
+	gas := desiredGas
+	// Only when no cap is configured does an unset limit mean "no limit": a
+	// desired gas of zero is a limit the caller asked for, not a missing value.
+	if globalGasCap == 0 && gas == 0 {
 		gas = uint64(math.MaxUint64 / 2)
-	}
-	if desiredGas > 0 {
-		gas = desiredGas
 	}
 	if globalGasCap != 0 && globalGasCap < gas {
 		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
