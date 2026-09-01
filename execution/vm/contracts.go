@@ -576,8 +576,6 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
 	case modexpBigIntFaster(exp, modLen):
-		// math/big's Montgomery inner loop is `hand-written assembly`, which beats
-		// `evmone's portable C++` once the modulus is large enough.
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
@@ -600,7 +598,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 func modexpBigIntFaster(exp []byte, modLen uint64) bool {
 	const wordBytes = bits.UintSize / 8 // a math/big Word, so the bound tracks the platform
 	if modLen < min(modexpBigIntMinModLenWideExp, modexpBigIntMinModLenNarrowExp) {
-		return false
+		return false // below both bounds, so skip the scan of a up-to-1KB exponent
 	}
 	if len(exp) > wordBytes && bitutil.TestBytes(exp[:len(exp)-wordBytes]) {
 		return modLen >= modexpBigIntMinModLenWideExp
@@ -626,12 +624,9 @@ const modexpU256MaxWindow = 5
 // multiplies. Both methods square once per exponent bit, so only multiplies
 // differ: width 1 needs one per set bit, while a wider window builds a 2^(w-1)
 // entry table and then needs one per window. Sparse exponents such as 65537 have
-// far fewer set bits than their width suggests, and stay on width 1.
-//
-// The window count assumes set bits cluster enough to share a window, which an
-// evenly spread exponent never does: every window shrinks back to a single bit
-// and the table is wasted. Requiring the saving to beat the table cost twice
-// over keeps those exponents on width 1.
+// far fewer set bits than their width suggests, and stay on width 1. An evenly
+// spread exponent shares no windows at all, so the saving must beat the table
+// cost twice over before a wider window is taken.
 func modexpU256WindowWidth(expBits, expOnes int) int {
 	best, bestCost := 1, expOnes
 	for w := 2; w <= modexpU256MaxWindow; w++ {
@@ -690,6 +685,8 @@ func modexpU256(dst, base, exp, mod []byte) {
 
 	var result uint256.Int
 	if w := modexpU256WindowWidth(expBits, expOnes); w == 1 {
+		// Width 1 keeps its own loop: routing it through the window path below
+		// costs ~2.5% on sparse exponents in per-bit scalar work.
 		result.Set(&b) // the top bit is set, so the first squaring would be of 1
 		for i := 1; i < expBits; i++ {
 			result.MulModWithReciprocal(&result, &result, &m, &mu)
