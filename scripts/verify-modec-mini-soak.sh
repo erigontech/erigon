@@ -55,22 +55,20 @@ REGIME_CYCLE=${REGIME_CYCLE:-3,3,2}
 
 echo "[verify-modec] ITER=$ITER REGIME_CYCLE=$REGIME_CYCLE DATADIR=$DATADIR"
 
-# Override the launcher's publisher-propagation MIN_AGE_STEPS=6 with
-# 2 — the balance point between two contending requirements:
-#   - Phase 3.5's regime-depths needs a per-step (width==1) commitment
-#     .kv to persist long enough to select as a mode-C target. With
-#     MIN_AGE_STEPS=0, merges fire immediately and width==1 files get
-#     absorbed before regime-depths polls (cycle 19 hit the 5400s cap).
-#     MIN_AGE_STEPS=2 keeps per-step files for ~10-12 min at hoodi
-#     cadence — well within Phase 3.5's 90 min poll window.
-#   - Phase 5's disk-clean assertion needs the merger to consume v4
-#     boundary pairs. The merger holds a file until current_max_endTxN
-#     >= file.endTxN + MIN_AGE_STEPS*stepSize. Cycle 20 showed
-#     MIN_AGE_STEPS=6 needs the chain to advance ~30-40 min beyond the
-#     last v4 emit — more than any reasonable wait cap. MIN_AGE_STEPS=2
-#     needs only ~10-15 min chain advance so 1800s covers it comfortably.
-export ERIGON_MERGE_MIN_AGE_STEPS=2
-export DISK_CLEAN_MERGE_QUIESCE_SEC=1800
+# Keep launcher's default ERIGON_MERGE_MIN_AGE_STEPS=6 — the value
+# cycles 17/18 used successfully. Cycle 21 showed aggressive merges
+# (MIN_AGE_STEPS=2) compete with live-tip block inserts for the
+# exec-module semaphore and can push setHead past its 5-min preflight
+# quiescence cap (see semaphore-split-followup-2026-08-25). Under 6,
+# per-step commitment .kv files linger ~30 min (Phase 3.5 finds them
+# comfortably) and merges fire sparsely enough not to contend.
+#
+# Phase 5's disk-clean assertion cannot converge fully under 6-step
+# age gate — the last v4 emits need ~30-40 min of chain advance to
+# become eligible. We accept that as informational (V4_TRANSIENT_COUNT
+# is reported but not a hard failure) until the semaphore-split work
+# lands, which will let aggressive merges coexist with SetHead.
+export DISK_CLEAN_MERGE_QUIESCE_SEC=600
 
 DATADIR="$DATADIR" \
   LOG_DIR="$out" \
