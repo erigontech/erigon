@@ -821,6 +821,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			}
 			return false, validationErr
 		}
+		if payloadStatus == execution_client.PayloadStatusInvalidated {
+			return false, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot))
+		}
 		if f.payloadInvalidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
 			return false, fmt.Errorf("%w: execution payload was invalidated while validation was in progress", errInvalidExecutionPayloadEnvelope)
 		}
