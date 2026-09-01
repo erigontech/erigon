@@ -1270,6 +1270,10 @@ func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
 // suppresses the derivation the kept data would otherwise supply, leaving the snapshot unseedable
 // for the life of the process. Remove it only when the bytes are confirmed malformed: a file we
 // could not read says nothing about its contents.
+//
+// Parsing the outer dict is not enough. metainfo.Load leaves InfoBytes as raw bencode it never
+// unmarshals, so a file missing its info dict reaches SetInfoBytes and fails there instead, with
+// the name already bound to an info-less torrent.
 func (d *Downloader) removeMalformedMetainfo(name string) error {
 	name, err := ensureCantLeaveDir(name, d.snapDir())
 	if err != nil {
@@ -1279,8 +1283,10 @@ func (d *Downloader) removeMalformedMetainfo(name string) error {
 	if err != nil {
 		return nil
 	}
-	if _, err := metainfo.Load(bytes.NewReader(b)); err == nil {
-		return nil
+	if mi, err := metainfo.Load(bytes.NewReader(b)); err == nil {
+		if _, err := mi.UnmarshalInfo(); err == nil {
+			return nil
+		}
 	}
 	if err := d.torrentFS.Delete(name); err != nil {
 		return err
