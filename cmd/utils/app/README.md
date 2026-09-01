@@ -2,23 +2,6 @@
 
 ## Backup
 
-## Db
-
-### `db compact`
-
-Rewrites every mdbx database of a datadir without its free pages. MDBX reuses
-free pages instead of returning them to the filesystem, so `mdbx.dat` never
-shrinks on its own.
-
-```
-./build/bin/erigon db compact --datadir=<path>
-```
-
-Erigon must be stopped. The command takes the datadir lock and opens each
-database exclusively, so it fails instead of touching a database still in use.
-The copy is written next to the original, so it needs free disk space for a
-second copy of the largest database, and can take hours on a big `chaindata`.
-
 ## Import
 
 ## Init

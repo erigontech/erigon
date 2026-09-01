@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -252,4 +253,42 @@ func TestCompactInPlace(t *testing.T) {
 		}
 		return nil
 	}))
+}
+
+// TestDatadirDBs pins the three rules of the datadir scan: a db is found by its
+// mdbx.dat, the label comes from the root it sits under, and the walk reaches
+// caplin/blobs/chaindata without descending into a file tree like snapshots/.
+func TestDatadirDBs(t *testing.T) {
+	root := t.TempDir()
+	mkDB := func(parts ...string) string {
+		p := filepath.Join(append([]string{root}, parts...)...)
+		require.NoError(t, os.MkdirAll(p, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(p, dataFileName), nil, 0644))
+		return p
+	}
+	chaindata := mkDB("chaindata")
+	txpool := mkDB("txpool")
+	nodes := mkDB("nodes", "eth68")
+	blobs := mkDB("caplin", "blobs", "chaindata")
+	indexing := mkDB("caplin", "indexing")
+
+	// Neither of these may be reported: snapshots/ holds no db, and a staging dir
+	// lives inside a db whose own mdbx.dat stops the walk above it.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "snapshots", "domain"), 0755))
+	mkDB("chaindata", compactDirName)
+
+	found, err := datadirDBs(datadir.Open(root))
+	require.NoError(t, err)
+
+	got := map[string]kv.Label{}
+	for _, db := range found {
+		got[db.path] = db.label
+	}
+	require.Equal(t, map[string]kv.Label{
+		chaindata: dbcfg.ChainDB,
+		txpool:    dbcfg.TxPoolDB,
+		nodes:     dbcfg.SentryDB,
+		blobs:     dbcfg.CaplinDB,
+		indexing:  dbcfg.CaplinDB,
+	}, got)
 }

@@ -26,8 +26,9 @@ not only `chaindata`.
 - **Erigon and rpcdaemon must be stopped.** The command takes the datadir lock
   and opens each database exclusively, so it fails cleanly rather than
   corrupting a database in use. Still confirm with the user first.
-- **Free space for a second copy of the largest database.** The copy is written
-  to a sibling `<db>-compacting/` directory, then moved back over the original.
+- **Free space for a second copy of each database, on the volume that database
+  already lives on.** The copy is written to a `<db>/compacting/` subdirectory,
+  then moved back over the original.
 
 ## Procedure
 
@@ -70,8 +71,11 @@ The user can now restart erigon.
 
 ## Notes
 
-- A crashed run can leave a `<db>-compacting/` directory behind. It is skipped
-  on the next run and deleted, so no cleanup is needed.
-- `integration mdbx_to_mdbx` runs the same compaction. With `--chaindata.to` it
-  copies `--chaindata` to a new path instead, which is how you change
-  `--db.pagesize`.
+- A crashed run can leave a `<db>/compacting/` directory behind. The next run
+  deletes it, so no cleanup is needed.
+- To change `--db.pagesize` you need a copy, not a compaction: the destination
+  keeps whatever page size it was created with, and `mdbx_to_mdbx` passes a
+  `targetPageSize` of 0, so it inherits the source's. Pre-create the new db with
+  `ONLY_CREATE_DB=true erigon --datadir=<new> --chain=<chain> --db.pagesize=8kb`,
+  then `integration mdbx_to_mdbx --chaindata=<old> --chaindata.to=<new>` — the
+  full recipe is in `cmd/integration/Readme.md`.

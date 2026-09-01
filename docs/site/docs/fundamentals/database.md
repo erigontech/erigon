@@ -130,8 +130,9 @@ pages:
 
 Erigon must be stopped. The command takes the datadir lock and opens each
 database exclusively, so it fails instead of touching a database still in use.
-The copy is written next to the original, so it needs free disk space for a
-second copy of the largest database, and can take hours on a big `chaindata/`.
+The copy is written inside the database's own directory, so each database needs
+free space for a second copy of itself on the volume it already lives on, and a
+big `chaindata/` can take hours.
 
 This is a manual defragmentation pass, not the background compaction of an
 LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
