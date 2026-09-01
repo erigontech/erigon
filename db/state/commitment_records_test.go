@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"testing"
 
@@ -88,4 +89,38 @@ func TestScanCommitmentRecordRunCoversSlotsAcrossFiles(t *testing.T) {
 	// The first file scan stops after the second file supplies the last wanted slot;
 	// it never walks a descendant after the mask is covered.
 	require.Equal(t, 0, secondNext)
+}
+
+// commitmentRecordTestSeekBounded fails the walk instead of letting it spin, so a scan that stops
+// making progress surfaces as a named error rather than a hung test.
+func commitmentRecordTestSeekBounded(entries []commitmentRecordTestEntry, nextCalls, seeks *int, limit int) func([]byte) (commitmentRecordCursor, error) {
+	inner := commitmentRecordTestSeek(entries, nextCalls, seeks)
+	return func(key []byte) (commitmentRecordCursor, error) {
+		if *seeks >= limit {
+			return nil, fmt.Errorf("seek limit %d exceeded at key %x: the sibling walk is not advancing", limit, key)
+		}
+		return inner(key)
+	}
+}
+
+// A descendant record can sort inside the direct-child run when the file lacks that child's own
+// record, which is what a compacted tombstone leaves behind. The walk has to step past it.
+func TestScanCommitmentRecordRunAdvancesPastIntruderWhenSlotAbsent(t *testing.T) {
+	t.Parallel()
+
+	nodeKey := nibbles.EncodeKeyV3([]byte{1, 2})
+	intruder := append(append([]byte(nil), nibbles.ChildKeyV3(nodeKey, 0)...), 0x00, 0x80)
+	file := []commitmentRecordTestEntry{
+		{key: intruder, val: []byte{0xff}},
+		{key: nibbles.ChildKeyV3(nodeKey, 3), val: []byte{0xa3}},
+	}
+
+	wanted := uint16(1<<0 | 1<<3)
+	var records [16][]byte
+	next, seeks := 0, 0
+	present, err := scanCommitmentRecordRun(nodeKey, wanted, 0, &records, commitmentRecordTestSeekBounded(file, &next, &seeks, 32))
+	require.NoError(t, err)
+	require.Equal(t, uint16(1<<3), present, "child 0 is absent from this file and child 3 must still be collected")
+	require.Equal(t, []byte{0xa3}, records[3])
+	require.Nil(t, records[0])
 }

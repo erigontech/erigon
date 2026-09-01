@@ -115,6 +115,7 @@ func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[1
 		return present, err
 	}
 
+	seekedAtExpected := true
 	for expected := 0; expected < 16 && present&wanted != wanted; {
 		key := cursor.Key()
 		if nibble, ok := directCommitmentChild(key, nodeKey); ok && nibble >= expected {
@@ -128,6 +129,7 @@ func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[1
 				cursor.Close()
 				return present, nil
 			}
+			seekedAtExpected = false
 			continue
 		}
 
@@ -137,6 +139,16 @@ func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[1
 		}
 
 		cursor.Close()
+		// A seek at expected that returns anything but that child proves the file holds no record
+		// for it: descendants of it sort after its key, so re-seeking the same slot returns this
+		// key again forever.
+		if seekedAtExpected {
+			expected++
+		}
+		if expected == 16 {
+			return present, nil
+		}
+		seekedAtExpected = true
 		cursor, err = seek(nibbles.ChildKeyV3(nodeKey, byte(expected)))
 		if err != nil || cursor == nil {
 			return present, err
