@@ -188,10 +188,8 @@ func TestContextReadyForCollationUsesTransactionVisibleTxNums(t *testing.T) {
 	}
 }
 
-// A node that downloaded blocks to tip while execution lags far behind keeps only the
-// recent end of MaxTxNum, so a step from the executed range ends below the table's
-// floor. FindBlockNum answers that with the floor rather than !ok, which would gate
-// collation until execution passed a block millions ahead of the step.
+// Blocks downloaded to tip with execution far behind: the step ends below the table's
+// floor, which the search answers with the floor rather than !ok.
 func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) {
 	const (
 		firstBlockInDB = uint64(25_472_999)

@@ -94,12 +94,8 @@ func (c finalityContext) MaxReorgDepth() uint64 {
 func (c finalityContext) ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
 	err = db.View(ctx, func(tx kv.Tx) error {
-		// A step ending below the range MaxTxNum still holds belongs to blocks that are
-		// already frozen, so it is collatable. BlockNumber's search floors at the second
-		// key, so such a query comes back as that floor with ok=true rather than !ok,
-		// which reads as a step far ahead of the head and gates collation forever -- the
-		// shape a re-executing node has, with blocks downloaded to tip and execution
-		// millions of blocks behind. Genesis is always key one, hence the second.
+		// Below the table's coverage the step is unresolvable here, not a step at the
+		// floor: BlockNumber's search clamps to the second key.
 		_, secondTxInDB, ferr := rawdbv3.TxNums.Second(tx)
 		if ferr != nil {
 			return ferr
