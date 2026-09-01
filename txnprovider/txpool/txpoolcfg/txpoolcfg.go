@@ -21,12 +21,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon/common"
 )
-
-// BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txns acceptance into the pool.
-const BorDefaultTxPoolPriceLimit = 25 * common.GWei
 
 type Config struct {
 	Disable             bool
@@ -140,6 +135,9 @@ const (
 	NonceTooDistant      DiscardReason = 37 // Nonce gap between tx and on-chain nonce exceeds MaxNonceGap; tx can never become pending
 	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
 	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
+	TipAboveFeeCap       DiscardReason = 40 // EIP-1559: max priority fee per gas cannot exceed max fee per gas
+	DelegatedNonceGap    DiscardReason = 41 // Delegated account transaction nonce is not currently executable
+	DelegatedTxnLimit    DiscardReason = 42 // Delegated account already has an executable transaction
 )
 
 func (r DiscardReason) String() string {
@@ -224,6 +222,12 @@ func (r DiscardReason) String() string {
 		return "queued sender dormant: no on-chain state change for too long"
 	case ErrGetSenderInfo:
 		return "error getting sender state during tx validation"
+	case TipAboveFeeCap:
+		return "max priority fee per gas higher than max fee per gas"
+	case DelegatedNonceGap:
+		return "gapped-nonce transaction from delegated account"
+	case DelegatedTxnLimit:
+		return "in-flight transaction limit reached for delegated account"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

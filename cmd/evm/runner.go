@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -168,19 +169,24 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
-	if machineFriendlyOutput {
+	switch {
+	case machineFriendlyOutput:
 		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
-	} else if ctx.Bool(DebugFlag.Name) {
+	case ctx.Bool(DebugFlag.Name):
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
-	} else {
+	default:
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	tmpDir, err := os.MkdirTemp("", "erigon-evm-run-*")
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
@@ -203,12 +209,14 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
-	statedb.CreateAccount(sender, true)
+	if err := statedb.CreateAccount(sender, true); err != nil {
+		return err
+	}
 
 	if ctx.String(ReceiverFlag.Name) != "" {
 		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
@@ -315,7 +323,9 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
+			if err := statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified); err != nil {
+				return err
+			}
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)

@@ -130,7 +130,7 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
 
-// Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
+// Same as [GetPayloadV3], with executionRequests added to the response.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
 func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId, err := decodePayloadID(payloadID)
@@ -152,7 +152,7 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
-// Same as [GetPayloadV5], but returning ExecutionPayloadV6
+// Same as [GetPayloadV5], but returning ExecutionPayloadV4.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
 func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId, err := decodePayloadID(payloadID)
@@ -185,7 +185,7 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 
 // Successor of [ForkchoiceUpdatedV3] post Amsterdam, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
-func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, custodyColumns *engine_types.CustodyColumns) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.GloasVersion)
 }
 

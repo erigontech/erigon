@@ -19,6 +19,7 @@ package httpreqresp
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -265,10 +267,18 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		cancelled := make(chan struct{})
+		stopCancellation := context.AfterFunc(r.Context(), func() {
+			defer close(cancelled)
+			_ = stream.Reset()
+		})
 		// The successful path hands the stream off to the response body, which closes it; on every
 		// other path this deferred close releases it.
 		streamTransferred := false
 		defer func() {
+			if !stopCancellation() {
+				<-cancelled
+			}
 			if !streamTransferred {
 				stream.Close()
 			}
@@ -276,7 +286,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		// Update topic to the actually negotiated protocol so callers know which version was used.
 		topic = string(stream.Protocol())
 		// this write deadline is not part of the eth p2p spec, but we are implying it.
-		stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if err := stream.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Trace("[httpreqresp] failed to set write deadline", "err", err)
+		}
 		var bytesWritten int64
 		// When multiple protocols are offered, the request body matches the
 		// first (preferred) protocol. If the peer negotiated a different
@@ -303,10 +315,12 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		}
 		code := make([]byte, 1)
 		// we have 5 seconds to read the next byte. this is the 5 TTFB_TIMEOUT in the spec
-		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err := stream.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Trace("[httpreqresp] failed to set read deadline", "err", err)
+		}
 		n, err := io.ReadFull(stream, code)
 		synthesizedEmptySuccess := false
-		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) {
+		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) { //nolint:errorlint // intentional bare sentinel check
 			synthesizedEmptySuccess = true
 		} else if err != nil {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)
@@ -332,7 +346,9 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		}
 		// the deadline is 10 * expected chunk count, which the user can send. otherwise we will only wait 10 seconds
 		// this is technically incorrect, and more aggressive than the network might like.
-		stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks)))
+		if err := stream.SetReadDeadline(time.Now().Add(10 * time.Second * time.Duration(chunks))); err != nil {
+			log.Trace("[httpreqresp] failed to set read deadline", "err", err)
+		}
 		// Stream the response through a per-topic size cap instead of buffering it: a compliant
 		// response passes through untouched, a flood is bounded at the cap and the caller sees
 		// ErrResponseTooLarge.

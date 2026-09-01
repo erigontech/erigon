@@ -86,5 +86,5 @@ func (b *SignedBeaconBlockHeader) HashSSZ() ([32]byte, error) {
 }
 
 func (b *SignedBeaconBlockHeader) EncodingSizeSSZ() int {
-	return b.Header.EncodingSizeSSZ() + 96
+	return signedStaticSize(b.Header.EncodingSizeSSZ())
 }

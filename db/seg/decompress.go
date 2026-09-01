@@ -44,12 +44,16 @@ type codeword struct {
 	len     byte          // Number of bits in the codes
 }
 
+// noCodeword marks a table slot no code reaches. Reading one indexes out of
+// range, which fails as loudly as the nil pointer the slots used to hold.
+const noCodeword = ^uint32(0)
+
 type patternTable struct {
-	patterns []*codeword
-	bitLen   int // Number of bits to lookup in the table
+	patterns []uint32 // codeword indices into patternArena.codewords
+	bitLen   int      // Number of bits to lookup in the table
 }
 
-func (pt *patternTable) insertWord(cw *codeword) {
+func (pt *patternTable) insertWord(idx uint32, cw *codeword) {
 	codeStep := uint16(1) << uint16(cw.len)
 	codeFrom, codeTo := cw.code, cw.code+codeStep
 	if pt.bitLen != int(cw.len) && cw.len > 0 {
@@ -57,13 +61,13 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 
 	for c := codeFrom; c < codeTo; c += codeStep {
-		pt.patterns[c] = cw
+		pt.patterns[c] = idx
 	}
 }
 
 // posEntry is one slot in a Huffman position table: bits>0 is a terminal
 // (pos is the decoded position); bits==0 is a subtable router (pos is the
-// child index in posArena.tables), valid on the posMask!=0 path only.
+// child index in posArena.tables).
 type posEntry struct {
 	pos  uint32
 	bits uint8
@@ -82,17 +86,27 @@ type posTable struct {
 type patternArena struct {
 	codewords []codeword
 	tables    []patternTable
-	slots     []*codeword // backing store for all patternTable.patterns slices
+	slots     []uint32 // backing store for all patternTable.patterns slices
 	cwIdx     int
 	tableIdx  int
 	slotIdx   int
 }
 
-func (a *patternArena) allocCW(code uint16, pattern word, codeLen byte, ptr *patternTable) *codeword {
-	cw := &a.codewords[a.cwIdx]
+func (a *patternArena) allocCW(code uint16, pattern word, codeLen byte, ptr *patternTable) (uint32, *codeword) {
+	idx := a.cwIdx
+	cw := &a.codewords[idx]
 	a.cwIdx++
 	cw.code, cw.pattern, cw.len, cw.ptr = code, pattern, codeLen, ptr
-	return cw
+	return uint32(idx), cw
+}
+
+// newSlots returns a slot slab where every entry starts unreachable.
+func newSlots(n int) []uint32 {
+	s := make([]uint32, n)
+	for i := range s {
+		s[i] = noCodeword
+	}
+	return s
 }
 
 func (a *patternArena) allocTable(bitLen int) *patternTable {
@@ -167,14 +181,14 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	f                   *os.File
-	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	dict                *patternTable
 	posDict             *posTable
 	patArena            *patternArena // arena keeping all pattern table allocations alive
 	posArena            *posArena     // arena keeping all position table allocations alive
-	mmapHandle1         []byte        // mmap handle for unix (this is used to close mmap)
+	_mmapHandle         mmap.Ro       // mmap handle for unix (this is used to close mmap)
 	data                []byte        // slice of correct size for the decompressor to work with
 	wordsStart          uint64        // Offset of whether the superstrings actually start
+	wordsFileOffset     uint64
 	size                int64
 	modTime             time.Time
 	wordsCount          uint64
@@ -193,6 +207,8 @@ type Decompressor struct {
 	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+
+	residency atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
 }
 
 const (
@@ -245,11 +261,12 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 
 	d.modTime = stat.ModTime()
-	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
+	if d._mmapHandle, err = mmap.OpenRo(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
 	// read patterns from file
-	d.data = d.mmapHandle1[:d.size]
+	d.data = d._mmapHandle[:d.size]
+	var dataFileOffset uint64
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.version = d.data[0]
@@ -260,17 +277,20 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
+		dataFileOffset += 2
 	}
 
 	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
 		d.compPageValuesCount = d.data[0]
 		d.data = d.data[1:]
+		dataFileOffset++
 	}
 
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
 		d.metadata = d.data[4 : 4+metadataLen]
 		d.data = d.data[4+metadataLen:]
+		dataFileOffset += 4 + uint64(metadataLen)
 
 		dataSize := len(d.data)
 		if dataSize < compressedMinSize {
@@ -337,7 +357,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		d.patArena = &patternArena{
 			codewords: make([]codeword, len(patterns)+numSubTables), // terminals + routing nodes
 			tables:    make([]patternTable, 1+numSubTables),
-			slots:     make([]*codeword, (1<<bitLen)+extraSlots),
+			slots:     newSlots((1 << bitLen) + extraSlots),
 		}
 		d.dict = d.patArena.allocTable(bitLen)
 		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth, d.patArena); err != nil {
@@ -404,6 +424,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 	}
 	d.wordsStart = pos + dictSize
+	d.wordsFileOffset = dataFileOffset + d.wordsStart
 
 	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
@@ -424,8 +445,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	}
 	if depth == depths[0] {
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
-		cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
-		table.insertWord(cw)
+		idx, cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
+		table.insertWord(idx, cw)
 		return 1, nil
 	}
 	if bits == 9 {
@@ -436,8 +457,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 			bitLen = int(maxDepth)
 		}
 		subTable := arena.allocTable(bitLen)
-		cw := arena.allocCW(code, nil, 0, subTable)
-		table.insertWord(cw)
+		idx, cw := arena.allocCW(code, nil, 0, subTable)
+		table.insertWord(idx, cw)
 		return buildCondensedPatternTable(subTable, depths, patterns, 0, 0, depth, maxDepth, arena)
 	}
 	if maxDepth == 0 {
@@ -496,9 +517,6 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	return b0 + b1, err
 }
 
-func (d *Decompressor) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&d.data[0])
-}
 func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
 func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
 func (d *Decompressor) SerializedTotalDictSize() uint64 { return d.serializedDictSize + d.lenDictSize }
@@ -513,7 +531,7 @@ func (d *Decompressor) DictMemSize() uint64 {
 	if d.patArena != nil {
 		total += uint64(cap(d.patArena.codewords)) * uint64(unsafe.Sizeof(codeword{}))
 		total += uint64(cap(d.patArena.tables)) * uint64(unsafe.Sizeof(patternTable{}))
-		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof((*codeword)(nil)))
+		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof(uint32(0)))
 	}
 	if d.posArena != nil {
 		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
@@ -570,7 +588,11 @@ func (d *Decompressor) Close() {
 		return
 	}
 	d.checkFileLenChange()
-	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+	if rb := d.residency.Load(); rb != nil {
+		rb.stop() // join the refresh goroutine before munmap so no mincore touches freed memory
+		d.residency.Store(nil)
+	}
+	if err := d._mmapHandle.Unmap(); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
 	if err := d.f.Close(); err != nil {
@@ -596,10 +618,10 @@ func (d *Decompressor) GetMetadata() []byte {
 
 // WithReadAhead reads in sequential order via a separate MADV_SEQUENTIAL mmap, so the shared mmap used by concurrent random readers is unaffected.
 func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
-	if d == nil || d.mmapHandle1 == nil {
+	if d == nil || d._mmapHandle == nil {
 		return nil
 	}
-	v, err := d.OpenSequentialView(true)
+	v, err := d.OpenSequentialView()
 	if err != nil {
 		return err
 	}
@@ -609,7 +631,7 @@ func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
 func (d *Decompressor) DisableReadAhead() {
-	if d == nil || d.mmapHandle1 == nil {
+	if d == nil || d._mmapHandle == nil {
 		return
 	}
 	leftReaders := d.readAheadRefcnt.Add(-1)
@@ -619,127 +641,80 @@ func (d *Decompressor) DisableReadAhead() {
 	}
 
 	if !dbg.SnapshotMadvRnd { // all files
-		_ = mmap.MadviseNormal(d.mmapHandle1)
+		_ = mmap.MadviseNormal(d._mmapHandle)
 		return
 	}
 
-	_ = mmap.MadviseRandom(d.mmapHandle1)
+	_ = mmap.MadviseRandom(d._mmapHandle)
 }
 
 func (d *Decompressor) MadvSequential() *Decompressor {
-	if d == nil || d.mmapHandle1 == nil {
+	if d == nil || d._mmapHandle == nil {
 		return d
 	}
 	d.readAheadRefcnt.Add(1)
-	_ = mmap.MadviseSequential(d.mmapHandle1)
+	_ = mmap.MadviseSequential(d._mmapHandle)
 	return d
 }
 func (d *Decompressor) MadvNormal() MadvDisabler {
-	if d == nil || d.mmapHandle1 == nil {
+	if d == nil || d._mmapHandle == nil {
 		return d
 	}
 	d.readAheadRefcnt.Add(1)
-	_ = mmap.MadviseNormal(d.mmapHandle1)
+	_ = mmap.MadviseNormal(d._mmapHandle)
 	return d
 }
 func (d *Decompressor) MadvWillNeed() *Decompressor {
-	if d == nil || d.mmapHandle1 == nil {
+	if d == nil || d._mmapHandle == nil {
 		return d
 	}
 	d.readAheadRefcnt.Add(1)
-	_ = mmap.MadviseWillNeed(d.mmapHandle1)
+	_ = mmap.MadviseWillNeed(d._mmapHandle)
 	return d
 }
 
-// SequentialView provides a separate mmap of the same file with MADV_NORMAL for
-// sequential operations (merges, full scans) that run concurrently with random readers.
+// SequentialView is a scan over its own mmap of the file, so MADV_SEQUENTIAL lands on a
+// separate VMA and the shared mapping keeps the MADV_RANDOM that NewDecompressor left on it.
 //
-// All default RPC requests (eth_getBalance, eth_call, debug_traceTransaction, etc.)
-// continue to use the Decompressor's original mmap with MADV_RANDOM. They never touch
-// this second mapping — so their page fault behavior, readahead suppression, and hot
-// page residency are completely unaffected by concurrent merge I/O.
+// madvise sets vm_flags per-VMA, so two mmaps of one fd get independent readahead
+// (mm/madvise.c: SEQUENTIAL sets VM_SEQ_READ and clears VM_RAND_READ, RANDOM the reverse,
+// NORMAL clears both; mm/filemap.c do_sync_mmap_readahead: VM_RAND_READ skips readahead,
+// VM_SEQ_READ forces it). The page cache is keyed (inode, offset), so the second mapping
+// shares pages and costs no extra RAM. MADV_SEQUENTIAL also deactivates pages behind the
+// scan; pages hot in the shared VMA carry the referenced bit and the two-list LRU promotes
+// them back.
 //
-// Design decisions and kernel-level rationale:
+// On Windows every Madvise* is a no-op — FILE_FLAG_SEQUENTIAL_SCAN affects ReadFile, not
+// MapViewOfFile — so the view still isolates the VMA but gets no kernel hint.
 //
-//  1. Separate VMA isolates madvise flags from the shared mmap.
-//     madvise(2) sets VM_SEQ_READ / VM_RAND_READ flags on the struct vm_area_struct.
-//     A second mmap() of the same fd creates a separate VMA with its own vm_flags —
-//     the original VMA's MADV_RANDOM (VM_RAND_READ) is untouched.
-//
-//     Proof in kernel source:
-//     - madvise_vma_behavior() sets flags per-VMA (vma->vm_flags):
-//     https://github.com/torvalds/linux/blob/master/mm/madvise.c
-//     MADV_SEQUENTIAL: new_flags = (new_flags & ~VM_RAND_READ) | VM_SEQ_READ
-//     MADV_RANDOM:     new_flags = (new_flags & ~VM_SEQ_READ) | VM_RAND_READ
-//     MADV_NORMAL:     new_flags = new_flags & ~VM_RAND_READ & ~VM_SEQ_READ
-//     - Page fault handler checks these flags per-VMA to decide readahead:
-//     https://github.com/torvalds/linux/blob/master/mm/filemap.c
-//     do_sync_mmap_readahead():
-//     if (vm_flags & VM_RAND_READ) return;     // skip readahead
-//     if (vm_flags & VM_SEQ_READ) { sync_ra(); } // aggressive readahead
-//     So two mmaps of the same file get independent readahead behavior.
-//
-//  2. Shared page cache — no double memory cost.
-//     Both mappings are backed by the same page cache pages (same inode). A second
-//     mmap does NOT duplicate physical memory. The page cache is indexed by
-//     (inode, offset), so identical pages are shared regardless of how many VMAs
-//     map them:
-//     https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#page-cache
-//
-//  3. MADV_SEQUENTIAL triggers readahead and "deactivate behind".
-//     The kernel performs aggressive readahead on sequential VMAs and moves accessed
-//     pages to the inactive LRU list ("deactivate behind"). However, pages that are
-//     also hot in the MADV_RANDOM VMA have the "referenced" bit set and get promoted
-//     back to the active list by the second-chance / two-list LRU algorithm:
-//     https://www.kernel.org/doc/html/latest/admin-guide/mm/multigen_lru.html
-//     https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
-//     https://www.kernel.org/doc/html/latest/mm/readahead.html
-//
-//  4. Why not just call MadvSequential() on the shared mmap?
-//     That changes the VMA flags for ALL concurrent readers of that file. Random RPC
-//     lookups would get sequential readahead (wasted I/O) and "deactivate behind"
-//     (evicting hot pages). This is the core problem we are solving.
-//
-//  5. Windows: Mmap/Munmap work cross-platform. All Madvise* calls are no-ops on
-//     Windows — there is no madvise(2) equivalent for memory-mapped files.
-//     FILE_FLAG_SEQUENTIAL_SCAN only affects ReadFile/WriteFile, not MapViewOfFile.
-//     SequentialView still provides VMA isolation but without kernel hint benefits.
+//	https://github.com/torvalds/linux/blob/master/mm/madvise.c
+//	https://github.com/torvalds/linux/blob/master/mm/filemap.c
+//	https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#page-cache
+//	https://www.kernel.org/doc/html/latest/mm/readahead.html
+//	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
-	d           *Decompressor
-	mmapHandle1 []byte
-	mmapHandle2 *[mmap.MaxMapSize]byte
-	data        []byte // words data region from the sequential mmap
+	d      *Decompressor
+	ownMap mmap.Ro
+	data   []byte // words region inside ownMap
 }
 
-// OpenSequentialView returns a view for a sequential scan of the file. With separateReadahead
-// it creates a second mmap of the same file with MADV_SEQUENTIAL, isolating aggressive readahead
-// (and its deactivate-behind eviction) from the shared mmap used by concurrent random readers;
-// the caller must call Close. Without it the view shares the decompressor's mmap with MADV_NORMAL —
-// used when concurrent random readers of the same file (e.g. commitment dereference) must keep their
-// pages resident; Close is then a no-op.
-func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
+// OpenSequentialView scans over its own MADV_SEQUENTIAL mmap, so readahead never
+// reaches the mapping random readers fault through. Caller must Close. To scan
+// through the shared mapping instead, use MakeGetter.
+func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
 	}
-	if !separateReadahead {
-		_ = mmap.MadviseNormal(d.mmapHandle1)
-		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
-	}
-	h1, h2, err := mmap.Mmap(d.f, int(d.size))
+	h1, err := mmap.OpenRo(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
-	if dbg.SnapshotMadvSequential {
+	if dbg.SnapshotMadvSequential { // OpenRo already left it MADV_RANDOM
 		_ = mmap.MadviseSequential(h1)
 	}
-	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
-	// (version, feature flags, metadata). wordsStart is relative to d.data,
-	// so the file offset is: headerSize + wordsStart.
-	headerSize := d.size - int64(len(d.data))
-	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
-		d: d, mmapHandle1: h1, mmapHandle2: h2,
-		data: h1[wordsFileOffset:d.size],
+		d: d, ownMap: h1,
+		data: h1[d.wordsFileOffset:d.size],
 	}, nil
 }
 
@@ -748,25 +723,40 @@ func (v *SequentialView) MakeGetter() *Getter {
 		d:           v.d,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
+		dataOffset:  v.d.wordsFileOffset,
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
+	}
+	if v.d.patArena != nil {
+		g.patCodewords = v.d.patArena.codewords
 	}
 	if v.d.posArena != nil {
 		g.posTables = v.d.posArena.tables
 	}
 	if v.d.posDict != nil {
-		g.posMask = v.d.posDict.mask
 		g.posEntries = v.d.posDict.entries
+	}
+	if dbg.AssertEnabled && g.dataOffset+uint64(len(g.data)) != uint64(v.d.size) {
+		panic("seg: getter dataOffset is not the file offset of data[0]")
 	}
 	return g
 }
 
+// SequentialViews closes a batch of views whose getters outlive the loop that opened them.
+type SequentialViews []*SequentialView
+
+func (vs SequentialViews) Close() {
+	for _, v := range vs {
+		v.Close()
+	}
+}
+
 func (v *SequentialView) Close() {
-	if v == nil || v.mmapHandle1 == nil {
+	if v == nil || v.ownMap == nil {
 		return
 	}
-	_ = mmap.Munmap(v.mmapHandle1, v.mmapHandle2)
-	v.mmapHandle1 = nil
+	_ = v.ownMap.Unmap()
+	v.ownMap = nil
 	v.data = nil
 }
 
@@ -776,15 +766,19 @@ type Getter struct {
 	dataP      uint64     // current byte offset in data
 	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
 	dataBit    int        // bit offset within current byte (0-7)
-	posMask    uint16     // cached d.posDict.mask, avoids pointer chain on hot path
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables   []posTable // posArena.tables; only used for the subtable path
-	patternDict *patternTable
-	d           *Decompressor
-	fName       string
-	trace       bool
+	posTables                  []posTable // posArena.tables; only used for the subtable path
+	patCodewords               []codeword // patArena.codewords; table slots index into it
+	patternDict                *patternTable
+	d                          *Decompressor
+	fName                      string
+	dataOffset                 uint64
+	multiPageBlockingAsyncRead func(*Getter, uint64, uint64)
+	multiPageReadThreshold     uint64
+	trace                      bool
+	residencyGate              bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -807,21 +801,24 @@ func (g *Getter) nextPosClean() uint64 {
 }
 
 // nextPos reads the next position from the Huffman-coded bitstream.
-// It is structured to be inlinable: the subtable (deep-tree) case is pushed
-// into a separate //go:noinline helper so this function stays small.
+// Do NOT swap len(data)/len(entries) for g.dataLen/posTable.mask: prove cannot
+// relate a field to the slice it indexes, so the bounds checks come back and
+// the two stream bytes stop fusing into one 16-bit load.
 func (g *Getter) nextPos() uint64 {
-	if g.posMask == 0 {
-		return uint64(g.posEntries[0].pos)
+	entries := g.posEntries
+	if len(entries) <= 1 {
+		return uint64(entries[0].pos)
 	}
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7 // & 7 proves to compiler: 0 ≤ dataBit < 8, eliminating shift guards
 	data := g.data
-	code := uint16(data[dataP]) >> dataBit
-	if dataP+1 < g.dataLen {
-		code |= uint16(data[dataP+1]) << (8 - dataBit)
+	var code uint16
+	if dataP+1 < uint64(len(data)) {
+		code = (uint16(data[dataP]) | uint16(data[dataP+1])<<8) >> dataBit
+	} else {
+		code = uint16(data[dataP]) >> dataBit
 	}
-	code &= g.posMask
-	entry := g.posEntries[code]
+	entry := entries[int(code)&(len(entries)-1)]
 	l := uint(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(entry.pos)
@@ -848,9 +845,11 @@ func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
-		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
-			code |= uint16(data[dataP+1]) << (8 - dataBit)
+		var code uint16
+		if dataP+1 < uint64(len(data)) {
+			code = (uint16(data[dataP]) | uint16(data[dataP+1])<<8) >> dataBit
+		} else {
+			code = uint16(data[dataP]) >> dataBit
 		}
 		code &= table.mask
 		entry := table.entries[code]
@@ -868,21 +867,26 @@ func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
 	if table.bitLen == 0 {
-		return table.patterns[0].pattern
+		return g.patCodewords[table.patterns[0]].pattern
 	}
 
 	data := g.data
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7
+	// Local copy: the slice header would otherwise be reloaded from g on every
+	// iteration, since the compiler cannot prove the loop leaves g alone.
+	cws := g.patCodewords
 
 	for {
-		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
-			code |= uint16(data[dataP+1]) << (8 - dataBit)
+		var code uint16
+		if dataP+1 < uint64(len(data)) {
+			code = (uint16(data[dataP]) | uint16(data[dataP+1])<<8) >> dataBit
+		} else {
+			code = uint16(data[dataP]) >> dataBit
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
-		cw := table.patterns[code]
+		cw := &cws[table.patterns[code]]
 		if cw.len == 0 {
 			table = cw.ptr
 			dataBit += 9
@@ -915,15 +919,21 @@ func (d *Decompressor) MakeGetter() *Getter {
 		d:           d,
 		data:        data,
 		dataLen:     uint64(len(data)),
+		dataOffset:  d.wordsFileOffset,
 		patternDict: d.dict,
 		fName:       d.FileName(),
+	}
+	if d.patArena != nil {
+		g.patCodewords = d.patArena.codewords
 	}
 	if d.posArena != nil {
 		g.posTables = d.posArena.tables
 	}
 	if d.posDict != nil {
-		g.posMask = d.posDict.mask
 		g.posEntries = d.posDict.entries
+	}
+	if dbg.AssertEnabled && g.dataOffset+uint64(len(g.data)) != uint64(d.size) {
+		panic("seg: getter dataOffset is not the file offset of data[0]")
 	}
 	return g
 }
@@ -935,6 +945,9 @@ func (g *Getter) DataLen() int {
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
 	g.dataBit = 0
+	if g.residencyGate {
+		g.ensureResident(offset)
+	}
 }
 
 func (g *Getter) HasNext() bool {
@@ -976,16 +989,31 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
 	bufPos := bufOffset
+	blockingAsyncRead := g.multiPageBlockingAsyncRead
+	if blockingAsyncRead != nil && wordLen <= g.multiPageReadThreshold {
+		blockingAsyncRead = nil
+	}
+	literalLen := wordLen
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
 		copy(buf[bufPos:], pt)
+		if blockingAsyncRead != nil {
+			if patternLen := uint64(len(pt)); patternLen <= literalLen {
+				literalLen -= patternLen
+			} else {
+				literalLen = 0
+			}
+		}
 	}
 	if g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
+	if blockingAsyncRead != nil && literalLen > 0 {
+		blockingAsyncRead(g, g.dataOffset+postLoopPos, literalLen)
+	}
 	g.dataP = savePos
 	g.dataBit = 0
 	g.nextPosClean() // Reset the state of huffman reader

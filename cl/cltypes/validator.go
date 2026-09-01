@@ -145,5 +145,5 @@ func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
 }
 
 func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
-	return 96 + e.VoluntaryExit.EncodingSizeSSZ()
+	return signedStaticSize(e.VoluntaryExit.EncodingSizeSSZ())
 }

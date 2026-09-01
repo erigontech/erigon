@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 type LogsFilterAggregator struct {
@@ -34,18 +35,16 @@ type LogsFilterAggregator struct {
 	logsFilterLock sync.RWMutex
 }
 
-// LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
-// and "aggregated" log filter representing a union of all subscribers. Therefore, the values in
-// the mappings are counters (of type int) and they get deleted when counter goes back to 0.
-// Also, addAddr and allTopic are int instead of bool because they are also counters, counting
-// how many subscribers have this set on.
+// LogsFilter represents one subscriber or the aggregate of all subscribers.
+// Aggregate address and topic values are reference counts.
 type LogsFilter struct {
-	allAddrs       int
-	addrs          *concurrent.SyncMap[common.Address, int]
-	allTopics      int
-	topics         *concurrent.SyncMap[common.Hash, int]
-	topicsOriginal [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
-	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
+	allAddrs        int
+	addrs           *concurrent.SyncMap[common.Address, int]
+	allTopics       int
+	topics          *concurrent.SyncMap[common.Hash, int]
+	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
+	pollingCriteria *filters.FilterCriteria
+	sender          Sub[*types.RPCLog] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -66,19 +65,50 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 	}
 }
 
-// insertLogsFilter inserts a new log filter into the LogsFilterAggregator with the specified sender.
-// It generates a new filter ID, creates a new LogsFilter, and adds it to the logsFilters map.
-func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log]) (LogsSubID, *LogsFilter) {
+func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
+	filter := &LogsFilter{
+		addrs:           concurrent.NewSyncMap[common.Address, int](),
+		topics:          concurrent.NewSyncMap[common.Hash, int](),
+		pollingCriteria: pollingCriteria,
+		sender:          sender,
+	}
+	if len(criteria.Addresses) == 0 {
+		filter.allAddrs = 1
+	} else {
+		for _, addr := range criteria.Addresses {
+			filter.addrs.Put(addr, 1)
+		}
+	}
+	if len(criteria.Topics) == 0 {
+		filter.allTopics = 1
+	} else {
+		for _, topics := range criteria.Topics {
+			for _, topic := range topics {
+				filter.topics.Put(topic, 1)
+			}
+		}
+		filter.topicsOriginal = criteria.Topics
+	}
+	return filter
+}
+
+func (a *LogsFilterAggregator) insertLogsFilter(filter *LogsFilter) LogsSubID {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filterId := LogsSubID(generateSubscriptionID())
-	filter := &LogsFilter{
-		addrs:  concurrent.NewSyncMap[common.Address, int](),
-		topics: concurrent.NewSyncMap[common.Hash, int](),
-		sender: sender,
-	}
+	a.addLogsFilterLocked(filter)
 	a.logsFilters.Put(filterId, filter)
-	return filterId, filter
+	return filterId
+}
+
+func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, bool) {
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
+	filter, ok := a.logsFilters.Get(filterId)
+	if !ok || filter.pollingCriteria == nil {
+		return filters.FilterCriteria{}, false
+	}
+	return *filter.pollingCriteria, true
 }
 
 // removeLogsFilter removes a log filter identified by filterId from the LogsFilterAggregator.
@@ -166,12 +196,7 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 	})
 }
 
-// addLogsFilters adds the counts of addresses and topics in the given LogsFilter to the aggregated filter.
-// It increments the counters for each address and topic in the aggregated filter by the corresponding counts in the
-// provided LogsFilter.
-func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
+func (a *LogsFilterAggregator) addLogsFilterLocked(f *LogsFilter) {
 	a.aggLogsFilter.allAddrs += f.allAddrs
 	if f.allAddrs > 0 {
 		// Increment the count for AllAddresses
@@ -220,51 +245,44 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
-func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
+	addr := gointerfaces.ConvertH160toAddress(eventLog.Address)
+	topics := make([]common.Hash, len(eventLog.Topics))
+	for i, topic := range eventLog.Topics {
+		topics[i] = gointerfaces.ConvertH256ToHash(topic)
+	}
+	// The same log instance is sent to every matching subscriber, each reading it from
+	// its own goroutine, so it must not be mutated after the first Send.
+	lg := &types.RPCLog{
+		Log: types.Log{
+			Address:     addr,
+			Topics:      topics,
+			Data:        eventLog.Data,
+			BlockNumber: hexutil.Uint64(eventLog.BlockNumber),
+			TxHash:      gointerfaces.ConvertH256ToHash(eventLog.TransactionHash),
+			TxIndex:     hexutil.Uint(eventLog.TransactionIndex),
+			BlockHash:   gointerfaces.ConvertH256ToHash(eventLog.BlockHash),
+			Index:       hexutil.Uint(eventLog.LogIndex),
+			Removed:     eventLog.Removed,
+		},
+		BlockTimestamp: hexutil.Uint64(eventLog.BlockTimestamp),
+	}
+
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
-	var lg types.Log
-	var topics []common.Hash
-
 	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
-			_, addrOk := filter.addrs.Get(gointerfaces.ConvertH160toAddress(eventLog.Address))
-			if !addrOk {
+			if _, ok := filter.addrs.Get(addr); !ok {
 				return nil
 			}
 		}
-
-		// Pre-allocate topics slice to the required size to avoid multiple allocations
-		topics = topics[:0]
-		if cap(topics) < len(eventLog.Topics) {
-			topics = make([]common.Hash, 0, len(eventLog.Topics))
+		if filter.allTopics == 0 && !a.chooseTopics(filter, topics) {
+			return nil
 		}
-		for _, topic := range eventLog.Topics {
-			topics = append(topics, gointerfaces.ConvertH256ToHash(topic))
-		}
-
-		if filter.allTopics == 0 {
-			if !a.chooseTopics(filter, topics) {
-				return nil
-			}
-		}
-
-		// Reuse lg object to avoid creating new instances
-		lg.Address = gointerfaces.ConvertH160toAddress(eventLog.Address)
-		lg.Topics = topics
-		lg.Data = eventLog.Data
-		lg.BlockNumber = hexutil.Uint64(eventLog.BlockNumber)
-		lg.TxHash = gointerfaces.ConvertH256ToHash(eventLog.TransactionHash)
-		lg.TxIndex = hexutil.Uint(eventLog.TransactionIndex)
-		lg.BlockHash = gointerfaces.ConvertH256ToHash(eventLog.BlockHash)
-		lg.Index = hexutil.Uint(eventLog.LogIndex)
-		lg.Removed = eventLog.Removed
-
-		filter.sender.Send(&lg)
+		filter.sender.Send(lg)
 		return nil
 	})
-	return nil
 }
 
 // chooseTopics checks if the log topics match the filter's topics.

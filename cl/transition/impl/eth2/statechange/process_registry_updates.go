@@ -52,7 +52,9 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 	if err := threading.ParallellForLoop(1, 0, s.ValidatorSet().Length(), func(i int) error {
 		validator := s.ValidatorSet().Get(i)
 		if state.IsValidatorEligibleForActivationQueue(s, validator) {
-			s.SetActivationEligibilityEpochForValidatorAtIndex(i, currentEpoch+1)
+			if err := s.SetActivationEligibilityEpochForValidatorAtIndex(i, currentEpoch+1); err != nil {
+				return err
+			}
 		}
 		effectivaBalance := validator.EffectiveBalance()
 		if validator.Active(currentEpoch) && effectivaBalance <= beaconConfig.EjectionBalance {
@@ -92,7 +94,9 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 
 	// Only process up to epoch limit.
 	for _, entry := range activationQueue {
-		s.SetActivationEpochForValidatorAtIndex(int(entry.validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch))
+		if err := s.SetActivationEpochForValidatorAtIndex(int(entry.validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

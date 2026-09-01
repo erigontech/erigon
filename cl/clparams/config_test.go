@@ -42,6 +42,23 @@ func TestGetConfigsByNetwork(t *testing.T) {
 	testConfig(t, chainspec.HoodiChainID)
 }
 
+func TestChiadoDoesNotConfigureStaticPeers(t *testing.T) {
+	network, _ := GetConfigsByNetwork(chainspec.ChiadoChainID)
+
+	require.NotEmpty(t, network.BootNodes)
+	require.Empty(t, network.StaticPeers)
+}
+
+func TestCaplinConfigCanSetStaticPeers(t *testing.T) {
+	network := NetworkConfigs[chainspec.ChiadoChainID]
+
+	CaplinConfig{}.ApplyNetworkOverrides(&network)
+	require.Empty(t, network.StaticPeers)
+
+	CaplinConfig{StaticPeers: []string{"replacement"}}.ApplyNetworkOverrides(&network)
+	require.Equal(t, []string{"replacement"}, network.StaticPeers)
+}
+
 // TestCustomConfigMinimalPreset verifies that CustomConfig() correctly loads
 // a minimal-preset YAML config with GLOAS parameters. This simulates what
 // epbs-devnet-1 will use: SLOTS_PER_EPOCH=8, GLOAS_FORK_EPOCH=1, etc.

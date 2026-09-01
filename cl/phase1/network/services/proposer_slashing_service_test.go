@@ -53,7 +53,7 @@ func (t *proposerSlashingTestSuite) SetupTest() {
 	}
 	_, st, _ := tests.GetBellatrixRandom()
 	t.syncedData = synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	t.syncedData.OnHeadState(st)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
 	t.ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	t.beaconCfg = &clparams.BeaconChainConfig{
 		SlotsPerEpoch: 2,
@@ -182,7 +182,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 			name: "validator not found",
 			mock: func() {
 				_, st, _ := tests.GetBellatrixRandom()
-				t.syncedData.OnHeadState(st)
+				t.Require().NoError(t.syncedData.OnHeadState(st))
 			},
 			msg:     mockMsg2,
 			wantErr: true,
@@ -202,7 +202,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 				)
 				_, st, _ := tests.GetBellatrixRandom()
 				st.ValidatorSet().Set(int(mockProposerIndex), mockValidator)
-				t.syncedData.OnHeadState(st)
+				t.Require().NoError(t.syncedData.OnHeadState(st))
 
 				t.ethClock.EXPECT().GetCurrentEpoch().Return(uint64(1)).Times(1)
 			},

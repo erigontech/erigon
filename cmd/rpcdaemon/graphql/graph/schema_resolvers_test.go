@@ -164,19 +164,19 @@ func TestDecodeOptionalAddress(t *testing.T) {
 }
 
 func TestDecodeOptionalBig(t *testing.T) {
-	b, err := decodeOptionalBig(nil, "gasPrice")
+	b, err := decodeOptionalU256(nil, "gasPrice")
 	if err != nil || b != nil {
 		t.Fatal("expected nil, nil for nil input")
 	}
 
 	invalid := "not-hex"
-	_, err = decodeOptionalBig(&invalid, "gasPrice")
+	_, err = decodeOptionalU256(&invalid, "gasPrice")
 	if err == nil {
 		t.Fatal("expected error for invalid hex")
 	}
 
 	valid := "0x1234"
-	b, err = decodeOptionalBig(&valid, "gasPrice")
+	b, err = decodeOptionalU256(&valid, "gasPrice")
 	if err != nil {
 		t.Fatal(err)
 	}
