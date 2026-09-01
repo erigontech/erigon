@@ -479,7 +479,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 
-			statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			require.NoError(t, err)
 			txContext := protocol.NewEVMTxContext(msg)
@@ -1123,4 +1123,105 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	})
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
+}
+
+func traceCallValueTransfer() TraceCallParam {
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.Big)(big.NewInt(1))}
+}
+
+func TestTraceCallKeepsTraceEmptyWhenNotRequested(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	for _, traceTypes := range [][]string{
+		{TraceTypeStateDiff},
+		{TraceTypeVmTrace},
+		{TraceTypeVmTrace, TraceTypeStateDiff},
+	} {
+		t.Run(strings.Join(traceTypes, "+"), func(t *testing.T) {
+			result, err := api.Call(context.Background(), traceCallValueTransfer(), traceTypes, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Empty(t, result.Trace)
+
+			// An unrequested trace must serialize as [], never as null.
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.Contains(t, string(encoded), `"trace":[]`)
+		})
+	}
+}
+
+func TestTraceCallPopulatesTraceWhenRequested(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	result, err := api.Call(context.Background(), traceCallValueTransfer(), []string{TraceTypeTrace}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+	require.Nil(t, result.StateDiff)
+}
+
+func TestTraceCallWithoutTraceTypes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	result, err := api.Call(context.Background(), traceCallValueTransfer(), []string{}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+	require.Nil(t, result.StateDiff)
+}
+
+func TestRawTransactionWithoutTraceTypes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+
+	result, err := api.RawTransaction(context.Background(), encoded, []string{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+	require.Nil(t, result.StateDiff)
+}
+
+func TestTraceCallRejectsCustomTracerWithoutTraceType(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	tracer := "callTracer"
+	_, err := api.Call(context.Background(), traceCallValueTransfer(), []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &config.TraceConfig{Tracer: &tracer})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support custom tracers")
+}
+
+func TestReplayTransactionInvalidType(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	var txnHash common.Hash
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		if err != nil {
+			return err
+		}
+		txnHash = b.Transactions()[5].Hash()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := api.ReplayTransaction(context.Background(), txnHash, []string{"unknown"}, new(bool), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unrecognized trace type")
 }

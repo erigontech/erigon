@@ -99,7 +99,7 @@ type EthAPI interface {
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
-	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Big, error)
+	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.U256, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
 	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
@@ -110,9 +110,9 @@ type EthAPI interface {
 	Syncing(ctx context.Context) (any, error)
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
-	GasPrice(_ context.Context) (*hexutil.Big, error)
-	BaseFee(ctx context.Context) (*hexutil.Big, error)
-	BlobBaseFee(ctx context.Context) (*hexutil.Big, error)
+	GasPrice(_ context.Context) (*hexutil.U256, error)
+	BaseFee(ctx context.Context) (*hexutil.U256, error)
+	BlobBaseFee(ctx context.Context) (*hexutil.U256, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
 	Capabilities(ctx context.Context) (*CapabilitiesResult, error)
 
@@ -150,6 +150,10 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
+	_preMergeData             atomic.Pointer[preMergeVerdict]
+	_preMergeDataTTL          time.Duration
+	_preMergeProbeMu          sync.Mutex
+	_preMergeProbeInFlight    *preMergeProbe
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -197,6 +201,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
+		_preMergeDataTTL:  defaultPreMergeDataTTL,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
 		receiptsGenerator: receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
@@ -452,6 +457,29 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
+// preMergeVerdict is the archive-vs-expiry answer with the time it was observed: it
+// reads live snapshot availability, which widens as segments arrive.
+type preMergeVerdict struct {
+	holds bool
+	at    time.Time
+}
+
+// preMergeProbe is a probe other callers can wait on rather than repeat. Its result is
+// readable once done is closed.
+type preMergeProbe struct {
+	done  chan struct{}
+	holds bool
+	err   error
+}
+
+var errPreMergeProbeAbandoned = errors.New("pre-merge block data probe did not complete")
+
+const defaultPreMergeDataTTL = 30 * time.Second
+
+// systemTxsPerBlock is the pair of system entries every block carries in the txnum
+// sequence, which a stored TxCount includes.
+const systemTxsPerBlock = 2
+
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors
@@ -463,7 +491,244 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 // checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
 // that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if expiry {
+		if mergeHeight == nil || block >= *mergeHeight {
+			return nil
+		}
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
+	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+}
+
+// blocksFollowChainHistoryExpiry reports whether block retention is the chain's
+// history-expiry policy rather than a window, which Distance.Enabled reads as "not
+// pruning" although pre-merge transactions are never downloaded.
+func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx) (bool, *uint64, error) {
+	p, err := api.pruneMode(tx)
+	if err != nil || p == nil {
+		return false, nil, err
+	}
+	if p.Blocks != prune.KeepPostMergeBlocksPruneMode {
+		return false, nil, nil
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, nil, err
+	}
+	if chainConfig.MergeHeight != nil {
+		holds, err := api.holdsPreMergeBlockData(ctx, tx, *chainConfig.MergeHeight)
+		if err != nil || holds {
+			return false, nil, err
+		}
+	}
+	return true, chainConfig.MergeHeight, nil
+}
+
+// holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
+// point, which tells a legacy archive from chain-history expiry when the stored prune
+// mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
+// available block answers on its own: expiry keeps pre-merge headers and bodies, and
+// the transaction segment spanning the merge point reaches below it. Only a readable
+// transaction of an early block does, so block data the search cannot read leaves the
+// question open rather than settling it, and an open question is not remembered. The
+// answer is availability rather than policy, so a settled one is kept for a short TTL in
+// both directions instead of being decided once. One probe answers every caller waiting
+// on it: each costs several backend reads under an open read transaction, so refreshing
+// the TTL must not fan out with the load.
+func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
+	for {
+		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
+			return v.holds, nil
+		}
+		probe, leader := api.joinPreMergeProbe()
+		if leader {
+			return api.runPreMergeProbe(ctx, tx, mergeHeight, probe)
+		}
+		select {
+		case <-probe.done:
+			if probe.err == nil {
+				return probe.holds, nil
+			}
+			// The probe reads through the transaction of the caller that ran it, so its
+			// failure is about that caller rather than about the datadir: ask again here.
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+}
+
+// runPreMergeProbe answers the callers waiting on probe. A probe that dies without a
+// result must still release them, and with an error rather than its zero verdict, so
+// that the next caller asks again instead of taking an answer nobody produced.
+func (api *BaseAPI) runPreMergeProbe(ctx context.Context, tx kv.Tx, mergeHeight uint64, probe *preMergeProbe) (bool, error) {
+	holds, decided := false, false
+	err := errPreMergeProbeAbandoned
+	defer func() { api.finishPreMergeProbe(probe, holds, err) }()
+
+	holds, decided, err = api.probePreMergeBlockData(ctx, tx, mergeHeight)
+	if err == nil && decided {
+		api._preMergeData.Store(&preMergeVerdict{holds: holds, at: time.Now()})
+	}
+	return holds, err
+}
+
+// joinPreMergeProbe registers this caller as the one running the probe, or hands back
+// the probe already in flight. The lock covers that bookkeeping alone, never the probe.
+func (api *BaseAPI) joinPreMergeProbe() (*preMergeProbe, bool) {
+	api._preMergeProbeMu.Lock()
+	defer api._preMergeProbeMu.Unlock()
+	if probe := api._preMergeProbeInFlight; probe != nil {
+		return probe, false
+	}
+	probe := &preMergeProbe{done: make(chan struct{})}
+	api._preMergeProbeInFlight = probe
+	return probe, true
+}
+
+func (api *BaseAPI) finishPreMergeProbe(probe *preMergeProbe, holds bool, err error) {
+	api._preMergeProbeMu.Lock()
+	defer api._preMergeProbeMu.Unlock()
+	probe.holds, probe.err = holds, err
+	close(probe.done)
+	api._preMergeProbeInFlight = nil
+}
+
+// probePreMergeBlockData answers holdsPreMergeBlockData from what is on disk. It reports
+// decided=false where the block data it reads is itself missing: a verdict inferred from
+// absent data is not one to remember.
+func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (holds, decided bool, err error) {
+	if mergeHeight == 0 {
+		return false, true, nil
+	}
+	oldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
+	if err != nil {
+		return false, false, err
+	}
+	// Zero is a snapshot set starting at genesis, one a database holding every block
+	// after it; anything higher starts mid-chain, however far below the merge point.
+	if oldest > 1 {
+		return false, true, nil
+	}
+	return api.hasEarlyTransaction(ctx, tx, mergeHeight)
+}
+
+// hasEarlyTransaction reports whether the datadir is read as holding user transactions
+// below limit, and whether the block data it takes to answer was there at all. The last
+// pre-merge body carries the cumulative txnum position: no more than the system entries
+// below limit means there is no user transaction to be missing. Sampling by halving keeps
+// the candidates clear of the transaction segment spanning limit.
+func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uint64) (holds, decided bool, err error) {
+	last, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, limit-1)
+	if err != nil {
+		return false, false, err
+	}
+	if last != nil && earlyUserTxns(last, limit-1) <= 0 {
+		return true, true, nil
+	}
+	for candidate := limit / 2; candidate >= 1; candidate /= 2 {
+		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, candidate)
+		if err != nil {
+			return false, false, err
+		}
+		if body == nil || body.TxCount <= systemTxsPerBlock {
+			continue
+		}
+		return api.readsUserTransaction(ctx, tx, candidate)
+	}
+	if last == nil {
+		// Nothing sampled could show a transaction, and no count proved there are none,
+		// so the datadir has not answered: a verdict inferred from what is missing is
+		// not one.
+		return false, false, nil
+	}
+	// The count proves a transaction is there and no sampled block held one: a chain
+	// sparse enough to pay for a search.
+	candidate, outcome, err := api.searchUserTxnBlock(ctx, tx, limit-1, last)
+	if err != nil {
+		return false, false, err
+	}
+	switch outcome {
+	case earlyTxnFound:
+		return api.readsUserTransaction(ctx, tx, candidate)
+	case earlyTxnNone:
+		// Every block the count leaves room for one in was read and none records a
+		// transaction, so the count is inflation alone: there is none to be missing.
+		return true, true, nil
+	default:
+		return false, false, nil
+	}
+}
+
+// earlyUserTxns reports how many user transactions the chain records up to blockNum. It
+// is an upper bound: the database numbers non-canonical bodies from the same sequence, so
+// a reorg inflates the total, as does a genesis position past zero. Only the body of a
+// block confirms that it holds one of the transactions the count records.
+func earlyUserTxns(body *types.BodyForStorage, blockNum uint64) int64 {
+	return int64(body.BaseTxnID.U64()) + int64(body.TxCount) - int64(systemTxsPerBlock*(blockNum+1))
+}
+
+// earlyTxnSearch is what a search for a pre-merge user transaction observed. Block data
+// it could not read leaves the question open, which is neither evidence of an archive
+// datadir nor of chain history expiry.
+type earlyTxnSearch uint8
+
+const (
+	earlyTxnUnread earlyTxnSearch = iota
+	earlyTxnNone
+	earlyTxnFound
+)
+
+// earlyTxnSearchBudget bounds the bodies one search reads; past it the question is left
+// open rather than settled on what the search has not seen.
+const earlyTxnSearchBudget = 256
+
+// searchUserTxnBlock locates a block up to last whose body records a user transaction,
+// which the count the caller read says is there. That count is an upper bound, so the
+// block it lands on can record none: what it carried was inflation, and excluding it
+// moves the bound past that block so the search resumes above it.
+func (api *BaseAPI) searchUserTxnBlock(ctx context.Context, tx kv.Tx, last uint64, lastBody *types.BodyForStorage) (uint64, earlyTxnSearch, error) {
+	budget, low, excludedTxns := earlyTxnSearchBudget, uint64(0), int64(0)
+	totalTxns := earlyUserTxns(lastBody, last)
+	for excludedTxns < totalTxns {
+		high, highBody := last, lastBody
+		for low < high {
+			if budget <= 0 {
+				return 0, earlyTxnUnread, nil
+			}
+			budget--
+			middle := low + (high-low)/2
+			body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, middle)
+			if err != nil {
+				return 0, earlyTxnUnread, err
+			}
+			if body == nil {
+				return 0, earlyTxnUnread, nil
+			}
+			if earlyUserTxns(body, middle) > excludedTxns {
+				high, highBody = middle, body
+			} else {
+				low = middle + 1
+			}
+		}
+		if highBody.TxCount > systemTxsPerBlock {
+			return low, earlyTxnFound, nil
+		}
+		excludedTxns = earlyUserTxns(highBody, low)
+		low++
+	}
+	return 0, earlyTxnNone, nil
+}
+
+func (api *BaseAPI) readsUserTransaction(ctx context.Context, tx kv.Tx, blockNum uint64) (holds, decided bool, err error) {
+	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, tx, blockNum, 0)
+	if err != nil {
+		return false, false, err
+	}
+	return ok && txn != nil, true, nil
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
@@ -488,15 +753,95 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
+// checkReceiptsAvailable gates endpoints serving the receipts of a block. They come
+// from the receipt cache where it still covers the block, and otherwise from
+// re-executing it, which reaches only as far back as state history. Enabling the
+// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired
+// on its own --prune.receipts.distance window when one is set, and alongside history
+// otherwise.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	computed, err := api.postStateCalculated(ctx, tx, block)
 	if err != nil {
 		return err
 	}
-	if persistReceipts {
+	if computed {
+		return api.checkPruneHistory(ctx, tx, block)
+	}
+	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if !persisted || !receipts.PersistedReceiptsServed() {
+		return api.checkPruneHistory(ctx, tx, block)
+	}
+	p, err := api.pruneMode(tx)
+	if err != nil || p == nil {
+		return err
+	}
+	switch amount := p.ReceiptsAmount(); {
+	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
+	case p.ReceiptsFollowHistory():
+		return api.checkPruneHistory(ctx, tx, block)
+	default:
+		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+		if err == nil || !errors.Is(err, state.PrunedError) {
+			return err
+		}
+		return api.checkPruneHistory(ctx, tx, block)
+	}
+}
+
+// postStateCalculated reports whether the receipts of this block carry a post state
+// that has to be computed, which is the case below Byzantium. The persistent cache
+// does not store that field, so those receipts are always re-executed and reach only
+// as far back as state history.
+func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if chainConfig.IsByzantium(block) {
+		return false, nil
+	}
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return false, err
+	}
+	return receipts.PostStateCalculated(chainConfig, block, commitmentHistory, api._blockReader), nil
+}
+
+// checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
+// Reading them needs the block body too: the stored receipt carries no TxHash, so it
+// is derived from the block's transaction, and the result is sized by the transaction
+// count. The blocks boundary therefore applies on top of receipt availability.
+func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	return api.checkReceiptsAvailable(ctx, tx, block)
+}
+
+// checkLogsAvailable gates a log query on the data it reads: the receipts of the
+// range, which are derived from the block's transactions, plus the log indices when
+// the filter searches them. The indices are retired at the history cutoff whatever
+// the receipt retention is. Every leg is a lower bound, so checking the first block
+// of the range covers all of it.
+func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+		return err
+	}
+	if !usesLogIndex(crit) {
+		return nil
+	}
+	return api.checkPruneHistory(ctx, tx, block)
+}
+
+// checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its
+// transactions from the body and start from the state history preceding it.
+func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
 	}
 	return api.checkPruneHistory(ctx, tx, block)
 }
