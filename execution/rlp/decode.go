@@ -69,7 +69,8 @@ var (
 
 // IsInvalidRLPError reports whether err is an RLP decoding error.
 func IsInvalidRLPError(err error) bool {
-	return errors.Is(err, ErrExpectedString) ||
+	return errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
 		errors.Is(err, ErrCanonSize) ||

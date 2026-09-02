@@ -148,8 +148,7 @@ func TestFetcherFetchHeadersResponseTimeout(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			// requestId2 takes too long and causes response timeout
-			Data: nil,
+			Data:   blockHeadersPacket66Bytes(t, requestId1, nil),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{
@@ -166,8 +165,7 @@ func TestFetcherFetchHeadersResponseTimeout(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			// requestId2 takes too long and causes response timeout
-			Data: nil,
+			Data:   blockHeadersPacket66Bytes(t, requestId2, nil),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{
@@ -219,8 +217,7 @@ func TestFetcherFetchHeadersResponseTimeoutRetrySuccess(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			// requestId2 takes too long and causes response timeout
-			Data: nil,
+			Data:   blockHeadersPacket66Bytes(t, requestId2, nil),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{
@@ -694,7 +691,7 @@ func TestFetcherFetchBodiesPenalizesInvalidMatchingResponse(t *testing.T) {
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
 			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
-				rlp.RawValue{0x80},
+				rlp.RawValue{0xf8},
 			),
 		},
 	}
@@ -727,24 +724,31 @@ func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 	requestId2 := uint64(1235)
 	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
-	mockInboundMessages := []*sentryproto.InboundMessage{
+	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data:   nil, // response timeout
+			Data:   newMockBlockBodiesPacketBytes(t, requestId1),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{
 		requestId:                   requestId1,
 		responseDelay:               600 * time.Millisecond,
-		mockResponseInboundMessages: mockInboundMessages,
+		mockResponseInboundMessages: mockInboundMessages1,
 		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
+	}
+	mockInboundMessages2 := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId2),
+		},
 	}
 	mockRequestResponse2 := requestResponseMock{
 		requestId:                   requestId2,
 		responseDelay:               600 * time.Millisecond,
-		mockResponseInboundMessages: mockInboundMessages,
+		mockResponseInboundMessages: mockInboundMessages2,
 		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
@@ -789,7 +793,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data:   nil, // response timeout
+			Data:   newMockBlockBodiesPacketBytes(t, requestId1),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{

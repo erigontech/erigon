@@ -34,6 +34,13 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+func TestIsInvalidRLPErrorUnexpectedEOF(t *testing.T) {
+	err := fmt.Errorf("decode value: %w", io.ErrUnexpectedEOF)
+	if !IsInvalidRLPError(err) {
+		t.Fatalf("expected truncated RLP to be invalid: %v", err)
+	}
+}
+
 func TestStreamKind(t *testing.T) {
 	tests := []struct {
 		input    string
