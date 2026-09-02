@@ -1133,10 +1133,10 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var pendingBranches []branchCacheUpdate
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
-		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+		return kv.WithFlushCallback(domain, func(k string, v []byte, step kv.Step, txNum uint64) {
 			if domain == kv.CommitmentDomain {
 				pendingBranches = append(pendingBranches, branchCacheUpdate{
-					key:  append([]byte(nil), k...),
+					key:  []byte(k),
 					val:  append([]byte(nil), v...),
 					step: step,
 					txN:  txNum,
@@ -1145,7 +1145,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 			pendingState = append(pendingState, cache.StateUpdate{
 				Domain: domain,
-				Key:    append([]byte(nil), k...),
+				Key:    []byte(k),
 				Value:  append([]byte(nil), v...),
 				TxNum:  txNum,
 			})
@@ -1164,14 +1164,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// corrupts it (reorg/unwind wrong root).
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
-		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k string, v []byte, step kv.Step, txNum uint64) {
 			if sd.codeStore != nil && len(v) > 0 {
 				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(v), append([]byte(nil), v...)})
 			}
 			if sd.stateCache != nil {
 				pendingState = append(pendingState, cache.StateUpdate{
 					Domain: kv.CodeDomain,
-					Key:    append([]byte(nil), k...),
+					Key:    []byte(k),
 					Value:  append([]byte(nil), v...),
 					TxNum:  txNum,
 				})
