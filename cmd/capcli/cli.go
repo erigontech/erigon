@@ -61,10 +61,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -681,7 +685,30 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 
 	blockReader := freezeblocks.NewBlockReader(allSnapshots)
-	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
+	// EL bodies live in the chain DB and its block files, not in the Caplin
+	// indexing DB. Block reads need a tx that pins a block-files view.
+	chainDB, err := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).Accede(true).Open(ctx)
+	if err != nil {
+		return fmt.Errorf("opening chaindata for EL payload reads: %w", err)
+	}
+	defer chainDB.Close()
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, log.Root(), false)
+	if err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).SanityOldNaming().Logger(log.Root()).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(); err != nil {
+		return err
+	}
+	elDB, err := temporal.New(chainDB, agg, allSnapshots)
+	if err != nil {
+		return err
+	}
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, elDB)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
