@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -246,6 +247,8 @@ func TestPruneGatesReusePhysicalFloorsAtSameHead(t *testing.T) {
 	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
 		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
 	})
+	apis.eth._historyPruneFloor.ttl = time.Hour
+	apis.eth._blocksPruneFloor.ttl = time.Hour
 	ctx := t.Context()
 	tx, err := apis.eth.db.BeginTemporalRo(ctx)
 	require.NoError(t, err)

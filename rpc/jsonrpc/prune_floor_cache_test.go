@@ -25,6 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type pruneFloorCacheResult struct {
+	floor uint64
+	err   error
+}
+
 func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	t.Parallel()
 
@@ -68,6 +73,95 @@ func TestPruneFloorCacheRefreshesAtSameHeadAfterExpiry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), floor)
 	require.Equal(t, uint64(2), reads.Load())
+}
+
+func TestPruneFloorCacheCoalescesConcurrentReadsAtSameHead(t *testing.T) {
+	t.Parallel()
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var reads atomic.Uint64
+	cache := pruneFloorCache{ttl: time.Hour}
+	read := func() (uint64, error) {
+		if reads.Add(1) == 1 {
+			close(started)
+		}
+		<-release
+		return 7, nil
+	}
+
+	results := make(chan pruneFloorCacheResult, 2)
+	get := func() {
+		floor, err := cache.get(t.Context(), 10, read)
+		results <- pruneFloorCacheResult{floor: floor, err: err}
+	}
+
+	go get()
+	<-started
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		get()
+	}()
+	<-secondStarted
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, uint64(1), reads.Load())
+	close(release)
+
+	for range 2 {
+		got := <-results
+		require.NoError(t, got.err)
+		require.Equal(t, uint64(7), got.floor)
+	}
+	require.Equal(t, uint64(1), reads.Load())
+}
+
+func TestPruneFloorCacheRefreshesDifferentHeadAfterConcurrentRead(t *testing.T) {
+	t.Parallel()
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	cache := pruneFloorCache{ttl: time.Hour}
+	firstResult := make(chan pruneFloorCacheResult, 1)
+	go func() {
+		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
+			close(firstStarted)
+			<-releaseFirst
+			return 7, nil
+		})
+		firstResult <- pruneFloorCacheResult{floor: floor, err: err}
+	}()
+	<-firstStarted
+
+	secondReadStarted := make(chan struct{})
+	secondResult := make(chan pruneFloorCacheResult, 1)
+	go func() {
+		floor, err := cache.get(t.Context(), 11, func() (uint64, error) {
+			close(secondReadStarted)
+			return 8, nil
+		})
+		secondResult <- pruneFloorCacheResult{floor: floor, err: err}
+	}()
+
+	select {
+	case <-secondReadStarted:
+		close(releaseFirst)
+		require.Fail(t, "different-head read did not wait for the in-flight read")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseFirst)
+	first := <-firstResult
+	require.NoError(t, first.err)
+	require.Equal(t, uint64(7), first.floor)
+
+	select {
+	case <-secondReadStarted:
+	case <-time.After(time.Second):
+		require.Fail(t, "different-head read did not refresh")
+	}
+	second := <-secondResult
+	require.NoError(t, second.err)
+	require.Equal(t, uint64(8), second.floor)
 }
 
 func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
