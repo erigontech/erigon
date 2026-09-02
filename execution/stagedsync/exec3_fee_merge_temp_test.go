@@ -408,6 +408,8 @@ func TestRecordFeeMerge_ReCreditRewritesTheRecordedSet(t *testing.T) {
 	require.Same(t, merged, r.credited(), "the rewritten set is still this version's credit")
 	require.Equal(t, findBalance(credit, s.coinbase).Val, findBalance(merged, s.coinbase).Val,
 		"the recorded set must carry the round's credit")
+	require.Equal(t, findAddress(credit, s.coinbase).Val, findAddress(merged, s.coinbase).Val,
+		"the account sibling must carry it too")
 
 	r.be.superseded.release()
 	require.False(t, merged.Released(), "the recorded set must not be released")

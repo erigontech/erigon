@@ -2622,7 +2622,7 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	// The credit almost always lands on the same headers as the round before it,
 	// carrying only a moved value: overwrite those entries in the product that
 	// already holds them rather than pour the tx's whole write set into a fresh
-	// one and pool the set that replaces.
+	// one and pool the set it replaces.
 	if outcome == feeCreditNew && superseded && rewritesCredit(temp.writes, tipWrites, feeAddrs) {
 		overwriteFeeWrites(temp.writes, tipWrites)
 		// calcFees hands the credit to this call and keeps no reference, so its
