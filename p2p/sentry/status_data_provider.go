@@ -72,6 +72,9 @@ type StatusDataProvider struct {
 	cacheVer atomic.Uint64
 }
 
+// NewStatusDataProvider requires a db whose txs pin a block-files view (a
+// kv.TemporalRoDB): the snapshot fallback taken when the db holds no head
+// header reads block files through the tx.
 func NewStatusDataProvider(
 	db kv.RoDB,
 	chainConfig *chain.Config,

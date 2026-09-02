@@ -548,8 +548,9 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 	return ForEachHeader(ctx, r.sn, walker)
 }
 
-// HasBlockFilesRoTx is a tx (e.g. a temporal tx) exposing a block-files view
-// pinned for its lifetime.
+// HasBlockFilesRoTx is a tx (e.g. a temporal tx) that can carry a block-files
+// view pinned for its lifetime. BlockFilesRoTx returns nil when it carries none
+// — a state-only tx implements this too.
 type HasBlockFilesRoTx interface {
 	BlockFilesRoTx() *blocksnapshots.View
 }
@@ -566,14 +567,14 @@ func (r *BlockReader) view(tx kv.Getter) *blocksnapshots.View {
 	}
 	v := p.BlockFilesRoTx()
 	if v == nil {
-		panic(fmt.Sprintf("block reads require a pinned block-files view, but %T has none: the tx is already closed, or the DB was opened without block snapshots", tx))
+		panic(fmt.Sprintf("block reads require a pinned block-files view, but %T carries none", tx))
 	}
 	return v
 }
 
 // HeaderFromView reads a header from an explicitly supplied block-files view, for
-// startup paths that open their own RoSnapshots before any tx exists. Block files
-// are still only read through a pinned view; this one just isn't carried by a tx.
+// paths that open their own RoSnapshots instead of reading the ones a tx pins.
+// Block files are still only read through a view; this one just isn't tx-carried.
 func (r *BlockReader) HeaderFromView(view *blocksnapshots.View, blockHeight uint64) (*types.Header, error) {
 	seg, ok := view.Segment(snaptype2.Headers, blockHeight)
 	if !ok {
@@ -829,9 +830,6 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		if dbgLogs {
 			log.Info(dbgPrefix + "requested hash is not the block held at this height")
 		}
-		if tx == nil {
-			return nil, nil
-		}
 		return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 	}
 
@@ -911,9 +909,6 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 		return nil, 0, err
 	}
 	if !matches {
-		if tx == nil {
-			return
-		}
 		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
 	}
@@ -935,9 +930,6 @@ func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.
 		return false, err
 	}
 	if !matches {
-		if tx == nil {
-			return false, nil
-		}
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
 	return true, nil
@@ -1028,9 +1020,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// requested block can still be in the db until this height is pruned.
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match header %x held at this height", h.Hash()))
-		}
-		if tx == nil {
-			return
 		}
 		return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 	}

@@ -442,7 +442,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 
 		logSnapshotStats := func() {
-			_ = db.View(context.Background(), func(tx kv.Tx) error {
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
 				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
@@ -450,7 +450,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					return histBlockNumProgress, err
 				})
 				return nil
-			})
+			}); err != nil {
+				logger.Error("[rpc] log stats", "err", err)
+			}
 		}
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
