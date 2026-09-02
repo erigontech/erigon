@@ -104,7 +104,7 @@ jobs:
           {
             echo "repository=$(jq -r .hive_repository "$versions")"
             echo "ref=$(jq -r .hive_ref "$versions")"
-            echo "devp2p_geth_ref=$(jq -r .devp2p_geth_ref "$versions")"
+            echo "devp2p_geth_ref=$(jq -r '.devp2p_geth_ref // empty' "$versions")"
             echo "execution_apis_ref=$(jq -r '.execution_apis_ref // empty' "$versions")"
           } >> "$GITHUB_OUTPUT"
 
@@ -116,8 +116,10 @@ jobs:
           path: hive
           persist-credentials: false
 
+      # TODO(taratorio): Remove this pin when the upstream Geth fixture is fixed
+      # and https://github.com/erigontech/erigon/issues/22808 is resolved.
       - name: Pin Geth used by DevP2P
-        if: ${{ matrix.sim == 'devp2p' }}
+        if: ${{ matrix.sim == 'devp2p' && steps.hive-version.outputs.devp2p_geth_ref != '' }}
         env:
           GETH_REF: ${{ steps.hive-version.outputs.devp2p_geth_ref }}
         run: |
