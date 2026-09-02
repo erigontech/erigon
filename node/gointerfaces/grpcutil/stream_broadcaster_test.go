@@ -196,25 +196,23 @@ func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
 	var b StreamBroadcaster[testMsg]
 
 	stalled := newFakeStream(ctx)
-	stalled.gate = make(chan struct{}, subscriberQueueLen*2)
+	stalled.gate = make(chan struct{}) // wedges the first Send, so nothing can drain
 	errs := subscribe(t, &b, ctx, stalled)
 
 	for i := range subscriberQueueLen + 2 {
 		broadcastNow(t, &b, &testMsg{n: i})
 	}
+	require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
 
 	// Let it drain: it must deliver what was buffered before reporting the drop.
-	for range subscriberQueueLen * 2 {
-		stalled.gate <- struct{}{}
-	}
+	close(stalled.gate)
 	select {
 	case err := <-errs:
 		require.ErrorIs(t, err, ErrSubscriberTooSlow)
 	case <-time.After(testTimeout):
 		t.Fatal("Subscribe did not return after the subscriber fell behind")
 	}
-	require.Equal(t, 0, subCount(&b))
-	require.NotEmpty(t, stalled.sent)
+	require.Len(t, stalled.sent, subscriberQueueLen+1)
 }
 
 func TestSendErrorEndsSubscription(t *testing.T) {
@@ -315,14 +313,15 @@ func TestOverflowedSubscriberReportsItsSendError(t *testing.T) {
 
 	boom := errors.New("boom")
 	stalled := newFakeStream(ctx)
-	stalled.gate = make(chan struct{}, 1)
+	stalled.gate = make(chan struct{})
 	stalled.sendErr = boom
 	errs := subscribe(t, &b, ctx, stalled)
 
 	for i := range subscriberQueueLen + 2 {
 		broadcastNow(t, &b, &testMsg{n: i})
 	}
-	stalled.gate <- struct{}{}
+	require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
+	close(stalled.gate)
 
 	select {
 	case err := <-errs:
@@ -332,20 +331,28 @@ func TestOverflowedSubscriberReportsItsSendError(t *testing.T) {
 	}
 }
 
-func TestDroppedSubscriberDoesNotUnregisterALaterOne(t *testing.T) {
+// A subscriber that overflows while wedged in Send runs its deferred remove
+// only once that Send returns, by which time a later subscriber holds a fresh
+// id. Its teardown must not take that one with it.
+func TestLateTeardownDoesNotUnregisterALaterSubscriber(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	var b StreamBroadcaster[testMsg]
 
 	dropped := newFakeStream(ctx)
-	dropped.gate = make(chan struct{}, subscriberQueueLen*2)
+	dropped.gate = make(chan struct{})
 	errs := subscribe(t, &b, ctx, dropped)
 	for i := range subscriberQueueLen + 2 {
 		broadcastNow(t, &b, &testMsg{n: i})
 	}
-	for range subscriberQueueLen * 2 {
-		dropped.gate <- struct{}{}
-	}
+	require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
+
+	// dropped is unregistered but still inside Send when the next one arrives.
+	fresh := newFakeStream(ctx)
+	subscribe(t, &b, ctx, fresh)
+	require.Equal(t, 1, subCount(&b))
+
+	close(dropped.gate)
 	select {
 	case err := <-errs:
 		require.ErrorIs(t, err, ErrSubscriberTooSlow)
@@ -353,13 +360,9 @@ func TestDroppedSubscriberDoesNotUnregisterALaterOne(t *testing.T) {
 		t.Fatal("Subscribe did not return after the subscriber fell behind")
 	}
 
-	// The teardown of the dropped subscriber must not take the new one with it.
-	fresh := newFakeStream(ctx)
-	subscribe(t, &b, ctx, fresh)
-	require.Eventually(t, func() bool { return subCount(&b) == 1 }, testTimeout, time.Millisecond)
+	require.Equal(t, 1, subCount(&b))
 	broadcastNow(t, &b, &testMsg{n: 99})
 	require.Equal(t, 99, recvMsg(t, fresh).n)
-	require.Equal(t, 1, subCount(&b))
 }
 
 // Broadcast hands every subscriber the same message, which is why callers must
