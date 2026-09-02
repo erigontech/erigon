@@ -772,7 +772,7 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 ### v3.7 pruning-window upgrade
 
-Erigon v3.7 automatically widens the default `full` block and state-history windows, and the `blocks` mode state-history window, from 262,144 to 1,100,000 blocks. Data already pruned by an older release is not restored. The physical window grows as the node advances; re-sync the datadir if the full window is needed immediately. Plan for higher disk use while the window fills.
+Erigon v3.7 automatically widens the default `full` block and state-history windows, and the `blocks` mode state-history window, from 262,144 to 1,100,000 blocks. Data already pruned by an older release is not restored. The physical window grows as the node advances; re-sync the datadir if the full window is needed immediately. Plan for higher disk use while the window fills. A fresh sync downloads and processes more snapshot data than the previous default, so it can require more bandwidth, disk I/O, and time. An in-place upgrade does not download the missing backlog.
 
 :::warning
 Downgrading a migrated datadir to Erigon 3.6 restores that release's 262,144-block default and can permanently prune the backlog accumulated under v3.7. Before a rollback, back up the datadir and configure 1,100,000 explicitly for every finite window you need to preserve. For `full`, use `--prune.distance=1100000 --prune.distance.blocks=1100000`; for `blocks`, use `--prune.distance=1100000`.
@@ -1825,7 +1825,7 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks. The consensus-layer request window counts slots, with at most one execution block per slot. On Ethereum mainnet, the new distance conservatively covers the `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots) with a 43,232-block margin; missed slots extend the covered time span. Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. The wider window uses more disk as it fills. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks. The consensus-layer request window counts slots, with at most one execution block per slot. On Ethereum mainnet, the new distance conservatively covers the `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots) with a 43,232-block margin; missed slots extend the covered time span. Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. The wider window uses more disk as it fills. Fresh syncs also download and process more snapshot history than releases with the previous window, increasing bandwidth, I/O, and sync time. An in-place upgrade does not backfill deleted data. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
 
 To keep every post-merge block instead of only the window — pruning pre-merge block data alone — set `--prune.distance.blocks=keep-post-merge`. Decide before the first start: pruning is not reversible, and block data already discarded comes back only by re-syncing.
 
@@ -1974,7 +1974,7 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 Erigon v3.7 increases the **Full** block and state-history windows and the **Blocks** state-history window from 262,144 to 1,100,000 blocks. Existing datadirs that use these mode defaults migrate automatically. The wider setting does not restore previously deleted data: the available window grows as the node advances, or immediately after a re-sync. Archive, minimal, and custom distances are unchanged.
 
-The extra snapshots increase disk use as the window fills. A downgrade to Erigon 3.6 restores its 262,144-block default and can prune the newly accumulated data. See the [Upgrading guide](../get-started/installation/upgrading#v37-pruning-window-upgrade) before rolling back.
+The extra snapshots increase disk use as the window fills. Fresh syncs also download and process more snapshot data, which can increase network traffic, disk I/O, and sync time. An in-place upgrade does not download the missing backlog. A downgrade to Erigon 3.6 restores its 262,144-block default and can prune the newly accumulated data. See the [Upgrading guide](../get-started/installation/upgrading#v37-pruning-window-upgrade) before rolling back.
 
 ### Historical v3.5 EIP-8252 change
 

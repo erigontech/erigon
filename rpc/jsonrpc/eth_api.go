@@ -154,6 +154,8 @@ type BaseAPI struct {
 	_preMergeDataTTL          time.Duration
 	_preMergeProbeMu          sync.Mutex
 	_preMergeProbeInFlight    *preMergeProbe
+	_historyPruneFloor        pruneFloorCache
+	_blocksPruneFloor         pruneFloorCache
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -485,8 +487,8 @@ const systemTxsPerBlock = 2
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func() (uint64, error) {
-		return api.stateHistoryStartBlock(ctx, tx)
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		return api.stateHistoryStartBlock(ctx, tx, head)
 	})
 }
 
@@ -503,12 +505,18 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 		}
 		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
 	}
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func() (uint64, error) {
-		return api._blockReader.MinimumBlockAvailable(ctx, tx)
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
+		return api.minimumBlockAvailable(ctx, tx, head)
 	})
 }
 
-func (api *BaseAPI) stateHistoryStartBlock(ctx context.Context, tx kv.Tx) (uint64, error) {
+func (api *BaseAPI) stateHistoryStartBlock(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
+	return api._historyPruneFloor.get(ctx, head, func() (uint64, error) {
+		return api.readStateHistoryStartBlock(ctx, tx, head)
+	})
+}
+
+func (api *BaseAPI) readStateHistoryStartBlock(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
 		return 0, nil
@@ -524,8 +532,13 @@ func (api *BaseAPI) stateHistoryStartBlock(ctx context.Context, tx kv.Tx) (uint6
 	if ok {
 		return block, nil
 	}
-	latest, err := rpchelper.GetLatestBlockNumber(tx)
-	return latest, err
+	return head, nil
+}
+
+func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
+	return api._blocksPruneFloor.get(ctx, head, func() (uint64, error) {
+		return api._blockReader.MinimumBlockAvailable(ctx, tx)
+	})
 }
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
@@ -755,7 +768,7 @@ func (api *BaseAPI) readsUserTransaction(ctx context.Context, tx kv.Tx, blockNum
 	return ok && txn != nil, true, nil
 }
 
-func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string, onDiskFloor func() (uint64, error)) error {
+func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string, onDiskFloor func(uint64) (uint64, error)) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
@@ -772,8 +785,14 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return err
 	}
 	floor := amount.PruneTo(latest)
+	if block < floor {
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, floor)
+	}
+	if block >= latest {
+		return nil
+	}
 	if onDiskFloor != nil {
-		actual, err := onDiskFloor()
+		actual, err := onDiskFloor(latest)
 		if err != nil {
 			return err
 		}

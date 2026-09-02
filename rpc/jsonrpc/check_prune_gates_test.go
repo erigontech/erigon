@@ -18,9 +18,11 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math"
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -188,6 +191,77 @@ func TestBlocksGateUsesOnDiskFloor(t *testing.T) {
 
 	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(floorBlock-1), false)
 	require.ErrorIs(t, err, state.PrunedError)
+}
+
+func TestPruneGatesSkipPhysicalFloorsAtHead(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var historyCalls atomic.Int64
+	historyTx := countingHistoryFloorTx{TemporalTx: tx, calls: &historyCalls}
+	blocks := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
+	apis.eth._blockReader = blocks
+
+	require.NoError(t, apis.eth.checkPruneHistory(ctx, historyTx, chainInfo.head))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head))
+	require.Zero(t, historyCalls.Load())
+	require.Zero(t, blocks.calls.Load())
+}
+
+func TestPruneGatesSkipPhysicalFloorsBelowConfiguredCutoff(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var historyCalls atomic.Int64
+	historyTx := countingHistoryFloorTx{TemporalTx: tx, calls: &historyCalls}
+	blocks := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
+	apis.eth._blockReader = blocks
+	configuredFloor := pruneGatingDistance.PruneTo(chainInfo.head)
+
+	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, historyTx, configuredFloor-1), state.PrunedError)
+	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, tx, configuredFloor-1), state.PrunedError)
+	require.Zero(t, historyCalls.Load())
+	require.Zero(t, blocks.calls.Load())
+}
+
+func TestPruneGatesReusePhysicalFloorsAtSameHead(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var historyCalls atomic.Int64
+	historyTx := countingHistoryFloorTx{TemporalTx: tx, calls: &historyCalls}
+	blocks := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
+	apis.eth._blockReader = blocks
+
+	for range 2 {
+		require.NoError(t, apis.eth.checkPruneHistory(ctx, historyTx, chainInfo.head-1))
+		require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head-1))
+	}
+	require.Equal(t, int64(3), historyCalls.Load())
+	require.Equal(t, int64(1), blocks.calls.Load())
 }
 
 func TestCapabilitiesUseOnDiskFloors(t *testing.T) {
@@ -1676,6 +1750,35 @@ type prunedHistoryDebugTx struct {
 }
 
 func (prunedHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return math.MaxUint64 }
+
+type countingHistoryFloorTx struct {
+	kv.TemporalTx
+	calls *atomic.Int64
+}
+
+func (tx countingHistoryFloorTx) Debug() kv.TemporalDebugTx {
+	return countingHistoryFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), calls: tx.calls}
+}
+
+type countingHistoryFloorDebugTx struct {
+	kv.TemporalDebugTx
+	calls *atomic.Int64
+}
+
+func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) uint64 {
+	tx.calls.Add(1)
+	return tx.TemporalDebugTx.HistoryStartFrom(domain)
+}
+
+type countingMinimumBlockReader struct {
+	dbservices.FullBlockReader
+	calls atomic.Int64
+}
+
+func (r *countingMinimumBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	r.calls.Add(1)
+	return r.FullBlockReader.MinimumBlockAvailable(ctx, tx)
+}
 
 // TestEmptyBlockReceiptsNeedNoStateHistory pins that a block without transactions is
 // answered from its body: there is nothing to derive, so no execution environment is

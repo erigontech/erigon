@@ -164,14 +164,14 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
 	if pruneMode.History.Enabled() {
-		onDiskOldest, err := api.stateHistoryStartBlock(ctx, tx)
+		onDiskOldest, err := api.stateHistoryStartBlock(ctx, tx, headBlock)
 		if err != nil {
 			return nil, err
 		}
 		stateOldest = max(stateOldest, onDiskOldest)
 	}
 	if pruneMode.Blocks.Enabled() {
-		onDiskOldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
+		onDiskOldest, err := api.minimumBlockAvailable(ctx, tx, headBlock)
 		if err != nil {
 			return nil, err
 		}

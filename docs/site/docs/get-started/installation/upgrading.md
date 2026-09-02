@@ -19,7 +19,7 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 ### v3.7 pruning-window upgrade
 
-Erigon v3.7 automatically widens the default `full` block and state-history windows, and the `blocks` mode state-history window, from 262,144 to 1,100,000 blocks. Data already pruned by an older release is not restored. The physical window grows as the node advances; re-sync the datadir if the full window is needed immediately. Plan for higher disk use while the window fills.
+Erigon v3.7 automatically widens the default `full` block and state-history windows, and the `blocks` mode state-history window, from 262,144 to 1,100,000 blocks. Data already pruned by an older release is not restored. The physical window grows as the node advances; re-sync the datadir if the full window is needed immediately. Plan for higher disk use while the window fills. A fresh sync downloads and processes more snapshot data than the previous default, so it can require more bandwidth, disk I/O, and time. An in-place upgrade does not download the missing backlog.
 
 :::warning
 Downgrading a migrated datadir to Erigon 3.6 restores that release's 262,144-block default and can permanently prune the backlog accumulated under v3.7. Before a rollback, back up the datadir and configure 1,100,000 explicitly for every finite window you need to preserve. For `full`, use `--prune.distance=1100000 --prune.distance.blocks=1100000`; for `blocks`, use `--prune.distance=1100000`.
