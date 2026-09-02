@@ -705,22 +705,43 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
-// workerViewMayDrift reports whether workerTx can resolve DB-resident reads at a
-// snapshot newer than callerTx's. A write-tx caller holds MDBX's single writer,
-// so nothing can commit under the fold and a fresh read view cannot move past it.
-func workerViewMayDrift(callerTx, workerTx kv.TemporalTx) bool {
-	callerTx, workerTx = kv.UnderlyingTx(callerTx), kv.UnderlyingTx(workerTx)
-	if callerTx == nil || workerTx == nil {
+// callerView is the caller half of the drift check, resolved once per fold.
+// ViewID memoizes inside libmdbx's txn, so asking the shared caller tx from
+// each worker is a write race on that memo.
+type callerView struct {
+	unresolved bool
+	writer     bool
+	viewID     uint64
+}
+
+func resolveCallerView(callerTx kv.TemporalTx) callerView {
+	callerTx = kv.UnderlyingTx(callerTx)
+	if callerTx == nil {
+		return callerView{unresolved: true}
+	}
+	// A write-tx caller holds MDBX's single writer, so nothing can commit under
+	// the fold and a fresh read view cannot move past it.
+	if _, writable := callerTx.(kv.TemporalRwTx); writable {
+		return callerView{writer: true}
+	}
+	return callerView{viewID: callerTx.ViewID()}
+}
+
+// mayDrift reports whether workerTx can resolve DB-resident reads at a snapshot
+// newer than the caller's.
+func (c callerView) mayDrift(workerTx kv.TemporalTx) bool {
+	workerTx = kv.UnderlyingTx(workerTx)
+	if c.unresolved || workerTx == nil {
 		return true
 	}
-	if _, callerWritable := callerTx.(kv.TemporalRwTx); callerWritable {
+	if c.writer {
 		return false
 	}
 	// A write tx's ViewID is the snapshot it will create, not one it reads.
 	if _, workerWritable := workerTx.(kv.TemporalRwTx); workerWritable {
 		return true
 	}
-	return callerTx.ViewID() != workerTx.ViewID()
+	return c.viewID != workerTx.ViewID()
 }
 
 func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
@@ -787,8 +808,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		pinned = newSyncStateReader(&pinnedMu, src)
 	}
 	// A custom reader whose clones keep their own source hands every worker the
-	// same transaction; the drift check is the only per-worker part.
+	// same transaction; only the worker's own view is per-worker.
 	sharedSource := sdc.stateReader != nil && !sdc.stateReader.BindsWorkerTx()
+	caller := resolveCallerView(tx)
 
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
 		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
@@ -816,7 +838,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 			traceW:         sdc.traceW,
 		}
 		switch {
-		case pinned != nil && (sharedSource || workerViewMayDrift(tx, roTx)):
+		case pinned != nil && (sharedSource || caller.mayDrift(roTx)):
 			// A read view opened at fold time sits at the then-current head, which
 			// is the caller's snapshot only while no commit can land between them.
 			// Clones share the reader and its lock; only the scratch buffer is

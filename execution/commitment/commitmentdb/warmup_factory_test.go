@@ -108,10 +108,21 @@ type snapshotTx struct {
 	viewID  uint64
 	val     []byte
 	scratch []byte
+
+	// libmdbx's Txn.ID memoizes on first call and takes no lock, so two
+	// goroutines asking one txn for its view is a write race.
+	viewMemo  uint64
+	viewCalls atomic.Int64
 }
 
-func (t *snapshotTx) ViewID() uint64 { return t.viewID }
-func (t *snapshotTx) Rollback()      {}
+func (t *snapshotTx) ViewID() uint64 {
+	t.viewCalls.Add(1)
+	if t.viewMemo == 0 {
+		t.viewMemo = t.viewID
+	}
+	return t.viewMemo
+}
+func (t *snapshotTx) Rollback() {}
 
 type snapshotGetter struct {
 	execctxapi.StateGetter
@@ -374,4 +385,43 @@ func TestConcurrentTrieContextKeepsBindingCustomReaderPerWorker(t *testing.T) {
 	enc, _, err := trieCtx.Branch([]byte("prefix"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("worker-view"), enc)
+}
+
+// Every worker asking the shared caller tx whether its own view drifted is the
+// same txn-level race the pinned reader exists to avoid: the caller's view is
+// resolved once, before any worker runs.
+func TestConcurrentTrieContextResolvesCallerViewOnce(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc, _ := newSnapshotSdc(t)
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	require.Equal(t, int64(1), caller.viewCalls.Load(), "caller view must be resolved before any worker runs")
+
+	const workers = 8
+	var wg sync.WaitGroup
+	cleanups := make([]func(), workers)
+	encs := make([][]byte, workers)
+	errs := make([]error, workers)
+	for i := range workers {
+		wg.Go(func() {
+			trieCtx, cleanup := factory(t.Context())
+			cleanups[i] = cleanup
+			encs[i], _, errs[i] = trieCtx.Branch([]byte("prefix"))
+		})
+	}
+	wg.Wait()
+	for _, cleanup := range cleanups {
+		cleanup()
+	}
+	for _, c := range drain() {
+		c.Close()
+	}
+
+	for i := range workers {
+		require.NoError(t, errs[i])
+		require.Equal(t, []byte("caller-snapshot"), encs[i])
+	}
+	require.Equal(t, int64(1), caller.viewCalls.Load(), "workers must not ask the caller tx for its view")
 }
