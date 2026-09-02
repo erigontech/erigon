@@ -115,7 +115,9 @@ func processFromHeaders(headers []string, ethAPI EthAPI, netAPI NetAPI, w http.R
 		}
 	}
 
-	reportHealthFromHeaders(errCheckSynced, errCheckPeer, errCheckBlock, errCheckSeconds, w)
+	if err := reportHealthFromHeaders(errCheckSynced, errCheckPeer, errCheckBlock, errCheckSeconds, w); err != nil {
+		log.Error("failed to write healthcheck response", "err", err)
+	}
 }
 
 func processFromBody(w http.ResponseWriter, r *http.Request, netAPI NetAPI, ethAPI EthAPI) {

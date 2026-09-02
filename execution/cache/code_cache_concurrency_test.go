@@ -233,12 +233,10 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 	check("purge")
 }
 
-// growLRU's generation swap is not fenced against writers (see its doc
-// comment): a grow can copy a key into the new generation while a same-key
-// refresh (putContentLocked's stale-entry path) is in flight. Put resolves
-// g.cur once so its removal and its store land on the same generation; split
-// across the swap, the removal would hit the retired generation and the store
-// would replace the copy in place without firing OnEvict, double-counting it.
+// A grow can copy a key into the new generation while a same-key refresh is in
+// flight. Put resolves g.cur once so its removal and its store land on the same
+// generation; split across the swap, the store would replace the copy in place
+// without firing OnEvict and double-count it.
 func TestGrowLRU_GrowRacePutDoesNotDoubleCount(t *testing.T) {
 	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
 	defer g.Close()
@@ -275,11 +273,9 @@ func TestGrowLRU_GrowRacePutDoesNotDoubleCount(t *testing.T) {
 	require.Equal(t, gen1.lru.Len(), gen1.len(), "the retired generation's own counter must stay exact")
 }
 
-// CodeCache drives all three growLRU layers through putContentLocked, whose
-// stale path displaces the resident entry. The key space repeats so puts land on
-// resident keys, an unwinder makes those repeats stale so the displacing path
-// runs, and the code budget leaves room above the start capacity so the grow
-// gates fire. Each layer's counter must still equal its LRU's real length.
+// Each layer's counter must equal its LRU's real length while all three are
+// driven through putContentLocked's displacing path. The fixture repeats keys
+// and keeps unwinding them so that path runs, with budget left to grow into.
 func TestCodeCache_GrowLRULenCounterUnderConcurrency(t *testing.T) {
 	// 64MB over avgCodeEntryBytes puts the two code layers' ceiling well above
 	// genericCacheStartCapacity; at 8MB it lands below and they never grow.
@@ -356,11 +352,10 @@ func BenchmarkGrowLRUParallelPutGrow(b *testing.B) {
 	})
 }
 
-// The three stale drops on CodeCache's read path hold no put stripe, so they
-// interleave freely with a striped writer's stale-entry refresh while the LRU
-// grows. Whatever the interleaving, the live generation's counter must equal
-// its real length: an under-count wedges growth for good, because both grow
-// gates read the counter.
+// CodeCache's read-path stale drops hold no put stripe, so they interleave
+// freely with a striped refresh while the LRU grows. The counter must still
+// equal the real length: both grow gates read it, so an under-count wedges
+// growth for good.
 func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
 	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
 	defer g.Close()
