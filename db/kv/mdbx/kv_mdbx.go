@@ -2330,3 +2330,5 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 func (tx *MdbxTx) CHandle() unsafe.Pointer {
 	return tx.tx.CHandle()
 }
+
+func (tx *MdbxTx) WarmValue(v []byte) { tx.db.WarmValue(v) }

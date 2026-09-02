@@ -1836,6 +1836,7 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
 	if foundStep.LastTxNum(dt.stepSize) >= dt.files.EndTxNum() {
+		kv.WarmValue(roTx, v)
 		return v, foundStep, true, nil
 	}
 
