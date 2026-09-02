@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"strings"
 	"testing"
@@ -1182,34 +1181,4 @@ func TestPutDropsOversizedBuffer(t *testing.T) {
 	Put(s)
 	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
 	require.NotSame(t, s, Get(nil).(*StackStream))
-}
-
-func BenchmarkStreamAcquire(b *testing.B) {
-	result := strings.Repeat("0xabcdef", 512)
-	write := func(s Stream) {
-		s.WriteObjectStart()
-		s.WriteObjectField("jsonrpc")
-		s.WriteString("2.0")
-		s.WriteMore()
-		s.WriteObjectField("result")
-		s.WriteString(result)
-		s.WriteObjectEnd()
-	}
-	b.Run("impl=new", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			s := New(io.Discard)
-			write(s)
-			_ = s.Flush()
-		}
-	})
-	b.Run("impl=pool", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			s := Get(io.Discard)
-			write(s)
-			_ = s.Flush()
-			Put(s)
-		}
-	})
 }
