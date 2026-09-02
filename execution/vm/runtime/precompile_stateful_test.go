@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -921,4 +922,52 @@ func TestVersionGatedPrecompileIsPrecompiledToTracers(t *testing.T) {
 	res, err = tracer.GetResult()
 	require.NoError(t, err)
 	require.JSONEq(t, `{"0x01020304-0":1}`, string(res), "a plain call still records its selector")
+}
+
+// runtime.Execute and runtime.Call start the tracer themselves, so a partial
+// VMContext there is invisible to a test that drives OnTxStart directly. The
+// 4byte, flat-call and JS tracers rebuild Rules from this context: a dropped
+// L2Version misclassifies a version-gated precompile, and a nil ChainConfig
+// panics them outright.
+func TestRuntimeStartsTracerWithFullVMContext(t *testing.T) {
+	const chainID = 900434
+	const activeAt = 30
+
+	newCfg := func(t *testing.T) (*Config, *tracing.VMContext) {
+		t.Helper()
+		cfg := newStatefulTestConfig(t, chainID)
+		cfg.ChainConfig.L2 = l2VersionRules{}
+		cfg.L2Version = activeAt
+		var got tracing.VMContext
+		cfg.EVMConfig.Tracer = &tracing.Hooks{
+			OnTxStart: func(vmctx *tracing.VMContext, _ types.Transaction, _ accounts.Address) {
+				if vmctx != nil {
+					got = *vmctx
+				}
+			},
+		}
+		return cfg, &got
+	}
+
+	assertFull := func(t *testing.T, got *tracing.VMContext) {
+		t.Helper()
+		require.NotNil(t, got.IntraBlockState, "the tracer must be started at all")
+		require.NotNil(t, got.ChainConfig, "a nil ChainConfig panics the 4byte and flat tracers")
+		require.Equal(t, uint64(activeAt), got.L2Version,
+			"a dropped L2Version evaluates version-gated providers at 0")
+	}
+
+	t.Run("Call", func(t *testing.T) {
+		cfg, got := newCfg(t)
+		_, _, err := Call(accounts.InternAddress(common.BytesToAddress([]byte{0x9b})), nil, cfg)
+		require.NoError(t, err)
+		assertFull(t, got)
+	})
+
+	t.Run("Execute", func(t *testing.T) {
+		cfg, got := newCfg(t)
+		_, _, err := Execute([]byte{byte(vm.STOP)}, nil, cfg, t.TempDir())
+		require.NoError(t, err)
+		assertFull(t, got)
+	})
 }

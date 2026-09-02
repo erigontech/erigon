@@ -156,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	}
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
+		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 	ret, _, _, err := vmenv.Call(
 		sender,
@@ -272,7 +272,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
-		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
+		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
 	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
