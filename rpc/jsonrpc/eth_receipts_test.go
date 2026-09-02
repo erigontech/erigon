@@ -36,21 +36,21 @@ func logsWithIndexes(n int) types.Logs {
 	return logs
 }
 
-func erigonLogsWithIndexes(n int) []*types.ErigonLog {
-	logs := make([]*types.ErigonLog, n)
+func rpcLogsWithIndexes(n int) types.RPCLogs {
+	logs := make(types.RPCLogs, n)
 	src := logsWithIndexes(n)
 	for i := range src {
-		logs[i] = &types.ErigonLog{Log: src[i]}
+		logs[i] = &types.RPCLog{Log: src[i]}
 	}
 	return logs
 }
 
-func TestAppendErigonLogs(t *testing.T) {
+func TestAppendRPCLogs(t *testing.T) {
 	const blockTime = 42
 
 	cases := []struct {
 		name       string
-		logs       []*types.ErigonLog
+		logs       types.RPCLogs
 		filtered   types.Logs
 		maxResults int
 		wantLen    int
@@ -60,13 +60,13 @@ func TestAppendErigonLogs(t *testing.T) {
 		{name: "below limit", filtered: logsWithIndexes(3), maxResults: 5, wantLen: 3},
 		{name: "at limit", filtered: logsWithIndexes(3), maxResults: 3, wantLen: 3},
 		{name: "above limit", filtered: logsWithIndexes(4), maxResults: 3, wantErr: true},
-		{name: "limit counts logs appended earlier", logs: erigonLogsWithIndexes(2), filtered: logsWithIndexes(2), maxResults: 3, wantErr: true},
-		{name: "nothing to append at limit", logs: erigonLogsWithIndexes(2), maxResults: 2, wantLen: 2},
+		{name: "limit counts logs appended earlier", logs: rpcLogsWithIndexes(2), filtered: logsWithIndexes(2), maxResults: 3, wantErr: true},
+		{name: "nothing to append at limit", logs: rpcLogsWithIndexes(2), maxResults: 2, wantLen: 2},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := appendErigonLogs(tc.logs, tc.filtered, blockTime, tc.maxResults)
+			got, err := appendRPCLogs(tc.logs, tc.filtered, blockTime, tc.maxResults)
 			if tc.wantErr {
 				require.Nil(t, got)
 				var rpcErr rpc.Error

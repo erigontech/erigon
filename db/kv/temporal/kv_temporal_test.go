@@ -19,8 +19,11 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
@@ -127,7 +130,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 
 		// build files
-		err = agg.BuildFiles(2)
+		err = agg.BuildFiles(2, unboundedFinalityCtx)
 		require.NoError(t, err)
 		rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -368,7 +371,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 			require.NoError(t, rwTtx.Commit())
 		}()
 	}
-	require.NoError(t, agg.BuildFiles(3))
+	require.NoError(t, agg.BuildFiles(3, unboundedFinalityCtx))
 
 	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)

@@ -31,7 +31,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -171,7 +170,6 @@ func execV3(ctx context.Context,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	defer resetExecGauges(ctx)
-	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
@@ -299,7 +297,6 @@ func execV3Serial(ctx context.Context,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	defer resetExecGauges(ctx)
-	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
@@ -834,7 +831,7 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	minBlockNum = max(minBlockNum, unwindToLimit)
 
 	// Binary search, but not too deep
-	jump := cmp.InRange(1, maxUnwindJumpAllowance, (blockNumber-minBlockNum)/2)
+	jump := min(maxUnwindJumpAllowance, max(1, (blockNumber-minBlockNum)/2))
 	unwindTo := blockNumber - jump
 
 	// protect from too far unwind

@@ -70,7 +70,7 @@ func MarshalReceipt(
 		if receipt.Logs != nil {
 			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
 			for i := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(&receipt.Logs[i], header, txnHash, uint64(receipt.TransactionIndex)))
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(&receipt.Logs[i], header))
 			}
 			logsToMarshal = rpcLogs
 		} else {

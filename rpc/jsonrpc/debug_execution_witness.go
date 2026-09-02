@@ -1239,7 +1239,7 @@ func detectCollapseSiblings(
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
 	splitStateReader := collapseReaderFor(hc, tx, firstTxNumInBlock, endTxNum)
-	sdCtx.SetCustomHistoryStateReader(splitStateReader)
+	sdCtx.SetStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
@@ -1286,7 +1286,7 @@ func detectCollapseSiblings(
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
 		if mode == witnessModeCanonical {
-			childCount, err := sdCtx.BranchChildCount(splitStateReader, c.branchPrefix)
+			childCount, err := sdCtx.BranchChildCount(c.branchPrefix)
 			if err != nil {
 				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
 			}
@@ -1318,7 +1318,7 @@ func buildWitnessTrie(
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
-	sdCtx.SetCustomHistoryStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
+	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}

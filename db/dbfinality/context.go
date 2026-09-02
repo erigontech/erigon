@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package cmp
+package dbfinality
 
 import (
-	"cmp"
+	"context"
+
+	"github.com/erigontech/erigon/db/kv"
 )
 
-// InRange - ensure val is in [min,max] range
-func InRange[T cmp.Ordered](_min, _max, val T) T {
-	if _min >= val {
-		return _min
-	}
-	if _max <= val {
-		return _max
-	}
-	return val
+// Context defines immutable block boundaries for database retention work.
+type Context interface {
+	PruneToBlockNum() uint64
+	RetireToBlockNum() uint64
+	MaxReorgDepth() uint64
+	ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
 }
