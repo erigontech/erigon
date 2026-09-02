@@ -1,14 +1,25 @@
 package jsonrpc
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestSimulateSanitizeBlockOrder(t *testing.T) {
@@ -109,4 +120,50 @@ func newUint64(n uint64) *hexutil.Uint64 {
 
 func newBig(n uint64) *hexutil.Big {
 	return (*hexutil.Big)(new(big.Int).SetUint64(n))
+}
+
+// TestSimulateV1BlockHashOfEarlierSimulatedBlock pins that BLOCKHASH inside a
+// simulated block resolves an earlier simulated block to that block's own hash,
+// not to the hash of the real canonical block sitting at the same number. The
+// base is historical on purpose: only then does the canonical chain hold a
+// competing block at a simulated block number.
+func TestSimulateV1BlockHashOfEarlierSimulatedBlock(t *testing.T) {
+	gspec := &types.Genesis{Config: chain.TestChainConfig, Difficulty: params.GenesisDifficulty}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	canonicalChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(canonicalChain))
+
+	ctx := context.Background()
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+
+	const baseNumber = uint64(1)
+	canonical := canonicalChain.Blocks[baseNumber] // canonical block at baseNumber+1
+	require.Equal(t, baseNumber+1, canonical.NumberU64())
+
+	// runtime code returning blockhash(calldataload(0))
+	probe := common.Address{0xbb}
+	code := hexutil.Bytes(hexutil.MustDecodeHex("0x6000354060005260206000f3"))
+	arg := hexutil.Bytes(common.BigToHash(new(big.Int).SetUint64(baseNumber + 1)).Bytes())
+
+	res, err := api.SimulateV1(ctx, SimulationRequest{BlockStateCalls: []SimulatedBlock{
+		{},
+		{
+			StateOverrides: &ethapi.StateOverrides{accounts.InternAddress(probe): ethapi.Account{Code: &code}},
+			Calls:          []ethapi.CallArgs{{To: &probe, Data: &arg}},
+		},
+	}}, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(baseNumber)))
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+
+	simulated, ok := res[0]["hash"].(common.Hash)
+	require.True(t, ok, "simulated block hash missing: %v", res[0]["hash"])
+	require.NotEqual(t, canonical.Hash(), simulated, "test is only meaningful if the two hashes differ")
+
+	calls, ok := res[1]["calls"].([]CallResult)
+	require.True(t, ok)
+	require.Len(t, calls, 1)
+	require.Equal(t, hexutil.Uint64(1), calls[0].Status, "call failed: %v", calls[0].Error)
+	require.Equal(t, simulated.Hex(), calls[0].ReturnData)
 }
