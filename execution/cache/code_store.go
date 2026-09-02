@@ -100,7 +100,8 @@ func (s *CodeStore) PutByHash(tx kv.RwTx, codeHash, code []byte) error {
 	}
 	var key [32]byte
 	copy(key[:], codeHash)
-	s.mem.Set(key, code)
+	// The otter tier is process-lifetime, so it cannot hold the caller's buffer.
+	s.mem.Set(key, bytes.Clone(code))
 	has, err := tx.Has(kv.TblCodeCache, codeHash)
 	if err != nil {
 		return err
