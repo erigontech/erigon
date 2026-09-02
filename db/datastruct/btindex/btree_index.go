@@ -17,7 +17,6 @@
 package btindex
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -729,58 +728,6 @@ func (b *BtIndex) Seek(g *seg.Reader, x []byte) (*Cursor, error) {
 	return c, nil
 }
 
-// RSeek moves the cursor to the first key strictly greater than x.
-func (b *BtIndex) RSeek(g *seg.Reader, x []byte) (*Cursor, error) {
-	c, err := b.Seek(g, x)
-	if err != nil || c == nil {
-		return c, err
-	}
-	if !bytes.Equal(c.Key(), x) {
-		return c, nil
-	}
-	if !c.Next() {
-		c.Close()
-		return nil, nil
-	}
-	return c, nil
-}
-
-// LSeek moves the cursor to the greatest key strictly less than x. Do not use it for ancestor lookup:
-// an odd-length ancestor ends in 0xf0|a while descendants carry a<<4|b at that position, so the ancestor
-// sorts after its own subtree.
-func (b *BtIndex) LSeek(g *seg.Reader, x []byte) (*Cursor, error) {
-	if b.Empty() {
-		return nil, nil
-	}
-
-	c, err := b.Seek(g, x)
-	if err != nil {
-		return nil, err
-	}
-	if c == nil {
-		c = b.newCursor(nil, nil, b.ef.Count()-1, g)
-		if err := c.readKV(); err != nil {
-			c.Close()
-			return nil, err
-		}
-		return c, nil
-	}
-	if c.d == 0 {
-		c.Close()
-		return nil, nil
-	}
-	if err := c.resetNoRead(c.d-1, g); err != nil {
-		c.Close()
-		return nil, err
-	}
-	if err := c.readKV(); err != nil {
-		c.Close()
-		return nil, err
-	}
-	return c, nil
-}
-
-// OrdinalLookup returns cursor for key at position i
 func (b *BtIndex) OrdinalLookup(getter *seg.Reader, i uint64) *Cursor {
 	k, v, _, err := b.dataLookup(i, getter)
 	if err != nil {
