@@ -1889,6 +1889,8 @@ func SetAccountFieldFromAccount(out *WriteSet, addr accounts.Address, path Accou
 // TouchUpdates feeds the write set directly to a commitment.Updates buffer
 // via TouchPlainKeyDirect, one partial Update per write. The buffer merges
 // per key (ModeUpdate and ModeParallel both accumulate flags additively).
+// An address whose writes do not cover balance, nonce and code hash together
+// costs one account read at fold time, where the trie fills in the rest.
 func (s *WriteSet) TouchUpdates(updates *commitment.Updates) {
 	if s == nil {
 		return
