@@ -19,8 +19,14 @@ package execmodule_test
 import (
 	"crypto/ecdsa"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"math/big"
+	"os"
+	"runtime/pprof"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,6 +85,11 @@ const (
 // to split branches; at the small end it is not. Sizes under 100k are absent
 // deliberately: stateBudget leaves them too few blocks to measure.
 var stateSizes = []int{100_000, 1_000_000}
+
+var windowProfile = flag.String("windowprofile", "",
+	"path prefix for a CPU profile covering only the timed block loop; incompatible with -cpuprofile")
+
+var windowProfileSeq atomic.Int64
 
 // BenchmarkValidatePayload times a payload end to end and splits the result:
 // ns/op covers InsertBlocks + ValidateChain + UpdateForkChoice, newPayload_ms
@@ -200,6 +211,8 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	var newPayload, fcu time.Duration
 
 	b.ReportAllocs()
+	stopWindowProfile := startWindowProfile(b)
+	defer stopWindowProfile()
 	b.ResetTimer()
 	for _, block := range chainResult.Blocks {
 		start := time.Now()
@@ -230,7 +243,39 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	// The executor mode changes what every arm measures and leaves no other
 	// trace in the output.
 	b.ReportMetric(boolMetric(dbg.Exec3Parallel), "parallelExec")
+	b.ReportMetric(gogcPercent(), "gogc")
 	b.ReportMetric(float64(b.N*benchTxsPerBlok)/float64(stateSize), "stateGrowth")
+}
+
+func gogcPercent() float64 {
+	switch v := os.Getenv("GOGC"); v {
+	case "":
+		return 100
+	case "off":
+		return 0
+	default:
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return -1
+		}
+		return float64(n)
+	}
+}
+
+func startWindowProfile(b *testing.B) func() {
+	if *windowProfile == "" {
+		return func() {}
+	}
+	name := strings.ReplaceAll(b.Name(), "/", "_")
+	path := fmt.Sprintf("%s-%s-%d.prof", *windowProfile, name, windowProfileSeq.Add(1))
+	f, err := os.Create(path)
+	require.NoError(b, err)
+	require.NoError(b, pprof.StartCPUProfile(f))
+	b.Logf("window cpu profile: %s (b.N=%d)", path, b.N)
+	return func() {
+		pprof.StopCPUProfile()
+		require.NoError(b, f.Close())
+	}
 }
 
 func boolMetric(v bool) float64 {
