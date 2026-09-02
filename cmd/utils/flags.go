@@ -726,9 +726,8 @@ var (
 		Usage: "Bytes per second for webseeds, example: 32mb. Set Inf for no limit. If not set, rate limit is shared with torrent.download.rate",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
-		Name: "torrent.upload.rate",
-		// Agreed in meeting to leave it quite a bit higher than 3.0 unless it becomes a problem.
-		Value: "16mb",
+		Name:  "torrent.upload.rate",
+		Value: "4mb",
 		Usage: "Bytes per second, example: 32mb. Set Inf for no limit.",
 	}
 	// Deprecated (v3.0): This flag no longer has any effect and will be removed in a future release.
