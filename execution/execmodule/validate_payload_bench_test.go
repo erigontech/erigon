@@ -248,18 +248,18 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 }
 
 func gogcPercent() float64 {
-	switch v := os.Getenv("GOGC"); v {
-	case "":
-		return 100
-	case "off":
-		return 0
-	default:
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return -1
-		}
-		return float64(n)
+	v := os.Getenv("GOGC")
+	if v == "off" {
+		return -1
 	}
+	if strings.HasPrefix(v, "+") {
+		return 100
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		return 100
+	}
+	return float64(n)
 }
 
 func startWindowProfile(b *testing.B) func() {
