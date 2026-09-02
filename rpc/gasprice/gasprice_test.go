@@ -225,54 +225,6 @@ func TestKthAlgorithmCorrectness(t *testing.T) {
 	}
 }
 
-func BenchmarkHeapPercentile_N20(b *testing.B) {
-	testData := make([][]*uint256.Int, iterations)
-	for i := range iterations {
-		testData[i] = generateUint256Slice(sliceSizeSmall)
-	}
-
-	for b.Loop() {
-		for j := range iterations {
-			values := copyUint256Slice(testData[j])
-			_ = heapPercentile(values, percentile)
-		}
-	}
-}
-
-func BenchmarkKthPercentile_N20(b *testing.B) {
-	testData := make([][]*uint256.Int, iterations)
-	for i := range iterations {
-		testData[i] = generateUint256Slice(sliceSizeSmall)
-	}
-
-	for b.Loop() {
-		for j := range iterations {
-			values := copyUint256Slice(testData[j])
-			index := (len(values) - 1) * percentile / 100
-			_ = findKthUint256(values, index)
-		}
-	}
-}
-
-func BenchmarkHeapPercentile(b *testing.B) {
-	testData := generateUint256Slice(sliceSizeLarge)
-
-	for b.Loop() {
-		values := copyUint256Slice(testData)
-		_ = heapPercentile(values, percentile)
-	}
-}
-
-func BenchmarkKthPercentile(b *testing.B) {
-	testData := generateUint256Slice(sliceSizeLarge)
-
-	for b.Loop() {
-		values := copyUint256Slice(testData)
-		index := (len(values) - 1) * percentile / 100
-		_ = findKthUint256(values, index)
-	}
-}
-
 // mockOracleBackend is a minimal OracleBackend for unit tests.
 // HeaderByNumber intentionally ignores ctx cancellation so the oracle can
 // proceed past the head-lookup even when the caller's context is already

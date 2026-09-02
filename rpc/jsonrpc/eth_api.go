@@ -529,16 +529,10 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 }
 
 // holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
-// point, which tells a legacy archive from chain-history expiry when the stored prune
-// mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
-// available block answers on its own: expiry keeps pre-merge headers and bodies, and
-// the transaction segment spanning the merge point reaches below it. Only a readable
-// transaction of an early block does, so block data the search cannot read leaves the
-// question open rather than settling it, and an open question is not remembered. The
-// answer is availability rather than policy, so a settled one is kept for a short TTL in
-// both directions instead of being decided once. One probe answers every caller waiting
-// on it: each costs several backend reads under an open read transaction, so refreshing
-// the TTL must not fan out with the load.
+// point, which tells a legacy archive from chain-history expiry where the stored prune
+// mode carries the same sentinel for both. Only a readable transaction of an early block
+// settles it: expiry keeps pre-merge headers and bodies, and the transaction segment
+// spanning the merge point reaches below it.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	for {
 		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
@@ -781,7 +775,7 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	switch amount := p.ReceiptsAmount(); {
 	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
-	case p.ReceiptsFollowHistory():
+	case !amount.Enabled():
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
 		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
@@ -800,9 +794,6 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return false, err
-	}
-	if chainConfig.IsByzantium(block) {
-		return false, nil
 	}
 	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
 	if err != nil {
