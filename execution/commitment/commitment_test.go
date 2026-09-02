@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -927,6 +928,60 @@ func TestUpdatesModeParallel_RepeatTouchDoesNotRehash(t *testing.T) {
 	require.Equal(t, uint64(1), ut.Size())
 	require.NotNil(t, ut.parallel.trie.root)
 	require.EqualValues(t, 1, ut.parallel.trie.root.subtreeCount)
+}
+
+func TestUpdates_PlainAndHashedTouchesDoNotSwallowEachOther(t *testing.T) {
+	t.Parallel()
+
+	raw := make([]byte, length.Addr)
+	for i := range raw {
+		raw[i] = byte(i % 16)
+	}
+
+	modes := []struct {
+		name      string
+		mode      Mode
+		collected func(ut *Updates) int
+	}{
+		{"ModeParallel", ModeParallel, func(ut *Updates) int { return int(ut.parallel.trie.root.subtreeCount) }},
+		{"ModeDirect", ModeDirect, func(ut *Updates) int { return len(ut.direct) }},
+	}
+	orders := []struct {
+		name string
+		run  func(ut *Updates)
+	}{
+		{"hashedFirst", func(ut *Updates) {
+			ut.TouchHashedKey(raw)
+			ut.TouchPlainKey(string(raw), nil, func(c *KeyUpdate, val []byte) {})
+		}},
+		{"plainFirst", func(ut *Updates) {
+			ut.TouchPlainKey(string(raw), nil, func(c *KeyUpdate, val []byte) {})
+			ut.TouchHashedKey(raw)
+		}},
+	}
+
+	for _, m := range modes {
+		for _, o := range orders {
+			t.Run(m.name+"/"+o.name, func(t *testing.T) {
+				t.Parallel()
+
+				var hashCalls atomic.Int64
+				ut := NewUpdates(m.mode, t.TempDir(), func(key []byte) []byte {
+					hashCalls.Add(1)
+					return KeyToHexNibbleHash(key)
+				})
+				defer ut.Close()
+
+				o.run(ut)
+
+				require.EqualValues(t, 1, hashCalls.Load(),
+					"a plain touch and a hashed touch sharing their bytes must not dedup against each other")
+				require.Equal(t, 2, m.collected(ut),
+					"the nibble path and the plain key's hash are separate entries")
+				require.Equal(t, uint64(2), ut.Size())
+			})
+		}
+	}
 }
 
 func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {

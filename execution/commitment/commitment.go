@@ -1347,14 +1347,15 @@ func (m Mode) String() string {
 }
 
 type Updates struct {
-	hasher   keyHasher
-	keys     map[string]struct{}
-	etl      *etl.Collector
-	tree     *btree.BTreeG[*KeyUpdate]
-	treeIdx  map[string]*KeyUpdate
-	mode     Mode
-	tmpdir   string
-	parallel *parallelUpdate
+	hasher     keyHasher
+	keys       map[string]struct{}
+	hashedKeys map[string]struct{}
+	etl        *etl.Collector
+	tree       *btree.BTreeG[*KeyUpdate]
+	treeIdx    map[string]*KeyUpdate
+	mode       Mode
+	tmpdir     string
+	parallel   *parallelUpdate
 
 	direct         []KeyUpdate
 	directBytes    int
@@ -1522,7 +1523,7 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect, ModeParallel:
-		return uint64(len(t.keys))
+		return uint64(len(t.keys) + len(t.hashedKeys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
 	default:
@@ -1624,6 +1625,17 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	}
 }
 
+func (t *Updates) touchedHashed(dedupKey string) bool {
+	if _, ok := t.hashedKeys[dedupKey]; ok {
+		return true
+	}
+	if t.hashedKeys == nil {
+		t.hashedKeys = make(map[string]struct{})
+	}
+	t.hashedKeys[dedupKey] = struct{}{}
+	return false
+}
+
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
 	switch t.mode {
 	case ModeDirect:
@@ -1631,18 +1643,16 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 			return
 		}
 		dedupKey := string(hashedKey)
-		if _, ok := t.keys[dedupKey]; !ok {
+		if !t.touchedHashed(dedupKey) {
 			t.collectDirect(common.ToBytesZeroCopy(dedupKey), "")
-			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeParallel:
 		if len(hashedKey) == 0 {
 			return
 		}
 		dedupKey := string(hashedKey)
-		if _, ok := t.keys[dedupKey]; !ok {
+		if !t.touchedHashed(dedupKey) {
 			t.parallel.Insert(hashedKey, nil, nil)
-			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
 		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
@@ -1704,6 +1714,7 @@ func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
 	}
+	clear(t.hashedKeys)
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
@@ -1766,8 +1777,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 
 	switch t.mode {
 	case ModeDirect:
-		cnt := len(t.keys)
+		cnt := len(t.keys) + len(t.hashedKeys)
 		clear(t.keys)
+		clear(t.hashedKeys)
 		if t.etl == nil {
 			return t.hashSortDirectInMem(ctx, warmuper, fn)
 		}
@@ -1933,6 +1945,7 @@ func (t *Updates) consumeParallel() {
 		return
 	}
 	clear(t.keys)
+	clear(t.hashedKeys)
 	if t.parallel != nil {
 		t.parallel.Reset()
 	}
@@ -1946,6 +1959,7 @@ func (t *Updates) Reset() {
 		} else {
 			clear(t.keys)
 		}
+		clear(t.hashedKeys)
 		if t.etl != nil {
 			t.etl.Close()
 			t.etl = nil
@@ -1962,6 +1976,7 @@ func (t *Updates) Reset() {
 		} else {
 			clear(t.keys)
 		}
+		clear(t.hashedKeys)
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
