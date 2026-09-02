@@ -65,7 +65,7 @@ func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bo
 	var finalityCtx dbfinality.Context
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false, execfinality.WithTxNumsReader(cfg.blockReader.TxnumReader()))
+		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false, execfinality.WithTxNumsReader(cfg.db, cfg.blockReader.TxnumReader()))
 		return err
 	}); err != nil {
 		return trie.EmptyRoot, err

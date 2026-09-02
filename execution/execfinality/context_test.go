@@ -23,11 +23,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -238,7 +240,7 @@ func TestContextReadyForCollationCollatesStepsBelowTheTxNumWindow(t *testing.T) 
 
 	db := txNumWindowDB(t)
 	reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{stepLastBlock: stepLastTxNum}})
-	ctx := NewContext(headBlockNum, 25_837_750, 96, true, WithTxNumsReader(reader))
+	ctx := NewContext(headBlockNum, 25_837_750, 96, true, WithTxNumsReader(nil, reader))
 
 	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, stepLastTxNum)
 	require.NoError(t, err)
@@ -258,7 +260,7 @@ func TestContextReadyForCollationStillGatesStepsBelowTheTxNumWindow(t *testing.T
 
 	db := txNumWindowDB(t)
 	reader := rawdbv3.TxNums.WithCustomReadTxNumFunc(snapshotTxNums{map[uint64]uint64{stepLastBlock: stepLastTxNum}})
-	ctx := NewContext(headBlockNum, 25_837_750, 96, true, WithTxNumsReader(reader))
+	ctx := NewContext(headBlockNum, 25_837_750, 96, true, WithTxNumsReader(nil, reader))
 
 	_, lastBlockInStep, _, _, ready, err := ctx.ReadyForCollation(t.Context(), db, stepLastTxNum)
 	require.NoError(t, err)
@@ -291,4 +293,30 @@ func TestContextReadyForCollationResolvesStepsInsideTheTxNumWindow(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, uint64(25_473_001), lastBlockInStep)
 	require.False(t, ready, "step above the finalised head stays gated")
+}
+
+// txRecordingIndex records the tx the reader is handed.
+type txRecordingIndex struct{ tx kv.Tx }
+
+func (txRecordingIndex) MaxTxNum(context.Context, kv.Tx, kv.Cursor, uint64) (uint64, bool, error) {
+	return 0, false, nil
+}
+
+func (i *txRecordingIndex) BlockNumber(_ context.Context, tx kv.Tx, _ uint64) (uint64, bool, error) {
+	i.tx = tx
+	return 0, false, nil
+}
+
+// A snapshot-backed reader reads block files, which only a temporal tx pins a view for.
+// The collation caller passes the aggregator's chaindata, so the lookup has to run on
+// the db the reader came with instead.
+func TestContextReadyForCollationResolvesStepsOnATemporalTx(t *testing.T) {
+	temporalDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	index := &txRecordingIndex{}
+	ctx := NewContext(25_473_001, 25_473_000, 96, false,
+		WithTxNumsReader(temporalDB, rawdbv3.TxNums.WithCustomReadTxNumFunc(index)))
+
+	_, _, _, _, _, err := ctx.ReadyForCollation(t.Context(), txNumWindowDB(t), 3_630_628_100)
+	require.NoError(t, err)
+	require.Implements(t, (*kv.TemporalTx)(nil), index.tx)
 }

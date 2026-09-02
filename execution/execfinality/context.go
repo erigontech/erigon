@@ -31,11 +31,13 @@ type finalityContext struct {
 	maxReorgDepth     uint64
 	retentionBlockNum uint64
 	collateToBlockNum uint64
+	txNumsDB          kv.TemporalRoDB
 	txNumsReader      rawdbv3.TxNumsReader
 }
 
 type resolveOptions struct {
 	withoutFinalisedBlock bool
+	txNumsDB              kv.TemporalRoDB
 	txNumsReader          rawdbv3.TxNumsReader
 }
 
@@ -51,9 +53,11 @@ func WithoutFinalisedBlock() ResolveOption {
 // chaindata alone. MaxTxNum is pruned to the downloaded-blocks range, so on a node
 // re-executing from scratch a step from the executed range falls below the table and
 // the search answers with its floor; a reader backed by the block snapshots names the
-// real block.
-func WithTxNumsReader(reader rawdbv3.TxNumsReader) ResolveOption {
+// real block. Such a reader reads block files, so it needs db to open the read tx: only
+// a temporal tx pins the block-files view those reads go through.
+func WithTxNumsReader(db kv.TemporalRoDB, reader rawdbv3.TxNumsReader) ResolveOption {
 	return func(options *resolveOptions) {
+		options.txNumsDB = db
 		options.txNumsReader = reader
 	}
 }
@@ -66,6 +70,7 @@ func NewContext(headBlockNum, finalisedBlockNum, maxReorgDepth uint64, initialCy
 	ctx := finalityContext{
 		finalisedBlockNum: finalisedBlockNum,
 		maxReorgDepth:     maxReorgDepth,
+		txNumsDB:          opts.txNumsDB,
 		txNumsReader:      opts.txNumsReader,
 	}
 	if finalisedBlockNum > 0 && !initialCycle {
@@ -111,6 +116,11 @@ func (c finalityContext) MaxReorgDepth() uint64 {
 
 func (c finalityContext) ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
+	// db is the aggregator's chaindata, whose tx pins no block-files view. A
+	// snapshot-backed reader reads block files, so it gets the temporal db instead.
+	if c.txNumsDB != nil {
+		db = c.txNumsDB
+	}
 	err = db.View(ctx, func(tx kv.Tx) error {
 		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
 		if err != nil {
