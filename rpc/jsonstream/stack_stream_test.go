@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"testing"
@@ -1181,4 +1182,94 @@ func TestPutDropsOversizedBuffer(t *testing.T) {
 	Put(s)
 	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
 	require.NotSame(t, s, Get(nil).(*StackStream))
+}
+
+// A raw payload at or above FlushThreshold goes to the writer instead of being
+// copied into the buffer. Both branches emit the same bytes, so the buffer is the
+// only thing that shows which one ran.
+func TestWriteRawBytesLargePayloadWritesThrough(t *testing.T) {
+	t.Parallel()
+	// Sizes are pre-quoting; two quote bytes are added, so these land the quoted
+	// length exactly on FlushThreshold and exactly one byte below it.
+	for name, tc := range map[string]struct {
+		size          int
+		writesThrough bool
+	}{
+		"below-threshold": {FlushThreshold - 3, false},
+		"at-threshold":    {FlushThreshold - 2, true},
+		"far-above":       {32 * FlushThreshold, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := append([]byte(`"`), bytes.Repeat([]byte("a"), tc.size)...)
+			payload = append(payload, '"')
+
+			var out bytes.Buffer
+			s := New(&out)
+			s.WriteObjectStart()
+			s.WriteObjectField("result")
+			s.WriteRawBytes(payload)
+			s.WriteObjectEnd()
+			require.NoError(t, s.Flush())
+
+			require.Equal(t, `{"result":`+string(payload)+`}`, out.String())
+
+			if tc.writesThrough {
+				require.Less(t, cap(s.(*StackStream).Buffer()), FlushThreshold,
+					"payload must reach the writer without being copied into the buffer")
+			} else {
+				require.GreaterOrEqual(t, cap(s.(*StackStream).Buffer()), FlushThreshold,
+					"a payload below the threshold must still be buffered")
+			}
+		})
+	}
+}
+
+// With no writer the caller reads the response back out of Buffer, so everything
+// must still be buffered no matter how large.
+func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
+	t.Parallel()
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4*FlushThreshold)...)
+	payload = append(payload, '"')
+
+	s := New(nil)
+	s.WriteObjectStart()
+	s.WriteObjectField("result")
+	s.WriteRawBytes(payload)
+	s.WriteObjectEnd()
+
+	require.Equal(t, `{"result":`+string(payload)+`}`, string(s.Buffer()))
+}
+
+// Mirrors the response path: pooled stream, envelope, one big pre-encoded result.
+func BenchmarkWriteRawBytesLargeResult(b *testing.B) {
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4<<20)...)
+	payload = append(payload, '"')
+	b.ReportAllocs()
+	for b.Loop() {
+		s := Get(io.Discard)
+		s.WriteObjectStart()
+		s.WriteObjectField("result")
+		s.WriteRawBytes(payload)
+		s.WriteObjectEnd()
+		_ = s.Flush()
+		Put(s)
+	}
+}
+
+// The mirror of TestPutDropsOversizedBuffer: a large result no longer grows the
+// buffer, so the stream survives Put instead of being dropped by the size check.
+func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
+	var out bytes.Buffer
+	s := Get(&out).(*StackStream)
+	s.WriteObjectStart()
+	s.WriteObjectField("result")
+	s.WriteRawBytes(append(bytes.Repeat([]byte(`"a`), 2<<20), '"'))
+	s.WriteObjectEnd()
+	require.NoError(t, s.Flush())
+
+	require.LessOrEqual(t, cap(s.Buffer()), maxPooledBufferSize,
+		"a written-through result must not grow the buffer past the pool limit")
+
+	Put(s)
+	require.Same(t, s, Get(nil).(*StackStream), "the stream must go back to the pool, not be dropped")
 }
