@@ -111,10 +111,7 @@ func (s *MiningServer) Mining(_ context.Context, req *txpoolproto.MiningRequest)
 }
 
 func (s *MiningServer) OnPendingLogs(req *txpoolproto.OnPendingLogsRequest, reply txpoolproto.Mining_OnPendingLogsServer) error {
-	remove := s.pendingLogsStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
+	return s.pendingLogsStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
@@ -128,14 +125,7 @@ func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
 }
 
 func (s *MiningServer) OnPendingBlock(req *txpoolproto.OnPendingBlockRequest, reply txpoolproto.Mining_OnPendingBlockServer) error {
-	remove := s.pendingBlockStreams.Add(reply)
-	defer remove()
-	select {
-	case <-s.ctx.Done():
-		return nil
-	case <-reply.Context().Done():
-		return nil
-	}
+	return s.pendingBlockStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
@@ -149,10 +139,7 @@ func (s *MiningServer) BroadcastPendingBlock(block *types.Block) error {
 }
 
 func (s *MiningServer) OnMinedBlock(req *txpoolproto.OnMinedBlockRequest, reply txpoolproto.Mining_OnMinedBlockServer) error {
-	remove := s.minedBlockStreams.Add(reply)
-	defer remove()
-	<-reply.Context().Done()
-	return reply.Context().Err()
+	return s.minedBlockStreams.Subscribe(s.ctx, reply)
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
