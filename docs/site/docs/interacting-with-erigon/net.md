@@ -8,7 +8,7 @@ sidebar_position: 5
 
 The `net` namespace provides network-related methods that are part of the standard Ethereum JSON-RPC API. These methods offer information about the node's network connectivity, peer count, and network version. In Erigon, the net namespace is implemented through the `NetAPI` interface and `NetAPIImpl` struct.
 
-The `net` namespace is enabled by default in Erigon's RPC daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
+The `net` namespace is enabled by default in Erigon's RPC Daemon and provides essential network information that applications use to understand the node's connectivity status and network configuration.
 
 For API usage refer to the below official resources:
 
@@ -34,9 +34,9 @@ For API usage refer to the below official resources:
 
 ### Availability and Configuration
 
-* The net namespace is enabled by default in Erigon's RPC daemon.
+* The net namespace is enabled by default in Erigon's RPC Daemon.
 * These methods are available on both HTTP and WebSocket connections.
-* For remote RPC daemon setups, the `net` namespace must be explicitly enabled for health check functionality.
+* For remote RPC Daemon setups, the `net` namespace must be explicitly enabled for health check functionality.
 
 ### Documentation References
 

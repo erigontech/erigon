@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -71,7 +72,9 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = rawdbreset.ResetState(db, ctx); err != nil {
+		dirs := datadir.New(datadirCli)
+		br, _ := blocksIO(db, logger)
+		if err = rawdbreset.ResetState(db, ctx, dirs, br, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}

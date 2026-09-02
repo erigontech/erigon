@@ -72,8 +72,8 @@ These flags control database performance and memory usage.
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Limits the number of parallel database reads. Default: equal to GOMAXPROCS (or number of CPU)
-  * Default: `1408`
+* `--db.read.concurrency value`: Ceiling on concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP) fail fast with an overload response instead. Low values are fine for low read-concurrency nodes (for example, validators); raise it for nodes serving heavy parallel RPC.
+  * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
@@ -84,12 +84,14 @@ These flags control database performance and memory usage.
   * Default: `0MB`
 * `--sync.parallel-state-flushing`: Enables parallel state flushing.
   * Default: `true`
+* `--erigondb.domain.steps-in-frozen-file value`: Overrides the `steps_in_frozen_file` setting in `erigondb.toml` for the domain merge cap only (history and inverted-index merges are unaffected). Pass a positive integer to set an explicit cap, or `"Inf"` to leave the domain merge unbounded.
+  * Default: unset (the value from `erigondb.toml` is used)
 
 ### Pruning and Snapshots
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](/fundamentals/sync-modes)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Prune Modes](/fundamentals/prune-modes)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
@@ -238,11 +240,11 @@ Flags for configuring various RPC servers and their behavior.
 * `--rpc.overlay.replayblocktimeout value`: The maximum time to wait to replay a single block.
   * Default: `10s`
 * `--rpc.subscription.filters.maxlogs value`: Maximum logs to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxheaders value`: Maximum block headers to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
   * Default: `0`
 * `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
@@ -349,7 +351,7 @@ Flags related to consensus mechanisms and network forks.
 
 Flags for configuring the Sentry component.
 
-* `--sentry.api.addr value`: A comma-separated list of sentry addresses.
+* `--sentry.api.addr value`: A comma-separated list of Sentry addresses.
 * `--sentry.log-peer-info`: Logs detailed peer info when a peer connects or disconnects.
   * Default: `false`
 * `--sentinel.addr value`: The address for the sentinel component.
@@ -359,18 +361,16 @@ Flags for configuring the Sentry component.
 * `--sentinel.bootnodes value`: Comma-separated enode URLs for P2P discovery bootstrap for the sentinel.
 * `--sentinel.staticpeers value`: Connects to comma-separated consensus static peers.
 
-Here is the rewritten and merged Downloader section, combining the two original sections and ensuring consistent formatting:
-
 ### Downloader and Synchronization
 
 These flags control the block synchronization and data downloading process, including the BitTorrent protocol settings.
 
-* `--downloader.api.addr value`: The downloader address.
-* `--downloader.disable.ipv4`: Disables IPv4 for the downloader.
+* `--downloader.api.addr value`: The Downloader address.
+* `--downloader.disable.ipv4`: Disables IPv4 for the Downloader.
   * Default: `false`
-* `--downloader.disable.ipv6`: Disables IPv6 for the downloader.
+* `--downloader.disable.ipv6`: Disables IPv6 for the Downloader.
   * Default: `false`
-* `--no-downloader`: Disables the downloader component.
+* `--no-downloader`: Disables the Downloader component.
   * Default: `false`
 * `--downloader.verify`: Verifies snapshots on startup.
   * Default: `false`
@@ -426,6 +426,8 @@ Flags for configuring the Caplin consensus layer.
   * Default: `128`
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
+* `--caplin.nat value`: NAT port mapping for Caplin P2P. Sets the external IP advertised in the discv5 ENR and libp2p multiaddrs while the socket binds to `--caplin.discovery.addr`. Required when running inside Docker or behind NAT. Accepted values: `""` (none), `"extip:1.2.3.4"`, `"stun"`, `"stun:<host>"`, `"upnp"`, `"pmp"`, `"pmp:192.168.0.1"`.
+  * Default: `""` (no NAT mapping)
 * `--caplin.max-inbound-traffic-per-peer value`: The maximum inbound traffic per second per peer.
   * Default: `1MB`
 * `--caplin.max-outbound-traffic-per-peer value`: The maximum outbound traffic per second per peer.
@@ -442,6 +444,8 @@ Flags for configuring the Caplin consensus layer.
   * Default: `false`
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
+* `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
+  * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.snapgen`: Enables snapshot generation.
@@ -553,8 +557,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 When running Erigon in Docker, you can configure user permissions and data directories:
 
-* `DOCKER_UID` - The UID of the docker user
-* `DOCKER_GID` - The GID of the docker user
+* `DOCKER_UID` - The UID of the Docker user
+* `DOCKER_GID` - The GID of the Docker user
 * `XDG_DATA_HOME` - The data directory mounted to containers
 
 ### Usage Examples

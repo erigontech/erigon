@@ -324,6 +324,7 @@ func init() {
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
+	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withStageBase(cmdStageCustomTrace)
@@ -332,6 +333,7 @@ func init() {
 	withPruneTo(cmdStageCustomTrace)
 	withTraceFlags(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
+	withErigondbDomainStepsInFrozenFile(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withStageBase(cmdStageTxLookup)
@@ -773,6 +775,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	if err := agg.SetDomainStepsInFrozenFile(erigondbDomainStepsInFrozenFile); err != nil {
+		return err
+	}
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 	agg.LockWorkersEditing()
@@ -856,6 +861,9 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	if err := agg.SetDomainStepsInFrozenFile(erigondbDomainStepsInFrozenFile); err != nil {
+		return err
+	}
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -977,7 +985,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
 			return
 		}
-		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
+		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 		_aggSingleton.SetFrozenBlocksProvider(blockReader)

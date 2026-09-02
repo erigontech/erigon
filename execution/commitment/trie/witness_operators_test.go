@@ -251,9 +251,9 @@ func TestKeySerialization(t *testing.T) {
 		{1},
 		{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 15, 15, 15, 16},
 	} {
-		b := keyNibblesToBytes(key)
+		b := witnessKeyNibblesToBytes(key)
 
-		key2 := keyBytesToNibbles(b)
+		key2 := witnessKeyBytesToNibbles(b)
 
 		if !bytes.Equal(key, key2) {
 			t.Errorf("wrong deserialization, expected %x got %x", key, key2)

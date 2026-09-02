@@ -232,8 +232,13 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	return res, nil
 }
 
-// GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
-// [from, to)
+// GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber.
+//
+// Geth semantics:
+//   - single param N:     returns accounts modified in block N
+//     (equivalent to comparing state root of N-1 vs N)
+//   - two params (S, E]:  returns accounts modified in blocks S+1 … E
+//     (equivalent to comparing state root of S vs E)
 func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -252,64 +257,171 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
 
-	endNum := startNum + 1 // allows for single param calls
-	if endNumber != nil {
-		// forces negative numbers to fail (too large) but allows zero
-		endNum = uint64(endNumber.Int64()) // [startNum,endNum) from user
-	}
-
-	// is endNum too big?
-	if endNum > latestBlock+1 { // [startNum,endNum)
-		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
-	}
-
-	if startNum >= endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
-	if err != nil {
-		return nil, err
-	}
-
-	//[from, to)
-	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
-	if err != nil {
-		return nil, err
-	}
-	endTxNum, err := api._txNumReader.Min(ctx, tx, endNum)
-	if err != nil {
-		return nil, err
-	}
-	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
-}
-
-// getModifiedAccounts returns a list of addresses that were modified in the block range
-// [startNum:endNum)
-func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
-	it, err := tx.HistoryRange(kv.AccountsDomain, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
-	if err != nil {
-		return nil, err
-	}
-	defer it.Close()
-
-	var result []common.Address
-	saw := make(map[common.Address]struct{})
-	for it.HasNext() {
-		k, _, err := it.Next()
+	if endNumber == nil {
+		// Single param: cover exactly block startNum.
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
+			return nil, err
+		}
+		startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 		if err != nil {
 			return nil, err
 		}
-		//TODO: data is sorted, enough to compare with prevKey
-		if _, ok := saw[common.BytesToAddress(k)]; !ok {
-			saw[common.BytesToAddress(k)] = struct{}{}
-			result = append(result, common.BytesToAddress(k))
+		endTxNum, err := api._txNumReader.Max(ctx, tx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		return getModifiedAccounts(tx, startTxNum, endTxNum+1)
+	}
+
+	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
+	endNum := uint64(endNumber.Int64()) // forces negative numbers to fail (too large)
+	// Allow endNum == latestBlock+1 for compatibility: callers may pass latest+1 to mean
+	// "up to and including the latest block" (mirrors old half-open [startNum, endNum) semantics).
+	if endNum > latestBlock+1 {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	}
+	originalEndNum := endNum
+	if endNum > latestBlock {
+		// Clamp to latestBlock so downstream txNum lookups succeed.
+		endNum = latestBlock
+	}
+	if startNum >= endNum {
+		// Special case: caller passed startNum+1 as endNum (e.g. startNum=latestBlock,
+		// endNum=latestBlock+1). After clamping, startNum == endNum. Treat as single-block.
+		if startNum == endNum && originalEndNum > latestBlock {
+			if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
+				return nil, err
+			}
+			startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
+			if err != nil {
+				return nil, err
+			}
+			endTxNum, err := api._txNumReader.Max(ctx, tx, startNum)
+			if err != nil {
+				return nil, err
+			}
+			return getModifiedAccounts(tx, startTxNum, endTxNum+1)
+		}
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
+	}
+
+	// Checking startNum+1 is sufficient under sequential-pruning semantics: if block N is
+	// available, all blocks > N are too.
+	if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
+		return nil, err
+	}
+
+	// startNum is the exclusive lower bound: first txNum is Max(startNum)+1.
+	startTxNum, err := api._txNumReader.Max(ctx, tx, startNum)
+	if err != nil {
+		return nil, err
+	}
+	startTxNum++ // exclusive: first txNum belonging to startNum+1
+	endTxNum, err := api._txNumReader.Max(ctx, tx, endNum)
+	if err != nil {
+		return nil, err
+	}
+	return getModifiedAccounts(tx, startTxNum, endTxNum+1)
+}
+
+// getModifiedAccounts returns a list of addresses that were modified in the txNum range
+// [startTxNum, endTxNum) (endTxNum is exclusive).
+//
+// # Why we need two domain passes (Erigon vs Geth architecture)
+//
+// Geth uses a Merkle Patricia Trie (MPT). Every storage write changes the storageRoot field
+// inside the account's trie node, so a trie diff between two state roots automatically surfaces
+// ALL modified accounts — including contracts whose only change was a storage slot write.
+//
+// Erigon uses a flat key/value model with two separate domains:
+//   - AccountsDomain: balance, nonce, code hash (one record per address)
+//   - StorageDomain:  storage slots (one record per address+slot)
+//
+// A contract that writes to storage without changing balance/nonce/code produces history
+// entries only in StorageDomain, not in AccountsDomain. Querying AccountsDomain alone would
+// miss those contracts. We therefore perform two passes and union the results.
+//
+// # Filters applied to match Geth output exactly
+//
+//  1. Precompiles touched but not changed: bytes.Equal(preVal, postVal) → skip.
+//  2. Self-destructed accounts (postVal empty): record in deletedAddrs, skip from result.
+//  3. Storage slots of deleted accounts: skipped via deletedAddrs.
+func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	saw := make(map[common.Address]struct{})
+	var result []common.Address
+
+	const addrLen = len(common.Address{})
+	addAddr := func(k []byte) {
+		addr := common.BytesToAddress(k[:addrLen])
+		if _, ok := saw[addr]; !ok {
+			saw[addr] = struct{}{}
+			result = append(result, addr)
 		}
 	}
+
+	// Pass 1 – AccountsDomain.
+	deletedAddrs := make(map[common.Address]struct{})
+	accIt, err := tx.HistoryRange(kv.AccountsDomain, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	defer accIt.Close()
+	for accIt.HasNext() {
+		k, preVal, err := accIt.Next()
+		if err != nil {
+			return nil, err
+		}
+		postVal, _, err := tx.GetAsOf(kv.AccountsDomain, k, endTxNum)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(preVal, postVal) {
+			continue // no net change
+		}
+		if len(postVal) == 0 {
+			deletedAddrs[common.BytesToAddress(k[:addrLen])] = struct{}{}
+			continue // deleted: Geth excludes these
+		}
+		addAddr(k)
+	}
+
+	// Pass 2 – StorageDomain (key = address 20B + slot 32B).
+	storIt, err := tx.HistoryRange(kv.StorageDomain, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	defer storIt.Close()
+	for storIt.HasNext() {
+		k, preVal, err := storIt.Next()
+		if err != nil {
+			return nil, err
+		}
+		if len(k) < addrLen {
+			continue
+		}
+		addr := common.BytesToAddress(k[:addrLen])
+		if _, ok := saw[addr]; ok {
+			continue // already in result
+		}
+		if _, ok := deletedAddrs[addr]; ok {
+			continue // account deleted within range
+		}
+		postVal, _, err := tx.GetAsOf(kv.StorageDomain, k, endTxNum)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(preVal, postVal) {
+			continue // no net change for this slot
+		}
+		addAddr(k)
+	}
+
 	return result, nil
 }
 
-// GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
+// GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash.
+// Same Geth semantics as GetModifiedAccountsByNumber: single hash = block N,
+// two hashes = accounts modified in (startHash, endHash].
 func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -317,39 +429,58 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 	defer tx.Rollback()
 
+	latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
 	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
 	if err != nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
-	endNum := startNum + 1 // allows for single parameter calls
 
-	if endHash != nil {
-		var err error
-		endNum, err = api.headerNumberByHash(ctx, tx, *endHash) // [startNum,endNum) from user
-		if err != nil {
-			return nil, fmt.Errorf("end block %x not found", *endHash)
+	if endHash == nil {
+		// Single param: cover exactly block startNum.
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum); err != nil {
+			return nil, err
 		}
+		startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		endTxNum, err := api._txNumReader.Max(ctx, tx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		return getModifiedAccounts(tx, startTxNum, endTxNum+1)
 	}
 
+	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
+	endNum, err := api.headerNumberByHash(ctx, tx, *endHash)
+	if err != nil {
+		return nil, fmt.Errorf("end block %x not found", *endHash)
+	}
+	if endNum > latestBlock {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	}
 	if startNum >= endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
-	if err != nil {
+	if err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum+1); err != nil {
 		return nil, err
 	}
 
-	//[from, to)
-	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
+	startTxNum, err := api._txNumReader.Max(ctx, tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := api._txNumReader.Min(ctx, tx, endNum)
+	startTxNum++ // exclusive: first txNum belonging to startNum+1
+	endTxNum, err := api._txNumReader.Max(ctx, tx, endNum)
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
+	return getModifiedAccounts(tx, startTxNum, endTxNum+1)
 }
 
 func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {

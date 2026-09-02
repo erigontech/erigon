@@ -620,7 +620,7 @@ func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, s
 		if !ok {
 			panic(fmt.Sprintf("match %s can't be parsed, shouldn't happen, fail fast", filename))
 		}
-		if info.Version.GreaterOrEqual(supported.MinSupported) && info.Version.LessOrEqual(supported.Current) && maxVersion.Less(info.Version) {
+		if supported.Supports(info.Version) && maxVersion.Less(info.Version) {
 			maxVersion = info.Version
 			maxMatch = match
 			continue

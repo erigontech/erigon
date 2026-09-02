@@ -89,6 +89,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcGethCompatFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
+	&utils.RpcGetLogsMaxResults,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -268,4 +269,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
+
+	&utils.ErigondbDomainStepsInFrozenFileFlag,
 }

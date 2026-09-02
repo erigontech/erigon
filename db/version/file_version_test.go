@@ -470,6 +470,17 @@ func TestMustSupport(t *testing.T) {
 		}()
 		supported.MustSupport(V2_0, "test.kv")
 	})
+
+	t.Run("higher minor within same major does not panic", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("unexpected panic for higher minor within same major: %v", r)
+			}
+		}()
+		// v1.5 > Current v1.2 but shares the major: a minor bump is a
+		// content-only, backward-readable change and must be supported.
+		supported.MustSupport(Version{Major: 1, Minor: 5}, "test.kv")
+	})
 }
 
 func BenchmarkMatchVersionedFile(b *testing.B) {

@@ -119,7 +119,12 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // findMergeRange
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
-func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
+//
+// domainMaxSpan caps the domain values merge range; historyMaxSpan is forwarded to the history
+// (and underlying inverted index) merge. They are passed separately so that the
+// --erigondb.domain.steps-in-frozen-file CLI flag can relax the domain cap without affecting
+// history/II, which keep using the erigondb.toml stepsInFrozenFile value.
+func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64) DomainRanges {
 	r := DomainRanges{
 		name:    dt.name,
 		aggStep: dt.stepSize,
@@ -130,7 +135,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		}
 		endStep := item.endTxNum / dt.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := spanStep * dt.stepSize
+		span := min(spanStep*dt.stepSize, domainMaxSpan)
 		fromTxNum := item.endTxNum - span
 		if fromTxNum >= item.startTxNum {
 			continue

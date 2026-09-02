@@ -248,10 +248,6 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			}
 		}
 
-		lastTxNum, _, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
-			return err
-		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -262,6 +258,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	var fromStep, toStep kv.Step
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		fromStep = firstStepNotInFiles(tx, produce)
+		// toStep must reflect what this batch actually re-derived, not the commitment
+		// frontier: when rebuilding a subset of domains, commitment can be ahead, which
+		// would build empty files past the domain's data and desync pruning.
+		var err error
+		lastTxNum, err = cfg.BlockReader.TxnumReader().Max(ctx, tx, toBlock-1)
+		if err != nil {
+			return err
+		}
 		if lastTxNum/agg.StepSize() > 0 {
 			toStep = kv.Step(lastTxNum / agg.StepSize())
 		}
@@ -502,6 +506,14 @@ func StageCustomTraceReset(ctx context.Context, db kv.TemporalRwDB, produce Prod
 	}
 	if err := backup.ClearTables(ctx, tx, tables...); err != nil {
 		return err
+	}
+	// Clearing the data tables alone is not enough: the prune-progress bookmark in
+	// TblPruningValsProg survives and would make the post-rebuild prune short-circuit
+	// (prs.TxTo >= txTo && Done), so the re-written history never gets pruned.
+	for _, table := range tables {
+		if err := dbstate.InvalidatePruneProgress(tx, table); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

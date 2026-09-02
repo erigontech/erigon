@@ -78,8 +78,19 @@ def _is_placeholder_brace(match):
 
 
 def _strip_jsx_expr(match):
-    """re.sub callback: drop JSX expressions, preserve placeholder identifiers."""
-    return match.group(0) if _is_placeholder_brace(match) else ""
+    """re.sub callback: drop JSX expressions, preserve placeholder identifiers.
+
+    If the expression contains a nullish-coalescing fallback (`?? 'value'` or
+    `?? "value"`), emit that fallback string so table cells stay readable in
+    the plain-text LLM artifact instead of going blank.
+    """
+    if _is_placeholder_brace(match):
+        return match.group(0)
+    inner = match.group(0)[1:-1]
+    fb = re.search(r'\?\?\s*[\'"]([^\'"]+)[\'"]', inner)
+    if fb:
+        return fb.group(1)
+    return ""
 
 
 def _sub_outside_backticks(pattern, repl, line):

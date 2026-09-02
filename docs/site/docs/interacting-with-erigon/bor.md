@@ -8,7 +8,7 @@ sidebar_position: 10
 
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
 
-The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC daemon and is only functional when running on Polygon networks with the Bor consensus engine.
+The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.
 
 ### Network Compatibility
 

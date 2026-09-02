@@ -61,12 +61,12 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 	t.Run("empty_and_single_file", func(t *testing.T) {
 		dt := newDomainRoTx(1, []visibleFile{})
-		result := dt.findMergeRange(100, 32)
+		result := dt.findMergeRange(100, 32, 32)
 		assert.False(t, result.values.needMerge)
 		assert.Equal(t, uint64(1), result.aggStep)
 
 		dt = newDomainRoTx(1, []visibleFile{createFile(0, 2)})
-		result = dt.findMergeRange(4, 32)
+		result = dt.findMergeRange(4, 32, 32)
 		assert.False(t, result.values.needMerge)
 	})
 
@@ -78,7 +78,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			createFile(5, 6),
 		}
 		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(16, 32)
+		result := dt.findMergeRange(16, 32, 32)
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
 		assert.Equal(t, uint64(4), result.values.to)
@@ -92,7 +92,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			createFile(3, 4),
 		}
 		dt := newDomainRoTx(1, files)
-		result := dt.findMergeRange(4, 32)
+		result := dt.findMergeRange(4, 32, 32)
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
 		assert.Equal(t, uint64(4), result.values.to)
@@ -106,7 +106,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 				createFile(aggStep, aggStep*2),
 			}
 			dt := newDomainRoTx(aggStep, files)
-			result := dt.findMergeRange(endTx, 32)
+			result := dt.findMergeRange(endTx, 32, 32)
 			assert.Equal(t, aggStep, result.aggStep)
 			assert.True(t, result.values.needMerge)
 		}
@@ -544,7 +544,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		files := []visibleFile{
 			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(32, 32)
+		r := newDomainRoTx(1, files).findMergeRange(32, 32, 32)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 32, int(r.values.to))
@@ -561,7 +561,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 	t.Run("domain/after_partial_merge", func(t *testing.T) {
 		// After a prior merge produced 0-32, the remaining files allow 0-64.
 		files := []visibleFile{f(0, 32), f(32, 48), f(48, 64)}
-		r := newDomainRoTx(16, files).findMergeRange(64, 64)
+		r := newDomainRoTx(16, files).findMergeRange(64, 64, 64)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 64, int(r.values.to))
@@ -572,7 +572,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 	t.Run("domain/four_equal_steps", func(t *testing.T) {
 		// 4 single-step files → merges 0-64 directly (4-way, single pass).
 		files := []visibleFile{f(0, 16), f(16, 32), f(32, 48), f(48, 64)}
-		r := newDomainRoTx(16, files).findMergeRange(64, 64)
+		r := newDomainRoTx(16, files).findMergeRange(64, 64, 64)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 64, int(r.values.to))
@@ -590,7 +590,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 			f(0, 1), f(1, 2), f(2, 3), f(3, 4),
 			f(4, 5), f(5, 6), f(6, 7), f(7, 8),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(8, 8)
+		r := newDomainRoTx(1, files).findMergeRange(8, 8, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 8, int(r.values.to))
@@ -610,7 +610,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		files := []visibleFile{
 			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5), f(5, 6),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(6, 8)
+		r := newDomainRoTx(1, files).findMergeRange(6, 8, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 4, int(r.values.to))
@@ -620,7 +620,7 @@ func TestFindMergeRange_Optimal(t *testing.T) {
 		files := []visibleFile{
 			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5),
 		}
-		r := newDomainRoTx(1, files).findMergeRange(5, 8)
+		r := newDomainRoTx(1, files).findMergeRange(5, 8, 8)
 		assert.True(t, r.values.needMerge)
 		assert.Equal(t, 0, int(r.values.from))
 		assert.Equal(t, 4, int(r.values.to))

@@ -1333,8 +1333,13 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-		if value != nil {
+		// A key changed at several steps in the range has one diff per step, sorted
+		// by key then descending step; only the lowest step's value is the value at
+		// txNumUnwindTo. Restore once, on the last (lowest-step) diff — else the
+		// DupSort table keeps several dups at unwindStep and getLatestFromDb returns
+		// the smallest. nil = different step, skip; []byte{} = absent, write tombstone.
+		lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
+		if value != nil && lastForKey {
 			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
 				return err
 			}
@@ -1377,9 +1382,10 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 	}
 
+	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
+	// last write in an older .kv is still found (walkback bounded by maxTxNum).
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		if maxTxNum != math.MaxUint64 && (dt.files[i].startTxNum > maxTxNum || maxTxNum > dt.files[i].endTxNum) { // (maxTxNum > dt.files[i].endTxNum || dt.files[i].startTxNum > maxTxNum) { // skip partially matched files
-			//fmt.Printf("getLatestFromFiles: skipping file %d %s, maxTxNum=%d, startTxNum=%d, endTxNum=%d\n", i, dt.files[i].src.decompressor.FileName(), maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum)
+		if maxTxNum != math.MaxUint64 && dt.files[i].startTxNum > maxTxNum {
 			continue
 		}
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)

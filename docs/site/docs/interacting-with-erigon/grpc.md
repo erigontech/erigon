@@ -8,7 +8,7 @@ sidebar_position: 13
 
 Erigon provides gRPC APIs that allow users to access blockchain data and services directly through protocol buffer interfaces. These APIs offer high-performance, strongly-typed access to Erigon's internal services and are particularly useful for applications requiring efficient data access or integration with other gRPC-based systems.
 
-The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like txpool, downloader, and sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
+The gRPC server can be explicitly enabled using the `--grpc` flag when running the **standalone `rpcdaemon`** binary. This flag is **not available** on the main `erigon` binary — internal gRPC services for components like TxPool, Downloader, and Sentry start automatically on the `--private.api.addr` endpoint and do not require any additional flag.
 
 ### Performance Considerations
 
@@ -124,7 +124,7 @@ The Downloader interface provides access to snapshot downloading and torrent man
 | Add          | Adds files to download queue       |
 | Delete       | Removes files from download queue  |
 | Completed    | Checks if downloads are completed  |
-| SetLogPrefix | Sets logging prefix for downloader |
+| SetLogPrefix | Sets logging prefix for Downloader |
 
 ***
 
