@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
@@ -482,6 +483,10 @@ func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, er
 type historyFloorTx struct {
 	kv.TemporalTx
 	startTxNum uint64
+}
+
+func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
+	return tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }).BlockFilesRoTx()
 }
 
 func (tx historyFloorTx) Debug() kv.TemporalDebugTx {
