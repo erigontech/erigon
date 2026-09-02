@@ -136,9 +136,8 @@ func TestRouteRedirectsNonCanonicalPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			rec := doRequest(t, http.MethodPost, tt.path, validQueryBody)
-			// http.ServeMux returns 301 here in go1.25.x; changes to 307 as of go1.26+ (see go.dev/doc/go1.26)
-			if rec.Code != http.StatusMovedPermanently {
-				t.Errorf("got status %d, want %d", rec.Code, http.StatusMovedPermanently)
+			if rec.Code < 300 || rec.Code >= 400 {
+				t.Errorf("got status %d, want a redirect", rec.Code)
 			}
 			if got := rec.Header().Get("Location"); got != tt.wantLocation {
 				t.Errorf("Location: got %q, want %q", got, tt.wantLocation)
@@ -240,7 +239,7 @@ func TestRouteInvalidJSON(t *testing.T) {
 // A body over the MaxBytesReader cap must be rejected rather than buffered.
 func TestRouteRejectsOversizedBody(t *testing.T) {
 	oversized := `{"queries":[{"anchor":"execution_block","path":"` + strings.Repeat("a", 1<<20) + `"}]}`
-	assertJSONError(t, doRequest(t, http.MethodPost, "/eth/v1/execution/123/query", oversized), http.StatusBadRequest)
+	assertJSONError(t, doRequest(t, http.MethodPost, "/eth/v1/execution/123/query", oversized), http.StatusRequestEntityTooLarge)
 }
 
 func TestRouteAcceptsBodyUnderLimit(t *testing.T) {
@@ -314,6 +313,16 @@ func TestRouteAliasBranch(t *testing.T) {
 			t.Errorf("alias %q missing from response: %v", name, got)
 		}
 	}
+}
+
+// A duplicate alias is bad input from the client, not a server fault.
+func TestRouteDuplicateAlias(t *testing.T) {
+	body := `{"aliases":[
+		{"anchor":"execution_block","path":".stateRoot","alias":"root"},
+		{"anchor":"execution_block","path":".number","alias":"root"}
+	],"queries":[{"anchor":"execution_block","path":".transactions[0].to"}]}`
+
+	assertJSONError(t, doRequest(t, http.MethodPost, "/eth/v1/execution/123/query", body), http.StatusBadRequest)
 }
 
 // The proof branch of parseQuery only runs when include_proofs is set.

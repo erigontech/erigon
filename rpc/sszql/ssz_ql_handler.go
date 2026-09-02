@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
@@ -19,9 +18,7 @@ var blockIDPattern = regexp.MustCompile(`^(?:latest|earliest|safe|finalized|pend
 var errInvalidBlockID = errors.New("invalid block_id")
 
 func SSZQueryHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleSSZQuery(w, r)
-	})
+	return http.HandlerFunc(handleSSZQuery)
 }
 
 func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
@@ -32,23 +29,10 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	segment := r.PathValue("version")
-	if !strings.HasPrefix(segment, "v") {
-		writeQueryError(w, http.StatusNotFound, "invalid version segment")
+	if r.PathValue("version") != "v1" {
+		writeQueryError(w, http.StatusNotFound, "unsupported API version")
 		return
 	}
-
-	v := strings.TrimPrefix(segment, "v")
-	if len(v) > 1 && v[0] == '0' {
-		writeQueryError(w, http.StatusNotFound, "invalid version segment")
-		return
-	}
-	parsed, err := strconv.ParseUint(v, 10, 8)
-	if err != nil {
-		writeQueryError(w, http.StatusNotFound, "invalid version segment")
-		return
-	}
-	version := uint(parsed)
 
 	blockID := r.PathValue("blockID")
 
@@ -65,6 +49,11 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeQueryError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeQueryError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
@@ -77,17 +66,12 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var res SSZQLResponse
-
-	switch version {
-	case 1:
-		res, err = parseQueryV1(req, version, bnh)
-	default:
-		writeQueryError(w, http.StatusNotFound, "unsupported API version")
-		return
-	}
-
+	res, err := parseQueryV1(req, bnh)
 	if err != nil {
+		if errors.Is(err, errBadQuery) {
+			writeQueryError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeQueryError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

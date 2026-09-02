@@ -8,26 +8,25 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func parseQueryV1(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrHash) (SSZQLResponse, error) {
+var errBadQuery = errors.New("bad query")
+
+func parseQueryV1(request SSZQLRequest, blockID rpc.BlockNumberOrHash) (SSZQLResponse, error) {
 	response := SSZQLResponse{
 		Paths:    make([]Path, 0),
 		Gindices: make([]Gindex, 0),
 		Leaves:   make([]Leaf, 0),
 		Results:  make([]Result, 0),
 	}
-	emptyRes := response
 	aliases, err := parseAliases(request.Aliases, &response, blockID)
 	if err != nil {
-		return emptyRes, err
+		return SSZQLResponse{}, err
 	}
-	err = parseQueries(request, &response, blockID, aliases)
-	if err != nil {
-		return emptyRes, err
+	if err := parseQueries(request, &response, blockID, aliases); err != nil {
+		return SSZQLResponse{}, err
 	}
 	if request.IncludeProofs {
-		err = generateProof(&response)
-		if err != nil {
-			return emptyRes, err
+		if err := generateProof(&response); err != nil {
+			return SSZQLResponse{}, err
 		}
 	}
 
@@ -54,7 +53,7 @@ func parseAliases(aliases []Alias, res *SSZQLResponse, blockID rpc.BlockNumberOr
 
 	for _, alias := range aliases {
 		if _, dup := m[alias.Alias]; dup {
-			return nil, fmt.Errorf("%w: %q", errors.New("duplicate alias"), alias.Alias)
+			return nil, fmt.Errorf("%w: duplicate alias %q", errBadQuery, alias.Alias)
 		}
 
 		resolvedPath, err := resolvePath(alias.Path, alias.Anchor, blockID)
@@ -78,11 +77,8 @@ func resolvePath(path Path, anchor Anchor, blockID rpc.BlockNumberOrHash) (Resol
 }
 
 func generateProof(res *SSZQLResponse) error {
-	proofs := make([]Proof, 0, len(res.Results))
 	for i := range res.Results {
-		proof := Proof("proof of query" + strconv.Itoa(i))
-		proofs = append(proofs, proof)
-		res.Proofs = append(res.Proofs, proof)
+		res.Proofs = append(res.Proofs, Proof("proof of query"+strconv.Itoa(i)))
 	}
 	return nil
 }
