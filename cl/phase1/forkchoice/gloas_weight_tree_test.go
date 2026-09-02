@@ -211,6 +211,23 @@ func TestGrowGloasContributionsReusesCapacity(t *testing.T) {
 	require.Equal(t, gloasVoteContribution{}, applied[2])
 }
 
+func TestGrowGloasContributionsClearsReexposedCapacity(t *testing.T) {
+	backing := []gloasVoteContribution{
+		{contribution: 42, set: true},
+		{contribution: 64, set: true},
+		{contribution: 128, set: true},
+	}
+	applied := backing[:1]
+	first := &applied[0]
+
+	applied = growGloasContributions(applied, len(backing))
+
+	require.Same(t, first, &applied[0])
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
 func TestGrowGloasContributionsNoGrowth(t *testing.T) {
 	require.Nil(t, growGloasContributions(nil, 0))
 
