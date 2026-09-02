@@ -1274,9 +1274,8 @@ func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
 }
 
 // BuildTorrentIfNeed only checks that the .torrent path exists, so metainfo that cannot be parsed
-// suppresses the derivation the kept data would otherwise supply, leaving the snapshot unseedable
-// for the life of the process. Remove it only when the bytes are confirmed malformed: a file we
-// could not read says nothing about its contents.
+// suppresses the derivation the kept data would otherwise supply. Remove it only when the bytes are
+// confirmed malformed: a file we could not read says nothing about its contents.
 // metainfo.Load never unmarshals InfoBytes, so the info dict needs its own check.
 func (d *Downloader) removeMalformedMetainfo(name string) error {
 	name, err := ensureCantLeaveDir(name, d.snapDir())

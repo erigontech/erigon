@@ -1279,7 +1279,7 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 // would otherwise supply, and the name never reaches torrentsByName.
 func TestKeptLocalSnapshotWithMalformedMetainfoIsSeeded(t *testing.T) {
 	require := require.New(t)
-	d, _, name, path := newLocalSnapshotTest(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
 	require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("not bencode"), 0o644))
 	markInitialDownloadComplete(t, d)
 
@@ -1290,13 +1290,14 @@ func TestKeptLocalSnapshotWithMalformedMetainfoIsSeeded(t *testing.T) {
 	_, registered := d.torrentsByName[name]
 	d.lock.RUnlock()
 	require.True(registered, "a corrupt .torrent left the kept snapshot unseedable")
+	requireLoggedForName(t, logs, "removed malformed metainfo", name)
 }
 
 // A bencode dict without an "info" key parses cleanly, so only SetInfoBytes rejects it --
 // by then the kept snapshot is registered against an info-less torrent.
 func TestKeptLocalSnapshotWithInfolessMetainfoIsSeeded(t *testing.T) {
 	require := require.New(t)
-	d, _, name, path := newLocalSnapshotTest(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
 	require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("d8:announce3:abce"), 0o644))
 	markInitialDownloadComplete(t, d)
 
@@ -1308,4 +1309,5 @@ func TestKeptLocalSnapshotWithInfolessMetainfoIsSeeded(t *testing.T) {
 	d.lock.RUnlock()
 	require.True(registered, "an info-less .torrent left the kept snapshot unseedable")
 	require.NotNil(tor.Info(), "the kept snapshot is registered against an info-less torrent")
+	requireLoggedForName(t, logs, "removed malformed metainfo", name)
 }
