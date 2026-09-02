@@ -521,8 +521,14 @@ func (c *BranchCache) store(prefix []byte, entry branchCacheEntry) {
 	var nibBuf [4]byte
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
+			// Boxed on the first attempt and reused: only one CAS can publish it,
+			// and an occupied slot is not the common case.
+			var boxed *branchCacheEntry
 			for cur := slot.Load(); cur != nil; cur = slot.Load() {
-				if slot.CompareAndSwap(cur, newBranchCacheEntry(entry)) {
+				if boxed == nil {
+					boxed = newBranchCacheEntry(entry)
+				}
+				if slot.CompareAndSwap(cur, boxed) {
 					return
 				}
 			}
