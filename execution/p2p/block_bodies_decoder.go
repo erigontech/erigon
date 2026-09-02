@@ -27,10 +27,10 @@ import (
 )
 
 type rawBlockBody struct {
-	transactions   []byte
-	uncles         []byte
-	withdrawals    []byte
-	hasWithdrawals bool
+	transactionsPayload []byte
+	encodedUncles       []byte
+	withdrawalsPayload  []byte
+	hasWithdrawals      bool
 }
 
 type blockBodyCommitments struct {
@@ -50,7 +50,7 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 	}
 
 	bodies := make([]*types.Body, len(headers))
-	nextHeaderIndex := 0
+	candidateIndex := 0
 	for bodyIndex := range bodyCount {
 		bodyPayload, rest, err := rlp.SplitList(encodedBodies)
 		if err != nil {
@@ -68,73 +68,77 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 			return nil, fmt.Errorf("hash block body %d: %w", bodyIndex, err)
 		}
 
-		lastHeaderIndex := len(headers) - (bodyCount - bodyIndex)
-		firstHeaderIndex := nextHeaderIndex
+		// Stop early enough to leave one header for every later body.
+		lastCandidateIndex := len(headers) - (bodyCount - bodyIndex)
+		firstCandidateIndex := candidateIndex
 		var firstMismatch error
-		for nextHeaderIndex <= lastHeaderIndex {
-			mismatch := commitments.matchesHeader(headers[nextHeaderIndex])
+		for candidateIndex <= lastCandidateIndex {
+			mismatch := commitments.matchesHeader(headers[candidateIndex])
 			if mismatch == nil {
 				break
 			}
 			if firstMismatch == nil {
 				firstMismatch = mismatch
 			}
-			nextHeaderIndex++
+			candidateIndex++
 		}
-		if nextHeaderIndex > lastHeaderIndex {
+		if candidateIndex > lastCandidateIndex {
 			firstMismatch = fmt.Errorf("body matches no remaining requested header: %w", firstMismatch)
-			return nil, newBodyHeaderMismatch(headers[firstHeaderIndex], firstMismatch)
+			return nil, newBodyHeaderMismatch(headers[firstCandidateIndex], firstMismatch)
 		}
 
 		body := new(types.Body)
 		if err := rlp.DecodeBytes(encodedBody, body); err != nil {
 			return nil, fmt.Errorf("decode block body %d: %w", bodyIndex, err)
 		}
-		bodies[nextHeaderIndex] = body
-		nextHeaderIndex++
+		bodies[candidateIndex] = body
+		candidateIndex++
 	}
 	return bodies, nil
 }
 
-func splitRawBlockBody(body []byte) (rawBlockBody, error) {
-	transactions, _, body, err := splitRawList(body)
+func splitRawBlockBody(payload []byte) (rawBlockBody, error) {
+	transactionsPayload, _, remaining, err := splitRawList(payload)
 	if err != nil {
 		return rawBlockBody{}, err
 	}
-	_, uncles, body, err := splitRawList(body)
+	_, encodedUncles, remaining, err := splitRawList(remaining)
 	if err != nil {
 		return rawBlockBody{}, err
 	}
 
-	rawBody := rawBlockBody{transactions: transactions, uncles: uncles}
-	if len(body) == 0 {
+	rawBody := rawBlockBody{
+		transactionsPayload: transactionsPayload,
+		encodedUncles:       encodedUncles,
+	}
+	if len(remaining) == 0 {
 		return rawBody, nil
 	}
-	rawBody.withdrawals, _, body, err = splitRawList(body)
+	rawBody.withdrawalsPayload, _, remaining, err = splitRawList(remaining)
 	if err != nil {
 		return rawBlockBody{}, err
 	}
-	if len(body) != 0 {
+	if len(remaining) != 0 {
 		return rawBlockBody{}, rlp.ErrMoreThanOneValue
 	}
 	rawBody.hasWithdrawals = true
 	return rawBody, nil
 }
 
-func splitRawList(encoded []byte) (content, raw, rest []byte, err error) {
-	content, rest, err = rlp.SplitList(encoded)
+func splitRawList(encoded []byte) (payload, encodedList, rest []byte, err error) {
+	payload, rest, err = rlp.SplitList(encoded)
 	if err != nil {
 		return nil, nil, encoded, err
 	}
-	return content, encoded[:len(encoded)-len(rest)], rest, nil
+	return payload, encoded[:len(encoded)-len(rest)], rest, nil
 }
 
 func (b rawBlockBody) commitments() (blockBodyCommitments, error) {
-	transactionHash, err := types.DeriveShaRawTransactions(b.transactions)
+	transactionHash, err := types.DeriveShaRawTransactions(b.transactionsPayload)
 	if err != nil {
 		return blockBodyCommitments{}, err
 	}
-	uncleHash := crypto.Keccak256Hash(b.uncles)
+	uncleHash := crypto.Keccak256Hash(b.encodedUncles)
 	commitments := blockBodyCommitments{
 		transactionHash: transactionHash,
 		uncleHash:       uncleHash,
@@ -144,7 +148,7 @@ func (b rawBlockBody) commitments() (blockBodyCommitments, error) {
 		return commitments, nil
 	}
 
-	commitments.withdrawalsHash, err = types.DeriveShaRawValues(b.withdrawals)
+	commitments.withdrawalsHash, err = types.DeriveShaRawValues(b.withdrawalsPayload)
 	if err != nil {
 		return blockBodyCommitments{}, err
 	}

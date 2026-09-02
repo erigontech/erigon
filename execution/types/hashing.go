@@ -42,15 +42,14 @@ func DeriveSha(list DerivableList) common.Hash {
 	}
 
 	var value bytes.Buffer
-	builder := newDeriveShaBuilder()
-	next := firstDerivationIndex(count)
-	builder.add(nil, next)
-	for next >= 0 {
-		index := next
+	index := firstDerivationIndex(count)
+	builder := newDeriveShaBuilder(index)
+	for index >= 0 {
 		value.Reset()
 		list.EncodeIndex(index, &value)
-		next = nextDerivationIndex(index, count)
-		builder.add(value.Bytes(), next)
+		nextIndex := nextDerivationIndex(index, count)
+		builder.addValue(value.Bytes(), nextIndex)
+		index = nextIndex
 	}
 
 	return builder.root()
@@ -75,12 +74,11 @@ func deriveShaRawValues(encoded []byte, unwrapStringValues bool) (common.Hash, e
 		return trie.EmptyRoot, nil
 	}
 
-	builder := newDeriveShaBuilder()
-	builder.add(nil, firstDerivationIndex(count))
+	builder := newDeriveShaBuilder(firstDerivationIndex(count))
 	indexAfterZero := nextDerivationIndex(0, count)
 
 	// Raw values arrive in numeric order. Hold index 0 so the builder receives
-	// keys in RLP order: 1 through 127, then 0, then 128 onward.
+	// RLP-encoded keys in lexicographic order: 1 through 127, then 0, then 128 onward.
 	var zeroValue []byte
 	for i := 0; len(encoded) > 0; i++ {
 		kind, content, rest, err := rlp.Split(encoded)
@@ -98,14 +96,14 @@ func deriveShaRawValues(encoded []byte, unwrapStringValues bool) (common.Hash, e
 			zeroValue = value
 		} else {
 			if i == indexAfterZero {
-				builder.add(zeroValue, indexAfterZero)
+				builder.addValue(zeroValue, indexAfterZero)
 			}
-			builder.add(value, nextDerivationIndex(i, count))
+			builder.addValue(value, nextDerivationIndex(i, count))
 		}
 		encoded = rest
 	}
 	if indexAfterZero < 0 {
-		builder.add(zeroValue, indexAfterZero)
+		builder.addValue(zeroValue, indexAfterZero)
 	}
 
 	return builder.root(), nil
@@ -139,44 +137,40 @@ func nextDerivationIndex(index, count int) int {
 }
 
 type deriveShaBuilder struct {
-	curr     bytes.Buffer
-	succ     bytes.Buffer
-	hb       *trie.HashBuilder
-	hex      hexWriter
-	groups   []uint16
-	branches []uint16
-	hashes   []uint16
-	leafData trie.GenStructStepLeafData
+	currentKey  bytes.Buffer
+	nextKey     bytes.Buffer
+	hashBuilder *trie.HashBuilder
+	keyWriter   hexWriter
+	groups      []uint16
+	branches    []uint16
+	hashes      []uint16
+	leafData    trie.GenStructStepLeafData
 }
 
-func newDeriveShaBuilder() *deriveShaBuilder {
-	builder := &deriveShaBuilder{hb: trie.NewHashBuilder(false)}
-	builder.hex.w = &builder.succ
-	builder.hb.Reset()
+func newDeriveShaBuilder(firstIndex int) *deriveShaBuilder {
+	builder := &deriveShaBuilder{hashBuilder: trie.NewHashBuilder(false)}
+	builder.keyWriter.w = &builder.nextKey
+	builder.hashBuilder.Reset()
+	builder.prepareNextKey(firstIndex)
 	return builder
 }
 
-func (b *deriveShaBuilder) add(value []byte, next int) {
-	b.curr.Reset()
-	b.curr.Write(b.succ.Bytes())
-	b.succ.Reset()
-
-	if next >= 0 {
-		encodeUint(uint(next), &b.hex)
-		if err := b.hex.Commit(); err != nil {
-			panic(fmt.Errorf("fatal in DeriveSha: %w", err))
-		}
-	}
-	if b.curr.Len() == 0 {
+// addValue inserts value under the prepared key and prepares nextIndex as its successor.
+func (b *deriveShaBuilder) addValue(value []byte, nextIndex int) {
+	b.currentKey.Reset()
+	b.currentKey.Write(b.nextKey.Bytes())
+	b.nextKey.Reset()
+	b.prepareNextKey(nextIndex)
+	if b.currentKey.Len() == 0 {
 		return
 	}
 
 	b.leafData.Value = rlp.RlpEncodedBytes(value)
 	b.groups, b.branches, b.hashes, _ = trie.GenStructStep(
 		retain,
-		b.curr.Bytes(),
-		b.succ.Bytes(),
-		b.hb,
+		b.currentKey.Bytes(),
+		b.nextKey.Bytes(),
+		b.hashBuilder,
 		nil,
 		&b.leafData,
 		b.groups,
@@ -186,8 +180,18 @@ func (b *deriveShaBuilder) add(value []byte, next int) {
 	)
 }
 
+func (b *deriveShaBuilder) prepareNextKey(index int) {
+	if index < 0 {
+		return
+	}
+	encodeUint(uint(index), &b.keyWriter)
+	if err := b.keyWriter.Commit(); err != nil {
+		panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+	}
+}
+
 func (b *deriveShaBuilder) root() common.Hash {
-	hash, _ := b.hb.RootHash()
+	hash, _ := b.hashBuilder.RootHash()
 	return hash
 }
 

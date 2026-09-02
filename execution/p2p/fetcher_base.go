@@ -124,9 +124,9 @@ func (f *FetcherBase) FetchBodies(
 ) (FetcherResponse[[]*types.Body], error) {
 	bodies := make([]*types.Body, len(headers))
 	pendingHeaders := slices.Clone(headers)
-	pendingIndexes := make([]int, len(headers))
-	for i := range pendingIndexes {
-		pendingIndexes[i] = i
+	pendingResultIndexes := make([]int, len(headers))
+	for i := range pendingResultIndexes {
+		pendingResultIndexes[i] = i
 	}
 	totalBodiesSize := 0
 
@@ -146,22 +146,22 @@ func (f *FetcherBase) FetchBodies(
 		for i, body := range bodiesChunk.Data {
 			if body == nil {
 				pendingHeaders[missingCount] = headersChunk[i]
-				pendingIndexes[missingCount] = pendingIndexes[i]
+				pendingResultIndexes[missingCount] = pendingResultIndexes[i]
 				missingCount++
 				continue
 			}
 
-			bodies[pendingIndexes[i]] = body
+			bodies[pendingResultIndexes[i]] = body
 			matchedCount++
 		}
 		if matchedCount == 0 {
 			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headersChunk)
 		}
 
-		remainingCount := copy(pendingHeaders[missingCount:], pendingHeaders[chunkLen:])
-		copy(pendingIndexes[missingCount:], pendingIndexes[chunkLen:])
-		pendingHeaders = pendingHeaders[:missingCount+remainingCount]
-		pendingIndexes = pendingIndexes[:missingCount+remainingCount]
+		// Compact missing entries before the untouched tail while keeping headers
+		// aligned with their result indexes.
+		pendingHeaders = append(pendingHeaders[:missingCount], pendingHeaders[chunkLen:]...)
+		pendingResultIndexes = append(pendingResultIndexes[:missingCount], pendingResultIndexes[chunkLen:]...)
 		totalBodiesSize += bodiesChunk.TotalSize
 	}
 
