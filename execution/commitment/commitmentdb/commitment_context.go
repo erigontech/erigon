@@ -1173,8 +1173,13 @@ func loadLatestCollectorRecords(collector *etl.Collector, putBranch func([]byte,
 			return nil
 		}
 		held := value
-		if valueNil {
+		switch {
+		case valueNil:
 			held = nil
+		case held == nil:
+			// append(nil[:0], empty...) is nil, and DomainPut refuses a nil value. An empty
+			// record is a tombstone and has to stay distinguishable from an absent one.
+			held = []byte{}
 		}
 		if err := putBranch(key, held); err != nil {
 			return err

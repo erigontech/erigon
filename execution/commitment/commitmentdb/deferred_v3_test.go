@@ -64,6 +64,30 @@ func TestTrieContextV3OverlayIncludesLatestRecord(t *testing.T) {
 	require.Equal(t, []byte(want.Data), branch)
 }
 
+// An empty record on the very first key: the row buffer is still nil there, and append(nil[:0])
+// of an empty slice yields nil, not an empty slice. DomainPut rejects a nil value outright, so
+// getting this wrong kills the node rather than corrupting anything quietly.
+func TestLoadLatestCollectorRecordsKeepsFirstEmptyRecordNonNil(t *testing.T) {
+	collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(1), log.Root())
+	defer collector.Close()
+
+	tombstoneKey := []byte{0x10, 0x80 | 1}
+	laterKey := []byte{0x10, 0x80 | 2}
+	require.NoError(t, collector.Collect(tombstoneKey, []byte{}))
+	require.NoError(t, collector.Collect(laterKey, []byte{5}))
+
+	var got [][]byte
+	err := loadLatestCollectorRecords(collector, func(_, v []byte) error {
+		got = append(got, cloneBytesPreserveNil(v))
+		return nil
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.NotNil(t, got[0], "an empty record must stay non-nil: DomainPut refuses a nil value")
+	require.Empty(t, got[0])
+	require.Equal(t, []byte{5}, got[1])
+}
+
 func TestLoadLatestCollectorRecordsResolvesEachRecord(t *testing.T) {
 	collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(1), log.Root())
 	defer collector.Close()
