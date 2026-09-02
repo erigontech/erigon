@@ -110,7 +110,12 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 }
 
 func (r *LatestStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
-	return r.sharedDomains.ReadCommitmentRecords(r.srcTx, nodeKey, mask, maskKnown, r.metrics)
+	// A typed nil in the interface would read as non-nil and silence the request-scoped fallback.
+	var wm kv.GetLatestMetrics
+	if r.metrics != nil {
+		wm = r.metrics
+	}
+	return r.sharedDomains.ReadCommitmentRecords(r.srcTx, nodeKey, mask, maskKnown, wm)
 }
 
 func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {

@@ -817,3 +817,29 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	require.Error(t, res.err, "a divergent computed-ahead root must fail the block")
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
 }
+
+// A record read never goes through the getter, so it needs its own path to the worker's
+// accumulator. Without it kv_read_count{domain="commitment"} reads zero on a v3 node while the
+// v2 arm reports millions, and the two cannot be compared.
+func TestAsOfStateReaderWorkerMetersRecordReads(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	_, tx, doms := setupStepTest(t)
+
+	nodeKey := []byte{0x00}
+	childKey := []byte{0x00, 0x80 | 3}
+	require.NoError(t, doms.DomainPut(kv.CommitmentDomain, tx, childKey, []byte{1, 2, 3}, 0, nil))
+
+	wm := kvmetrics.NewDomainMetrics()
+	workerCtx := kvmetrics.ContextWithMetrics(context.Background(), wm)
+	reader := (&asOfStateReader{sd: doms, roTx: tx}).CloneForWorker(workerCtx, tx)
+
+	_, present, _, err := reader.ReadCommitmentRecords(nodeKey, 0, false)
+	require.NoError(t, err)
+	require.NotZero(t, present, "the record just written must be readable")
+
+	entry, ok := wm.Domains[kv.CommitmentDomain]
+	require.True(t, ok, "a worker's record read must land in its own accumulator")
+	require.Positive(t, entry.CacheReadCount+entry.DbReadCount+entry.FileReadCount)
+}
