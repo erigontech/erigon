@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -133,5 +133,60 @@ func TestOnAddSubscriberThatStopsReadingOverTCP(t *testing.T) {
 		case <-timeout:
 			t.Fatal("healthy subscriber never received the marker message")
 		}
+	}
+}
+
+// A handler wedged in Send is released when the server tears its transport
+// down, so a subscriber that stopped reading cannot outlive the server.
+func TestStalledOnAddSubscriberIsReleasedWhenTheServerStops(t *testing.T) {
+	ctx := t.Context()
+	logger := log.New()
+
+	handlerDone := make(chan struct{})
+	newSlotsStreams := &NewSlotsStreams{}
+	srv := grpc.NewServer(grpc.StreamInterceptor(
+		func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+			defer close(handlerDone)
+			return handler(srv, ss)
+		}))
+	txpoolproto.RegisterTxpoolServer(srv, NewGrpcServer(ctx, nil, nil, newSlotsStreams, *uint256.NewInt(1), logger))
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go srv.Serve(listener) //nolint:errcheck // stopped below
+
+	conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+	stalled, err := txpoolproto.NewTxpoolClient(conn).OnAdd(ctx, &txpoolproto.OnAddRequest{})
+	require.NoError(t, err)
+
+	probing := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-probing:
+				return
+			case <-ticker.C:
+				newSlotsStreams.Broadcast(&txpoolproto.OnAddReply{}, logger)
+			}
+		}
+	}()
+	_, err = stalled.Recv()
+	require.NoError(t, err)
+	close(probing)
+
+	// stalled is never read again: wedge its handler inside Send.
+	for range 40 {
+		newSlotsStreams.Broadcast(&txpoolproto.OnAddReply{RplTxs: [][]byte{make([]byte, 256*1024)}}, logger)
+	}
+
+	srv.Stop()
+	select {
+	case <-handlerDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the wedged OnAdd handler was not released when the server stopped")
 	}
 }

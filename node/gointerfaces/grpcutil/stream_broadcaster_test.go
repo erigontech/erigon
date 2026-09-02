@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -382,5 +382,32 @@ func TestBroadcastDoesNotCopyTheMessage(t *testing.T) {
 	broadcastNow(t, &b, msg)
 	for _, stream := range streams {
 		require.Same(t, msg, recvMsg(t, stream))
+	}
+}
+
+func TestManyStalledSubscribersDoNotAffectAHealthyOne(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	var b StreamBroadcaster[testMsg]
+
+	const stalledCount = 8
+	stalled := make([]*fakeStream, stalledCount)
+	for i := range stalled {
+		stalled[i] = newFakeStream(ctx)
+		stalled[i].gate = make(chan struct{})
+		subscribe(t, &b, ctx, stalled[i])
+	}
+	healthy := newFakeStream(ctx)
+	subscribe(t, &b, ctx, healthy)
+
+	const messages = subscriberQueueLen + 2
+	for i := range messages {
+		broadcastNow(t, &b, &testMsg{n: i})
+	}
+
+	// Every stalled subscriber is gone; the healthy one kept all of them in order.
+	require.Equal(t, 1, subCount(&b))
+	for i := range messages {
+		require.Equal(t, i, recvMsg(t, healthy).n)
 	}
 }
