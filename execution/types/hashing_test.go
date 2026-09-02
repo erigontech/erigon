@@ -103,7 +103,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), common.Copy(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), bytes.Clone(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }
@@ -127,33 +127,3 @@ var (
 		BaseFee:     uint256.NewInt(7),
 	}
 )
-
-func BenchmarkLegacySmallList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkCurrentSmallList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkLegacyLargeList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkCurrentLargeList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkRlpHashHeader(b *testing.B) {
-	for b.Loop() {
-		RlpHash(benchHeader)
-	}
-}

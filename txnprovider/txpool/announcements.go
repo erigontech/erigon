@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"sort"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -120,9 +119,9 @@ func (a Announcements) Copy() Announcements {
 		return a
 	}
 	c := Announcements{
-		ts:     common.Copy(a.ts),
+		ts:     bytes.Clone(a.ts),
 		sizes:  make([]uint32, len(a.sizes)),
-		hashes: common.Copy(a.hashes),
+		hashes: bytes.Clone(a.hashes),
 	}
 	copy(c.sizes, a.sizes)
 	return c

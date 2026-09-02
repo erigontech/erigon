@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"math"
 	"slices"
 	"testing"
 
@@ -44,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 //go:embed test_data/anchor_state.ssz_snappy
@@ -81,12 +80,14 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	anchor := state2.New(cfg)
 	require.NoError(tb, utils.DecodeSSZSnappy(anchor, diffAnchorEnc, int(clparams.AltairVersion)))
 	em := beaconevents.NewEventEmitter()
-	gs, err := initial_state.GetGenesisState(1)
+	gs, err := initial_state.GetGenesisState(tb.Context(), 1)
 	require.NoError(tb, err)
 	clk := eth_clock.NewEthereumClock(gs.GenesisTime(), gs.GenesisValidatorsRoot(), cfg)
-	bs := blob_storage.NewBlobStore(memdb.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, cfg, clk)
+	bs := blob_storage.NewBlobStore(mdbxtest.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs())
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(tb, err)
 	store, err := NewForkChoiceStore(clk, anchor, nil, pool.NewOperationsPool(cfg),
-		fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
+		forkGraphDisk,
 		em, sd, bs, public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
 	require.NoError(tb, err)
 	store.OnTick(0)
@@ -136,93 +137,6 @@ func TestGloasWeightTreeMatchesFullScan(t *testing.T) {
 		}
 	}
 	require.True(t, sawNonZero, "differential check is vacuous: no node carried weight")
-}
-
-// BenchmarkHeadWeight_DeltaTreeVsFullScan compares the maintained tree against
-// the full-scan store on the same scenario.
-func BenchmarkHeadWeight_DeltaTreeVsFullScan(b *testing.B) {
-	f := buildExAnteStore(b)
-	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	cs, err := f.getCheckpointState(justified)
-	require.NoError(b, err)
-	require.NotNil(b, cs)
-	node := ForkChoiceNode{Root: justified.Root, PayloadStatus: cltypes.PayloadStatusPending}
-
-	b.Run("delta-tree", func(b *testing.B) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		tree := f.gloasWeightTree.prepare(justified, cs)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_ = tree.GetAttestationScore(node)
-		}
-	})
-	b.Run("fullscan", func(b *testing.B) {
-		full := NewWeightStore(f) // constructed outside the lock (getCheckpointState is cached)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			_ = full.GetAttestationScore(node)
-		}
-	})
-}
-
-func BenchmarkGloasWeightTreePrepare(b *testing.B) {
-	f := buildExAnteStore(b)
-	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	cs, err := f.getCheckpointState(justified)
-	require.NoError(b, err)
-	require.NotNil(b, cs)
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.gloasWeightTree.prepare(justified, cs)
-
-	dirtyOne := uint64(0)
-	dirtyTenPercent := make([]uint64, 0, cs.validatorSetSize/10)
-	dirtyAll := make([]uint64, 0, cs.validatorSetSize)
-	for i := 0; i < cs.validatorSetSize; i++ {
-		vi := uint64(i)
-		if len(dirtyTenPercent) < cs.validatorSetSize/10 {
-			dirtyTenPercent = append(dirtyTenPercent, vi)
-		}
-		dirtyAll = append(dirtyAll, vi)
-	}
-
-	b.Run("clean", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("dirty-one", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.markDirty(dirtyOne)
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("dirty-10pct", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			for _, vi := range dirtyTenPercent {
-				f.gloasWeightTree.markDirty(vi)
-			}
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("dirty-all", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			for _, vi := range dirtyAll {
-				f.gloasWeightTree.markDirty(vi)
-			}
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
-	b.Run("full-rebuild", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			f.gloasWeightTree.markAllDirty()
-			f.gloasWeightTree.prepare(justified, cs)
-		}
-	})
 }
 
 // TestGloasWeightTreeDeltaMatchesFullScan drives vote reassignments through

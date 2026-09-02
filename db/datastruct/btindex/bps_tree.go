@@ -51,8 +51,8 @@ type indexSeekerIterator interface {
 type dataLookupFunc func(di uint64, g *seg.Reader) ([]byte, []byte, uint64, error)
 
 // M limits amount of child for tree node.
-func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup}
+func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc) *BpsTree {
+	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup}
 	if err := bt.WarmUp(kv); err != nil {
 		panic(err)
 	}
@@ -62,8 +62,8 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, nodeStride uint64) *BpsTree {
-	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfftEF: nodeOfftEF, nodeStride: nodeStride}
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, nodeStride uint64) *BpsTree {
+	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfftEF: nodeOfftEF, nodeStride: nodeStride}
 	if envAssertBTKeys {
 		for i := range bt.numNodes() {
 			if cmp := bt.compareKey(kv, bt.nodeKey(i), bt.nodeDi(i)); cmp != 0 {
@@ -121,11 +121,6 @@ func (b *BpsTree) compareKey(g *seg.Reader, key []byte, di uint64) int {
 }
 
 type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
-
-type BpsTreeIterator struct {
-	t *BpsTree
-	i uint64
-}
 
 //// If data[i] == key, returns 0 (equal) and value, nil err
 //// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
@@ -356,7 +351,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	if l == r {
 		// l can be Count() when seeking past the last key (insertion point);
 		// Reset then reports out-of-bounds and Seek's contract is (nil, nil).
-		if err = cur.Reset(l, g); err != nil {
+		if err := cur.Reset(l, g); err != nil {
 			return nil, err
 		}
 		return cur, nil
@@ -395,7 +390,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			fmt.Printf("[%d %d] cmp: %d\n", l, r, cmp)
 		}
 
-		if cmp == 0 {
+		if cmp == 0 { //nolint:gocritic
 			break
 		} else if cmp < 0 {
 			r = m
@@ -419,15 +414,40 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 // If given key is nil, returns first key
 // If no exact match found, returns nil values
 func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
-	if b.trace {
-		fmt.Printf("get   %x\n", key)
-	}
 	if len(key) == 0 && b.offt.Count() > 0 {
 		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
 		return v0, true, 0, nil
+	}
+	ok, offset, err = b.seekExact(g, key)
+	if err != nil || !ok {
+		return nil, false, 0, err
+	}
+	v, _ = g.Next(nil)
+	return v, true, offset, nil
+}
+
+func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err error) {
+	if len(key) == 0 && b.offt.Count() > 0 {
+		k0, v0, _, err := b.dataLookupFunc(0, g)
+		if err != nil || k0 != nil {
+			return 0, false, err
+		}
+		return len(v0), true, nil
+	}
+	ok, _, err = b.seekExact(g, key)
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	_, size = g.Skip()
+	return size, true, nil
+}
+
+func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, err error) {
+	if b.trace {
+		fmt.Printf("get   %x\n", key)
 	}
 
 	l, r, klo, khi := b.bs(key) // l===r when key is found
@@ -455,13 +475,13 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			g.Reset(off)
 			km, _ = g.Next(km[:0])
 			cmp = bytes.Compare(key, km)
-			if cmp == 0 {
-				v, _ = g.Next(nil)
-				return v, true, off, nil
-			} else if cmp < 0 {
+			switch {
+			case cmp == 0:
+				return true, off, nil
+			case cmp < 0:
 				r = m
 				khi = append(khiArr[:0], km...)
-			} else {
+			default:
 				l = m + 1
 				klo = append(kloArr[:0], km...)
 			}
@@ -476,7 +496,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				g.Reset(offset)
 			}
 			if cmp = g.MatchCmp(key); cmp < 0 {
-				return nil, false, 0, err
+				return false, 0, err
 			} else if cmp > 0 {
 				// on non-match MatchCmp resets position; skip key+value to advance
 				g.Skip()
@@ -484,21 +504,19 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				l++
 				continue
 			}
-			v, _ = g.Next(nil)
-			offset = b.offt.Get(m)
-			return v, true, offset, nil
+			return true, b.offt.Get(m), nil
 		}
 
 		cmp = b.compareKey(g, key, m)
-		if cmp == 0 {
+		switch {
+		case cmp == 0:
 			if !g.HasNext() {
-				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
+				return false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
-			v, _ = g.Next(nil)
-			return v, true, b.offt.Get(m), nil
-		} else if cmp < 0 {
+			return true, b.offt.Get(m), nil
+		case cmp < 0:
 			r = m
-		} else {
+		default:
 			l = m + 1
 		}
 		if b.trace {
@@ -507,17 +525,16 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 
 	if l >= b.offt.Count() {
-		return nil, false, 0, nil
+		return false, 0, nil
 	}
 	cmp = b.compareKey(g, key, l)
 	if cmp != 0 {
-		return nil, false, 0, nil
+		return false, 0, nil
 	}
 	if !g.HasNext() {
-		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
+		return false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
-	v, _ = g.Next(nil)
-	return v, true, b.offt.Get(l), nil
+	return true, b.offt.Get(l), nil
 }
 
 // interpMid estimates the index of searchKey within [l,r) by linear interpolation on

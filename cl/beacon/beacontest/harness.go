@@ -163,7 +163,8 @@ func Execute(options ...HarnessOption) {
 func (h *Harness) Execute() {
 	ctx := context.Background()
 	for suiteName, tests := range h.tests {
-		for idx, v := range tests {
+		for idx := range tests {
+			v := &tests[idx]
 			v.Actual.h = h
 			v.Expect.h = h
 			name := v.Name
@@ -407,7 +408,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 	}
 	purl.RawQuery = q.Encode()
 
-	request, err := http.NewRequest(method, strings.ReplaceAll(purl.String(), "%3F", "?"), body)
+	request, err := http.NewRequestWithContext(ctx, method, strings.ReplaceAll(purl.String(), "%3F", "?"), body)
 	if err != nil {
 		return nil, 0, err
 	}

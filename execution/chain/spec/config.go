@@ -45,7 +45,8 @@ func init() {
 	RegisterChainSpec(networkname.Bloatnet, Bloatnet)
 
 	// verify registered chains
-	for name, spec := range registeredChainsByName {
+	for name := range registeredChainsByName {
+		spec := registeredChainsByName[name]
 		if spec.IsEmpty() {
 			panic("chain spec is empty for chain " + spec.Name)
 		}
@@ -111,7 +112,8 @@ func ChainSpecByName(chainName string) (Spec, error) {
 // ONLY USED FOR ERROR LOGGING.
 func ChainSpecsByGenesisHash(genesisHash common.Hash) []Spec {
 	var result []Spec
-	for _, spec := range registeredChainsByName {
+	for name := range registeredChainsByName {
+		spec := registeredChainsByName[name]
 		if spec.GenesisHash == genesisHash {
 			result = append(result, spec)
 		}

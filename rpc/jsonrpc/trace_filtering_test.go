@@ -19,6 +19,8 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"math/big"
 	"testing"
 
@@ -111,10 +113,10 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, sc)
 	ibs := state.New(cachedReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, nil)
 	logger := log.New("trace_filtering_test")
+	consensusHeaderReader := consensuschain.NewReader(cfg, tx, api._blockReader, logger)
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader,
 		block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	require.NoError(t, err)
@@ -129,7 +131,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, &parentNrOrHash, header, false, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -146,9 +148,9 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 // TestCallTransactionNilTxnReturnsError reproduces
 // https://github.com/erigontech/erigon/issues/22643: at the live chain tip,
-// TxnByIdxInBlock can resolve a txIndex whose body hasn't materialized yet and
-// return (nil, nil) rather than an error. callTransaction must turn that into
-// a JSON-RPC error instead of dereferencing the nil transaction.
+// TxnByIdxInBlock can report a txIndex as not found because the body hasn't
+// materialized yet. callTransaction must turn that into a JSON-RPC error
+// instead of dereferencing the missing transaction.
 func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -168,7 +170,7 @@ func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Far past the last real transaction in the block, so TxnByIdxInBlock
-	// finds the body but no matching entry in kv.EthTx and returns (nil, nil).
+	// finds the body but no matching entry in kv.EthTx and returns ok=false.
 	unresolvedTxIndex := len(block.Transactions()) + 1_000_000
 
 	_, err = api.callTransaction(ctx, tx, block.Header(), []string{TraceTypeTrace}, unresolvedTxIndex, false, chainConfig, nil)
@@ -187,7 +189,8 @@ func traceConfigWithWithdrawals() *config.TraceConfig {
 
 func assertNoWithdrawalTraces(t *testing.T, traces ParityTraces) {
 	t.Helper()
-	for _, tr := range traces {
+	for i := range traces {
+		tr := &traces[i]
 		action, ok := tr.Action.(*RewardTraceAction)
 		require.False(t, ok && action.RewardType == rewardTypeWithdrawal,
 			"unexpected withdrawal trace entry")
@@ -204,7 +207,7 @@ func chainWithWithdrawal(t *testing.T, withdrawalAddr common.Address, withdrawal
 		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: bankFunds}},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{
 			Index:     0,
 			Validator: 42,
@@ -339,7 +342,7 @@ func TestReplayBlockTransactionsMultiWithdrawalSameAddr(t *testing.T) {
 		Alloc:  types.GenesisAlloc{withdrawalAddr: {Balance: testBankFunds()}},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: withdrawalAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 43, Address: withdrawalAddr, Amount: wd2Gwei})
 	})
@@ -386,7 +389,7 @@ func TestReplayBlockTransactionsWithdrawalNewAddress(t *testing.T) {
 	newAddr := common.HexToAddress("0xaaaabbbbccccddddeeeeffffaaaabbbbccccdddd")
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 42, Address: newAddr, Amount: withdrawalGwei})
 	})
 	require.NoError(t, err)
@@ -430,7 +433,7 @@ func TestReplayBlockTransactionsMultiWithdrawalNewAddress(t *testing.T) {
 	newAddr := common.HexToAddress("0x1111222233334444555566667777888899990000")
 	gspec := &types.Genesis{Config: chain.AllProtocolChanges}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, b *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
 		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: newAddr, Amount: wd1Gwei})
 		b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 2, Address: newAddr, Amount: wd2Gwei})
 	})
@@ -482,4 +485,54 @@ func TestReplayBlockTransactionsWithdrawalNoEntriesWithoutFlag(t *testing.T) {
 		_, ok := r.StateDiff[internedAddr]
 		require.False(t, ok, "withdrawal stateDiff entry emitted without IncludeWithdrawals flag")
 	}
+}
+
+// TestTraceGetResolvesTraceAddressPath pins trace_get selector semantics: the
+// selector is a call-tree path matched against traceAddress, not a position in
+// the flat trace list.
+func TestTraceGetResolvesTraceAddressPath(t *testing.T) {
+	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
+	api := newTraceApiForTest(m)
+	ctx := context.Background()
+	txHash := common.HexToHash("0xb42edc1d46932ef34be0ba49402dc94e3d2319c066f02945f6828cd344fcfa7b")
+
+	for _, path := range [][]int{{}, {0}, {1}, {0, 0}, {1, 0}} {
+		t.Run(fmt.Sprintf("found %v", path), func(t *testing.T) {
+			selector := common.SliceMap(path, func(level int) hexutil.Uint64 { return hexutil.Uint64(level) })
+			trace, err := api.Get(ctx, txHash, selector, nil, nil)
+			require.NoError(t, err)
+			require.NotNil(t, trace)
+			require.Equal(t, path, trace.TraceAddress)
+		})
+	}
+
+	for _, selector := range [][]hexutil.Uint64{
+		{2},
+		{0, 0, 0},
+		{1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		{math.MaxUint64},
+		{1, math.MaxUint64},
+	} {
+		t.Run(fmt.Sprintf("null %v", selector), func(t *testing.T) {
+			trace, err := api.Get(ctx, txHash, selector, nil, nil)
+			require.NoError(t, err)
+			require.Nil(t, trace)
+		})
+	}
+
+	t.Run("nil selector returns root", func(t *testing.T) {
+		trace, err := api.Get(ctx, txHash, nil, nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, trace)
+		require.Empty(t, trace.TraceAddress)
+	})
+}
+
+func TestTraceGetUnknownTxReturnsNull(t *testing.T) {
+	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
+	api := newTraceApiForTest(m)
+
+	trace, err := api.Get(context.Background(), common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), []hexutil.Uint64{0}, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, trace)
 }

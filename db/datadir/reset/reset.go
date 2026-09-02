@@ -54,9 +54,10 @@ func (reset *Reset) Run() (err error) {
 		"data", reset.stats.removed.DataFiles)
 	// Remove chaindata last, so that the config is available if there's an error.
 	if reset.RemoveLocal {
+		// Left over from Polygon support; harmless on chains that never had them.
 		for _, extraDir := range []slashName{
-			dbcfg.HeimdallDB,
-			dbcfg.PolygonBridgeDB,
+			"heimdall",
+			"polygon-bridge",
 		} {
 			// Probably shouldn't log these unless they existed, it would confuse the user for
 			// unrelated chains.
@@ -78,11 +79,9 @@ func (reset *Reset) Run() (err error) {
 	err = reset.remove(OsFilePath(reset.Dirs.PreverifiedPath()))
 	if err == nil {
 		logger.Info("Removed snapshots lock file", "path", datadir.PreverifiedFileName)
-	} else {
-		if !errors.Is(err, fs.ErrNotExist) {
-			err = fmt.Errorf("removing snapshot lock file: %w", err)
-			return
-		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		err = fmt.Errorf("removing snapshot lock file: %w", err)
+		return
 	}
 	return nil
 }

@@ -17,16 +17,19 @@
 package misc_test
 
 import (
+	"crypto/sha256"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -83,10 +86,10 @@ func TestSystemContractsExcludeBuilderPreAmsterdam(t *testing.T) {
 func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer statedb.Close()
 
 	// Contract exists with zero-length code.
 	statedb.CreateAccount(params.BuilderDepositAddress, true)
@@ -102,10 +105,10 @@ func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 func TestDequeueBuilderExitRequests_EmptyCodeReturnsError(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer statedb.Release(false)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer statedb.Close()
 
 	// Contract exists with zero-length code.
 	statedb.CreateAccount(params.BuilderExitAddress, true)
@@ -116,23 +119,28 @@ func TestDequeueBuilderExitRequests_EmptyCodeReturnsError(t *testing.T) {
 		"must reject syscall to builder exit contract with empty bytecode")
 }
 
-// TestBuilderContractAddresses verifies the EIP-8282 predeploy addresses
-// match the specification, and that the pre-deployed bytecode variables are populated.
-func TestBuilderContractAddresses(t *testing.T) {
+func TestBuilderContractArtifacts(t *testing.T) {
 	t.Parallel()
-
-	require.Equal(t,
-		common.HexToAddress("0x0000884d2AA32eAa155F59A2f24eFa73D9008282"),
+	require.Equal(
+		t,
+		common.HexToAddress("0x0000BFF46984E3725691FA540A8C7589300D8282"),
 		params.BuilderDepositAddress.Value(),
-		"BuilderDepositAddress must match EIP-8282 spec")
-
-	require.Equal(t,
-		common.HexToAddress("0x000014574A74c805590AFF9499fc7A690f008282"),
+	)
+	require.Equal(
+		t,
+		common.HexToAddress("0x000064D678505AD48F8CCB093BC65613800E8282"),
 		params.BuilderExitAddress.Value(),
-		"BuilderExitAddress must match EIP-8282 spec")
-
-	require.NotEmpty(t, misc.BuilderDepositRequestCode,
-		"BuilderDepositRequestCode must be populated with official bytecode")
-	require.NotEmpty(t, misc.BuilderExitRequestCode,
-		"BuilderExitRequestCode must be populated with official bytecode")
+	)
+	depositHash := sha256.Sum256(misc.BuilderDepositRequestCode)
+	require.Equal(
+		t,
+		common.HexToHash("0x2c49dcf745b1304f3dac0ea7487eae6d8fd07812ada980d542f79e8e5e53eb8d"),
+		common.Hash(depositHash),
+	)
+	exitHash := sha256.Sum256(misc.BuilderExitRequestCode)
+	require.Equal(
+		t,
+		common.HexToHash("0xc889ed88730d157d192aae28c2dee61324d0df3bd01ff0078386808b4adb27aa"),
+		common.Hash(exitHash),
+	)
 }

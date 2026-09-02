@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
@@ -127,7 +128,7 @@ func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 		return ssz.ErrBadDynamicLength
 	}
 	h.MerkleTree = nil
-	h.u = common.Copy(buf)
+	h.u = bytes.Clone(buf)
 	h.l = len(h.u) / length.Hash
 	return nil
 }

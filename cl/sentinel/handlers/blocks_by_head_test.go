@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBlocksByHeadCountCap(t *testing.T) {
@@ -193,7 +193,7 @@ func writeBlocksByHeadRequest(t *testing.T, stream network.Stream, root common.H
 	}
 	var reqBuf bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
-	_, err := stream.Write(common.Copy(reqBuf.Bytes()))
+	_, err := stream.Write(bytes.Clone(reqBuf.Bytes()))
 	require.NoError(t, err)
 }
 
@@ -202,6 +202,8 @@ func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) [
 
 	ethClock := getEthClock(t)
 	blocks := make([]*cltypes.SignedBeaconBlock, 0, count)
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for range count {
 		prefix := make([]byte, 1)
 		require.NoError(t, stream.SetReadDeadline(time.Now().Add(5*time.Second)))
@@ -217,7 +219,7 @@ func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) [
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		_, err = io.ReadFull(sr, raw)
 		require.NoError(t, err)
 

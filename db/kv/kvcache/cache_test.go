@@ -212,7 +212,7 @@ func TestAPI(t *testing.T) {
 					}
 
 					select {
-					case res[idx] <- common.Copy(v):
+					case res[idx] <- bytes.Clone(v):
 					case <-ctx.Done():
 						panic("Context done while sending result")
 					}

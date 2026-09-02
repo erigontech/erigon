@@ -95,7 +95,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 9090         | TCP      | gRPC Server (Private)    |
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
-| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
+| Sentry    | 30303        | TCP/UDP  | P2P Peering (Public)     |
 | RPC Daemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
@@ -124,19 +124,6 @@ Configure separate log directories for each instance:
 For Prometheus monitoring, each instance should expose metrics on different ports.
 
 ## Performance Optimization
-
-### Cloud Storage Considerations
-
-If using network-attached storage, apply these optimizations:
-
-```bash
-# Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
---db.pagesize=64kb
-
-# For Polygon networks
---sync.loop.block.limit=10000
-```
 
 ### Memory Locking for Performance
 
@@ -170,7 +157,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
 

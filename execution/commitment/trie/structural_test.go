@@ -20,6 +20,7 @@
 package trie
 
 import (
+	"bytes"
 	"encoding/binary"
 	"slices"
 	"testing"
@@ -221,7 +222,7 @@ func TestEmbeddedStorage(t *testing.T) {
 	// (only different in the last nibble before the cutoff)
 	cutoff := 2 * length.Hash
 	last := hexKeys[len(hexKeys)-1]
-	finalSucc := append(common.Copy(last[:cutoff-1]), last[cutoff-1]+1)
+	finalSucc := append(bytes.Clone(last[:cutoff-1]), last[cutoff-1]+1)
 
 	genStructStepsOver(t, hb, retainAll, nil, hexKeys, func(i int) GenStructStepData {
 		return &GenStructStepLeafData{rlp.RlpSerializableBytes(valueShort)}
@@ -274,7 +275,7 @@ func TestEmbeddedStorage11(t *testing.T) {
 	}
 	cutoff := 2 * (length.Hash + common.IncarnationLength)
 	last := hexKeys[len(hexKeys)-1]
-	finalSucc := append(common.Copy(last[:cutoff-1]), last[cutoff-1]+1)
+	finalSucc := append(bytes.Clone(last[:cutoff-1]), last[cutoff-1]+1)
 
 	genStructStepsOver(t, hb, retainNone, nil, hexKeys, func(i int) GenStructStepData {
 		return &GenStructStepLeafData{rlp.RlpSerializableBytes(keys[i].v)}

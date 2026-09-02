@@ -25,7 +25,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 )
@@ -65,13 +64,13 @@ func TestVerifySignature(t *testing.T) {
 	if VerifySignature(testpubkey, testmsg, nil) {
 		t.Errorf("nil signature valid")
 	}
-	if VerifySignature(testpubkey, testmsg, append(common.Copy(sig), 1, 2, 3)) {
+	if VerifySignature(testpubkey, testmsg, append(bytes.Clone(sig), 1, 2, 3)) {
 		t.Errorf("signature valid with extra bytes at the end")
 	}
 	if VerifySignature(testpubkey, testmsg, sig[:len(sig)-2]) {
 		t.Errorf("signature valid even though it's incomplete")
 	}
-	wrongkey := common.Copy(testpubkey)
+	wrongkey := bytes.Clone(testpubkey)
 	wrongkey[10]++
 	if VerifySignature(wrongkey, testmsg, sig) {
 		t.Errorf("signature valid with wrong public key")
@@ -102,7 +101,7 @@ func TestDecompressPubkey(t *testing.T) {
 	if _, err := DecompressPubkey(testpubkeyc[:5]); err == nil {
 		t.Errorf("no error for incomplete pubkey")
 	}
-	if _, err := DecompressPubkey(append(common.Copy(testpubkeyc), 1, 2, 3)); err == nil {
+	if _, err := DecompressPubkey(append(bytes.Clone(testpubkeyc), 1, 2, 3)); err == nil {
 		t.Errorf("no error for pubkey with extra bytes at the end")
 	}
 }
@@ -133,31 +132,6 @@ func TestPubkeyRandom(t *testing.T) {
 		}
 		if !reflect.DeepEqual(key.PublicKey, *pubkey2) {
 			t.Fatalf("iteration %d: keys not equal", i)
-		}
-	}
-}
-
-func BenchmarkEcrecoverSignature(b *testing.B) {
-	for b.Loop() {
-		if _, err := Ecrecover(testmsg, testsig); err != nil {
-			b.Fatal("ecrecover error", err)
-		}
-	}
-}
-
-func BenchmarkVerifySignature(b *testing.B) {
-	sig := testsig[:len(testsig)-1] // remove recovery id
-	for b.Loop() {
-		if !VerifySignature(testpubkey, testmsg, sig) {
-			b.Fatal("verify error")
-		}
-	}
-}
-
-func BenchmarkDecompressPubkey(b *testing.B) {
-	for b.Loop() {
-		if _, err := DecompressPubkey(testpubkeyc); err != nil {
-			b.Fatal(err)
 		}
 	}
 }

@@ -45,14 +45,23 @@ func (f *ForkChoiceStore) queuePrune(slot uint64) {
 	f.queuedPrunes = append(f.queuedPrunes, slot)
 }
 
+func (f *ForkChoiceStore) queueOperationPrune(checkpoint solid.Checkpoint) {
+	f.queuedOperationPrunes = append(f.queuedOperationPrunes, checkpoint)
+}
+
 // drainQueuedWork runs queued event sends and prunes. Call after releasing f.mu.
 func (f *ForkChoiceStore) drainQueuedWork() {
 	f.mu.Lock()
 	emits := f.queuedEmits
 	prunes := f.queuedPrunes
+	operationPrunes := f.queuedOperationPrunes
 	f.queuedEmits = nil
 	f.queuedPrunes = nil
+	f.queuedOperationPrunes = nil
 	f.mu.Unlock()
+	if len(operationPrunes) > 0 && f.operationsPool.HasPrunableOperations() {
+		f.scheduleOperationPrune(operationPrunes[len(operationPrunes)-1])
+	}
 	for _, emit := range emits {
 		emit()
 	}
@@ -63,12 +72,54 @@ func (f *ForkChoiceStore) drainQueuedWork() {
 	}
 }
 
+func (f *ForkChoiceStore) scheduleOperationPrune(checkpoint solid.Checkpoint) {
+	f.operationPruneMu.Lock()
+	if checkpoint.Epoch <= f.operationPruneTarget.Epoch {
+		f.operationPruneMu.Unlock()
+		return
+	}
+	f.operationPruneTarget = checkpoint
+	f.operationPrunePending = true
+	if f.operationPruneRunning {
+		f.operationPruneMu.Unlock()
+		return
+	}
+	f.operationPruneRunning = true
+	f.operationPruneMu.Unlock()
+	go f.runOperationPruner()
+}
+
+func (f *ForkChoiceStore) runOperationPruner() {
+	for {
+		f.operationPruneMu.Lock()
+		if !f.operationPrunePending {
+			f.operationPruneRunning = false
+			f.operationPruneMu.Unlock()
+			return
+		}
+		checkpoint := f.operationPruneTarget
+		f.operationPrunePending = false
+		f.operationPruneMu.Unlock()
+
+		if !f.operationsPool.HasPrunableOperations() {
+			continue
+		}
+		finalizedState, err := f.forkGraph.GetState(checkpoint.Root, true)
+		if err != nil || finalizedState == nil {
+			log.Warn("Failed to load finalized state for operation pruning", "root", checkpoint.Root, "err", err)
+			continue
+		}
+		f.operationsPool.PruneFinalized(finalizedState, checkpoint.Epoch)
+	}
+}
+
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
 func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckpoint solid.Checkpoint) {
 	if justifiedCheckpoint.Epoch > f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch {
 		f.justifiedCheckpoint.Store(justifiedCheckpoint)
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch {
+		f.queueOperationPrune(finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint.Store(finalizedCheckpoint)
 

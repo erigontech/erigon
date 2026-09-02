@@ -1,7 +1,8 @@
 package trie
 
 import (
-	"github.com/erigontech/erigon/common"
+	"bytes"
+
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -25,12 +26,12 @@ func NewRetainListBuilder() *RetainListBuilder {
 
 // AddTouch adds a key (in KEY encoding) into the read/change set of account keys
 func (rlb *RetainListBuilder) AddTouch(touch []byte) {
-	rlb.touches = append(rlb.touches, common.Copy(touch))
+	rlb.touches = append(rlb.touches, bytes.Clone(touch))
 }
 
 // AddStorageTouch adds a key (in KEY encoding) into the read/change set of storage keys
 func (rlb *RetainListBuilder) AddStorageTouch(touch []byte) {
-	rlb.storageTouches = append(rlb.storageTouches, common.Copy(touch))
+	rlb.storageTouches = append(rlb.storageTouches, bytes.Clone(touch))
 }
 
 // ExtractTouches returns accumulated read/change sets and clears them for the next block's execution

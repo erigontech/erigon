@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -92,7 +93,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	compression := a.d[domain].Compression
 	compressCfg := a.d[domain].CompressCfg
 
-	a.logger.Info("[sqeeze] file", "f", to, "cfg", compressCfg, "c", compression)
+	a.logger.Info("[squeeze] file", "f", to, "cfg", compressCfg, "c", compression)
 	decompressor, err := seg.NewDecompressor(from)
 	if err != nil {
 		return err
@@ -100,7 +101,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
 
-	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
+	c, err := seg.NewCompressor(ctx, "squeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {
 		return err
 	}
@@ -281,7 +282,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				}
 			}
 
-			if err = writer.Compress(); err != nil {
+			if err := writer.Compress(); err != nil {
 				return err
 			}
 			writer.Close()
@@ -294,12 +295,12 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			cf.closeFilesAndRemove()
 
 			squeezedPath := targetPath + sqExt
-			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
+			if err := os.Rename(squeezedTmpPath, squeezedPath); err != nil {
 				return err
 			}
 			temporalFiles = append(temporalFiles, squeezedPath)
 
-			logger.Info("[sqeeze_migration] file done", "original", filepath.Base(originalPath),
+			logger.Info("[squeeze_migration] file done", "original", filepath.Base(originalPath),
 				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
 
 			processedFiles++
@@ -488,11 +489,12 @@ func (b *historyBatch) TxNum(blockNum uint64) uint64 { return b.maxTxNums[blockN
 
 func (b *historyBatch) Close() { b.collector.Close() }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader rebuildBlockReader, finalityCtx dbfinality.Context, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
 	a.DisableInterDomainDependencies()
+	defer a.Unalign(kv.CommitmentDomain)()
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
@@ -599,7 +601,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err = a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
+		if err := a.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()
@@ -625,7 +627,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				return fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", pruneErr)
 			}
 		}
-		if err = pruneRwTx.Commit(); err != nil {
+		if err := pruneRwTx.Commit(); err != nil {
 			return err
 		}
 
@@ -854,7 +856,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[rebuild_commitment_history] squeeze failed", "err", err)
-		logger.Info("[rebuild_commitment_history] rebuilt commitment files still available. Run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Info("[rebuild_commitment_history] rebuilt commitment files still available. Run 'erigon snapshots squeeze' to finish squeezing")
 		return nil, err
 	}
 	actx.Close()
@@ -879,6 +881,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()
+	defer a.Unalign(kv.CommitmentDomain)()
 
 	// Capture the resolved flag before we temporarily flip it off for the rebuild loop;
 	// the squeeze gate below uses the captured value, not process-global schema state.
@@ -961,7 +964,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		if err != nil {
 			return nil, err
 		}
-		defer roTx.Rollback()
+		defer roTx.Rollback() //nolint:gocritic
 
 		// count keys in accounts and storage domains
 		accKeys := acRo.KeyCountInFiles(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
@@ -1018,13 +1021,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		streaming := statecfg.ExperimentalStreamingCommitment
-		parallel := statecfg.ExperimentalParallelCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
-		switch {
-		case streaming:
-			trieVariant = commitment.VariantStreamingHexPatricia
-		case parallel:
+		if statecfg.ExperimentalParallelCommitment {
 			trieVariant = commitment.VariantParallelHexPatricia
 		}
 
@@ -1049,7 +1047,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			if err != nil {
 				return nil, err
 			}
-			defer rwTx.Rollback()
+			defer rwTx.Rollback() //nolint:gocritic
 
 			iterTrieCfg := rebuildTrieCfg
 			iterTrieCfg.Variant = trieVariant
@@ -1061,7 +1059,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if parallel || streaming {
+			if statecfg.ExperimentalParallelCommitment {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
@@ -1086,6 +1084,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			a.recalcVisibleFiles(nil)
 			a.dirtyFilesLock.Unlock()
 			rwTx.Rollback()
+
+			for {
+				smthDone, err := a.mergeCommitmentStep(ctx, rangeToTxNum)
+				if err != nil {
+					return nil, err
+				}
+				if !smthDone {
+					break
+				}
+			}
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
 				shardStepsSize /= 2
@@ -1145,12 +1153,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[squeeze] failed", "err", err)
-		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots sqeeze' to finish squeezing")
+		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots squeeze' to finish squeezing")
 		return nil, err
 	}
 	actx.Close()
 	if err = a.ReloadFiles(); err != nil {
-		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
+		logger.Warn("[squeeze] failed to reload folder after squeeze", "err", err)
 	}
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {

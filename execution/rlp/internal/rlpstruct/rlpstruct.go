@@ -147,10 +147,8 @@ func ProcessFields(allFields []Field) ([]Field, []Tags, error) {
 		name := fields[i].Name
 		if ts.Optional || ts.Tail {
 			anyOptional = true
-		} else {
-			if anyOptional {
-				return nil, nil, OptionalFieldError{Field: name}
-			}
+		} else if anyOptional {
+			return nil, nil, OptionalFieldError{Field: name}
 		}
 	}
 	return fields, tags, nil

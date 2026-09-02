@@ -121,7 +121,8 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 		// Get cells and column indices for this blob row
 		var cellIndices []ColumnIndex
 		var cells []cltypes.Cell
-		for _, entry := range partialMatrix {
+		for i := range partialMatrix {
+			entry := &partialMatrix[i]
 			if entry.RowIndex == blobIndex {
 				cellIndices = append(cellIndices, entry.ColumnIndex)
 				cells = append(cells, entry.Cell)

@@ -74,8 +74,7 @@ func cgroupsV1MemoryLimit() (uint64, error) {
 		}
 		var out []cgroup1.Subsystem
 		for _, v := range system {
-			switch v.Name() {
-			case cgroup1.Memory:
+			if v.Name() == cgroup1.Memory {
 				out = append(out, v)
 			}
 		}

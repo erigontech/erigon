@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"net"
@@ -9,10 +10,17 @@ import (
 	"time"
 
 	"github.com/OffchainLabs/go-bitfield"
+	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
+
 	"github.com/erigontech/erigon/cl/clparams"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	elp2p "github.com/erigontech/erigon/p2p"
@@ -20,12 +28,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
-	"github.com/libp2p/go-libp2p"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/metrics"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/multiformats/go-multiaddr"
 )
 
 type P2PConfig struct {
@@ -223,7 +225,7 @@ func (p *p2pManager) setupENR() error {
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, initialAttnets.Bytes()))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, initialSyncnets.Bytes()))
-	node.Set(enr.WithEntry(p.cfg.NetworkConfig.CgcKey, []byte{}))
+	node.Set(enr.WithEntry(p.cfg.NetworkConfig.CgcKey, peerdasstate.EncodeCgc(p.cfg.BeaconConfig.CustodyRequirement)))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.NfdKey, nfd))
 	return nil
 }
@@ -265,7 +267,7 @@ func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
 		log.Error("[Sentinel] Could not load AttSubnetKey", "err", err)
 		return
 	}
-	subnetField = common.Copy(subnetField)
+	subnetField = bytes.Clone(subnetField)
 	if subnetIndex < 0 {
 		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
@@ -290,7 +292,7 @@ func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
 		log.Error("[Sentinel] Could not load SyncCommsSubnetKey", "err", err)
 		return
 	}
-	subnetField = common.Copy(subnetField)
+	subnetField = bytes.Clone(subnetField)
 	if len(subnetField) <= subnetIndex/8 {
 		log.Error("[Sentinel] Sync subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return

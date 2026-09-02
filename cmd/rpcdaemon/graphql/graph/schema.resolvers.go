@@ -31,6 +31,17 @@ func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot 
 	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, rpc.BlockNumber(obj.BlockNum))
 }
 
+// Miner is the resolver for the miner field.
+func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
+	// miner is non-nullable (Account!): a miner-less block must return an
+	// actionable error, not nil — gqlgen turns a nil non-null field into an
+	// opaque "must not be null".
+	if obj.Miner == nil || obj.Miner.Address == "" {
+		return nil, fmt.Errorf("block %d has no miner", obj.Number)
+	}
+	return r.resolveAccountAtBlock(ctx, obj.Miner.Address, obj.Number, block)
+}
+
 // TransactionAt is the resolver for the transactionAt field.
 func (r *blockResolver) TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error) {
 	if index < 0 || index >= len(obj.Transactions) {
@@ -89,6 +100,17 @@ func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data 
 		return 0, err
 	}
 	return r.GraphQLAPI.EstimateGas(ctx, rpc.BlockNumber(obj.Number), args)
+}
+
+// Account is the resolver for the account field.
+func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error) {
+	// account is non-nullable (Account!): a log with no emitting address must
+	// return an actionable error, not nil — gqlgen turns a nil non-null field
+	// into an opaque "must not be null".
+	if obj.Account == nil || obj.Account.Address == "" {
+		return nil, fmt.Errorf("log has no account address")
+	}
+	return r.resolveAccountAtBlock(ctx, obj.Account.Address, obj.Account.BlockNum, block)
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -351,11 +373,22 @@ func (r *transactionResolver) To(ctx context.Context, obj *model.Transaction, bl
 	return r.resolveAccountAtBlock(ctx, obj.To.Address, obj.Block.Number, block)
 }
 
+// CreatedContract is the resolver for the createdContract field.
+func (r *transactionResolver) CreatedContract(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
+	if obj.CreatedContract == nil {
+		return nil, nil
+	}
+	return r.resolveAccountAtBlock(ctx, obj.CreatedContract.Address, obj.Block.Number, block)
+}
+
 // Account returns AccountResolver implementation.
 func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
 
 // Block returns BlockResolver implementation.
 func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
+
+// Log returns LogResolver implementation.
+func (r *Resolver) Log() LogResolver { return &logResolver{r} }
 
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
@@ -372,6 +405,7 @@ func (r *Resolver) Transaction() TransactionResolver { return &transactionResolv
 type (
 	accountResolver     struct{ *Resolver }
 	blockResolver       struct{ *Resolver }
+	logResolver         struct{ *Resolver }
 	mutationResolver    struct{ *Resolver }
 	pendingResolver     struct{ *Resolver }
 	queryResolver       struct{ *Resolver }

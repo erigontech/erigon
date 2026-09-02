@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"math"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -50,25 +49,26 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger, useRealSyncDataMgr bool) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData synced_data.SyncedData, fcu *mock_services2.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	ctrl := gomock.NewController(t)
 	bcfg := clparams.MainnetBeaconConfig
-	if v == clparams.Phase0Version {
+	switch v {
+	case clparams.Phase0Version:
 		blocks, preState, postState = tests.GetPhase0Random()
-	} else if v == clparams.BellatrixVersion {
+	case clparams.BellatrixVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		blocks, preState, postState = tests.GetBellatrixRandom()
-	} else if v == clparams.CapellaVersion {
+	case clparams.CapellaVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		bcfg.CapellaForkEpoch = 1
 		blocks, preState, postState = tests.GetCapellaRandom()
-	} else if v == clparams.ElectraVersion {
+	case clparams.ElectraVersion:
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		bcfg.CapellaForkEpoch = 1
@@ -77,8 +77,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blocks, preState, postState = tests.GetElectraRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t, dbcfg.ChainDB)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
@@ -87,7 +87,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	if useRealSyncDataMgr {
 		syncedData = synced_data.NewSyncedDataManager(&bcfg, true)
-		syncedData.OnHeadState(postState)
+		require.NoError(t, syncedData.OnHeadState(postState))
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}
@@ -100,12 +100,12 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 
-	genesis, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
+	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
 		{
 			Index:                    0,
 			Blob:                     cltypes.Blob{byte(1)},
@@ -120,7 +120,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			KzgCommitment:            [48]byte{1},
 			CommitmentInclusionProof: solid.NewHashVector(17),
 		},
-	})
+	}))
 	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
 	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)

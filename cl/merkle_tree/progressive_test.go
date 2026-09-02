@@ -62,6 +62,68 @@ func TestMerkleizeProgressiveReferenceVectors(t *testing.T) {
 	}
 }
 
+func TestProgressiveListRootReferenceVectors(t *testing.T) {
+	tests := []struct {
+		name          string
+		chunkCount    int
+		logicalLength uint64
+		expected      string
+	}{
+		{name: "empty", chunkCount: 0, logicalLength: 0, expected: "0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"},
+		{name: "single composite element", chunkCount: 1, logicalLength: 1, expected: "0xa21da97c8a597221c87c9ea5ecdfbd860fcd52fd6fb5b001723f6437856c8df1"},
+		{name: "start four-leaf subtree", chunkCount: 2, logicalLength: 2, expected: "0x9a4badc45a45e9dd4b131c2c1aaff8a054527d8db40d2a7cd07e8f0f02a8232b"},
+		{name: "end four-leaf subtree", chunkCount: 5, logicalLength: 5, expected: "0x183886e81b2e887d5960b2fa49b3464eabee62ec55ff5e6ee6f7e0495d8a01d1"},
+		{name: "start sixteen-leaf subtree", chunkCount: 6, logicalLength: 6, expected: "0x690beb7f075e2dc91699aa3ee9354687772923889ce755458cb405ae95e34055"},
+		{name: "end sixteen-leaf subtree", chunkCount: 21, logicalLength: 21, expected: "0x93589633f10a1e8fe51bef0481731c7c19d7a87269127b6c6a19720668ee47da"},
+		{name: "start sixty-four-leaf subtree", chunkCount: 22, logicalLength: 22, expected: "0xe79bdcda4e58dd09c4b855964e1f1c01c99e215b6e01602f5302763effaf8637"},
+		{name: "sixteen packed uint16 values", chunkCount: 1, logicalLength: 16, expected: "0xe803cfbc4d0caecd70bff297ea98e07b6c3e4d0057e7321e020a4023fe52a9d7"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			chunks := progressiveTestChunks(test.chunkCount)
+			original := make([][32]byte, len(chunks))
+			copy(original, chunks)
+
+			root, err := merkle_tree.ProgressiveListRoot(chunks, test.logicalLength)
+			require.NoError(t, err)
+			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
+			require.Equal(t, original, chunks, "input chunks must not be modified")
+		})
+	}
+}
+
+func TestProgressiveByteListRootReferenceVectors(t *testing.T) {
+	tests := []struct {
+		name     string
+		byteLen  int
+		expected string
+	}{
+		{name: "empty", byteLen: 0, expected: "0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b"},
+		{name: "single byte", byteLen: 1, expected: "0x905efb51c2764c2c7a4efb0548e372569df06db82115c3b1896c186632f3fe5b"},
+		{name: "before first chunk boundary", byteLen: 31, expected: "0x3e12b2d2b507ef7ffe70761d0b0b69af7a26449621227a7a3e06438917f4aebd"},
+		{name: "at first chunk boundary", byteLen: 32, expected: "0x77a8c5b3ec7b888068f0d2f0237b535b7ac6dc38c9ce75ed40a3bb6250537bc9"},
+		{name: "after first chunk boundary", byteLen: 33, expected: "0xbdb0c331db145d1efad9e022c70ab1f1c0896e7fc8bd8a83c6f0cd6ca89e1009"},
+		{name: "end four-leaf subtree", byteLen: 160, expected: "0x2927fdb091eebe601a502656169f978a3fb2cf2a641ee97aad0f25458ef0f93a"},
+		{name: "start sixteen-leaf subtree", byteLen: 161, expected: "0x14103a66a65d67d16d80e2b914241af6d1a371dc03925e610f2ebf7068d22c05"},
+		{name: "end sixteen-leaf subtree", byteLen: 672, expected: "0x03a448071ba4184a8586b78b154880195db0a7a29aef04bd865f77c3469d6d5b"},
+		{name: "start sixty-four-leaf subtree", byteLen: 673, expected: "0xd411caaeaf48519cd983b24a40115851e63996cbd47927651f686679a23c6c71"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data := progressiveByteListTestData(test.byteLen)
+			original := make([]byte, len(data))
+			copy(original, data)
+
+			root, err := merkle_tree.ProgressiveByteListRoot(data)
+			require.NoError(t, err)
+			require.Equal(t, [32]byte(common.HexToHash(test.expected)), root)
+			require.Equal(t, original, data, "input bytes must not be modified")
+		})
+	}
+}
+
 func progressiveTestChunks(count int) [][32]byte {
 	chunks := make([][32]byte, count)
 	for i := range chunks {
@@ -70,4 +132,12 @@ func progressiveTestChunks(count int) [][32]byte {
 		}
 	}
 	return chunks
+}
+
+func progressiveByteListTestData(length int) []byte {
+	data := make([]byte, length)
+	for i := range data {
+		data[i] = byte(i%251 + 1)
+	}
+	return data
 }

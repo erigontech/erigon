@@ -194,6 +194,7 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 }
 
 // Closed returns a channel that is closed when the RPC connection is closed.
+//
 // Deprecated: use subscription error channel
 func (n *RemoteNotifier) Closed() <-chan any {
 	return n.h.conn.closed()
@@ -225,7 +226,10 @@ func (n *RemoteNotifier) activate() error {
 }
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	params, _ := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
+	params, err := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
+	if err != nil {
+		return err
+	}
 	ctx := context.Background()
 	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
 		Version: vsn,

@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -42,25 +43,16 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 func init() {
 	withDataDir(readDomains)
 	withChain(readDomains)
-	withHeimdall(readDomains)
 	withWorkers(readDomains)
 	withStartTx(readDomains)
 
 	rootCmd.AddCommand(readDomains)
 }
-
-// if trie variant is not hex, we could not have another rootHash with to verify it
-var (
-	stepSize uint64
-	lastStep uint64
-)
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
 var readDomains = &cobra.Command{
@@ -98,7 +90,7 @@ var readDomains = &cobra.Command{
 			}
 			addr, err := hex.DecodeString(strings.TrimPrefix(args[i], "0x"))
 			if err != nil {
-				logger.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
+				logger.Warn("invalid address passed", "str", args[i], "position", i, "err", err)
 				continue
 			}
 			addrs = append(addrs, addr)
@@ -140,7 +132,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		return err
 	}
 
-	r := state.NewReaderV3(domains.AsGetter(temporalTx))
+	r := state.NewReaderV3(domains.AsStateGetter(temporalTx, execctxapi.StateGetterOptions{}))
 	latestTx, latestBlock, err := domains.SeekCommitment(ctx, temporalTx)
 	if err != nil {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)

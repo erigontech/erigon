@@ -26,37 +26,20 @@ import (
 
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 const (
-	ETH68 = 68
-	ETH69 = 69
-	ETH70 = 70
-	ETH71 = 71
-
-	WIT0 = 1
+	ETH68 = eth.ETH68
+	ETH69 = eth.ETH69
+	ETH70 = eth.ETH70
+	ETH71 = eth.ETH71
 )
 
 var (
-	ProtocolToUintMap = map[sentryproto.Protocol]uint{
-		sentryproto.Protocol_ETH68: ETH68,
-		sentryproto.Protocol_ETH69: ETH69,
-		sentryproto.Protocol_ETH70: ETH70,
-		sentryproto.Protocol_ETH71: ETH71,
-	}
-	UintToProtocolMap = map[uint]sentryproto.Protocol{
-		ETH68: sentryproto.Protocol_ETH68,
-		ETH69: sentryproto.Protocol_ETH69,
-		ETH70: sentryproto.Protocol_ETH70,
-		ETH71: sentryproto.Protocol_ETH71,
-	}
-	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
-		sentryproto.Protocol_WIT0: {},
-	}
-	UintToSideProtocolMap = map[uint]sentryproto.Protocol{
-		WIT0: sentryproto.Protocol_WIT0,
-	}
+	ProtocolToUintMap = libsentry.ProtocolToUintMap
+	UintToProtocolMap = libsentry.UintToProtocolMap
 )
 
 //go:generate mockgen -typed=true -destination=./sentry_client_mock.go -package=direct . SentryClient
@@ -70,9 +53,8 @@ type SentryClient interface {
 type SentryClientRemote struct {
 	sentryproto.SentryClient
 	sync.RWMutex
-	protocol      sentryproto.Protocol
-	sideProtocols []sentryproto.Protocol
-	ready         bool
+	protocol sentryproto.Protocol
+	ready    bool
 }
 
 var _ SentryClient = (*SentryClientRemote)(nil) // compile-time interface check
@@ -117,14 +99,6 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}
 	c.protocol = reply.Protocol
-	c.sideProtocols = nil // Reset side protocols
-	for _, s := range reply.SideProtocols {
-		if _, ok := SupportedSideProtocols[s]; ok {
-			c.sideProtocols = append(c.sideProtocols, s)
-			break
-		}
-	}
-
 	c.ready = true
 	return reply, nil
 }
@@ -134,11 +108,11 @@ func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentryproto.Stat
 
 func (c *SentryClientRemote) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 	c.RLock()
-	allProtocols := append([]sentryproto.Protocol{c.protocol}, c.sideProtocols...)
+	protocol := c.protocol
 	c.RUnlock()
 
 	in = &sentryproto.MessagesRequest{
-		Ids: filterIds(in.Ids, allProtocols),
+		Ids: filterIds(in.Ids, protocol),
 	}
 	return c.SentryClient.Messages(ctx, in, opts...)
 }
@@ -156,12 +130,11 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentryproto.Peer
 // SentryClientDirect implements SentryClient interface by connecting the instance of the client directly with the corresponding
 // instance of SentryServer
 type SentryClientDirect struct {
-	server        sentryproto.SentryServer
-	protocol      sentryproto.Protocol
-	sideProtocols []sentryproto.Protocol
+	server   sentryproto.SentryServer
+	protocol sentryproto.Protocol
 }
 
-func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer, sideProtocols []sentryproto.Protocol) (*SentryClientDirect, error) {
+func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer) (*SentryClientDirect, error) {
 	protocolEnum, ok := UintToProtocolMap[protocol]
 	if !ok {
 		return nil, fmt.Errorf("unsupported protocol version: %d", protocol)
@@ -169,12 +142,6 @@ func NewSentryClientDirect(protocol uint, sentryServer sentryproto.SentryServer,
 	client := &SentryClientDirect{
 		server:   sentryServer,
 		protocol: protocolEnum,
-	}
-	for _, s := range sideProtocols {
-		if _, ok := SupportedSideProtocols[s]; ok {
-			client.sideProtocols = append(client.sideProtocols, s)
-			break
-		}
 	}
 	return client, nil
 }
@@ -241,9 +208,8 @@ func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentryproto.PeerB
 }
 
 func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
-	allProtocols := append([]sentryproto.Protocol{c.protocol}, c.sideProtocols...)
 	in = &sentryproto.MessagesRequest{
-		Ids: filterIds(in.Ids, allProtocols),
+		Ids: filterIds(in.Ids, c.protocol),
 	}
 	ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
 	streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
@@ -284,13 +250,10 @@ func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, op
 	return c.server.NodeInfo(ctx, in)
 }
 
-func filterIds(in []sentryproto.MessageId, protocols []sentryproto.Protocol) (filtered []sentryproto.MessageId) {
+func filterIds(in []sentryproto.MessageId, protocol sentryproto.Protocol) (filtered []sentryproto.MessageId) {
 	for _, id := range in {
-		for _, protocol := range protocols {
-			if _, ok := libsentry.ProtoIds[protocol][id]; ok {
-				filtered = append(filtered, id)
-				break
-			}
+		if _, ok := libsentry.ProtoIds[protocol][id]; ok {
+			filtered = append(filtered, id)
 		}
 	}
 	return filtered

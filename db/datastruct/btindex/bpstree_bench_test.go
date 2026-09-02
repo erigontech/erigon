@@ -20,11 +20,11 @@ import (
 func BenchmarkBpsTreeSeek(t *testing.B) {
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 12_000_000, 256
+	keyCount := 12_000_000
 	if testing.Short() {
 		keyCount = 10_000
 	}
-	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, M, DefaultBtreeStartSkip)
+	t.Logf("N: %d, M: %d skip since shard <= %d", keyCount, DefaultBtreeM, DefaultBtreeStartSkip)
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
@@ -32,7 +32,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
@@ -62,14 +62,14 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 func BenchmarkBpsTreeGet(t *testing.B) {
 	tmp := t.TempDir()
 	logger := log.New()
-	keyCount, M := 100_000, 256
+	keyCount := 100_000
 	compressFlags := seg.CompressKeys | seg.CompressVals
 
 	dataPath := generateKV(t, tmp, 52, 180, keyCount, logger, 0)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, uint64(M), compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
@@ -164,7 +164,7 @@ func BenchmarkBpsTreeGetReal(t *testing.B) {
 	t.Logf("compression: %d", compressFlags)
 
 	getter := seg.NewReader(d.MakeGetter(), compressFlags)
-	bt, err := OpenBtreeIndexWithDecompressor(btPath, 256, getter)
+	bt, err := OpenBtreeIndexWithDecompressor(btPath, getter)
 	require.NoError(t, err)
 	defer bt.Close()
 

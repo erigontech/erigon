@@ -94,14 +94,35 @@ func TestShardedLRUMoreShardsThanSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Shard count capped at size (50) then rounded down to a power of two = 32,
-	// not collapsed to a single shard.
-	if len(l.shards) != 32 {
-		t.Fatalf("shard count = %d want 32", len(l.shards))
+	// 50/2 = 25 shards max to keep per-shard capacity >= 2, rounded down to 16.
+	if len(l.shards) != 16 {
+		t.Fatalf("shard count = %d want 16", len(l.shards))
 	}
 	l.Set([]byte("k"), 42)
 	if v, ok := l.Get([]byte("k")); !ok || v != 42 {
 		t.Fatalf("Get after Set = %d,%v want 42,true", v, ok)
+	}
+}
+
+// TestShardedLRUMinShardCapacity pins that for size >= 2 no shard is built with
+// capacity 1, where two colliding keys would evict each other.
+func TestShardedLRUMinShardCapacity(t *testing.T) {
+	for _, tc := range []struct{ size, shards int }{
+		{100, 256},
+		{50, 256},
+		{512, 256},
+		{2, 256},
+		{1024, 16},
+	} {
+		l, err := NewShardedLRU[int](tc.size, tc.shards)
+		if err != nil {
+			t.Fatalf("size=%d shards=%d: %v", tc.size, tc.shards, err)
+		}
+		n := len(l.shards)
+		if smallest := tc.size / n; smallest < 2 {
+			t.Errorf("size=%d shards=%d: %d shards → smallest holds %d, want >= 2",
+				tc.size, tc.shards, n, smallest)
+		}
 	}
 }
 
@@ -178,6 +199,33 @@ func TestMapOverwrite(t *testing.T) {
 		t.Errorf("expected (second, true), got (%s, %v)", v, ok)
 	}
 
+	if m.Len() != 1 {
+		t.Errorf("expected len 1, got %d", m.Len())
+	}
+}
+
+// The bool reports presence, not insertion; callers count entries off it.
+func TestMapReplaceIfPresent(t *testing.T) {
+	SetSeed(42)
+	m := NewMap[string]()
+
+	if m.ReplaceIfPresent([]byte("absent"), "v") {
+		t.Error("ReplaceIfPresent on an absent key must report false")
+	}
+	if _, ok := m.Get([]byte("absent")); ok {
+		t.Error("ReplaceIfPresent must not insert")
+	}
+	if m.Len() != 0 {
+		t.Errorf("expected len 0, got %d", m.Len())
+	}
+
+	m.Set([]byte("key"), "first")
+	if !m.ReplaceIfPresent([]byte("key"), "second") {
+		t.Error("ReplaceIfPresent on a present key must report true")
+	}
+	if v, ok := m.Get([]byte("key")); !ok || v != "second" {
+		t.Errorf("expected (second, true), got (%s, %v)", v, ok)
+	}
 	if m.Len() != 1 {
 		t.Errorf("expected len 1, got %d", m.Len())
 	}
@@ -375,42 +423,6 @@ func TestMapDeterminism(t *testing.T) {
 	}
 }
 
-func BenchmarkMapSet(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-	key := []byte("benchmark-key")
-
-	for b.Loop() {
-		m.Set(key, 123)
-	}
-}
-
-func BenchmarkMapGet(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-	key := []byte("benchmark-key")
-	m.Set(key, 123)
-
-	for b.Loop() {
-		m.Get(key)
-	}
-}
-
-func BenchmarkMapConcurrentReadWrite(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-	key := []byte("benchmark-key")
-	m.Set(key, 123)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			m.Get(key)
-			m.Set(key, 456)
-		}
-	})
-}
-
 // LRU tests
 
 func TestLRUBasicOperations(t *testing.T) {
@@ -579,27 +591,6 @@ func TestLRUConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-func BenchmarkLRUSet(b *testing.B) {
-	SetSeed(42)
-	l, _ := NewLRU[int](10000)
-	key := []byte("benchmark-key")
-
-	for b.Loop() {
-		l.Set(key, 123)
-	}
-}
-
-func BenchmarkLRUGet(b *testing.B) {
-	SetSeed(42)
-	l, _ := NewLRU[int](10000)
-	key := []byte("benchmark-key")
-	l.Set(key, 123)
-
-	for b.Loop() {
-		l.Get(key)
-	}
-}
-
 // Comparison benchmarks: maphash.Map vs map[string] vs unique.Handle
 
 // StringMap is a simple map with string keys for comparison
@@ -627,188 +618,13 @@ func (m *StringMap[V]) Set(key []byte, value V) {
 
 // Benchmark Set operations
 
-func BenchmarkMaphashMapSet(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-
-	for b.Loop() {
-		m.Set(key, 123)
-	}
-}
-
-func BenchmarkStringMapSet(b *testing.B) {
-	m := NewStringMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-
-	for b.Loop() {
-		m.Set(key, 123)
-	}
-}
-
 // Benchmark Get operations
-
-func BenchmarkMaphashMapGet(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-	m.Set(key, 123)
-
-	for b.Loop() {
-		m.Get(key)
-	}
-}
-
-func BenchmarkStringMapGet(b *testing.B) {
-	m := NewStringMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-	m.Set(key, 123)
-
-	for b.Loop() {
-		m.Get(key)
-	}
-}
 
 // Benchmark Set with many keys (more realistic cache scenario)
 
-func BenchmarkMaphashMapSetManyKeys(b *testing.B) {
-	SetSeed(42)
-
-	// Pre-generate 10000 keys
-	keys := make([][]byte, 10000)
-	for i := range keys {
-		keys[i] = make([]byte, 48)
-		keys[i][0] = byte(i >> 24)
-		keys[i][1] = byte(i >> 16)
-		keys[i][2] = byte(i >> 8)
-		keys[i][3] = byte(i)
-	}
-
-	i := 0
-	for b.Loop() {
-		m := NewMap[int]()
-		for _, key := range keys {
-			m.Set(key, i)
-			i++
-		}
-	}
-}
-
-func BenchmarkStringMapSetManyKeys(b *testing.B) {
-	// Pre-generate 10000 keys
-	keys := make([][]byte, 10000)
-	for i := range keys {
-		keys[i] = make([]byte, 48)
-		keys[i][0] = byte(i >> 24)
-		keys[i][1] = byte(i >> 16)
-		keys[i][2] = byte(i >> 8)
-		keys[i][3] = byte(i)
-	}
-
-	i := 0
-	for b.Loop() {
-		m := NewStringMap[int]()
-		for _, key := range keys {
-			m.Set(key, i)
-			i++
-		}
-	}
-}
-
-func BenchmarkUniqueHandleMapSetManyKeys(b *testing.B) {
-	// Pre-generate 10000 keys
-	keys := make([][]byte, 10000)
-	for i := range keys {
-		keys[i] = make([]byte, 48)
-		keys[i][0] = byte(i >> 24)
-		keys[i][1] = byte(i >> 16)
-		keys[i][2] = byte(i >> 8)
-		keys[i][3] = byte(i)
-	}
-
-	i := 0
-	for b.Loop() {
-		m := NewUniqueHandleMap[int]()
-		for _, key := range keys {
-			m.Set(key, i)
-			i++
-		}
-	}
-}
-
 // Benchmark Get with many keys (more realistic cache scenario)
 
-func BenchmarkMaphashMapGetManyKeys(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-
-	// Pre-populate with 10000 keys
-	keys := make([][]byte, 10000)
-	for i := range keys {
-		keys[i] = make([]byte, 48)
-		keys[i][0] = byte(i >> 24)
-		keys[i][1] = byte(i >> 16)
-		keys[i][2] = byte(i >> 8)
-		keys[i][3] = byte(i)
-		m.Set(keys[i], i)
-	}
-
-	i := 0
-	for b.Loop() {
-		m.Get(keys[i%len(keys)])
-		i++
-	}
-}
-
-func BenchmarkStringMapGetManyKeys(b *testing.B) {
-	m := NewStringMap[int]()
-
-	// Pre-populate with 10000 keys
-	keys := make([][]byte, 10000)
-	for i := range keys {
-		keys[i] = make([]byte, 48)
-		keys[i][0] = byte(i >> 24)
-		keys[i][1] = byte(i >> 16)
-		keys[i][2] = byte(i >> 8)
-		keys[i][3] = byte(i)
-		m.Set(keys[i], i)
-	}
-
-	i := 0
-	for b.Loop() {
-		m.Get(keys[i%len(keys)])
-		i++
-	}
-}
-
 // Benchmark concurrent access
-
-func BenchmarkMaphashMapConcurrent(b *testing.B) {
-	SetSeed(42)
-	m := NewMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-	m.Set(key, 123)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			m.Get(key)
-		}
-	})
-}
-
-func BenchmarkStringMapConcurrent(b *testing.B) {
-	m := NewStringMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-	m.Set(key, 123)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			m.Get(key)
-		}
-	})
-}
 
 // UniqueHandleMap uses unique.Handle for string interning
 type UniqueHandleMap[V any] struct {
@@ -833,57 +649,4 @@ func (m *UniqueHandleMap[V]) Set(key []byte, value V) {
 	defer m.mu.Unlock()
 	h := unique.Make(string(key))
 	m.m[h] = value
-}
-
-func BenchmarkUniqueHandleMapSet(b *testing.B) {
-	m := NewUniqueHandleMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-
-	for b.Loop() {
-		m.Set(key, 123)
-	}
-}
-
-func BenchmarkUniqueHandleMapGet(b *testing.B) {
-	m := NewUniqueHandleMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-	m.Set(key, 123)
-
-	for b.Loop() {
-		m.Get(key)
-	}
-}
-
-func BenchmarkUniqueHandleMapGetManyKeys(b *testing.B) {
-	m := NewUniqueHandleMap[int]()
-
-	// Pre-populate with 10000 keys
-	keys := make([][]byte, 10000)
-	for i := range keys {
-		keys[i] = make([]byte, 48)
-		keys[i][0] = byte(i >> 24)
-		keys[i][1] = byte(i >> 16)
-		keys[i][2] = byte(i >> 8)
-		keys[i][3] = byte(i)
-		m.Set(keys[i], i)
-	}
-
-	i := 0
-	for b.Loop() {
-		m.Get(keys[i%len(keys)])
-		i++
-	}
-}
-
-func BenchmarkUniqueHandleMapConcurrent(b *testing.B) {
-	m := NewUniqueHandleMap[int]()
-	key := []byte("benchmark-key-that-is-48-bytes-long-like-pubkey!")
-	m.Set(key, 123)
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			m.Get(key)
-		}
-	})
 }

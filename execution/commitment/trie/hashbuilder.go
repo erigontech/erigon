@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -83,7 +84,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) 
 		return fmt.Errorf("length %d", length)
 	}
 	key := keyHex[len(keyHex)-length:]
-	s := &ShortNode{Key: common.Copy(key), Val: ValueNode(common.Copy(val.RawBytes()))}
+	s := &ShortNode{Key: bytes.Clone(key), Val: ValueNode(bytes.Clone(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
@@ -225,7 +226,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
-				root = &HashNode{hash: common.Copy(hb.acc.Root[:])}
+				root = &HashNode{hash: bytes.Clone(hb.acc.Root[:])}
 			}
 		}
 		popped++
@@ -260,10 +261,10 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 
 	a := &AccountNode{accCopy, root, true, accountCode, accountCodeSize}
-	s := &ShortNode{Key: common.Copy(key), Val: a}
+	s := &ShortNode{Key: bytes.Clone(key), Val: a}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
-	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
+	if err := hb.accountLeafHashWithKey(key, popped); err != nil {
 		return err
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
@@ -365,10 +366,10 @@ func (hb *HashBuilder) extension(key []byte) error {
 	var s *ShortNode
 	switch n := nd.(type) {
 	case nil:
-		branchHash := common.Copy(hb.hashStack[len(hb.hashStack)-length2.Hash:])
-		s = &ShortNode{Key: common.Copy(key), Val: &HashNode{hash: branchHash}}
+		branchHash := bytes.Clone(hb.hashStack[len(hb.hashStack)-length2.Hash:])
+		s = &ShortNode{Key: bytes.Clone(key), Val: &HashNode{hash: branchHash}}
 	case *FullNode:
-		s = &ShortNode{Key: common.Copy(key), Val: n}
+		s = &ShortNode{Key: bytes.Clone(key), Val: n}
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
@@ -442,7 +443,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	var capture []byte //nolint: used for tracing
 	if hb.trace {
-		capture = common.Copy(branchHash[:length2.Hash+1])
+		capture = bytes.Clone(branchHash[:length2.Hash+1])
 	}
 	if _, err := writer.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
@@ -478,7 +479,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	for digit := range uint(16) {
 		if ((1 << digit) & set) != 0 {
 			if nodes[i] == nil {
-				f.Children[digit] = &HashNode{hash: common.Copy(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
+				f.Children[digit] = &HashNode{hash: bytes.Clone(hashes[hashStackStride*i+1 : hashStackStride*(i+1)])}
 			} else {
 				f.Children[digit] = nodes[i]
 			}
@@ -605,7 +606,7 @@ func (hb *HashBuilder) code(code []byte) error {
 	if hb.trace {
 		fmt.Printf("CODE\n")
 	}
-	codeCopy := common.Copy(code)
+	codeCopy := bytes.Clone(code)
 	n := CodeNode(codeCopy)
 	hb.nodeStack = append(hb.nodeStack, n)
 	hb.sha.Reset()

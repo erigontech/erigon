@@ -101,7 +101,7 @@ func StartSentinelService(
 	ethClock eth_clock.EthereumClock,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 	dataColumnStorage blob_storage.DataColumnStorage,
-	PeerDasStateReader peerdasstate.PeerDasStateReader,
+	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 	logger log.Logger,
 ) (sentinelproto.SentinelClient, *enode.LocalNode, error) {
@@ -114,7 +114,7 @@ func StartSentinelService(
 		forkChoiceReader,
 		ethClock,
 		dataColumnStorage,
-		PeerDasStateReader,
+		peerDasStateReader,
 		p2p,
 		srvCfg.InitialStatus,
 		logger,
@@ -134,7 +134,7 @@ func StartServe(
 	srvCfg *ServerConfig,
 	creds credentials.TransportCredentials,
 ) {
-	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr)
+	lis, err := net.Listen(srvCfg.Network, srvCfg.Addr) //nolint:noctx
 	if err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 		return

@@ -1,6 +1,7 @@
 package btindex
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	randOld "math/rand"
@@ -12,7 +13,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -39,7 +39,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 			break
 		}
 		key, _ := getter.Next(key[:0])
-		listing = append(listing, common.Copy(key))
+		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
 	decomp.Close()

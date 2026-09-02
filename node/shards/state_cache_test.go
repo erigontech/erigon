@@ -161,10 +161,8 @@ func TestAccountReadWrites(t *testing.T) {
 	sc.SetAccountWrite(addr1[:], &account11)
 	if a, ok := sc.GetAccount(addr1[:]); !ok {
 		t.Fatalf("Expected to find account with addr1")
-	} else {
-		if a.Balance.Uint64() != 11 {
-			t.Fatalf("Expected account balance 11, got %d", a.Balance.Uint64())
-		}
+	} else if a.Balance.Uint64() != 11 {
+		t.Fatalf("Expected account balance 11, got %d", a.Balance.Uint64())
 	}
 	if sc.WriteCount() != 1 {
 		t.Fatalf("Write queue is expected to have 1 elements, got: %d", sc.WriteCount())
@@ -184,10 +182,8 @@ func TestAccountReadWrites(t *testing.T) {
 	sc.SetAccountWrite(addr2[:], &account22)
 	if a, ok := sc.GetAccount(addr2[:]); !ok {
 		t.Fatalf("Expected to find account with addr2")
-	} else {
-		if a.Balance.Uint64() != 22 {
-			t.Fatalf("Expected account balance 22, got %d", a.Balance.Uint64())
-		}
+	} else if a.Balance.Uint64() != 22 {
+		t.Fatalf("Expected account balance 22, got %d", a.Balance.Uint64())
 	}
 	if sc.WriteCount() != 2 {
 		t.Fatalf("Write queue is expected to have 2 elements, got: %d", sc.WriteCount())

@@ -43,7 +43,7 @@ func NextKey(key []byte) ([]byte, error) {
 	if len(key) == 0 {
 		return key, errors.New("could not apply NextKey for the empty key")
 	}
-	nextKey := common.Copy(key)
+	nextKey := bytes.Clone(key)
 	for i := len(key) - 1; i >= 0; i-- {
 		b := nextKey[i]
 		if b < 0xFF {

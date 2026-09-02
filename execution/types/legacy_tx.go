@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 
@@ -183,7 +184,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.Copy(tx.Data),
+			Data:            bytes.Clone(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
 			V:               tx.V,

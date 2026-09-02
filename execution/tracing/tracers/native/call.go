@@ -20,6 +20,7 @@
 package native
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -77,7 +78,7 @@ func (f *callFrame) failed() bool {
 }
 
 func (f *callFrame) processOutput(output []byte, err error) {
-	output = common.Copy(output)
+	output = bytes.Clone(output)
 	if err == nil {
 		f.Output = output
 		return
@@ -170,7 +171,7 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to account
 		Type:  vm.CALL,
 		From:  from.Value(),
 		To:    toValue,
-		Input: common.Copy(input),
+		Input: bytes.Clone(input),
 		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
@@ -216,7 +217,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		Type:  vm.OpCode(typ),
 		From:  from.Value(),
 		To:    toValue,
-		Input: common.Copy(input),
+		Input: bytes.Clone(input),
 		Gas:   gas,
 	}
 

@@ -24,7 +24,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 var altairSlot = clparams.MainnetBeaconConfig.AltairForkEpoch*clparams.MainnetBeaconConfig.SlotsPerEpoch + 1
@@ -250,7 +250,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -325,7 +325,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -338,12 +338,14 @@ func TestLightClientUpdates(t *testing.T) {
 	_ = got
 	expectedCount := 1
 	currentPeriod := 1
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for range expectedCount {
 		forkDigest := make([]byte, 4)
 
 		_, err := stream.Read(forkDigest)
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF { //nolint:errorlint // intentional bare sentinel check
 				t.Fatal("Stream is empty")
 			} else {
 				require.NoError(t, err)
@@ -354,7 +356,7 @@ func TestLightClientUpdates(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -381,36 +383,13 @@ func TestLightClientUpdates(t *testing.T) {
 		require.Equal(t, f.LCUpdates[uint64(currentPeriod)], update)
 		currentPeriod++
 
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
-}
-
-// BenchmarkLightClientPrefixConstruction benchmarks the prefix construction
-// for light client responses, comparing the optimized version (stack allocation)
-// against the old version (heap allocation with append).
-func BenchmarkLightClientPrefixConstruction(b *testing.B) {
-	forkDigest := common.Bytes4{0xAA, 0xBB, 0xCC, 0xDD}
-
-	b.Run("Optimized", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var prefix [5]byte
-			prefix[0] = SuccessfulResponsePrefix
-			copy(prefix[1:], forkDigest[:])
-			_ = prefix
-		}
-	})
-
-	b.Run("Old", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
-			_ = prefix
-		}
-	})
 }

@@ -1,8 +1,6 @@
 # Erigon Agent Guidelines
 
-This file provides guidance for AI agents working with this codebase.
-
-**Requirements**: Go 1.25+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
+Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
 
 ## Build & Test
 
@@ -50,6 +48,10 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 2. **Green** — write the minimum production code needed to make the test pass. Do not write code the current failing test does not demand.
 3. **Refactor** — clean up code and tests with the suite staying green. Skipping this step is how technical debt accumulates.
 
+### Before adding a test
+
+Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
+
 ### For bug fixes
 
 Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips red → green when the fix lands.
@@ -76,6 +78,8 @@ TDD is the default for behavior changes (bug fixes, new logic, new endpoints). I
 - Pure refactors with no behavior change — existing tests are the safety net; do not write new tests just to satisfy the cycle.
 - Exploratory spikes — throw the spike away and TDD the real implementation.
 - Mechanical changes — renames, generated code regeneration, dependency bumps.
+- Trivial changes that introduce no new logic — comments, documentation, formatting, build metadata, and simple constant, fixture-value, or version updates. Use the existing test suite, build, or lint checks instead of adding a test that merely mirrors the edit.
+- Feature removals — remove or update tests for the obsolete behavior; do not add a test merely to prove that deleted code is absent. Add coverage when the removal changes remaining observable behavior or when absence is itself a required contract.
 
 When skipping TDD for one of these reasons, say so explicitly in the PR description.
 
@@ -118,13 +122,17 @@ If a user explicitly directs an agent to add any other skip in the current turn 
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
-Do not add `Co-Authored-By: Claude` or `🤖 Generated with Claude Code` lines to commits, PRs, or issues — Claude attribution is disabled repo-wide via `.claude/settings.json` (`includeCoAuthoredBy: false`).
+Don't sign commits, pr's, issues, comments.
 
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
 
 ## Code Style
+
+### Benchmarks
+
+Prefer keeping benchmarks in a separate `xyz_bench_test.go` file instead of mixing them with tests in `xyz_test.go`.
 
 ### Comments
 
@@ -172,9 +180,23 @@ Function docstrings follow the same rule: a one-line summary, plus param/return 
 
 **For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. The forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
 
+## Code Reviews
+
+Keep review feedback focused on the behavior and code changed by the PR. Do not require unrelated pre-existing issues to be fixed in the same change. When a review uncovers one, ask the author to create a follow-up issue or PR instead. Expand the current PR only when the pre-existing issue prevents the proposed change from being correct or safe. Keeping changes focused shortens the development cycle and makes the PR easier to review.
+
 ## Pull Requests & Workflows
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
+
+### Pull request scope
+
+Keep each PR focused on one coherent unit of work. Judge scope by the concepts changed, not only by the number of lines or files. Prefer a small diff when practical, but do not split an implementation from the tests that verify it or make a change incomplete only to reduce its size.
+
+A large PR is acceptable when one cohesive change must touch many places, such as a mass rename, an API or package migration, generated-code updates, a mechanical refactor across call sites, or applying one established pattern consistently across the codebase. Keep unrelated behavior changes out of such PRs.
+
+### Stacked pull requests
+
+For a large change with multiple dependent, independently reviewable parts, consider using stacked pull requests instead of one large PR. Keep each layer focused, buildable, testable, and safe to merge. Put foundational changes below dependent changes. Do not add unrelated work or pre-existing issues to the stack; track them in separate issues or PRs.
 
 ### Referring to numbered points in GitHub text
 
@@ -196,6 +218,8 @@ Before running `git push`, always run `make lint` first and fix all issues. Run 
 ## Lint Notes
 
 The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
+
+A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
 
 Common lint categories and fixes:
 - **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
