@@ -23,8 +23,8 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"runtime/debug"
 	"runtime/pprof"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,82 +44,43 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// benchCoinbase replaces blockgen's default zero address and is funded in
-// genesis. Built from benchAddress rather than a hex literal so it cannot
-// collide with a destination and cannot silently decode to the zero address,
-// which is the one value that would put the shared coinbase write back.
 var benchCoinbase = benchAddress("fees", 0)
 
 const (
-	benchGasLimit   = 36_000_000
-	benchTxsPerBlok = 1000 // 21M gas, comfortably under the limit
+	benchGasLimit    = 36_000_000
+	benchTxsPerBlock = 1000 // 21M gas, comfortably under the limit
 )
 
-// workload decides where a block's value transfers are sent. Every workload
-// moves the same value with the same gas and the same transaction count, so
-// the destination keys are the only variable.
 type workload string
 
 const (
-	// warmAccounts pays accounts genesis already created, a fresh slice of the
-	// pre-state per block. Reusing one set would rewrite the same keys every
-	// block and pile up versions per key, which is a cost that grows with the
-	// block count in this arm and not in cold — the two would then only be
-	// comparable at one -benchtime.
 	warmAccounts workload = "warm"
-	// coldAccounts pays an address never seen before, so every transfer
-	// inserts a trie key that was not there. It draws from the same address
-	// space as warm, past the range genesis allocated: a separate space would
-	// put the two arms in different regions of the accounts domain and make
-	// key locality a second variable alongside novelty.
 	coldAccounts workload = "cold"
-	// hotAccount pays one account for the whole block, so it is the arm whose
-	// destination conflicts. Senders are distinct everywhere and the coinbase is
-	// funded, so the other arms have no shared write for it to be compared
-	// against.
-	hotAccount workload = "hot"
+	hotAccount   workload = "hot"
 )
 
-// stateSizes are the accounts genesis creates before the first block runs.
-// This is the knob that decides whether the trie is deep enough for an insert
-// to split branches; at the small end it is not. Sizes under 100k are absent
-// deliberately: stateBudget leaves them too few blocks to measure.
-var stateSizes = []int{100_000, 1_000_000}
+var stateSizes = []struct {
+	n    int
+	name string
+}{
+	{100_000, "100kaccounts"},
+	{1_000_000, "1Maccounts"},
+}
 
 var windowProfile = flag.String("windowprofile", "",
 	"path prefix for a CPU profile covering only the timed block loop; incompatible with -cpuprofile")
 
 var windowProfileSeq atomic.Int64
 
-// BenchmarkValidatePayload times a payload end to end and splits the result:
-// ns/op covers InsertBlocks + ValidateChain + UpdateForkChoice, newPayload_ms
-// is the first two, fcu_ms the flush. Erigon computes the state root under
-// engine_newPayload but flushes under engine_forkchoiceUpdated, and the
-// cross-client harnesses time only the first, so newPayload_ms is the number
-// comparable to theirs. Splitting by report rather than by toggling the
-// benchmark timer keeps testing's ReadMemStats stop-the-world out of the loop,
-// where its cost would grow with the heap and land on one window only.
-//
-// Compare newPayload_ms medians, never ns/op: a single flush excursion of
-// 11 ms has been observed against a warm-to-cold difference of 0.8 ms, so
-// ns/op reports the flush, not the effect.
-//
-//	go test -run='^$' -bench=BenchmarkValidatePayload -benchtime=10x -count=10 -cpu=1
-//
-// Take power from -count, not -benchtime: every repeat rebuilds genesis, so
-// repeats add samples without letting one run drift further from its
-// pre-state. -benchtime=1x is not usable — first-block page faults land on the
-// only timed block and cost cold more than warm.
-//
-// -cpu=1 is deliberate. The destination cost is fixed CPU work per block, so
-// more cores absorb it into parallel slack: at a 100k pre-state it reads ~10%
-// on one core and ~3-4% on eighteen. Either is a real number, but only one of
-// them is the same number as last week's.
 func BenchmarkValidatePayload(b *testing.B) {
+	sizes := stateSizes
+	if testing.Short() {
+		sizes = sizes[:1]
+	}
 	for _, w := range []workload{warmAccounts, coldAccounts, hotAccount} {
-		for _, size := range stateSizes {
-			b.Run(fmt.Sprintf("%s/%s", w, accountCount(size)), func(b *testing.B) {
-				benchmarkValidatePayload(b, w, size)
+		for _, size := range sizes {
+			b.Run(fmt.Sprintf("%s/%s", w, size.name), func(b *testing.B) {
+				benchmarkValidatePayload(b, w, size.n)
 			})
 		}
 	}
@@ -134,22 +95,13 @@ func BenchmarkValidatePayload(b *testing.B) {
 const stateBudget = 0.1
 
 func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
-	// warm needs a distinct pre-existing account per transaction per block and
-	// cold grows the state by the same amount. hot needs neither, but it is
-	// bounded too: it rewrites one key every block, so its cost climbs with the
-	// block count, and a ratio against warm only means something when both arms
-	// ran the same number of blocks.
-	if used := float64(b.N*benchTxsPerBlok) / float64(stateSize); used > stateBudget {
+	if used := float64(b.N*benchTxsPerBlock) / float64(stateSize); used > stateBudget {
 		b.Fatalf("%s needs %.2f× the %d-account pre-state over %d blocks (budget %.2f); "+
 			"lower -benchtime and raise -count, or raise the state size", w, used, stateSize, b.N, stateBudget)
 	}
 
-	// One sender per transaction slot. A single sender would chain every
-	// transaction in the block through its own nonce and balance, serialising
-	// the parallel executor in every arm and leaving the destination work as a
-	// residual on top of it.
-	senders := make([]*ecdsa.PrivateKey, benchTxsPerBlok)
-	alloc := make(types.GenesisAlloc, stateSize+benchTxsPerBlok)
+	senders := make([]*ecdsa.PrivateKey, benchTxsPerBlock)
+	alloc := make(types.GenesisAlloc, stateSize+benchTxsPerBlock)
 	senderBalance := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
 	for i := range senders {
 		key, err := crypto.GenerateKey()
@@ -180,22 +132,18 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	var coldSeq uint64
 	chainResult, err := m.GenerateChain(b.N, func(blockIdx int, bg *blockgen.BlockGen) {
 		bg.SetCoinbase(benchCoinbase)
-		// Full blocks push the base fee up every block, so the fee cap has to
-		// track the header being built rather than the genesis value.
 		gasPrice := bg.GetHeader().BaseFee
-		for i := range benchTxsPerBlok {
+		for i := range benchTxsPerBlock {
 			var to common.Address
 			switch w {
 			case warmAccounts:
-				to = benchAddress("acct", uint64(blockIdx*benchTxsPerBlok+i))
+				to = benchAddress("acct", uint64(blockIdx*benchTxsPerBlock+i))
 			case coldAccounts:
 				to = benchAddress("acct", uint64(stateSize)+coldSeq)
+				coldSeq++
 			case hotAccount:
 				to = benchAddress("acct", 0)
 			}
-			coldSeq++
-			// Each sender posts one transaction per block, so its nonce is the
-			// block index and no two transactions in a block share an account.
 			txn, err := types.SignTx(
 				types.NewTransaction(uint64(blockIdx), to, uint256.NewInt(1), params.TxGas, gasPrice, nil),
 				signer, senders[i],
@@ -226,8 +174,9 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 		newPayload += time.Since(start)
 
 		start = time.Now()
-		_, err = m.UpdateForkChoice(ctx, block.Header())
+		fcuResult, err := m.UpdateForkChoice(ctx, block.Header())
 		require.NoError(b, err)
+		require.Equal(b, execmodule.ExecutionStatusSuccess, fcuResult.Status)
 		fcu += time.Since(start)
 
 		totalGas += block.GasUsed()
@@ -240,26 +189,15 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	if secs := newPayload.Seconds(); secs > 0 {
 		b.ReportMetric((float64(totalGas)/1e6)/secs, "Mgas/s")
 	}
-	// The executor mode changes what every arm measures and leaves no other
-	// trace in the output.
 	b.ReportMetric(boolMetric(dbg.Exec3Parallel), "parallelExec")
 	b.ReportMetric(gogcPercent(), "gogc")
-	b.ReportMetric(float64(b.N*benchTxsPerBlok)/float64(stateSize), "stateGrowth")
+	b.ReportMetric(float64(b.N*benchTxsPerBlock)/float64(stateSize), "stateGrowth")
 }
 
 func gogcPercent() float64 {
-	v := os.Getenv("GOGC")
-	if v == "off" {
-		return -1
-	}
-	if strings.HasPrefix(v, "+") {
-		return 100
-	}
-	n, err := strconv.ParseInt(v, 10, 32)
-	if err != nil {
-		return 100
-	}
-	return float64(n)
+	p := debug.SetGCPercent(100)
+	debug.SetGCPercent(p)
+	return float64(p)
 }
 
 func startWindowProfile(b *testing.B) func() {
@@ -294,14 +232,11 @@ func benchChainConfig() *chain.Config {
 	return cfg
 }
 
-// requireAllSucceeded fails the benchmark if any transaction reverted. A
-// reverted transfer still burns gas and still moves the block through
-// validation, so the arm reports a plausible number for work it never did.
 func requireAllSucceeded(b *testing.B, chainResult *blockgen.ChainPack) {
 	b.Helper()
 	for blockIdx, receipts := range chainResult.Receipts {
-		if len(receipts) != benchTxsPerBlok {
-			b.Fatalf("block %d has %d receipts, want %d", blockIdx, len(receipts), benchTxsPerBlok)
+		if len(receipts) != benchTxsPerBlock {
+			b.Fatalf("block %d has %d receipts, want %d", blockIdx, len(receipts), benchTxsPerBlock)
 		}
 		for txIdx, receipt := range receipts {
 			if receipt.Status != types.ReceiptStatusSuccessful {
@@ -312,23 +247,9 @@ func requireAllSucceeded(b *testing.B, chainResult *blockgen.ChainPack) {
 	}
 }
 
-// benchAddress numbers one address space. Genesis fills indices below
-// stateSize, so an index at or above it has never existed — which is the only
-// thing that separates a cold destination from a warm one.
 func benchAddress(space string, i uint64) common.Address {
 	var a common.Address
 	copy(a[:4], space)
 	binary.BigEndian.PutUint64(a[12:], i+1)
 	return a
-}
-
-func accountCount(n int) string {
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%dMaccounts", n/1_000_000)
-	case n >= 1_000:
-		return fmt.Sprintf("%dkaccounts", n/1_000)
-	default:
-		return fmt.Sprintf("%daccounts", n)
-	}
 }
