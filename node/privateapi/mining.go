@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -112,16 +111,6 @@ func (s *MiningServer) Mining(_ context.Context, req *txpoolproto.MiningRequest)
 
 func (s *MiningServer) OnPendingLogs(req *txpoolproto.OnPendingLogsRequest, reply txpoolproto.Mining_OnPendingLogsServer) error {
 	return s.pendingLogsStreams.Subscribe(s.ctx, reply)
-}
-
-func (s *MiningServer) BroadcastPendingLogs(l types.Logs) error {
-	b, err := rlp.EncodeToBytes(l)
-	if err != nil {
-		return err
-	}
-	reply := &txpoolproto.OnPendingBlockReply{RplBlock: b}
-	s.pendingBlockStreams.Broadcast(reply, s.logger)
-	return nil
 }
 
 func (s *MiningServer) OnPendingBlock(req *txpoolproto.OnPendingBlockRequest, reply txpoolproto.Mining_OnPendingBlockServer) error {
