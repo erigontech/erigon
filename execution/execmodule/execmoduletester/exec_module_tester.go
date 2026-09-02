@@ -896,6 +896,27 @@ func (emt *ExecModuleTester) UpdateForkChoice(ctx context.Context, header *types
 	})
 }
 
+// WaitForBlocksAvailable waits until the block snapshots expose at least n blocks. Retirement runs in
+// the background and its start/done events do not pair one-to-one with fork-choice updates — a cycle
+// that finds nothing to freeze signals both just the same — so a caller that needs the files on disk
+// polls here instead of counting events.
+func (emt *ExecModuleTester) WaitForBlocksAvailable(ctx context.Context, n uint64) error {
+	for {
+		if err := emt.BlockSnapshots.OpenFolder(); err != nil {
+			return err
+		}
+		available := emt.BlockSnapshots.BlocksAvailable()
+		if available >= n {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for %d blocks in snapshots (have %d): %w", n, available, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 func (emt *ExecModuleTester) WaitForBlockRetirement(ctx context.Context) error {
 	select {
 	case started := <-emt.retirementStart:

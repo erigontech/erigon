@@ -36,38 +36,77 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-func FileName(version Version, from, to uint64, fileType string) string {
-	if to < from {
-		panic(fmt.Errorf("snap file name to < from: %d < %d", to, from))
+// EpochMarker flags an epoch (era1-aligned) block segment in its file name, as a suffix on the type:
+// v1.0-000000-000008-headers-ep.seg. The marker makes the regime self-describing and independent of
+// the (content) version; decimal files carry no marker. It goes last, not next to the version, so that
+// a lookup mask — whose version is a wildcard, since an index's version may differ from its segment's
+// — cannot match across regimes: the two regimes print the same digits for the same tier index
+// (decimal [1000,2000) and epoch [1024,2048) are both "000001-000002"), and a wildcard sitting where
+// the marker is would swallow it.
+const EpochMarker = "ep"
+
+// fileNameBase is the divisor a file name encodes block numbers with: epoch block segments print
+// block/1024, decimal ones (Bor/Gnosis block segments, and every non-block type) block/1000.
+func fileNameBase(epoch bool) uint64 {
+	if epoch {
+		return 1_024
 	}
-	if to-from < 1000 {
+	return 1_000
+}
+
+func markedType(fileType string, epoch bool) string {
+	if epoch {
+		return fileType + "-" + EpochMarker
+	}
+	return fileType
+}
+
+func fileName(version Version, epoch bool, from, to uint64, fileType string) string {
+	base, spellOut := nameEncoding(epoch, from, to)
+	fileType = markedType(fileType, epoch)
+	if spellOut {
 		return fmt.Sprintf("%s-%09d-%09d-%s", version.String(), from, to, fileType)
 	}
-	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
+	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/base, to/base, fileType)
 }
 
-func FileMask(from, to uint64, fileType string) string {
+func fileMask(epoch bool, from, to uint64, fileType string) string {
+	base, spellOut := nameEncoding(epoch, from, to)
+	fileType = markedType(fileType, epoch)
+	if spellOut {
+		return fmt.Sprintf("*-%09d-%09d-%s", from, to, fileType)
+	}
+	return fmt.Sprintf("*-%06d-%06d-%s", from/base, to/base, fileType)
+}
+
+func nameEncoding(epoch bool, from, to uint64) (base uint64, spellOut bool) {
 	if to < from {
 		panic(fmt.Errorf("snap file name to < from: %d < %d", to, from))
 	}
-	if to-from < 1000 {
-		return fmt.Sprintf("*-%09d-%09d-%s", from, to, fileType)
-	}
-	return fmt.Sprintf("*-%06d-%06d-%s", from/1_000, to/1_000, fileType)
+	base = fileNameBase(epoch)
+	return base, to-from < base
 }
 
-func SegmentFileName(version Version, from, to uint64, t Enum) string {
-	return FileName(version, from, to, t.String()) + ".seg"
-}
-func IdxFileName(version Version, from, to uint64, fType string) string {
-	return FileName(version, from, to, fType) + ".idx"
+func FileName(version Version, epoch bool, from, to uint64, fileType string) string {
+	return fileName(version, epoch, from, to, fileType)
 }
 
-func SegmentFileMask(from, to uint64, t Enum) string {
-	return FileMask(from, to, t.String()) + ".seg"
+func FileMask(epoch bool, from, to uint64, fileType string) string {
+	return fileMask(epoch, from, to, fileType)
 }
-func IdxFileMask(from, to uint64, fType string) string {
-	return FileMask(from, to, fType) + ".idx"
+
+func SegmentFileName(version Version, epoch bool, from, to uint64, t Enum) string {
+	return fileName(version, epoch, from, to, t.String()) + ".seg"
+}
+func IdxFileName(version Version, epoch bool, from, to uint64, fType string) string {
+	return fileName(version, epoch, from, to, fType) + ".idx"
+}
+
+func SegmentFileMask(epoch bool, from, to uint64, t Enum) string {
+	return fileMask(epoch, from, to, t.String()) + ".seg"
+}
+func IdxFileMask(epoch bool, from, to uint64, fType string) string {
+	return fileMask(epoch, from, to, fType) + ".idx"
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
@@ -117,7 +156,7 @@ func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
 
 func IsCorrectFileName(name string) bool {
 	parts := strings.Split(name, "-")
-	return len(parts) == 4
+	return len(parts) == 4 || len(parts) == 5
 }
 
 // check that filename w/o ext matches pattern: "<any>.<num>-<num>"
@@ -196,7 +235,13 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
 		}
-	} else { // 1-2-bodies
+	} else { // 1-2-bodies  (or  1-2-bodies-ep for epoch)
+		// epoch (era1-aligned) block segments carry the "ep" marker as a type suffix; it makes the
+		// regime self-describing, independent of the version.
+		if trimmed, found := strings.CutSuffix(croppedFileName, "-"+EpochMarker); found {
+			res.Epoch = true
+			croppedFileName = trimmed
+		}
 		fromStr, rest, ok := strings.Cut(croppedFileName, "-")
 		if !ok || fromStr == "" {
 			return res, false, false
@@ -215,11 +260,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 			return res, false, false
 		}
 		var multiplier uint64
-		switch len(fromStr) {
-		case 9: // smallest number in file name is < 1_000, so we represent it as it is
+		switch {
+		case len(fromStr) == 9: // range shorter than the regime's divisor, spelled out as it is
 			multiplier = 1
-		default: // smallest number in file name is > 1_000, so we represent it as /1000
-			multiplier = 1_000
+		default:
+			multiplier = fileNameBase(res.Epoch)
 		}
 		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*multiplier, uint64(to)*multiplier, typeString, typeString
 		res.Type, ok = ParseFileType(typeString)
@@ -309,10 +354,50 @@ func IsSeedableExtension(name string) bool {
 //     less files - means small files will be removed after merge (no peers for this files).
 const Erigon2OldMergeLimit = 500_000
 const Erigon2MergeLimit = 100_000
+
+// EpochMergeLimit is the frozen (top-tier) size of epoch-rounded block segments: 64 era1
+// files of 8192 blocks each.
+const EpochMergeLimit = 524_288
 const CaplinMergeLimit = 10_000
 const Erigon2MinSegmentSize = 1_000
 
+// EpochMinSegmentSize is the produce/round-down granularity of epoch-rounded segments
+// (the smallest tier, 2^10), analogous to Erigon2MinSegmentSize for the decimal scheme.
+const EpochMinSegmentSize = 1_024
+
 var MergeSteps = []uint64{100_000, 10_000}
+
+// EpochMergeSteps are the merge targets (largest first) for epoch-rounded segments: the
+// 1024-block produce tier merges up through 8192 (one era1 file), 65536, to 524288.
+var EpochMergeSteps = []uint64{524_288, 65_536, 8_192}
+
+// epochTypes is the set of segment types eligible for the epoch (era1-aligned) layout — the core eth
+// block segments. Whether a given file/production actually uses epoch is decided per chain (see
+// snaptype2.RegimeFor); this set only gates which types can ever be epoch. Written only at init.
+var epochTypes = map[Enum]bool{Unknown: true}
+
+// RegisterEpochType marks a segment type as epoch-eligible.
+func RegisterEpochType(t Enum) { epochTypes[t] = true }
+
+// EpochType reports whether type t is epoch-eligible (a core block segment). The actual regime for a
+// file is carried by FileInfo.Epoch (reads) or chosen by the chain at production (writes).
+func EpochType(t Enum) bool { return epochTypes[t] }
+
+// EpochRegimeMismatch reports whether snapshot file `name` belongs to the block-segment regime
+// opposite to epochOn, so a chain in that regime must skip it: an epoch chain skips decimal
+// (no "ep" marker) block files and a decimal chain skips epoch ("ep"-marked) block files. Files
+// that are not core block segments (state, Caplin, Bor, salt) never mismatch.
+func EpochRegimeMismatch(name string, epochOn bool) bool {
+	fi, stateFile, ok := ParseFileName("", name)
+	if !ok || stateFile || fi.Type == nil {
+		return false
+	}
+	enum := fi.Type.Enum()
+	if enum == Unknown || !epochTypes[enum] {
+		return false
+	}
+	return fi.Epoch != epochOn
+}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -320,6 +405,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	Epoch           bool // epoch (era1-aligned, "ep"-marked, block/1024) vs decimal (block/1000)
 
 	CaplinTypeString string // part of file-name - without version, range, ext
 	TypeString       string
@@ -351,18 +437,14 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 	return strings.Compare(f.name, o.name)
 }
 
+// As returns the same block range and version as f, for a different type. The name must come from
+// FileName: an epoch block segment encodes block/1024, and a hand-rolled /1000 here would address a
+// different range for every segment whose two encodings disagree (any tier from 8192 up).
 func (f FileInfo) As(t Type) FileInfo {
-	if f.To < f.From {
-		panic(fmt.Errorf("file info To < From: %d < %d", f.To, f.From))
-	}
-	var name string
-	if f.To-f.From < 1_000 {
-		name = fmt.Sprintf("%s-%09d-%09d-%s%s", f.Version.String(), f.From, f.To, t, f.Ext)
-	} else {
-		name = fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
-	}
+	name := fileName(f.Version, f.Epoch, f.From, f.To, t.Name()) + f.Ext
 	return FileInfo{
 		Version: f.Version,
+		Epoch:   f.Epoch,
 		From:    f.From,
 		To:      f.To,
 		Ext:     f.Ext,

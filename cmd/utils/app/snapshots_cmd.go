@@ -3074,6 +3074,11 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
+	// Convert legacy decimal block segments to the epoch layout before opening them.
+	if err = freezeblocks.MigrateDecimalToEpoch(ctx, dirs, chainDB, chainConfig, estimate.CompressSnapshot.Workers(), logger); err != nil {
+		return
+	}
+
 	res.BlockSnaps = blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = res.BlockSnaps.OpenFolder(); err != nil {
 		return
@@ -3320,6 +3325,11 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	logger.Info("number of elements", "source", sourcefile, "count", decomp.Count())
 
 	blockFrom, blockTo := info.From, info.To
+
+	step := uint64(snaptype.Erigon2MinSegmentSize)
+	if info.Epoch {
+		step = snaptype.EpochMinSegmentSize
+	}
 	var compressor *seg.Compressor
 	compresCfg := seg.DefaultCfg
 	workers := estimate.CompressSnapshot.Workers()
@@ -3329,7 +3339,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	switch {
 	case info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies:
 		for g.HasNext() {
-			if blockFrom%1000 == 0 {
+			if blockFrom%step == 0 {
 				if compressor != nil {
 					if err := compressor.Compress(); err != nil {
 						return err
@@ -3337,7 +3347,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 					compressor.Close()
 				}
 
-				unmerged_fileinfo := info.Type.FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
+				unmerged_fileinfo := info.Type.FileInfo(dirs.Snap, info.Epoch, blockFrom, blockFrom+step)
 				compressor, err = seg.NewCompressor(ctx, "unmerge", unmerged_fileinfo.Path, dirs.Tmp, compresCfg, log.LvlTrace, logger)
 				if err != nil {
 					return err
@@ -3361,8 +3371,8 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 		return fmt.Errorf("unsupported type %s", info.Type.Enum().String())
 	default:
 		// tx unmerge
-		for ; blockFrom < blockTo; blockFrom += 1000 {
-			um_fileinfo := snaptype2.Enums.Bodies.Type().FileInfo(dirs.Snap, blockFrom, blockFrom+1000)
+		for ; blockFrom < blockTo; blockFrom += step {
+			um_fileinfo := snaptype2.Enums.Bodies.Type().FileInfo(dirs.Snap, info.Epoch, blockFrom, blockFrom+step)
 			bodiesSegment, err := seg.NewDecompressor(um_fileinfo.Path)
 			if err != nil {
 				return err

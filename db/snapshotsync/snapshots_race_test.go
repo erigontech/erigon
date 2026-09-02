@@ -64,7 +64,7 @@ func TestRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 	defer s.Close()
 	require.NoError(s.OpenFolder())
 
-	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum()))
+	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, false, 0, 1_000, snaptype2.Headers.Enum()))
 	_, err := os.Stat(subPath)
 	require.NoError(err, "sub-segment must exist before RemoveOverlaps")
 
@@ -121,13 +121,13 @@ func TestOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
 	// An external actor removes the [0,1000) files; OpenFolder retires them close-only
 	// (they are already gone from disk), then the same files are recreated before v drains.
 	for _, snT := range snaptype2.BlockSnapshotTypes {
-		require.NoError(dir.RemoveFile(filepath.Join(tmpDir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snT.Enum()))))
+		require.NoError(dir.RemoveFile(filepath.Join(tmpDir, snaptype.SegmentFileName(version.V1_0, false, 0, 1_000, snT.Enum()))))
 	}
 	require.NoError(s.OpenFolder())
 	for _, snT := range snaptype2.BlockSnapshotTypes {
 		createTestSegmentFile(t, 0, 1_000, snT.Enum(), tmpDir, version.V1_0, logger)
 	}
-	headersPath := filepath.Join(tmpDir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum()))
+	headersPath := filepath.Join(tmpDir, snaptype.SegmentFileName(version.V1_0, false, 0, 1_000, snaptype2.Headers.Enum()))
 
 	v.Close() // drains the pinning generation -> reclaims the retired segments (close-only)
 	vClosed = true
@@ -186,7 +186,7 @@ func TestRemoveOverlapsProtectsPendingRetired(t *testing.T) {
 	s.recalcVisibleFiles(s.alignMin, subs) // retire subs to the current generation
 	s.dirtyLock.Unlock()
 
-	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, 0, 1_000, snaptype2.Headers.Enum()))
+	subPath := filepath.Join(dir, snaptype.SegmentFileName(version.V1_0, false, 0, 1_000, snaptype2.Headers.Enum()))
 	_, err := os.Stat(subPath)
 	require.NoError(err, "retired sub must still be on disk while a reader pins it")
 
@@ -225,7 +225,7 @@ func TestReadersRaceRetire(t *testing.T) {
 	for from := uint64(0); from < 10_000; from += 1_000 {
 		for i, snT := range snaptype2.BlockSnapshotTypes {
 			createTestSegmentFile(t, from, from+1_000, snT.Enum(), dir, verOf(i), logger)
-			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), from, from+1_000, snT.Enum()))
+			subNames = append(subNames, snaptype.SegmentFileName(verOf(i), false, from, from+1_000, snT.Enum()))
 		}
 	}
 	for i, snT := range snaptype2.BlockSnapshotTypes {

@@ -40,13 +40,14 @@ func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	cfg := m.snCfg
+	epoch := snaptype2.RegimeFor(m.chainConfig)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
+		mergeLimit := cfg.MergeLimit(snaptype.Unknown, epoch, r.From())
 		if r.To()-r.From() >= mergeLimit {
 			continue
 		}
-		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, r.From()) {
+		for _, span := range snapcfg.MergeStepsFromCfg(cfg, snaptype.Unknown, epoch, r.From()) {
 			if r.To()%span != 0 {
 				continue
 			}
@@ -219,11 +220,12 @@ func (m *Merger) Merge(
 			out[snapType] = append(out[snapType], t...)
 		}
 
+		epoch := snaptype2.RegimeFor(m.chainConfig)
 		for _, t := range snapTypes {
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
 				v,
-				t.FileInfo(snapDir, r.From(), r.To()),
+				t.FileInfo(snapDir, epoch, r.From(), r.To()),
 				toMerge[t.Enum()],
 				snapDir,
 				doIndex,
@@ -389,6 +391,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	sn := &DirtySegment{
 		segType: targetFile.Type,
 		version: targetFile.Version,
+		epoch:   targetFile.Epoch,
 		Range:   Range{targetFile.From, targetFile.To},
 		frozen:  m.snCfg.IsFrozen(targetFile),
 	}

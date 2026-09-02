@@ -488,7 +488,7 @@ func caplinStateFileName(snapName string, fromSlot, toSlot uint64) (string, erro
 	if typ == nil {
 		return "", fmt.Errorf("unknown caplin state snapshot type %q", snapName)
 	}
-	return typ.FileName(version.ZeroVersion, fromSlot, toSlot), nil
+	return typ.FileName(version.ZeroVersion, false, fromSlot, toSlot), nil
 }
 
 type caplinStateDumpJob struct {
@@ -589,7 +589,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 				return fmt.Errorf("invalid caplin state snapshot filename %q", df.FileName())
 			}
 
-			indexFile := filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.CaplinTypeString))
+			indexFile := filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, false, sn.From, sn.To, sn.CaplinTypeString))
 			if _, err := os.Stat(indexFile); err == nil {
 				logger.Info("index file already exists, yet dirtyFile didn't have it opened", "seg", sn.Name())
 				continue

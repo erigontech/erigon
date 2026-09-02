@@ -465,6 +465,15 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		if allSegmentsDownloadComplete {
+			needsMigration, err := freezeblocks.HasDecimalBlockSegments(cfg.Dirs, cc)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, err
+			}
+			if needsMigration {
+				return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf(
+					"datadir %s still has legacy decimal block segments: start erigon once (or run `erigon seg retire --datadir=%s`) to convert them, then start rpcdaemon",
+					cfg.Dirs.DataDir, cfg.Dirs.DataDir)
+			}
 			allSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")

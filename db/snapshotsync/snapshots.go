@@ -147,9 +147,13 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 	return res, overlapped
 }
 
-func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg, retireStep uint64) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(epoch bool, from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg, retireStep uint64) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
+	}
+	// The epoch ladder is 1024 -> 8192 -> 65536 -> 524288; retireStep can lower only its smallest tier.
+	if epoch {
+		return canRetireEpoch(from, to, epochMinSegmentSize(retireStep))
 	}
 	if retireStep == 0 {
 		retireStep = 1_000
@@ -157,7 +161,7 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg, reti
 	blockFrom = (from / retireStep) * retireStep
 	roundedToRetireStep := (to / retireStep) * retireStep
 	maxJump := retireStep
-	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, blockFrom)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, epoch, blockFrom)
 	switch {
 	case blockFrom%mergeLimit == 0:
 		maxJump = mergeLimit
@@ -180,6 +184,49 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg, reti
 		blockTo = blockFrom
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= retireStep
+}
+
+// canRetireEpoch is CanRetire's epoch-rounded variant: the ladder is 1024 -> 8192 -> 65536
+// -> 524288 (era1-derived) instead of the decimal 1k/10k/100k/mergeLimit.
+// epochMinSegmentSize resolves the smallest epoch tier to produce. retireStep may lower it below the
+// 1024 default, but only to a power of two that still divides the 8192 era1 tier — a step that never
+// lines up with a merge span would strand its segments below the ladder forever.
+func epochMinSegmentSize(retireStep uint64) uint64 {
+	if retireStep == 0 || retireStep > snaptype.EpochMinSegmentSize || 8_192%retireStep != 0 ||
+		retireStep&(retireStep-1) != 0 {
+		return snaptype.EpochMinSegmentSize
+	}
+	return retireStep
+}
+
+func canRetireEpoch(from, to, minSize uint64) (blockFrom, blockTo uint64, can bool) {
+	blockFrom = (from / minSize) * minSize
+	roundedTo := (to / minSize) * minSize
+
+	var maxJump uint64 = minSize
+	switch {
+	case blockFrom%snaptype.EpochMergeLimit == 0:
+		maxJump = snaptype.EpochMergeLimit
+	case blockFrom%65_536 == 0:
+		maxJump = 65_536
+	case blockFrom%8_192 == 0:
+		maxJump = 8_192
+	}
+
+	jump := min(maxJump, roundedTo-blockFrom)
+	switch { // only next segment sizes are allowed
+	case jump >= snaptype.EpochMergeLimit:
+		blockTo = blockFrom + snaptype.EpochMergeLimit
+	case jump >= 65_536:
+		blockTo = blockFrom + 65_536
+	case jump >= 8_192:
+		blockTo = blockFrom + 8_192
+	case jump >= minSize:
+		blockTo = blockFrom + minSize
+	default:
+		blockTo = blockFrom
+	}
+	return blockFrom, blockTo, blockTo-blockFrom >= minSize
 }
 
 type Range struct {
@@ -205,16 +252,18 @@ type DirtySegment struct {
 	indexes []*recsplit.Index
 	segType snaptype.Type
 	version snaptype.Version
+	epoch   bool // era1-aligned ("ep"-marked, block/1024) vs decimal (block/1000)
 
 	frozen bool
 
 	canDelete atomic.Bool
 }
 
-func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
+func NewDirtySegment(segType snaptype.Type, version snaptype.Version, epoch bool, from uint64, to uint64, frozen bool) *DirtySegment {
 	return &DirtySegment{
 		segType: segType,
 		version: version,
+		epoch:   epoch,
 		Range:   Range{from, to},
 		frozen:  frozen,
 	}
@@ -303,7 +352,7 @@ func (s *DirtySegment) FileName() string {
 	if s.Decompressor != nil {
 		return s.Decompressor.FileName()
 	}
-	return s.Type().FileName(s.version, s.from, s.to)
+	return s.Type().FileName(s.version, s.epoch, s.from, s.to)
 }
 
 func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
@@ -327,7 +376,7 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
-	return s.Type().FileInfoByMask(dir, s.from, s.to)
+	return s.Type().FileInfoByMask(dir, s.epoch, s.from, s.to)
 }
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
@@ -391,7 +440,7 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 }
 
 func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []string) (err error) {
-	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
+	if len(s.Type().IdxFileNames(s.epoch, s.from, s.to)) == 0 {
 		return nil
 	}
 
@@ -420,7 +469,7 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 		s.indexes = append(s.indexes, nil)
 	}
 
-	for i, fileName := range s.Type().IdxFileNames(s.from, s.to) {
+	for i, fileName := range s.Type().IdxFileNames(s.epoch, s.from, s.to) {
 		if s.indexes[i] != nil {
 			continue
 		}
@@ -1222,7 +1271,7 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 
 		sn, exists := FindOpenSegment(segtype, fName)
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, epoch: f.Epoch, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
 		}
 
 		if open {
@@ -1546,7 +1595,7 @@ func isIndexedOnDisk(dirPath string, f snaptype.FileInfo) bool {
 	if f.Type == nil {
 		return false
 	}
-	for _, name := range f.Type.IdxFileNames(f.From, f.To) {
+	for _, name := range f.Type.IdxFileNames(f.Epoch, f.From, f.To) {
 		ok, err := dir.FileExist(filepath.Join(dirPath, name))
 		if err != nil || !ok {
 			return false

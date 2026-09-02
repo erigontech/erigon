@@ -31,8 +31,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -74,6 +77,11 @@ func TestDump(t *testing.T) {
 		},
 		{
 			chainSize:   50,
+			chainConfig: chain.AllProtocolChanges,
+		},
+		{
+			// eth chain -> epoch: block dump carves 1024-aligned segments
+			chainSize:   1024,
 			chainConfig: chain.AllProtocolChanges,
 		},
 	}
@@ -209,10 +217,6 @@ func TestDump(t *testing.T) {
 			require.Equal(lastTxNum, firstTxNum+uint64(i*3))
 		})
 		t.Run("blocks", func(t *testing.T) {
-			if test.chainSize < 1000 || test.chainSize%1000 != 0 {
-				t.Skip("Block dump requires chain size to be a multiple of 1000")
-			}
-
 			require := require.New(t)
 
 			logger := log.New()
@@ -221,7 +225,15 @@ func TestDump(t *testing.T) {
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig, nil)
+			// production only ever retires whole segments; feed DumpBlocks the segmentable prefix
+			// (a chain shorter than one segment yields none), matching the chain's regime.
+			minSeg := uint64(snaptype.Erigon2MinSegmentSize)
+			if snaptype2.RegimeFor(test.chainConfig) {
+				minSeg = snaptype.EpochMinSegmentSize
+			}
+			blockTo := uint64(test.chainSize) / minSeg * minSeg
+
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, blockTo, m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig, nil)
 			require.NoError(err)
 		})
 	}
@@ -263,4 +275,11 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 	}
 
 	return m
+}
+
+// The block-segment regime is scoped to Ethereum-family chains: RegimeFor is epoch for eth and
+// decimal for Aura (Gnosis).
+func TestRegimeForByChain(t *testing.T) {
+	require.True(t, snaptype2.RegimeFor(chain.AllProtocolChanges))
+	require.False(t, snaptype2.RegimeFor(chainspec.Gnosis.Config))
 }
