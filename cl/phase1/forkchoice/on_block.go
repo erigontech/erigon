@@ -221,6 +221,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 		// Call NewPayload to validate execution payload
 		if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
+			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
+			if f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
+				f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
+				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
+					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
+				}
+				return errors.New("block is invalid")
+			}
 			if block.Version() >= clparams.DenebVersion {
 				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
 					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
@@ -228,10 +236,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {
+				return validationErr
+			}
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
-			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
 			if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, blockRoot, executionBlockHash); err != nil {
+				f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
+				if cleanupErr := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); cleanupErr != nil {
+					return fmt.Errorf("failed to remove block from optimistic store: %w", cleanupErr)
+				}
 				return err
 			}
 			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)

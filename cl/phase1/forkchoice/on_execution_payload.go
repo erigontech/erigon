@@ -139,7 +139,7 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 	block *cltypes.SignedBeaconBlock,
 	blockState abstract.BeaconState,
 ) error {
-	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, false)
+	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, false, true)
 }
 
 func (f *ForkChoiceStore) validateEnvelopeAgainstBlockAfterCommitments(
@@ -147,7 +147,15 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockAfterCommitments(
 	block *cltypes.SignedBeaconBlock,
 	blockState abstract.BeaconState,
 ) error {
-	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true)
+	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, true)
+}
+
+func (f *ForkChoiceStore) validateEnvelopeAgainstBlockForGossip(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+	blockState abstract.BeaconState,
+) error {
+	return f.validateEnvelopeAgainstBlockInternal(signedEnvelope, block, blockState, true, false)
 }
 
 func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
@@ -155,6 +163,7 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 	block *cltypes.SignedBeaconBlock,
 	blockState abstract.BeaconState,
 	commitmentsValidated bool,
+	validateParentBeaconBlockRoot bool,
 ) error {
 	if signedEnvelope.Message == nil {
 		log.Warn("[validateEnvelopeAgainstBlock] received signed envelope with nil message")
@@ -208,7 +217,7 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlockInternal(
 	}
 
 	// Validate envelope.parent_beacon_block_root == state.latest_block_header.parent_root
-	if blockState != nil {
+	if validateParentBeaconBlockRoot && blockState != nil {
 		latestBlockHeader := blockState.LatestBlockHeader()
 		if envelope.ParentBeaconBlockRoot != latestBlockHeader.ParentRoot {
 			return fmt.Errorf("envelope parent_beacon_block_root %v != latest_block_header parent_root %v",
@@ -394,15 +403,6 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	})
 }
 
-func (f *ForkChoiceStore) validateEnvelopeCommitmentsWhileYieldingForkChoiceLock(
-	block *cltypes.SignedBeaconBlock,
-	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
-) error {
-	return f.withForkChoiceLockYielded(func() error {
-		return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
-	})
-}
-
 func (f *ForkChoiceStore) validateEnvelopePersistenceCommitmentsWhileYieldingForkChoiceLock(
 	block *cltypes.SignedBeaconBlock,
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
@@ -428,6 +428,33 @@ func (f *ForkChoiceStore) validatePayloadHashFallbackLocked(blockRoot, execution
 		return fmt.Errorf("%w: execution payload was invalidated during local payload hash validation", errInvalidExecutionPayloadEnvelope)
 	}
 	return nil
+}
+
+func (f *ForkChoiceStore) authenticatePayloadHashBeforeStatusProjectionLocked(
+	payloadStatus execution_client.PayloadStatus,
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+) (*cltypes.SignedBeaconBlock, error) {
+	envelope := signedEnvelope.Message
+	blockRoot := envelope.BeaconBlockRoot
+	executionBlockHash := envelope.Payload.BlockHash
+	needsAuthentication := payloadStatus == execution_client.PayloadStatusNone || payloadStatus == execution_client.PayloadStatusInvalidated
+	if !needsAuthentication && payloadStatus != execution_client.PayloadStatusValidated {
+		needsAuthentication = f.payloadValidatedLocked(blockRoot, executionBlockHash)
+	}
+	if !needsAuthentication {
+		return block, nil
+	}
+	if err := f.validatePayloadHashFallbackLocked(blockRoot, executionBlockHash, func() error {
+		return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
+	}); err != nil {
+		if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: EL did not authenticate payload hash and local validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
+	}
+	block, err := f.refreshEnvelopeBlockLocked(blockRoot)
+	return block, err
 }
 
 func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, validate func() (execution_client.PayloadStatus, error)) (execution_client.PayloadStatus, error) {
@@ -653,22 +680,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
-	if err := f.validateEnvelopeCommitmentsWhileYieldingForkChoiceLock(block, signedEnvelope); err != nil {
-		return fmt.Errorf("execution payload envelope failed gossip validation: invalid execution payload envelope commitments: %w", err)
-	}
-	block, err = f.refreshEnvelopeBlockLocked(root)
-	if err != nil {
-		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
-	}
-	blockState, err = f.forkGraph.GetState(root, false)
-	if err != nil || blockState == nil {
-		return fmt.Errorf("beacon block state %v is unavailable after commitment validation", root)
-	}
-	finalizedSlot = f.FinalizedSlot()
-	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
-	}
-	if err := f.validateEnvelopeAgainstBlockAfterCommitments(signedEnvelope, block, blockState); err != nil {
+	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
 	return nil
@@ -899,6 +911,16 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			}
 			return false, validationErr
 		}
+		if err := validatePayloadValidationResult(payloadStatus, validationErr); err != nil {
+			return false, err
+		}
+		block, err := f.authenticatePayloadHashBeforeStatusProjectionLocked(payloadStatus, signedEnvelope, block)
+		if err != nil {
+			if missingMode == queueMissingEnvelope && errors.Is(err, ErrIgnore) {
+				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+			}
+			return false, fmt.Errorf("OnExecutionPayload: payload hash authentication failed: %w", err)
+		}
 		validationApplied, err := f.applyTerminalPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot))
 		if err != nil {
 			return false, err
@@ -909,26 +931,6 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
 		if err != nil {
 			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block: %w", err)
-		}
-		if payloadStatus == execution_client.PayloadStatusNone {
-			if err := f.validatePayloadHashFallbackLocked(beaconBlockRoot, envelope.Payload.BlockHash, func() error {
-				return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
-			}); err != nil {
-				if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
-					return false, err
-				}
-				return false, fmt.Errorf("%w: OnExecutionPayload: EL did not validate payload hash and local validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
-			}
-			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-				return false, nil
-			}
-			block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
-			if err != nil {
-				if missingMode == queueMissingEnvelope {
-					f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-				}
-				return false, fmt.Errorf("OnExecutionPayload: failed to refresh block after local payload hash validation: %w", err)
-			}
 		}
 		if !validationApplied {
 			err = f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot))
@@ -1294,6 +1296,16 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 			}
 			return false, validationErr
 		}
+		if err := validatePayloadValidationResult(payloadStatus, validationErr); err != nil {
+			return false, err
+		}
+		block, err := f.authenticatePayloadHashBeforeStatusProjectionLocked(payloadStatus, signedEnvelope, block)
+		if err != nil {
+			if missingMode == queueMissingEnvelope && errors.Is(err, ErrIgnore) {
+				f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+			}
+			return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: payload hash authentication failed: %w", err)
+		}
 		validationApplied, err := f.applyTerminalPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot))
 		if err != nil {
 			return false, err
@@ -1304,26 +1316,6 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
 		if err != nil {
 			return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to refresh block: %w", err)
-		}
-		if payloadStatus == execution_client.PayloadStatusNone {
-			if err := f.validatePayloadHashFallbackLocked(beaconBlockRoot, envelope.Payload.BlockHash, func() error {
-				return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
-			}); err != nil {
-				if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
-					return false, err
-				}
-				return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: EL did not validate payload hash and local validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
-			}
-			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-				return false, nil
-			}
-			block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
-			if err != nil {
-				if missingMode == queueMissingEnvelope {
-					f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-				}
-				return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to refresh block after local payload hash validation: %w", err)
-			}
 		}
 		if !validationApplied {
 			err = f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot))

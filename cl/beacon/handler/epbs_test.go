@@ -220,7 +220,10 @@ func TestPostExecutionPayloadEnvelopeRejectsEnvelopeAlreadyStoredByP2P(t *testin
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+	envelope := contents.SignedExecutionPayloadEnvelope
+	envelope.Message.Payload.GasLimit++
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
 	fcu.SetEnvelope(envelope.Message.BeaconBlockRoot, envelope)
 	body, err := json.Marshal(envelope)
@@ -836,11 +839,12 @@ func TestPostExecutionPayloadEnvelopeRejectsMissingCachedBlobData(t *testing.T) 
 
 func TestPostExecutionPayloadEnvelopeRejectsInvalidEnvelopeBeforeBlobColumns(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		mutate func(*cltypes.SignedExecutionPayloadEnvelope)
+		name      string
+		mutate    func(*cltypes.SignedExecutionPayloadEnvelope)
+		gossipErr error
 	}{
 		{name: "nil payload", mutate: func(envelope *cltypes.SignedExecutionPayloadEnvelope) { envelope.Message.Payload = nil }},
-		{name: "commitment mismatch", mutate: func(envelope *cltypes.SignedExecutionPayloadEnvelope) { envelope.Message.Payload.BlockHash[0]++ }},
+		{name: "commitment mismatch", mutate: func(envelope *cltypes.SignedExecutionPayloadEnvelope) { envelope.Message.Payload.BlockHash[0]++ }, gossipErr: errors.New("gossip commitment mismatch")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -861,6 +865,7 @@ func TestPostExecutionPayloadEnvelopeRejectsInvalidEnvelopeBeforeBlobColumns(t *
 			block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
 			contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
 			tc.mutate(contents.SignedExecutionPayloadEnvelope)
+			fcu.ValidateExecutionPayloadEnvelopeForGossipErr = tc.gossipErr
 			proofValue := cltypes.KZGProof(proof)
 			contents.KZGProofs.Append(&proofValue)
 			contents.Blobs.Append(blob)
@@ -985,6 +990,47 @@ func TestPostExecutionPayloadEnvelopeGossipsAndReturnsAcceptedWhenFullIntegratio
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
+}
+
+func TestPostExecutionPayloadEnvelopeWithBlobsDefersDerivedHashFailureUntilAfterGossip(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler.columnStorage = columnStorage
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blob := new(cltypes.Blob)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
+	require.NoError(t, err)
+	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
+	require.NoError(t, err)
+	commitmentValue := cltypes.KZGCommitment(commitment)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
+	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+	contents.SignedExecutionPayloadEnvelope.Message.Payload.GasLimit++
+	proofValue := cltypes.KZGProof(proof)
+	contents.KZGProofs.Append(&proofValue)
+	contents.Blobs.Append(blob)
+	body, err := json.Marshal(contents)
+	require.NoError(t, err)
+	root := contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot
+	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), root, gomock.Any(), gomock.Any()).Return(nil).Times(int(handler.beaconChainCfg.NumberOfColumns))
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(int(handler.beaconChainCfg.NumberOfColumns) + 1)
+	fcu.OnExecutionPayloadErr = errors.New("derived hash mismatch")
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "true")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)

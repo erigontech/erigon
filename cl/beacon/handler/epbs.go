@@ -964,15 +964,6 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
-		if !ok || block == nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("beacon block is unavailable for envelope validation")).WriteTo(w)
-			return
-		}
-		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(a.beaconChainCfg, block, signedEnvelope); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
-		}
 		columnSidecars, err = a.dataColumnSidecarsFromEnvelopeBlobs(signedEnvelope, contents.KZGProofs, contents.Blobs)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
