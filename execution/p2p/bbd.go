@@ -42,12 +42,11 @@ type BbdHeaderReader interface {
 }
 
 type BackwardBlockDownloader struct {
-	logger        log.Logger
-	fetcher       Fetcher
-	balFetcher    BALFetcher
-	peerPenalizer *PeerPenalizer
-	peerTracker   *PeerTracker
-	tmpDir        string
+	logger      log.Logger
+	fetcher     Fetcher
+	balFetcher  BALFetcher
+	peerTracker *PeerTracker
+	tmpDir      string
 }
 
 type BackwardBlockDownloaderOption func(*BackwardBlockDownloader)
@@ -61,17 +60,15 @@ func WithBALFetcher(balFetcher BALFetcher) BackwardBlockDownloaderOption {
 func NewBackwardBlockDownloader(
 	logger log.Logger,
 	fetcher Fetcher,
-	peerPenalizer *PeerPenalizer,
 	peerTracker *PeerTracker,
 	tmpDir string,
 	opts ...BackwardBlockDownloaderOption,
 ) *BackwardBlockDownloader {
 	bbd := &BackwardBlockDownloader{
-		logger:        logger,
-		fetcher:       fetcher,
-		peerPenalizer: peerPenalizer,
-		peerTracker:   peerTracker,
-		tmpDir:        tmpDir,
+		logger:      logger,
+		fetcher:     fetcher,
+		peerTracker: peerTracker,
+		tmpDir:      tmpDir,
 	}
 	for _, opt := range opts {
 		opt(bbd)
@@ -562,57 +559,31 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 					return nil
 				}
 
-				bodies := bodiesResponse.Data
-				bodyBatch := make([]*types.Body, 0, len(headerBatch))
-				for i, header := range headerBatch {
-					body := bodies[i]
-					err := body.MatchesHeader(header)
-					if err != nil {
+				bodyBatch := bodiesResponse.Data
+				if bbd.balFetcher != nil {
+					if want := len(balReqs); len(balsResponse) < want {
 						bbd.logger.Debug(
-							"[backward-block-downloader] body does not match header, penalizing peer",
-							"num", header.Number.Uint64(),
-							"hash", header.Hash(),
-							"peerId", peerId.String(),
-							"err", err,
-						)
-						err = bbd.peerPenalizer.Penalize(ctx, &peerId)
-						if err != nil {
-							bbd.logger.Debug(
-								"[backward-block-downloader] could not penalize peer",
-								"peerId", peerId.String(),
-								"err", err,
-							)
-						}
-						break
-					}
-					bodyBatch = append(bodyBatch, body)
-				}
-				if len(bodyBatch) == len(headerBatch) {
-					if bbd.balFetcher != nil {
-						if want := len(balReqs); len(balsResponse) < want {
-							bbd.logger.Debug(
-								"[backward-block-downloader] BALs download miss for batch",
-								"fromNum", headerBatch[0].Number.Uint64(),
-								"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
-								"got", len(balsResponse),
-								"want", want,
-								"bodyPeerId", peerId.String(),
-								"balLeadPeerId", balPrimary.String(),
-							)
-						}
-					}
-					bodyBatches[batchIndex] = bodyBatch
-					if len(balsResponse) > 0 {
-						balBatches[batchIndex] = balsResponse
-						bbd.logger.Trace(
-							"[backward-block-downloader] fetched BALs for batch",
+							"[backward-block-downloader] BALs download miss for batch",
 							"fromNum", headerBatch[0].Number.Uint64(),
-							"fromHash", headerBatch[0].Hash(),
 							"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
-							"toHash", headerBatch[len(headerBatch)-1].Hash(),
 							"got", len(balsResponse),
+							"want", want,
+							"bodyPeerId", peerId.String(),
+							"balLeadPeerId", balPrimary.String(),
 						)
 					}
+				}
+				bodyBatches[batchIndex] = bodyBatch
+				if len(balsResponse) > 0 {
+					balBatches[batchIndex] = balsResponse
+					bbd.logger.Trace(
+						"[backward-block-downloader] fetched BALs for batch",
+						"fromNum", headerBatch[0].Number.Uint64(),
+						"fromHash", headerBatch[0].Hash(),
+						"toNum", headerBatch[len(headerBatch)-1].Number.Uint64(),
+						"toHash", headerBatch[len(headerBatch)-1].Hash(),
+						"got", len(balsResponse),
+					)
 				}
 				return nil
 			})

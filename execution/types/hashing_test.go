@@ -76,6 +76,16 @@ func TestDeriveSha(t *testing.T) {
 	}
 }
 
+func TestDeriveShaAllocations(t *testing.T) {
+	transactions := genTransactions(100)
+	allocations := testing.AllocsPerRun(10, func() {
+		DeriveSha(transactions)
+	})
+	if allocations > 150 {
+		t.Fatalf("allocations = %.0f, want at most 150", allocations)
+	}
+}
+
 func TestDeriveShaRawTransactions(t *testing.T) {
 	for _, count := range []uint64{0, 1, 2, 127, 128, 129, 255, 256, 257, 1000} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {

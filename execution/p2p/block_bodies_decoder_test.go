@@ -95,28 +95,6 @@ func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
 	require.Empty(t, decoded)
 }
 
-func BenchmarkDecodeBlockBodiesResponseRejectsTransactionAmplification(b *testing.B) {
-	transaction := append([]byte{0xc9}, bytes.Repeat([]byte{0x80}, 9)...)
-	header := newMockHeaderForBody(1, &types.Body{})
-
-	for _, test := range []struct {
-		name  string
-		count int
-	}{
-		{name: "one", count: 1},
-		{name: "4096", count: 4096},
-	} {
-		b.Run(test.name, func(b *testing.B) {
-			transactions := rlpTestList(bytes.Repeat(transaction, test.count))
-			body := rlpTestList(append(transactions, rlp.EmptyListCode))
-			b.ReportAllocs()
-			for b.Loop() {
-				_, _ = decodeBlockBodiesResponse(body, []*types.Header{header})
-			}
-		})
-	}
-}
-
 func rlpTestList(content []byte) []byte {
 	encoded := make([]byte, rlp.ListPrefixLen(len(content))+len(content))
 	prefixLen := rlp.EncodeListPrefixToBuf(len(content), encoded)

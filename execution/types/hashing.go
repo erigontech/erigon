@@ -125,6 +125,7 @@ type deriveShaBuilder struct {
 	curr     bytes.Buffer
 	succ     bytes.Buffer
 	hb       *trie.HashBuilder
+	hex      hexWriter
 	groups   []uint16
 	branches []uint16
 	hashes   []uint16
@@ -133,6 +134,7 @@ type deriveShaBuilder struct {
 
 func newDeriveShaBuilder() *deriveShaBuilder {
 	builder := &deriveShaBuilder{hb: trie.NewHashBuilder(false)}
+	builder.hex.w = &builder.succ
 	builder.hb.Reset()
 	return builder
 }
@@ -143,9 +145,8 @@ func (b *deriveShaBuilder) add(value []byte, next int) {
 	b.succ.Reset()
 
 	if next >= 0 {
-		hexWriter := &hexWriter{&b.succ}
-		encodeUint(uint(next), hexWriter)
-		if err := hexWriter.Commit(); err != nil {
+		encodeUint(uint(next), &b.hex)
+		if err := b.hex.Commit(); err != nil {
 			panic(fmt.Errorf("fatal in DeriveSha: %w", err))
 		}
 	}
