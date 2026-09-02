@@ -55,7 +55,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	}
 	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
 
-	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
+	branch, childMasks, childMasksKnown, err := base.branchWithMasksFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,11 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		return errStorageBaseNotBranch
 	}
 	base.branchBefore[0] = true
-	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
+	if err := base.decodeBranchIntoRow(0, d+1, branch[2:], false); err != nil {
+		return err
+	}
+	base.stampChildMasks(0, childMasks, childMasksKnown)
+	return nil
 }
 
 func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {

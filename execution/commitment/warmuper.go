@@ -144,10 +144,25 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
+	// A v3 parent record carries its child's bitmap, so every node below the first can be read
+	// by its exact mask instead of probing all 16 nibbles across every commitment file.
+	maskReader, _ := trieCtx.(BranchMaskReader)
+	var mask uint16
+	maskKnown := false
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
-		branchData, _, err := trieCtx.Branch(prefix)
+		var (
+			branchData      []byte
+			childMasks      [16]uint16
+			childMasksKnown uint16
+			err             error
+		)
+		if maskReader != nil {
+			branchData, _, childMasks, childMasksKnown, err = maskReader.BranchWithMask(prefix, mask, maskKnown)
+		} else {
+			branchData, _, err = trieCtx.Branch(prefix)
+		}
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
@@ -169,6 +184,11 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 
 		if bitmap&childBit == 0 {
 			break
+		}
+
+		mask, maskKnown = 0, false
+		if childMasksKnown&childBit != 0 {
+			mask, maskKnown = childMasks[nextNibble], true
 		}
 
 		pos := 2

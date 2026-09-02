@@ -1534,15 +1534,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if err := hph.decodeBranchIntoRow(row, depth, branchData, deleted); err != nil {
 		return fmt.Errorf("prefix [%x] branchData[%x]: %w", hph.currentKey[:hph.currentKeyLen], branchData, err)
 	}
-	for bitset := childMasksKnown; bitset != 0; {
-		bit := bitset & -bitset
-		nibble := bits.TrailingZeros16(bit)
-		hph.grid[row][nibble].branchMask = childMasks[nibble]
-		hph.grid[row][nibble].branchMaskKnown = true
-		// One record field carries both: a branch child's mask and a fused account's storage mask.
-		hph.grid[row][nibble].storageMask = childMasks[nibble]
-		bitset ^= bit
-	}
+	hph.stampChildMasks(row, childMasks, childMasksKnown)
 	hph.depths[hph.activeRows] = depth
 	hph.activeRows++
 	return nil
@@ -2813,6 +2805,32 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	data, _, err := hph.ctx.Branch(key)
 	return data, err
+}
+
+// branchWithMasksFromCacheOrDB keeps the child bitmaps a v3 record carries; the mask-less read
+// drops them, and every descent below then has to probe all 16 nibbles.
+func (hph *HexPatriciaHashed) branchWithMasksFromCacheOrDB(key []byte) ([]byte, [16]uint16, uint16, error) {
+	if hph.cfg.EdgeRecords {
+		if reader, ok := hph.ctx.(BranchMaskReader); ok {
+			data, _, childMasks, childMasksKnown, err := reader.BranchWithMask(key, 0, false)
+			return data, childMasks, childMasksKnown, err
+		}
+	}
+	data, _, err := hph.ctx.Branch(key)
+	return data, [16]uint16{}, 0, err
+}
+
+// stampChildMasks records, per decoded cell, the bitmap of the node it points at.
+func (hph *HexPatriciaHashed) stampChildMasks(row int, childMasks [16]uint16, childMasksKnown uint16) {
+	for bitset := childMasksKnown; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		hph.grid[row][nibble].branchMask = childMasks[nibble]
+		hph.grid[row][nibble].branchMaskKnown = true
+		// One record field carries both: a branch child's mask and a fused account's storage mask.
+		hph.grid[row][nibble].storageMask = childMasks[nibble]
+		bitset ^= bit
+	}
 }
 
 // No Go-side cache; reads straight from the AccountsDomain.
