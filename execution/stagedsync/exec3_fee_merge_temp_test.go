@@ -17,7 +17,9 @@
 package stagedsync
 
 import (
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -60,7 +62,7 @@ func TestRecordFeeMerge_FirstMergeKeepsWorkerWrites(t *testing.T) {
 
 	txOut := feeMergeTestWrites(t, addr, 1)
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, txOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
 	require.Same(t, tip, be.blockIO.WriteSet(version.TxIndex),
@@ -77,15 +79,18 @@ func TestRecordFeeMerge_RevalidationReleasesSupersededTemp(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	first := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), first, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), first, feeCreditNew, [2]accounts.Address{addr})
 
 	second := feeMergeTestWrites(t, addr, 3)
-	be.recordFeeMerge(version, first, second, feeCreditNew)
+	be.recordFeeMerge(version, first, second, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
-	require.Same(t, second, be.feeMergeTemp[0].writes)
-	require.True(t, first.Released(), "the superseded fee-merge temp must be released")
-	require.Equal(t, 1, second.Count())
+	require.Same(t, first, be.feeMergeTemp[0].writes, "the recorded product is rewritten in place")
+	require.True(t, second.Released(), "the credit the rewrite consumed must be released")
+	require.Equal(t, 1, first.Count())
+	vw, ok := first.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), vw.Val.Uint64(), "the recorded product must carry the newest credit")
 }
 
 func TestRecordFeeMerge_AfterReExecutionKeepsStaleTemp(t *testing.T) {
@@ -96,11 +101,11 @@ func TestRecordFeeMerge_AfterReExecutionKeepsStaleTemp(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	stale := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), stale, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), stale, feeCreditNew, [2]accounts.Address{addr})
 
 	reTxOut := feeMergeTestWrites(t, addr, 4)
 	tip := feeMergeTestWrites(t, addr, 5)
-	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	be.superseded.release()
 
 	require.Same(t, tip, be.feeMergeTemp[0].writes)
@@ -125,7 +130,7 @@ func TestRecordFeeMerge_NoCreditKeepsWorkerWrites(t *testing.T) {
 			be := feeMergeTestExecutor(t)
 			txOut := feeMergeTestWrites(t, addr, 1)
 			be.recordWorkerWrites(version, txOut)
-			be.recordFeeMerge(version, txOut, nil, tc.outcome)
+			be.recordFeeMerge(version, txOut, nil, tc.outcome, [2]accounts.Address{addr})
 
 			require.Same(t, txOut, be.blockIO.WriteSet(version.TxIndex))
 			require.Nil(t, be.creditedWrites(version, txOut),
@@ -147,7 +152,7 @@ func TestRecordWorkerWrites_DropsCreditedTemp(t *testing.T) {
 		"the worker's own output carries no credit")
 
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
+	be.recordFeeMerge(version, txOut, tip, feeCreditNew, [2]accounts.Address{addr})
 	require.Same(t, tip, be.creditedWrites(version, be.blockIO.WriteSet(version.TxIndex)))
 
 	reTxOut := feeMergeTestWrites(t, addr, 3)
@@ -168,7 +173,7 @@ func TestCreditedWrites_PinsVersion(t *testing.T) {
 	version := state.Version{TxIndex: 0}
 
 	tip := feeMergeTestWrites(t, addr, 2)
-	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), tip, feeCreditNew)
+	be.recordFeeMerge(version, feeMergeTestWrites(t, addr, 1), tip, feeCreditNew, [2]accounts.Address{addr})
 	require.Same(t, tip, be.creditedWrites(version, tip))
 
 	reExecuted := version
@@ -193,10 +198,10 @@ func TestRecordFeeMerge_ReleaseKeepsSharedWrites(t *testing.T) {
 
 	txOut := feeMergeTestWrites(t, shared, 1)
 	temp1 := feeMergeTestWrites(t, fresh, 7)
-	be.recordFeeMerge(version, txOut, temp1, feeCreditNew)
+	be.recordFeeMerge(version, txOut, temp1, feeCreditNew, [2]accounts.Address{shared, fresh})
 
 	tipWrites := feeMergeTestWrites(t, fresh, 9)
-	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew)
+	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew, [2]accounts.Address{shared, fresh})
 	be.superseded.release()
 
 	require.True(t, temp1.Released(), "the superseded set's maps must go back to the pool")
@@ -332,4 +337,160 @@ func TestBlockResult_HandsSupersededToApplyLoop(t *testing.T) {
 		require.True(t, handed.Released())
 		require.False(t, later.Released(), "a set collected after the handoff has no reader releasing it yet")
 	})
+}
+
+func benchFeeDropSets(n int, coinbase accounts.Address) (prev, next *state.WriteSet) {
+	base := &state.WriteSet{}
+	for i := range n {
+		var a common.Address
+		binary.BigEndian.PutUint64(a[12:], uint64(i+1))
+		addr := accounts.InternAddress(a)
+		base.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}})
+		base.SetNonce(addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}})
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[24:], uint64(i+1))
+		key := accounts.InternKey(h)
+		base.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key}})
+	}
+	for _, tip := range []**state.WriteSet{&prev, &next} {
+		ws := &state.WriteSet{}
+		ws.SetBalance(coinbase, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath}})
+		ws.SetAddress(coinbase, &state.VersionedWrite[*accounts.Account]{
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.AddressPath}, Val: &accounts.Account{}})
+		*tip = base.MergeInto(ws)
+	}
+	// The half of the credit this round stopped emitting.
+	prev.SetSelfDestruct(coinbase, &state.VersionedWrite[bool]{
+		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.SelfDestructPath}, Val: true})
+	return prev, next
+}
+
+// BenchmarkDropStaleVersionedWrites sizes the retraction scan against the tx's
+// own write set: the credit it retracts is the same two addresses either way.
+func BenchmarkDropStaleVersionedWrites(b *testing.B) {
+	coinbase := feeMergeTestAddr("0x7777777777777777777777777777777777777777")
+	burnt := feeMergeTestAddr("0x8888888888888888888888888888888888888888")
+	version := state.Version{TxIndex: 0}
+
+	for _, n := range []int{4, 32, 256} {
+		b.Run(fmt.Sprintf("writes=%d", n*3), func(b *testing.B) {
+			be := feeMergeTestExecutor(b)
+			prev, next := benchFeeDropSets(n, coinbase)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				be.dropStaleVersionedWrites(version, prev, next, [2]accounts.Address{coinbase, burnt})
+			}
+		})
+	}
+}
+
+// A re-credit at the same headers only moves the fee values, so the round must
+// rewrite them in the recorded set rather than rebuild it from the tx's whole
+// write set and pool the one it replaces.
+func TestRecordFeeMerge_ReCreditRewritesTheRecordedSet(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+	r := newFeeCreditRound(t, s)
+
+	require.NotNil(t, r.run(t), "the first round must credit the tip")
+	merged := r.recorded()
+
+	r.setPreCreditBalance(s.coinbase, 9_000)
+	credit := r.run(t)
+	require.NotNil(t, credit, "a moved coinbase makes the credit differ")
+
+	require.Same(t, merged, r.recorded(), "the same headers must be rewritten, not rebuilt")
+	require.Same(t, merged, r.credited(), "the rewritten set is still this version's credit")
+	require.Equal(t, findBalance(credit, s.coinbase).Val, findBalance(merged, s.coinbase).Val,
+		"the recorded set must carry the round's credit")
+	require.Equal(t, findAddress(credit, s.coinbase).Val, findAddress(merged, s.coinbase).Val,
+		"the account sibling must carry it too")
+
+	r.be.superseded.release()
+	require.False(t, merged.Released(), "the recorded set must not be released")
+}
+
+func feeMergeBenchWorkerWrites(b *testing.B, addrs, slots int) *state.WriteSet {
+	b.Helper()
+	ws := &state.WriteSet{}
+	for a := range addrs {
+		addr := feeMergeTestAddr(fmt.Sprintf("0x%040x", a+1))
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath},
+			Val:         *uint256.NewInt(uint64(a)),
+		})
+		ws.SetNonce(addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath},
+			Val:         uint64(a),
+		})
+		for k := range slots {
+			key := accounts.InternKey(common.HexToHash(fmt.Sprintf("0x%x", k+1)))
+			ws.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key},
+				Val:         *uint256.NewInt(uint64(k)),
+			})
+		}
+	}
+	return ws
+}
+
+func feeMergeBenchTip(version state.Version, coinbase, burnt accounts.Address, amount uint64) *state.WriteSet {
+	tip := &state.WriteSet{}
+	for _, addr := range [...]accounts.Address{coinbase, burnt} {
+		acc := accounts.Account{Balance: *uint256.NewInt(amount), CodeHash: accounts.EmptyCodeHash}
+		tip.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: version},
+			Val:         acc.Balance,
+		})
+		tip.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: version},
+			Val:         &acc,
+		})
+	}
+	return tip
+}
+
+// BenchmarkRecordFeeMerge measures one re-credit round against a worker write
+// set the size mainnet actually produces. The percentiles come from replaying
+// blocks 25881700-15, where a tx that gets credited sees 12-24 rounds.
+func BenchmarkRecordFeeMerge(b *testing.B) {
+	coinbase := feeMergeTestAddr("0x00000000000000000000000000000000000000c0")
+	burnt := feeMergeTestAddr("0x00000000000000000000000000000000000000b1")
+	version := state.Version{TxIndex: 0, TxNum: 1}
+	feeAddrs := [2]accounts.Address{coinbase, burnt}
+
+	for _, size := range []struct {
+		name         string
+		addrs, slots int
+	}{
+		{"p50=4", 2, 0},
+		{"p90=10", 2, 3},
+		{"p99=24", 4, 4},
+		{"max=444", 37, 10},
+	} {
+		b.Run(size.name, func(b *testing.B) {
+			be := feeMergeTestExecutor(b)
+			base := feeMergeBenchWorkerWrites(b, size.addrs, size.slots)
+			be.recordWorkerWrites(version, base)
+			be.recordFeeMerge(version, base, feeMergeBenchTip(version, coinbase, burnt, 1), feeCreditNew, feeAddrs)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			rounds := 0
+			for ; b.Loop(); rounds++ {
+				tip := feeMergeBenchTip(version, coinbase, burnt, uint64(rounds+2))
+				be.recordFeeMerge(version, be.blockIO.WriteSet(version.TxIndex), tip, feeCreditNew, feeAddrs)
+			}
+			b.StopTimer()
+			// Only a rebuild supersedes a set, so this counts the rounds that
+			// rebuilt rather than rewrote.
+			b.ReportMetric(float64(len(be.superseded))/float64(rounds), "rebuilds/op")
+			be.superseded.release()
+		})
+	}
 }
