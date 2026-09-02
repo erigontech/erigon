@@ -835,7 +835,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	collateAndPrune := func() error {
 		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle,
+				execfinality.WithoutFinalisedBlock(), execfinality.WithTxNumsReader(db, br.TxnumReader()))
 			if err != nil {
 				return nil, err
 			}
@@ -1188,9 +1189,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
 		_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
-		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton)
-		txNums := blockReader.TxnumReader()
-
 		var erigonDBSettings *dbstate.ErigonDBSettings
 		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
 			return
@@ -1234,18 +1232,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		}
 
 		_allSnapshotsSingleton.LogStat("blocks")
-		_ = db.View(context.Background(), func(tx kv.Tx) error {
-			ac := _aggSingleton.BeginFilesRo()
-			defer ac.Close()
-			stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-				histBlockNumProgress, _, err := txNums.FindBlockNum(ctx, tx, endTxNumMinimax)
-				if err != nil {
-					return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
-				}
-				return histBlockNumProgress, nil
-			})
-			return nil
-		})
 	})
 
 	if err != nil {
@@ -1253,6 +1239,22 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		return nil, nil, nil, err
 	}
 	return _allSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, nil
+}
+
+// logSnapshotStats needs a temporal tx: resolving txNum to block reads block files,
+// which only a tx pinning a block-files view may do.
+func logSnapshotStats(ctx context.Context, db kv.TemporalRoDB, blockSnaps *blocksnapshots.RoSnapshots, logger log.Logger) {
+	txNums := freezeblocks.NewBlockReader(blockSnaps).TxnumReader()
+	_ = db.View(ctx, func(tx kv.Tx) error {
+		stats.LogStats(dbstate.AggTx(tx), tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+			histBlockNumProgress, _, err := txNums.FindBlockNum(ctx, tx, endTxNumMinimax)
+			if err != nil {
+				return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
+			}
+			return histBlockNumProgress, nil
+		})
+		return nil
+	})
 }
 
 var openBlockReaderOnce sync.Once

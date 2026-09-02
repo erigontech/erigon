@@ -1509,7 +1509,7 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 func (ss *GrpcServer) hasSubscribers(msgID sentryproto.MessageId) bool {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
-	return ss.messageStreams[msgID] != nil && len(ss.messageStreams[msgID]) > 0
+	return len(ss.messageStreams[msgID]) > 0
 	//	log.Error("Sending msg to core P2P failed", "msg", sentryproto.MessageId_name[int32(streamMsg.msgId)], "err", err)
 }
 

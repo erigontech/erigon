@@ -341,6 +341,17 @@ func TestReceiptsGateFollowsRetention(t *testing.T) {
 			refused: wideOldest - 1,
 		},
 		{
+			// Cache on with a retention that is a sentinel rather than a window: only
+			// an explicit keep-all outlives history, so this one is retired with it.
+			name: "cache_sentinel_retention",
+			cfg: pruneGatingConfig{mode: prune.Mode{
+				Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+				Receipts: prune.KeepPostMergeBlocksPruneMode,
+			}, persistReceipts: true},
+			served:  historyOldest,
+			refused: historyOldest - 1,
+		},
+		{
 			// Cache on with a window narrower than history: past its cutoff the
 			// receipts are re-derived by re-executing, so history decides and the
 			// narrow cache costs the caller nothing.
