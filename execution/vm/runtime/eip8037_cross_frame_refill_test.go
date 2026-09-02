@@ -61,6 +61,28 @@ func sstore(slot, value byte) []byte {
 // spills from its gas_left; the second clears the same slot, but has no spill
 // of its own, so its refill lands in the reservoir. The merge must absorb it,
 // leaving the reservoir at its start-of-transaction value.
+// deployStateGasContracts installs the setter/clearer pair plus a caller running
+// callerCode, and returns the caller and the state it was deployed into.
+func deployStateGasContracts(t *testing.T, callerCode []byte) (accounts.Address, *state.IntraBlockState) {
+	t.Helper()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoMaterialize(true)
+	t.Cleanup(statedb.Close)
+
+	deploy := func(at uint16, code []byte) accounts.Address {
+		addr := accounts.InternAddress(common.BytesToAddress([]byte{byte(at >> 8), byte(at)}))
+		require.NoError(t, statedb.SetCode(addr, code, tracing.CodeChangeUnspecified))
+		return addr
+	}
+	stop := []byte{byte(vm.STOP)}
+	deploy(setterAddr, slices.Concat(sstore(1, 1), stop))
+	deploy(clearerAddr, slices.Concat(sstore(1, 0), stop))
+	return deploy(callerAddr, callerCode), statedb
+}
+
 func TestStateGasReturnsToGasLeftAcrossFrames(t *testing.T) {
 	t.Parallel()
 
@@ -83,21 +105,7 @@ func TestStateGasReturnsToGasLeftAcrossFrames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-			tx, domains := temporaltest.NewTestTxSD(t, db)
-			reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-			statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-			statedb.SetNoMaterialize(true)
-			defer statedb.Close()
-
-			deploy := func(at uint16, code []byte) accounts.Address {
-				addr := accounts.InternAddress(common.BytesToAddress([]byte{byte(at >> 8), byte(at)}))
-				require.NoError(t, statedb.SetCode(addr, code, tracing.CodeChangeUnspecified))
-				return addr
-			}
-			deploy(setterAddr, slices.Concat(sstore(1, 1), stop))
-			deploy(clearerAddr, slices.Concat(sstore(1, 0), stop))
-			caller := deploy(callerAddr, tc.caller)
+			caller, statedb := deployStateGasContracts(t, tc.caller)
 
 			_, gasRemaining, err := Call(caller, nil, &Config{
 				ChainConfig: chain.AllProtocolChanges,
@@ -127,22 +135,9 @@ func TestStateGasMergeIsAnnouncedToTracer(t *testing.T) {
 		},
 	}
 
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, domains := temporaltest.NewTestTxSD(t, db)
-	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	statedb.SetNoMaterialize(true)
-	defer statedb.Close()
-
-	deploy := func(at uint16, code []byte) accounts.Address {
-		addr := accounts.InternAddress(common.BytesToAddress([]byte{byte(at >> 8), byte(at)}))
-		require.NoError(t, statedb.SetCode(addr, code, tracing.CodeChangeUnspecified))
-		return addr
-	}
 	stop := []byte{byte(vm.STOP)}
-	deploy(setterAddr, slices.Concat(sstore(1, 1), stop))
-	deploy(clearerAddr, slices.Concat(sstore(1, 0), stop))
-	caller := deploy(callerAddr, slices.Concat(delegateCallTo(setterAddr), delegateCallTo(clearerAddr), stop))
+	caller, statedb := deployStateGasContracts(t,
+		slices.Concat(delegateCallTo(setterAddr), delegateCallTo(clearerAddr), stop))
 
 	_, _, err := Call(caller, nil, &Config{
 		ChainConfig: chain.AllProtocolChanges,

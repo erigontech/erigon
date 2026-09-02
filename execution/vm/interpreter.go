@@ -190,24 +190,20 @@ func (c *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hook
 		return
 	}
 	c.stateGas -= misplaced
-	c.refillStateGas(misplaced, tracer, tracing.GasChangeCallLeftOverRefunded) // LIFO: gas_left first
+	before := c.gas
+	c.refillStateGas(misplaced) // LIFO: gas_left first
+	if tracer != nil && tracer.OnGasChange != nil {
+		tracer.OnGasChange(before, c.gas, tracing.GasChangeCallLeftOverRefunded)
+	}
 }
 
-func (c *CallContext) refillStateGas(amount uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
-	initial := c.Gas()
-	remaining := initial
+func (c *CallContext) refillStateGas(amount uint64) {
+	remaining := c.Gas()
 	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
 	mdgas.Refill(&remaining, &used, amount, mdgas.StateGas)
 	c.gas = remaining.Execution
 	c.stateGas = remaining.State
 	c.stateGasSpill = used.StateSpill
-	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		before, after := initial.Execution, remaining.Execution
-		if before == after {
-			before, after = initial.State, remaining.State
-		}
-		tracer.OnGasChange(before, after, reason)
-	}
 }
 
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {

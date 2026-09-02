@@ -1050,7 +1050,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	if forwarded {
 		scope.restoreChildGas(returnGas, evm.config.Tracer)
 		if suberr != nil && preparation.chargeNewAccount {
-			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeIgnored)
+			scope.refillStateGas(params.StateGasNewAccount)
 		} else if suberr == nil {
 			scope.mergeChildStateGas(childGasUsed.StateSpill, evm.config.Tracer)
 		}
@@ -1133,7 +1133,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		if err == nil {
 			scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 		} else if scope.newAccountCharged {
-			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeIgnored)
+			scope.refillStateGas(params.StateGasNewAccount)
 		}
 	}
 	scope.Contract.selfBalanceCached = false
