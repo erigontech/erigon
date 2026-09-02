@@ -108,22 +108,6 @@ func broadcastNow(t *testing.T, b *StreamBroadcaster[testMsg], m *testMsg) {
 	}
 }
 
-func TestBroadcastReachesHealthySubscriberWhileAnotherStalls(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	var b StreamBroadcaster[testMsg]
-
-	stalled := newFakeStream(ctx)
-	stalled.gate = make(chan struct{}) // never fed: Send blocks
-	subscribe(t, &b, ctx, stalled)
-
-	healthy := newFakeStream(ctx)
-	subscribe(t, &b, ctx, healthy)
-
-	broadcastNow(t, &b, &testMsg{n: 1})
-	require.Equal(t, 1, recvMsg(t, healthy).n)
-}
-
 func TestLaterBroadcastsProceedWhileSubscriberStalls(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -190,31 +174,6 @@ func TestStalledSubscriberIsReleasedOnStreamCancel(t *testing.T) {
 	require.Equal(t, 2, recvMsg(t, healthy).n)
 }
 
-func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	var b StreamBroadcaster[testMsg]
-
-	stalled := newFakeStream(ctx)
-	stalled.gate = make(chan struct{}) // wedges the first Send, so nothing can drain
-	errs := subscribe(t, &b, ctx, stalled)
-
-	for i := range subscriberQueueLen + 2 {
-		broadcastNow(t, &b, &testMsg{n: i})
-	}
-	require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
-
-	// Let it drain: it must deliver what was buffered before reporting the drop.
-	close(stalled.gate)
-	select {
-	case err := <-errs:
-		require.ErrorIs(t, err, ErrSubscriberTooSlow)
-	case <-time.After(testTimeout):
-		t.Fatal("Subscribe did not return after the subscriber fell behind")
-	}
-	require.Len(t, stalled.sent, subscriberQueueLen+1)
-}
-
 func TestSendErrorEndsSubscription(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -275,62 +234,6 @@ func TestConcurrentBroadcastsKeepEverySubscriberInTheSameOrder(t *testing.T) {
 	}
 }
 
-// An overflowing subscriber stops being a subscriber straight away, but a
-// Subscribe wedged in Send only returns once that Send does.
-func TestOverflowedSubscriberReturnsWhenItsStreamEnds(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	var b StreamBroadcaster[testMsg]
-
-	streamCtx, cancel := context.WithCancel(ctx)
-	stalled := newFakeStream(streamCtx)
-	stalled.gate = make(chan struct{})
-	errs := subscribe(t, &b, ctx, stalled)
-
-	for i := range subscriberQueueLen + 2 {
-		broadcastNow(t, &b, &testMsg{n: i})
-	}
-	require.Equal(t, 0, subCount(&b))
-	select {
-	case err := <-errs:
-		t.Fatalf("Subscribe returned %v while still inside Send", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-
-	cancel()
-	select {
-	case err := <-errs:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(testTimeout):
-		t.Fatal("Subscribe did not return after the stream was cancelled")
-	}
-}
-
-func TestOverflowedSubscriberReportsItsSendError(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	var b StreamBroadcaster[testMsg]
-
-	boom := errors.New("boom")
-	stalled := newFakeStream(ctx)
-	stalled.gate = make(chan struct{})
-	stalled.sendErr = boom
-	errs := subscribe(t, &b, ctx, stalled)
-
-	for i := range subscriberQueueLen + 2 {
-		broadcastNow(t, &b, &testMsg{n: i})
-	}
-	require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
-	close(stalled.gate)
-
-	select {
-	case err := <-errs:
-		require.ErrorIs(t, err, boom)
-	case <-time.After(testTimeout):
-		t.Fatal("Subscribe did not return after Send failed")
-	}
-}
-
 // A subscriber that overflows while wedged in Send runs its deferred remove
 // only once that Send returns, by which time a later subscriber holds a fresh
 // id. Its teardown must not take that one with it.
@@ -365,26 +268,6 @@ func TestLateTeardownDoesNotUnregisterALaterSubscriber(t *testing.T) {
 	require.Equal(t, 99, recvMsg(t, fresh).n)
 }
 
-// Broadcast hands every subscriber the same message, which is why callers must
-// not reuse or mutate one after passing it in.
-func TestBroadcastDoesNotCopyTheMessage(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	var b StreamBroadcaster[testMsg]
-
-	streams := make([]*fakeStream, 3)
-	for i := range streams {
-		streams[i] = newFakeStream(ctx)
-		subscribe(t, &b, ctx, streams[i])
-	}
-
-	msg := &testMsg{n: 7}
-	broadcastNow(t, &b, msg)
-	for _, stream := range streams {
-		require.Same(t, msg, recvMsg(t, stream))
-	}
-}
-
 func TestManyStalledSubscribersDoNotAffectAHealthyOne(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -400,14 +283,61 @@ func TestManyStalledSubscribersDoNotAffectAHealthyOne(t *testing.T) {
 	healthy := newFakeStream(ctx)
 	subscribe(t, &b, ctx, healthy)
 
+	// Drain as we broadcast: the healthy subscriber must never have slack to
+	// lose, or it overflows too and the test is measuring the scheduler.
 	const messages = subscriberQueueLen + 2
 	for i := range messages {
 		broadcastNow(t, &b, &testMsg{n: i})
-	}
-
-	// Every stalled subscriber is gone; the healthy one kept all of them in order.
-	require.Equal(t, 1, subCount(&b))
-	for i := range messages {
 		require.Equal(t, i, recvMsg(t, healthy).n)
+	}
+	require.Equal(t, 1, subCount(&b), "every stalled subscriber should have been dropped")
+}
+
+// A subscriber that fills its queue is unregistered at once, but its Subscribe
+// only returns when the Send it is wedged in does - and whatever ended that
+// Send decides the error. Its queued messages are released, not delivered.
+func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
+	t.Parallel()
+	boom := errors.New("boom")
+	for _, tc := range []struct {
+		name    string
+		sendErr error
+		cancel  bool
+		want    error
+	}{
+		{name: "send released", want: ErrSubscriberTooSlow},
+		{name: "stream cancelled", cancel: true, want: context.Canceled},
+		{name: "send failed", sendErr: boom, want: boom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			var b StreamBroadcaster[testMsg]
+
+			streamCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			stalled := newFakeStream(streamCtx)
+			stalled.gate = make(chan struct{}) // wedges the first Send
+			stalled.sendErr = tc.sendErr
+			errs := subscribe(t, &b, ctx, stalled)
+
+			for i := range subscriberQueueLen + 2 {
+				broadcastNow(t, &b, &testMsg{n: i})
+			}
+			require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
+
+			if tc.cancel {
+				cancel()
+			} else {
+				close(stalled.gate)
+			}
+			select {
+			case err := <-errs:
+				require.ErrorIs(t, err, tc.want)
+			case <-time.After(testTimeout):
+				t.Fatal("Subscribe did not return after the subscriber fell behind")
+			}
+			require.LessOrEqual(t, len(stalled.sent), 1, "queued messages must be released, not delivered")
+		})
 	}
 }

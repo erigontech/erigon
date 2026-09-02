@@ -28,14 +28,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// subscriberQueueLen is how many broadcasts may be buffered for one subscriber.
-// It absorbs short read stalls; beyond it the subscriber is dropped rather than
-// letting a client that stopped reading retain messages without bound.
+// subscriberQueueLen is a jitter buffer for a short read stall, not a
+// durability buffer.
 const subscriberQueueLen = 64
 
-// ErrSubscriberTooSlow is returned by Subscribe to a subscriber that fell more
-// than subscriberQueueLen messages behind. The code is one that
-// IsRetryLater recognises, so clients back off and resubscribe.
+// ErrSubscriberTooSlow ends a subscription that fell behind. IsRetryLater
+// recognises the code, so clients back off and resubscribe.
 var ErrSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscriber fell behind")
 
 // StreamBroadcaster fans a message out to a set of gRPC server-streaming
@@ -48,9 +46,7 @@ var ErrSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscri
 // Delivery is best-effort, not a reliable log. A subscriber that falls
 // subscriberQueueLen messages behind is disconnected with ErrSubscriberTooSlow
 // instead of being buffered further; it has to resubscribe and there is no way
-// for it to recover what it missed in between. The alternative - buffering
-// without bound, or waiting for the slow subscriber - costs either memory or
-// the liveness of every other subscriber and of the producer.
+// for it to recover what it missed in between.
 //
 // Broadcast takes ownership of the message it is given: the message may still
 // be queued for or in flight to a subscriber after Broadcast returns, and every
@@ -96,19 +92,38 @@ func (s *StreamBroadcaster[T]) Subscribe(ctx context.Context, stream grpc.Server
 // across non-blocking queue writes, so an unresponsive subscriber can stall
 // neither the caller nor the other subscribers.
 //
-// A subscriber whose queue is full stops being a subscriber here and receives
-// nothing further. Its Subscribe call only returns once it drains what was
-// already queued, which for one wedged in Send means when that Send unblocks.
+// A subscriber whose queue is full stops being a subscriber here, and its queued
+// messages are released rather than delivered: the queue bounds a count, and a
+// single reply can be large, so a Send that stays wedged would otherwise keep
+// all of them reachable. Its Subscribe returns ErrSubscriberTooSlow once that
+// Send unblocks.
 func (s *StreamBroadcaster[T]) Broadcast(reply *T, logger log.Logger) {
+	var dropped int
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for id, queue := range s.subs {
 		select {
 		case queue <- reply:
 		default:
-			logger.Warn("[grpc] dropping stream subscriber that stopped reading", "stream", fmt.Sprintf("%T", reply))
 			delete(s.subs, id)
+			discard(queue)
 			close(queue)
+			dropped++
+		}
+	}
+	s.mu.Unlock()
+
+	if dropped > 0 {
+		logger.Warn("[grpc] dropped stream subscribers that stopped reading",
+			"count", dropped, "stream", fmt.Sprintf("%T", reply))
+	}
+}
+
+func discard[T any](queue chan *T) {
+	for {
+		select {
+		case <-queue:
+		default:
+			return
 		}
 	}
 }
@@ -125,8 +140,8 @@ func (s *StreamBroadcaster[T]) add() (queue chan *T, id uint) {
 	return queue, s.id
 }
 
-// remove is idempotent, and ids are never reused, so a subscriber tearing down
-// can never unregister a later one.
+// ids are never reused, so a subscriber tearing down late cannot unregister a
+// later one that has since taken its place.
 func (s *StreamBroadcaster[T]) remove(id uint) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
