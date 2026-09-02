@@ -55,7 +55,7 @@ import (
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, false, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -67,7 +67,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, false, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(ver, false, from, to, snaptype2.Indexes.TxnHash2BlockNum.Name)),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -97,7 +97,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, ver snaptype.Version, logger log.Logger) {
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
-	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(t.Context(), "test", filepath.Join(dir, snaptype.SegmentFileName(ver, false, from, to, name)), dir, compressCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -108,7 +108,7 @@ func createTestSegmentOnlyFile(t *testing.T, from, to uint64, name snaptype.Enum
 func requireSegmentFilesExist(t *testing.T, dir string, ver snaptype.Version, from, to uint64, names ...snaptype.Enum) {
 	t.Helper()
 	for _, name := range names {
-		_, err := os.Stat(filepath.Join(dir, snaptype.SegmentFileName(ver, from, to, name)))
+		_, err := os.Stat(filepath.Join(dir, snaptype.SegmentFileName(ver, false, from, to, name)))
 		require.NoError(t, err)
 	}
 }
@@ -262,7 +262,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	reopenedSnapshots.Close()
 
 	// Removing the unindexed overlap leaves the same indexed subsegments visible.
-	unindexedOverlap := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, 1, 2000, snaptype2.Enums.Transactions))
+	unindexedOverlap := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, false, 1, 2000, snaptype2.Enums.Transactions))
 	require.NoError(t, dir.RemoveFile(unindexedOverlap))
 
 	restoredSnapshots := blocksnapshots.NewRoSnapshots(snapshots.Cfg(), dirs.Snap, logger)
@@ -512,7 +512,7 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	word := append([]byte{0}, rlpBytes...)
 
 	// Write the headers segment with a single valid entry.
-	segPath := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, from, to, snaptype2.Enums.Headers))
+	segPath := filepath.Join(dirs.Snap, snaptype.SegmentFileName(ver, false, from, to, snaptype2.Enums.Headers))
 	compressCfg := seg.DefaultCfg
 	compressCfg.MinPatternScore = 100
 	c, err := seg.NewCompressor(t.Context(), "test", segPath, dirs.Snap, compressCfg, log.LvlDebug, logger)
@@ -523,7 +523,7 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	c.Close()
 
 	// Build index with BaseDataID=from so OrdinalLookup(blockNum-from)=OrdinalLookup(0).
-	idxPath := filepath.Join(dirs.Snap, snaptype.IdxFileName(ver, from, to, snaptype2.Enums.Headers.String()))
+	idxPath := filepath.Join(dirs.Snap, snaptype.IdxFileName(ver, false, from, to, snaptype2.Enums.Headers.String()))
 	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   1,
 		BucketSize: 10,

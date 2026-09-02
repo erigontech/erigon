@@ -224,10 +224,10 @@ func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
 	for _, typ := range append(snaptype.CaplinSnapshotTypes, snaptype.CaplinStateSnapshotTypes...) {
 		e := typ.Enum()
 		require.True(t, snaptype.IsCaplinType(e), typ.Name())
-		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 0), typ.Name())
-		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 1_000_000), typ.Name())
+		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, false, 0), typ.Name())
+		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, false, 1_000_000), typ.Name())
 	}
 
-	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, 0),
+	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, false, 0),
 		"core types must still resolve through the preverified scan")
 }

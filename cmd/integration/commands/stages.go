@@ -1187,6 +1187,22 @@ func allSnapshots(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) (*
 		dirs := datadir.New(datadirCli)
 		chainConfig := fromdb.ChainConfig(db)
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
+
+		var needsMigration bool
+		if needsMigration, err = freezeblocks.HasDecimalBlockSegments(dirs, chainConfig); err != nil {
+			return
+		}
+		if needsMigration {
+			var unlock func()
+			if unlock, err = dirs.TryFlock(); err != nil {
+				return
+			}
+			err = freezeblocks.MigrateDecimalToEpoch(ctx, dirs, db, chainConfig, estimate.CompressSnapshot.Workers(), logger)
+			unlock()
+			if err != nil {
+				return
+			}
+		}
 		g := &errgroup.Group{}
 		g.Go(func() error {
 			_allSnapshotsSingleton.OptimisticalyOpenFolder()

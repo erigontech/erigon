@@ -30,7 +30,7 @@ import (
 
 func writeEmptySeg(t *testing.T, dir string, typ snaptype.Type, from, to uint64) string {
 	t.Helper()
-	name := typ.FileName(version.ZeroVersion, from, to)
+	name := typ.FileName(version.ZeroVersion, false, from, to)
 	path := filepath.Join(dir, name)
 	require.NoError(t, os.WriteFile(path, []byte{0}, 0o644))
 	return name

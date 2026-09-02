@@ -36,7 +36,9 @@ import (
 func TestExecModuleProducesE2Snapshots(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	retireStep := uint64(10)
+	// An eth-family chain gets epoch-aligned block segments; E2RetireStep lowers the ladder's smallest
+	// tier from 1024 so this needs a handful of blocks rather than a thousand.
+	retireStep := uint64(8)
 	chainLen := int(retireStep) + 2
 	emt := execmoduletester.New(
 		t,
@@ -72,8 +74,6 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 	result, err = emt.UpdateForkChoice(ctx, cp.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	require.NoError(t, emt.WaitForBlockRetirement(ctx))
-	err = emt.BlockSnapshots.OpenFolder()
-	require.NoError(t, err)
-	require.Equal(t, uint64(9), emt.BlockSnapshots.BlocksAvailable())
+	require.NoError(t, emt.WaitForBlocksAvailable(ctx, retireStep-1))
+	require.Equal(t, retireStep-1, emt.BlockSnapshots.BlocksAvailable())
 }
