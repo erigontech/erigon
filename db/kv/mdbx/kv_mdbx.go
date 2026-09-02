@@ -109,8 +109,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		metrics:         label == dbcfg.ChainDB,
 	}
 	if label == dbcfg.ChainDB {
-		if dbg.EnvBool("CHAINDATA_READAHEAD", true) {
-			// enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (dosen GB)
+		if dbg.EnvBool("CHAINDATA_READAHEAD", false) {
 			opts = opts.RemoveFlags(mdbx.NoReadahead)
 		}
 		if dbg.MdbxNoSync {
