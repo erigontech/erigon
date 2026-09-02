@@ -442,3 +442,86 @@ func TestToRPCLogsEmpty(t *testing.T) {
 		require.Len(t, rpcLogs, 0)
 	}
 }
+
+// MarshalFastJSON must be byte-identical to reflection-based json.Marshal,
+// since it replaces it on the eth_getLogs response path.
+func TestRPCLogsMarshalFastJSON(t *testing.T) {
+	t.Parallel()
+	mk := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
+		return &RPCLog{
+			Log: Log{
+				Address:     common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+				Topics:      topics,
+				Data:        data,
+				BlockNumber: hexutil.Uint64(25880000),
+				TxHash:      common.HexToHash("0xaabb"),
+				TxIndex:     hexutil.Uint(7),
+				BlockHash:   common.HexToHash("0xccdd"),
+				Index:       hexutil.Uint(3),
+				Removed:     removed,
+			},
+			BlockTimestamp: hexutil.Uint64(1700000000),
+		}
+	}
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	maxed := mk(nil, nil, true)
+	maxed.BlockNumber = hexutil.Uint64(^uint64(0))
+	maxed.BlockTimestamp = hexutil.Uint64(^uint64(0))
+	maxed.Index = hexutil.Uint(^uint(0))
+
+	for name, logs := range map[string]RPCLogs{
+		"nil":          nil,
+		"empty":        {},
+		"nil-topics":   {mk(nil, []byte{1, 2, 3}, false)},
+		"empty-topics": {mk([]common.Hash{}, nil, false)},
+		"topics":       {mk([]common.Hash{topic, {}}, []byte{0xff}, false)},
+		"removed":      {mk([]common.Hash{topic}, nil, true)},
+		"maxed":        {maxed},
+		"nil-entry":    {nil, mk([]common.Hash{topic}, []byte{9}, false), nil},
+		"many":         {mk([]common.Hash{topic}, []byte{1}, false), mk(nil, nil, true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			got, err := logs.MarshalFastJSON()
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
+}
+
+func benchmarkLogs(n int) RPCLogs {
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	logs := make(RPCLogs, n)
+	for i := range logs {
+		logs[i] = &RPCLog{
+			Log: Log{
+				Address: common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+				Topics:  []common.Hash{topic, {}, {}},
+				Data:    make([]byte, 64),
+			},
+			BlockTimestamp: hexutil.Uint64(1700000000),
+		}
+	}
+	return logs
+}
+
+func BenchmarkRPCLogsMarshalReflect(b *testing.B) {
+	logs := benchmarkLogs(1000)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := json.Marshal(logs); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRPCLogsMarshalFast(b *testing.B) {
+	logs := benchmarkLogs(1000)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := logs.MarshalFastJSON(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
