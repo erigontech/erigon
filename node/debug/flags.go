@@ -243,6 +243,7 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	SetGoMemLimit(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
 		return logger, tracer, nil, nil, err

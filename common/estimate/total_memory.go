@@ -28,6 +28,28 @@ var (
 	totalMemoryCached uint64
 )
 
+// SystemMemory reports the machine's physical memory, ignoring any cgroup
+// confinement. TotalMemory folds the cgroup in; this is the number to compare a
+// cgroup limit against to decide whether it constrains anything.
+func SystemMemory() uint64 {
+	vm, err := mem.VirtualMemory()
+	if err != nil {
+		return 0
+	}
+	return vm.Total
+}
+
+// CgroupsMemoryLimit reports the memory limit this process is confined to, or 0
+// when it is not confined. Callers that only want a sizing input should use
+// TotalMemory; this is for deciding whether a cgroup is the binding constraint.
+func CgroupsMemoryLimit() uint64 {
+	limit, err := cgroupsMemoryLimit()
+	if err != nil {
+		return 0
+	}
+	return limit
+}
+
 func TotalMemory() uint64 {
 	totalMemoryOnce.Do(func() {
 		var total uint64
