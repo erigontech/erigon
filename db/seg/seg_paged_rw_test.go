@@ -421,58 +421,6 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 	require.Equal(len(sortedPairs), i, "should have read all %d pairs", len(sortedPairs))
 }
 
-func BenchmarkPagedWriterAdd(b *testing.B) {
-	const pageSize = 16
-	key := make([]byte, 20)
-	val := make([]byte, 100)
-	for i := range key {
-		key[i] = byte(i)
-	}
-	for i := range val {
-		val[i] = byte(i)
-	}
-
-	cases := []struct {
-		name       string
-		compress   bool
-		numWorkers int
-	}{
-		{"noCompression", false, 1},
-		{"compression_sync", true, 1},
-		{"compression_workers2", true, 2},
-		{"compression_workers4", true, 4},
-	}
-	for _, tc := range cases {
-		b.Run(tc.name, func(b *testing.B) {
-			buf := &multyBytesWriter{pageSize: pageSize}
-			w := NewPagedWriter(b.Context(), buf, tc.compress, tc.numWorkers)
-			b.ResetTimer()
-			for b.Loop() {
-				w.Add(key, val) //nolint:errcheck
-			}
-			w.Flush() //nolint:errcheck
-		})
-	}
-}
-
-func BenchmarkName(b *testing.B) {
-	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(b.Context(), buf, false, 1)
-	for i := range 16 {
-		w.Add([]byte{byte(i)}, []byte{10 + byte(i)}) //nolint:errcheck
-	}
-	bts := buf.Bytes()[0]
-
-	k := []byte{15}
-
-	b.Run("1", func(b *testing.B) {
-		for b.Loop() {
-			GetFromPage(k, bts, nil, false)
-		}
-	})
-
-}
-
 // prepareKVUncompressedKeysCompressedVals creates a file with sorted KV pairs:
 // uncompressed keys (like domain keys) and compressed values.
 func prepareKVUncompressedKeysCompressedVals(t *testing.T, keyLen int, numPairs int) (*Decompressor, [][]byte, [][]byte) {
