@@ -61,6 +61,7 @@ type rotatingProbeSentinel struct {
 type switchableProbeSentinel struct {
 	sentinelproto.SentinelClient
 	response []byte
+	delay    time.Duration
 	healthy  atomic.Bool
 	calls    atomic.Int32
 }
@@ -92,6 +93,7 @@ func (s *switchableProbeSentinel) SendRequest(ctx context.Context, _ *sentinelpr
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
+	time.Sleep(s.delay)
 	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: "healthy-peer"}}, nil
 }
 
@@ -483,6 +485,8 @@ func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
 	firstHTTPCalls := httpCalls.Load()
 
 	sentinel.healthy.Store(true)
+	sentinel.delay = 20 * time.Millisecond
+	forwardBeaconFallbackDelay = time.Second
 	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
 		return blocks[len(blocks)-1].Block.Slot, nil
 	})

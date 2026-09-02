@@ -399,6 +399,9 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	{name: "blocks_receipts_follow_history", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode}, persistReceipts: true},
 	{name: "blocks_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
 	{name: "minimal_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
+	// A receipts retention that is a sentinel rather than a window: the cache is
+	// retired at the history cutoff, like the follow-history default.
+	{name: "blocks_receipts_sentinel", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepPostMergeBlocksPruneMode}, persistReceipts: true},
 }
 
 // TestPruneModeEndpointGating pins, for every prune mode shape, that block-data
@@ -415,7 +418,7 @@ func TestPruneModeEndpointGating(t *testing.T) {
 	for _, cfg := range pruneGatingConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
 			t.Parallel()
-			require.True(t, cfg.mode.ReceiptsFollowHistory() || cfg.mode.ReceiptsAmount() == prune.KeepAllReceiptsPruneMode,
+			require.False(t, cfg.mode.ReceiptsAmount().Enabled(),
 				"pruneGateFires does not resolve a receipt window of its own; pin that shape in TestReceiptsGateFollowsRetention")
 			apis, chainInfo := setupPruneGating(t, cfg)
 			legs := []struct {
