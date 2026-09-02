@@ -288,9 +288,11 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers}, false); err != nil {
 		return 0, fmt.Errorf("opening the header files to date head %x at %d: %w", hash, number, err)
 	}
-	// A nil tx keeps the lookup on these segments: a temporal tx carries its own pinned
-	// block-files view, which has nothing open this early in startup.
-	head, err := freezeblocks.NewBlockReader(snaps).Header(context.Background(), nil, hash, number)
+	// Read through this RoSnapshots' own view: the tx above pins the node's own
+	// snapshots, not the private ones just opened here.
+	view := snaps.View()
+	defer view.Close()
+	head, err := freezeblocks.NewBlockReader(snaps).HeaderFromView(view, number)
 	if err != nil {
 		return 0, err
 	}

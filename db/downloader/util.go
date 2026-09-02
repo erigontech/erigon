@@ -378,11 +378,7 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			f.Close()
-		}
-	}()
+	defer f.Close()
 
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {

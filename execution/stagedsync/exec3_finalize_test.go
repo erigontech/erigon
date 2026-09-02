@@ -1780,7 +1780,8 @@ func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	if outcome == feeCreditNew {
 		credit = copyWrites(tip)
 	}
-	r.be.recordFeeMerge(version, recorded, tip, outcome)
+	r.be.recordFeeMerge(version, recorded, tip, outcome,
+		[2]accounts.Address{r.result.Coinbase, r.result.ExecutionResult.BurntContractAddress})
 	r.vm.FlushVersionedWrites(r.recorded(), true, "")
 	return credit
 }
@@ -1889,6 +1890,32 @@ func TestFeeEntry_RecordedInAcceptsWhatWriteToWrote(t *testing.T) {
 			"entry %d: a credit stamped at another incarnation is not this credit", i)
 		require.False(t, e.recordedIn(&state.WriteSet{}, version),
 			"entry %d: an empty set carries no credit", i)
+	}
+}
+
+// dropStaleVersionedWrites scans only feeWritePaths, so a path writeTo starts
+// emitting outside that list would leave a retracted credit in the version map
+// with nothing to report it.
+func TestFeeEntry_WriteToStaysWithinFeeWritePaths(t *testing.T) {
+	t.Parallel()
+	version := state.Version{TxIndex: 3, Incarnation: 1}
+	addr := fAddr("credited")
+
+	for _, e := range []*feeEntry{
+		{
+			addr:   addr,
+			acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
+			reason: tracing.BalanceIncreaseRewardTransactionFee,
+		},
+		{addr: addr, deleted: true},
+	} {
+		ws := &state.WriteSet{}
+		e.writeTo(ws, version)
+		require.NotZero(t, ws.Count(), "an entry that writes nothing proves nothing")
+		for h := range ws.AllHeaders() {
+			require.Contains(t, feeWritePaths[:], h.Path,
+				"writeTo emits %s, which the stale-credit scan does not look at", h.Path)
+		}
 	}
 }
 
@@ -2060,46 +2087,6 @@ func TestFeeEntry_RecordedInRejectsMutations(t *testing.T) {
 }
 
 var feeCreditSink *state.WriteSet
-
-func BenchmarkCalcFees(b *testing.B) {
-	for _, sc := range []struct {
-		name  string
-		build func() *testFinalizeScenario
-	}{
-		{"pre_london", simpleTransferScenario},
-		{"london", londonTransferScenario},
-	} {
-		for _, bc := range []struct {
-			name     string
-			recredit bool
-		}{
-			{"first_credit", false},
-			{"redundant_recredit", true},
-		} {
-			b.Run(sc.name+"/"+bc.name, func(b *testing.B) {
-				r := newFeeCreditRound(b, sc.build())
-				var credited *state.WriteSet
-				if bc.recredit {
-					require.NotNil(b, r.run(b))
-					credited = r.credited()
-				}
-
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					tip, _, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, credited)
-					if err != nil {
-						b.Fatal(err)
-					}
-					feeCreditSink = tip
-					// The apply loop recycles these maps, so the benchmark must
-					// too, or the emit arm is measured against a cold pool.
-					tip.ReleaseMaps()
-				}
-			})
-		}
-	}
-}
 
 // An Estimate cell need not come from a destruct to make a live coinbase read
 // empty: an invalidated tx that only moved the balance leaves a lone Estimate

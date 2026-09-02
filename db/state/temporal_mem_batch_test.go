@@ -102,3 +102,53 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 		}
 	}
 }
+
+// Commit borrows the batch's value buffers instead of copying, which is only
+// sound while a later write to the same key leaves the earlier bytes alone.
+func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
+	t.Parallel()
+
+	// inMemHistoryReads picks which arm a later txNum takes: append, or overwrite
+	// the slot in place. Both must leave the earlier bytes alone.
+	for _, inMemHistoryReads := range []bool{true, false} {
+		t.Run(fmt.Sprintf("inMemHistoryReads=%v", inMemHistoryReads), func(t *testing.T) {
+			t.Parallel()
+
+			sd := &TemporalMemBatch{
+				stepSize:          16,
+				storage:           btree2.NewMap[string, []dataWithTxNum](128),
+				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+				inMemHistoryReads: inMemHistoryReads,
+			}
+			for d := range sd.domains {
+				sd.domains[d] = map[string][]dataWithTxNum{}
+			}
+
+			// Each case is the FIRST write after the borrow, so the slot still holds
+			// the borrowed buffer when the arm runs. A shorter value fits that buffer,
+			// which is what an arm recycling it would overwrite.
+			for _, next := range []struct {
+				name  string
+				val   string
+				txNum uint64
+			}{
+				{"same txNum", "second", 1},
+				{"later txNum", "third", 2},
+			} {
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+					key := "k-" + domain.String() + "-" + next.name
+					first := []byte("first-and-long-enough-to-be-reused")
+					sd.putLatest(domain, key, first, 1)
+					borrowed, _, ok := sd.GetLatest(domain, []byte(key))
+					require.True(t, ok)
+					require.Equal(t, first, borrowed)
+
+					sd.putLatest(domain, key, []byte(next.val), next.txNum)
+
+					require.Equal(t, first, borrowed,
+						"%s/%s: a borrowed value must survive a later write to its key", domain, next.name)
+				}
+			}
+		})
+	}
+}

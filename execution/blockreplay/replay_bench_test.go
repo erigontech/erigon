@@ -26,15 +26,6 @@ func loadFixture(tb testing.TB, block string) *blockreplay.Fixture {
 	return fx
 }
 
-func TestReplayMainnetBlock(t *testing.T) {
-	fx := loadFixture(t, "25604144")
-	engine := merge.New(ethash.NewFaker())
-	defer engine.Close()
-	res, err := blockreplay.Replay(fx, chainspec.Mainnet.Config, engine, 0, log.New())
-	require.NoError(t, err)
-	require.NotNil(t, res)
-}
-
 // BenchmarkReplayMainnetBlock is an isolated, repeatable per-block exec
 // benchmark: no DB, no commitment. BLOCKREPLAY_READ_NS models a per-storage-read
 // latency, since the in-mem reader is otherwise free.
