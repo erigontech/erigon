@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -208,12 +209,16 @@ func dirBytes(t testing.TB, root, match string) (int64, int) {
 	t.Helper()
 	var total int64
 	var count int
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || info.IsDir() {
+	_ = filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry == nil || entry.IsDir() {
 			return nil //nolint:nilerr
 		}
 		if match != "" && !strings.Contains(filepath.Base(path), match) {
 			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil //nolint:nilerr
 		}
 		total += info.Size()
 		count++

@@ -35,7 +35,7 @@ import (
 func mineKey(t *testing.T, keyLen int, hash func([]byte) []byte, path []byte) []byte {
 	t.Helper()
 	key := make([]byte, keyLen)
-	for counter := uint64(0); counter < 1<<26; counter++ {
+	for counter := range uint64(1 << 26) {
 		binary.BigEndian.PutUint64(key[keyLen-8:], counter)
 		if bytes.Equal(hash(key)[:len(path)], path) {
 			return bytes.Clone(key)
