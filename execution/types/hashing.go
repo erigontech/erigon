@@ -54,12 +54,12 @@ func DeriveSha(list DerivableList) common.Hash {
 	return builder.root()
 }
 
-// DeriveShaRawTransactions derives a transaction root from an encoded transaction-list payload.
+// DeriveShaRawTransactions derives a transaction root from the RLP payload of a transaction list.
 func DeriveShaRawTransactions(encoded []byte) (common.Hash, error) {
 	return deriveShaRawValues(encoded, true)
 }
 
-// DeriveShaRawValues derives a trie root from an encoded list payload without materializing its values.
+// DeriveShaRawValues derives an indexed trie root from an RLP list payload without materializing its values.
 func DeriveShaRawValues(encoded []byte) (common.Hash, error) {
 	return deriveShaRawValues(encoded, false)
 }
@@ -178,7 +178,7 @@ type bytesWriter interface {
 	WriteByte(byte) error
 }
 
-// hexTapeWriter hex-encodes data and writes it directly to a tape.
+// hexWriter writes bytes as trie-key nibbles; Commit appends the leaf terminator.
 type hexWriter struct {
 	w io.ByteWriter
 }
@@ -203,11 +203,9 @@ func adjustIndex(i int, l int) int {
 	return i
 }
 
-// traverseInLexOrder traverses the list indices in the order suitable for HashBuilder.
-// HashBuilder requires keys to be in the lexicographical order. Our keys are unit indices in RLP encoding in hex.
-// In RLP encoding 0 is 0080 where 1 is 000110, 2 is 000210, etc up until 128 which is 0801080010.
-// So, knowing that we can order indices in the right order even w/o really sorting them. Only 0 is misplaced, and should take the position after 127.
-// So, in the end we transform [0,...,127,128,...n] to [1,...,127,0,128,...,n] which will be [000110....070f10, 080010, 0801080010....] in hex encoding.
+// traverseInLexOrder visits RLP-encoded list indices in the order required by HashBuilder.
+// Their keys sort as 1 through 127, then 0, then 128 and above. The callback also
+// receives the next index; -1 marks the initial or final boundary.
 func traverseInLexOrder(list DerivableList, traverser func(int, int)) {
 	for i := -1; i < list.Len(); i++ {
 		adjustedIndex := adjustIndex(i, list.Len())

@@ -126,10 +126,8 @@ func (f *FetcherBase) FetchBodies(
 	totalBodiesSize := 0
 
 	for len(headers) > 0 {
-		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
-		// In most cases the response will contain incomplete bodies list (ie < MaxBodiesServe) so we just
-		// continue asking it for more starting from the first hash in the sequence after the last received one.
-		// This is akin to how a paging API is consumed.
+		// Request up to MaxBodiesServe headers per page. A peer may return a
+		// non-empty prefix, so continue from the first header without a body.
 		var headersChunk []*types.Header
 		if len(headers) > eth.MaxBodiesServe {
 			headersChunk = headers[:eth.MaxBodiesServe]
