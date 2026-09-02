@@ -86,6 +86,12 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	}
 	if opts.commitmentEdgeRecordsOverride != nil {
 		a.applyEdgeRecordsInCommitment(*opts.commitmentEdgeRecordsOverride)
+	} else {
+		edgeRecords, err := ResolveCommitmentEdgeRecords(opts.dirs, statecfg.Schema.CommitmentDomain.EdgeRecordsInCommitment, opts.logger)
+		if err != nil {
+			return nil, err
+		}
+		a.applyEdgeRecordsInCommitment(edgeRecords)
 	}
 
 	if err := a.ConfigureDomains(); err != nil {

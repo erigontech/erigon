@@ -393,6 +393,11 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
 	a.applyReferencesInCommitmentBranches(settings.RefsInCommitmentBranches())
+	edgeRecords, err := ResolveCommitmentEdgeRecords(a.dirs, statecfg.Schema.CommitmentDomain.EdgeRecordsInCommitment, a.logger)
+	if err != nil {
+		return err
+	}
+	a.applyEdgeRecordsInCommitment(edgeRecords)
 
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
