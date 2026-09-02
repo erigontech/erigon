@@ -1193,7 +1193,7 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 			require.NoErrorf(t, err, "%s: expected INVALID status, got error: %v", name, err)
 			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "%s", name)
 			require.NotNilf(t, status.ValidationError, "%s", name)
-			require.ErrorContainsf(t, status.ValidationError.Error(), "undecodable blockAccessList", "%s", name)
+			require.ErrorContainsf(t, status.ValidationError.Error(), types.ErrInvalidBlockAccessList.Error(), "%s", name)
 		}
 		account := append([]byte{0xda, 0x94}, make([]byte, 20)...)
 		account = append(account, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
