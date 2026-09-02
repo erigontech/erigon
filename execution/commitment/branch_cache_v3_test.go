@@ -29,9 +29,9 @@ func v3RecordKey(path []byte, child byte) []byte {
 	return nibbles.ChildKeyV3(nibbles.EncodeKeyV3(path), child)
 }
 
-// The trunk indexes a legacy compact key, whose first byte is a flags byte. A v3 record key carries
-// path nibbles there instead, so two edges that differ only in their first two nibbles land in the
-// same slot and each read returns whichever was written last.
+// The trunk indexes a legacy compact key, whose first byte is a flags byte. A v3 key carries path
+// nibbles there instead, so two nodes that differ only in their first two nibbles must not land in
+// the same slot and read back each other's records.
 func TestBranchCacheKeepsV3RecordKeysDistinct(t *testing.T) {
 	c := NewBranchCache(1024, true)
 	defer c.Close()
@@ -43,9 +43,44 @@ func TestBranchCacheKeepsV3RecordKeysDistinct(t *testing.T) {
 	c.Put(first, []byte("edge-29-5"), 1, 1)
 	c.Put(second, []byte("edge-85-5"), 1, 1)
 
-	got, _, ok := c.Get(first)
-	require.True(t, ok, "record %x was evicted", first)
-	require.Equal(t, []byte("edge-29-5"), got, "record %x reads back the value of %x", first, second)
+	for _, tc := range []struct {
+		key  []byte
+		want string
+	}{{first, "edge-29-5"}, {second, "edge-85-5"}} {
+		nodeKey, nibble, ok := v3NodeKeyOf(tc.key)
+		require.True(t, ok)
+		var records [16][]byte
+		present, _, ok := c.GetNode(nodeKey, &records)
+		require.Truef(t, ok, "record %x was evicted", tc.key)
+		require.NotZerof(t, present&(uint16(1)<<nibble), "record %x was evicted", tc.key)
+		require.Equalf(t, []byte(tc.want), records[nibble], "record %x reads back another node's value", tc.key)
+	}
+}
+
+// A node's children share one entry, so they must still come back individually addressable.
+func TestBranchCacheNodeEntryKeepsChildrenDistinct(t *testing.T) {
+	c := NewBranchCache(1024, true)
+	defer c.Close()
+
+	path := []byte{4, 1, 7}
+	for child := range 16 {
+		c.Put(v3RecordKey(path, byte(child)), []byte{byte(child), 0xaa}, uint64(child), uint64(child))
+	}
+	var records [16][]byte
+	present, step, ok := c.GetNode(nibbles.EncodeKeyV3(path), &records)
+	require.True(t, ok)
+	require.Equal(t, ^uint16(0), present, "every child written must be present")
+	require.Equal(t, uint64(15), step, "the node reports the newest child's step")
+	for child := range 16 {
+		require.Equalf(t, []byte{byte(child), 0xaa}, records[child], "child %d", child)
+	}
+
+	// Dropping one child must leave the rest in place.
+	c.Invalidate(v3RecordKey(path, 7))
+	present, _, ok = c.GetNode(nibbles.EncodeKeyV3(path), &records)
+	require.True(t, ok)
+	require.Zero(t, present&(1<<7), "the invalidated child must be gone")
+	require.Equal(t, ^uint16(0)&^uint16(1<<7), present, "its siblings must survive")
 }
 
 // Every edge down to depth 4 owns a trunk slot of its own, so no pair of them can alias.

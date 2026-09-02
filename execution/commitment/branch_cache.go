@@ -18,7 +18,9 @@ package commitment
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"math/bits"
 	"os"
 	"sync"
@@ -100,6 +102,10 @@ type branchCacheEntry struct {
 	step  uint64 // on-disk file step; 0 = untracked
 	txN   uint64 // write txN, upper bound of validity; 0 = frozen/untracked
 	epoch uint32
+	// node marks data as a whole v3 node's encoded edge records rather than one value. The two
+	// share slots -- the v3 root's node key is byte-identical to KeyCommitmentState, and an edge
+	// record for P->n routes to the same trunk slot as node P||n -- so every reader must check it.
+	node bool
 }
 
 // MissCallback runs on the hot read path when lookup misses every tier that
@@ -661,7 +667,7 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	}
 	coh := c.coh.Snapshot()
 	entry, ok := c.lookup(prefix)
-	if !ok {
+	if !ok || entry.node {
 		return nil, 0, false
 	}
 	if coh.IsStale(entry.txN, entry.epoch) {
@@ -676,6 +682,18 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	if c.isCommitmentStateKey(prefix) {
+		return
+	}
+	if c.edgeRecordsInCommitment.Load() {
+		// v3 keeps one entry per node, so a single record write merges into its node's entry
+		// instead of claiming a slot of its own.
+		if nodeKey, nibble, ok := v3NodeKeyOf(prefix); ok {
+			var records [16][]byte
+			var steps, txNums [16]uint64
+			records[nibble] = data
+			steps[nibble], txNums[nibble] = step, txN
+			c.PutChildren(nodeKey, uint16(1)<<nibble, &records, &steps, &txNums)
+		}
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -693,60 +711,292 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
-// PutChildren stores several of one node's edge records. A v3 read resolves a whole node at once,
-// and Put costs two allocations per record; sharing one data buffer and one entry block across the
-// node turns 2*k allocations into 2. The block keeps every child of the node alive as long as any
-// one of them is cached, which is what a node's records do anyway -- they are read together.
+// A v3 read resolves a whole node: it wants every child record under key(P). One entry per record
+// puts each child at its own trunk slot one level below its node, so a node sitting at the deepest
+// trunk level has all 16 children spill to the LRU tail while v2 keeps that same node in the trunk
+// array -- v3 loses a level of trunk coverage and multiplies entries by the branching factor.
+// Keying the entry by the node restores v2's slot mapping and its entry count.
+
+// v3NodeDepth reads the nibble depth out of a node key (pack(P) || term).
+func v3NodeDepth(nodeKey []byte) (int, bool) {
+	if len(nodeKey) == 0 {
+		return 0, false
+	}
+	switch term := nodeKey[len(nodeKey)-1]; {
+	case term == 0x00:
+		return 2 * (len(nodeKey) - 1), true
+	case term&0xf0 == 0xf0:
+		return 2*len(nodeKey) - 1, true
+	default:
+		return 0, false
+	}
+}
+
+func v3NodeNibble(nodeKey []byte, depth, i int) byte {
+	if depth&1 == 1 && i == depth-1 { // an odd path keeps its last nibble in the term byte
+		return nodeKey[len(nodeKey)-1] & 0x0f
+	}
+	if i&1 == 0 {
+		return nodeKey[i/2] >> 4
+	}
+	return nodeKey[i/2] & 0x0f
+}
+
+// v3NodeKeyOf splits an edge record key into the node it belongs to and its child nibble.
+func v3NodeKeyOf(recordKey []byte) ([]byte, int, bool) {
+	if len(recordKey) < 2 || recordKey[len(recordKey)-1]&0xf0 != 0x80 {
+		return nil, 0, false
+	}
+	return recordKey[:len(recordKey)-1], int(recordKey[len(recordKey)-1] & 0x0f), true
+}
+
+func (c *BranchCache) v3NodeTrunkSlot(nodeKey []byte, forWrite bool) *atomic.Pointer[branchCacheEntry] {
+	if c.trunkDisabled {
+		return nil
+	}
+	depth, ok := v3NodeDepth(nodeKey)
+	if !ok || depth == 0 || depth > trunkDepthFull {
+		return nil
+	}
+	var nib [4]byte
+	for i := range depth {
+		nib[i] = v3NodeNibble(nodeKey, depth, i)
+	}
+	return c.accountTrunk.slot(&nib, depth, forWrite)
+}
+
+// encodeNodeRecords packs a node's records into one value: present mask, a length per present
+// child, then the payloads. Returns nil for a record too long to describe, which is not cached.
+func encodeNodeRecords(present uint16, records *[16][]byte) []byte {
+	size := 2 + 2*bits.OnesCount16(present)
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		n := len(records[bits.TrailingZeros16(bitset&-bitset)])
+		if n > math.MaxUint16 {
+			return nil
+		}
+		size += n
+	}
+	blob := make([]byte, size)
+	binary.BigEndian.PutUint16(blob, present)
+	pos := 2
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		binary.BigEndian.PutUint16(blob[pos:], uint16(len(records[bits.TrailingZeros16(bitset&-bitset)])))
+		pos += 2
+	}
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		pos += copy(blob[pos:], records[bits.TrailingZeros16(bitset&-bitset)])
+	}
+	return blob
+}
+
+// decodeNodeRecords slices the payloads back out. They alias the cache's buffer, so a caller
+// keeping them past the read must copy.
+func decodeNodeRecords(blob []byte, out *[16][]byte) (uint16, bool) {
+	if len(blob) < 2 {
+		return 0, false
+	}
+	present := binary.BigEndian.Uint16(blob)
+	header := 2 + 2*bits.OnesCount16(present)
+	if len(blob) < header {
+		return 0, false
+	}
+	pos, lenPos := header, 2
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		size := int(binary.BigEndian.Uint16(blob[lenPos:]))
+		lenPos += 2
+		if pos+size > len(blob) {
+			return 0, false
+		}
+		out[nibble] = blob[pos : pos+size : pos+size]
+		pos += size
+	}
+	return present, true
+}
+
+func (c *BranchCache) storeNode(nodeKey []byte, entry *branchCacheEntry) {
+	if isRootPrefix(nodeKey) {
+		c.root.Store(entry)
+		return
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, true); slot != nil {
+		slot.Store(entry)
+		return
+	}
+	c.tailForWrite().Add(maphash.Hash(nodeKey), entry)
+}
+
+// peekNode reads without touching the hit counters: it serves the writer's merge, and counting it
+// would make the hit rate report the writer's own probes.
+func (c *BranchCache) peekNode(nodeKey []byte) *branchCacheEntry {
+	if isRootPrefix(nodeKey) {
+		return c.root.Load()
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, false); slot != nil {
+		return slot.Load()
+	}
+	if tail := c.tail.Load(); tail != nil {
+		if entry, ok := tail.Get(maphash.Hash(nodeKey)); ok {
+			return entry
+		}
+	}
+	return nil
+}
+
+func (c *BranchCache) lookupNode(nodeKey []byte) *branchCacheEntry {
+	if isRootPrefix(nodeKey) {
+		entry := c.root.Load()
+		if entry == nil {
+			c.rootMisses.Add(1)
+			return nil
+		}
+		c.rootHits.Add(1)
+		return entry
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, false); slot != nil {
+		if entry := slot.Load(); entry != nil {
+			c.trunkHits.Add(1)
+			return entry
+		}
+		c.trunkMisses.Add(1)
+		return nil
+	}
+	tail := c.tail.Load()
+	if tail == nil {
+		c.tailMisses.Add(1)
+		return nil
+	}
+	entry, ok := tail.Get(maphash.Hash(nodeKey))
+	if !ok {
+		c.tailMisses.Add(1)
+		return nil
+	}
+	c.tailHits.Add(1)
+	return entry
+}
+
+// GetNode serves a whole node's edge records. The returned slices alias the cache's buffer.
+func (c *BranchCache) GetNode(nodeKey []byte, out *[16][]byte) (present uint16, step uint64, ok bool) {
+	coh := c.coh.Snapshot()
+	entry := c.lookupNode(nodeKey)
+	if entry == nil || !entry.node {
+		if entry == nil {
+			c.fireOnMiss(nodeKey)
+		}
+		return 0, 0, false
+	}
+	if coh.IsStale(entry.txN, entry.epoch) {
+		c.InvalidateNode(nodeKey)
+		c.staleEvicted.Add(1)
+		return 0, 0, false
+	}
+	present, ok = decodeNodeRecords(entry.data, out)
+	if !ok {
+		return 0, 0, false
+	}
+	c.bytesServed.Add(uint64(len(entry.data)))
+	return present, entry.step, true
+}
+
+func (c *BranchCache) InvalidateNode(nodeKey []byte) {
+	if isRootPrefix(nodeKey) {
+		c.root.Store(nil)
+		return
+	}
+	if slot := c.v3NodeTrunkSlot(nodeKey, false); slot != nil {
+		slot.Store(nil)
+		return
+	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(nodeKey))
+	}
+}
+
+// invalidateChild drops one record and keeps the node's siblings: a tombstoned edge should not cost
+// the whole node its cache entry.
+func (c *BranchCache) invalidateChild(nodeKey []byte, nibble int) {
+	stripe := c.putStripe(nodeKey)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	entry := c.peekNode(nodeKey)
+	if entry == nil || !entry.node {
+		return
+	}
+	var records [16][]byte
+	present, ok := decodeNodeRecords(entry.data, &records)
+	bit := uint16(1) << nibble
+	if !ok || present&bit == 0 {
+		return
+	}
+	present &^= bit
+	records[nibble] = nil
+	if present == 0 {
+		c.InvalidateNode(nodeKey)
+		return
+	}
+	blob := encodeNodeRecords(present, &records)
+	if blob == nil {
+		c.InvalidateNode(nodeKey)
+		return
+	}
+	c.storeNode(nodeKey, &branchCacheEntry{data: blob, step: entry.step, txN: entry.txN, epoch: entry.epoch, node: true})
+}
+
+// PutChildren merges records into their node's single entry. A publish carries only the records
+// that changed, so dropping the siblings would send every later read back to the db.
 func (c *BranchCache) PutChildren(nodeKey []byte, present uint16, records *[16][]byte, steps, txNums *[16]uint64) {
 	if present == 0 {
 		return
 	}
-	total, count := 0, 0
+	stripe := c.putStripe(nodeKey)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	merged := *records
+	mergedPresent := present
+	var step, txN uint64
 	for bitset := present; bitset != 0; bitset &= bitset - 1 {
 		nibble := bits.TrailingZeros16(bitset & -bitset)
-		if len(records[nibble]) == 0 {
+		if len(merged[nibble]) == 0 {
+			mergedPresent &^= uint16(1) << nibble
 			continue
 		}
-		total += len(records[nibble])
-		count++
+		step = max(step, steps[nibble])
+		// IsStale fires at txN >= floor, so the newest child decides: below the floor, all are.
+		txN = max(txN, txNums[nibble])
 	}
-	if count == 0 {
+	if existing := c.peekNode(nodeKey); existing != nil && existing.node {
+		var old [16][]byte
+		if oldPresent, ok := decodeNodeRecords(existing.data, &old); ok {
+			for bitset := oldPresent &^ mergedPresent; bitset != 0; bitset &= bitset - 1 {
+				nibble := bits.TrailingZeros16(bitset & -bitset)
+				merged[nibble] = old[nibble]
+				mergedPresent |= uint16(1) << nibble
+			}
+			step = max(step, existing.step)
+			txN = max(txN, existing.txN)
+		}
+	}
+	if mergedPresent == 0 {
 		return
 	}
-	buf := make([]byte, 0, total)
-	entries := make([]branchCacheEntry, 0, count)
-	epoch := c.coh.Epoch()
-
-	childKey := make([]byte, len(nodeKey)+1)
-	copy(childKey, nodeKey)
-	for bitset := present; bitset != 0; bitset &= bitset - 1 {
-		nibble := bits.TrailingZeros16(bitset & -bitset)
-		record := records[nibble]
-		if len(record) == 0 {
-			continue
-		}
-		childKey[len(nodeKey)] = 0x80 | byte(nibble)
-		if c.isCommitmentStateKey(childKey) {
-			continue
-		}
-		start := len(buf)
-		buf = append(buf, record...)
-		entries = append(entries, branchCacheEntry{
-			data:  buf[start:len(buf):len(buf)],
-			step:  steps[nibble],
-			txN:   txNums[nibble],
-			epoch: epoch,
-		})
-		entry := &entries[len(entries)-1]
-
-		stripe := c.putStripe(childKey)
-		stripe.Lock()
-		c.store(childKey, entry)
-		stripe.Unlock()
+	blob := encodeNodeRecords(mergedPresent, &merged)
+	if blob == nil {
+		return
 	}
+	c.storeNode(nodeKey, &branchCacheEntry{data: blob, step: step, txN: txN, epoch: c.coh.Epoch(), node: true})
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {
+	if c.edgeRecordsInCommitment.Load() {
+		if nodeKey, nibble, ok := v3NodeKeyOf(prefix); ok {
+			c.invalidateChild(nodeKey, nibble)
+		} else {
+			c.InvalidateNode(prefix)
+		}
+		return
+	}
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return

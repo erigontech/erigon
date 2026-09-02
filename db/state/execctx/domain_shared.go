@@ -1287,6 +1287,13 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 	if wm != nil {
 		cacheStart = time.Now()
 	}
+	// One node lookup instead of one per nibble: the cache keeps a node's records together.
+	var cached [16][]byte
+	var cachedPresent uint16
+	var cachedStep uint64
+	if sd.branchCache != nil {
+		cachedPresent, cachedStep, _ = sd.branchCache.GetNode(nodeKey, &cached)
+	}
 	// Neither lookup retains the key, so one scratch buffer serves every nibble.
 	childKey := make([]byte, len(nodeKey)+1)
 	copy(childKey, nodeKey)
@@ -1295,10 +1302,8 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 		nibble := bits.TrailingZeros16(bit)
 		childKey[len(nodeKey)] = 0x80 | byte(nibble)
 		value, valueStep, _, ok := sd.latestFromMem(kv.CommitmentDomain, childKey)
-		if !ok && sd.branchCache != nil {
-			var cacheStep uint64
-			value, cacheStep, ok = sd.branchCache.Get(childKey)
-			valueStep = kv.Step(cacheStep)
+		if !ok && cachedPresent&bit != 0 {
+			value, valueStep, ok = cached[nibble], kv.Step(cachedStep), true
 		}
 		if ok {
 			records[nibble] = bytes.Clone(value)

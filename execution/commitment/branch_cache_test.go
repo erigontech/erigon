@@ -376,12 +376,18 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	require.False(t, ok, "state key must never be served from the cache")
 	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
 
-	deepKey := []byte{0x12, 0x34}
+	// v3 keeps records under their node, so a real entry needs a real record key. The state key is
+	// byte-identical to the root's node key, which is exactly why invalidating it must not reach in.
+	deepKey := nibbles.ChildKeyV3(nibbles.EncodeKeyV3([]byte{1, 2}), 3)
 	c.Put(deepKey, []byte("d"), 0, 0)
 	c.Invalidate(KeyCommitmentState)
-	got, _, ok := c.Get(deepKey)
+	nodeKey, nibble, ok := v3NodeKeyOf(deepKey)
+	require.True(t, ok)
+	var records [16][]byte
+	present, _, ok := c.GetNode(nodeKey, &records)
 	require.True(t, ok, "invalidating the state key must not evict real entries")
-	require.Equal(t, []byte("d"), got)
+	require.NotZero(t, present&(uint16(1)<<nibble))
+	require.Equal(t, []byte("d"), records[nibble])
 }
 
 func TestBranchCache_LegacyStateKeyDoesNotBlockRoot(t *testing.T) {
