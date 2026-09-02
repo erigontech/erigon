@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+
 	"github.com/erigontech/erigon/common/dir"
 )
 
@@ -66,6 +68,24 @@ func (tf *AtomicTorrentFS) delete(name string) error {
 		name += ".torrent"
 	}
 	return dir.RemoveFile(filepath.Join(tf.dir, name))
+}
+
+// DeleteMalformed removes the metainfo at fPath when its bytes are confirmed malformed. A file
+// that could not be read is left alone: it says nothing about its contents.
+// metainfo.Load never unmarshals InfoBytes, so the info dict needs its own check.
+func (tf *AtomicTorrentFS) DeleteMalformed(fPath string) (removed bool, err error) {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	b, err := os.ReadFile(fPath)
+	if err != nil {
+		return false, nil
+	}
+	if mi, err := metainfo.Load(bytes.NewReader(b)); err == nil {
+		if _, err := mi.UnmarshalInfo(); err == nil {
+			return false, nil
+		}
+	}
+	return true, dir.RemoveFile(fPath)
 }
 
 func (tf *AtomicTorrentFS) writeFile(name string, r io.Reader) (err error) {
