@@ -94,9 +94,9 @@ func pruneBlockAccessListHistory(t *testing.T, m *execmoduletester.ExecModuleTes
 			name     string
 			valueLen int
 		}{
-			{name: kv.TblAccountHistoryKeys, valueLen: length.Addr},
-			{name: kv.TblStorageHistoryKeys, valueLen: length.Addr + length.Hash},
-			{name: kv.TblCodeHistoryKeys, valueLen: length.Addr},
+			{name: kv.TblAccountHistoryData, valueLen: length.Addr},
+			{name: kv.TblStorageHistoryData, valueLen: length.Addr + length.Hash},
+			{name: kv.TblCodeHistoryData, valueLen: length.Addr},
 		} {
 			for {
 				key, err := kv.FirstKey(tx, table.name)
