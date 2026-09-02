@@ -185,6 +185,11 @@ report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc c
    argument has no production caller. Deliberately skipped as a wider refactor than the finding
    warrants.
 4. Per-table breakdown of the 1.56x chaindata delta — never measured.
+5. Whether the child mask must always travel with the parent. A node read without a mask wants
+   all 16 children, absent nibbles never resolve, so `readCommitmentRecords` walks every v3 file
+   and probes each file's existence filter for every absent nibble. Invisible at from-0 with 1-2
+   files; at the tip it is files x absent nibbles per such read. Counters are in place (see
+   "State at handoff"); the rig binary has to be rebuilt to report them.
 
 ## State at handoff
 
@@ -197,3 +202,14 @@ stop both, then run each host's `restart-arm.sh` behind `sleep $((T - $(date +%s
 shared epoch `T`. The calcState fix is PR #23737 against main from
 `~/org/wrk/wt/calcstate-dirty`, `make lint` clean, `execution/stagedsync` green, judged HOLDS;
 Copilot review requested. `MACHINES.org` carries both arms under snap-arb1 and edev.
+
+Mask-knowledge counters (commit after 8b7e733e04f, not yet in the rig binary): per trie-level
+node read `domain_commitment_node_reads{mask="known"|"unknown"}` (execctx); per aggregator read
+`domain_commitment_record_reads{mask=...}`, `domain_commitment_record_files_consulted{mask=...}`
+(a v3 file reached with something still missing, before its existence filter) and
+`domain_commitment_record_files_scanned{mask=...}` (a file actually seeked). Per block: delta of a
+counter over the delta of `domain_commitment_took_count` between two `metrics-last.prom` dumps or
+`increase(...[5m])` on both. The question is the unknown share of node reads and files consulted
+per unknown read once the file count is realistic, so read them on the 1M run or on a synced node,
+not in the first steps. Tests: `TestCommitmentV3UnknownMaskReadsConsultEveryFile` (db/state) and
+`TestReadCommitmentRecordsCountsMaskKnowledge` (execctx).

@@ -55,6 +55,7 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 	if wanted == 0 {
 		return records, 0, 0, nil
 	}
+	var filesConsulted, filesScanned uint64
 
 	dt := at.d[kv.CommitmentDomain]
 	maxStep := kv.NoStepBound
@@ -136,6 +137,7 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 		if !statecfg.CommitmentEdgeRecords(file.src.version) || file.src.bindex == nil {
 			continue
 		}
+		filesConsulted++
 		missing := wanted &^ present
 		if useExistence && file.src.existence != nil &&
 			!childMayBeInFile(salt, file.src.existence, nodeKey, missing, childKey, &childHashes, &hashed) {
@@ -146,6 +148,7 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 		if wm != nil {
 			fileStart = time.Now()
 		}
+		filesScanned++
 		present, err = scanCommitmentRecordFile(dt, i, nodeKey, childKey, wanted, present, &records)
 		if err != nil {
 			return records, present, step, err
@@ -169,8 +172,19 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 			}
 		}
 	}
+	countRecordWalk(present&wanted == wanted, filesConsulted, filesScanned)
 	at.cacheLatestBranchChildren(cacheBranch, nodeKey, cacheMask, &records, &cacheSteps, &cacheTxNums)
 	return records, present, step, nil
+}
+
+func countRecordWalk(satisfied bool, filesConsulted, filesScanned uint64) {
+	reads, consulted, scanned := mxCommitmentRecordReadsExhausted, mxCommitmentRecordFilesConsultedExhausted, mxCommitmentRecordFilesScannedExhausted
+	if satisfied {
+		reads, consulted, scanned = mxCommitmentRecordReadsSatisfied, mxCommitmentRecordFilesConsultedSatisfied, mxCommitmentRecordFilesScannedSatisfied
+	}
+	reads.Inc()
+	consulted.AddUint64(filesConsulted)
+	scanned.AddUint64(filesScanned)
 }
 
 // childMayBeInFile probes the file's existence filter for the children still wanted. The filter is

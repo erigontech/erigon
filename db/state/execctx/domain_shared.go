@@ -49,7 +49,9 @@ import (
 )
 
 var (
-	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
+	mxFlushTook                 = metrics.GetOrCreateSummary("domain_flush_took")
+	mxCommitmentNodeReads       = metrics.GetOrCreateCounter(`domain_commitment_node_reads{mask="known"}`)
+	mxCommitmentNodeReadsNoMask = metrics.GetOrCreateCounter(`domain_commitment_node_reads{mask="unknown"}`)
 )
 
 // CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
@@ -1275,7 +1277,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 // kv_read_count{domain="commitment"} series reads zero on a v3 node.
 func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
 	wanted := mask
-	if !maskKnown {
+	if maskKnown {
+		mxCommitmentNodeReads.Inc()
+	} else {
+		mxCommitmentNodeReadsNoMask.Inc()
 		wanted = ^uint16(0)
 	}
 	if !dbg.KVReadLevelledMetrics {
