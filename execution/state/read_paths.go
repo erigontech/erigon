@@ -641,6 +641,18 @@ reread:
 							hdr.Version.TxIndex, hdr.Version.Incarnation,
 							addr, AccountKey{path, key})
 					}
+					// Torn read: this incarnation already recorded a version-map read
+					// of this key at prHeader.Version, but that version no longer
+					// resolves (the writer's cell was deleted/superseded mid-execution).
+					// It observed two states of the writer for the same key, so it did
+					// not run against a settled snapshot. Fail fast — depend on the
+					// vanished writer so this tx re-executes rather than silently
+					// re-reading base and committing a torn result the version-only
+					// validator can't catch. Mirrors the WR/RD DEP handling above; only
+					// a real (>=0) writer forces the re-exec.
+					if prHeader.Version.TxIndex > s.dep {
+						s.dep = prHeader.Version.TxIndex
+					}
 					// Fall through to storage read.
 				}
 			}
