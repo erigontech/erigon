@@ -311,7 +311,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 	}); err != nil {
 		return err
 	}
-	if err := agg.BuildFiles2(ctx, fromStep, toStep, finalityCtx, true); err != nil {
+	if err := agg.BuildFiles2(ctx, db, fromStep, toStep, finalityCtx, true); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
