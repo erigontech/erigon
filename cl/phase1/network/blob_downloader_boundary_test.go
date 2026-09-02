@@ -19,7 +19,6 @@ package network
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -556,20 +555,6 @@ func TestBlobHistoryDownloaderRetryVisitsMixedDenseAndSparseFailuresWithinOneCyc
 		seen[slot] = struct{}{}
 	}
 	require.Len(t, seen, len(blocks))
-}
-
-func BenchmarkBlobHistoryDownloaderAddSparseRetrySlots(b *testing.B) {
-	for _, failures := range []int{1024, 2048, 4096} {
-		b.Run(fmt.Sprintf("failures_%d", failures), func(b *testing.B) {
-			b.ReportMetric(float64(failures), "failures/op")
-			for b.Loop() {
-				downloader := &BlobHistoryDownloader{}
-				for i := range failures {
-					downloader.addRetrySlot(uint64(i)*1_000_000 + 1)
-				}
-			}
-		})
-	}
 }
 
 func TestBlobHistoryDownloaderRetryRangeCompressesContiguousSlots(t *testing.T) {

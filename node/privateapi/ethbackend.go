@@ -467,6 +467,9 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	if err != nil {
 		return nil, err
 	}
+	if currentBlock == nil {
+		return nil, errors.New("AAValidation: no current block")
+	}
 	header := currentBlock.HeaderNoCopy()
 
 	aaTxn := types.FromProto(req.Tx)

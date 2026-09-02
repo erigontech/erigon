@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -495,16 +494,16 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receipts, nil
 	}
 
-	select {
-	case g.execSem <- struct{}{}:
-		defer func() { <-g.execSem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
 	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
+	}
+
+	// A block with no transactions has no receipts to derive, and preparing an
+	// execution environment for it would need state history that may be pruned.
+	if len(block.Transactions()) == 0 {
+		g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+		return receipts, nil
 	}
 
 	calculatePostState := PostStateCalculated(cfg, blockNum, opts.CommitmentHistoryEnabled, g.blockReader)
@@ -524,10 +523,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
-	// A block with no transactions has no receipts to derive, and preparing an
-	// execution environment for it would need state history that may be pruned.
-	if len(block.Transactions()) == 0 {
-		return receipts, nil
+	select {
+	case g.execSem <- struct{}{}:
+		defer func() { <-g.execSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
 	var genEnv *ReceiptEnv
@@ -699,7 +699,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 		a := toJson(generated.Logs[i])
 		b := toJson(fromDB.Logs[i])
 		if a != b {
-			panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+			panic(fmt.Sprintf("assert: generated=%s, fromDB=%s, bn=%d, txnIdx=%d", a, b, generated.BlockNumber.Uint64(), generated.TransactionIndex))
 		}
 	}
 	fromDB.Logs, generated.Logs = nil, nil
@@ -707,7 +707,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	a := toJson(generated)
 	b := toJson(fromDB)
 	if a != b {
-		panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+		panic(fmt.Sprintf("assert: generated=%s, fromDB=%s, bn=%d, txnIdx=%d", a, b, generated.BlockNumber.Uint64(), generated.TransactionIndex))
 	}
 }
 

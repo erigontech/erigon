@@ -500,3 +500,22 @@ func TestGetLogsByHashZeroLogReceipt(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `[[]]`, string(encoded))
 }
+
+// TestErigonGetLogsByBlockHashRequiresACanonicalBlock pins erigon_getLogs on the same
+// by-hash resolution as eth_getLogs: a hash no header answers for is an error rather
+// than an empty log array, and a reorged-out sibling is not served the logs of the
+// canonical block at its height.
+func TestErigonGetLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	unknown := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &unknown})
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+	logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &orphaned})
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+}

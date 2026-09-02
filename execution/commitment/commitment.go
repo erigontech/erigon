@@ -1674,22 +1674,16 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if err != nil {
 		panic(err)
 	}
-	if c.update.Nonce != acc.Nonce {
-		c.update.Nonce = acc.Nonce
-		c.update.Flags |= NonceUpdate
+	c.update.Nonce = acc.Nonce
+	c.update.Balance.Set(&acc.Balance)
+	if acc.CodeHash.IsEmpty() {
+		c.update.CodeHash = empty.CodeHash
+	} else {
+		c.update.CodeHash = acc.CodeHash.Value()
 	}
-	if !c.update.Balance.Eq(&acc.Balance) {
-		c.update.Balance.Set(&acc.Balance)
-		c.update.Flags |= BalanceUpdate
-	}
-	if acc.CodeHash.Value() != c.update.CodeHash {
-		if acc.CodeHash.IsEmpty() {
-			c.update.CodeHash = empty.CodeHash
-		} else {
-			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash.Value()
-		}
-	}
+	// val is the whole account record, so flag every field: a cell may skip its state
+	// read only when the update it was given covers the account completely.
+	c.update.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
