@@ -62,6 +62,19 @@ The test passed and a *later* step failed — most often the RPC integration
 suite that `qa-sync-from-scratch.yml` runs on the freshly synced datadir. Look
 at `rpc-test-results-<chain>`, not at the sync report.
 
+On `qa-exec-from-zero.yml` that later step is the state-snapshot hash
+comparison. Read `result-state-hashes-<chain>.json` in the
+`state-snapshot-hashes-<chain>` artifact:
+
+- `mismatched > 0` → Erigon reached the tip but computed state that differs from
+  the published snapshots. The named files say where: bisect on execution and
+  collation, not on sync speed. `mismatched_<subdir>` localises it to
+  `domain` (current state), `history` or `idx`.
+- `outcome: ERROR` → nothing was comparable, i.e. the node built no state file at
+  a published step boundary. Check that it got far enough, and that the file
+  version prefixes still line up (a `v1.1` → `v1.2` bump on either side turns
+  matches into `local_only` + `published_only`).
+
 ## 3. Sync-time failure — Erigon can't keep up
 
 The node held the tip < 75 % of the tracking window. This is a performance
