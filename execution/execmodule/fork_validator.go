@@ -198,6 +198,15 @@ func (fv *ForkValidator) NotifyCommitted(height uint64) {
 	}
 }
 
+// CommittedHeight is the last block whose merged state is flushed+committed to the durable DB. ValidateChain
+// uses it to short-circuit re-validation of already-applied (lagging) blocks WITHOUT building a fresh
+// SharedDomains that would displace the DAG frontier SD — see the ALREADY-COMMITTED fast-path.
+func (fv *ForkValidator) CommittedHeight() uint64 {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.committedHeight
+}
+
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()

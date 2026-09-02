@@ -486,6 +486,20 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// A block NOT in the sealed set falls through to base erigon's execute-and-validate path below — the
 	// engine block DOWNLOADER (sync of FOREIGN peer blocks) and non-DAG chains (dev-l1) rely on it, and base
 	// erigon's own execmodule tests drive the seal THROUGH this method. Accept-if-sealed is purely additive.
+	//
+	// ALREADY-COMMITTED fast-path: a block at/below the FCU-committed height (fv.committedHeight) is already
+	// accepted and its state durably applied — never re-validate it. Caplin re-validates such LAGGING blocks
+	// (its NewPayload backfill); by then the sealedByHash entry has been pruned (forkchoice), so the seal path
+	// below misses and validateChainLocked would build a FRESH SharedDomains that ValidatePayload ADOPTS as
+	// fv.sharedDom — DISPLACING the DAG frontier/extending-fork SD the next SealBoundary needs, which wedges L2
+	// block production (block-end markers stop sealing). committedHeight is the reliable "already applied"
+	// signal (independent of the pruned sealed set and the not-yet-durable overlay canonical row). The caller
+	// uses only status + LatestValidHash (ComputedRoot is ignored). Only fires for number <= committed, so a
+	// freshly-produced tip block (dev-l1 or L2, number > committed) still executes normally — it does NOT
+	// short-circuit an un-applied block (the canonicalHeaderIfAny/HasValidHash mistake that froze dev-l1).
+	if blockNumber <= e.forkValidator.CommittedHeight() {
+		return ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}, nil
+	}
 	e.pendingBoundaryMu.Lock()
 	sealed := e.sealedByHash[blockHash]
 	e.pendingBoundaryMu.Unlock()
