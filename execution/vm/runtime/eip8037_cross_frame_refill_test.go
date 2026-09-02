@@ -121,16 +121,17 @@ func TestStateGasReturnsToGasLeftAcrossFrames(t *testing.T) {
 	}
 }
 
-// A merge moves gas_left, so a tracer following OnGasChange must be told;
-// an unannounced increase desynchronises every gas-tracking tracer.
+// A merge moves gas_left, so a tracer following OnGasChange must be told; an
+// unannounced increase desynchronises every gas-tracking tracer. It is not a
+// leftover refund, so a tracer counting those must not see one more per call.
 func TestStateGasMergeIsAnnouncedToTracer(t *testing.T) {
 	t.Parallel()
 
-	var refunds []uint64
+	gains := map[tracing.GasChangeReason][]uint64{}
 	hooks := &tracing.Hooks{
 		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
-			if reason == tracing.GasChangeCallLeftOverRefunded && newGas > old {
-				refunds = append(refunds, newGas-old)
+			if newGas > old {
+				gains[reason] = append(gains[reason], newGas-old)
 			}
 		},
 	}
@@ -146,5 +147,8 @@ func TestStateGasMergeIsAnnouncedToTracer(t *testing.T) {
 		EVMConfig:   vm.Config{Tracer: hooks},
 	})
 	require.NoError(t, err)
-	require.Contains(t, refunds, uint64(97_920), "the reservoir->gas_left move must be reported")
+	require.Contains(t, gains[tracing.GasChangeCallStateGasReturned], uint64(97_920),
+		"the reservoir->gas_left move must be reported")
+	require.Len(t, gains[tracing.GasChangeCallLeftOverRefunded], 2,
+		"one leftover refund per child call, and none for the state-gas merge")
 }
