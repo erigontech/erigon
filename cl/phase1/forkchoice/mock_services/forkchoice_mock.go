@@ -165,7 +165,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Return(true, nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
-		Prune(gomock.Any()).
+		PruneBelow(gomock.Any()).
 		Return(nil).
 		AnyTimes()
 	mockPeerDas.EXPECT().
