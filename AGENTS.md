@@ -130,6 +130,10 @@ Run `make lint` before every push. The linter is non-deterministic — run it re
 
 ## Code Style
 
+### Benchmarks
+
+Prefer keeping benchmarks in a separate `xyz_bench_test.go` file instead of mixing them with tests in `xyz_test.go`.
+
 ### Comments
 
 **Default: no comment.** Clear names and small focused functions read on their own. The vast majority of code — including code written by automated agents — should carry zero new comments. Before adding one, ask whether renaming, extracting a helper, or restructuring would remove the need. Almost always, it does.
