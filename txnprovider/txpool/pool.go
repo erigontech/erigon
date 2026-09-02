@@ -299,7 +299,7 @@ func (p *TxPool) start(ctx context.Context) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
 	coreDB, cache := p.chainDB()

@@ -1353,7 +1353,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// optimistically without needing to worry about
 			// clashes, this should signifigatly improve tx
 			// concurrency
-			break
 		default:
 			sender, err := t.TxSender()
 			if err != nil {
@@ -2619,6 +2618,18 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 		return
 	}
 
+	// The credit almost always lands on the same headers as the round before it,
+	// carrying only a moved value: overwrite those entries in the product that
+	// already holds them rather than pour the tx's whole write set into a fresh
+	// one and pool the set it replaces.
+	if outcome == feeCreditNew && superseded && rewritesCredit(temp.writes, tipWrites, feeAddrs) {
+		overwriteFeeWrites(temp.writes, tipWrites)
+		// calcFees hands the credit to this call and keeps no reference, so its
+		// maps go back to the pool now rather than waiting for the block.
+		tipWrites.ReleaseMaps()
+		return
+	}
+
 	// A credit is merged onto the worker's own writes, never onto an earlier
 	// round's product: an entry that credit emitted and this one does not would
 	// otherwise survive the merge.
@@ -2646,6 +2657,45 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 		be.feeMergeTemp[txVersion.TxIndex] = feeMerge{writes: merged, base: base, version: txVersion}
 	} else {
 		delete(be.feeMergeTemp, txVersion.TxIndex)
+	}
+}
+
+// rewritesCredit reports whether tip writes every fee entry recorded still
+// holds, so overwriting them in place leaves the set a rebuild would. An entry
+// recorded holds and tip does not would otherwise survive.
+func rewritesCredit(recorded, tip *state.WriteSet, feeAddrs [2]accounts.Address) bool {
+	for _, addr := range feeAddrs {
+		if addr.IsNil() {
+			continue
+		}
+		for _, path := range feeWritePaths {
+			h := state.WriteHeader{Address: addr, Path: path}
+			if recorded.Has(h) && !tip.Has(h) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// overwriteFeeWrites replaces dst's entries at tip's headers. It copies only
+// feeWritePaths, so a credit reaching any other path would be dropped.
+func overwriteFeeWrites(dst, tip *state.WriteSet) {
+	copied := 0
+	for a, vw := range tip.Addresses() {
+		dst.SetAddress(a, vw)
+		copied++
+	}
+	for a, vw := range tip.Balances() {
+		dst.SetBalance(a, vw)
+		copied++
+	}
+	for a, vw := range tip.SelfDestructs() {
+		dst.SetSelfDestruct(a, vw)
+		copied++
+	}
+	if dbg.AssertEnabled && copied != tip.Count() {
+		panic("fee credit wrote a path overwriteFeeWrites does not copy")
 	}
 }
 
