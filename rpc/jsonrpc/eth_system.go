@@ -200,7 +200,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		switch amount := pruneMode.ReceiptsAmount(); {
 		case amount == prune.KeepAllReceiptsPruneMode:
 			receiptsOldest, receiptsAmount = 0, amount
-		case pruneMode.ReceiptsFollowHistory():
+		case !amount.Enabled():
 		default:
 			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, stateOldest, pruneMode.History)
 		}
