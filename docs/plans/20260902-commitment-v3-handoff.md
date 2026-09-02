@@ -203,13 +203,16 @@ shared epoch `T`. The calcState fix is PR #23737 against main from
 `~/org/wrk/wt/calcstate-dirty`, `make lint` clean, `execution/stagedsync` green, judged HOLDS;
 Copilot review requested. `MACHINES.org` carries both arms under snap-arb1 and edev.
 
-Mask-knowledge counters (commit after 8b7e733e04f, not yet in the rig binary): per trie-level
-node read `domain_commitment_node_reads{mask="known"|"unknown"}` (execctx); per aggregator read
-`domain_commitment_record_reads{mask=...}`, `domain_commitment_record_files_consulted{mask=...}`
-(a v3 file reached with something still missing, before its existence filter) and
-`domain_commitment_record_files_scanned{mask=...}` (a file actually seeked). Per block: delta of a
-counter over the delta of `domain_commitment_took_count` between two `metrics-last.prom` dumps or
-`increase(...[5m])` on both. The question is the unknown share of node reads and files consulted
-per unknown read once the file count is realistic, so read them on the 1M run or on a synced node,
-not in the first steps. Tests: `TestCommitmentV3UnknownMaskReadsConsultEveryFile` (db/state) and
+Mask-knowledge counters (commit after 8b7e733e04f, not yet in the rig binary). Trie level, in
+execctx: `domain_commitment_node_reads{mask="known"|"unknown"}` per node read. Aggregator level,
+keyed by what the walk did rather than by the caller's mask, because the trie forwards every read
+as a narrowed known mask: `domain_commitment_record_reads{walk="satisfied"|"exhausted"}`,
+`domain_commitment_record_files_consulted{walk=...}` (a v3 file reached with something still
+missing, before its existence filter) and `domain_commitment_record_files_scanned{walk=...}` (a
+file actually seeked). An exhausted walk is one that ran out of files with children still wanted,
+which is what a maskless read does every time, warm cache or not. Per block: delta of a counter over
+the delta of `domain_commitment_took_count` between two `metrics-last.prom` dumps, or
+`increase(...[5m])` on both. Read them on the 1M run or a synced node, not in the first steps,
+since the cost is files x absent nibbles. Tests: `TestCommitmentV3RecordWalkIsCountedByOutcome`
+and `TestCommitmentV3UnknownMaskNodeReadExhaustsTheFileWalk` (db/state),
 `TestReadCommitmentRecordsCountsMaskKnowledge` (execctx).
