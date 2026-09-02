@@ -66,7 +66,7 @@ func DeriveShaRawValues(encoded []byte) (common.Hash, error) {
 	return deriveShaRawValues(encoded, false)
 }
 
-func deriveShaRawValues(encoded []byte, unwrapStrings bool) (common.Hash, error) {
+func deriveShaRawValues(encoded []byte, unwrapStringValues bool) (common.Hash, error) {
 	count, err := rlp.CountValues(encoded)
 	if err != nil {
 		return common.Hash{}, err
@@ -77,31 +77,35 @@ func deriveShaRawValues(encoded []byte, unwrapStrings bool) (common.Hash, error)
 
 	builder := newDeriveShaBuilder()
 	builder.add(nil, firstDerivationIndex(count))
-	afterZero := nextDerivationIndex(0, count)
+	indexAfterZero := nextDerivationIndex(0, count)
 
-	var firstValue []byte
+	// Raw values arrive in numeric order. Hold index 0 so the builder receives
+	// keys in RLP order: 1 through 127, then 0, then 128 onward.
+	var zeroValue []byte
 	for i := 0; len(encoded) > 0; i++ {
 		kind, content, rest, err := rlp.Split(encoded)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		value := encoded[:len(encoded)-len(rest)]
-		if unwrapStrings && kind != rlp.List {
+		if unwrapStringValues && kind != rlp.List {
+			// Typed transactions are RLP strings in block bodies, but their trie
+			// values exclude the string wrapper. Legacy transactions remain lists.
 			value = content
 		}
 
 		if i == 0 {
-			firstValue = value
+			zeroValue = value
 		} else {
-			if i == afterZero {
-				builder.add(firstValue, afterZero)
+			if i == indexAfterZero {
+				builder.add(zeroValue, indexAfterZero)
 			}
 			builder.add(value, nextDerivationIndex(i, count))
 		}
 		encoded = rest
 	}
-	if afterZero < 0 {
-		builder.add(firstValue, afterZero)
+	if indexAfterZero < 0 {
+		builder.add(zeroValue, indexAfterZero)
 	}
 
 	return builder.root(), nil
