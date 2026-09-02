@@ -63,6 +63,8 @@ func (r *testStateReader) Clone(kv.TemporalTx) StateReader { return r }
 
 func (r *testStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader { return r }
 
+func (r *testStateReader) BindsWorkerTx() bool { return false }
+
 func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	t.Parallel()
 
