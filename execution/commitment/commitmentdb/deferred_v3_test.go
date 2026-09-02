@@ -76,6 +76,11 @@ func TestLoadLatestCollectorRecordsResolvesEachRecord(t *testing.T) {
 	require.NoError(t, collector.Collect(tombstoneKey, []byte{4}))
 	require.NoError(t, collector.Collect(tombstoneKey, []byte{}))
 	require.NoError(t, collector.Collect(otherKey, []byte{4}))
+	// A long row followed by a short one under the same key: the reused row buffer must report the
+	// short value's length, not carry the tail of the long one.
+	shrinkKey := []byte{0x10, 0x80 | 6}
+	require.NoError(t, collector.Collect(shrinkKey, []byte{9, 9, 9, 9, 9, 9}))
+	require.NoError(t, collector.Collect(shrinkKey, []byte{7}))
 
 	var got []struct {
 		key []byte
@@ -89,7 +94,7 @@ func TestLoadLatestCollectorRecordsResolvesEachRecord(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.Len(t, got, 3)
+	require.Len(t, got, 4)
 	require.Equal(t, key, got[0].key)
 	require.Equal(t, []byte{2, 3}, got[0].val)
 	require.Equal(t, tombstoneKey, got[1].key)
@@ -97,4 +102,6 @@ func TestLoadLatestCollectorRecordsResolvesEachRecord(t *testing.T) {
 	require.Empty(t, got[1].val)
 	require.Equal(t, otherKey, got[2].key)
 	require.Equal(t, []byte{4}, got[2].val)
+	require.Equal(t, shrinkKey, got[3].key)
+	require.Equal(t, []byte{7}, got[3].val)
 }

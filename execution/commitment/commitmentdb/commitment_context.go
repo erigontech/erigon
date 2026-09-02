@@ -1159,18 +1159,26 @@ func cloneBytesPreserveNil(data []byte) []byte {
 	return clone
 }
 
+// loadLatestCollectorRecords keeps only the last row per key. The row has to outlive the callback
+// that produced it, so it is copied -- into buffers that are reused, because every row but the last
+// of a run is thrown away and a fresh pair of allocations per row is the single largest allocation
+// site on the v3 write path. PutBranch copies what it keeps, which is what lets the buffers be
+// handed to it and then overwritten.
 func loadLatestCollectorRecords(collector *etl.Collector, putBranch func([]byte, []byte) error) error {
 	var key, value []byte
 	haveRecord := false
+	valueNil := true
 	flush := func() error {
 		if !haveRecord {
 			return nil
 		}
-		if err := putBranch(key, value); err != nil {
+		held := value
+		if valueNil {
+			held = nil
+		}
+		if err := putBranch(key, held); err != nil {
 			return err
 		}
-		key = nil
-		value = nil
 		haveRecord = false
 		return nil
 	}
@@ -1180,8 +1188,9 @@ func loadLatestCollectorRecords(collector *etl.Collector, putBranch func([]byte,
 				return err
 			}
 		}
-		key = cloneBytesPreserveNil(k)
-		value = cloneBytesPreserveNil(v)
+		key = append(key[:0], k...)
+		value = append(value[:0], v...)
+		valueNil = v == nil
 		haveRecord = true
 		return nil
 	}
