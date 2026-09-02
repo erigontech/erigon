@@ -1160,7 +1160,10 @@ def main():
                   f"Regenerate when convenient; not a failure.", file=sys.stderr)
             for path in version_drift:
                 print(f"  {path}", file=sys.stderr)
-        print(f"OK: 4 llms files match regenerated content ({n_pages} pages)")
+            print(f"OK: no differences beyond the release token "
+                  f"({n_pages} pages)")
+        else:
+            print(f"OK: 4 llms files match regenerated content ({n_pages} pages)")
         return
 
     write_outputs(llms_txt, llms_full_txt)

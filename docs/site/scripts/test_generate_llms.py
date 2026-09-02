@@ -587,12 +587,13 @@ class MalformedAttributeTests(unittest.TestCase):
         )
 
 
-class ReviewRoundFixTests(unittest.TestCase):
-    """Defects found by independent review of the built-site rewrite.
+class RenderingFidelityTests(unittest.TestCase):
+    """Structure the built HTML carries and the Markdown output must keep.
 
-    Each of these produced wrong bytes in a committed artifact that `--check`
-    called green, because the check compares this code's output to this code's
-    earlier output and so cannot see a systematic error.
+    Fence languages, admonition type and title, blockquote markers, tab labels,
+    link and code-span delimiters, and the boundaries the whitespace passes must
+    not cross. `--check` compares this code's output against its own earlier
+    output, so it cannot see any of these going wrong.
     """
 
     def render(self, html, page_url=""):
@@ -654,8 +655,8 @@ class ReviewRoundFixTests(unittest.TestCase):
 
     # -- link buffer routing ------------------------------------------------
     def test_space_between_inline_elements_in_a_link_survives(self):
-        # The whitespace guard used to test the page buffer while writing to the
-        # link buffer, so the words fused.
+        # The whitespace guard has to test the buffer being written to; testing
+        # the page buffer while emitting into the link buffer fuses the words.
         self.assertEqual(
             "See [**Alpha** *beta*](https://docs.erigon.tech/x) now.",
             self.render('<p>See <a href="/x"><strong>Alpha</strong> '
@@ -704,8 +705,8 @@ class ReviewRoundFixTests(unittest.TestCase):
         self.assertLess(out.index("graph TD"), out.index("Every box above"))
 
     def test_a_hash_comment_inside_a_fence_is_not_a_heading(self):
-        # Every other scanner here is fence-aware; this one was not, so a bash
-        # `# Usage` comment matched the "Usage" heading and the diagram landed
+        # A `#` line inside a fence is code: without fence tracking a bash
+        # `# Usage` comment matches the "Usage" heading and the diagram lands
         # inside the code block.
         body = ("## Intro\n\n```bash\n# Usage\nerigon --help\n```\n\n"
                 "## Usage\n\nReal section.\n")
@@ -751,8 +752,8 @@ class ReviewRoundFixTests(unittest.TestCase):
 
     # -- blank-line collapse ------------------------------------------------
     def test_a_paragraph_meeting_a_fence_leaves_one_blank_line(self):
-        # Collapsing per-chunk and re-joining the chunks put the separator back,
-        # so every paragraph-then-code boundary carried a second blank line.
+        # Blank runs collapse in one pass over the whole text: collapsing per
+        # chunk and re-joining puts the separator back at every fence boundary.
         out = self.render('<p>Run:</p><pre class="language-sh"><code>ls</code></pre>')
         self.assertEqual("Run:\n\n```sh\nls\n```", out)
 
@@ -771,7 +772,7 @@ class ReviewRoundFixTests(unittest.TestCase):
     # -- admonition titles --------------------------------------------------
     def test_a_custom_admonition_title_survives(self):
         # `:::tip Some title` puts the title in the heading div, where the type
-        # word otherwise sits. Skipping the div wholesale dropped the title.
+        # word otherwise sits, so the div cannot simply be skipped.
         html = ('<div class="theme-admonition theme-admonition-tip">'
                 '<div class="admonitionHeading_Rf37">'
                 '<span class="admonitionIcon_a"><svg><path/></svg></span>'
@@ -795,7 +796,7 @@ class ReviewRoundFixTests(unittest.TestCase):
 
     # -- leading H1 ---------------------------------------------------------
     def test_an_empty_h1_does_not_eat_the_first_prose_line(self):
-        # `#\s+` spans newlines, so it reached past the blank line.
+        # `#\s+` would span the newline and reach the first prose line.
         self.assertEqual("First prose line.\n\nSecond.",
                          g.strip_leading_h1("# \n\nFirst prose line.\n\nSecond."))
 
@@ -804,8 +805,8 @@ class ReviewRoundFixTests(unittest.TestCase):
 
     # -- tabs ---------------------------------------------------------------
     def test_tab_labels_attach_to_their_panels(self):
-        # Docusaurus links a label to its panel by order only, so the labels
-        # used to render as a bullet list and the panels as an unlabelled run.
+        # Docusaurus links a label to its panel by order only, so the binding
+        # has to be reconstructed or the panels read as an unlabelled run.
         html = ('<ul role="tablist" class="tabs">'
                 '<li role="tab" class="tabs__item tabs__item--active">Ethereum mainnet</li>'
                 '<li role="tab" class="tabs__item">Gnosis Chain</li></ul>'
