@@ -44,9 +44,9 @@ var ErrSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscri
 // subscriber, and no subscriber waits on another.
 //
 // Delivery is best-effort, not a reliable log. A subscriber that falls
-// subscriberQueueLen messages behind is disconnected with ErrSubscriberTooSlow
-// instead of being buffered further; it has to resubscribe and there is no way
-// for it to recover what it missed in between.
+// subscriberQueueLen messages behind is dropped rather than buffered further
+// (see Broadcast); it has to resubscribe and there is no way for it to recover
+// what it missed in between.
 //
 // Broadcast takes ownership of the message it is given: the message may still
 // be queued for or in flight to a subscriber after Broadcast returns, and every
