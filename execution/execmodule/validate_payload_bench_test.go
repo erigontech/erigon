@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"runtime"
 	"runtime/debug"
 	"runtime/pprof"
 	"strings"
@@ -86,27 +87,79 @@ func BenchmarkValidatePayload(b *testing.B) {
 	}
 }
 
-// stateBudget is how much of the pre-state one run may consume, as a fraction.
+// stateBudget is how much of the pre-state one op may consume, as a fraction.
 // Trie depth goes with log16(keys), so holding growth under a tenth keeps every
 // point on the state-size sweep within ~0.03 nibbles of its own pre-state and
-// of the other points — without it, a fixed -benchtime grows the trie by half
-// at one size and a twentieth at the next, and the sweep measures the growth
-// rather than the size.
+// of the other points.
 const stateBudget = 0.1
 
+const benchBlocksPerOp = 8
+
 func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
-	if used := float64(b.N*benchTxsPerBlock) / float64(stateSize); used > stateBudget {
-		b.Fatalf("%s needs %.2f× the %d-account pre-state over %d blocks (budget %.2f); "+
-			"lower -benchtime and raise -count, or raise the state size", w, used, stateSize, b.N, stateBudget)
+	if used := float64(benchBlocksPerOp*benchTxsPerBlock) / float64(stateSize); used > stateBudget {
+		b.Fatalf("%s consumes %.2f× the %d-account pre-state over %d blocks (budget %.2f); "+
+			"lower benchBlocksPerOp or raise the state size", w, used, stateSize, benchBlocksPerOp, stateBudget)
 	}
 
-	senders := make([]*ecdsa.PrivateKey, benchTxsPerBlock)
+	senders := benchSenders(b)
+	ctx := b.Context()
+
+	var totalGas uint64
+	var newPayload, fcu time.Duration
+	var validated int
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		func() {
+			b.StopTimer()
+			m, blocks := benchFixture(b, w, stateSize, senders)
+			defer m.Close()
+			runtime.GC()
+			stopWindowProfile := startWindowProfile(b)
+			defer stopWindowProfile()
+			b.StartTimer()
+
+			for _, block := range blocks {
+				start := time.Now()
+				status, err := m.InsertBlocks(ctx, []*types.Block{block})
+				require.NoError(b, err)
+				require.Equal(b, execmodule.ExecutionStatusSuccess, status)
+
+				result, err := m.ValidateChain(ctx, block.Header())
+				require.NoError(b, err)
+				require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
+				newPayload += time.Since(start)
+
+				start = time.Now()
+				fcuResult, err := m.UpdateForkChoice(ctx, block.Header())
+				require.NoError(b, err)
+				require.Equal(b, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+				fcu += time.Since(start)
+
+				totalGas += block.GasUsed()
+			}
+			b.StopTimer()
+			validated += len(blocks)
+		}()
+	}
+
+	perBlock := float64(validated)
+	b.ReportMetric(float64(newPayload.Nanoseconds())/perBlock/1e6, "newPayload_ms")
+	b.ReportMetric(float64(fcu.Nanoseconds())/perBlock/1e6, "fcu_ms")
+	if secs := newPayload.Seconds(); secs > 0 {
+		b.ReportMetric((float64(totalGas)/1e6)/secs, "Mgas/s")
+	}
+	b.ReportMetric(boolMetric(dbg.Exec3Parallel), "parallelExec")
+	b.ReportMetric(gogcPercent(), "gogc")
+	b.ReportMetric(float64(benchBlocksPerOp*benchTxsPerBlock)/float64(stateSize), "txPerAccount")
+}
+
+func benchFixture(b *testing.B, w workload, stateSize int, senders []*ecdsa.PrivateKey) (*execmoduletester.ExecModuleTester, []*types.Block) {
 	alloc := make(types.GenesisAlloc, stateSize+benchTxsPerBlock)
 	senderBalance := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
-	for i := range senders {
-		key, err := crypto.GenerateKey()
-		require.NoError(b, err)
-		senders[i] = key
+	for _, key := range senders {
 		alloc[crypto.PubkeyToAddress(key.PublicKey)] = types.GenesisAccount{Balance: senderBalance}
 	}
 	for i := range stateSize {
@@ -118,19 +171,20 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	// which serialises every arm and buries the destination cost under it.
 	alloc[benchCoinbase] = types.GenesisAccount{Balance: senderBalance}
 
-	m := execmoduletester.New(b,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config:   benchChainConfig(),
-			GasLimit: benchGasLimit,
-			Alloc:    alloc,
-		}),
+	gspec := &types.Genesis{
+		Config:   benchChainConfig(),
+		GasLimit: benchGasLimit,
+		Alloc:    alloc,
+	}
+	m := execmoduletester.New(nil,
+		execmoduletester.WithGenesisSpec(gspec),
 		execmoduletester.WithKey(senders[0]),
 	)
-	ctx := b.Context()
-	signer := *types.LatestSignerForChainID(nil)
+	gspec.Alloc = nil
 
+	signer := *types.LatestSignerForChainID(nil)
 	var coldSeq uint64
-	chainResult, err := m.GenerateChain(b.N, func(blockIdx int, bg *blockgen.BlockGen) {
+	chainResult, err := m.GenerateChain(benchBlocksPerOp, func(blockIdx int, bg *blockgen.BlockGen) {
 		bg.SetCoinbase(benchCoinbase)
 		gasPrice := bg.GetHeader().BaseFee
 		for i := range benchTxsPerBlock {
@@ -154,44 +208,17 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	})
 	require.NoError(b, err)
 	requireAllSucceeded(b, chainResult)
+	return m, chainResult.Blocks
+}
 
-	var totalGas uint64
-	var newPayload, fcu time.Duration
-
-	b.ReportAllocs()
-	stopWindowProfile := startWindowProfile(b)
-	defer stopWindowProfile()
-	b.ResetTimer()
-	for _, block := range chainResult.Blocks {
-		start := time.Now()
-		status, err := m.InsertBlocks(ctx, []*types.Block{block})
+func benchSenders(b *testing.B) []*ecdsa.PrivateKey {
+	senders := make([]*ecdsa.PrivateKey, benchTxsPerBlock)
+	for i := range senders {
+		key, err := crypto.HexToECDSA(fmt.Sprintf("%064x", i+1))
 		require.NoError(b, err)
-		require.Equal(b, execmodule.ExecutionStatusSuccess, status)
-
-		result, err := m.ValidateChain(ctx, block.Header())
-		require.NoError(b, err)
-		require.Equal(b, execmodule.ExecutionStatusSuccess, result.ValidationStatus)
-		newPayload += time.Since(start)
-
-		start = time.Now()
-		fcuResult, err := m.UpdateForkChoice(ctx, block.Header())
-		require.NoError(b, err)
-		require.Equal(b, execmodule.ExecutionStatusSuccess, fcuResult.Status)
-		fcu += time.Since(start)
-
-		totalGas += block.GasUsed()
+		senders[i] = key
 	}
-	b.StopTimer()
-
-	perBlock := float64(len(chainResult.Blocks))
-	b.ReportMetric(float64(newPayload.Nanoseconds())/perBlock/1e6, "newPayload_ms")
-	b.ReportMetric(float64(fcu.Nanoseconds())/perBlock/1e6, "fcu_ms")
-	if secs := newPayload.Seconds(); secs > 0 {
-		b.ReportMetric((float64(totalGas)/1e6)/secs, "Mgas/s")
-	}
-	b.ReportMetric(boolMetric(dbg.Exec3Parallel), "parallelExec")
-	b.ReportMetric(gogcPercent(), "gogc")
-	b.ReportMetric(float64(b.N*benchTxsPerBlock)/float64(stateSize), "stateGrowth")
+	return senders
 }
 
 func gogcPercent() float64 {
