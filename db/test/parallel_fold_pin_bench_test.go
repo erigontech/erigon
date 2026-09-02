@@ -17,6 +17,7 @@
 package test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -124,7 +125,7 @@ func BenchmarkSharedDomains_ParallelFold_PinnedFallback(b *testing.B) {
 
 			rh, err := doms.ComputeCommitment(ctx, callerTx, false, 0, txNum, "", nil)
 			require.NoError(b, err)
-			roots = append(roots, rh)
+			roots = append(roots, bytes.Clone(rh))
 		}
 	}
 
