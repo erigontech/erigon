@@ -1330,3 +1330,34 @@ func TestRemoveMalformedMetainfoKeepsDataForTorrentSuffixedName(t *testing.T) {
 	require.FileExists(path, "the snapshot data must survive the metainfo repair")
 	require.NoFileExists(miPath, "the malformed metainfo must be the file that goes")
 }
+
+func openFdCount(t *testing.T) int {
+	t.Helper()
+	// Readdirnames, not ReadDir: ReadDir lstats every entry, and an fd closed by a
+	// background goroutine meanwhile fails the whole listing with EBADF, which is not
+	// IsNotExist and so is not skipped.
+	d, err := os.Open("/dev/fd")
+	require.NoError(t, err)
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	require.NoError(t, err)
+	return len(names)
+}
+
+func TestVerifyDataFailFastClosesFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/fd on windows")
+	}
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a"), bytes.Repeat([]byte{1}, 4096), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(t.Context(), "a"))
+
+	const runs = 20
+	require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	before := openFdCount(t)
+	for range runs {
+		require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	}
+	require.Less(openFdCount(t)-before, runs/2, "VerifyFileFailFast leaks a file descriptor per verified file")
+}
