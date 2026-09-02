@@ -619,7 +619,7 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 		doubled.generationBytes(doubled.maxCap)-external.generationBytes(external.maxCap),
 		"charging the in-element bookkeeping again takes that much extra from the shared envelope")
 
-	// usage_pct divides currentSize, so its denominator has to add it back.
+	// currentSize carries the in-element bookkeeping the estimate leaves out.
 	key := make([]byte, 52)
 	val := make([]byte, avgStoragePayloadBytes-len(key))
 	external.Put(key, val, 1)
@@ -685,4 +685,25 @@ func TestGenericCache_EnvelopeCoversLargeValueType(t *testing.T) {
 	require.GreaterOrEqual(t, charged, allocated,
 		"envelope reserves %d B of slot overhead for %d slots across %d shards but the generation allocates %d B",
 		charged, slots, c.shardCount, allocated)
+}
+
+// avgBytes counts only what an entry points at, so it cannot also be the
+// denominator for a numerator that counts the entry's logical bytes: for a value
+// type held inline the two disagree by the whole value.
+func TestGenericCache_UsageReportIsNotDrivenByThePayloadEstimate(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[128]byte](1*datasize.MB, 8,
+		func([128]byte) int { return 128 }, ModeEvictLRU))
+
+	key := make([]byte, 32)
+	for i := range int(c.maxCap) {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		c.Put(key, [128]byte{}, 1)
+	}
+
+	require.LessOrEqual(t, c.slotsPct(), 100.0,
+		"a cache that is exactly full reports %.0f%%", c.slotsPct())
 }

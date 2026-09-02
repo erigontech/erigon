@@ -632,21 +632,24 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		hitRate = float64(hits) / float64(total) * 100
 	}
 	sizeBytes := c.currentSize.Load()
-	// Reported against the payload the ceiling buys, not capacityB: that also
-	// funds the slot arrays and would read ~27% on a cache already evicting.
-	// The envelope side is reserved_mb.
-	payloadCap := int64(c.maxCap) * (c.payloadBytes + currentSizeEntryOverhead)
-	var usagePct float64
-	if payloadCap > 0 {
-		usagePct = float64(sizeBytes) / float64(payloadCap) * 100
-	}
 	log.Debug(name+" cache stats",
 		"mode", c.mode.String(),
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
 		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
-		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
+		"capacity_mb", int64(c.capacityB/datasize.MB), "slots_pct", c.slotsPct(),
 		"reserved_mb", c.reservedBytes.Load()/int64(datasize.MB),
 	)
+}
+
+// slotsPct is how full the cache is against the bound that actually evicts, the
+// slot cap. currentSize is not the numerator for a payloadBytes denominator:
+// that estimate counts only what an entry points at, so for a value held inline
+// in T the two disagree by the whole value. Bytes are reported as size_mb.
+func (c *GenericCache[T]) slotsPct() float64 {
+	if c.maxCap == 0 {
+		return 0
+	}
+	return float64(c.data.Load().Len()) / float64(c.maxCap) * 100
 }
