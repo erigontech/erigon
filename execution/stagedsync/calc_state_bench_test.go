@@ -30,7 +30,7 @@ import (
 
 func BenchmarkCalcStateFlushWithAccumulatedAccounts(b *testing.B) {
 	const perBlock = 32
-	for _, accumulated := range []int{1_000, 100_000, 300_000} {
+	for _, accumulated := range []int{32, 256, 1_000, 100_000, 300_000} {
 		b.Run(fmt.Sprintf("accumulated=%d", accumulated), func(b *testing.B) {
 			cs := newTestCalcState()
 			addrs := make([]accounts.Address, accumulated)

@@ -166,8 +166,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 	return acc
 }
 
-func (cs *calcState) markDirty(addr accounts.Address) {
-	acc := cs.accounts[addr]
+func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	if acc.dirty {
 		return
 	}
@@ -190,7 +189,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if vw.Val {
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
-			cs.markDirty(addr)
+			cs.markDirty(addr, acc)
 			cs.deleteStorageSubtree(addr)
 		}
 	}
@@ -200,7 +199,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Balance = vw.Val
-		cs.markDirty(addr)
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
 		}
@@ -208,7 +207,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Nonces() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Nonce = vw.Val
-		cs.markDirty(addr)
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, acc.Nonce != 0) {
 			acc.Deleted = false
 		}
@@ -216,7 +215,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.CodeHashes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Value()
-		cs.markDirty(addr)
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
 			acc.Deleted = false
 		}
@@ -224,7 +223,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Codes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
-		cs.markDirty(addr)
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
 			acc.Deleted = false
 		}
@@ -232,7 +231,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Incarnations() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Incarnation = vw.Val
-		cs.markDirty(addr)
+		cs.markDirty(addr, acc)
 	}
 	for addr, inner := range writes.Storages() {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
