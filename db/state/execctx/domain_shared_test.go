@@ -2046,14 +2046,11 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 }
 
 // TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress verifies that a
-// commitment computation with no state updates still advances the persisted
-// commitment position when saveState=true.
-//
-// The state root must remain unchanged, but the persisted (blockNum, txNum)
-// must move forward to the new execution position.
+// zero-update commitment advances the persisted execution position without
+// changing the state root or serialized trie state.
 func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("long-running test")
 	}
 
 	const (
@@ -2066,11 +2063,6 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	db := newTestDb(t, stepSize)
 	ctx := t.Context()
-
-	// -----------------------------------------------------------------
-	// Phase 1:
-	// make a real state change and persist commitment at block1/txNum1.
-	// -----------------------------------------------------------------
 
 	rwTx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -2093,7 +2085,11 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 		Incarnation: 0,
 	}
 
-	prev, _, err := domains1.GetLatest(kv.AccountsDomain, rwTx1, addr)
+	prev, _, err := domains1.GetLatest(
+		kv.AccountsDomain,
+		rwTx1,
+		addr,
+	)
 	require.NoError(t, err)
 
 	require.NoError(t, domains1.DomainPut(
@@ -2119,14 +2115,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 
 	require.NoError(t, domains1.Flush(ctx, rwTx1))
 	domains1.Close()
-
 	require.NoError(t, rwTx1.Commit())
-
-	// -----------------------------------------------------------------
-	// Phase 2:
-	// reopen from persisted state, make ZERO state updates, then request
-	// commitment persistence at block2/txNum2.
-	// -----------------------------------------------------------------
 
 	rwTx2, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -2138,27 +2127,23 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
+	require.Greater(t, len(state1), 16)
 
-	if len(state1) < 16 {
-		t.Fatalf(
-			"PHASE1_BASELINE_BAD: commitment state length=%d, want >=16",
-			len(state1),
-		)
-	}
+	storedTx1, storedBlock1 :=
+		commitmentdb.DecodeTxBlockNums(state1)
 
-	storedTx1, storedBlock1 := commitmentdb.DecodeTxBlockNums(state1)
+	require.Equal(t, block1, storedBlock1)
+	require.Equal(t, txNum1, storedTx1)
 
-	if storedBlock1 != block1 || storedTx1 != txNum1 {
-		t.Fatalf(
-			"PHASE1_BASELINE_BAD: got block=%d txNum=%d, want block=%d txNum=%d",
-			storedBlock1,
-			storedTx1,
-			block1,
-			txNum1,
-		)
-	}
+	// GetLatest may return transaction-backed memory. Preserve the serialized
+	// trie payload before committing and reopening the database transaction.
+	trieState1 := bytes.Clone(state1[16:])
 
-	domains2, err := execctx.NewSharedDomains(ctx, rwTx2, log.New())
+	domains2, err := execctx.NewSharedDomains(
+		ctx,
+		rwTx2,
+		log.New(),
+	)
 	require.NoError(t, err)
 
 	// Deliberately perform NO DomainPut/DomainDel calls here.
@@ -2174,25 +2159,11 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, root2)
-
-	if !bytes.Equal(root1, root2) {
-		t.Fatalf(
-			"ROOT_CHANGED_UNEXPECTED: root1=%x root2=%x",
-			root1,
-			root2,
-		)
-	}
+	require.Equal(t, root1, root2)
 
 	require.NoError(t, domains2.Flush(ctx, rwTx2))
 	domains2.Close()
-
 	require.NoError(t, rwTx2.Commit())
-
-	// -----------------------------------------------------------------
-	// Phase 3:
-	// reopen AGAIN so the assertion is against durable persisted state,
-	// not an in-memory overlay.
-	// -----------------------------------------------------------------
 
 	rwTx3, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
@@ -2204,23 +2175,12 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 		kv.GetLatestOptions{},
 	)
 	require.NoError(t, err)
+	require.Greater(t, len(state2), 16)
 
-	if len(state2) < 16 {
-		t.Fatalf(
-			"PHASE2_STATE_MISSING: commitment state length=%d, want >=16",
-			len(state2),
-		)
-	}
+	storedTx2, storedBlock2 :=
+		commitmentdb.DecodeTxBlockNums(state2)
 
-	storedTx2, storedBlock2 := commitmentdb.DecodeTxBlockNums(state2)
-
-	if storedBlock2 != block2 || storedTx2 != txNum2 {
-		t.Fatalf(
-			"ZERO_UPDATE_PROGRESS_STALE: got block=%d txNum=%d; want block=%d txNum=%d; root stayed unchanged as required",
-			storedBlock2,
-			storedTx2,
-			block2,
-			txNum2,
-		)
-	}
+	require.Equal(t, block2, storedBlock2)
+	require.Equal(t, txNum2, storedTx2)
+	require.Equal(t, trieState1, state2[16:])
 }
