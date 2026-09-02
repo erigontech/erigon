@@ -1131,7 +1131,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 			}
 		}
 
-		superStringsPool.Put(superstring) //nolint:staticcheck // boxing one slice header per 16MB superstring is cheaper than an indirection in the scan loop
+		superStringsPool.Put(superstring) //nolint:staticcheck // slice-header boxing beats an indirection here
 	}
 }
 
