@@ -130,7 +130,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 
 		// build files
-		err = agg.BuildFiles(temporalDb, 2, unboundedFinalityCtx)
+		err = temporalDb.BuildFiles(2, unboundedFinalityCtx)
 		require.NoError(t, err)
 		rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -371,7 +371,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 			require.NoError(t, rwTtx.Commit())
 		}()
 	}
-	require.NoError(t, agg.BuildFiles(temporalDb, 3, unboundedFinalityCtx))
+	require.NoError(t, temporalDb.BuildFiles(3, unboundedFinalityCtx))
 
 	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)

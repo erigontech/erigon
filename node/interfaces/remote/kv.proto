@@ -47,6 +47,8 @@ service KV {
   // Snapshots returns list of current snapshot files. Then client can just open all of them.
   rpc Snapshots(SnapshotsRequest) returns (SnapshotsReply);
 
+  rpc OpenStateSnapshots(google.protobuf.Empty) returns (google.protobuf.Empty);
+
   // Range [from, to)
   // Range(from, nil) means [from, EndOfTable)
   // Range(nil, to)   means [StartOfTable, to)
@@ -67,6 +69,7 @@ service KV {
   rpc HistoryStartFrom(HistoryStartFromReq) returns (HistoryStartFromReply);
   rpc CurrentDomainVersion(CurrentDomainVersionReq) returns (CurrentDomainVersionReply);
   rpc StepSize(StepSizeReq) returns (StepSizeReply);
+  rpc MaxPrunableStepsBacklog(google.protobuf.Empty) returns (MaxPrunableStepsBacklogReply);
 }
 
 enum Op {
@@ -342,4 +345,8 @@ message StepSizeReq {
 
 message StepSizeReply {
   uint64 step = 1;
+}
+
+message MaxPrunableStepsBacklogReply {
+  uint64 steps = 1;
 }

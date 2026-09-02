@@ -23,10 +23,27 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
+
+func TestOpenStateSnapshots(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().OpenStateSnapshots(gomock.Any(), gomock.Any(), gomock.Any()).Return(&emptypb.Empty{}, nil)
+	db := &DB{remoteKV: client}
+	require.NoError(t, db.OpenStateSnapshots(t.Context()))
+}
+
+func TestMaxPrunableStepsBacklog(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().MaxPrunableStepsBacklog(gomock.Any(), gomock.Any(), gomock.Any()).Return(&remoteproto.MaxPrunableStepsBacklogReply{Steps: 123}, nil)
+	db := &DB{remoteKV: client}
+	require.Equal(t, uint64(123), db.MaxPrunableStepsBacklog())
+}
 
 func TestGetLatestForwardsMaxStep(t *testing.T) {
 	ctrl := gomock.NewController(t)

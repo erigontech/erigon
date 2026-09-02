@@ -3531,7 +3531,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := agg.BuildFiles(temporalDb, lastTxNum, finalityCtx); err != nil {
+	if err := temporalDb.BuildFiles(lastTxNum, finalityCtx); err != nil {
 		return err
 	}
 
@@ -3665,7 +3665,12 @@ func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger 
 	if err != nil {
 		return nil, err
 	}
-	if err = agg.OpenFolder(chainDB); err != nil {
+	temporalDB, err := temporal.New(chainDB, agg, nil)
+	if err != nil {
+		agg.Close()
+		return nil, err
+	}
+	if err = temporalDB.OpenStateSnapshots(ctx); err != nil {
 		agg.Close()
 		return nil, err
 	}

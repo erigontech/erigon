@@ -21,21 +21,23 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KV_Version_FullMethodName              = "/remote.KV/Version"
-	KV_Tx_FullMethodName                   = "/remote.KV/Tx"
-	KV_StateChanges_FullMethodName         = "/remote.KV/StateChanges"
-	KV_Snapshots_FullMethodName            = "/remote.KV/Snapshots"
-	KV_Range_FullMethodName                = "/remote.KV/Range"
-	KV_Sequence_FullMethodName             = "/remote.KV/Sequence"
-	KV_GetLatest_FullMethodName            = "/remote.KV/GetLatest"
-	KV_HistorySeek_FullMethodName          = "/remote.KV/HistorySeek"
-	KV_IndexRange_FullMethodName           = "/remote.KV/IndexRange"
-	KV_HistoryRange_FullMethodName         = "/remote.KV/HistoryRange"
-	KV_RangeAsOf_FullMethodName            = "/remote.KV/RangeAsOf"
-	KV_HasPrefix_FullMethodName            = "/remote.KV/HasPrefix"
-	KV_HistoryStartFrom_FullMethodName     = "/remote.KV/HistoryStartFrom"
-	KV_CurrentDomainVersion_FullMethodName = "/remote.KV/CurrentDomainVersion"
-	KV_StepSize_FullMethodName             = "/remote.KV/StepSize"
+	KV_Version_FullMethodName                 = "/remote.KV/Version"
+	KV_Tx_FullMethodName                      = "/remote.KV/Tx"
+	KV_StateChanges_FullMethodName            = "/remote.KV/StateChanges"
+	KV_Snapshots_FullMethodName               = "/remote.KV/Snapshots"
+	KV_OpenStateSnapshots_FullMethodName      = "/remote.KV/OpenStateSnapshots"
+	KV_Range_FullMethodName                   = "/remote.KV/Range"
+	KV_Sequence_FullMethodName                = "/remote.KV/Sequence"
+	KV_GetLatest_FullMethodName               = "/remote.KV/GetLatest"
+	KV_HistorySeek_FullMethodName             = "/remote.KV/HistorySeek"
+	KV_IndexRange_FullMethodName              = "/remote.KV/IndexRange"
+	KV_HistoryRange_FullMethodName            = "/remote.KV/HistoryRange"
+	KV_RangeAsOf_FullMethodName               = "/remote.KV/RangeAsOf"
+	KV_HasPrefix_FullMethodName               = "/remote.KV/HasPrefix"
+	KV_HistoryStartFrom_FullMethodName        = "/remote.KV/HistoryStartFrom"
+	KV_CurrentDomainVersion_FullMethodName    = "/remote.KV/CurrentDomainVersion"
+	KV_StepSize_FullMethodName                = "/remote.KV/StepSize"
+	KV_MaxPrunableStepsBacklog_FullMethodName = "/remote.KV/MaxPrunableStepsBacklog"
 )
 
 // KVClient is the client API for KV service.
@@ -55,13 +57,14 @@ type KVClient interface {
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StateChangeBatch], error)
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
+	OpenStateSnapshots(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
 	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
 	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error)
 	Sequence(ctx context.Context, in *SequenceReq, opts ...grpc.CallOption) (*SequenceReply, error)
-	//Temporal methods
+	// Temporal methods
 	GetLatest(ctx context.Context, in *GetLatestReq, opts ...grpc.CallOption) (*GetLatestReply, error)
 	HistorySeek(ctx context.Context, in *HistorySeekReq, opts ...grpc.CallOption) (*HistorySeekReply, error)
 	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
@@ -71,6 +74,7 @@ type KVClient interface {
 	HistoryStartFrom(ctx context.Context, in *HistoryStartFromReq, opts ...grpc.CallOption) (*HistoryStartFromReply, error)
 	CurrentDomainVersion(ctx context.Context, in *CurrentDomainVersionReq, opts ...grpc.CallOption) (*CurrentDomainVersionReply, error)
 	StepSize(ctx context.Context, in *StepSizeReq, opts ...grpc.CallOption) (*StepSizeReply, error)
+	MaxPrunableStepsBacklog(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MaxPrunableStepsBacklogReply, error)
 }
 
 type kVClient struct {
@@ -127,6 +131,16 @@ func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SnapshotsReply)
 	err := c.cc.Invoke(ctx, KV_Snapshots_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) OpenStateSnapshots(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, KV_OpenStateSnapshots_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +257,16 @@ func (c *kVClient) StepSize(ctx context.Context, in *StepSizeReq, opts ...grpc.C
 	return out, nil
 }
 
+func (c *kVClient) MaxPrunableStepsBacklog(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MaxPrunableStepsBacklogReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MaxPrunableStepsBacklogReply)
+	err := c.cc.Invoke(ctx, KV_MaxPrunableStepsBacklog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KVServer is the server API for KV service.
 // All implementations must embed UnimplementedKVServer
 // for forward compatibility.
@@ -260,13 +284,14 @@ type KVServer interface {
 	StateChanges(*StateChangeRequest, grpc.ServerStreamingServer[StateChangeBatch]) error
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error)
+	OpenStateSnapshots(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
 	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
 	Range(context.Context, *RangeReq) (*Pairs, error)
 	Sequence(context.Context, *SequenceReq) (*SequenceReply, error)
-	//Temporal methods
+	// Temporal methods
 	GetLatest(context.Context, *GetLatestReq) (*GetLatestReply, error)
 	HistorySeek(context.Context, *HistorySeekReq) (*HistorySeekReply, error)
 	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
@@ -276,6 +301,7 @@ type KVServer interface {
 	HistoryStartFrom(context.Context, *HistoryStartFromReq) (*HistoryStartFromReply, error)
 	CurrentDomainVersion(context.Context, *CurrentDomainVersionReq) (*CurrentDomainVersionReply, error)
 	StepSize(context.Context, *StepSizeReq) (*StepSizeReply, error)
+	MaxPrunableStepsBacklog(context.Context, *emptypb.Empty) (*MaxPrunableStepsBacklogReply, error)
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -297,6 +323,9 @@ func (UnimplementedKVServer) StateChanges(*StateChangeRequest, grpc.ServerStream
 }
 func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Snapshots not implemented")
+}
+func (UnimplementedKVServer) OpenStateSnapshots(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenStateSnapshots not implemented")
 }
 func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
 	return nil, status.Error(codes.Unimplemented, "method Range not implemented")
@@ -330,6 +359,9 @@ func (UnimplementedKVServer) CurrentDomainVersion(context.Context, *CurrentDomai
 }
 func (UnimplementedKVServer) StepSize(context.Context, *StepSizeReq) (*StepSizeReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method StepSize not implemented")
+}
+func (UnimplementedKVServer) MaxPrunableStepsBacklog(context.Context, *emptypb.Empty) (*MaxPrunableStepsBacklogReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method MaxPrunableStepsBacklog not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 func (UnimplementedKVServer) testEmbeddedByValue()            {}
@@ -402,6 +434,24 @@ func _KV_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interf
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(KVServer).Snapshots(ctx, req.(*SnapshotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_OpenStateSnapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).OpenStateSnapshots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_OpenStateSnapshots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).OpenStateSnapshots(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -604,6 +654,24 @@ func _KV_StepSize_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_MaxPrunableStepsBacklog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).MaxPrunableStepsBacklog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_MaxPrunableStepsBacklog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).MaxPrunableStepsBacklog(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KV_ServiceDesc is the grpc.ServiceDesc for KV service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -618,6 +686,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Snapshots",
 			Handler:    _KV_Snapshots_Handler,
+		},
+		{
+			MethodName: "OpenStateSnapshots",
+			Handler:    _KV_OpenStateSnapshots_Handler,
 		},
 		{
 			MethodName: "Range",
@@ -662,6 +734,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StepSize",
 			Handler:    _KV_StepSize_Handler,
+		},
+		{
+			MethodName: "MaxPrunableStepsBacklog",
+			Handler:    _KV_MaxPrunableStepsBacklog_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
@@ -114,12 +113,11 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 		return nil, err
 	}
 
-	blockSnaps, agg, _, err := allSnapshots(ctx, rawDB, logger)
+	db, err := newTemporalDB(ctx, rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
-
-	db, err := temporal.New(rawDB, agg, blockSnaps)
+	blockSnaps, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		return nil, err
 	}

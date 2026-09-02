@@ -468,7 +468,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
-			_ = agg.OpenFolder(db)
+			_ = db.OpenStateSnapshots(ctx)
 
 			logSnapshotStats()
 		} else {
@@ -487,7 +487,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allSnapshots.LogStat("reopen")
 				}
 
-				if err = agg.OpenFolder(db); err != nil {
+				if err = db.OpenStateSnapshots(ctx); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					logSnapshotStats()

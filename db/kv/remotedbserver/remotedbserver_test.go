@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"context"
 	"runtime"
 	"testing"
 
@@ -34,6 +35,41 @@ import (
 type getLatestOptionsTx struct {
 	kv.TemporalTx
 	opts kv.GetLatestOptions
+}
+
+type stateSnapshotsDB struct {
+	kv.TemporalRoDB
+	opened bool
+}
+
+type prunableStepsDB struct {
+	kv.TemporalRoDB
+	steps uint64
+}
+
+func (db *stateSnapshotsDB) OpenStateSnapshots(context.Context) error {
+	db.opened = true
+	return nil
+}
+
+func (db *prunableStepsDB) MaxPrunableStepsBacklog() uint64 {
+	return db.steps
+}
+
+func TestOpenStateSnapshots(t *testing.T) {
+	db := &stateSnapshotsDB{}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	_, err := s.OpenStateSnapshots(t.Context(), nil)
+	require.NoError(t, err)
+	require.True(t, db.opened)
+}
+
+func TestMaxPrunableStepsBacklog(t *testing.T) {
+	db := &prunableStepsDB{steps: 123}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	reply, err := s.MaxPrunableStepsBacklog(t.Context(), nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), reply.Steps)
 }
 
 func (tx *getLatestOptionsTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {

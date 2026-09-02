@@ -2244,6 +2244,50 @@ func (x *StepSizeReply) GetStep() uint64 {
 	return 0
 }
 
+type MaxPrunableStepsBacklogReply struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Steps         uint64                 `protobuf:"varint,1,opt,name=steps,proto3" json:"steps,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MaxPrunableStepsBacklogReply) Reset() {
+	*x = MaxPrunableStepsBacklogReply{}
+	mi := &file_remote_kv_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MaxPrunableStepsBacklogReply) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MaxPrunableStepsBacklogReply) ProtoMessage() {}
+
+func (x *MaxPrunableStepsBacklogReply) ProtoReflect() protoreflect.Message {
+	mi := &file_remote_kv_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MaxPrunableStepsBacklogReply.ProtoReflect.Descriptor instead.
+func (*MaxPrunableStepsBacklogReply) Descriptor() ([]byte, []int) {
+	return file_remote_kv_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *MaxPrunableStepsBacklogReply) GetSteps() uint64 {
+	if x != nil {
+		return x.Steps
+	}
+	return 0
+}
+
 var File_remote_kv_proto protoreflect.FileDescriptor
 
 const file_remote_kv_proto_rawDesc = "" +
@@ -2406,7 +2450,9 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\vStepSizeReq\x12\x13\n" +
 	"\x05tx_id\x18\x01 \x01(\x04R\x04txId\"#\n" +
 	"\rStepSizeReply\x12\x12\n" +
-	"\x04step\x18\x01 \x01(\x04R\x04step*\xfb\x01\n" +
+	"\x04step\x18\x01 \x01(\x04R\x04step\"4\n" +
+	"\x1cMaxPrunableStepsBacklogReply\x12\x14\n" +
+	"\x05steps\x18\x01 \x01(\x04R\x05steps*\xfb\x01\n" +
 	"\x02Op\x12\t\n" +
 	"\x05FIRST\x10\x00\x12\r\n" +
 	"\tFIRST_DUP\x10\x01\x12\b\n" +
@@ -2438,12 +2484,13 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tDirection\x12\v\n" +
 	"\aFORWARD\x10\x00\x12\n" +
 	"\n" +
-	"\x06UNWIND\x10\x012\x90\a\n" +
+	"\x06UNWIND\x10\x012\xaf\b\n" +
 	"\x02KV\x126\n" +
 	"\aVersion\x12\x16.google.protobuf.Empty\x1a\x13.types.VersionReply\x12&\n" +
 	"\x02Tx\x12\x0e.remote.Cursor\x1a\f.remote.Pair(\x010\x01\x12F\n" +
 	"\fStateChanges\x12\x1a.remote.StateChangeRequest\x1a\x18.remote.StateChangeBatch0\x01\x12=\n" +
-	"\tSnapshots\x12\x18.remote.SnapshotsRequest\x1a\x16.remote.SnapshotsReply\x12(\n" +
+	"\tSnapshots\x12\x18.remote.SnapshotsRequest\x1a\x16.remote.SnapshotsReply\x12D\n" +
+	"\x12OpenStateSnapshots\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12(\n" +
 	"\x05Range\x12\x10.remote.RangeReq\x1a\r.remote.Pairs\x126\n" +
 	"\bSequence\x12\x13.remote.SequenceReq\x1a\x15.remote.SequenceReply\x129\n" +
 	"\tGetLatest\x12\x14.remote.GetLatestReq\x1a\x16.remote.GetLatestReply\x12?\n" +
@@ -2455,7 +2502,8 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tHasPrefix\x12\x14.remote.HasPrefixReq\x1a\x16.remote.HasPrefixReply\x12N\n" +
 	"\x10HistoryStartFrom\x12\x1b.remote.HistoryStartFromReq\x1a\x1d.remote.HistoryStartFromReply\x12Z\n" +
 	"\x14CurrentDomainVersion\x12\x1f.remote.CurrentDomainVersionReq\x1a!.remote.CurrentDomainVersionReply\x126\n" +
-	"\bStepSize\x12\x13.remote.StepSizeReq\x1a\x15.remote.StepSizeReplyB\x16Z\x14./remote;remoteprotob\x06proto3"
+	"\bStepSize\x12\x13.remote.StepSizeReq\x1a\x15.remote.StepSizeReply\x12W\n" +
+	"\x17MaxPrunableStepsBacklog\x12\x16.google.protobuf.Empty\x1a$.remote.MaxPrunableStepsBacklogReplyB\x16Z\x14./remote;remoteprotob\x06proto3"
 
 var (
 	file_remote_kv_proto_rawDescOnce sync.Once
@@ -2470,89 +2518,94 @@ func file_remote_kv_proto_rawDescGZIP() []byte {
 }
 
 var file_remote_kv_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_remote_kv_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_remote_kv_proto_goTypes = []any{
-	(Op)(0),                           // 0: remote.Op
-	(Action)(0),                       // 1: remote.Action
-	(Direction)(0),                    // 2: remote.Direction
-	(*Cursor)(nil),                    // 3: remote.Cursor
-	(*Pair)(nil),                      // 4: remote.Pair
-	(*StorageChange)(nil),             // 5: remote.StorageChange
-	(*AccountChange)(nil),             // 6: remote.AccountChange
-	(*StateChangeBatch)(nil),          // 7: remote.StateChangeBatch
-	(*StateChange)(nil),               // 8: remote.StateChange
-	(*StateChangeRequest)(nil),        // 9: remote.StateChangeRequest
-	(*SnapshotsRequest)(nil),          // 10: remote.SnapshotsRequest
-	(*SnapshotsReply)(nil),            // 11: remote.SnapshotsReply
-	(*RangeReq)(nil),                  // 12: remote.RangeReq
-	(*SequenceReq)(nil),               // 13: remote.SequenceReq
-	(*SequenceReply)(nil),             // 14: remote.SequenceReply
-	(*GetLatestReq)(nil),              // 15: remote.GetLatestReq
-	(*GetLatestReply)(nil),            // 16: remote.GetLatestReply
-	(*HistorySeekReq)(nil),            // 17: remote.HistorySeekReq
-	(*HistorySeekReply)(nil),          // 18: remote.HistorySeekReply
-	(*IndexRangeReq)(nil),             // 19: remote.IndexRangeReq
-	(*IndexRangeReply)(nil),           // 20: remote.IndexRangeReply
-	(*HistoryRangeReq)(nil),           // 21: remote.HistoryRangeReq
-	(*RangeAsOfReq)(nil),              // 22: remote.RangeAsOfReq
-	(*Pairs)(nil),                     // 23: remote.Pairs
-	(*PairsPagination)(nil),           // 24: remote.PairsPagination
-	(*IndexPagination)(nil),           // 25: remote.IndexPagination
-	(*HasPrefixReq)(nil),              // 26: remote.HasPrefixReq
-	(*HasPrefixReply)(nil),            // 27: remote.HasPrefixReply
-	(*HistoryStartFromReq)(nil),       // 28: remote.HistoryStartFromReq
-	(*HistoryStartFromReply)(nil),     // 29: remote.HistoryStartFromReply
-	(*CurrentDomainVersionReq)(nil),   // 30: remote.CurrentDomainVersionReq
-	(*CurrentDomainVersionReply)(nil), // 31: remote.CurrentDomainVersionReply
-	(*StepSizeReq)(nil),               // 32: remote.StepSizeReq
-	(*StepSizeReply)(nil),             // 33: remote.StepSizeReply
-	(*typesproto.H256)(nil),           // 34: types.H256
-	(*typesproto.H160)(nil),           // 35: types.H160
-	(*emptypb.Empty)(nil),             // 36: google.protobuf.Empty
-	(*typesproto.VersionReply)(nil),   // 37: types.VersionReply
+	(Op)(0),                              // 0: remote.Op
+	(Action)(0),                          // 1: remote.Action
+	(Direction)(0),                       // 2: remote.Direction
+	(*Cursor)(nil),                       // 3: remote.Cursor
+	(*Pair)(nil),                         // 4: remote.Pair
+	(*StorageChange)(nil),                // 5: remote.StorageChange
+	(*AccountChange)(nil),                // 6: remote.AccountChange
+	(*StateChangeBatch)(nil),             // 7: remote.StateChangeBatch
+	(*StateChange)(nil),                  // 8: remote.StateChange
+	(*StateChangeRequest)(nil),           // 9: remote.StateChangeRequest
+	(*SnapshotsRequest)(nil),             // 10: remote.SnapshotsRequest
+	(*SnapshotsReply)(nil),               // 11: remote.SnapshotsReply
+	(*RangeReq)(nil),                     // 12: remote.RangeReq
+	(*SequenceReq)(nil),                  // 13: remote.SequenceReq
+	(*SequenceReply)(nil),                // 14: remote.SequenceReply
+	(*GetLatestReq)(nil),                 // 15: remote.GetLatestReq
+	(*GetLatestReply)(nil),               // 16: remote.GetLatestReply
+	(*HistorySeekReq)(nil),               // 17: remote.HistorySeekReq
+	(*HistorySeekReply)(nil),             // 18: remote.HistorySeekReply
+	(*IndexRangeReq)(nil),                // 19: remote.IndexRangeReq
+	(*IndexRangeReply)(nil),              // 20: remote.IndexRangeReply
+	(*HistoryRangeReq)(nil),              // 21: remote.HistoryRangeReq
+	(*RangeAsOfReq)(nil),                 // 22: remote.RangeAsOfReq
+	(*Pairs)(nil),                        // 23: remote.Pairs
+	(*PairsPagination)(nil),              // 24: remote.PairsPagination
+	(*IndexPagination)(nil),              // 25: remote.IndexPagination
+	(*HasPrefixReq)(nil),                 // 26: remote.HasPrefixReq
+	(*HasPrefixReply)(nil),               // 27: remote.HasPrefixReply
+	(*HistoryStartFromReq)(nil),          // 28: remote.HistoryStartFromReq
+	(*HistoryStartFromReply)(nil),        // 29: remote.HistoryStartFromReply
+	(*CurrentDomainVersionReq)(nil),      // 30: remote.CurrentDomainVersionReq
+	(*CurrentDomainVersionReply)(nil),    // 31: remote.CurrentDomainVersionReply
+	(*StepSizeReq)(nil),                  // 32: remote.StepSizeReq
+	(*StepSizeReply)(nil),                // 33: remote.StepSizeReply
+	(*MaxPrunableStepsBacklogReply)(nil), // 34: remote.MaxPrunableStepsBacklogReply
+	(*typesproto.H256)(nil),              // 35: types.H256
+	(*typesproto.H160)(nil),              // 36: types.H160
+	(*emptypb.Empty)(nil),                // 37: google.protobuf.Empty
+	(*typesproto.VersionReply)(nil),      // 38: types.VersionReply
 }
 var file_remote_kv_proto_depIdxs = []int32{
 	0,  // 0: remote.Cursor.op:type_name -> remote.Op
-	34, // 1: remote.StorageChange.location:type_name -> types.H256
-	35, // 2: remote.AccountChange.address:type_name -> types.H160
+	35, // 1: remote.StorageChange.location:type_name -> types.H256
+	36, // 2: remote.AccountChange.address:type_name -> types.H160
 	1,  // 3: remote.AccountChange.action:type_name -> remote.Action
 	5,  // 4: remote.AccountChange.storage_changes:type_name -> remote.StorageChange
 	8,  // 5: remote.StateChangeBatch.change_batch:type_name -> remote.StateChange
 	2,  // 6: remote.StateChange.direction:type_name -> remote.Direction
-	34, // 7: remote.StateChange.block_hash:type_name -> types.H256
+	35, // 7: remote.StateChange.block_hash:type_name -> types.H256
 	6,  // 8: remote.StateChange.changes:type_name -> remote.AccountChange
-	36, // 9: remote.KV.Version:input_type -> google.protobuf.Empty
+	37, // 9: remote.KV.Version:input_type -> google.protobuf.Empty
 	3,  // 10: remote.KV.Tx:input_type -> remote.Cursor
 	9,  // 11: remote.KV.StateChanges:input_type -> remote.StateChangeRequest
 	10, // 12: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
-	12, // 13: remote.KV.Range:input_type -> remote.RangeReq
-	13, // 14: remote.KV.Sequence:input_type -> remote.SequenceReq
-	15, // 15: remote.KV.GetLatest:input_type -> remote.GetLatestReq
-	17, // 16: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
-	19, // 17: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
-	21, // 18: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
-	22, // 19: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
-	26, // 20: remote.KV.HasPrefix:input_type -> remote.HasPrefixReq
-	28, // 21: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
-	30, // 22: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
-	32, // 23: remote.KV.StepSize:input_type -> remote.StepSizeReq
-	37, // 24: remote.KV.Version:output_type -> types.VersionReply
-	4,  // 25: remote.KV.Tx:output_type -> remote.Pair
-	7,  // 26: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
-	11, // 27: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
-	23, // 28: remote.KV.Range:output_type -> remote.Pairs
-	14, // 29: remote.KV.Sequence:output_type -> remote.SequenceReply
-	16, // 30: remote.KV.GetLatest:output_type -> remote.GetLatestReply
-	18, // 31: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
-	20, // 32: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
-	23, // 33: remote.KV.HistoryRange:output_type -> remote.Pairs
-	23, // 34: remote.KV.RangeAsOf:output_type -> remote.Pairs
-	27, // 35: remote.KV.HasPrefix:output_type -> remote.HasPrefixReply
-	29, // 36: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
-	31, // 37: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
-	33, // 38: remote.KV.StepSize:output_type -> remote.StepSizeReply
-	24, // [24:39] is the sub-list for method output_type
-	9,  // [9:24] is the sub-list for method input_type
+	37, // 13: remote.KV.OpenStateSnapshots:input_type -> google.protobuf.Empty
+	12, // 14: remote.KV.Range:input_type -> remote.RangeReq
+	13, // 15: remote.KV.Sequence:input_type -> remote.SequenceReq
+	15, // 16: remote.KV.GetLatest:input_type -> remote.GetLatestReq
+	17, // 17: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
+	19, // 18: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
+	21, // 19: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
+	22, // 20: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
+	26, // 21: remote.KV.HasPrefix:input_type -> remote.HasPrefixReq
+	28, // 22: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
+	30, // 23: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
+	32, // 24: remote.KV.StepSize:input_type -> remote.StepSizeReq
+	37, // 25: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
+	38, // 26: remote.KV.Version:output_type -> types.VersionReply
+	4,  // 27: remote.KV.Tx:output_type -> remote.Pair
+	7,  // 28: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
+	11, // 29: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
+	37, // 30: remote.KV.OpenStateSnapshots:output_type -> google.protobuf.Empty
+	23, // 31: remote.KV.Range:output_type -> remote.Pairs
+	14, // 32: remote.KV.Sequence:output_type -> remote.SequenceReply
+	16, // 33: remote.KV.GetLatest:output_type -> remote.GetLatestReply
+	18, // 34: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
+	20, // 35: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
+	23, // 36: remote.KV.HistoryRange:output_type -> remote.Pairs
+	23, // 37: remote.KV.RangeAsOf:output_type -> remote.Pairs
+	27, // 38: remote.KV.HasPrefix:output_type -> remote.HasPrefixReply
+	29, // 39: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
+	31, // 40: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
+	33, // 41: remote.KV.StepSize:output_type -> remote.StepSizeReply
+	34, // 42: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
+	26, // [26:43] is the sub-list for method output_type
+	9,  // [9:26] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
@@ -2570,7 +2623,7 @@ func file_remote_kv_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_remote_kv_proto_rawDesc), len(file_remote_kv_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   31,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
