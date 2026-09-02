@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -1976,6 +1977,14 @@ func (db *countCanonicalScansDB) BeginTemporalRo(ctx context.Context) (kv.Tempor
 type countCanonicalScansTx struct {
 	kv.TemporalTx
 	scans *atomic.Int64
+}
+
+// Embedding the tx interface drops BlockFilesRoTx, which block reads require.
+func (tx *countCanonicalScansTx) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := tx.TemporalTx.(membatchwithdb.HasBlockFilesRoTx); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
 }
 
 func (tx *countCanonicalScansTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
