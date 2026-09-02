@@ -41,11 +41,11 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return g.sd.getCode(g.tx, g.view, addr, txNum)
+	return g.sd.getCode(g.tx, g.view, addr, txNum, g.m)
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
-	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
+	return g.sd.getCodeSize(g.tx, g.view, addr, txNum, g.m)
 }
 
 func (g *stateGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
