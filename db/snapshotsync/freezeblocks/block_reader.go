@@ -152,13 +152,11 @@ func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not 
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 // FrozenBlocks is answered by the backend. The context-free signature leaves no way to
-// surface an error or honor request cancellation, so the whole call is bounded by an
-// internal timeout however many rounds it takes, cached for a short TTL, and not
-// duplicated while one is in flight.
-// The count only grows, so a stale-low answer is the conservative one for the
-// availability gates and is served while a refresh runs. Zero is not: the pre-Byzantium
-// receipt paths read it as "no snapshots" and re-execute, so a failed fetch is not
-// cached, and it reaches only the callers that have no observation to wait for.
+// surface an error or honor cancellation, so the whole call is bounded by an internal
+// timeout however many rounds it takes, cached for a short TTL, and not duplicated while
+// one is in flight. The count only grows, so a stale-low answer is conservative for the
+// availability gates; zero is not, since callers read it as "no snapshots", so a failed
+// fetch is not cached.
 func (r *RemoteBlockReader) FrozenBlocks() uint64 {
 	deadline := time.Now().Add(r.frozenBlocksTimeout)
 	for waited := false; ; waited = true {
@@ -188,8 +186,8 @@ func (r *RemoteBlockReader) FrozenBlocks() uint64 {
 				r.frozenBlocksMu.Unlock()
 				return value
 			}
-			// Waiting is not asking: a caller left with nothing observed has spent no
-			// attempt of its own, and one more is worth its wait. A second is not.
+			// A caller that has not fetched yet retries once the in-flight one ends;
+			// waiting again would put it past the single timeout it is bounded by.
 			continue
 		}
 		r.frozenBlocksFetching = true

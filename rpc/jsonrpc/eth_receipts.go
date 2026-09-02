@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
@@ -116,6 +115,40 @@ func usesLogIndex(crit filters.FilterCriteria) bool {
 	return false
 }
 
+// resolveLogsBlockHash resolves the block a by-hash log query names. The header-number
+// index also covers non-canonical headers and the log scan is by block number, so a
+// side-chain hash must not resolve to the canonical block at that height. Below the
+// pruning boundary the body is gone by policy and the boundary is what the caller is
+// told; elsewhere a missing body is what it says it is, and answering with an empty log
+// array would hide it.
+func (api *BaseAPI) resolveLogsBlockHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return 0, err
+	}
+	if number == nil {
+		return 0, fmt.Errorf("block not found: %x", hash)
+	}
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+	if err != nil {
+		return 0, err
+	}
+	if !ok || canonicalHash != hash {
+		return 0, fmt.Errorf("block not found: %x", hash)
+	}
+	body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, *number)
+	if err != nil {
+		return 0, err
+	}
+	if body == nil {
+		if err := api.checkPruneBlocks(ctx, tx, *number); err != nil {
+			return 0, err
+		}
+		return 0, fmt.Errorf("block not found: %x", hash)
+	}
+	return *number, nil
+}
+
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
 // block; otherwise negative tags are resolved against the chain, defaulting to the
 // latest executed block. With checkFuture, ranges past the latest executed block are
@@ -123,45 +156,11 @@ func usesLogIndex(crit filters.FilterCriteria) bool {
 // callers scan logs through that same tx.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
-		number, err := api._blockReader.HeaderNumber(ctx, tx, *crit.BlockHash)
+		number, err := api.resolveLogsBlockHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return 0, 0, err
 		}
-		if number == nil {
-			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-		// The header-number index also covers non-canonical headers, and the log
-		// scan below is by block number: without this the caller would get the
-		// canonical block's logs for a side-chain hash.
-		canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
-		if err != nil {
-			return 0, 0, err
-		}
-		if !ok || canonicalHash != *crit.BlockHash {
-			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
-		}
-		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, *number)
-		if err != nil {
-			return 0, 0, err
-		}
-		if body == nil {
-			// The body is also missing below the pruning boundary, where the gate is the
-			// one that must speak. Where no boundary covers the block, a missing body is
-			// what it says it is, and answering with an empty log array would hide it.
-			latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
-			if err != nil {
-				return 0, 0, err
-			}
-			if *number > latest {
-				return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
-			}
-			if err := api.checkPruneBlocks(ctx, tx, *number); err == nil {
-				return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
-			} else if !errors.Is(err, state.PrunedError) {
-				return 0, 0, err
-			}
-		}
-		return *number, *number, nil
+		return number, number, nil
 	}
 
 	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
