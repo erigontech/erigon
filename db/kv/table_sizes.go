@@ -84,6 +84,7 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 	}
 
 	debugLogging := logger.Enabled(ctx, log.LvlDebug)
+	var warnedReclaimable bool
 	ticker := time.NewTicker(collectTableSizesFrequency)
 	defer ticker.Stop()
 
@@ -107,8 +108,13 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 					continue
 				}
 				dbTableSizeBytes.WithLabelValues(string(label), t.Name).Set(float64(t.Size))
-				if t.Name == reclaimableSpaceRow && t.Size > reclaimableSpaceWarn.Bytes() {
-					logger.Warn("[kv] db holds a lot of free space: stop erigon and run `erigon db compact`", "db", label, "reclaimable", common.ByteCount(t.Size))
+				if t.Name == reclaimableSpaceRow {
+					if crossed := t.Size > reclaimableSpaceWarn.Bytes(); crossed != warnedReclaimable {
+						warnedReclaimable = crossed
+						if crossed {
+							logger.Warn("[kv] db holds a lot of free space: stop erigon and run `erigon db compact`", "db", label, "reclaimable", common.ByteCount(t.Size))
+						}
+					}
 				}
 				if t.Size == 0 || !debugLogging {
 					continue
