@@ -343,6 +343,25 @@ func (s *syncContributionService) markContributionAsSeen(contribution *cltypes.C
 		subCommitteeIndex: contribution.Contribution.SubcommitteeIndex,
 	}
 	s.seenSyncCommitteeContributions.Store(key, struct{}{})
+	s.cleanupOldSyncCommitteeContributions() // prune entries older than the recent-slot window
+}
+
+// cleanupOldSyncCommitteeContributions removes stale entries from the seen-set so it stays bounded to the
+// recent slots gossip dedup actually needs. Without this the map only ever grew (one entry per aggregator/
+// slot/subcommittee, forever) — a per-slot memory leak. Mirrors cleanupOldSyncCommitteeMessages.
+func (s *syncContributionService) cleanupOldSyncCommitteeContributions() {
+	headSlot := s.syncedDataManager.HeadSlot()
+	var entriesToRemove []seenSyncCommitteeContribution
+	s.seenSyncCommitteeContributions.Range(func(key, _ any) bool {
+		k := key.(seenSyncCommitteeContribution)
+		if headSlot > k.slot+1 {
+			entriesToRemove = append(entriesToRemove, k)
+		}
+		return true
+	})
+	for _, k := range entriesToRemove {
+		s.seenSyncCommitteeContributions.Delete(k)
+	}
 }
 
 // verifySyncContributionProof verifies the sync contribution proof.

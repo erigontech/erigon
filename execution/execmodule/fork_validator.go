@@ -39,6 +39,15 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
+// HasValidHash reports whether this hash has already been validated (in the validHashes cache) — used by
+// ValidateChain to short-circuit a re-validation before building a SharedDomains.
+func (fv *ForkValidator) HasValidHash(hash common.Hash) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	_, ok := fv.validHashes.Get(hash)
+	return ok
+}
+
 type BlockTimings [2]time.Duration
 
 const (
@@ -826,7 +835,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 // the block overlay. Point the extending fork at H1 and mark it valid, so a normal FCU(H1) takes the
 // merge-extending-fork fast path (no re-execution) and canonicalises the correct header. The maintained
 // sharedDom (already holding the sealed state) and extendingForkNumber are unchanged.
-func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash) error {
+func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash, number uint64) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.extendingForkHeadHash == oldHash {
@@ -842,6 +851,17 @@ func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash) error {
 	if fv.sharedDom != nil {
 		if ov := fv.sharedDom.BlockOverlay(); ov != nil {
 			if err := rawdb.WriteHeadHeaderHash(ov, newHash); err != nil {
+				return err
+			}
+			// StateStep wrote kv.HeaderCanonical[number] = the deferred (root-0) placeholder hash during
+			// pre-exec so exec3 could locate the in-progress block; the seal above materialised the real
+			// sealed header but left that canonical row pointing at the placeholder. copyFrontierChainTables
+			// copies this SD's overlay canonical rows FORWARD into successor blocks' overlays, so the stale
+			// placeholder propagates and a later ValidateChain of this block reads a header-less canonical
+			// hash (senders "can't find header") and rebuilds+leaks a SharedDomains ([[shared_domain_lifecycle_leak]]).
+			// Re-key the canonical row to the sealed hash here, alongside HeadHeaderKey, so the forward copy
+			// carries the sealed hash and every later read resolves the real header.
+			if err := rawdb.WriteCanonicalHash(ov, newHash, number); err != nil {
 				return err
 			}
 		}
