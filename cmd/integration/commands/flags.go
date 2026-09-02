@@ -63,6 +63,9 @@ var (
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
+	rebuildOutputDatadir            string
+	rebuildMaxShardSteps            uint64
+	convertFormatVerifySample       uint64
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 
@@ -148,6 +151,17 @@ func withResume(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
 }
 
+func withRebuildOutputDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input. Required for a bin target, whose files are indistinguishable from hex ones by name")
+	must(cmd.MarkFlagDirname("output.datadir"))
+}
+
+func withConvertFormatFlags(cmd *cobra.Command) {
+	withResume(cmd)
+	withRebuildOutputDatadir(cmd)
+	cmd.Flags().Uint64Var(&convertFormatVerifySample, "verify.sample", 0, "verify every N-th converted legacy branch record by sequential read-back; 0 disables sampling")
+}
+
 func withNoHistory(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
 }
@@ -180,6 +194,8 @@ func withDataDir(cmd *cobra.Command) {
 func withExperimentalCommitment(cmd *cobra.Command) {
 	def := statecfg.ExperimentalParallelCommitment || utils.ExperimentalParallelCommitmentFlag.Value
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Name, statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Usage)
+	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

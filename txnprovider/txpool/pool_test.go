@@ -120,6 +120,11 @@ func testDelegationCodeHash() accounts.CodeHash {
 
 func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
+	return newTestPoolWithFundedSenderOn(t, chain.AllProtocolChanges, codeHash)
+}
+
+func newTestPoolWithFundedSenderOn(t *testing.T, cfg *chain.Config, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -133,7 +138,7 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 		coreDB,
 		txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig),
-		chain.AllProtocolChanges,
+		cfg,
 		nil,
 		nil,
 		func() {},
@@ -2619,6 +2624,104 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
 	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
 	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
+}
+
+// amsterdamConfig returns a deep copy of AllProtocolChanges with Amsterdam at genesis.
+// chain.Config holds a sync.Once and a memoized map, so it must not be copied by value.
+func amsterdamConfig(t *testing.T) *chain.Config {
+	t.Helper()
+	var cfg chain.Config
+	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	zero := uint64(0)
+	cfg.AmsterdamTime = &zero
+	cfg.EIP8038Revised = false
+	return &cfg
+}
+
+// The executor charges the revised EIP-8038 schedule whenever the binary tree is scheduled,
+// so a pool reading only the explicit key rejects transactions the executor would accept.
+// Asserted through validateTx rather than through the predicate: the predicate was already
+// right, and the defect was that neither CalcIntrinsicGas call site passed it.
+func TestPoolEIP8038RevisedFollowsBinaryTrie(t *testing.T) {
+	t.Parallel()
+
+	newPool := func(t *testing.T, cfg *chain.Config) *TxPool {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		pool, err := New(ctx, make(chan Announcements, 1), mdbxtest.NewTestPoolDB(t),
+			temporaltest.NewTestDB(t, datadir.New(t.TempDir())), txpoolcfg.DefaultConfig,
+			kvcache.New(kvcache.DefaultCoherentConfig), cfg, nil, nil, func() {}, nil, nil,
+			log.New(), WithFeeCalculator(nil))
+		require.NoError(t, err)
+		return pool
+	}
+
+	zero := uint64(0)
+	base := amsterdamConfig(t)
+
+	withTree := amsterdamConfig(t)
+	withTree.BinaryTrieTime = &zero
+	require.True(t, newPool(t, withTree).isEIP8038Revised())
+
+	require.False(t, newPool(t, base).isEIP8038Revised(), "Amsterdam alone keeps the pinned-corpus schedule")
+
+	explicit := amsterdamConfig(t)
+	explicit.EIP8038Revised = true
+	require.True(t, newPool(t, explicit).isEIP8038Revised())
+
+}
+
+// The predicate above is not the defect: it was the two CalcIntrinsicGas call sites that never
+// passed it. This drives validateTx through AddLocalTxns with a transaction funded to exactly
+// the revised intrinsic gas, so a pool charging the unrevised schedule rejects what the
+// executor would run. Reverting either threaded line turns it red.
+func TestPoolIntrinsicGasFollowsEIP8038Revised(t *testing.T) {
+	t.Parallel()
+
+	intrinsic := func(revised bool) uint64 {
+		res, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+			AccessListLen: 1, StorageKeysLen: 1,
+			IsEIP2: true, IsEIP2028: true, IsEIP3860: true, IsEIP7623: true,
+			IsEIP7976: true, IsEIP7981: true, IsEIP2780: true,
+			IsEIP8038Revised: revised,
+		})
+		require.False(t, overflow)
+		return res.ExecutionGas
+	}
+	revisedGas, unrevisedGas := intrinsic(true), intrinsic(false)
+	require.Less(t, revisedGas, unrevisedGas, "the revised schedule must be the cheaper one")
+
+	// Exactly affordable under the revised schedule and 200 gas short under the other.
+	send := func(t *testing.T, cfg *chain.Config) txpoolcfg.DiscardReason {
+		t.Helper()
+		ctx, pool, _, _, sender := newTestPoolWithFundedSenderOn(t, cfg, accounts.EmptyCodeHash)
+		to := common.Address{2}
+		txn := &TxnSlot{Txn: &types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 0, GasLimit: revisedGas, To: &to},
+			TipCap:   *uint256.NewInt(1), FeeCap: *uint256.NewInt(2),
+			AccessList: types.AccessList{{
+				Address:     common.Address{3},
+				StorageKeys: []common.Hash{{4}},
+			}},
+		}}
+		txn.IDHash[0] = 9
+		var txns TxnSlots
+		txns.Append(txn, sender[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txns)
+		require.NoError(t, err)
+		require.Len(t, reasons, 1)
+		return reasons[0]
+	}
+
+	zero := uint64(0)
+	withTree := amsterdamConfig(t)
+	withTree.BinaryTrieTime = &zero
+	require.NotEqual(t, txpoolcfg.IntrinsicGas, send(t, withTree),
+		"a pool on the revised schedule must accept a transaction funded to the revised intrinsic gas")
+
+	require.Equal(t, txpoolcfg.IntrinsicGas, send(t, amsterdamConfig(t)),
+		"a pool on the unrevised schedule charges %d where the executor charges %d", unrevisedGas, revisedGas)
 }
 
 // probeFeeCalculator runs fn from the middle of fromDB, where CurrentFees is called.

@@ -16,6 +16,8 @@
 
 package state
 
+import "github.com/erigontech/erigon/execution/commitment"
+
 // Test-only bridge: convertCommitmentFile and its sentinels are package-private,
 // but the full-aggregator round-trip tests live in package state_test (the
 // aggregator-setup helpers — testDbAggregatorWithFiles, etc. — are defined
@@ -32,4 +34,25 @@ var (
 // resume integration test to cancel mid-Phase-1 deterministically.
 func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 	convertPhase1AfterFileHook = fn
+}
+
+func SetPBinConvertPairHookForTest(fn func()) {
+	pbinConvertPairHook = fn
+}
+
+func SetPBinConvertDropPairHookForTest(fn func(pair uint64) bool) {
+	pbinConvertDropPairHook = fn
+}
+
+func SetPBinConvertAfterBuildHookForTest(fn func(string)) {
+	pbinConvertAfterBuildHook = fn
+}
+
+// CloseMappedFilesForTest drops the aggregator's file mmaps so a test can remove
+// or rename the files underneath it; Windows refuses either while a mapping is
+// open. ReloadFiles re-opens them.
+func (a *Aggregator) CloseMappedFilesForTest() { a.closeDirtyFilesNoReopen() }
+
+func VerifyPBinStateConversionForTest(source, converted []byte) error {
+	return pbinVerifyStateConversion(commitment.NewPBinRecordConverter(), source, converted)
 }

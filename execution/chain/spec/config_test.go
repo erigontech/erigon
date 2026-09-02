@@ -156,6 +156,14 @@ func TestCheckCompatibleTimestampForks(t *testing.T) {
 			wantRewind: 99,
 		},
 		{
+			name:       "the binary tree is consensus-active and covered too",
+			stored:     &chain.Config{AmsterdamTime: common.NewUint64(0), BinaryTrieTime: common.NewUint64(0)},
+			newcfg:     &chain.Config{AmsterdamTime: common.NewUint64(0), BinaryTrieTime: common.NewUint64(500)},
+			headTime:   150,
+			wantWhat:   "Binary trie fork timestamp",
+			wantRewind: 0,
+		},
+		{
 			name:       "stored at genesis time, rescheduled, head past it",
 			stored:     &chain.Config{PragueTime: common.NewUint64(0)},
 			newcfg:     &chain.Config{PragueTime: common.NewUint64(200)},

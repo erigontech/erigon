@@ -1,0 +1,298 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commitment
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"sort"
+	"testing"
+
+	keccak "github.com/erigontech/fastkeccak"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
+)
+
+// Zero-vs-absent. EIP-8297 makes them the same state: a leaf whose value is 32
+// zero bytes is not stored, and reads back as the zero it stood for. So the
+// domain's shared encoding of the two needs no presence bit, and both a delete
+// and a zero write remove the leaf.
+
+// TestPBinStorageZeroWriteRemovesLeaf covers the update-stream side: the zeroed
+// slot is touched, so its leaf is in the grid when the absent read lands.
+func TestPBinStorageZeroWriteRemovesLeaf(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		kept, gone uint64
+	}{
+		{name: "storage zone", kept: 257, gone: 256},
+		{name: "account header zone", kept: 6, gone: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			addr := pbinOracleAddr(41)
+			stored := new(pbinTestCorpus).
+				storage(addr, pbinOracleSlot(tc.gone), 0x01).
+				storage(addr, pbinOracleSlot(tc.kept), 0x02)
+
+			pph, ms := pbinTestEngine(t)
+			require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+			before := pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+			zeroed := new(pbinTestCorpus).storage(addr, pbinOracleSlot(tc.gone))
+			require.NoError(t, ms.applyPlainUpdates(zeroed.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+			pph.Reset()
+			root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
+
+			survivorOnly := new(pbinTestCorpus).storage(addr, pbinOracleSlot(tc.kept), 0x02)
+			require.Equal(t, survivorOnly.oracleRoot(t), root,
+				"a zeroed slot leaves the tree it would have had without the slot")
+			require.NotEqual(t, before, root)
+		})
+	}
+}
+
+// TestPBinStorageZeroOnUntouchedSiblingRefuses pins the fold boundary. A slot
+// zeroed without being in the update set reaches the fold through its branch
+// record, and the only value it could carry is the 32 zero bytes the tree cannot
+// hold. Removal lives on the update path, and the grid only walks forward, so
+// the fold refuses rather than committing a root no entry set produces.
+func TestPBinStorageZeroOnUntouchedSiblingRefuses(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(42)
+	stored := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(256))
+	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+	touched := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
+	require.NoError(t, ms.applyPlainUpdates(touched.plainKeys, touched.updates))
+
+	pph.Reset()
+	upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touched.plainKeys, touched.updates)
+	_, err := pph.Process(context.Background(), upd, "", nil, WarmupConfig{})
+	require.ErrorIs(t, err, errPBinDeleteUnsupported)
+}
+
+// TestPBinStorageZeroOnTouchedSiblingCollapses is the same shape with the
+// removal declared: the update path drops the leaf and the root matches the
+// entry set without it.
+func TestPBinStorageZeroOnTouchedSiblingCollapses(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(42)
+	stored := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	gone := new(pbinTestCorpus).storage(addr, pbinOracleSlot(256))
+	require.NoError(t, ms.applyPlainUpdates(gone.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+	touched := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
+	require.NoError(t, ms.applyPlainUpdates(touched.plainKeys, touched.updates))
+
+	both := new(pbinTestCorpus).
+		storage(addr, pbinOracleSlot(256)).
+		storage(addr, pbinOracleSlot(257), 0x0B)
+	both.updates[0] = Update{Flags: DeleteUpdate}
+
+	pph.Reset()
+	root := pbinTestProcess(t, pph, both.plainKeys, both.updates)
+
+	survivor := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257), 0x0B)
+	require.Equal(t, survivor.oracleRoot(t), root)
+}
+
+// TestPBinLoadCellStateAbsentRead: neither arm has a value it may carry for a
+// key the state no longer holds, so both refuse.
+func TestPBinLoadCellStateAbsentRead(t *testing.T) {
+	t.Parallel()
+
+	t.Run("storage", func(t *testing.T) {
+		t.Parallel()
+
+		pph, _ := pbinTestEngine(t)
+		c := pbinTestEmptyCell()
+		c.kind = pbinNodeLeaf
+		c.storageAddrLen = length.Addr + length.Hash
+		copy(c.storageAddr[:], append(bytes.Clone(pbinOracleAddr(43)), pbinOracleSlot(1000)...))
+
+		require.ErrorIs(t, pph.loadCellState(&c), errPBinDeleteUnsupported)
+	})
+
+	t.Run("account", func(t *testing.T) {
+		t.Parallel()
+
+		pph, _ := pbinTestEngine(t)
+		c := pbinTestEmptyCell()
+		c.kind = pbinNodeLeaf
+		c.accountAddrLen = length.Addr
+		copy(c.accountAddr[:], pbinOracleAddr(44))
+
+		require.ErrorIs(t, pph.loadCellState(&c), errPBinDeleteUnsupported)
+	})
+}
+
+// TestPBinAccountRemovalDropsBothSubtrees: an account owns its header stem and
+// its storage prefix, and removing it removes those two subtrees whole — header
+// storage slots included, and storage the fold was handed no list of. Its code
+// chunks are content-addressed and shared, so they stay, and a bystander
+// account must survive untouched.
+func TestPBinAccountRemovalDropsBothSubtrees(t *testing.T) {
+	t.Parallel()
+
+	addr, bystander := pbinOracleAddr(45), pbinOracleAddr(48)
+	code := bytes.Repeat([]byte{0x01}, 31*4)
+	stored := new(pbinTestCorpus).
+		accountWithCodeBytes(addr, 3, 7, code).
+		storage(addr, pbinOracleSlot(5), 0x01).   // header window
+		storage(addr, pbinOracleSlot(256), 0x02). // storage zone
+		storage(addr, pbinOracleSlot(1<<20), 0x03).
+		account(bystander, 1, 2, empty.CodeHash)
+
+	pph, ms := pbinTestEngine(t)
+	stored.applyTo(t, ms)
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	removal := new(pbinTestCorpus).account(addr, 0, 0, common.Hash{})
+	require.NoError(t, ms.applyPlainUpdates(removal.plainKeys, []Update{{Flags: DeleteUpdate}}))
+
+	pph.Reset()
+	root := pbinTestProcess(t, pph, removal.plainKeys, removal.updates)
+
+	survivor := new(pbinTestCorpus).account(bystander, 1, 2, empty.CodeHash)
+	want := survivor.entries(t)
+	codeHash := keccak.Sum256(code)
+	for i, chunk := range pbinChunkifyCode(code) {
+		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(codeHash, i), value: chunk[:]})
+	}
+	wantRoot := pbinOracleRoot(want)
+	require.Equal(t, wantRoot[:], root,
+		"nothing of the removed account's own subtrees may survive, and nothing of the other may go")
+}
+
+// TestPBinFoldDeleteRunsOnProcess: removing the last leaf of a subtree collapses
+// it, and the collapse is observable as the zero-length record foldDelete writes
+// at a bit-path key. storeRoot makes the sole other zero-length write, and only
+// at the root key.
+func TestPBinFoldDeleteRunsOnProcess(t *testing.T) {
+	t.Parallel()
+
+	addr := pbinOracleAddr(46)
+	slots := []uint64{0, 1, 63, 256, 257, 258}
+	stored := new(pbinTestCorpus)
+	for i, slot := range slots {
+		stored.storage(addr, pbinOracleSlot(slot), byte(i+1))
+	}
+	stored.account(pbinOracleAddr(47), 1, 2, empty.CodeHash)
+
+	pph, ctx, ms := pbinTestStrictEngine(t)
+	require.NoError(t, ms.applyPlainUpdates(stored.plainKeys, stored.updates))
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	zeroed, want := new(pbinTestCorpus), new(pbinTestCorpus)
+	for _, slot := range slots {
+		zeroed.storage(addr, pbinOracleSlot(slot))
+	}
+	// An absent key with no leaf of its own contributes nothing — the case a zero
+	// write over a live leaf must not be confused with.
+	zeroed.storage(addr, pbinOracleSlot(1<<20))
+	want.account(pbinOracleAddr(47), 1, 2, empty.CodeHash)
+
+	for i := range zeroed.plainKeys {
+		require.NoError(t, ms.applyPlainUpdates(zeroed.plainKeys[i:i+1], []Update{{Flags: DeleteUpdate}}))
+	}
+	ctx.puts = nil
+	pph.Reset()
+	root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
+	require.Equal(t, want.oracleRoot(t), root)
+
+	var collapsed int
+	for _, put := range ctx.puts {
+		if len(put.data) == 0 {
+			collapsed++
+		}
+	}
+	require.NotZero(t, collapsed, "every stored leaf was zeroed, so subtrees must collapse")
+}
+
+// TestPBinCollapsedRowLeavesNoRecord: removing one of a branch's two children
+// collapses the row into its survivor, and the record the row was unfolded from
+// has to go with it — an incremental removal must store exactly the records a
+// rebuild of the same state stores.
+func TestPBinCollapsedRowLeavesNoRecord(t *testing.T) {
+	t.Parallel()
+
+	addr, bystander := pbinOracleAddr(51), pbinOracleAddr(52)
+	stored := new(pbinTestCorpus).
+		account(bystander, 1, 2, empty.CodeHash).
+		storage(addr, pbinOracleSlot(256), 0x01).
+		storage(addr, pbinOracleSlot(257), 0x02)
+
+	pph, ms := pbinTestEngine(t)
+	stored.applyTo(t, ms)
+	pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
+
+	zeroed := new(pbinTestCorpus).storage(addr, pbinOracleSlot(257))
+	require.NoError(t, ms.applyPlainUpdates(zeroed.plainKeys, []Update{{Flags: DeleteUpdate}}))
+	pph.Reset()
+	root := pbinTestProcess(t, pph, zeroed.plainKeys, zeroed.updates)
+
+	survivors := new(pbinTestCorpus).
+		account(bystander, 1, 2, empty.CodeHash).
+		storage(addr, pbinOracleSlot(256), 0x01)
+	require.Equal(t, survivors.oracleRoot(t), root)
+
+	_, fresh := pbinTestEngine(t)
+	survivors.applyTo(t, fresh)
+	freshEngine := NewPBinPatriciaHashed(fresh)
+	defer freshEngine.Release()
+	pbinTestProcess(t, freshEngine, survivors.plainKeys, survivors.updates)
+
+	require.Equal(t, pbinLiveRecordKeys(fresh), pbinLiveRecordKeys(ms),
+		"the collapsed row's record outlived the node it described")
+}
+
+func pbinLiveRecordKeys(ms *MockState) []string {
+	keys := make([]string, 0, len(ms.cm))
+	for prefix, data := range ms.cm {
+		if len(data) > 0 {
+			keys = append(keys, fmt.Sprintf("%x", prefix))
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}

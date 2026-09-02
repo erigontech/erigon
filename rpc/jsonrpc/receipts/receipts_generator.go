@@ -335,7 +335,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState && postState.CommitmentHistory {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 			if err != nil {
 				return nil, err
 			}
@@ -574,7 +574,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 		var stateWriter state.StateWriter
 		if opts.CommitmentHistoryEnabled {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 			if err != nil {
 				return nil, err
 			}

@@ -311,6 +311,8 @@ type Sync struct {
 	MaxReorgDepth                  uint64
 	KeepExecutionProofs            bool
 	ExperimentalParallelCommitment bool
+	ExperimentalBinCommitment      bool
+	BinCommitmentHash              string
 	PersistReceiptsCacheV2         bool
 	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
 }

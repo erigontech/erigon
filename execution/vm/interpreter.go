@@ -308,6 +308,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 	var jt *JumpTable
 	switch {
+	case chainRules.IsAmsterdam && chainRules.EIP8038Revised:
+		jt = &amsterdamEIP8038RevisedSet
 	case chainRules.IsAmsterdam:
 		jt = &amsterdamInstructionSet
 	case chainRules.IsOsaka:

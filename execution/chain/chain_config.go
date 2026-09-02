@@ -84,6 +84,17 @@ type Config struct {
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 
+	// EIP8038Revised charges EIP-8038's revised state-access schedule instead of the
+	// one the pinned spec-test corpora were generated against. Experimental forks that
+	// track head-of-spec set it; no scheduled network does. BinaryTrieTime implies it.
+	EIP8038Revised bool `json:"eip8038Revised,omitempty"`
+
+	// BinaryTrieTime schedules EIP-8297's partitioned binary tree. The key is shared with
+	// the other clients, so one genesis.json serves a mixed network. Not earlier than
+	// AmsterdamTime, which is where the tree is first defined, and not later than genesis:
+	// erigon commits through the tree from block 0 or not at all.
+	BinaryTrieTime *uint64 `json:"binaryTrieTime,omitempty"`
+
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
@@ -409,6 +420,12 @@ func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
 }
 
+// IsBinaryTrie returns whether time is either equal to the EIP-8297 binary-tree fork
+// time or greater.
+func (c *Config) IsBinaryTrie(time uint64) bool {
+	return isForked(c.BinaryTrieTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -668,6 +685,7 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
 		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
+		{name: "binaryTrieTime", what: "Binary trie fork timestamp", timestamp: c.BinaryTrieTime, outOfOrder: true},
 	}
 }
 
@@ -963,6 +981,7 @@ type Rules struct {
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun                                          bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
+	EIP8038Revised                                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
 

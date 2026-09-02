@@ -32,6 +32,10 @@ type AggOpts struct { //nolint:gocritic
 	disableFsync        bool // for tests speed
 	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
 	skipFilesDBGapCheck bool
+	// disableInterDomainDeps drops the accounts/storage -> commitment alignment for a
+	// directory that holds state files and no commitment yet, which is what the
+	// commitment rebuild reads from. Left on, every state file is invisible there.
+	disableInterDomainDeps bool
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -83,6 +87,11 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
 	}
+	// After ConfigureDomains, which is what registers the dependencies, and before
+	// OpenFolder, which is what first reads them.
+	if opts.disableInterDomainDeps && a.checker != nil {
+		a.checker.DisableInterDomain()
+	}
 
 	return a, nil
 }
@@ -116,6 +125,10 @@ func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
 
 func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
+func (opts AggOpts) DisableInterDomainDeps() AggOpts { //nolint:gocritic
+	opts.disableInterDomainDeps = true
+	return opts
+}
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
