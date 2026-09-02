@@ -587,6 +587,16 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
+// TipPruneTimeout - per-block prune budget at chain tip: one sixth of a slot,
+// plus 200ms per 100 prunable steps of backlog, capped at one third of a slot so
+// FCU still has time. The proper fix is a background prune that defers to FCU
+// when work is pending.
+func TipPruneTimeout(secondsPerSlot, prunableStepsBacklog uint64) time.Duration {
+	base := time.Duration(secondsPerSlot*1000/6) * time.Millisecond
+	extra := time.Duration(prunableStepsBacklog/100) * 200 * time.Millisecond
+	return min(base+extra, time.Duration(secondsPerSlot*1000/3)*time.Millisecond)
+}
+
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
@@ -599,18 +609,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	// Base budget is one-sixth of a slot, extended adaptively when there is a
-	// large prunable backlog and capped at one-third of a slot so FCU still has
-	// time. The proper fix is a background prune that defers to FCU when work is
-	// pending — out of scope here.
-	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/6) * time.Millisecond
-	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
-	stagePruneTimeout := baseTimeout
+	stagePruneTimeout := TipPruneTimeout(cfg.chainConfig.SecondsPerSlot(), 0)
 	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
-			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
-			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
-			stagePruneTimeout = min(baseTimeout+extra, maxTimeout)
+			stagePruneTimeout = TipPruneTimeout(cfg.chainConfig.SecondsPerSlot(), agg.MaxPrunableStepsBacklog())
 		}
 	}
 	if timeout > 0 && timeout > stagePruneTimeout {
