@@ -27,10 +27,10 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -56,8 +57,9 @@ type BlockGetter interface {
 
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
-	headerReader services.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
-	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
+	txIndex int,
+) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	var reader state.StateReader
 	if stateCache != nil {
 		cacheView, err := stateCache.View(ctx, dbtx)
@@ -126,7 +128,6 @@ func TraceTx(
 ) (gasUsed uint64, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockNumber, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
-		stream.WriteNil()
 		return 0, err
 	}
 
@@ -144,10 +145,8 @@ func TraceTx(
 			}
 
 			return result, err
-		} else {
-			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
-			}
+		} else if tracer != nil && tracer.OnTxEnd != nil {
+			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 		}
 
 		gasUsed = result.ReceiptGasUsed
@@ -203,6 +202,9 @@ func AssembleTracer(
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, cancel, nil
 	default:
+		if config.LogConfig != nil && config.LogConfig.Limit < 0 {
+			return nil, false, func() {}, &rpc.InvalidParamsError{Message: "limit must not be negative"}
+		}
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, cancel, nil
 	}
@@ -224,20 +226,16 @@ func ExecuteTraceTx(
 	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
-	var refunds = true
+	refunds := true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
-
 	}
 
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		if !streaming {
-			stream.WriteNil()
-		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}
 
@@ -262,13 +260,11 @@ func ExecuteTraceTx(
 	} else {
 		r, err := tracer.GetResult()
 		if err != nil {
-			stream.WriteNil()
 			return err
 		}
 
-		_, err = stream.Write(r)
-		if err != nil {
-			stream.WriteNil()
+		stream.WriteRawBytes(r)
+		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}
 	}

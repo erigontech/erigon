@@ -29,13 +29,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/valyala/fastjson"
 
-	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -70,6 +73,7 @@ func (e EthError) Error() string {
 type RequestGenerator interface {
 	PingErigonRpc() PingResult
 	GetBalance(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []common.Hash, blockRef rpc.BlockReference) (*accounts.AccProofResult, error)
 	AdminNodeInfo() (p2p.NodeInfo, error)
 	GetBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, withTxs bool) (*Block, error)
 	GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error)
@@ -79,18 +83,18 @@ type RequestGenerator interface {
 	BlockNumber() (uint64, error)
 	SendTransaction(signedTx types.Transaction) (common.Hash, error)
 	SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error)
-	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
-	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
-	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error)
+	FilterLogs(ctx context.Context, query bind.FilterQuery) ([]types.Log, error)
+	SubscribeFilterLogs(ctx context.Context, query bind.FilterQuery, ch chan<- types.Log) (event.Subscription, error)
+	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error)
+	UnsubscribeAll()
 	TxpoolContent() (int, int, int, error)
 	Call(args ethapi.CallArgs, blockRef rpc.BlockReference, overrides *ethapi.StateOverrides) ([]byte, error)
 	TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error)
 	DebugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
-	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
+	EstimateGas(args bind.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
 	GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error)
-	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error)
 }
 
 type requestGenerator struct {
@@ -115,6 +119,8 @@ var Methods = struct {
 	ETHGetTransactionCount RPCMethod
 	// ETHGetBalance represents the eth_getBalance method
 	ETHGetBalance RPCMethod
+	// ETHGetProof represents the eth_getProof method
+	ETHGetProof RPCMethod
 	// ETHSendRawTransaction represents the eth_sendRawTransaction method
 	ETHSendRawTransaction RPCMethod
 	// ETHSendRawTransactionSync represents the eth_sendRawTransactionSync method
@@ -145,11 +151,11 @@ var Methods = struct {
 	ETHGetTransactionByHash  RPCMethod
 	ETHGetTransactionReceipt RPCMethod
 	ETHGetBlockReceipts      RPCMethod
-	BorGetRootHash           RPCMethod
 	ETHCall                  RPCMethod
 }{
 	ETHGetTransactionCount:    "eth_getTransactionCount",
 	ETHGetBalance:             "eth_getBalance",
+	ETHGetProof:               "eth_getProof",
 	ETHSendRawTransaction:     "eth_sendRawTransaction",
 	ETHSendRawTransactionSync: "eth_sendRawTransactionSync",
 	ETHGetBlockByNumber:       "eth_getBlockByNumber",
@@ -170,7 +176,6 @@ var Methods = struct {
 	ETHGetTransactionByHash:   "eth_getTransactionByHash",
 	ETHGetTransactionReceipt:  "eth_getTransactionReceipt",
 	ETHGetBlockReceipts:       "eth_getBlockReceipts",
-	BorGetRootHash:            "bor_getRootHash",
 	ETHCall:                   "eth_call",
 }
 
@@ -233,41 +238,38 @@ func isConnectionError(err error) bool {
 func retryConnects(ctx context.Context, op func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	return retry(ctx, op, isConnectionError, time.Second*1, nil)
-}
 
-func retry(ctx context.Context, op func(context.Context) error, isRecoverableError func(error) bool, delay time.Duration, lastErr error) error {
-	opctx, cancel := context.WithTimeout(ctx, connectionTimeout)
-	defer cancel()
+	var lastDialErr error
+	attempt := func() error {
+		opctx, opCancel := context.WithTimeout(ctx, connectionTimeout)
+		defer opCancel()
 
-	err := op(opctx)
-
-	if err == nil {
-		return nil
-	}
-
-	if !isRecoverableError(err) {
+		err := op(opctx)
+		if err == nil {
+			return nil
+		}
+		if !isConnectionError(err) {
+			return backoff.Permanent(err)
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			if lastDialErr != nil {
+				return backoff.Permanent(lastDialErr)
+			}
+			return err
+		}
+		lastDialErr = err
 		return err
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
-		if lastErr != nil {
-			return lastErr
-		}
-
-		err = nil
+	err := backoff.Retry(attempt, backoff.WithContext(backoff.NewConstantBackOff(time.Second), ctx))
+	// backoff.Retry surfaces the overall context's error verbatim when it gives
+	// up; on deadline expiry, report the last dial error it discarded. Compared
+	// by identity so a permanent error that merely wraps DeadlineExceeded (from
+	// backoff.Permanent) is left intact.
+	if lastDialErr != nil && err == context.DeadlineExceeded { //nolint:errorlint // intentional bare sentinel check
+		return lastDialErr
 	}
-
-	delayTimer := time.NewTimer(delay)
-	select {
-	case <-delayTimer.C:
-		return retry(ctx, op, isRecoverableError, delay, err)
-	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return err
-		}
-		return ctx.Err()
-	}
+	return err
 }
 
 type PingResult callResult
@@ -350,7 +352,7 @@ func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error)
 func post(ctx context.Context, client *http.Client, url, method, request string, response any, logger log.Logger) error {
 	start := time.Now()
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(request))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(request))
 	if err != nil {
 		return err
 	}
@@ -393,7 +395,7 @@ func post(ctx context.Context, client *http.Client, url, method, request string,
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error) {
+func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error) {
 	if req.subscriptionClient == nil {
 		err := retryConnects(ctx, func(ctx context.Context) error {
 			var err error
@@ -401,14 +403,14 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, su
 			return err
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to dial websocket: %v", err)
+			return nil, fmt.Errorf("failed to dial websocket: %w", err)
 		}
 	}
 
 	namespace, subMethod, err := NamespaceAndSubMethodFromMethod(string(method))
 
 	if err != nil {
-		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
+		return nil, fmt.Errorf("cannot get namespace and submethod from method: %w", err)
 	}
 
 	args = append([]any{subMethod}, args...)

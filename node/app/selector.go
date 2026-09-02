@@ -30,7 +30,7 @@ type Keys interface {
 	IsMap() bool
 }
 
-type KeyArray []interface{}
+type KeyArray []any
 
 func (keys KeyArray) Len() int {
 	return len(keys)
@@ -44,7 +44,7 @@ func (keys KeyArray) IsMap() bool {
 	return false
 }
 
-type KeyMap map[interface{}]interface{}
+type KeyMap map[any]any
 
 func (keys KeyMap) Len() int {
 	return len(keys)
@@ -59,23 +59,23 @@ func (keys KeyMap) IsMap() bool {
 }
 
 type Selector interface {
-	Test(context context.Context, entity interface{}) bool
+	Test(context context.Context, entity any) bool
 }
 
 type KeyedSelector interface {
 	Keys() Keys
-	Test(context context.Context, entity interface{}) bool
+	Test(context context.Context, entity any) bool
 }
 
 // SelectorComparator provides a basic comparison on selectors by comparing
 // the values of the selectors keys
-func SelectorComparator(a, b interface{}) int {
+func SelectorComparator(a, b any) int {
 	aKeys := a.(KeyedSelector).Keys()
 	bKeys := b.(KeyedSelector).Keys()
 	aArray, aOk := aKeys.(KeyArray)
 	bArray, bOk := bKeys.(KeyArray)
 	if aOk && bOk {
-		return util.CompoundCompare([]interface{}(aArray), []interface{}(bArray))
+		return util.CompoundCompare([]any(aArray), []any(bArray))
 	}
 	return util.CompoundCompare(aKeys, bKeys)
 }
@@ -83,7 +83,7 @@ func SelectorComparator(a, b interface{}) int {
 type RangeSelector interface {
 	From() Keys
 	To() Keys
-	Test(context context.Context, entity interface{}) bool
+	Test(context context.Context, entity any) bool
 }
 
 const (
@@ -119,11 +119,11 @@ func (s all) Keys() Keys {
 	return KeyArray(nil)
 }
 
-func (s all) Test(context context.Context, entity interface{}) bool {
+func (s all) Test(context context.Context, entity any) bool {
 	return true
 }
 
-func (s all) CompareTo(entity interface{}) int {
+func (s all) CompareTo(entity any) int {
 	switch entity.(type) {
 	case all:
 		return 0
@@ -139,11 +139,11 @@ func (s none) Keys() Keys {
 	return KeyArray(nil)
 }
 
-func (s none) Test(context context.Context, entity interface{}) bool {
+func (s none) Test(context context.Context, entity any) bool {
 	return false
 }
 
-func (s none) CompareTo(entity interface{}) int {
+func (s none) CompareTo(entity any) int {
 	if _, ok := entity.(*none); ok {
 		return 0
 	}
@@ -171,7 +171,7 @@ func (selector *TypeSelector) Keys() Keys {
 	return KeyArray{selector.Type}
 }
 
-func (selector *TypeSelector) Test(context context.Context, entity interface{}) bool {
+func (selector *TypeSelector) Test(context context.Context, entity any) bool {
 	if selector.Type != nil {
 		return reflect.TypeOf(entity) == selector.Type
 	}

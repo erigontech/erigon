@@ -17,16 +17,17 @@
 package sentinel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -227,8 +228,8 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			}
 
 			// Sort by wanted count descending (subnets needing most peers first, i.e., 0-peer subnets)
-			sort.Slice(underserved, func(i, j int) bool {
-				return underserved[i].wanted > underserved[j].wanted
+			slices.SortFunc(underserved, func(a, b subnetSearchState) int {
+				return cmp.Compare(b.wanted, a.wanted)
 			})
 
 			// Extract just the subnet indices for logging
@@ -289,7 +290,7 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	}
 
 	// Query GossipSub for actual peers subscribed to each attestation subnet topic
-	for i := 0; i < attestationSubnetCount; i++ {
+	for i := range attestationSubnetCount {
 		topicName := gossip.TopicNameBeaconAttestation(uint64(i))
 		fullTopic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, topicName, gossip.SSZSnappyCodec)
 		peers := s.p2p.Pubsub().ListPeers(fullTopic)
@@ -299,6 +300,12 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 
 	log.Trace("[Sentinel] Subnet coverage check (GossipSub)", "forkDigest", fmt.Sprintf("%x", forkDigest))
 	return coverage, subnetToPeers
+}
+
+func (s *Sentinel) closePeer(pid peer.ID) {
+	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
+		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
+	}
 }
 
 // pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
@@ -324,7 +331,7 @@ func (s *Sentinel) pruneExcessPeers() {
 
 	// Build a map of peer -> subnets they're subscribed to (from GossipSub)
 	peerToSubnets := make(map[peer.ID][]int)
-	for i := 0; i < attestationSubnetCount; i++ {
+	for i := range attestationSubnetCount {
 		for _, pid := range subnetToPeers[i] {
 			peerToSubnets[pid] = append(peerToSubnets[pid], i)
 		}
@@ -352,18 +359,16 @@ func (s *Sentinel) pruneExcessPeers() {
 
 	// Sort peers by "removability" (most removable first)
 	// Priority: peers with no critical subnets, then by fewest covered subnets
-	sort.Slice(peerInfos, func(i, j int) bool {
-		// Critical peers (covering unique subnets) should never be removed
-		iCritical := len(peerInfos[i].criticalSubnets) > 0
-		jCritical := len(peerInfos[j].criticalSubnets) > 0
-
-		if iCritical != jCritical {
-			return !iCritical // Non-critical peers first (more removable)
+	slices.SortFunc(peerInfos, func(a, b peerSubnetInfo) int {
+		aCritical := len(a.criticalSubnets) > 0
+		bCritical := len(b.criticalSubnets) > 0
+		if aCritical != bCritical {
+			if !aCritical {
+				return -1
+			}
+			return 1
 		}
-
-		// Among non-critical peers, prefer removing those covering fewer subnets
-		// (they provide less value)
-		return peerInfos[i].subnetsCount < peerInfos[j].subnetsCount
+		return cmp.Compare(a.subnetsCount, b.subnetsCount)
 	})
 
 	// Remove peers, but re-check coverage after each removal
@@ -409,7 +414,7 @@ func (s *Sentinel) pruneExcessPeers() {
 		}
 
 		// Disconnect the peer
-		s.p2p.Host().Network().ClosePeer(info.pid)
+		s.closePeer(info.pid)
 		s.p2p.Host().Peerstore().RemovePeer(info.pid)
 		s.peers.RemovePeer(info.pid)
 		removed++
@@ -446,19 +451,16 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	return nil
 }
 
-// connectWithAllPeers is a helper function used to connect with a list of addrs.
-// it only returns an error on fail to parse multiaddrs
-// will print connect with peer errors to trace debug level
 func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	addrInfos, err := peer.AddrInfosFromP2pAddrs(multiAddrs...)
 	if err != nil {
 		return err
 	}
 	for _, peerInfo := range addrInfos {
+		if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
+			return err
+		}
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
-				return
-			}
 			if err := s.ConnectWithPeer(s.ctx, peerInfo, s.connectSem); err != nil {
 				log.Debug("[Sentinel] Could not connect with peer", "err", err)
 			} else {
@@ -470,33 +472,37 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
-	// connect to static peers every one minute
 	go func() {
 		for {
 			if err := s.connectWithAllPeers(peers); err != nil {
 				log.Debug("[Sentinel] Could not connect with static peers", "err", err)
 			}
-			time.Sleep(3 * time.Minute)
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(3 * time.Minute):
+			}
 		}
 	}()
 }
 
 func (s *Sentinel) listenForPeers() {
-	enodes := []*enode.Node{}
+	multiAddresses := make([]multiaddr.Multiaddr, 0, len(s.cfg.NetworkConfig.StaticPeers))
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
-		newNode, err := enode.Parse(enode.ValidSchemes, node)
-		if err == nil {
-			enodes = append(enodes, newNode)
-		} else {
+		addr, err := p2p.ParseStaticPeer(node)
+		if err != nil {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
+			continue
 		}
+		multiAddresses = append(multiAddresses, addr)
 	}
-	log.Info("CL Sentinel static peers", "len", len(enodes))
+	log.Info("CL Sentinel static peers", "len", len(multiAddresses))
+	if len(multiAddresses) > 0 {
+		s.stickToPeers(multiAddresses)
+	}
 	if s.cfg.NoDiscovery {
 		return
 	}
-	multiAddresses := p2p.ConvertToMultiAddr(enodes)
-	s.stickToPeers(multiAddresses)
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
@@ -520,7 +526,7 @@ func (s *Sentinel) listenForPeers() {
 
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
-			log.Error("[Sentinel] Could not convert to peer info", "err", err)
+			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
 		s.pidToEnr.Store(peerInfo.ID, node)
@@ -558,7 +564,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 				var peerSubnets bitfield.Bitvector64
 				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil && len(peerSubnets) == 8 {
 					coverage := s.getSubnetCoverage()
-					for i := 0; i < attestationSubnetCount; i++ {
+					for i := range attestationSubnetCount {
 						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
 							peerHelpsSubnets = true
 							break
@@ -572,16 +578,16 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		if s.HasTooManyPeers() && !peerHelpsSubnets {
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.p2p.Host().Network().ClosePeer(peerId)
+			s.closePeer(peerId)
 			s.peers.RemovePeer(peerId)
 			return
 		}
 
-		valid, err := s.handshaker.ValidatePeer(peerId)
+		valid, err := s.handshaker.ValidatePeer(s.ctx, peerId)
 		if err != nil {
 			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
 			// The peer may still work for gossip even if status exchange failed.
-			log.Debug("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+			log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
 		}
 
 		if !valid && err == nil {
@@ -589,7 +595,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			// Must disconnect to avoid receiving incompatible blocks.
 			log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.p2p.Host().Network().ClosePeer(peerId)
+			s.closePeer(peerId)
 			s.peers.RemovePeer(peerId)
 			return
 		}
@@ -598,7 +604,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			// Handshake had a transport error AND returned invalid — keep anyway.
 			s.peers.RecordHandshakeFailure(peerId)
 		} else {
-			// we were able to succesfully connect, so add this peer to our pool
+			// we were able to successfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
 
 			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)

@@ -68,7 +68,7 @@ func TestLargeDataSet(t *testing.T) {
 
 	// Add 10,000 keys (exceeding page size)
 	keyCount := 100_000
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		require.NoError(writer.AddHash(uint64(i)), "Failed to add hash %d", i)
 	}
 
@@ -82,7 +82,7 @@ func TestLargeDataSet(t *testing.T) {
 	defer reader.Close()
 
 	// Verify all keys exist
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		require.True(reader.ContainsHash(uint64(i)), "Key %d not found in filter", i)
 	}
 
@@ -119,7 +119,7 @@ func TestPartialPage(t *testing.T) {
 	// Add keys to partially fill the last page (not a multiple of 512)
 	keyCount := 600
 	keys := make([]uint64, keyCount)
-	for i := 0; i < keyCount; i++ {
+	for i := range keyCount {
 		keys[i] = uint64(i * 100)
 		require.NoError(writer.AddHash(keys[i]), "Failed to add hash %d", i)
 	}
@@ -401,7 +401,7 @@ func TestWriterShardedUniformDistribution(t *testing.T) {
 
 	falsePositives := 0
 	const probes = 200_000
-	for i := 0; i < probes; i++ {
+	for range probes {
 		var k uint64
 		for {
 			k = rng.Uint64()
@@ -436,7 +436,7 @@ func TestWriterShardedPageBoundary(t *testing.T) {
 	}
 	var allKeys []uint64
 	for shard, n := range plan {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			allKeys = append(allKeys, shard<<56|uint64(i))
 		}
 	}
@@ -469,10 +469,10 @@ func TestWriterShardedMmapMutationOnDuplicates(t *testing.T) {
 	w, err := NewWriterSharded(filePath)
 	require.NoError(err)
 	w.DisableFsync()
-	for i := 0; i < unique; i++ {
+	for i := range unique {
 		require.NoError(w.AddHash(uint64(i)))
 	}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		require.NoError(w.AddHash(uint64(i))) // duplicates
 	}
 	require.NoError(w.Build())
@@ -481,7 +481,7 @@ func TestWriterShardedMmapMutationOnDuplicates(t *testing.T) {
 	r, err := NewReaderSharded(filePath)
 	require.NoError(err)
 	defer r.Close()
-	for i := 0; i < unique; i++ {
+	for i := range unique {
 		require.True(r.ContainsHash(uint64(i)))
 	}
 }
@@ -505,7 +505,7 @@ func TestHeaderRoundTrip(t *testing.T) {
 	require.NoError(err)
 	defer w.Close()
 
-	for i := uint64(0); i < 50; i++ {
+	for i := range uint64(50) {
 		require.NoError(w.AddHash(i))
 	}
 
@@ -528,7 +528,7 @@ func TestMultipleFilters(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create multiple filters with different keys
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		filePath := filepath.Join(dir, fmt.Sprintf("filter_%d", i))
 		baseKey := uint64(i * 1000)
 
@@ -536,7 +536,7 @@ func TestMultipleFilters(t *testing.T) {
 		require.NoError(err, "Failed to create writer %d", i)
 
 		// Add some keys
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			key := baseKey + uint64(j)
 			require.NoError(writer.AddHash(key), "Failed to add hash %d to filter %d", key, i)
 		}
@@ -547,7 +547,7 @@ func TestMultipleFilters(t *testing.T) {
 		// Read back and verify
 		reader, err := NewReader(filePath)
 		require.NoError(err, "Failed to create reader for filter %d", i)
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			key := baseKey + uint64(j)
 			require.True(reader.ContainsHash(key), "Key %d not found in filter %d", key, i)
 		}

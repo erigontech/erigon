@@ -17,21 +17,19 @@
 package etl
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 
-	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/db/bufiopool"
 )
 
 type dataProvider interface {
@@ -42,11 +40,10 @@ type dataProvider interface {
 }
 
 type fileDataProvider struct {
-	file        *os.File
-	mmapReader  *mmapBytesReader       // zero-copy reader over mmap'd data
-	mmapData    []byte                 // mmap'd file content
-	mmapHandle2 *[mmap.MaxMapSize]byte // pointer handle for cleanup
-	wg          *errgroup.Group
+	file       *os.File
+	mmapReader *mmapBytesReader // zero-copy reader over mmap'd data
+	mmapData   mmap.Ro          // mmap'd file content
+	wg         *errgroup.Group
 }
 
 // mmapBytesReader tracks position for reading from mmap'd data
@@ -101,37 +98,16 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
-
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
-
-	// if we are going to create files in the system temp dir, we don't need any
-	// subfolders.
-	if tmpdir != "" {
-		if err := os.MkdirAll(tmpdir, 0755); err != nil {
-			return nil, err
-		}
-	}
 
 	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
 	if err != nil {
 		return nil, err
 	}
 
-	w := getBufioWriter(bufferFile)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(bufferFile)
+	defer bufiopool.PutWriter(w)
 
 	if err = b.Write(w); err != nil {
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
@@ -148,11 +124,11 @@ func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 			return nil, nil, err
 		}
 	}
-	key, err := readField(p.mmapReader)
+	key, err := readKeyField(p.mmapReader)
 	if err != nil {
 		return nil, nil, err
 	}
-	val, err := readField(p.mmapReader)
+	val, err := readValField(p.mmapReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -167,7 +143,7 @@ func (p *fileDataProvider) initMmap() error {
 	if fi.Size() == 0 {
 		return io.EOF
 	}
-	p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(fi.Size()))
+	p.mmapData, err = mmap.OpenRo(p.file, int(fi.Size()))
 	if err != nil {
 		return fmt.Errorf("mmap failed: %w", err)
 	}
@@ -176,16 +152,25 @@ func (p *fileDataProvider) initMmap() error {
 	return nil
 }
 
-func (m *mmapBytesReader) readVarint() (int, error) {
-	v, n := binary.Varint(m.data[m.pos:])
-	if n <= 0 {
-		if n == 0 {
-			return 0, io.EOF
-		}
-		return 0, fmt.Errorf("varint overflow")
+func (m *mmapBytesReader) readKeyLen() (int, error) {
+	if m.pos+keyLenSize > len(m.data) {
+		return 0, io.EOF
 	}
-	m.pos += n
-	return int(v), nil
+	n := binary.NativeEndian.Uint16(m.data[m.pos:])
+	m.pos += keyLenSize
+	if n == nilKeyLen {
+		return -1, nil
+	}
+	return int(n), nil
+}
+
+func (m *mmapBytesReader) readValLen() (int, error) {
+	if m.pos+valLenSize > len(m.data) {
+		return 0, io.EOF
+	}
+	n := int32(binary.NativeEndian.Uint32(m.data[m.pos:])) //nolint:gosec
+	m.pos += valLenSize
+	return int(n), nil
 }
 
 // readAt returns a zero-copy slice directly from mmap'd memory
@@ -198,31 +183,35 @@ func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
 	return result, nil
 }
 
-// readField reads a varint-prefixed byte slice from mmap data (zero-copy).
-// Negative length means nil.
-func readField(m *mmapBytesReader) ([]byte, error) {
-	n, err := m.readVarint()
-	if err != nil {
+// A nil field comes back nil. Zero-copy, like readAt.
+func readKeyField(m *mmapBytesReader) ([]byte, error) {
+	n, err := m.readKeyLen()
+	if err != nil || n < 0 {
 		return nil, err
 	}
-	if n < 0 {
-		return nil, nil
+	return m.readAt(n)
+}
+
+func readValField(m *mmapBytesReader) ([]byte, error) {
+	n, err := m.readValLen()
+	if err != nil || n < 0 {
+		return nil, err
 	}
 	return m.readAt(n)
 }
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
+	// Wait first: the async flush assigns p.file from its own goroutine, so
+	// reading it before joining both races and can leak a file created after.
+	p.Wait()
 	if p.file == nil {
 		return
 	}
 
-	p.Wait()
-
 	if p.mmapData != nil {
-		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		_ = p.mmapData.Unmap()
 		p.mmapData = nil
-		p.mmapHandle2 = nil
 		p.mmapReader = nil
 	}
 
@@ -237,20 +226,18 @@ func (p *fileDataProvider) String() string {
 }
 
 type memoryDataProvider struct {
-	buffer       Buffer
-	currentIndex int
+	buffer Buffer
 }
 
 func KeepInRAM(buffer Buffer) dataProvider {
-	return &memoryDataProvider{buffer, 0}
+	return &memoryDataProvider{buffer}
 }
 
 func (p *memoryDataProvider) Next() ([]byte, []byte, error) {
-	if p.currentIndex >= p.buffer.Len() {
+	key, value, ok := p.buffer.Next()
+	if !ok {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.Get(p.currentIndex)
-	p.currentIndex++
 	return key, value, nil
 }
 

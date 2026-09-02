@@ -185,7 +185,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 
 	for range numWorkers {
 		eg.Go(func() error {
-			kviReader := kvi.GetReaderFromPool()
+			kviReader := kvi.Reader()
 			defer kviReader.Close()
 			for {
 				select {

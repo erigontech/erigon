@@ -19,14 +19,13 @@ package state
 import (
 	"bytes"
 	"path/filepath"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/seg"
 )
 
@@ -52,7 +51,7 @@ func TestArchiveWriter(t *testing.T) {
 	for k := range td {
 		keys = append(keys, []byte(k))
 	}
-	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i], keys[j]) < 0 })
+	slices.SortFunc(keys, bytes.Compare)
 
 	writeLatest := func(tb testing.TB, w *seg.Writer, td map[string][]upd) {
 		tb.Helper()
@@ -142,17 +141,4 @@ func TestArchiveWriter(t *testing.T) {
 		checkLatest(t, r, td)
 	})
 
-}
-
-func TestPrunableProgress(t *testing.T) {
-	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
-	s, err := GetExecV3PrunableProgress(tx, []byte("test"))
-	require.NoError(t, err)
-	require.EqualValues(t, 100, s)
-	SaveExecV3PrunableProgress(tx, []byte("test"), 120)
-	s, err = GetExecV3PrunableProgress(tx, []byte("test"))
-	require.NoError(t, err)
-	require.EqualValues(t, 120, s)
 }

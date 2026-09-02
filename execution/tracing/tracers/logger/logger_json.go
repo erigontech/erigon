@@ -22,7 +22,8 @@ package logger
 import (
 	"encoding/json"
 	"io"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
@@ -52,15 +53,20 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 func (l *JSONLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
-			OnFault:   l.OnFault,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
+			OnFault:             l.OnFault,
 		},
 	}
 }
 
 func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JSONLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -78,24 +84,21 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 		MemorySize:    len(memory),
 		Storage:       nil,
 		Depth:         depth,
-		RefundCounter: l.env.IntraBlockState.GetRefund().Total(),
+		RefundCounter: l.env.IntraBlockState.GetRefund(),
 		Err:           err,
 	}
 	if l.cfg.EnableMemory {
 		log.Memory = memory
 	}
 	if !l.cfg.DisableStack {
-		//TODO(@holiman) improve this
-		logstack := make([]*big.Int, len(stack))
-		for i, item := range stack {
-			logstack[i] = item.ToBig()
-		}
+		logstack := make([]uint256.Int, len(stack))
+		copy(logstack, stack)
 		log.Stack = logstack
 	}
 	if l.cfg.EnableReturnData {
 		log.ReturnData = rData
 	}
-	_ = l.encoder.Encode(log)
+	_ = l.encoder.Encode(log) //nolint:errchkjson
 }
 
 func (l *JSONLogger) OnFault(pc uint64, op byte, gas uint64, cost uint64, scope tracing.OpContext, depth int, err error) {
@@ -115,5 +118,5 @@ func (l *JSONLogger) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	if err != nil {
 		errMsg = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg})
+	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg}) //nolint:errchkjson
 }

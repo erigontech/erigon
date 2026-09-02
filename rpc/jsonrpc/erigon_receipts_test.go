@@ -19,7 +19,9 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -81,12 +83,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make(types.ErigonLogs, 0)
-	for i := len(expectedLogs) - 1; i >= 0; i-- {
-		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLogs[i].Log,
-			Timestamp: expectedLogs[i].Timestamp,
-		})
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	for _, expectedLog := range slices.Backward(expectedLogs) {
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
@@ -95,9 +94,9 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.Equal(expectedErigonLogs, actual)
+	assert.Equal(expectedRPCLogs, actual)
 
-	expectedLog := &types.ErigonLog{
+	expectedLog := &types.RPCLog{
 		Log: types.Log{
 			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
 			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
@@ -109,7 +108,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Index:       0,
 			Removed:     false,
 		},
-		Timestamp: 100,
+		BlockTimestamp: 100,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
@@ -121,12 +120,9 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedErigonLogs := make([]*types.ErigonLog, 0)
-	for i := len(expectedLogs) - 1; i >= 0; i-- {
-		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLogs[i].Log,
-			Timestamp: expectedLogs[i].Timestamp,
-		})
+	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	for _, expectedLog := range slices.Backward(expectedLogs) {
+		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
 
 	var lastBlock uint64
@@ -148,7 +144,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
 	}
 	require.NotNil(t, actual)
-	assert.EqualValues(expectedErigonLogs, actual)
+	assert.EqualValues(expectedRPCLogs, actual)
 }
 
 var (
@@ -228,7 +224,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 // requested block range exceeds rangeLimit.
 func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 5, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil, nil)
 	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -245,7 +241,7 @@ func TestGetLogs_RangeLimitExceeded(t *testing.T) {
 // range is within rangeLimit.
 func TestGetLogs_RangeLimitOk(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 11, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 11, 0, 0), m.DB, nil, nil)
 	logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -258,7 +254,7 @@ func TestGetLogs_RangeLimitOk(t *testing.T) {
 // unlimited (0).
 func TestGetLogs_MaxResultsOk(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 0), m.DB, nil, nil)
 	logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -271,7 +267,7 @@ func TestGetLogs_MaxResultsOk(t *testing.T) {
 // when the matching log count exceeds maxResults.
 func TestGetLogs_MaxResultsExceeded(t *testing.T) {
 	m, _, contractAddr, _ := chainWithDeployedContract(t)
-	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 1), m.DB, nil, nil)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 1, 0), m.DB, nil, nil)
 	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(rpc.LatestBlockNumber.Int64()),
@@ -285,11 +281,70 @@ func TestGetLogs_MaxResultsExceeded(t *testing.T) {
 	assert.Equal(t, errExceedLogResults+": 1", rpcErr.Error())
 }
 
+// TestGetLogs_LogQueryLimitExceeded verifies that eth_getLogs returns invalid params
+// when the filter has more addresses, or more alternatives in one topic position,
+// than logQueryLimit.
+func TestGetLogs_LogQueryLimitExceeded(t *testing.T) {
+	cases := []struct {
+		name string
+		crit filters.FilterCriteria
+	}{
+		{"addresses", filters.FilterCriteria{Addresses: make(common.Addresses, 3)}},
+		{"topics", filters.FilterCriteria{Topics: [][]common.Hash{make([]common.Hash, 3)}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 2), m.DB, nil, nil)
+			tc.crit.FromBlock, tc.crit.ToBlock = big.NewInt(0), big.NewInt(10)
+			_, err := ethApi.GetLogs(context.Background(), tc.crit)
+			require.Error(t, err)
+
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			assert.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			assert.Equal(t, fmt.Sprintf(errExceedLogQueryLimit, 2), rpcErr.Error())
+		})
+	}
+}
+
+// TestGetLogs_LogQueryLimitAtLimit verifies that filters with exactly
+// logQueryLimit addresses or topic alternatives are accepted.
+func TestGetLogs_LogQueryLimitAtLimit(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, 2), m.DB, nil, nil)
+	_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(10),
+		Addresses: make(common.Addresses, 2),
+		Topics:    [][]common.Hash{make([]common.Hash, 2)},
+	})
+	require.NoError(t, err)
+}
+
+// TestGetLogs_LogQueryLimitUnlimited verifies that logQueryLimit<=0 disables the
+// addresses/topics cap.
+func TestGetLogs_LogQueryLimitUnlimited(t *testing.T) {
+	for _, limit := range []int{0, -1} {
+		t.Run(fmt.Sprintf("limit=%d", limit), func(t *testing.T) {
+			m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+			ethApi := newEthApiForTest(newBaseApiWithLimits(m, 0, 0, limit), m.DB, nil, nil)
+			_, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+				FromBlock: big.NewInt(0),
+				ToBlock:   big.NewInt(10),
+				Addresses: make(common.Addresses, 1500),
+				Topics:    [][]common.Hash{make([]common.Hash, 1500)},
+			})
+			require.NoError(t, err)
+		})
+	}
+}
+
 // TestGetLatestLogs_LogCountExceedsMaxResults verifies that erigon_getLatestLogs
 // returns an error when the requested logCount exceeds getLogsMaxResults.
 func TestGetLatestLogs_LogCountExceedsMaxResults(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewErigonAPI(newBaseApiWithLimits(m, 0, 5), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 0, 5, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
 		LogCount: 10,
 	})
@@ -301,7 +356,7 @@ func TestGetLatestLogs_LogCountExceedsMaxResults(t *testing.T) {
 // returns an error when the requested blockCount exceeds rangeLimit.
 func TestGetLatestLogs_BlockCountExceedsRangeLimit(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
 		BlockCount: 10,
 	})
@@ -314,7 +369,7 @@ func TestGetLatestLogs_BlockCountExceedsRangeLimit(t *testing.T) {
 // no logCount/blockCount is specified.
 func TestGetLatestLogs_ExplicitRangeExceedsLimit(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -329,7 +384,7 @@ func TestGetLatestLogs_ExplicitRangeExceedsLimit(t *testing.T) {
 func TestGetLatestLogs_ExplicitRangeWithLogCount_NoRangeCheck(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	// rangeLimit=5, but logCount is set so the range check should be skipped.
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -345,7 +400,7 @@ func TestGetLatestLogs_ExplicitRangeWithLogCount_NoRangeCheck(t *testing.T) {
 func TestGetLatestLogs_ExplicitRangeWithBlockCount_NoRangeCheck(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	// rangeLimit=5, blockCount=3 (≤5 so ok), explicit range 0-10 is skipped.
-	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0), m.DB, nil)
+	api := NewErigonAPI(newBaseApiWithLimits(m, 5, 0, 0), m.DB, nil)
 	_, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{
 		FromBlock: big.NewInt(0),
 		ToBlock:   big.NewInt(10),
@@ -353,6 +408,61 @@ func TestGetLatestLogs_ExplicitRangeWithBlockCount_NoRangeCheck(t *testing.T) {
 		BlockCount: 3,
 	})
 	require.NoError(t, err)
+}
+
+func TestErigonGetLogsByHash_UnknownHash_ReturnsNull(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLogsByHash(m.Ctx, common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"))
+	require.NoError(t, err)
+	require.Nil(t, logs)
+}
+
+func TestErigonGetLogsByHash_NonCanonicalHash_ReturnsError(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	orphanedBlock := orphanedChain[0].Blocks[0]
+	_, err := api.GetLogsByHash(m.Ctx, orphanedBlock.Hash())
+	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", orphanedBlock.Hash()))
+}
+
+func TestErigonGetLogsByHash_ReorgedBlock_NotServedFromCache(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
+	signer := types.LatestSignerForChainID(nil)
+
+	shortChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		if i == 0 {
+			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, uint256.NewInt(10000), params.TxGas, nil, nil), *signer, testKey)
+			block.AddTx(tx)
+		}
+	})
+	require.NoError(t, err)
+	longChain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(shortChain))
+
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	staleHash := shortChain.Blocks[0].Hash()
+
+	logs, err := api.GetLogsByHash(m.Ctx, staleHash)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+
+	require.NoError(t, m.InsertChain(longChain))
+
+	_, err = api.GetLogsByHash(m.Ctx, staleHash)
+	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", staleHash))
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
@@ -367,9 +477,45 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 		execmoduletester.WithKey(testKey),
 	)
 	if blocks > 0 {
-		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
-		err := m.InsertChain(chain)
+		chain, err := m.GenerateChain(blocks, generator)
+		require.NoError(t, err)
+		err = m.InsertChain(chain)
 		require.NoError(t, err)
 	}
 	return m
+}
+
+// TestGetLogsByHashZeroLogReceipt pins the documented array-per-transaction shape: a
+// transaction emitting no logs must serialize as [] and not as null.
+func TestGetLogsByHashZeroLogReceipt(t *testing.T) {
+	m, chainPack, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLogsByHash(m.Ctx, chainPack.Blocks[0].Hash())
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.NotNil(t, logs[0])
+
+	encoded, err := json.Marshal(logs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[[]]`, string(encoded))
+}
+
+// TestErigonGetLogsByBlockHashRequiresACanonicalBlock pins erigon_getLogs on the same
+// by-hash resolution as eth_getLogs: a hash no header answers for is an error rather
+// than an empty log array, and a reorged-out sibling is not served the logs of the
+// canonical block at its height.
+func TestErigonGetLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	unknown := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &unknown})
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+	logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &orphaned})
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
 }

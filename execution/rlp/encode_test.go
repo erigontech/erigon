@@ -25,10 +25,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
-	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/erigontech/erigon/common/race"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -36,7 +36,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/math"
 )
 
 type testEncoder struct {
@@ -117,46 +116,6 @@ var encTests = []encTest{
 	{val: uint64(0xFFFFFFFFFFFF), output: "86FFFFFFFFFFFF"},
 	{val: uint64(0xFFFFFFFFFFFFFF), output: "87FFFFFFFFFFFFFF"},
 	{val: uint64(0xFFFFFFFFFFFFFFFF), output: "88FFFFFFFFFFFFFFFF"},
-
-	// big integers (should match uint for small values)
-	{val: big.NewInt(0), output: "80"},
-	{val: big.NewInt(1), output: "01"},
-	{val: big.NewInt(127), output: "7F"},
-	{val: big.NewInt(128), output: "8180"},
-	{val: big.NewInt(256), output: "820100"},
-	{val: big.NewInt(1024), output: "820400"},
-	{val: big.NewInt(0xFFFFFF), output: "83FFFFFF"},
-	{val: big.NewInt(0xFFFFFFFF), output: "84FFFFFFFF"},
-	{val: big.NewInt(0xFFFFFFFFFF), output: "85FFFFFFFFFF"},
-	{val: big.NewInt(0xFFFFFFFFFFFF), output: "86FFFFFFFFFFFF"},
-	{val: big.NewInt(0xFFFFFFFFFFFFFF), output: "87FFFFFFFFFFFFFF"},
-	{
-		val:    big.NewInt(0).SetBytes(unhex("102030405060708090A0B0C0D0E0F2")),
-		output: "8F102030405060708090A0B0C0D0E0F2",
-	},
-	{
-		val:    big.NewInt(0).SetBytes(unhex("0100020003000400050006000700080009000A000B000C000D000E01")),
-		output: "9C0100020003000400050006000700080009000A000B000C000D000E01",
-	},
-	{
-		val:    big.NewInt(0).SetBytes(unhex("010000000000000000000000000000000000000000000000000000000000000000")),
-		output: "A1010000000000000000000000000000000000000000000000000000000000000000",
-	},
-	{
-		val:    veryBigInt,
-		output: "89FFFFFFFFFFFFFFFFFF",
-	},
-	{
-		val:    veryVeryBigInt,
-		output: "B848FFFFFFFFFFFFFFFFF800000000000000001BFFFFFFFFFFFFFFFFC8000000000000000045FFFFFFFFFFFFFFFFC800000000000000001BFFFFFFFFFFFFFFFFF8000000000000000001",
-	},
-
-	// non-pointer big.Int
-	{val: *big.NewInt(0), output: "80"},
-	{val: *big.NewInt(0xFFFFFF), output: "83FFFFFF"},
-
-	// negative ints are not supported
-	{val: big.NewInt(-1), error: "rlp: cannot encode negative big.Int"},
 
 	// uint256 integers (should match uint for small values)
 	{val: uint256.NewInt(0), output: "80"},
@@ -310,7 +269,6 @@ var encTests = []encTest{
 	{val: &optionalAndTailField{A: 1, B: 2}, output: "C20102"},
 	{val: &optionalAndTailField{A: 1, Tail: []uint{5, 6}}, output: "C401800506"},
 	{val: &optionalAndTailField{A: 1, Tail: []uint{5, 6}}, output: "C401800506"},
-	{val: &optionalBigIntField{A: 1}, output: "C101"},
 	{val: &optionalPtrField{A: 1}, output: "C101"},
 	{val: &optionalPtrFieldNil{A: 1}, output: "C101"},
 
@@ -319,7 +277,6 @@ var encTests = []encTest{
 	{val: (*string)(nil), output: "80"},
 	{val: (*[]byte)(nil), output: "80"},
 	{val: (*[10]byte)(nil), output: "80"},
-	{val: (*big.Int)(nil), output: "80"},
 	{val: (*uint256.Int)(nil), output: "80"},
 	{val: (*[]string)(nil), output: "C0"},
 	{val: (*[10]string)(nil), output: "C0"},
@@ -464,10 +421,9 @@ func TestEncodeToReaderPiecewise(t *testing.T) {
 func TestEncodeToReaderReturnToPool(t *testing.T) {
 	buf := make([]byte, 50)
 	wg := new(sync.WaitGroup)
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			for i := 0; i < 1000; i++ {
+	for range 5 {
+		wg.Go(func() {
+			for range 1000 {
 				_, r, _ := EncodeToReader("foo")
 				io.ReadAll(r)
 				r.Read(buf)
@@ -475,38 +431,12 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 				r.Read(buf)
 				r.Read(buf)
 			}
-			wg.Done()
-		}()
+		})
 	}
 	wg.Wait()
 }
 
 var sink any
-
-func BenchmarkPutint(b *testing.B) {
-	buf := make([]byte, 8)
-	for b.Loop() {
-		putint(buf, 0x12345678)
-		sink = buf
-	}
-}
-
-func BenchmarkEncodeBigInts(b *testing.B) {
-	ints := make([]*big.Int, 200)
-	for i := range ints {
-		ints[i] = math.BigPow(2, int64(i))
-	}
-	out := bytes.NewBuffer(make([]byte, 0, 4096))
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		out.Reset()
-		if err := Encode(out, ints); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func TestStringLen56(t *testing.T) {
 	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
@@ -566,34 +496,101 @@ func TestEncodeUint256Random(t *testing.T) {
 	}
 }
 
-func BenchmarkEncodeConcurrentInterface(b *testing.B) {
-	type struct1 struct {
-		A string
-		B *big.Int
-		C [20]byte
-	}
-	value := []any{
-		uint(999),
-		&struct1{A: "hello", B: big.NewInt(0xFFFFFFFF)},
-		[10]byte{1, 2, 3, 4, 5, 6},
-		[]string{"yeah", "yeah", "yeah"},
-	}
+type ptrTestAddr [20]byte
+type ptrTestHash [32]byte
 
-	var wg sync.WaitGroup
-	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+type ptrTestInner struct {
+	Address ptrTestAddr
+	Topics  []ptrTestHash
+	Data    []byte
+}
 
-			var buffer bytes.Buffer
-			for i := 0; i < b.N; i++ {
-				buffer.Reset()
-				err := Encode(&buffer, value)
-				if err != nil {
-					panic(err)
-				}
+type ptrTestOuter struct {
+	Head    ptrTestHash
+	Num     uint64
+	Bloom   [256]byte
+	Inners  []*ptrTestInner
+	Payload []byte
+}
+
+// TestEncodeValueAndPointerAgree pins the invariant callers rely on when switching
+// rlp.Encode(w, x) to rlp.Encode(w, &x): a pointer encodes exactly as the value it
+// points at. Both forms box into `any`; the pointer form is cheaper because boxing a
+// pointer copies nothing and leaves the pointee addressable, sparing the encoder a
+// reflect.New copy of each [N]byte it holds.
+func TestEncodeValueAndPointerAgree(t *testing.T) {
+	inner := &ptrTestInner{
+		Address: ptrTestAddr{1, 2, 3},
+		Topics:  []ptrTestHash{{4}, {5}},
+		Data:    []byte("payload"),
+	}
+	cases := []any{
+		ptrTestHash{9, 9, 9},
+		ptrTestAddr{},
+		*inner,
+		ptrTestInner{},
+		ptrTestOuter{Head: ptrTestHash{7}, Num: 42, Inners: []*ptrTestInner{inner, {}}, Payload: make([]byte, 100)},
+		ptrTestOuter{},
+		[17]uint64{1, 2, 3},
+	}
+	for i, c := range cases {
+		var byValue, byPointer bytes.Buffer
+		if err := Encode(&byValue, c); err != nil {
+			t.Fatalf("case %d: encode value: %v", i, err)
+		}
+		// pointerTo yields a pointer to a copy, which must still encode identically.
+		pv := pointerTo(c)
+		if err := Encode(&byPointer, pv); err != nil {
+			t.Fatalf("case %d: encode pointer: %v", i, err)
+		}
+		if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
+			t.Errorf("case %d (%T): value=%x pointer=%x", i, c, byValue.Bytes(), byPointer.Bytes())
+		}
+	}
+}
+
+// TestEncodePointerAvoidsByteArrayCopies documents why the pointer form is preferred:
+// fields of a value boxed into an interface are not addressable, so every [N]byte
+// field costs a reflect.New copy that the pointer form avoids entirely.
+func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
+	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
+
+	allocsPerEncode := func(val any) float64 {
+		return testing.AllocsPerRun(200, func() {
+			if err := Encode(io.Discard, val); err != nil {
+				t.Fatal(err)
 			}
-		}()
+		})
 	}
-	wg.Wait()
+	byValue := allocsPerEncode(v)
+	byPointer := allocsPerEncode(&v)
+	t.Logf("allocs/op: byValue=%v byPointer=%v", byValue, byPointer)
+
+	if byValue <= byPointer {
+		t.Errorf("expected the value form to allocate more than the pointer form, got value=%v pointer=%v", byValue, byPointer)
+	}
+	// encBuffer is pooled, and sync.Pool drops a random quarter of the values put
+	// back under the race detector, so the pooled path is not reliably zero there.
+	// The relative check above survives: its gap is the two reflect.New copies,
+	// which the pool does not touch.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled && byPointer != 0 {
+		t.Errorf("pointer form should not allocate, got %v allocs/op", byPointer)
+	}
+}
+
+func pointerTo(v any) any {
+	switch t := v.(type) {
+	case ptrTestHash:
+		return &t
+	case ptrTestAddr:
+		return &t
+	case ptrTestInner:
+		return &t
+	case ptrTestOuter:
+		return &t
+	case [17]uint64:
+		return &t
+	}
+	panic("unhandled case")
 }

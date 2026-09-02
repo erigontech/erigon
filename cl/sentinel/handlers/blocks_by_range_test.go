@@ -24,7 +24,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -38,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBlocksByRootHandler(t *testing.T) {
@@ -98,7 +97,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
 	require.NoError(t, err)
 
@@ -110,12 +109,14 @@ func TestBlocksByRootHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstByte[0], byte(0))
 
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := 0; i < int(count); i++ {
 		forkDigest := make([]byte, 4)
 
 		_, err := stream.Read(forkDigest)
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF { //nolint:errorlint // intentional bare sentinel check
 				t.Fatal("Stream is empty")
 			} else {
 				require.NoError(t, err)
@@ -126,7 +127,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -153,14 +154,16 @@ func TestBlocksByRootHandler(t *testing.T) {
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
-	defer tx.Rollback()
+	indiciesDB.Close()
+	tx.Rollback()
 }

@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -28,7 +29,7 @@ import (
 const InitialStackSize = 16
 
 // stackItem represents the type of item on the stack
-type stackItem int
+type stackItem int8
 
 const (
 	ItemObject stackItem = iota
@@ -44,11 +45,12 @@ type StackStream struct {
 	stack  []stackItem
 }
 
-// NewStackStream creates a new StackStream with the given jsoniter.Stream
-// The stack is pre-allocated with a capacity of InitialStackSize
-func NewStackStream(stream *jsoniter.Stream) *StackStream {
+// newStackStream creates a new StackStream writing to out. Building the
+// jsoniter.Stream here rather than taking one is what pins jsoniter's
+// IndentionStep at zero.
+func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
-		stream: stream,
+		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
 		stack:  make([]stackItem, 0, InitialStackSize),
 	}
 }
@@ -61,13 +63,16 @@ func (s *StackStream) Buffer() []byte {
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
+	// jsoniter latches the error on the stream, so a reused one would fail every
+	// later Flush without draining.
+	s.stream.Error = nil
 	s.stack = s.stack[:0]
 }
 
-// Write raw bytes to the stream
-func (s *StackStream) Write(content []byte) (int, error) {
+// WriteRawBytes writes already-encoded JSON held as bytes.
+func (s *StackStream) WriteRawBytes(content []byte) {
+	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 	s.popCommaOrField()
-	return s.stream.Write(content)
 }
 
 // WriteRaw writes raw content to the stream
@@ -174,7 +179,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 
 // WriteString writes a string value to the stream
 func (s *StackStream) WriteString(val string) {
-	s.stream.WriteString(val)
+	writeStringFast(s.stream, val)
 	s.popCommaOrField()
 }
 
@@ -187,6 +192,7 @@ func (s *StackStream) WriteObjectStart() {
 
 // WriteObjectEnd writes the end of an object and removes it from the stack
 func (s *StackStream) WriteObjectEnd() {
+	s.closeInside(ItemObject)
 	s.stream.WriteObjectEnd()
 	s.pop(ItemObject)
 }
@@ -200,6 +206,7 @@ func (s *StackStream) WriteArrayStart() {
 
 // WriteArrayEnd writes the end of an array and removes it from the stack
 func (s *StackStream) WriteArrayEnd() {
+	s.closeInside(ItemArray)
 	s.stream.WriteArrayEnd()
 	s.pop(ItemArray)
 }
@@ -212,7 +219,7 @@ func (s *StackStream) WriteMore() {
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) {
-	s.stream.WriteObjectField(fieldName)
+	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
 }
@@ -220,11 +227,6 @@ func (s *StackStream) WriteObjectField(fieldName string) {
 // Flush flushes the underlying stream
 func (s *StackStream) Flush() error {
 	return s.stream.Flush()
-}
-
-// Error returns any error from the underlying stream
-func (s *StackStream) Error() error {
-	return s.stream.Error
 }
 
 // BufferAsString returns the content as a string after flushing any incomplete structures
@@ -253,11 +255,6 @@ func (s *StackStream) IsComplete() bool {
 	return len(s.stack) == 0
 }
 
-// CurrentDepth returns the current nesting depth
-func (s *StackStream) CurrentDepth() int {
-	return len(s.stack)
-}
-
 // StackSummary returns a summary of the current stack state for debugging
 func (s *StackStream) StackSummary() string {
 	if len(s.stack) == 0 {
@@ -280,48 +277,57 @@ func (s *StackStream) StackSummary() string {
 	return result.String()
 }
 
-// ClosePending properly closes all pending JSON elements on the stack to ensure validity even when an error occurs.
-// You can specify how many elements to skip from the end of the stack for cases when they are handled in the user code.
-// @param skipLast number of items to skip from the end of the stack
-func (s *StackStream) ClosePending(skipLast uint) error {
+// ClosePending closes all open JSON structures above targetDepth, leaving the first targetDepth
+// stack entries intact so subsequent writes continue inside that nesting level.
+func (s *StackStream) ClosePending(targetDepth uint) error {
 	stackLen := len(s.stack)
 	if stackLen == 0 {
 		return s.stream.Error
 	}
+	if targetDepth > uint(stackLen) {
+		targetDepth = uint(stackLen)
+	}
 
-	// Process the stack in reverse order
-	for i := stackLen - 1; i >= int(skipLast); i-- {
-		item := s.stack[i]
-
-		if item == ItemField {
+	for i := stackLen - 1; i >= int(targetDepth); i-- {
+		switch s.stack[i] {
+		case ItemField:
 			s.stream.WriteNil()
-		} else if item == ItemComma {
-			if i-1 < stackLen && s.stack[i-1] == ItemObject {
-				// The previous item is a JSON object: we must add a field after the comma to preserve format validity
-				s.stream.WriteObjectField("")
-				s.stream.WriteString("")
+		case ItemComma:
+			if i > 0 && s.stack[i-1] == ItemObject {
+				// a trailing comma inside an object needs a placeholder field to stay valid
+				writeObjectFieldFast(s.stream, "")
+				writeStringFast(s.stream, "")
 			} else {
-				// The previous item is a JSON array: write a nil value after the comma
 				s.stream.WriteNil()
 			}
-		} else if item == ItemArray {
-			// Close array
+		case ItemArray:
 			s.stream.WriteArrayEnd()
-		} else if item == ItemObject {
-			// Close object
+		case ItemObject:
 			s.stream.WriteObjectEnd()
 		}
 	}
 
-	s.stack = s.stack[:0]
-
-	// Return any error from the underlying stream
+	s.stack = s.stack[:targetDepth]
 	return s.stream.Error
 }
+
+func (s *StackStream) Depth() int { return len(s.stack) }
 
 // push adds an item to the stack
 func (s *StackStream) push(item stackItem) {
 	s.stack = append(s.stack, item)
+}
+
+// closeInside completes whatever the caller left open inside the innermost
+// container of this kind, so ending it yields valid JSON rather than a dangling
+// comma or field. It does nothing once that container is already the top.
+func (s *StackStream) closeInside(kind stackItem) {
+	for i, item := range slices.Backward(s.stack) {
+		if item == kind {
+			_ = s.ClosePending(uint(i + 1))
+			return
+		}
+	}
 }
 
 // pop removes the specified item from the top of the stack, if present
@@ -332,7 +338,9 @@ func (s *StackStream) pop(item stackItem) {
 	}
 }
 
-// popCommaOrField is a helper method for the common case of popping ItemComma or ItemField from the stack
+// popCommaOrField pops ItemComma or ItemField after a value was written, and
+// hands the buffer over if that value filled it. Every writer goes through here,
+// so the bound holds for numbers and raw bytes as much as for strings.
 func (s *StackStream) popCommaOrField() {
 	if len(s.stack) > 0 {
 		top := s.stack[len(s.stack)-1]
@@ -340,4 +348,5 @@ func (s *StackStream) popCommaOrField() {
 			s.stack = s.stack[:len(s.stack)-1]
 		}
 	}
+	flushIfFull(s.stream)
 }

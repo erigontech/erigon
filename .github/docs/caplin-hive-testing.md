@@ -184,7 +184,7 @@ participants:
     cl_log_level: "debug"
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: sigp/lighthouse:v7.0.1
+    vc_image: sigp/lighthouse:v8.1.3
 network_params:
   seconds_per_slot: 12
   deneb_fork_epoch: 0
@@ -193,7 +193,7 @@ additional_services:
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:v0.0.17
+  image: ethpandaops/assertoor:v0.1.2
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml

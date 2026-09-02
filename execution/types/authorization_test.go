@@ -17,15 +17,19 @@
 package types
 
 import (
-	"bytes"
+	"errors"
+	"math"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
-// Tests that the correct signer is recovered from an Authorization object
-// The data here was obtained from a pectra devnet
+// The fixed vector pins the signing preimage independently of SignAuthorization:
+// a bug in the shared encoding keeps the round-trip test passing but changes
+// the address recovered from this externally signed vector.
 func TestRecoverSigner(t *testing.T) {
 	t.Parallel()
 
@@ -37,15 +41,85 @@ func TestRecoverSigner(t *testing.T) {
 		R:       uint256.Int{11238962557009670571, 14017651393191758745, 18358999445216475025, 5549385460848219779},
 		S:       uint256.Int{6390522493159340108, 17630603794136184458, 14442462445950880280, 846710983706847255},
 	}
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
-	authorityPtr, err := auth.RecoverSigner(data, b[:])
+	authority, err := auth.RecoverSigner()
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 	expectedSigner := common.HexToAddress("0x8ED5ABe9DE62dB2F266b06b86203f71e4C1e357f")
-	if *authorityPtr != expectedSigner {
-		t.Errorf("mismatch in recovered signer: got %v, want %v", *authorityPtr, expectedSigner)
+	if authority != expectedSigner {
+		t.Errorf("mismatch in recovered signer: got %v, want %v", authority, expectedSigner)
+	}
+}
+
+func TestSignAuthorizationRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := crypto.PubkeyToAddress(privateKey.PublicKey)
+	// Keep the delegation target distinct from the authority so the test checks
+	// both roles independently.
+	delegationTarget := authority
+	delegationTarget[0] ^= 0xff
+	chainID := *uint256.NewInt(7078815900)
+	const nonce = uint64(7)
+
+	auth, err := SignAuthorization(privateKey, chainID, delegationTarget, nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auth.ChainID != chainID {
+		t.Fatalf("unexpected chain ID: got %s, want %s", auth.ChainID.String(), chainID.String())
+	}
+	if auth.Address != delegationTarget {
+		t.Fatalf("unexpected delegation target: got %s, want %s", auth.Address, delegationTarget)
+	}
+	if auth.Nonce != nonce {
+		t.Fatalf("unexpected nonce: got %d, want %d", auth.Nonce, nonce)
 	}
 
+	recovered, err := auth.RecoverSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != authority {
+		t.Fatalf("unexpected authority: got %s, want %s", recovered, authority)
+	}
+}
+
+func TestSignAuthorizationRejectsMaxNonce(t *testing.T) {
+	t.Parallel()
+
+	privateKey, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = SignAuthorization(privateKey, uint256.Int{}, common.Address{}, math.MaxUint64)
+	if !errors.Is(err, errAuthNonceOverflow) {
+		t.Fatalf("expected maximum nonce to be rejected, got %v", err)
+	}
+	if got, want := err.Error(), "authorization nonce has max value"; got != want {
+		t.Fatalf("unexpected error: got %q, want %q", got, want)
+	}
+}
+
+func TestSignAuthorizationRejectsNilKey(t *testing.T) {
+	t.Parallel()
+
+	_, err := SignAuthorization(nil, uint256.Int{}, common.Address{}, 0)
+	if !errors.Is(err, errAuthNilPrivateKey) {
+		t.Fatalf("expected nil private key to be rejected, got %v", err)
+	}
+}
+
+func TestSignAuthorizationRejectsNilKeyBeforeMaxNonce(t *testing.T) {
+	t.Parallel()
+
+	_, err := SignAuthorization(nil, uint256.Int{}, common.Address{}, math.MaxUint64)
+	if !errors.Is(err, errAuthNilPrivateKey) {
+		t.Fatalf("expected nil private key to be rejected first, got %v", err)
+	}
 }

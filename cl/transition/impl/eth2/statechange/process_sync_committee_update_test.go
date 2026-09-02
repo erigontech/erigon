@@ -37,19 +37,19 @@ func TestProcessSyncCommittee(t *testing.T) {
 	s := state.New(&clparams.MainnetBeaconConfig)
 	currentCommittee := &solid.SyncCommittee{}
 	nextCommittee := &solid.SyncCommittee{}
-	for i := 0; i < validatorNum; i++ {
+	for i := range validatorNum {
 		var pubKey [48]byte
 		binary.BigEndian.PutUint64(pubKey[:], uint64(i))
 		v := solid.NewValidator()
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 		v.SetPublicKey(pk)
 		v.SetEffectiveBalance(2000000000)
-		s.AddValidator(v, 2000000000)
+		require.NoError(t, s.AddValidator(v, 2000000000))
 	}
-	s.SetCurrentSyncCommittee(currentCommittee)
-	s.SetNextSyncCommittee(nextCommittee)
+	require.NoError(t, s.SetCurrentSyncCommittee(currentCommittee))
+	require.NoError(t, s.SetNextSyncCommittee(nextCommittee))
 	prevNextSyncCommittee := s.NextSyncCommittee()
-	s.SetSlot(8160)
+	require.NoError(t, s.SetSlot(8160))
 	require.NoError(t, statechange.ProcessSyncCommitteeUpdate(s))
 	require.Equal(t, s.CurrentSyncCommittee(), prevNextSyncCommittee)
 	require.NotEqual(t, s.NextSyncCommittee(), prevNextSyncCommittee)

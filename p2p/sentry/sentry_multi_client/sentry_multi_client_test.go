@@ -11,14 +11,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -177,7 +176,7 @@ func (m *mockSentryClient) PenalizePeer(ctx context.Context, req *proto_sentry.P
 }
 
 type mockBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 }
 
 // TestBlockRange69_InvalidPacketKicksPeer verifies that an invalid
@@ -245,7 +244,7 @@ func (m *mockStatusDataProvider) GetStatusData(ctx context.Context) (*proto_sent
 }
 
 type mockFullBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 	readyFunc func(ctx context.Context) <-chan error
 }
 
@@ -253,13 +252,13 @@ func (m *mockFullBlockReader) Ready(ctx context.Context) <-chan error {
 	return m.readyFunc(ctx)
 }
 
-// balHeaderNumberReader is a minimal services.FullBlockReader stub that resolves
+// balHeaderNumberReader is a minimal dbservices.FullBlockReader stub that resolves
 // hash → block-number via an explicit map. AnswerGetBlockAccessListsQuery only
 // reads HeaderNumber; every other method falls through to the embedded nil
 // interface and would panic if called, which is the correct behaviour — it
 // flags accidental coupling.
 type balHeaderNumberReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 	byHash map[common.Hash]uint64
 }
 
@@ -280,7 +279,7 @@ func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, has
 func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 	ctx := context.Background()
 
-	db := temporal.NewTestDB(t, dbcfg.ChainDB)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	rwTx, err := db.BeginRw(ctx)
 	if err != nil {
 		t.Fatalf("begin rw: %v", err)
@@ -360,77 +359,4 @@ func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 	if !bytes.Equal(resp.BlockAccessListsPacket[1], []byte{0x80}) {
 		t.Errorf("response[1] (unknown block): have %x, want 0x80 sentinel", resp.BlockAccessListsPacket[1])
 	}
-}
-
-// TestBlockAccessLists71_NilFetcherDropsMessage covers the nil-guard added in
-// blockAccessLists71: in-package builds (e.g. tests that construct
-// &MultiClient{...} directly without wiring the BAL fetcher) must not panic on
-// a stray inbound BLOCK_ACCESS_LISTS_71 message. The guard drops the message
-// silently and returns nil so the dispatch loop can continue.
-func TestBlockAccessLists71_NilFetcherDropsMessage(t *testing.T) {
-	ctx := context.Background()
-
-	// Encode a syntactically valid BlockAccessListsPacket66 — even with a
-	// well-formed payload the handler must not call into a nil balFetcher.
-	bal, err := rlp.EncodeToBytes([]any{[]byte{0x01, 0x02}, []byte{0x03}})
-	if err != nil {
-		t.Fatalf("encode stub bal: %v", err)
-	}
-	packet := eth.BlockAccessListsPacket66{
-		RequestId:              0xdeadbeef,
-		BlockAccessListsPacket: eth.BlockAccessListsPacket{bal},
-	}
-	payload, err := rlp.EncodeToBytes(&packet)
-	if err != nil {
-		t.Fatalf("encode packet: %v", err)
-	}
-
-	peerId := &proto_types.H512{
-		Hi: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
-		Lo: &proto_types.H256{Hi: &proto_types.H128{}, Lo: &proto_types.H128{}},
-	}
-
-	cs := &MultiClient{logger: log.New()} // no balFetcher set
-
-	// Direct call: must not panic, must return nil.
-	if err := cs.blockAccessLists71(ctx, &proto_sentry.InboundMessage{
-		PeerId: peerId,
-		Data:   payload,
-	}, &mockSentryClient{}); err != nil {
-		t.Fatalf("blockAccessLists71 with nil fetcher should drop and return nil, got: %v", err)
-	}
-
-	// Dispatch path: same packet routed via HandleInboundMessage with the
-	// real eth/71 BAL message id must also be a clean no-op. HandleInboundMessage
-	// recovers panics and surfaces them as errors, so any failure here would
-	// have shown up as a non-nil err.
-	if err := cs.HandleInboundMessage(ctx, &proto_sentry.InboundMessage{
-		PeerId: peerId,
-		Id:     proto_sentry.MessageId_BLOCK_ACCESS_LISTS_71,
-		Data:   payload,
-	}, &mockSentryClient{}); err != nil {
-		t.Fatalf("HandleInboundMessage(BLOCK_ACCESS_LISTS_71) with nil fetcher should be a no-op, got: %v", err)
-	}
-}
-
-// TestRecvMessageLoop_SubscribesToBlockAccessListsMsg is a structural guard for
-// the inbound-response subscription added alongside blockAccessLists71: without
-// eth.ToProto[direct.ETH71][eth.BlockAccessListsMsg] in RecvMessageLoop's id
-// list, peer responses to outbound GetBlockAccessLists requests never reach
-// HandleInboundMessage, every fetch times out, and the BALDownloader silently
-// burns scan passes. Caught empirically on bal-devnet-3 pre-fix; this guards
-// against regressing the subscription back out.
-//
-// We can't run RecvMessageLoop in a unit test (it pumps an indefinite gRPC
-// stream), but we can assert the message-id list it builds contains the eth/71
-// response code by scanning the source — kept simple to avoid refactoring the
-// loop just for testability.
-func TestRecvMessageLoop_SubscribesToBlockAccessListsMsg(t *testing.T) {
-	if got := eth.ToProto[direct.ETH71][eth.BlockAccessListsMsg]; got != proto_sentry.MessageId_BLOCK_ACCESS_LISTS_71 {
-		t.Fatalf("eth.ToProto wiring drift: ETH71/BlockAccessListsMsg = %v, want BLOCK_ACCESS_LISTS_71", got)
-	}
-	// The subscription itself lives in RecvMessageLoop. The behavioural proof
-	// that it fires is in TestBlockAccessLists71_NilFetcherDropsMessage's
-	// HandleInboundMessage path above plus the bal-devnet-3 live-peer trace
-	// (zero `[bal-downloader] fetch failed` entries post-fix).
 }

@@ -34,8 +34,8 @@ type Service struct {
 
 // NewService creates a dev validator service.
 func NewService(beaconAPIURL string, seed string, validatorCount int,
-	cfg *clparams.BeaconChainConfig, logger log.Logger) (*Service, error) {
-
+	cfg *clparams.BeaconChainConfig, logger log.Logger,
+) (*Service, error) {
 	keys, err := LoadKeys(seed, validatorCount)
 	if err != nil {
 		return nil, fmt.Errorf("load dev validator keys: %w", err)
@@ -66,7 +66,8 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 
-	s.logger.Info("[dev-validator] started",
+	s.logger.Info(
+		"[dev-validator] started",
 		"validators", len(s.keys),
 		"slotsPerEpoch", s.cfg.SlotsPerEpoch,
 		"secondsPerSlot", s.cfg.SecondsPerSlot,
@@ -109,7 +110,8 @@ func (s *Service) waitForReady(ctx context.Context) {
 			if err == nil && len(root) == 32 {
 				copy(s.genesisValidatorsRoot[:], root)
 			}
-			s.logger.Info("[dev-validator] beacon node ready",
+			s.logger.Info(
+				"[dev-validator] beacon node ready",
 				"genesisTime", s.genesisTime,
 				"validatorsRoot", s.genesisValidatorsRoot.Hex(),
 			)
@@ -197,6 +199,9 @@ func (s *Service) slotLoop(ctx context.Context) {
 		// Attest for all validators with duties at this slot.
 		s.maybeAttest(ctx, currentSlot)
 
+		// Submit sync committee messages for validators in the current committee.
+		s.maybeSyncCommittee(ctx, currentSlot)
+
 		// Wait for next slot.
 		if time.Now().Before(nextSlotStart) {
 			time.Sleep(time.Until(nextSlotStart))
@@ -265,7 +270,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 
 	var blockResponse json.RawMessage
 	var getErr error
-	for attempt := 0; attempt < 5; attempt++ {
+	for range 5 {
 		getErr = s.client.get(ctx, path, &blockResponse)
 		if getErr == nil {
 			break
@@ -322,7 +327,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	// Submit the signed block. For Deneb+, wrap in DenebSignedBeaconBlock
 	// with empty blob sidecars.
 	versionStr := version.String()
-	var submitBody interface{} = block
+	var submitBody any = block
 	if version >= clparams.DenebVersion {
 		submitBody = &cltypes.DenebSignedBeaconBlock{
 			SignedBlock: block,
@@ -341,6 +346,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 // maybeAttest submits attestations for validators with duties at this slot.
 func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 	epoch := slot / s.cfg.SlotsPerEpoch
+	version := s.cfg.GetCurrentStateVersion(epoch)
 
 	// Get attester duties for this epoch.
 	type attesterDuty struct {
@@ -409,7 +415,6 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 			continue
 		}
 
-		// Build aggregation bits — set our bit position.
 		committeeLength, parseErr := strconv.ParseUint(duty.CommitteeLength, 10, 64)
 		if parseErr != nil {
 			continue
@@ -419,21 +424,22 @@ func (s *Service) maybeAttest(ctx context.Context, slot uint64) {
 			continue
 		}
 
-		aggBitsLen := (committeeLength + 7) / 8
-		aggBits := make([]byte, aggBitsLen)
-		aggBits[validatorPosition/8] |= 1 << (validatorPosition % 8)
-
-		// Submit attestation.
-		attestation := map[string]interface{}{
-			"aggregation_bits": hexutil.Encode(aggBits),
-			"data":             &attData,
-			"signature":        hexutil.Encode(sig[:]),
+		sub := buildAttestationSubmission(version, committeeIndex, key.ValidatorIndex, &attData, sig, committeeLength, validatorPosition)
+		var submitErr error
+		if sub.version != "" {
+			submitErr = s.client.postJSON(ctx, sub.path, sub.body, sub.version)
+		} else {
+			submitErr = s.client.post(ctx, sub.path, sub.body)
 		}
-		if err := s.client.post(ctx, "/eth/v1/beacon/pool/attestations", []interface{}{attestation}); err != nil {
-			s.logger.Debug("[dev-validator] attestation submit failed", "slot", slot, "err", err)
+		if submitErr != nil {
+			s.logger.Debug("[dev-validator] attestation submit failed", "slot", slot, "err", submitErr)
 			continue
 		}
 		attested++
+
+		if version >= clparams.ElectraVersion {
+			s.submitAggregateAndProof(ctx, slot, committeeIndex, key, &attData, sig, committeeLength, validatorPosition)
+		}
 	}
 
 	if attested > 0 {

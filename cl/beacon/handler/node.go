@@ -177,5 +177,6 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 			"is_syncing":    a.syncedData.Syncing(),
 			"is_optimistic": false, // needs to change
 			"el_offline":    false,
-		}), nil
+		},
+	), nil
 }

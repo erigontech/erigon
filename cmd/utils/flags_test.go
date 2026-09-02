@@ -21,14 +21,19 @@
 package utils
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/p2p"
 )
 
 func Test_SplitTagsFlag(t *testing.T) {
@@ -88,6 +93,22 @@ func TestCobraFlags_BoolDefaultsArePreserved(t *testing.T) {
 	require.False(t, gotFalse)
 }
 
+// A user-set --rpc.gascap must reach the config, not silently collapse to 0
+// (= infinite cap). rpc.gascap is registered as a UintFlag, so the accessor
+// behind RpcGasCap must be ctx.Uint; under urfave/cli v3 a mismatched read
+// yields 0.
+func TestRpcGasCap_UserValuePreserved(t *testing.T) {
+	// urfave/cli v3 flags carry parse state, so use a fresh copy per run.
+	gasCap := RpcGasCapFlag
+	app := &cli.Command{Flags: []cli.Flag{&gasCap}}
+	app.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.True(t, cmd.IsSet(RpcGasCapFlag.Name))
+		require.Equal(t, uint64(30_000_000), RpcGasCap(cmd))
+		return nil
+	}
+	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--rpc.gascap=30000000"}))
+}
+
 func TestResolveChainName(t *testing.T) {
 	tests := []struct {
 		name string
@@ -99,20 +120,24 @@ func TestResolveChainName(t *testing.T) {
 		{"--networkid=1 only → mainnet", []string{"--networkid=1"}, "mainnet"},
 		{"--networkid=11155111 only → sepolia (known id)", []string{"--networkid=11155111"}, "sepolia"},
 		{"--networkid=99999 only → empty (unknown id)", []string{"--networkid=99999"}, ""},
-		{"--networkid=1337 only → bor-devnet (registered id)", []string{"--networkid=1337"}, "bor-devnet"},
+		{"--networkid=100 only → gnosis (registered id)", []string{"--networkid=100"}, "gnosis"},
 		{"--networkid=99999 --chain=mainnet → mainnet (explicit chain wins)", []string{"--networkid=99999", "--chain=mainnet"}, "mainnet"},
 		{"--networkid=99999 --chain=sepolia → sepolia (explicit chain wins)", []string{"--networkid=99999", "--chain=sepolia"}, "sepolia"},
 		{"--networkid=1 --chain=sepolia → sepolia (explicit chain wins over mainnet id)", []string{"--networkid=1", "--chain=sepolia"}, "sepolia"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := cli.NewApp()
-			app.Flags = []cli.Flag{&ChainFlag, &NetworkIdFlag}
-			app.Action = func(ctx *cli.Context) error {
+			// urfave/cli v3 flags carry parse state (hasBeenSet), so use fresh
+			// instances per run instead of the shared package-global flags.
+			chainFlag := ChainFlag
+			networkIdFlag := NetworkIdFlag
+			app := &cli.Command{}
+			app.Flags = []cli.Flag{&chainFlag, &networkIdFlag}
+			app.Action = func(_ context.Context, ctx *cli.Command) error {
 				require.Equal(t, tt.want, resolveChainName(ctx))
 				return nil
 			}
-			require.NoError(t, app.Run(append([]string{"test"}, tt.args...)))
+			require.NoError(t, app.Run(context.Background(), append([]string{"test"}, tt.args...)))
 		})
 	}
 }
@@ -139,7 +164,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetNoBackgroundMaintenance(origNoBackgroundMaintenance)
 	})
 
-	apply := func(ctx *cli.Context) error {
+	apply := func(_ context.Context, ctx *cli.Command) error {
 		if ctx.IsSet(ExecBatchedIOFlag.Name) {
 			v := ctx.Bool(ExecBatchedIOFlag.Name)
 			dbg.SetReadAhead(v)
@@ -167,13 +192,17 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	}
 
 	run := func(args ...string) {
-		app := cli.NewApp()
+		// Fresh flag instances per run (v3 flags carry parse state across Run calls).
+		batchedIO, stateCache, workers := ExecBatchedIOFlag, ExecStateCacheFlag, ExecWorkersFlag
+		serial, noMerge, noPrune := ExecSerialFlag, ExecNoMergeFlag, ExecNoPruneFlag
+		noBgMaint := ExecNoBackgroundMaintenanceFlag
+		app := &cli.Command{}
 		app.Flags = []cli.Flag{
-			&ExecBatchedIOFlag, &ExecStateCacheFlag, &ExecWorkersFlag,
-			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag, &ExecNoBackgroundMaintenanceFlag,
+			&batchedIO, &stateCache, &workers,
+			&serial, &noMerge, &noPrune, &noBgMaint,
 		}
 		app.Action = apply
-		require.NoError(t, app.Run(append([]string{"test"}, args...)))
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
 	}
 
 	t.Run("no flags set leaves dbg untouched", func(t *testing.T) {
@@ -255,4 +284,72 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		run("--exec.no-background-maintenance=true")
 		require.True(t, dbg.NoBackgroundMaintenance())
 	})
+}
+
+func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
+	newCfg := func(nodiscover bool) *p2p.Config {
+		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
+		require.NoError(t, err)
+		return cfg
+	}
+
+	t.Run("discovery enabled by default", func(t *testing.T) {
+		cfg := newCfg(false)
+		require.False(t, cfg.NoDiscovery)
+		require.True(t, cfg.DiscoveryV5)
+	})
+
+	t.Run("nodiscover disables discovery", func(t *testing.T) {
+		cfg := newCfg(true)
+		require.True(t, cfg.NoDiscovery)
+		require.False(t, cfg.DiscoveryV5)
+	})
+}
+
+// The spec states column retention in epochs, so its slot count depends on SLOTS_PER_EPOCH.
+// Zero is the pruner's signal to derive the window from the active chain config, so an unset
+// flag must stay zero rather than pin one chain's slot count.
+func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
+	parse := func(args ...string) uint64 {
+		keepSlots := CaplinColumnKeepSlotsFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&keepSlots},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg.CaplinConfig.ColumnKeepSlots
+	}
+
+	require.Zero(t, parse(), "unset must defer to the chain config, not pin mainnet's slot count")
+	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
+}
+
+func TestCommitmentPlainValuesFromCtx(t *testing.T) {
+	parse := func(args ...string) *bool {
+		var got *bool
+		flag := cli.BoolFlag{Name: CommitmentPlainValuesFlag.Name}
+		app := &cli.Command{
+			Flags: []cli.Flag{&flag},
+			Action: func(ctx context.Context, cmd *cli.Command) error {
+				got = CommitmentPlainValuesFromCtx(cmd)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return got
+	}
+
+	require.Nil(t, parse(), "unset => nil")
+
+	gotTrue := parse("--commitment.plainValues")
+	require.NotNil(t, gotTrue)
+	require.True(t, *gotTrue)
+
+	gotFalse := parse("--commitment.plainValues=false")
+	require.NotNil(t, gotFalse)
+	require.False(t, *gotFalse)
 }

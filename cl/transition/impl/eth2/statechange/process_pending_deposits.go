@@ -2,27 +2,34 @@ package statechange
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-func ProcessPendingDeposits(s abstract.BeaconState) {
+func ProcessPendingDeposits(s abstract.BeaconState) error {
 	defer monitor.ObserveElaspedTime(monitor.ProcessPendingDepositsTime).End()
 
 	var (
 		nextEpoch              = s.Slot()/s.BeaconConfig().SlotsPerEpoch + 1
 		availableForProcessing = s.GetDepositBalanceToConsume() + state.GetActivationExitChurnLimit(s)
-		processAmount          = uint64(0)
-		nextDepositIndex       = 0
-		depositToPostpone      = []*solid.PendingDeposit{}
-		isChurnLimitReached    = false
-		finalizedSlot          = s.FinalizedCheckpoint().Epoch * s.BeaconConfig().SlotsPerEpoch
+	)
+	if s.Version() >= clparams.GloasVersion {
+		availableForProcessing = s.GetDepositBalanceToConsume() + state.GetActivationChurnLimit(s)
+	}
+	var (
+		processAmount       = uint64(0)
+		nextDepositIndex    = 0
+		depositToPostpone   = []*solid.PendingDeposit{}
+		isChurnLimitReached = false
+		finalizedSlot       = s.FinalizedCheckpoint().Epoch * s.BeaconConfig().SlotsPerEpoch
+		applyErr            error
 	)
 	s.GetPendingDeposits().Range(func(i int, d *solid.PendingDeposit, length int) bool {
 		// Do not process deposit requests if Eth1 bridge deposits are not yet applied.
-		if d.Slot > s.BeaconConfig().GenesisSlot && s.Eth1DepositIndex() < s.GetDepositRequestsStartIndex() {
+		if s.Version() < clparams.FuluVersion && d.Slot > s.BeaconConfig().GenesisSlot && s.Eth1DepositIndex() < s.GetDepositRequestsStartIndex() {
 			return false
 		}
 		// Check if deposit has been finalized, otherwise, stop processing.
@@ -41,13 +48,16 @@ func ProcessPendingDeposits(s abstract.BeaconState) {
 			isValidatorWithdrawn = validator.WithdrawableEpoch() < nextEpoch
 		}
 
-		if isValidatorWithdrawn {
+		switch {
+		case isValidatorWithdrawn:
 			// Deposited balance will never become active. Increase balance but do not consume churn
-			applyPendingDeposit(s, d)
-		} else if isValidatorExited {
+			if applyErr = applyPendingDeposit(s, d); applyErr != nil {
+				return false
+			}
+		case isValidatorExited:
 			// Validator is exiting, postpone the deposit until after withdrawable epoch
 			depositToPostpone = append(depositToPostpone, d)
-		} else {
+		default:
 			// Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
 			isChurnLimitReached = processAmount+d.Amount > availableForProcessing
 			if isChurnLimitReached {
@@ -55,11 +65,16 @@ func ProcessPendingDeposits(s abstract.BeaconState) {
 			}
 			// Consume churn and apply deposit.
 			processAmount += d.Amount
-			applyPendingDeposit(s, d)
+			if applyErr = applyPendingDeposit(s, d); applyErr != nil {
+				return false
+			}
 		}
 		nextDepositIndex++
 		return true
 	})
+	if applyErr != nil {
+		return applyErr
+	}
 
 	// update pending deposits. [nextDepositIndex:] + [postponed]
 	newPendingDeposits := s.GetPendingDeposits().ShallowCopy()
@@ -75,20 +90,22 @@ func ProcessPendingDeposits(s abstract.BeaconState) {
 	} else {
 		s.SetDepositBalanceToConsume(0)
 	}
+	return nil
 }
 
-func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) {
-	if vindex, exist := s.ValidatorIndexByPubkey(d.PubKey); !exist {
+func applyPendingDeposit(s abstract.BeaconState, d *solid.PendingDeposit) error {
+	vindex, exist := s.ValidatorIndexByPubkey(d.PubKey)
+	if !exist {
 		if valid, _ := IsValidDepositSignature(&cltypes.DepositData{
 			PubKey:                d.PubKey,
 			WithdrawalCredentials: d.WithdrawalCredentials,
 			Amount:                d.Amount,
 			Signature:             d.Signature,
 		}, s.BeaconConfig()); valid {
-			AddValidatorToRegistry(s, d.PubKey, d.WithdrawalCredentials, d.Amount)
+			return AddValidatorToRegistry(s, d.PubKey, d.WithdrawalCredentials, d.Amount)
 		}
-	} else {
-		// increase balance
-		state.IncreaseBalance(s, vindex, d.Amount)
+		return nil
 	}
+	// increase balance
+	return state.IncreaseBalance(s, vindex, d.Amount)
 }

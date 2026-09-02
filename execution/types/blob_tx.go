@@ -20,12 +20,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -145,26 +145,16 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []any{
-		&stx.ChainID,
-		stx.Nonce,
-		&stx.TipCap,
-		&stx.FeeCap,
-		stx.GasLimit,
-		stx.To,
-		&stx.Value,
-		stx.Data,
-		stx.AccessList,
-		&stx.MaxFeePerBlobGas,
-		stx.BlobVersionedHashes,
-		stx.V, stx.R, stx.S,
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
+	hash := prefixedPayloadHash(BlobTxType, func(w io.Writer, b []byte) error {
+		return stx.encodePayload(w, b, payloadSize, accessListLen, blobHashesLen)
 	})
 	stx.hash.Store(&hash)
 	return hash
 }
 
 type blobTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -177,7 +167,7 @@ type blobTxSigHash struct {
 	BlobHashes []common.Hash
 }
 
-func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
+func (stx *BlobTx) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		&blobTxSigHash{
@@ -238,7 +228,7 @@ func blobVersionedHashesSize(hashes []common.Hash) int {
 }
 
 func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) error {
-	for i := 0; i < len(hashes); i++ {
+	for i := range hashes {
 		if err := rlp.EncodeString(hashes[i][:], w, b); err != nil {
 			return err
 		}
@@ -272,11 +262,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode To
-	b[0] = 128 + 20
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if _, err := w.Write(stx.To[:]); err != nil {
+	if err := EncodeOptionalAddress(stx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
@@ -369,33 +355,34 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.ChainID); err != nil {
+	if err := s.ReadUint256(&stx.ChainID); err != nil {
 		return err
 	}
 	if stx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.TipCap); err != nil {
+	if err := s.ReadUint256(&stx.TipCap); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.FeeCap); err != nil {
+	if err := s.ReadUint256(&stx.FeeCap); err != nil {
 		return err
 	}
 	if stx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	stx.To = &common.Address{}
 	if kind, size, err := s.Kind(); err != nil {
 		return err
 	} else if kind == rlp.Byte {
-		return fmt.Errorf("wrong size for To: 1")
-	} else if size != 20 {
+		return errors.New("wrong size for To: 1")
+	} else if size != length.Addr {
 		return fmt.Errorf("wrong size for To: %d", size)
 	}
-	if err = s.ReadBytes(stx.To[:]); err != nil {
+	to, err := s.Addr()
+	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.Value); err != nil {
+	stx.To = &to
+	if err := s.ReadUint256(&stx.Value); err != nil {
 		return err
 	}
 	if stx.Data, err = s.Bytes(); err != nil {
@@ -403,48 +390,29 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode AccessList
 	stx.AccessList = AccessList{}
-	if err = decodeAccessList(&stx.AccessList, s); err != nil {
+	if err := decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}
 	// decode MaxFeePerBlobGas
-	if err = s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
+	if err := s.ReadUint256(&stx.MaxFeePerBlobGas); err != nil {
 		return err
 	}
 	// decode BlobVersionedHashes
-	stx.BlobVersionedHashes = []common.Hash{}
-	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
-		return err
+	if stx.BlobVersionedHashes, err = decodeHashList(s); err != nil {
+		return fmt.Errorf("read BlobVersionedHashes: %w", err)
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
 		return errors.New("a blob stx must contain at least one blob")
 	}
 	// decode V
-	if err = s.ReadUint256(&stx.V); err != nil {
+	if err := s.ReadUint256(&stx.V); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.R); err != nil {
+	if err := s.ReadUint256(&stx.R); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&stx.S); err != nil {
+	if err := s.ReadUint256(&stx.S); err != nil {
 		return err
 	}
 	return s.ListEnd()
-}
-
-func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open BlobVersionedHashes: %w", err)
-	}
-	for s.MoreDataInList() {
-		var h common.Hash
-		if err = s.ReadBytes(h[:]); err != nil {
-			return fmt.Errorf("read blobVersionedHash: %w", err)
-		}
-		*hashes = append(*hashes, h)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close BlobVersionedHashes: %w", err)
-	}
-	return nil
 }

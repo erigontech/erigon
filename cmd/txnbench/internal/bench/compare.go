@@ -46,7 +46,7 @@ func CompareResults(old BenchOutput, newer BenchOutput) string {
 	}
 	results := make([]cluster, 0, clusters)
 
-	for i := 0; i < clusters; i++ {
+	for i := range clusters {
 		startIdx := i * clusterSize
 		endIdx := startIdx + clusterSize
 		if i == clusters-1 || endIdx > len(keys) {

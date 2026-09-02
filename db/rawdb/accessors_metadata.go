@@ -25,12 +25,13 @@ import (
 	"encoding/json"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -44,16 +45,17 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	}
 
 	var config chain.Config
-	if err := json.Unmarshal(data, &config); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
 
-	if config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		if err := json.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
-		}
-		config.Bor = borConfig
+	// chain.Config no longer has a 'bor' field, so a stored Polygon config would
+	// otherwise load with its consensus settings silently dropped.
+	var probe struct {
+		Bor json.RawMessage `json:"bor"`
+	}
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &probe); err == nil && len(probe.Bor) > 0 && !bytes.Equal(probe.Bor, []byte("null")) {
+		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
 	return &config, nil
 }
@@ -64,15 +66,20 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 		return nil
 	}
 
-	if cfg.Bor != nil {
-		borJSON, err := json.Marshal(cfg.Bor)
+	// L2 resolution from L2JSON is owned by the registering L2 package, so
+	// only the raw payload round-trips here; a present L2JSON is the source
+	// of truth and is not clobbered by re-marshalling the resolved value.
+	// A `"l2": null` payload counts as absent, so the resolved value still
+	// backfills it rather than persisting the literal `null`.
+	if cfg.L2 != nil && (len(cfg.L2JSON) == 0 || bytes.Equal(cfg.L2JSON, []byte("null"))) {
+		l2JSON, err := jsoniter.ConfigFastest.Marshal(cfg.L2)
 		if err != nil {
-			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
+			return fmt.Errorf("failed to JSON encode chain config 'l2': %w", err)
 		}
-		cfg.BorJSON = borJSON
+		cfg.L2JSON = l2JSON
 	}
 
-	data, err := json.Marshal(cfg)
+	data, err := jsoniter.ConfigFastest.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to JSON encode chain config: %w", err)
 	}
@@ -93,7 +100,7 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	}
 
 	// Marshal json g
-	val, err := json.Marshal(g)
+	val, err := jsoniter.ConfigFastest.Marshal(g)
 	if err != nil {
 		return err
 	}
@@ -109,7 +116,7 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 		return nil, nil
 	}
 	var g types.Genesis
-	if err := json.Unmarshal(val, &g); err != nil {
+	if err := jsoniter.ConfigFastest.Unmarshal(val, &g); err != nil {
 		return nil, err
 	}
 	return &g, nil

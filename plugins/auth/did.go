@@ -47,12 +47,11 @@ func ParseDID(s string) (DID, error) {
 		return DID{}, fmt.Errorf("invalid DID: must start with 'did:': %q", s)
 	}
 
-	parts := strings.SplitN(s, ":", 3)
-	if len(parts) < 3 {
+	remaining := strings.TrimPrefix(s, "did:")
+	method, _, ok := strings.Cut(remaining, ":")
+	if !ok || method == "" {
 		return DID{}, fmt.Errorf("invalid DID: too few components: %q", s)
 	}
-
-	method := parts[1]
 	switch method {
 	case "pkh":
 		return parseDIDPKH(s)

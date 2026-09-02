@@ -20,6 +20,7 @@
 package discover
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"math/rand"
@@ -134,7 +135,7 @@ func waitForRevalidationPing(t *testing.T, transport *pingRecorder, tab *Table, 
 
 	simclock := tab.cfg.Clock.(*mclock.Simulated)
 	maxAttempts := tab.len() * 8
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		simclock.Run(tab.cfg.PingInterval * slowRevalidationFactor)
 		p := transport.waitPing(2 * time.Second)
 		if p == nil {
@@ -155,7 +156,7 @@ func TestTable_IPLimit(t *testing.T) {
 	defer db.Close()
 	defer tab.close()
 
-	for i := 0; i < tableIPLimit+1; i++ {
+	for i := range tableIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), i, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -173,7 +174,7 @@ func TestTable_BucketIPLimit(t *testing.T) {
 	defer tab.close()
 
 	d := 3
-	for i := 0; i < bucketIPLimit+1; i++ {
+	for i := range bucketIPLimit + 1 {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
@@ -481,7 +482,7 @@ func nodeIDEqual[N nodeType](n1, n2 N) bool {
 
 // gen wraps quick.Value so it's easier to use.
 // it generates a random value of the given value's type.
-func gen(typ interface{}, rand *rand.Rand) interface{} {
+func gen(typ any, rand *rand.Rand) any {
 	v, ok := quick.Value(reflect.TypeOf(typ), rand)
 	if !ok {
 		panic(fmt.Sprintf("couldn't generate random value of type %T", typ))
@@ -562,4 +563,42 @@ func newkey() *ecdsa.PrivateKey {
 		panic("couldn't generate key: " + err.Error())
 	}
 	return key
+}
+
+// This test checks that waitForNodes does not deadlock with addFoundNode.
+func TestTable_waitForNodesLocking(t *testing.T) {
+	transport := newPingRecorder()
+	tab, db := newTestTable(transport, Config{})
+	defer db.Close()
+	defer tab.close()
+	<-tab.initDone
+
+	// waitForNodes will never reach this count, so it stays subscribed
+	// to nodeFeed and looping for the duration of the test.
+	waitCtx, cancelWait := context.WithCancel(context.Background())
+	defer cancelWait()
+	waitDone := make(chan struct{})
+	go func() {
+		defer close(waitDone)
+		tab.waitForNodes(waitCtx, 1<<20)
+	}()
+
+	// Call addFoundNode in a loop to send to the feed repeatedly.
+	addDone := make(chan struct{})
+	go func() {
+		defer close(addDone)
+		for i := range 10000 {
+			d := 240 + (i % 17)
+			n := nodeAtDistance(tab.self().ID(), d, intIP(i))
+			tab.addFoundNode(n, true)
+		}
+	}()
+
+	select {
+	case <-addDone:
+		cancelWait()
+		<-waitDone
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock detected: add loop did not finish within 10s")
+	}
 }

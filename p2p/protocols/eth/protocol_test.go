@@ -21,14 +21,15 @@ package eth
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
@@ -241,10 +242,10 @@ func TestEth66Messages(t *testing.T) {
 }
 
 // TestBlockAccessListsPacket66RoundTrip verifies the eth/71 (EIP-8159) BAL
-// exchange packet types encode and decode losslessly at every cardinality that
-// matters in production: nil, empty list, single RLP-empty-list ("not available"
-// or "genuinely empty BAL"), and a multi-entry response with heterogeneous
-// payloads.
+// exchange packet types encode and decode losslessly across the entry shapes
+// covered here: nil, empty list, the "genuinely empty BAL" sentinel (0xc0,
+// per post-#11553 spec), populated BAL bytes, and a multi-entry mix. The
+// "not available" sentinel (0x80) is not exercised by this test.
 func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 	const reqID uint64 = 0x12345678
 
@@ -260,7 +261,7 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode stub BAL: %v", err)
 	}
-	emptyRLPList := common.FromHex("c0") // EIP-8159: empty list = "not available" OR "genuinely empty"
+	emptyRLPList := common.FromHex("c0") // EIP-8159 (post-#11553): 0xc0 = "genuinely empty BAL" (0x80 = "not available")
 
 	t.Run("GetBlockAccessLists", func(t *testing.T) {
 		cases := [][]common.Hash{
@@ -297,9 +298,9 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 		cases := [][]rlp.RawValue{
 			nil,
 			{},
-			{emptyRLPList},           // single "not available / empty" entry
+			{emptyRLPList},           // single "genuinely empty BAL" entry
 			{bal},                    // single populated BAL
-			{bal, emptyRLPList, bal}, // mixed — some available, one not
+			{bal, emptyRLPList, bal}, // mixed — populated and genuinely-empty BALs
 		}
 		for i, bals := range cases {
 			msg := BlockAccessListsPacket66{RequestId: reqID, BlockAccessListsPacket: bals}
@@ -330,14 +331,14 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 // the protocol name/length tables and that the two new message codes route to
 // their sentry MessageId counterparts via ToProto/FromProto.
 func TestEth71ProtocolRegistration(t *testing.T) {
-	if name, ok := ProtocolToString[direct.ETH71]; !ok || name != "eth71" {
+	if name, ok := ProtocolToString[ETH71]; !ok || name != "eth71" {
 		t.Fatalf("ProtocolToString[ETH71] = (%q, %v), want (eth71, true)", name, ok)
 	}
-	if length, ok := ProtocolLengths[direct.ETH71]; !ok || length != 20 {
+	if length, ok := ProtocolLengths[ETH71]; !ok || length != 20 {
 		t.Fatalf("ProtocolLengths[ETH71] = (%d, %v), want (20, true)", length, ok)
 	}
 
-	fwd := ToProto[direct.ETH71]
+	fwd := ToProto[ETH71]
 	if fwd == nil {
 		t.Fatal("ToProto has no ETH71 entry")
 	}
@@ -348,7 +349,7 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 		t.Errorf("ToProto[ETH71][BlockAccessListsMsg] = %v, want BLOCK_ACCESS_LISTS_71", got)
 	}
 
-	rev := FromProto[direct.ETH71]
+	rev := FromProto[ETH71]
 	if rev == nil {
 		t.Fatal("FromProto has no ETH71 entry")
 	}
@@ -357,5 +358,64 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 	}
 	if got := rev[sentryproto.MessageId_BLOCK_ACCESS_LISTS_71]; got != BlockAccessListsMsg {
 		t.Errorf("FromProto[ETH71][BLOCK_ACCESS_LISTS_71] = %v, want BlockAccessListsMsg", got)
+	}
+}
+
+// TestHashOrNumberEncodeRLPPointerIsAllocFree pins both EncodeRLP branches: the
+// hash branch encodes through a pointer and allocates nothing, the number branch
+// boxes a uint64 into any and allocates once above the runtime's 0-255 cache. It
+// also pins that the hash branch still produces the same bytes as the value form.
+func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
+	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
+
+	var byValue, byPointer bytes.Buffer
+	if err := rlp.Encode(&byValue, hn.Hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := hn.EncodeRLP(&byPointer); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(byValue.Bytes(), byPointer.Bytes()) {
+		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
+	}
+
+	// encBuffer is pooled, and sync.Pool drops a random quarter of the values put
+	// back under the race detector. That is enough to move mallocs/runs across the
+	// 0/1 truncation boundary in AllocsPerRun and flake the assertions below.
+	//goland:noinspection GoBoolExpressions
+	if race.Enabled {
+		t.Skip("sync.Pool does not pool reliably under -race")
+	}
+
+	allocsPerEncode := func(encode func(io.Writer) error) float64 {
+		return testing.AllocsPerRun(200, func() {
+			if err := encode(io.Discard); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	valueAllocs := allocsPerEncode(func(w io.Writer) error { return rlp.Encode(w, hn.Hash) })
+	pointerAllocs := allocsPerEncode(hn.EncodeRLP)
+	t.Logf("hash branch allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
+	if pointerAllocs != 0 {
+		t.Errorf("EncodeRLP hash branch should not allocate, got %v (value form: %v)", pointerAllocs, valueAllocs)
+	}
+
+	// Boxing hn.Number into any allocates unless the runtime's staticuint64s cache
+	// serves it. Upper bounds rather than exact counts, so an encoder improvement
+	// does not turn the build red.
+	for _, tc := range []struct {
+		number    uint64
+		maxAllocs float64
+	}{
+		{number: 255, maxAllocs: 0},
+		{number: 256, maxAllocs: 1},
+	} {
+		byNumber := &HashOrNumber{Number: tc.number}
+		got := allocsPerEncode(byNumber.EncodeRLP)
+		t.Logf("number branch %d: allocs/op=%v", tc.number, got)
+		if got > tc.maxAllocs {
+			t.Errorf("EncodeRLP number branch %d allocs = %v, want <= %v", tc.number, got, tc.maxAllocs)
+		}
 	}
 }

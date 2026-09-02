@@ -18,6 +18,7 @@ package httpcfg
 
 import (
 	"net"
+	"runtime"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -26,6 +27,38 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+// DefaultDBReadConcurrency is the default MDBX read-tx semaphore size;
+// rationale in DBReadConcurrencyFlag's usage.
+func DefaultDBReadConcurrency() int {
+	return min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000)
+}
+
+// execPermanentReadTxs counts the long-lived read txs a parallel batch always
+// holds beyond the worker count: the extra pool worker, the exec-loop and
+// apply-loop txs, the block-loader tx and the commitment-calculator tx.
+const execPermanentReadTxs = 5
+
+// execReadAheadTxs counts the block read-ahead txs held on non-initial applying
+// cycles — the steady tip-following mode — so they are counted with the fixed
+// holders rather than eating into the reserve.
+const execReadAheadTxs = 2
+
+// dbReadTxsReserved is read-tx headroom kept above parallel exec's permanent
+// holders. Without it a transient commitment/RPC reader can take the last slot
+// a blocked permanent holder needs, deadlocking the pipeline.
+const dbReadTxsReserved = 16
+
+// RoTxsLimit sizes the MDBX read-tx semaphore for concurrent worker pools and
+// reserved readers.
+func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int) int64 {
+	limit := DefaultDBReadConcurrency()
+	if dbReadConcurrency > 0 {
+		limit = dbReadConcurrency
+	}
+	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
+	return int64(max(limit, workerReaders+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
+}
 
 type HttpCfg struct {
 	Enabled bool
@@ -62,6 +95,7 @@ type HttpCfg struct {
 	Gascap                            uint64
 	BlockRangeLimit                   int
 	GetLogsMaxResults                 int
+	LogQueryLimit                     int
 	Feecap                            float64
 	MaxTraces                         uint64
 	WebsocketPort                     int
@@ -77,6 +111,9 @@ type HttpCfg struct {
 	WsMaxConnections                  int  // WebSocket connection limit; 0 = unlimited
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
+	WitnessCacheBlocks                uint // Recent blocks to eagerly cache legacy debug_executionWitness results for; 0 disables (embedded RPC only)
+	WitnessCacheHeadCapture           bool // Serve witnesses on a minimal node via head-capture (pinned parent commitment snapshot); cache-only (embedded RPC only)
+	WitnessCacheMaxMB                 uint // Resident-memory cap (MB) for the witness cache; 0 = count-only
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
 	Snap                              ethconfig.BlocksFreezing

@@ -21,9 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -32,25 +35,26 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash      common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient    common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot       common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot    common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom       hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao      common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber     hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit        hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed         hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp       hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData       hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas   *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash       common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions    []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
-	SlotNumber      *hexutil.Uint64     `json:"slotNumber,omitempty"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
+	ParentHash      common.Hash           `json:"parentHash"    gencodec:"required"`
+	FeeRecipient    common.Address        `json:"feeRecipient"  gencodec:"required"`
+	StateRoot       common.Hash           `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot    common.Hash           `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom       hexutil.Bytes         `json:"logsBloom"     gencodec:"required"`
+	PrevRandao      common.Hash           `json:"prevRandao"    gencodec:"required"`
+	BlockNumber     hexutil.Uint64        `json:"blockNumber"   gencodec:"required"`
+	GasLimit        hexutil.Uint64        `json:"gasLimit"      gencodec:"required"`
+	GasUsed         hexutil.Uint64        `json:"gasUsed"       gencodec:"required"`
+	Timestamp       hexutil.Uint64        `json:"timestamp"     gencodec:"required"`
+	ExtraData       hexutil.Bytes         `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash       common.Hash           `json:"blockHash"     gencodec:"required"`
+	Transactions    []hexutil.Bytes       `json:"transactions"  gencodec:"required"`
+	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
+	BlobGasUsed     *hexutil.Uint64       `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64       `json:"excessBlobGas"`
+	SlotNumber      *hexutil.Uint64       `json:"slotNumber,omitempty"`
+	BlockAccessList *hexutil.Bytes        `json:"blockAccessList,omitempty"`
+	SSZVersion      clparams.StateVersion `json:"-"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -62,12 +66,14 @@ type ForkChoiceState struct {
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
-	Timestamp             hexutil.Uint64      `json:"timestamp"             gencodec:"required"`
-	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
-	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
-	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
-	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
-	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
+	Timestamp             hexutil.Uint64        `json:"timestamp"             gencodec:"required"`
+	PrevRandao            common.Hash           `json:"prevRandao"            gencodec:"required"`
+	SuggestedFeeRecipient common.Address        `json:"suggestedFeeRecipient" gencodec:"required"`
+	Withdrawals           []*types.Withdrawal   `json:"withdrawals"`
+	ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
+	TargetGasLimit        *hexutil.Uint64       `json:"targetGasLimit"`
+	SSZVersion            clparams.StateVersion `json:"-"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -81,9 +87,10 @@ type TransitionConfiguration struct {
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes `json:"commitments" gencodec:"required"`
-	Proofs      []hexutil.Bytes `json:"proofs"      gencodec:"required"`
-	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
+	Commitments []hexutil.Bytes       `json:"commitments" gencodec:"required"`
+	Proofs      []hexutil.Bytes       `json:"proofs"      gencodec:"required"`
+	Blobs       []hexutil.Bytes       `json:"blobs"       gencodec:"required"`
+	SSZVersion  clparams.StateVersion `json:"-"`
 }
 
 // BlobsBundleFromTransactions builds a BlobsBundle by extracting blobs,
@@ -112,6 +119,7 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 			copy(pp, p[:])
 			bundle.Proofs = append(bundle.Proofs, pp)
 		}
+		//nolint:gocritic // rangeValCopy: iterating over 128KB blob byte array directly
 		for _, b := range blobTx.Blobs {
 			bp := make([]byte, len(b))
 			copy(bp, b[:])
@@ -141,7 +149,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
@@ -173,6 +181,29 @@ type ClientVersionV1 struct {
 
 func (c ClientVersionV1) String() string {
 	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
+}
+
+// NewClientVersionV1 builds a ClientVersionV1 from a git commit hash, using its leading
+// 4 bytes as required by the standard, or all-zero bytes when the hash is missing or too
+// short. See https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
+func NewClientVersionV1(code, name, versionStr, gitCommit string) ClientVersionV1 {
+	commit := strings.TrimPrefix(gitCommit, "0x")
+	if len(commit) >= 8 {
+		commit = commit[:8]
+	} else {
+		commit = "00000000"
+	}
+	return ClientVersionV1{
+		Code:    code,
+		Name:    name,
+		Version: versionStr,
+		Commit:  "0x" + commit,
+	}
+}
+
+// LocalClientVersionV1 returns the ClientVersionV1 describing this node.
+func LocalClientVersionV1() ClientVersionV1 {
+	return NewClientVersionV1(version.ClientCode, version.ClientName, version.VersionWithCommit(version.GitCommit), version.GitCommit)
 }
 
 type StringifiedError struct{ err error }
@@ -293,9 +324,11 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 			slotNumber := *payload.SlotNumber
 			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 		}
-		if blockAccessList := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList); blockAccessList != nil {
-			res.BlockAccessList = blockAccessList
+		bal := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
+		if bal == nil {
+			bal = hexutil.Bytes{}
 		}
+		res.BlockAccessList = &bal
 	}
 	return res
 }

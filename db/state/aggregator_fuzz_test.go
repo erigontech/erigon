@@ -32,11 +32,15 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
 
 func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
@@ -68,11 +72,11 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -83,23 +87,23 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum][:], buf, txNum, nil)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum][:], locs[txNum][:]), []byte{addrs[txNum][:][0], locs[txNum][:][0]}, txNum, nil)
 			require.NoError(t, err)
 
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
+				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
+				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
@@ -117,7 +121,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -138,13 +142,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+		v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey1)
 
 		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey2)
 
@@ -155,7 +159,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	db, agg := testFuzzDbAndAggregatorv3(f, 10)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	rwTx, err := db.BeginTemporalRw(f.Context())
 	require.NoError(f, err)
@@ -179,11 +183,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		addrData := data[:txs*length.Addr]
 		locData := data[txs*length.Addr : txs*(length.Addr+length.Hash)]
 		addrs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(addrs[i][:], addrData[i*length.Addr:(i+1)*length.Addr])
 		}
 		locs := make([]common.Address, 1000)
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			copy(locs[i][:], locData[i*length.Hash:(i+1)*length.Hash])
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
@@ -194,11 +198,11 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum][:], buf, txNum, nil)
 			require.NoError(t, err)
 
-			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
-			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
+			k := composite(addrs[txNum][:], locs[txNum][:])
+			v := []byte{addrs[txNum][:][0], locs[txNum][:][0]}
 			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil)
 			require.NoError(t, err)
 
@@ -207,8 +211,8 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				require.NoError(t, err)
 			}
 
-			state[string(addrs[txNum].Bytes())] = buf
-			state[string(addrs[txNum].Bytes())+string(locs[txNum].Bytes())] = []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
+			state[string(addrs[txNum][:])] = buf
+			state[string(addrs[txNum][:])+string(locs[txNum][:])] = []byte{addrs[txNum][:][0], locs[txNum][:][0]}
 		}
 
 		err = domains.Flush(t.Context(), rwTx)
@@ -217,7 +221,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		err = rwTx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		rwTx, err = db.BeginTemporalRw(t.Context())
@@ -240,7 +244,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	require := require.New(f)
 	dirs := datadir.New(f.TempDir())
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(f, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(f, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	f.Cleanup(db.Close)
 
 	agg, err := state.NewTest(dirs).StepSize(stepSize).Logger(logger).Open(f.Context(), db)
@@ -248,7 +252,7 @@ func testFuzzDbAndAggregatorv3(f *testing.F, stepSize uint64) (kv.TemporalRwDB, 
 	f.Cleanup(agg.Close)
 	err = agg.OpenFolder()
 	require.NoError(err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(err)
 	return tdb, agg
 }

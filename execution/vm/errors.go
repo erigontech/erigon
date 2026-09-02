@@ -31,6 +31,7 @@ var (
 	// as opposed to from a JUMPSUB instruction
 	ErrInvalidSubroutineEntry   = errors.New("invalid subroutine entry")
 	ErrOutOfGas                 = errors.New("out of gas")
+	ErrRuntimeOutOfGas          = fmt.Errorf("runtime: %w", ErrOutOfGas)
 	ErrCodeStoreOutOfGas        = errors.New("contract creation code storage out of gas")
 	ErrDepth                    = errors.New("max call depth exceeded")
 	ErrInsufficientBalance      = errors.New("insufficient balance for transfer")
@@ -174,6 +175,11 @@ const (
 
 func vmErrorCodeFromErr(err error) int {
 	switch {
+	case errors.Is(err, ErrWriteProtection):
+		// Checked before ErrOutOfGas: the interpreter wraps a static-context
+		// write protection from a dynamic gas function as "%w: %w" over ErrOutOfGas,
+		// so both match and write protection must take precedence.
+		return VMErrorCodeWriteProtection
 	case errors.Is(err, ErrOutOfGas):
 		return VMErrorCodeOutOfGas
 	case errors.Is(err, ErrCodeStoreOutOfGas):
@@ -190,8 +196,6 @@ func vmErrorCodeFromErr(err error) int {
 		return VMErrorCodeMaxCodeSizeExceeded
 	case errors.Is(err, ErrInvalidJump):
 		return VMErrorCodeInvalidJump
-	case errors.Is(err, ErrWriteProtection):
-		return VMErrorCodeWriteProtection
 	case errors.Is(err, ErrReturnDataOutOfBounds):
 		return VMErrorCodeReturnDataOutOfBounds
 	case errors.Is(err, ErrGasUintOverflow):

@@ -53,7 +53,7 @@ const (
 func GetProcessesInfo() []*ProcessInfo {
 	procs, err := process.Processes()
 	if err != nil {
-		log.Debug("[Sysutil] Error retrieving processes: %v", err)
+		log.Debug("[Sysutil] error retrieving processes", "err", err)
 	}
 
 	return averageProceses(procs)
@@ -68,7 +68,7 @@ func averageProceses(procs []*process.Process) []*ProcessInfo {
 	allProcsRepeats := make([][]*ProcessInfo, 0, iterations)
 
 	// Collect all processes N times with a delay of N seconds to calculate average stats.
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		processes := allProcesses(procs)
 		allProcsRepeats = append(allProcsRepeats, processes)
 		time.Sleep(sleepSeconds * time.Second)
@@ -161,13 +161,13 @@ func allProcesses(procs []*process.Process) []*ProcessInfo {
 
 		cpuPercent, err := proc.CPUPercent()
 		if err != nil {
-			log.Trace("[Sysutil] Error retrieving CPU percent for PID %d: %v Name: %s", pid, err, name)
+			log.Trace("[Sysutil] error retrieving CPU percent", "pid", pid, "name", name, "err", err)
 			continue
 		}
 
 		memPercent, err := proc.MemoryPercent()
 		if err != nil {
-			log.Trace("[Sysutil] Error retrieving memory percent for PID %d: %v Name: %s", pid, err, name)
+			log.Trace("[Sysutil] error retrieving memory percent", "pid", pid, "name", name, "err", err)
 			continue
 		}
 
@@ -180,7 +180,7 @@ func allProcesses(procs []*process.Process) []*ProcessInfo {
 func TotalCPUUsage() float64 {
 	totalCPUPercent, err := cpu.Percent(time.Second, false)
 	if err != nil {
-		log.Debug("[Sysutil] Error retrieving total CPU usage: %v", err)
+		log.Debug("[Sysutil] error retrieving total CPU usage", "err", err)
 	}
 
 	return float64(totalCPUPercent[0])
@@ -189,7 +189,7 @@ func TotalCPUUsage() float64 {
 func CPUUsageByCores() []float64 {
 	cpuPercent, err := cpu.Percent(time.Second, true)
 	if err != nil {
-		log.Debug("[Sysutil] Error retrieving CPU usage by cores: %v", err)
+		log.Debug("[Sysutil] error retrieving CPU usage by cores", "err", err)
 	}
 
 	return cpuPercent
@@ -205,7 +205,7 @@ func CPUUsage() CPUUsageInfo {
 func TotalMemoryUsage() float64 {
 	totalMemory, err := mem.VirtualMemory()
 	if err != nil {
-		log.Debug("[Sysutil] Error retrieving total memory usage: %v", err)
+		log.Debug("[Sysutil] error retrieving total memory usage", "err", err)
 	}
 
 	return float64(totalMemory.UsedPercent)

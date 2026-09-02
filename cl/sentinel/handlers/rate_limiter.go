@@ -134,10 +134,13 @@ func newPeerRateLimiter() *peerRateLimiter {
 
 	rl.protocolLimits[communication.BeaconBlocksByRangeProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByRootProtocolV2] = blockRate
+	rl.protocolLimits[communication.BeaconBlocksByHeadProtocolV1] = blockRate
 	rl.protocolLimits[communication.BlobSidecarByRangeProtocolV1] = blobRate
 	rl.protocolLimits[communication.BlobSidecarByRootProtocolV1] = blobRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRangeProtocolV1] = dataColRate
 	rl.protocolLimits[communication.DataColumnSidecarsByRootProtocolV1] = dataColRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = blockRate
+	rl.protocolLimits[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = blockRate
 	rl.protocolLimits[communication.PingProtocolV1] = pingRate
 	rl.protocolLimits[communication.GoodbyeProtocolV1] = goodbyeRate
 	rl.protocolLimits[communication.StatusProtocolV1] = statusRate

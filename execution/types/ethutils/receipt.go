@@ -18,7 +18,6 @@ package ethutils
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -42,14 +41,14 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) map[string]any {
-	var chainId *big.Int
+	var chainId *uint256.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V).ToBig()
+			chainId, _ = types.DeriveChainId(&t.V)
 		}
 	default:
-		chainId = txn.GetChainID().ToBig()
+		chainId = txn.GetChainID()
 	}
 
 	var from accounts.Address
@@ -58,13 +57,20 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
+	// Reuse a Bloom the receipt's source already computed; hash the logs only
+	// when it was left unset (e.g. cache reads that skip bloom derivation).
+	logsBloom := receipt.Bloom
+	if logsBloom.IsEmpty() && len(receipt.Logs) > 0 {
+		logsBloom = types.CreateBloom(types.Receipts{receipt})
+	}
+
 	var logsToMarshal any
 
 	if withBlockTimestamp {
 		if receipt.Logs != nil {
 			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
 			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
+				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
 			}
 			logsToMarshal = rpcLogs
 		} else {
@@ -90,17 +96,17 @@ func MarshalReceipt(
 		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
 		"contractAddress":   nil,
 		"logs":              logsToMarshal,
-		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
+		"logsBloom":         logsBloom,
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
-		fields["effectiveGasPrice"] = (*hexutil.Big)(txn.GetTipCap().ToBig())
+		fields["effectiveGasPrice"] = (*hexutil.U256)(new(uint256.Int).Set(txn.GetTipCap()))
 	} else {
 		baseFee := header.BaseFee
 		effectiveTip := txn.GetEffectiveGasTip(baseFee)
 		var gasPrice uint256.Int
 		gasPrice.Add(baseFee, &effectiveTip)
-		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice.ToBig())
+		fields["effectiveGasPrice"] = (*hexutil.U256)(&gasPrice)
 	}
 
 	// Assign status if postState is empty.
@@ -126,7 +132,7 @@ func MarshalReceipt(
 			if err != nil {
 				log.Error(err.Error())
 			}
-			fields["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
+			fields["blobGasPrice"] = (*hexutil.U256)(&blobGasPrice)
 			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 		}
 	}
@@ -203,7 +209,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 
 	if protoReceipt.BaseFee != nil {
 		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
-		receipt["effectiveGasPrice"] = (*hexutil.Big)(baseFee.ToBig())
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(baseFee)
 	}
 
 	if protoReceipt.BlobGasUsed > 0 {
@@ -211,7 +217,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 	}
 	if protoReceipt.BlobGasPrice != nil {
 		blobGasPrice := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BlobGasPrice)
-		receipt["blobGasPrice"] = (*hexutil.Big)(blobGasPrice.ToBig())
+		receipt["blobGasPrice"] = (*hexutil.U256)(blobGasPrice)
 	}
 
 	return receipt

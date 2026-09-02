@@ -39,11 +39,12 @@ in `db/kv/prune/` applies:
 
 ```
 --prune.mode=archive    → keep all qmtree entries (full proof history)
---prune.mode=full       → keep entries within DefaultPruneDistance (100,000 steps)
---prune.mode=minimal    → keep entries within DefaultPruneDistance
+--prune.mode=full       → keep entries within DefaultPruneDistance (262,144 blocks)
+--prune.mode=blocks     → keep entries within DefaultPruneDistance (matches full for qmtree)
+--prune.mode=minimal    → keep entries within MinimalPruneDistance (100,000 blocks)
 ```
 
-The `History` distance in `prune.Mode` controls how many steps of qmtree
+The `History` distance in `prune.Mode` controls how many blocks of qmtree
 entries to retain, just as it does for account/storage/code history.
 
 **Root files (.v) are never pruned** regardless of mode — they're needed
@@ -51,14 +52,19 @@ for upper tree reconstruction and total ~36 MB for the entire chain.
 
 ### How it maps to existing modes
 
-The `History` distance is in **blocks** (not steps). `DefaultPruneDistance` is
-100,000 blocks, which at ~100 txns/block is ~10M entries (~25 steps).
+The `History` distance is in **blocks** (not steps). Full mode uses
+`DefaultPruneDistance` = 262,144 blocks (EIP-8252's `REORG_RETENTION_WINDOW`,
+~36.4 days); minimal mode uses `MinimalPruneDistance` = 100,000 blocks
+(deliberately sub-EIP-8252 for operators trading state retention for disk).
+At ~100 txns/block and a step size of 390,625 entries, full keeps ~26M
+entries (~67 steps); minimal keeps ~10M entries (~26 steps).
 
 | `--prune.mode` | Entry retention | Root retention | Proof capability |
 |----------------|----------------|----------------|-----------------|
 | `archive` | all | all | full historical proofs |
-| `full` | last 100K blocks (~25 steps, ~2.5 GB) | all | proofs within window |
-| `minimal` | last 100K blocks (~25 steps, ~2.5 GB) | all | proofs within window |
+| `full` | last 262K blocks (~67 steps, ~6.5 GB) | all | proofs within window |
+| `blocks` | last 262K blocks (~67 steps, ~6.5 GB) | all | proofs within window |
+| `minimal` | last 100K blocks (~26 steps, ~2.5 GB) | all | proofs within window |
 
 QMTree entry files are step-aligned, so the block-based distance is converted
 to the nearest step boundary when deciding which entry files to retain/prune.

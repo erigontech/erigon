@@ -26,11 +26,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
+	btree2 "github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
-	btree2 "github.com/tidwall/btree"
 )
 
 // Compile-time check that memStore implements kv.RwTx.
@@ -132,7 +132,7 @@ func (s *memStore) GetOne(table string, key []byte) ([]byte, error) {
 	if !found {
 		return nil, nil
 	}
-	return common.Copy(item.v), nil
+	return bytes.Clone(item.v), nil
 }
 
 func (s *memStore) Rollback() {}
@@ -204,7 +204,7 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.getOrCreateTable(table)
-	t.tree.Set(memEntry{k: common.Copy(k), v: common.Copy(v)})
+	t.tree.Set(memEntry{k: bytes.Clone(k), v: bytes.Clone(v)})
 	// Keep sequences map in sync when writing to the Sequence table.
 	if table == kv.Sequence && len(v) >= 8 {
 		s.sequences[string(k)] = binary.BigEndian.Uint64(v)
@@ -254,7 +254,7 @@ func (s *memStore) IncrementSequence(bucket string, amount uint64) (uint64, erro
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, current+amount)
 	t := s.getOrCreateTable(kv.Sequence)
-	t.tree.Set(memEntry{k: common.Copy([]byte(bucket)), v: v})
+	t.tree.Set(memEntry{k: bytes.Clone([]byte(bucket)), v: v})
 	return current, nil
 }
 
@@ -265,7 +265,7 @@ func (s *memStore) ResetSequence(bucket string, newValue uint64) error {
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, newValue)
 	t := s.getOrCreateTable(kv.Sequence)
-	t.tree.Set(memEntry{k: common.Copy([]byte(bucket)), v: v})
+	t.tree.Set(memEntry{k: bytes.Clone([]byte(bucket)), v: v})
 	return nil
 }
 
@@ -480,7 +480,7 @@ func (c *memStoreCursor) First() ([]byte, []byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) Last() ([]byte, []byte, error) {
@@ -495,7 +495,7 @@ func (c *memStoreCursor) Last() ([]byte, []byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) Seek(seek []byte) ([]byte, []byte, error) {
@@ -510,7 +510,7 @@ func (c *memStoreCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) SeekExact(key []byte) ([]byte, []byte, error) {
@@ -546,7 +546,7 @@ func (c *memStoreCursor) Next() ([]byte, []byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) Prev() ([]byte, []byte, error) {
@@ -570,14 +570,14 @@ func (c *memStoreCursor) Prev() ([]byte, []byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) Current() ([]byte, []byte, error) {
 	if !c.valid {
 		return nil, nil, nil
 	}
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
@@ -605,7 +605,7 @@ func (c *memStoreCursor) NextDup() ([]byte, []byte, error) {
 	if !bytes.Equal(c.current.k, currentKey) {
 		return nil, nil, nil
 	}
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) NextNoDup() ([]byte, []byte, error) {
@@ -632,7 +632,7 @@ func (c *memStoreCursor) NextNoDup() ([]byte, []byte, error) {
 		c.current = iter.Item()
 		if !bytes.Equal(c.current.k, currentKey) {
 			iter.Release()
-			return common.Copy(c.current.k), common.Copy(c.current.v), nil
+			return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 		}
 	}
 }
@@ -652,7 +652,7 @@ func (c *memStoreCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if !bytes.Equal(c.current.k, key) {
 		return nil, nil
 	}
-	return common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
@@ -670,7 +670,7 @@ func (c *memStoreCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error
 	if !bytes.Equal(c.current.k, key) || !bytes.Equal(c.current.v, value) {
 		return nil, nil, nil
 	}
-	return common.Copy(c.current.k), common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.k), bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) FirstDup() ([]byte, error) {
@@ -679,7 +679,7 @@ func (c *memStoreCursor) FirstDup() ([]byte, error) {
 	}
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
-	currentKey := common.Copy(c.current.k)
+	currentKey := bytes.Clone(c.current.k)
 	iter := c.table.tree.Iter()
 	c.valid = iter.Seek(memEntry{k: currentKey})
 	if !c.valid || !bytes.Equal(iter.Item().k, currentKey) {
@@ -688,7 +688,7 @@ func (c *memStoreCursor) FirstDup() ([]byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) LastDup() ([]byte, error) {
@@ -697,7 +697,7 @@ func (c *memStoreCursor) LastDup() ([]byte, error) {
 	}
 	c.store.mu.RLock()
 	defer c.store.mu.RUnlock()
-	currentKey := common.Copy(c.current.k)
+	currentKey := bytes.Clone(c.current.k)
 	iter := c.table.tree.Iter()
 	nextKey, ok := kv.NextSubtree(currentKey)
 	if ok {
@@ -716,7 +716,7 @@ func (c *memStoreCursor) LastDup() ([]byte, error) {
 	}
 	c.current = iter.Item()
 	iter.Release()
-	return common.Copy(c.current.v), nil
+	return bytes.Clone(c.current.v), nil
 }
 
 func (c *memStoreCursor) PrevDup() ([]byte, []byte, error)   { panic("PrevDup not implemented") }
@@ -796,7 +796,7 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 			if toPrefix != nil && bytes.Compare(item.k, toPrefix) >= 0 {
 				break
 			}
-			entries = append(entries, memEntry{k: common.Copy(item.k), v: common.Copy(item.v)})
+			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
 		}
 	} else {
@@ -820,7 +820,7 @@ func (s *memStore) collectRange(t *memTable, fromPrefix, toPrefix []byte, asc bo
 			if fromPrefix != nil && bytes.Compare(item.k, fromPrefix) < 0 {
 				break
 			}
-			entries = append(entries, memEntry{k: common.Copy(item.k), v: common.Copy(item.v)})
+			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Prev()
 		}
 	}
@@ -844,7 +844,7 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 			if toPrefix != nil && bytes.Compare(item.v, toPrefix) >= 0 {
 				break
 			}
-			entries = append(entries, memEntry{k: common.Copy(item.k), v: common.Copy(item.v)})
+			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Next()
 		}
 	} else {
@@ -882,7 +882,7 @@ func (s *memStore) collectRangeDupSort(t *memTable, key []byte, fromPrefix, toPr
 			if fromPrefix != nil && bytes.Compare(item.v, fromPrefix) < 0 {
 				break
 			}
-			entries = append(entries, memEntry{k: common.Copy(item.k), v: common.Copy(item.v)})
+			entries = append(entries, memEntry{k: bytes.Clone(item.k), v: bytes.Clone(item.v)})
 			valid = iter.Prev()
 		}
 	}

@@ -17,11 +17,13 @@
 package kv
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -128,7 +130,7 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 				stop = true
 			}
 
-			from = common.Copy(k) // next transaction will start from this key
+			from = bytes.Clone(k) // next transaction will start from this key
 
 			return nil
 		}); err != nil {
@@ -179,7 +181,8 @@ func GetBool(tx Getter, bucket string, k []byte) (enabled bool, err error) {
 	return bytes2bool(vBytes), nil
 }
 
-func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
+// ReadAheadDeprecated is the legacy amount-bounded prefetcher (NewReadAhead is the windowed one).
+func ReadAheadDeprecated(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
 	if db == nil {
 		return func() {}
 	}
@@ -192,9 +195,7 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 		cancel()
 		wg.Wait()
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -203,13 +204,13 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			defer c.Close()
 
+			var sink byte
+			defer func() { warmupSink.Add(uint64(sink)) }()
 			for k, v, err := c.Seek(from); k != nil && amount > 0; k, v, err = c.Next() {
 				if err != nil {
 					return err
 				}
-				if len(v) > 0 {
-					_, _ = v[0], v[len(v)-1]
-				}
+				sink = touchValue(sink, v)
 				amount--
 				select {
 				case <-ctx.Done():
@@ -219,7 +220,7 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			}
 			return nil
 		})
-	}()
+	})
 	return clean
 }
 
@@ -324,7 +325,7 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 		if prevValue == nil {
 			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+			d.prevValues[valsKeySCopy] = bytes.Clone(prevValue)
 		}
 		d.prevValsSlice = nil
 	}
@@ -341,8 +342,8 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 		d.prevValsSlice[i].Value = v
 		i++
 	}
-	sort.Slice(d.prevValsSlice, func(i, j int) bool {
-		return d.prevValsSlice[i].Key < d.prevValsSlice[j].Key
+	slices.SortFunc(d.prevValsSlice, func(a, b DomainEntryDiff) int {
+		return cmp.Compare(a.Key, b.Key)
 	})
 	return d.prevValsSlice
 }

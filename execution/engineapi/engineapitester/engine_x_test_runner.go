@@ -17,12 +17,15 @@
 package engineapitester
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -30,24 +33,31 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/requests"
 )
 
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
 // per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
-// at construction time. The caller must call Close on the returned runner to
-// release the underlying testers and temp directories.
-func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
+// at construction time. Options may be passed to customise the runner's
+// behaviour (see EngineXTestRunnerOption). The caller must call Close on the
+// returned runner to release the underlying testers and temp directories.
+func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string, opts ...EngineXTestRunnerOption) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
 	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -61,7 +71,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 			return err
 		}
 		var preAlloc PreAlloc
-		err = json.Unmarshal(b, &preAlloc)
+		err = jsoniter.ConfigFastest.Unmarshal(b, &preAlloc)
 		if err != nil {
 			return err
 		}
@@ -77,17 +87,47 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		preAllocs: preAllocs,
 		testers:   make(map[Fork]map[PreAllocHash]testerEntry),
 	}
+	for _, opt := range opts {
+		opt(runner)
+	}
 	return runner, nil
 }
 
-type EngineXTestRunner struct {
-	ctx       context.Context
-	logger    log.Logger
-	preAllocs map[PreAllocHash]*PreAlloc
-	mu        sync.Mutex
-	testers   map[Fork]map[PreAllocHash]testerEntry
-	wg        sync.WaitGroup
+// EngineXTestRunnerOption customises an EngineXTestRunner at construction time.
+type EngineXTestRunnerOption func(*EngineXTestRunner)
+
+// WithRequestProfileHook installs a hook called around each engine API request
+// the runner makes. See RequestProfileHook for the contract.
+func WithRequestProfileHook(hook RequestProfileHook) EngineXTestRunnerOption {
+	return func(r *EngineXTestRunner) {
+		r.profileHook = hook
+	}
 }
+
+func WithWarmupKzgCtxOnInit(warmup bool) EngineXTestRunnerOption {
+	return func(r *EngineXTestRunner) {
+		r.warmupKzgCtxOnInit = warmup
+	}
+}
+
+type EngineXTestRunner struct {
+	ctx                context.Context
+	logger             log.Logger
+	preAllocs          map[PreAllocHash]*PreAlloc
+	mu                 sync.Mutex
+	testers            map[Fork]map[PreAllocHash]testerEntry
+	profileHook        RequestProfileHook
+	warmupKzgCtxOnInit bool
+}
+
+// RequestProfileHook is invoked immediately before each engine API request the
+// runner makes (NewPayload, FCU). The returned stop function is invoked after
+// the request returns. `kind` is "newpayload" or "fcu"; `id` is a stable
+// per-request suffix (test name + height/hash) suitable for use in a filename.
+// The hook is shared across all goroutines invoking Run on this runner; the
+// hook implementation is responsible for synchronisation if needed (process-
+// global pprof state typically requires serialising profile starts).
+type RequestProfileHook func(kind, id string) (stop func())
 
 // testerEntry pairs a cached EngineApiTester with the temp directory created
 // for it, so eviction can close the tester and remove the directory together.
@@ -105,15 +145,15 @@ func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
 	var entries []testerEntry
 	for _, perAlloc := range extr.testers {
-		for _, entry := range perAlloc {
-			entries = append(entries, entry)
+		for i := range perAlloc {
+			entries = append(entries, perAlloc[i])
 		}
 	}
 	extr.testers = nil
 	extr.mu.Unlock()
 	var errs []error
-	for _, entry := range entries {
-		err := extr.evict(entry)
+	for i := range entries {
+		err := extr.evict(entries[i])
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -163,6 +203,28 @@ func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	return errors.Join(errs...)
 }
 
+// testNameKey is the unexported context key callers use to attach a test name
+// to the ctx passed into Run. The profile hook embeds the name in per-request
+// profile ids so callers can route profiles into named files.
+type testNameKey struct{}
+
+// ContextWithTestName returns a copy of ctx that carries the given test name,
+// retrievable inside Run by the runner's per-request profile hook plumbing.
+// An empty name is treated as "no name" and produces unprefixed profile ids.
+func ContextWithTestName(ctx context.Context, name string) context.Context {
+	if name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, testNameKey{}, name)
+}
+
+func testNameFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(testNameKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
 	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
 	if err != nil {
@@ -179,13 +241,130 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 }
 
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
+	name := testNameFromContext(ctx)
+	// reset back to genesis before test new payloads
+	var fcuVersion string
+	if len(test.NewPayloads) > 0 {
+		fcuVersion = test.NewPayloads[0].FcuVersion
+	} else {
+		fcuVersion = fcuVersionFromTimestamp(tester.ChainConfig, tester.GenesisBlock.Time())
+	}
+	err := processFcu(ctx, tester, tester.GenesisBlock.Hash(), fcuVersion, name, extr.profileHook)
+	if err != nil {
+		return fmt.Errorf("reset head to genesis: %w", err)
+	}
 	for _, newPayload := range test.NewPayloads {
-		err := processNewPayload(ctx, tester, newPayload)
+		err := processNewPayload(ctx, tester, newPayload, name, extr.profileHook)
 		if err != nil {
 			return err
 		}
 	}
+	return verifyEngineXResult(ctx, tester.RpcApiClient, test)
+}
+
+func fcuVersionFromTimestamp(config *chain.Config, timestamp uint64) string {
+	switch {
+	case config.IsAmsterdam(timestamp):
+		return "4"
+	case config.IsCancun(timestamp):
+		return "3"
+	case config.IsShanghai(timestamp):
+		return "2"
+	default:
+		return "1"
+	}
+}
+
+type engineXResultReader interface {
+	GetBlockByNumber(context.Context, rpc.BlockNumber, bool) (*requests.Block, error)
+	GetProof(context.Context, common.Address, []common.Hash, rpc.BlockReference) (*accounts.AccProofResult, error)
+}
+
+func verifyEngineXResult(ctx context.Context, reader engineXResultReader, test EngineXTestDefinition) error {
+	blockRef := rpc.LatestBlock
+	if test.LastBlockHash != nil {
+		block, err := reader.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		if err != nil {
+			return fmt.Errorf("get final head: %w", err)
+		}
+		if block == nil {
+			return errors.New("get final head: block not found")
+		}
+		if block.Hash != *test.LastBlockHash {
+			return fmt.Errorf("final head mismatch: want %s, got %s", test.LastBlockHash, block.Hash)
+		}
+		blockRef = rpc.AsBlockReference(*test.LastBlockHash)
+	}
+	if test.PostStateDiff == nil {
+		return nil
+	}
+	addresses := make([]common.Address, 0, len(*test.PostStateDiff))
+	for address := range *test.PostStateDiff {
+		addresses = append(addresses, address)
+	}
+	slices.SortFunc(addresses, func(a, b common.Address) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	for _, address := range addresses {
+		proof, err := reader.GetProof(ctx, address, nil, blockRef)
+		if err != nil {
+			return fmt.Errorf("get proof for %s: %w", address, err)
+		}
+		if err := verifyEngineXAccount(address, (*test.PostStateDiff)[address], proof); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func verifyEngineXAccount(address common.Address, expected *types.GenesisAccount, proof *accounts.AccProofResult) error {
+	if proof == nil || proof.Balance == nil {
+		return fmt.Errorf("postStateDiff account %s: incomplete proof", address)
+	}
+	if expected == nil {
+		if proof.Balance.ToInt().Sign() != 0 || proof.Nonce != 0 || proof.CodeHash != (common.Hash{}) || proof.StorageHash != (common.Hash{}) {
+			return fmt.Errorf("postStateDiff account %s: expected account to be absent", address)
+		}
+		return nil
+	}
+	expectedBalance := expected.Balance
+	if expectedBalance == nil {
+		expectedBalance = new(big.Int)
+	}
+	if proof.Balance.ToInt().Cmp(expectedBalance) != 0 {
+		return fmt.Errorf("postStateDiff account %s balance mismatch: want %s, got %s", address, expectedBalance, proof.Balance.ToInt())
+	}
+	if uint64(proof.Nonce) != expected.Nonce {
+		return fmt.Errorf("postStateDiff account %s nonce mismatch: want %d, got %d", address, expected.Nonce, proof.Nonce)
+	}
+	expectedCodeHash := crypto.Keccak256Hash(expected.Code)
+	if proof.CodeHash != expectedCodeHash {
+		return fmt.Errorf("postStateDiff account %s code hash mismatch: want %s, got %s", address, expectedCodeHash, proof.CodeHash)
+	}
+	expectedStorageRoot := engineXStorageRoot(expected.Storage)
+	if proof.StorageHash != expectedStorageRoot {
+		return fmt.Errorf("postStateDiff account %s storage root mismatch: want %s, got %s", address, expectedStorageRoot, proof.StorageHash)
+	}
+	return nil
+}
+
+func engineXStorageRoot(storage map[common.Hash]common.Hash) common.Hash {
+	storageTrie := trie.NewInMemoryTrie(nil)
+	keys := make([]common.Hash, 0, len(storage))
+	for key := range storage {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b common.Hash) int {
+		return bytes.Compare(a[:], b[:])
+	})
+	for _, key := range keys {
+		value := storage[key]
+		trimmed := bytes.TrimLeft(value[:], "\x00")
+		if len(trimmed) != 0 {
+			storageTrie.Update(crypto.Keccak256(key[:]), trimmed)
+		}
+	}
+	return storageTrie.Hash()
 }
 
 // getOrCreateTester returns a cached tester for (fork, preAllocHash) if one
@@ -241,14 +420,14 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
-	err := copier.Copy(&forkConfigCopy, forkConfig)
+	err := copier.CopyWithOption(&forkConfigCopy, forkConfig, copier.Option{DeepCopy: true})
 	if err != nil {
 		return testerEntry{}, err
 	}
 	forkConfig = &forkConfigCopy
 	var genesis types.Genesis
 	if alloc.Environment.GasLimit != 0 {
-		// New format: build genesis from environment fields
+		// Earlier builder format stores genesis inputs as environment fields.
 		env := alloc.Environment
 		genesis = types.Genesis{
 			Config:     forkConfig,
@@ -270,8 +449,12 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 			v := uint64(*env.BlobGasUsed)
 			genesis.BlobGasUsed = &v
 		}
+		if env.SlotNumber != nil {
+			v := uint64(*env.SlotNumber)
+			genesis.SlotNumber = &v
+		}
 	} else {
-		// Old format: genesis parsed directly from JSON
+		// Final pre-allocation groups contain the genesis header directly.
 		genesis = alloc.Genesis
 		genesis.Alloc = alloc.Alloc
 		genesis.Config = forkConfig
@@ -287,10 +470,9 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
-		// benchmark fixtures at 150M-gas peak ~2.75GB SizeEstimate
-		BatchSize: 4 * datasize.GB,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
+			config.WarmupKzgCtxOnInit = extr.warmupKzgCtxOnInit
 		},
 		DisableTxPool: true,
 		DisableSentry: true,
@@ -307,7 +489,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 	return testerEntry{tester: tester, dataDir: dataDir}, nil
 }
 
-func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
+func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload, testName string, hook RequestProfileHook) error {
 	var enginePayload enginetypes.ExecutionPayload
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
@@ -335,6 +517,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		}
 	}
 	expectFailure := payload.ValidationError != "" || payload.ErrorCode != ""
+	npStop := beginProfile(hook, "newpayload", testName, fmt.Sprintf("h%d_%s", uint64(enginePayload.BlockNumber), enginePayload.BlockHash.Hex()))
 	enginePayloadStatus, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -363,11 +546,13 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		},
 	)
 	if err != nil {
+		npStop()
 		if expectFailure {
 			return nil
 		}
 		return err
 	}
+	npStop()
 	if enginePayloadStatus.Status != enginetypes.ValidStatus {
 		if expectFailure {
 			return nil
@@ -377,15 +562,31 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	if expectFailure {
 		return fmt.Errorf("expected payload to fail (validationError=%q errorCode=%q) but status was Valid", payload.ValidationError, payload.ErrorCode)
 	}
-	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion)
+	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion, testName, hook)
 }
 
-func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string) error {
+// beginProfile invokes the hook (if any) and returns a stop function. When the
+// hook is nil, beginProfile returns a no-op stop so callers can always defer
+// it unconditionally.
+func beginProfile(hook RequestProfileHook, kind, testName, suffix string) func() {
+	if hook == nil {
+		return func() {}
+	}
+	id := suffix
+	if testName != "" {
+		id = testName + "__" + suffix
+	}
+	return hook(kind, id)
+}
+
+func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string, testName string, hook RequestProfileHook) error {
 	fcu := enginetypes.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      common.Hash{},
 		FinalizedBlockHash: common.Hash{},
 	}
+	stop := beginProfile(hook, "fcu", testName, head.Hex())
+	defer stop()
 	r, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -401,7 +602,7 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 			case "3":
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
 			case "4":
-				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil, nil)
 			default:
 				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
 			}
@@ -421,9 +622,25 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 }
 
 type EngineXTestDefinition struct {
-	Fork         Fork                    `json:"network"`
-	PreAllocHash PreAllocHash            `json:"prehash"`
-	NewPayloads  []EngineXTestNewPayload `json:"engineNewPayloads"`
+	Fork          Fork                    `json:"network"`
+	PreAllocHash  PreAllocHash            `json:"preHash"`
+	LastBlockHash *common.Hash            `json:"lastblockhash"`
+	PostStateDiff *EngineXPostStateDiff   `json:"postStateDiff"`
+	NewPayloads   []EngineXTestNewPayload `json:"engineNewPayloads"`
+}
+
+type EngineXPostStateDiff map[common.Address]*types.GenesisAccount
+
+func (diff *EngineXPostStateDiff) UnmarshalJSON(input []byte) error {
+	var decoded map[common.UnprefixedAddress]*types.GenesisAccount
+	if err := json.Unmarshal(input, &decoded); err != nil {
+		return err
+	}
+	*diff = make(EngineXPostStateDiff, len(decoded))
+	for address, account := range decoded {
+		(*diff)[common.Address(address)] = account
+	}
+	return nil
 }
 
 type EngineXTestNewPayload struct {
@@ -454,7 +671,7 @@ type PreAlloc struct {
 	Alloc       types.GenesisAlloc `json:"pre"`
 }
 
-// EngineXEnvironment maps the "environment" field from engine-x pre-alloc JSON files.
+// EngineXEnvironment maps the legacy builder-form pre-allocation fields.
 type EngineXEnvironment struct {
 	Coinbase      common.Address       `json:"currentCoinbase"`
 	GasLimit      math.HexOrDecimal64  `json:"currentGasLimit"`
@@ -463,6 +680,7 @@ type EngineXEnvironment struct {
 	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
 	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
 	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
+	SlotNumber    *math.HexOrDecimal64 `json:"slotNumber"`
 }
 
 type Fork string

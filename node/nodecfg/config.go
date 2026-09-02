@@ -72,6 +72,11 @@ type Config struct {
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
 
+	// ExecWorkerCount is the resolved parallel-exec worker count for this node;
+	// OpenDatabase floors the read-tx semaphore on it. 0 falls back to the
+	// process-wide dbg.Exec3Workers.
+	ExecWorkerCount int `toml:"-"`
+
 	// IPCPath is the requested location to place the IPC endpoint. If the path is
 	// a simple file name, it is placed inside the data directory (or on the root
 	// pipe path on Windows), whereas if it's a resolvable path name (absolute or
@@ -113,9 +118,6 @@ type Config struct {
 	// interface.
 	HTTPTimeouts rpccfg.HTTPTimeouts
 
-	// HTTPPathPrefix specifies a path prefix on which http-rpc is to be served.
-	HTTPPathPrefix string `toml:",omitempty"`
-
 	// WSHost is the host interface on which to start the websocket RPC server. If
 	// this field is empty, no websocket API endpoint will be started.
 	WSHost string
@@ -124,9 +126,6 @@ type Config struct {
 	// default zero value is/ valid and will pick a port number randomly (useful for
 	// ephemeral nodes).
 	WSPort int `toml:",omitempty"`
-
-	// WSPathPrefix specifies a path prefix on which ws-rpc is to be served.
-	WSPathPrefix string `toml:",omitempty"`
 
 	// WSOrigins is the list of domain to accept websocket requests from. Please be
 	// aware that the server can only act upon the HTTP request the client sends and

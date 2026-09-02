@@ -316,6 +316,13 @@ func TestEventTupleUnpack(t *testing.T) {
 		"abi: insufficient number of arguments for unpack, want 3, got 2",
 		"Can not unpack Pledge event into too short slice",
 	}, {
+		transferData1,
+		&[]any{},
+		&[]any{},
+		jsonEventTransfer,
+		"abi: insufficient number of arguments for unpack, want 1, got 0",
+		"Can not unpack Transfer event into too short slice",
+	}, {
 		pledgeData1,
 		new(map[string]any),
 		&[]any{},

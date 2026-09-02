@@ -90,10 +90,31 @@ func TestAccountBigBalance(t *testing.T) {
 
 }
 
+// mustWriteAccountOp serializes acc and returns the raw bytes plus the minimal (no-optional-fields) encoding length.
+func mustWriteAccountOp(t *testing.T, acc *OperatorLeafAccount) ([]byte, int) {
+	t.Helper()
+	var buff bytes.Buffer
+	if err := acc.WriteTo(NewOperatorMarshaller(&buff)); err != nil {
+		t.Fatal(err)
+	}
+	return buff.Bytes(), 1 /* opcode */ + 1 /* CBOR prefix for key */ + len(acc.Key) + 1 /* flags */
+}
+
+// checkAccountOpFlags asserts the operator encodes optional fields and carries the expected flags.
+func checkAccountOpFlags(t *testing.T, acc *OperatorLeafAccount, expectedFlags byte) {
+	t.Helper()
+	b, compactLen := mustWriteAccountOp(t, acc)
+	if len(b) <= compactLen {
+		t.Errorf("unexpected serialization expected to be bigger than %d (fields serialized), got %d (raw: %v)", compactLen, len(b), b)
+	}
+	if flags := b[2+len(acc.Key)]; flags != expectedFlags {
+		t.Errorf("unexpected flags value (expected %b, got %b)", expectedFlags, flags)
+	}
+}
+
 func TestAccountCompactWriteTo(t *testing.T) {
-	key := []byte("l")
 	acc := &OperatorLeafAccount{
-		key,
+		[]byte("l"),
 		0,
 		big.NewInt(0),
 		false,
@@ -101,28 +122,15 @@ func TestAccountCompactWriteTo(t *testing.T) {
 		0,
 	}
 
-	var buff bytes.Buffer
-
-	collector := NewOperatorMarshaller(&buff)
-
-	err := acc.WriteTo(collector)
-	if err != nil {
-		t.Error(err)
-	}
-
-	b := buff.Bytes()
-
-	expectedLen := 1 /* opcode */ + 1 /* CBOR prefix for key */ + len(key) + 1 /* flags */
-
+	b, expectedLen := mustWriteAccountOp(t, acc)
 	if len(b) != expectedLen {
-		t.Errorf("unexpected serialization len for default fields, expected %d (no fields seralized), got %d (raw: %v)", expectedLen, len(b), b)
+		t.Errorf("unexpected serialization len for default fields, expected %d (no fields serialized), got %d (raw: %v)", expectedLen, len(b), b)
 	}
 }
 
 func TestAccountFullWriteTo(t *testing.T) {
-	key := []byte("l")
 	acc := &OperatorLeafAccount{
-		key,
+		[]byte("l"),
 		20,
 		big.NewInt(10),
 		true,
@@ -130,40 +138,12 @@ func TestAccountFullWriteTo(t *testing.T) {
 		0,
 	}
 
-	var buff bytes.Buffer
-
-	collector := NewOperatorMarshaller(&buff)
-
-	err := acc.WriteTo(collector)
-	if err != nil {
-		t.Error(err)
-	}
-
-	b := buff.Bytes()
-
-	compactLen := 1 /* opcode */ + 1 /* CBOR prefix for key */ + len(key) + 1 /* flags */
-
-	if len(b) <= compactLen {
-		t.Errorf("unexpected serialization expected to be bigger than %d (fields seralized), got %d (raw: %v)", compactLen, len(b), b)
-	}
-
-	flags := b[3]
-
-	expectedFlags := byte(0)
-	expectedFlags |= flagStorage
-	expectedFlags |= flagCode
-	expectedFlags |= flagNonce
-	expectedFlags |= flagBalance
-
-	if flags != expectedFlags {
-		t.Errorf("unexpected flags value (expected %b, got %b)", expectedFlags, flags)
-	}
+	checkAccountOpFlags(t, acc, flagStorage|flagCode|flagNonce|flagBalance)
 }
 
 func TestAccountPartialNoNonceWriteTo(t *testing.T) {
-	key := []byte("l")
 	acc := &OperatorLeafAccount{
-		key,
+		[]byte("l"),
 		0,
 		big.NewInt(10),
 		true,
@@ -171,39 +151,12 @@ func TestAccountPartialNoNonceWriteTo(t *testing.T) {
 		0,
 	}
 
-	var buff bytes.Buffer
-
-	collector := NewOperatorMarshaller(&buff)
-
-	err := acc.WriteTo(collector)
-	if err != nil {
-		t.Error(err)
-	}
-
-	b := buff.Bytes()
-
-	compactLen := 1 /* opcode */ + 1 /* CBOR prefix for key */ + len(key) + 1 /* flags */
-
-	if len(b) <= compactLen {
-		t.Errorf("unexpected serialization expected to be bigger than %d (fields seralized), got %d (raw: %v)", compactLen, len(b), b)
-	}
-
-	flags := b[3]
-
-	expectedFlags := byte(0)
-	expectedFlags |= flagStorage
-	expectedFlags |= flagCode
-	expectedFlags |= flagBalance
-
-	if flags != expectedFlags {
-		t.Errorf("unexpected flags value (expected %b, got %b)", expectedFlags, flags)
-	}
+	checkAccountOpFlags(t, acc, flagStorage|flagCode|flagBalance)
 }
 
 func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
-	key := []byte("l")
 	acc := &OperatorLeafAccount{
-		key,
+		[]byte("l"),
 		22,
 		big.NewInt(0),
 		true,
@@ -211,33 +164,7 @@ func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 		0,
 	}
 
-	var buff bytes.Buffer
-
-	collector := NewOperatorMarshaller(&buff)
-
-	err := acc.WriteTo(collector)
-	if err != nil {
-		t.Error(err)
-	}
-
-	b := buff.Bytes()
-
-	compactLen := 1 /* opcode */ + 1 /* CBOR prefix for key */ + len(key) + 1 /* flags */
-
-	if len(b) <= compactLen {
-		t.Errorf("unexpected serialization expected to be bigger than %d (fields seralized), got %d (raw: %v)", compactLen, len(b), b)
-	}
-
-	flags := b[3]
-
-	expectedFlags := byte(0)
-	expectedFlags |= flagStorage
-	expectedFlags |= flagCode
-	expectedFlags |= flagNonce
-
-	if flags != expectedFlags {
-		t.Errorf("unexpected flags value (expected %b, got %b)", expectedFlags, flags)
-	}
+	checkAccountOpFlags(t, acc, flagStorage|flagCode|flagNonce)
 }
 
 func TestKeySerialization(t *testing.T) {

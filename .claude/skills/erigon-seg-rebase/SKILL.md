@@ -15,10 +15,13 @@ The `erigon seg step-rebase` command changes the step size of an existing Erigon
 ./build/bin/erigon seg step-rebase --datadir=<path> --new-step-size=<size> [other-flags]
 ```
 
-## Required Flags
+## Flags
 
 - `--datadir`: Path to the Erigon datadir (required)
-- `--new-step-size`: New step size to rebase to (default: 1562500)
+- `--new-step-size`: New step size to rebase to (required; must be an exact divisor or multiple of the current step size from `snapshots/erigondb.toml`)
+- `--keep-blocks`: Keep chaindata instead of deleting it. Resets only execution state (domains, history, changesets, prune progress) via the same logic as `integration stage_exec --reset`, so already-downloaded blocks stay in the DB and get re-executed on next start. Without this flag the whole chaindata DB is deleted and the block tail must be re-downloaded from the network.
+
+The command is interactive: it prints the full rename/delete plan and waits for a `y/N` confirmation on stdin (`echo y | erigon seg step-rebase ...` when scripting).
 
 ## Common Step Sizes
 
@@ -37,6 +40,12 @@ The `erigon seg step-rebase` command changes the step size of an existing Erigon
 ```bash
 ./build/bin/erigon seg step-rebase --datadir=/path/to/datadir --new-step-size=390625
 ```
+
+### Rebase Keeping Already-Downloaded Blocks
+```bash
+./build/bin/erigon seg step-rebase --datadir=/path/to/datadir --new-step-size=781250 --keep-blocks
+```
+Run `erigon seg retire` first to minimize the re-execution window, then after the rebase start erigon (or run `integration stage_exec`) to re-execute the kept blocks from the snapshot files' end.
 
 ## Important Considerations
 

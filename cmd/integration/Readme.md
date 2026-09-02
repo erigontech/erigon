@@ -24,14 +24,8 @@ integration stage_exec --reset
 # Unwind single stage N blocks backward
 integration stage_exec --unwind=N
 
-# Run stage prune to block N
-integration stage_exec --prune.to=N
-
 # To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
-
-# Exec blocks, but don't commit changes (loose them)
-integration stage_exec --no-commit
 
 # Run txn replay with domains [requires 6th stage to be done before run]
 integration read_domains --chain sepolia account <addr> <addr> ... # read values for given accounts
@@ -63,13 +57,11 @@ For example:
 
 ## How to unwind node
 
-In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
-until https://github.com/erigontech/erigon/issues/13674 is fixed)
+In Erigon3 - better do `rm -rf chaindata`
 
 ## Copy data to another db
 
-In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
-until https://github.com/erigontech/erigon/issues/13674 is fixed)
+In Erigon3 - better do `rm -rf chaindata`
 
 ```sh
 0. You will need 2x disk space (can be different disks).
@@ -78,7 +70,7 @@ until https://github.com/erigontech/erigon/issues/13674 is fixed)
 ONLY_CREATE_DB=true ./build/bin/erigon --datadir=/erigon-new/ --chain="$CHAIN" --db.pagesize=8kb --db.size.limit=12T
 # if erigon doesn't stop after 1 min. just stop it.
 3. Build integration: cd erigon; make integration
-5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /erigon-new/chaindata/
+5. Run: ./build/bin/integration mdbx_to_mdbx --datadir /existing/erigon/path/ --chaindata /existing/erigon/path/chaindata/ --chaindata.to /erigon-new/chaindata/
 6. cp -R /existing/erigon/path/snapshots /erigon-new/snapshots
 7. start erigon in new datadir as usually
 ```
@@ -155,13 +147,10 @@ erigon snapshots rm-state --only-history --step=0-900
 erigon snapshots rm-state --only-history --step=0-900 --dry-run
 ```
 
-## How to re-gen bor checkpoints
+## Compact chaindata in-place
 
 ```sh
-rm -rf datadir/heimdall
-rm -rf datadir/snapshots/*borch*
-# Start erigon, it will gen. Then:
-erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
+src=<datadir>/chaindata && ./build/bin/mdbx_copy -c -u "$src" "${src}/mdbx.dat.tmp" && mv "${src}/mdbx.dat.tmp" "${src}/mdbx.dat" || rm -f "${src}/mdbx.dat.tmp"
 ```
 
 ## See tables size

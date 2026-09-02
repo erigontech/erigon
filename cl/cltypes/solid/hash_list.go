@@ -17,12 +17,13 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -127,7 +128,7 @@ func (h *hashList) DecodeSSZ(buf []byte, _ int) error {
 		return ssz.ErrBadDynamicLength
 	}
 	h.MerkleTree = nil
-	h.u = common.Copy(buf)
+	h.u = bytes.Clone(buf)
 	h.l = len(h.u) / length.Hash
 	return nil
 }
@@ -175,7 +176,7 @@ func (h *hashList) HashSSZ() ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return utils.Sha256(coreRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(coreRoot[:], lengthRoot[:]), nil
 }
 
 func (h *hashList) Range(fn func(int, common.Hash, int) bool) {

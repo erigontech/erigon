@@ -1,9 +1,8 @@
 package fork_graph
 
 import (
+	"bytes"
 	"sync"
-
-	"github.com/erigontech/erigon/common"
 )
 
 type participationIndiciesStore struct {
@@ -21,7 +20,7 @@ func (p *participationIndiciesStore) get(epoch uint64) ([]byte, bool) {
 func (p *participationIndiciesStore) add(epoch uint64, participations []byte) {
 	prevBitlistInterface, ok := p.s.Load(epoch)
 	if !ok {
-		p.s.Store(epoch, common.Copy(participations))
+		p.s.Store(epoch, bytes.Clone(participations))
 		return
 	}
 	// Reuse the existing slice if possible

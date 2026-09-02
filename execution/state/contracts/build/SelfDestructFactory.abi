@@ -1,0 +1,1 @@
+[{"inputs":[{"internalType":"bytes32","name":"salt","type":"bytes32"}],"name":"deploy","outputs":[{"internalType":"contract SelfDestructInConstructor","name":"instance","type":"address"}],"stateMutability":"payable","type":"function"}]

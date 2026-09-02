@@ -21,10 +21,7 @@ package types
 
 import (
 	"fmt"
-	"math/big"
 	"testing"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -66,7 +63,7 @@ func TestBloomExtensively(t *testing.T) {
 	var exp = common.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
 	var b Bloom
 	// Add 100 "random" things
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		data := fmt.Sprintf("xxxxxxxxxx data %d yyyyyyyyyyyyyy", i)
 		b.Add([]byte(data))
 		//b.Add(new(big.Int).SetBytes([]byte(data)))
@@ -83,86 +80,67 @@ func TestBloomExtensively(t *testing.T) {
 	}
 }
 
-func BenchmarkBloom9(b *testing.B) {
-	test := []byte("testestestest")
-	for b.Loop() {
-		Bloom9(test)
+func TestBloomOr(t *testing.T) {
+	t.Parallel()
+
+	var left Bloom
+	left.Add([]byte("left"))
+	var right Bloom
+	right.Add([]byte("right"))
+
+	merged := left
+	merged.Or(&right)
+
+	if !merged.Test([]byte("left")) {
+		t.Fatal("expected merged bloom to contain left input")
+	}
+	if !merged.Test([]byte("right")) {
+		t.Fatal("expected merged bloom to contain right input")
+	}
+	if left.Test([]byte("right")) {
+		t.Fatal("Or should not mutate the source bloom")
+	}
+
+	r1 := &Receipt{Logs: []*Log{{
+		Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Topics:  []common.Hash{common.HexToHash("0x01")},
+	}}}
+	r2 := &Receipt{Logs: []*Log{{
+		Address: common.HexToAddress("0x2222222222222222222222222222222222222222"),
+		Topics:  []common.Hash{common.HexToHash("0x02"), common.HexToHash("0x03")},
+	}}}
+	combined := CreateBloom(Receipts{r1, r2})
+	acc := CreateBloom(Receipts{r1})
+	r2Bloom := CreateBloom(Receipts{r2})
+	acc.Or(&r2Bloom)
+	if acc != combined {
+		t.Fatal("expected OR of receipt blooms to match CreateBloom over all receipts")
 	}
 }
 
-func BenchmarkBloom9Lookup(b *testing.B) {
-	toTest := []byte("testtest")
-	bloom := new(Bloom)
-	for b.Loop() {
-		bloom.Test(toTest)
+func TestReceiptsMergedBloom(t *testing.T) {
+	t.Parallel()
+	receipts := Receipts{
+		{Logs: Logs{
+			{Address: common.HexToAddress("0x1111111111111111111111111111111111111111"), Topics: []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")}},
+			{Address: common.HexToAddress("0x2222222222222222222222222222222222222222"), Topics: []common.Hash{common.HexToHash("0x03")}},
+		}},
+		{Logs: Logs{
+			{Address: common.HexToAddress("0x3333333333333333333333333333333333333333"), Topics: []common.Hash{common.HexToHash("0x04")}},
+		}},
+		{},
 	}
-}
-
-func BenchmarkCreateBloom(b *testing.B) {
-
-	one, _ := uint256.FromBig(big.NewInt(1))
-	two, _ := uint256.FromBig(big.NewInt(2))
-
-	var txs = Transactions{
-		NewContractCreation(1, one, 1, one, nil),
-		NewTransaction(2, common.HexToAddress("0x2"), two, 2, two, nil),
-	}
-	var rSmall = Receipts{
-		&Receipt{
-			Status:            ReceiptStatusFailed,
-			CumulativeGasUsed: 1,
-			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x11})},
-				{Address: common.BytesToAddress([]byte{0x01, 0x11})},
-			},
-			TxHash:          txs[0].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-			GasUsed:         1,
-		},
-		&Receipt{
-			PostState:         common.Hash{2}.Bytes(),
-			CumulativeGasUsed: 3,
-			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x22})},
-				{Address: common.BytesToAddress([]byte{0x02, 0x22})},
-			},
-			TxHash:          txs[1].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
-			GasUsed:         2,
-		},
+	for _, r := range receipts {
+		r.Bloom = CreateBloom(Receipts{r})
 	}
 
-	var rLarge = make(Receipts, 200)
-	// Fill it with 200 receipts x 2 logs
-	for i := 0; i < 200; i += 2 {
-		copy(rLarge[i:], rSmall)
+	merged := receipts.MergedBloom()
+	if merged.IsEmpty() {
+		t.Fatal("expected non-empty merged bloom")
 	}
-	b.Run("small", func(b *testing.B) {
-		b.ReportAllocs()
-		var bl Bloom
-		for b.Loop() {
-			bl = CreateBloom(rSmall)
-		}
-		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
-		got := crypto.Keccak256Hash(bl.Bytes())
-		if got != exp {
-			b.Errorf("Got %x, exp %x", got, exp)
-		}
-	})
-	b.Run("large", func(b *testing.B) {
-		b.ReportAllocs()
-		var bl Bloom
-		for b.Loop() {
-			bl = CreateBloom(rLarge)
-		}
-		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
-		got := crypto.Keccak256Hash(bl.Bytes())
-		if got != exp {
-			b.Errorf("Got %x, exp %x", got, exp)
-		}
-	})
+	if want := CreateBloom(receipts); merged != want {
+		t.Fatalf("merged bloom mismatch: got %x, want %x", merged, want)
+	}
 }
 
 func TestIsEmpty(t *testing.T) {

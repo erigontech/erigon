@@ -19,23 +19,15 @@ package crypto
 import (
 	"math/big"
 
-	keccak "github.com/erigontech/fastkeccak"
 	blst "github.com/supranational/blst/bindings/go"
+
+	erigoncrypto "github.com/erigontech/erigon/common/crypto"
 )
 
 const HashToG1DST = "SHUTTER_V01_BLS12381G1_XMD:SHA-256_SSWU_RO_"
 
-func keccak256(ds ...[]byte) []byte {
-	state := keccak.NewFastKeccak()
-	for _, d := range ds {
-		state.Write(d)
-	}
-	h := []byte{}
-	return state.Sum(h)
-}
-
 func hashWithPrefix(p byte, b []byte) []byte {
-	return keccak256(append([]byte{p}, b...))
+	return erigoncrypto.Keccak256([]byte{p}, b)
 }
 
 func Hash1(b []byte) *blst.P1Affine {

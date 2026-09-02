@@ -1,216 +1,484 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package stagedsync
 
 import (
-	"os"
-	"path/filepath"
+	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/shards"
 )
 
-func TestParseFileStepRange(t *testing.T) {
-	tests := []struct {
-		name      string
-		wantStart kv.Step
-		wantEnd   kv.Step
-		wantOk    bool
-	}{
-		{"v2.0-accounts.8192-8704.kv", 8192, 8704, true},
-		{"v2.0-commitment.0-8192.kv", 0, 8192, true},
-		{"v1.1-storage.8772-8774.bt", 8772, 8774, true},
-		{"v3.0-accounts.8704-8768.ef", 8704, 8768, true},
-		// Block files: "v2.0-024823-024824-bodies.idx" splits to ["v2", "0-024823-024824-bodies", "idx"].
-		// Sscanf parses "0-024823..." as start=0, end=24823. This is a false positive parse,
-		// but isStateDomainFile() filters block files before deletion, so it's harmless.
-		{"v2.0-024823-024824-bodies.idx", 0, 24823, true},
-		{"preverified.toml", 0, 0, false},
-		{"erigondb.toml", 0, 0, false},
-		{"salt-blocks.txt", 0, 0, false},
-		{"v2.0-accounts.8192-8704.kv.torrent", 8192, 8704, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			start, end, ok := parseFileStepRange(tt.name)
-			assert.Equal(t, tt.wantOk, ok, "ok")
-			if ok {
-				assert.Equal(t, tt.wantStart, start, "start")
-				assert.Equal(t, tt.wantEnd, end, "end")
-			}
-		})
-	}
+// progressDownloader is an in-process downloader: it reports byte progress and
+// drops it on reset, like the real one publishing/clearing its stats snapshot.
+type progressDownloader struct {
+	mu     sync.Mutex
+	done   uint64
+	total  uint64
+	resets int
 }
 
-func TestIsStateDomainFile(t *testing.T) {
-	stateFiles := []string{
-		"v2.0-accounts.8192-8704.kv",
-		"v1.1-storage.8772-8774.bt",
-		"v2.0-commitment.0-8192.kvi",
-		"v2.0-code.8704-8768.kv",
-		"v1.2-receipt.8768-8772.bt",
-		"v3.0-logaddrs.8704-8768.ef",
-		"v3.0-logtopics.8704-8768.ef",
-		"v3.0-tracesfrom.8704-8768.ef",
-		"v3.0-tracesto.8704-8768.ef",
-		"v2.0-rcache.8768-8772.kvi",
-	}
-	for _, name := range stateFiles {
-		assert.True(t, isStateDomainFile(name), "should be state: %s", name)
-	}
-
-	blockFiles := []string{
-		"v2.0-024823-024824-bodies.idx",
-		"v1.1-024822-024823-headers.seg",
-		"v1.1-024822-024823-transactions.seg",
-		"preverified.toml",
-		"erigondb.toml",
-		"salt-blocks.txt",
-	}
-	for _, name := range blockFiles {
-		assert.False(t, isStateDomainFile(name), "should NOT be state: %s", name)
-	}
+func (d *progressDownloader) set(done, total uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.done, d.total = done, total
 }
 
-func TestFindHighestStateFileStartStep(t *testing.T) {
-	dir := t.TempDir()
-	dirs := datadir.Dirs{SnapDomain: dir}
-
-	// Empty dir
-	step, found := findHighestStateFileStartStep(dirs)
-	assert.False(t, found)
-	assert.Equal(t, kv.Step(0), step)
-
-	// Add some state files
-	for _, name := range []string{
-		"v2.0-accounts.0-8192.kv",
-		"v2.0-accounts.8192-8704.kv",
-		"v2.0-accounts.8704-8768.kv",
-		"v2.0-commitment.8768-8772.kv",
-	} {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte{}, 0644))
-	}
-
-	step, found = findHighestStateFileStartStep(dirs)
-	assert.True(t, found)
-	assert.Equal(t, kv.Step(8768), step)
-
-	// Add a block file — should be ignored
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "v2.0-024823-024824-bodies.idx"), []byte{}, 0644))
-	step, found = findHighestStateFileStartStep(dirs)
-	assert.True(t, found)
-	assert.Equal(t, kv.Step(8768), step) // still 8768, not 24823
-
-	// Step 0 as only file
-	dir2 := t.TempDir()
-	dirs2 := datadir.Dirs{SnapDomain: dir2}
-	require.NoError(t, os.WriteFile(filepath.Join(dir2, "v2.0-accounts.0-8192.kv"), []byte{}, 0644))
-	step, found = findHighestStateFileStartStep(dirs2)
-	assert.True(t, found)
-	assert.Equal(t, kv.Step(0), step) // step 0 IS valid
+func (d *progressDownloader) resetCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.resets
 }
 
-func TestRemoveStateFilesFromStep(t *testing.T) {
-	snapDir := t.TempDir()
-	idxDir := t.TempDir()
-	histDir := t.TempDir()
-	accDir := t.TempDir()
-	dirs := datadir.Dirs{
-		Snap:          t.TempDir(),
-		SnapDomain:    snapDir,
-		SnapIdx:       idxDir,
-		SnapHistory:   histDir,
-		SnapAccessors: accDir,
-	}
+func (d *progressDownloader) Completed() (uint64, uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.done, d.total
+}
 
-	// Create state files across steps
-	stateFiles := []string{
-		"v2.0-accounts.0-8192.kv",
-		"v2.0-accounts.8192-8704.kv",
-		"v2.0-accounts.8704-8768.kv",
-		"v2.0-commitment.8768-8772.kv",
-	}
-	for _, name := range stateFiles {
-		require.NoError(t, os.WriteFile(filepath.Join(snapDir, name), []byte{}, 0644))
-	}
+func (d *progressDownloader) ResetProgress() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.resets++
+	d.done, d.total = 0, 0
+}
 
-	// Create a block file that should NOT be removed
-	blockFile := "v2.0-024823-024824-bodies.idx"
-	require.NoError(t, os.WriteFile(filepath.Join(idxDir, blockFile), []byte{}, 0644))
+func (d *progressDownloader) DownloadProgress() dbservices.DownloadProgressReport { return d }
 
-	// Create preverified.toml
-	pvContent := `'domain/v2.0-accounts.0-8192.kv' = 'abc123'
-'domain/v2.0-accounts.8192-8704.kv' = 'def456'
-'domain/v2.0-accounts.8704-8768.kv' = 'ghi789'
-'domain/v2.0-commitment.8768-8772.kv' = 'jkl012'
-'v2.0-024823-024824-bodies.idx' = 'mno345'
+func (d *progressDownloader) Seed(context.Context, []string) error   { return nil }
+func (d *progressDownloader) Delete(context.Context, []string) error { return nil }
+func (d *progressDownloader) Download(context.Context, *downloaderproto.DownloadRequest) error {
+	return nil
+}
+
+// plainDownloader lacks the progress capability, like an external downloader
+// in another process.
+type plainDownloader struct {
+	dbservices.DownloaderClient
+}
+
+type frozenBlockReader struct {
+	dbservices.FullBlockReader
+	frozen   uint64
+	freezing ethconfig.BlocksFreezing
+}
+
+func (r frozenBlockReader) FrozenBlocks() uint64                  { return r.frozen }
+func (r frozenBlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.freezing }
+
+// seedPreverified registers a two-file snapshot set (plus any extra TOML lines)
+// so KnownCfg reports a non-zero ExpectBlocks: the registry is empty until a
+// chain TOML is loaded at runtime, and the reporter is a no-op without a target.
+func seedPreverified(t *testing.T, chainName string, extraLines ...string) uint64 {
+	t.Helper()
+	empty, _ := snapcfg.KnownCfg(chainName)
+	require.Zero(t, empty.ExpectBlocks, "test chain must have no preverified set of its own")
+	t.Cleanup(func() { snapcfg.SetToml(chainName, []byte{}, false) })
+
+	toml := `"v1-000000-000500-headers.seg" = "aa"
+"v1-000000-000500-bodies.seg" = "bb"
 `
-	pvPath := filepath.Join(dirs.Snap, "preverified.toml")
-	require.NoError(t, os.WriteFile(pvPath, []byte(pvContent), 0644))
+	for _, line := range extraLines {
+		toml += line + "\n"
+	}
+	snapcfg.SetToml(chainName, []byte(toml), false)
 
-	logger := log.New()
-
-	// Remove from step 8704
-	result := removeStateFilesFromStep(dirs, 8704, logger, "test")
-
-	assert.Equal(t, 2, result.count) // 8704-8768 and 8768-8772
-	assert.Len(t, result.names, 2)
-
-	// Verify 0-8192 and 8192-8704 still exist
-	_, err := os.Stat(filepath.Join(snapDir, "v2.0-accounts.0-8192.kv"))
-	assert.NoError(t, err)
-	_, err = os.Stat(filepath.Join(snapDir, "v2.0-accounts.8192-8704.kv"))
-	assert.NoError(t, err)
-
-	// Verify 8704-8768 and 8768-8772 are gone
-	_, err = os.Stat(filepath.Join(snapDir, "v2.0-accounts.8704-8768.kv"))
-	assert.True(t, os.IsNotExist(err))
-	_, err = os.Stat(filepath.Join(snapDir, "v2.0-commitment.8768-8772.kv"))
-	assert.True(t, os.IsNotExist(err))
-
-	// Verify block file NOT removed
-	_, err = os.Stat(filepath.Join(idxDir, blockFile))
-	assert.NoError(t, err, "block file should not be removed")
-
-	// Verify preverified.toml stripped correctly
-	pvData, err := os.ReadFile(pvPath)
-	require.NoError(t, err)
-	assert.Contains(t, string(pvData), "0-8192")
-	assert.Contains(t, string(pvData), "8192-8704")
-	assert.NotContains(t, string(pvData), "8704-8768")
-	assert.NotContains(t, string(pvData), "8768-8772")
-	assert.Contains(t, string(pvData), "bodies") // block entries preserved
+	cfg, known := snapcfg.KnownCfg(chainName)
+	require.True(t, known)
+	require.NotZero(t, cfg.ExpectBlocks)
+	return cfg.ExpectBlocks
 }
 
-func TestAlignmentSkipsWhenTxNumsIndexExists(t *testing.T) {
-	// When the TxNums index already covers frozen blocks, alignment must
-	// NOT run — the node previously processed past any snapshot
-	// misalignment. Running alignment on restart would remove snapshot
-	// files that the downloader re-downloaded, cascading until all state
-	// files are gone.
-	//
-	// The guard checks: TxNums.Max(frozenBlocks) > 0. A full integration
-	// test requires a temporal DB with TxNums populated, which is beyond
-	// unit test scope. The guard is tested end-to-end via the
-	// fresh-start/restart cycle.
+// A commitment block just below the frozen tip used in the pin tests: the pin
+// must report it, not the tip.
+const testCommitBlock = 498_377
 
-	// Verify the helper functions are safe with existing files
-	snapDir := t.TempDir()
-	stateFiles := []string{
-		"v2.0-accounts.0-8192.kv",
-		"v2.0-accounts.8192-8704.kv",
-		"v2.0-commitment.8704-8768.kv",
-	}
-	for _, name := range stateFiles {
-		require.NoError(t, os.WriteFile(filepath.Join(snapDir, name), []byte{}, 0644))
-	}
+type reporterHarness struct {
+	cfg          SnapshotsCfg
+	downloader   *progressDownloader
+	expectBlocks uint64
+	events       chan *remoteproto.SyncingReply
+}
 
-	// Files should be untouched (alignment guard prevents removal)
-	for _, name := range stateFiles {
-		_, err := os.Stat(filepath.Join(snapDir, name))
-		assert.NoError(t, err, "file should still exist: %s", name)
+// newReporterHarness wires the reporter to a real Notifications and temporal DB;
+// only the downloader and the frozen-block count are faked.
+func newReporterHarness(t *testing.T, chainName string, frozen uint64, downloader dbservices.DownloaderClient) *reporterHarness {
+	t.Helper()
+
+	snapshotDownloadProgressInterval = 5 * time.Millisecond
+	t.Cleanup(func() { snapshotDownloadProgressInterval = 2 * time.Second })
+
+	notifications := shards.NewNotifications(nil)
+	events, cancelSubscription := notifications.Events.AddSyncStateSubscription()
+	t.Cleanup(cancelSubscription)
+
+	h := &reporterHarness{
+		cfg: SnapshotsCfg{
+			db:                 temporaltest.NewTestDB(t, datadir.New(t.TempDir())),
+			chainConfig:        &chain.Config{ChainName: chainName},
+			snapshotDownloader: downloader,
+			blockReader:        frozenBlockReader{frozen: frozen},
+			notifier:           notifications,
+		},
+		events: events,
 	}
+	if d, ok := downloader.(*progressDownloader); ok {
+		h.downloader = d
+	}
+	return h
+}
+
+func newSeededReporterHarness(t *testing.T, frozen uint64) *reporterHarness {
+	t.Helper()
+	h := newReporterHarness(t, networkname.Bloatnet, frozen, &progressDownloader{})
+	h.expectBlocks = seedPreverified(t, networkname.Bloatnet)
+	return h
+}
+
+// currentBlock reads the progress the reporter recorded, independently of event
+// dedup.
+func (h *reporterHarness) currentBlock(t *testing.T) uint64 {
+	t.Helper()
+	var reply *remoteproto.SyncingReply
+	err := h.cfg.db.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		reply, err = h.cfg.notifier.BuildSyncingReply(tx, h.cfg.blockReader.FrozenBlocks())
+		return err
+	})
+	require.NoError(t, err)
+	return reply.CurrentBlock
+}
+
+func (h *reporterHarness) awaitEvent(t *testing.T) *remoteproto.SyncingReply {
+	t.Helper()
+	select {
+	case reply := <-h.events:
+		return reply
+	case <-time.After(10 * time.Second):
+		t.Fatal("no sync-state event published")
+		return nil
+	}
+}
+
+func (h *reporterHarness) requireNoEvent(t *testing.T) {
+	t.Helper()
+	select {
+	case reply := <-h.events:
+		t.Fatalf("unexpected sync-state event: currentBlock=%d", reply.CurrentBlock)
+	case <-time.After(20 * snapshotDownloadProgressInterval):
+	}
+}
+
+// Pins the no-up-front-publish behavior documented on the reporter itself.
+func TestSnapshotDownloadProgressReporterPublishesNothingBeforeFirstSample(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
+}
+
+func TestSnapshotDownloadProgressReporterMapsByteRatioToBlocks(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+	h.downloader.set(250, 1000)
+
+	reply := h.awaitEvent(t)
+	require.True(t, reply.Syncing)
+	require.InDelta(t, 0.25*float64(h.expectBlocks), float64(reply.CurrentBlock), 1)
+	require.Equal(t, h.expectBlocks, reply.LastNewBlockSeen)
+}
+
+func TestSnapshotDownloadProgressReporterResetsStaleProgressAtStart(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+
+	// A terminal sample left behind by the header-chain phase: publishing it
+	// as-is would report the full snapshot set as downloaded.
+	h.downloader.set(1000, 1000)
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	defer func() { stop(nil, true, 0) }()
+
+	require.Equal(t, 1, h.downloader.resetCount())
+	require.Zero(t, h.currentBlock(t))
+}
+
+// The snapshot set's commitment can lag the headers tip the in-flight samples
+// scale to, so the pin steps back from the last mapped height to the block
+// execution resumes from. That step is the accepted correction: holding the
+// higher number would report a block that is neither committed progress nor the
+// resume point.
+func TestSnapshotDownloadProgressReporterStopPinsCommitmentBlockBelowLastSample(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(1000, 1000)
+	require.Greater(t, h.awaitEvent(t).CurrentBlock, uint64(commitBlock))
+
+	stop(nil, true, commitBlock)
+
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
+}
+
+func TestSnapshotDownloadProgressReporterSkipsUnknownTotal(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+	h.downloader.set(400, 0)
+
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
+}
+
+// The pin reports the commitment block, where execution resumes; pinning the
+// frozen tip would make currentBlock step backwards at the handoff.
+func TestSnapshotDownloadProgressReporterStopPinsCommitmentBlockOnSuccess(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(400, 1000)
+	h.awaitEvent(t)
+
+	stop(nil, true, commitBlock)
+
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
+}
+
+// A download that failed at 40% must not report 100%: an operator watching
+// eth_syncing through a failing download would see it oscillate real% → 100%.
+func TestSnapshotDownloadProgressReporterStopKeepsLastSampleOnDownloadFailure(t *testing.T) {
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(400, 1000)
+	h.awaitEvent(t)
+
+	stop(errors.New("webseed outage"), false, 0)
+
+	require.InDelta(t, 0.4*float64(h.expectBlocks), float64(h.currentBlock(t)), 1)
+}
+
+// A completed download must not leave the Downloading sample behind when a
+// later step of the stage fails: the node keeps running and syncs to head, and
+// a retained sample would report the download shape forever.
+func TestSnapshotDownloadProgressReporterStopClearsSampleWhenTailFailsAfterCompletedDownload(t *testing.T) {
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(1000, 1000)
+	h.awaitEvent(t)
+
+	stop(errors.New("open folder failed"), true, 0)
+
+	require.Zero(t, h.currentBlock(t))
+}
+
+// Same tail failure, but late enough that the commitment block is already
+// known: pin it, as on success.
+func TestSnapshotDownloadProgressReporterStopPinsCommitmentBlockWhenTailFailsAfterCompletedDownload(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(1000, 1000)
+	h.awaitEvent(t)
+
+	stop(errors.New("save stage progress failed"), true, commitBlock)
+
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
+}
+
+// Shutdown between download completion and the stop publish: the pin is still
+// recorded for pollers, but nothing is published — the final db.View on the
+// cancelled ctx only fails and logs.
+func TestSnapshotDownloadProgressReporterStopOnShutdownPinsWithoutPublishing(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	stop := startSnapshotDownloadProgressReporter(ctx, h.cfg)
+	h.downloader.set(400, 1000)
+	h.awaitEvent(t)
+
+	cancel()
+	stop(nil, true, commitBlock)
+
+	h.requireNoEvent(t)
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
+}
+
+func TestSnapshotDownloadProgressReporterStopWithoutSamplePinsCommitmentBlock(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	stop(nil, true, commitBlock)
+
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
+}
+
+// Completion can land inside the last sampling window, where the downloader
+// still reports (0, 0): the pin must not depend on downloader state.
+func TestSnapshotDownloadProgressReporterStopPinsWhenDownloaderReportsNoProgress(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(400, 1000)
+	h.awaitEvent(t)
+	h.downloader.set(0, 0)
+
+	stop(nil, true, commitBlock)
+
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
+}
+
+// Pins the clear-instead-of-pin behavior documented on the stop func itself
+// (commitBlock == 0, e.g. --snap.skip-state-snapshot-download).
+func TestSnapshotDownloadProgressReporterStopClearsWithoutCommitmentBlock(t *testing.T) {
+	h := newSeededReporterHarness(t, 499_000)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	h.downloader.set(400, 1000)
+	h.awaitEvent(t)
+
+	stop(nil, true, 0)
+
+	require.Zero(t, h.currentBlock(t))
+}
+
+// A capped download retains only the segments whose To is at or below the cap,
+// so the target must be the top retained boundary: scaling to the cap itself
+// overshoots and snaps backwards at completion.
+func TestSnapshotDownloadProgressReporterCapsTargetAtLastBoundaryBelowDownloadToBlock(t *testing.T) {
+	// Boundaries at 100k (extra headers file) and 500k (base seed); the cap
+	// falls between them, so the retained set tops out at the 100k boundary.
+	const retainedBoundaryTip = 100_000 - 1
+	h := newReporterHarness(t, networkname.Bloatnet, 0, &progressDownloader{})
+	seedPreverified(t, networkname.Bloatnet, `"v1-000000-000100-headers.seg" = "cc"`, `"v1-000000-000100-bodies.seg" = "dd"`)
+	h.cfg.syncConfig.SnapshotDownloadToBlock = 250_000
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+	h.downloader.set(500, 1000)
+
+	reply := h.awaitEvent(t)
+	require.InDelta(t, 0.5*float64(retainedBoundaryTip), float64(reply.CurrentBlock), 1)
+}
+
+func TestSnapshotDownloadProgressReporterNoopWhenDownloadToBlockBelowFirstBoundary(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+	h.cfg.syncConfig.SnapshotDownloadToBlock = 200_000
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	stop(nil, true, 0)
+
+	require.Zero(t, h.downloader.resetCount())
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
+}
+
+func TestSnapshotDownloadProgressReporterDownloadToBlockAboveTipKeepsTarget(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+	h.cfg.syncConfig.SnapshotDownloadToBlock = 10 * h.expectBlocks
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+	h.downloader.set(500, 1000)
+
+	reply := h.awaitEvent(t)
+	require.InDelta(t, 0.5*float64(h.expectBlocks), float64(reply.CurrentBlock), 1)
+}
+
+// CL segments (beaconblocks, blobsidecars) are numbered by slot: on chains
+// where slots exceed block numbers, a target derived from every .seg would
+// report blocks past the EL tip and snap backwards at the success pin.
+func TestSnapshotDownloadProgressReporterTargetIgnoresSlotNumberedSegments(t *testing.T) {
+	h := newReporterHarness(t, networkname.Bloatnet, 0, &progressDownloader{})
+	seedPreverified(t, networkname.Bloatnet, `"v1.1-000000-000800-beaconblocks.seg" = "cc"`)
+	const headersTip = 499_999
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+	h.downloader.set(500, 1000)
+
+	reply := h.awaitEvent(t)
+	require.InDelta(t, 0.5*float64(headersTip), float64(reply.CurrentBlock), 1)
+	require.Equal(t, uint64(headersTip), reply.LastNewBlockSeen)
+}
+
+// A successful stop must stay silent too: with no data source there was no
+// download shape to bridge, and the pin would fabricate 100%.
+func TestSnapshotDownloadProgressReporterNoopWithoutProgressCapability(t *testing.T) {
+	h := newReporterHarness(t, networkname.Bloatnet, 499_000, plainDownloader{})
+	seedPreverified(t, networkname.Bloatnet)
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	stop(nil, true, testCommitBlock)
+
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
+}
+
+// Pins the DisableDownloadE3 no-op documented on the reporter.
+func TestSnapshotDownloadProgressReporterNoopWithoutStateSnapshotDownload(t *testing.T) {
+	h := newSeededReporterHarness(t, 0)
+	br := h.cfg.blockReader.(frozenBlockReader)
+	br.freezing = ethconfig.BlocksFreezing{DisableDownloadE3: true}
+	h.cfg.blockReader = br
+
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	t.Cleanup(func() { stop(nil, true, 0) })
+	h.downloader.set(250, 1000)
+
+	require.Zero(t, h.downloader.resetCount())
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
+}
+
+func TestSnapshotDownloadProgressReporterNoopWithoutKnownTarget(t *testing.T) {
+	h := newReporterHarness(t, networkname.Bloatnet, 0, &progressDownloader{})
+
+	h.downloader.set(250, 1000)
+	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
+	stop(nil, true, 0)
+
+	require.Zero(t, h.downloader.resetCount())
+	h.requireNoEvent(t)
+	require.Zero(t, h.currentBlock(t))
 }

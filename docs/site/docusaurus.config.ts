@@ -4,46 +4,55 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const versionReplace = require('./src/remark/version-replace.js');
 
+// Archived doc versions (newest-first). Single source of truth: adding an entry
+// here (via `docusaurus docs:version`) is all that's needed — version injection
+// below derives everything from this list, no per-version config edits required.
+const archivedVersions: string[] = require('./versions.json');
+
+// The docs series this branch publishes; also scopes the {ERIGON_VERSION}
+// lookup below. The `label: 'vX.Y'` literal is rewritten at each cutover.
+const currentDocsVersion = {
+  label: 'v3.6',
+  badge: false,
+};
+
+type Release = {tag_name: string; prerelease: boolean; draft: boolean};
+
+// Stable-release selection lives in its own CommonJS module so its ordering
+// rules are testable without booting Docusaurus (src/releases.test.js). The
+// GitHub API orders releases by publish date, so every selector there sorts by
+// semantic version instead of trusting that order.
+const {installableVersion, latestStableInSeries} = require('./src/releases.js');
+
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
   if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
   return headers;
 }
 
-async function fetchLatestVersion(): Promise<string> {
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/erigontech/erigon/releases/latest',
-      {headers: githubHeaders()},
-    );
-    if (!res.ok) return 'latest';
-    const data = await res.json() as {tag_name?: string};
-    return data.tag_name?.replace(/^v/, '') ?? 'latest';
-  } catch {
-    return 'latest';
+// One page serves every series resolved below; 100 is the API maximum and must
+// stay wide enough to reach the oldest archived series.
+async function fetchReleases(): Promise<Release[]> {
+  const res = await fetch(
+    'https://api.github.com/repos/erigontech/erigon/releases?per_page=100',
+    {headers: githubHeaders()},
+  );
+  if (!res.ok) {
+    const hint = res.status === 403 || res.status === 429
+      ? ' Set GITHUB_TOKEN if this is rate limiting.'
+      : '';
+    throw new Error(`Release lookup failed: ${res.status} ${res.statusText}.${hint}`);
   }
-}
-
-async function fetchLatestV33Version(): Promise<string> {
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/erigontech/erigon/releases?per_page=50',
-      {headers: githubHeaders()},
-    );
-    if (!res.ok) return 'latest';
-    const releases = await res.json() as Array<{tag_name: string; prerelease: boolean}>;
-    const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith('v3.3.'));
-    return latest?.tag_name.replace(/^v/, '') ?? 'latest';
-  } catch {
-    return 'latest';
-  }
+  return await res.json() as Release[];
 }
 
 export default async function createConfig(): Promise<Config> {
-  const [latestVersion, v33Version] = await Promise.all([
-    fetchLatestVersion(),
-    fetchLatestV33Version(),
-  ]);
+  const releases = await fetchReleases();
+  const latestVersion = installableVersion(releases, currentDocsVersion.label);
+  // Map each archived version id (e.g. "v3.4") to its latest patch release string.
+  const versionStrings: Record<string, string> = Object.fromEntries(
+    archivedVersions.map((v) => [v, latestStableInSeries(releases, v)]),
+  );
 
   return {
     title: 'Erigon Documentation',
@@ -58,6 +67,9 @@ export default async function createConfig(): Promise<Config> {
     onBrokenMarkdownLinks: 'throw',
     onBrokenAnchors: 'throw',
     i18n: {defaultLocale: 'en', locales: ['en']},
+
+    markdown: {mermaid: true},
+    themes: ['@docusaurus/theme-mermaid'],
 
     customFields: {latestVersion},
 
@@ -78,12 +90,39 @@ export default async function createConfig(): Promise<Config> {
 
     plugins: [
       [
+        '@docusaurus/plugin-client-redirects',
+        {
+          redirects: [
+            // NAT moved out of the CLI Reference subfolder to a top-level page.
+            {
+              from: '/fundamentals/configuring-erigon/nat',
+              to: '/fundamentals/nat',
+            },
+            // The Polygon easy-node guide is removed: 3.1.* is the last series
+            // that officially supports Polygon. Inbound links land on the support
+            // statement; the guide itself is still readable in the v3.4 archive.
+            {
+              from: '/get-started/easy-nodes/how-to-run-a-polygon-node',
+              to: '/fundamentals/supported-networks',
+            },
+            // The bor_ namespace is removed along with Polygon support. Inbound
+            // links land on the namespace index; the page is still readable in
+            // the v3.4 archive.
+            {
+              from: '/interacting-with-erigon/bor',
+              to: '/interacting-with-erigon',
+            },
+          ],
+        },
+      ],
+      [
         '@docusaurus/plugin-content-docs',
         {
           id: 'help-center',
           path: 'help-center',
           routeBasePath: 'help-center',
           sidebarPath: './sidebars-help-center.ts',
+          showLastUpdateTime: true,
         },
       ],
       [
@@ -107,15 +146,22 @@ export default async function createConfig(): Promise<Config> {
           routeBasePath: '/',
           lastVersion: 'current',
           versions: {
-            current: {
-              label: 'v3.4',
-              badge: false,
-            },
+            current: currentDocsVersion,
           },
-          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, v33Version}]],
+          remarkPlugins: [[versionReplace, {currentVersion: latestVersion, versionStrings}]],
+          showLastUpdateTime: true,
         },
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},
+        sitemap: {
+          // Emit <lastmod> per URL (from git history via showLastUpdateTime) so
+          // crawlers can prioritise changed pages. Exclude /search from the
+          // sitemap — it has no indexable content (the route itself still exists).
+          lastmod: 'date',
+          changefreq: 'weekly',
+          priority: 0.5,
+          ignorePatterns: ['/search'],
+        },
       } satisfies Preset.Options],
     ],
 
@@ -162,18 +208,9 @@ export default async function createConfig(): Promise<Config> {
           },
         ],
       },
-      footer: {
-        style: 'dark',
-        links: [
-          {title: 'Community', items: [
-            {label: 'GitHub', href: 'https://github.com/erigontech/erigon'},
-            {label: 'Discord', href: 'https://discord.gg/erigon'},
-          ]},
-        ],
-        copyright: `Copyright © ${new Date().getFullYear()} Erigon. Built with Docusaurus.`,
-      },
       metadata: [
         {name: 'description', content: 'Official documentation for Erigon — the efficient, modular Ethereum execution client built for performance and low disk footprint.'},
+        {name: 'theme-color', content: '#EF7716'},
         {property: 'og:type', content: 'website'},
         {property: 'og:site_name', content: 'Erigon Documentation'},
         {property: 'og:image', content: 'https://docs.erigon.tech/img/og-image.png'},

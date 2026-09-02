@@ -50,7 +50,7 @@ func TestSystemCallStoragePropagation_DirectDomainPut(t *testing.T) {
 	copy(composite[20:], slotVal[:])
 	sdMem[string(composite)] = values[0]
 
-	for blockIdx := 0; blockIdx < 5; blockIdx++ {
+	for blockIdx := range 5 {
 		// Read current value (simulates system call reading slot 4)
 		currentVal := sdMem[string(composite)]
 		t.Logf("Block %d: read slot4=%x", blockIdx, currentVal)
@@ -99,7 +99,7 @@ func TestSystemCallStoragePropagation_BlockStateCache(t *testing.T) {
 	// Write initial value
 	sdMem[string(composite)] = values[0]
 
-	for blockIdx := 0; blockIdx < 5; blockIdx++ {
+	for blockIdx := range 5 {
 		// Create a fresh BlockStateCache per block (like the parallel executor)
 		cache := NewBlockStateCache()
 

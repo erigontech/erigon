@@ -30,8 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
-type TransitionCore struct {
-}
+type TransitionCore struct{}
 
 func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {
@@ -83,7 +82,7 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 		}
 		blockIndex++
 		if err := machine.TransitionState(c.Machine, startState, block); err != nil {
-			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
+			return fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 		}
 	}
 	expectedRoot, err := stopState.HashSSZ()

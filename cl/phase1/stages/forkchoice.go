@@ -5,27 +5,34 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -52,7 +59,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		} else {
 			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
 		}
-
 	}
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
@@ -72,12 +78,19 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
 		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(justifiedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
+			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
-			err = fmt.Errorf("failed to run forkchoice: %w", err)
-			return
+			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+			// to lose by carrying on: the next head will send another one.
+			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
+				err = nil
+			} else {
+				err = fmt.Errorf("failed to run forkchoice: %w", err)
+				return
+			}
 		}
 	}
 
@@ -85,7 +98,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	if err2 := cfg.rpc.SetStatus(
 		cfg.forkChoice.FinalizedCheckpoint().Root,
 		cfg.forkChoice.FinalizedCheckpoint().Epoch,
-		headRoot, headSlot); err2 != nil {
+		headRoot, headSlot,
+	); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
 	return
@@ -107,16 +121,10 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to read canonical block root: %w", err)
 	}
 
-	oldCanonical := common.Hash{}
-	// Guard against uint64 underflow: currentSlot=0 → currentSlot-1 = MaxUint64 → infinite loop.
-	for i := currentSlot; i > 1; i-- {
-		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i-1)
-		if err != nil {
-			return fmt.Errorf("failed to read canonical block root: %w", err)
-		}
-		if oldCanonical != (common.Hash{}) {
-			break
-		}
+	// Capture the actual old canonical tip before any mutations.
+	oldHeadSlot, oldHeadRoot, err := beacon_indicies.ReadCanonicalHead(tx)
+	if err != nil {
+		return fmt.Errorf("failed to read canonical head: %w", err)
 	}
 
 	// List of new canonical chain entries
@@ -157,8 +165,8 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	}
 
 	// Mark the new canonical chain segments in reverse order
-	for i := len(reconnectionRoots) - 1; i >= 0; i-- {
-		if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
+	for _, reconnectionRoot := range slices.Backward(reconnectionRoots) {
+		if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoot.slot, reconnectionRoot.root); err != nil {
 			return fmt.Errorf("failed to mark root canonical: %w", err)
 		}
 	}
@@ -168,16 +176,13 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 		return fmt.Errorf("failed to mark root canonical: %w", err)
 	}
 
-	// check reorg
-	parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, headRoot)
-	if err != nil {
-		return fmt.Errorf("failed to read parent block root: %w", err)
-	}
-	if parentRoot != oldCanonical {
-		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_canonical", oldCanonical, "new_canonical", headRoot)
-		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldCanonical)
+	// A reorg occurred if the fork point (currentSlot) is strictly below the
+	// old canonical tip. Normal chain extension lands exactly at oldHeadSlot.
+	if oldHeadRoot != (common.Hash{}) && currentSlot < oldHeadSlot {
+		log.Debug("cl reorg", "new_head_slot", headSlot, "fork_slot", currentSlot, "old_head", oldHeadRoot, "new_canonical", headRoot)
+		oldStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, oldHeadRoot)
 		if err != nil {
-			log.Warn("failed to read state root by block root", "err", err, "block_root", oldCanonical)
+			log.Warn("failed to read state root by block root", "err", err, "block_root", oldHeadRoot)
 			return nil
 		}
 		newStateRoot, err := beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, headRoot)
@@ -186,18 +191,22 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 			return nil
 		}
 		reorgDepth := uint64(0)
-		if headSlot > currentSlot {
-			reorgDepth = headSlot - currentSlot
+		if oldHeadSlot > currentSlot {
+			reorgDepth = oldHeadSlot - currentSlot
+		}
+		executionOptimistic := false
+		if cfg.forkChoice != nil {
+			executionOptimistic = cfg.forkChoice.IsRootOptimistic(headRoot)
 		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
 			Depth:               reorgDepth,
-			OldHeadBlock:        oldCanonical,
+			OldHeadBlock:        oldHeadRoot,
 			NewHeadBlock:        headRoot,
 			OldHeadState:        oldStateRoot,
 			NewHeadState:        newStateRoot,
 			Epoch:               headSlot / cfg.beaconCfg.SlotsPerEpoch,
-			ExecutionOptimistic: cfg.forkChoice.IsRootOptimistic(headRoot),
+			ExecutionOptimistic: executionOptimistic,
 		}
 		cfg.emitter.State().SendChainReorg(reorgEvent)
 	}
@@ -251,19 +260,11 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		log.Warn("failed to get proposer index", "err", err)
 		return err
 	}
-	withdrawals := []*types.Withdrawal{}
 	expWithdrawals, err := state.GetExpectedWithdrawals(s, epoch)
 	if err != nil {
 		return err
 	}
-	for _, w := range expWithdrawals.Withdrawals {
-		withdrawals = append(withdrawals, &types.Withdrawal{
-			Amount:    w.Amount,
-			Index:     w.Index,
-			Validator: w.Validator,
-			Address:   w.Address,
-		})
-	}
+	withdrawals := cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(expWithdrawals.Withdrawals)
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,
@@ -274,6 +275,8 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	if cfg.beaconCfg.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.GloasVersion) {
 		sn := hexutil.Uint64(nextSlot)
 		payloadAttributes.SlotNumber = &sn
+		tgl := hexutil.Uint64(cfg.beaconCfg.DefaultBuilderGasLimit)
+		payloadAttributes.TargetGasLimit = &tgl
 	}
 	e := &beaconevents.PayloadAttributesData{
 		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),
@@ -290,30 +293,103 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	return nil
 }
 
-// saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint sync.
-func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
-	epochFrequency := uint64(5)
-	if headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
-		dat, err := utils.EncodeSSZSnappy(headState)
-		if err != nil {
-			return fmt.Errorf("failed to encode ssz snappy: %w", err)
+// writeFinalizedStateFile snappy-encodes st and replaces the finalized-state resume file via a
+// same-directory temp file and rename, so a crash mid-write can never leave a truncated file under
+// the final name. The rename is atomic on POSIX within one filesystem; on Windows it is best-effort.
+// The temp name is fixed rather than randomized so a crash before the rename leaves at most one
+// stale temp, reused by the next save.
+func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error {
+	dat, err := utils.EncodeSSZSnappy(st)
+	if err != nil {
+		return fmt.Errorf("failed to encode ssz snappy: %w", err)
+	}
+	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	var rootPath string
+	if st.Version() >= clparams.GloasVersion {
+		rootFileName := checkpoint_sync.FinalizedStateRootFileName(dat)
+		rootPath = filepath.Join(dirs.CaplinLatest, rootFileName)
+		rootTmpPath := rootPath + ".tmp"
+		stateRoot := st.PeekPreviousStateRoot()
+		if err := replaceDurableFile(rootTmpPath, rootPath, checkpoint_sync.EncodeFinalizedStateRoot(dat, stateRoot)); err != nil {
+			return fmt.Errorf("failed to replace finalized state root: %w", err)
 		}
-		// Write the head state to disk
-		fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
-
-		// Create the directory if it doesn't exist
-		err = os.MkdirAll(cfg.dirs.CaplinLatest, 0755)
-		if err != nil {
-			return fmt.Errorf("failed to create directory: %w", err)
+	}
+	tmpName := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName+".tmp")
+	statePath := filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName)
+	if err := replaceDurableFile(tmpName, statePath, dat); err != nil {
+		return fmt.Errorf("failed to replace finalized state: %w", err)
+	}
+	if rootPath != "" {
+		if err := checkpoint_sync.RemoveObsoleteFinalizedStateRoots(dirs.CaplinLatest, rootPath); err != nil {
+			return fmt.Errorf("failed to remove obsolete finalized state roots: %w", err)
 		}
-
-		// Write the data to the file
-		err = os.WriteFile(fileToWriteTo, dat, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write head state to disk: %w", err)
+		if err := syncDirectory(dirs.CaplinLatest); err != nil {
+			return fmt.Errorf("failed to sync finalized state root cleanup: %w", err)
 		}
 	}
 	return nil
+}
+
+func replaceDurableFile(tmpPath, finalPath string, data []byte) (err error) {
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, tmp.Close())
+		}
+		_ = dir.RemoveFile(tmpPath)
+	}()
+	if _, err = tmp.Write(data); err != nil {
+		return err
+	}
+	if syncErr := tmp.Sync(); syncErr != nil {
+		return syncErr
+	}
+	closeErr := tmp.Close()
+	closed = true
+	if closeErr != nil {
+		return closeErr
+	}
+	if renameErr := os.Rename(tmpPath, finalPath); renameErr != nil {
+		return renameErr
+	}
+	return syncDirectory(filepath.Dir(finalPath))
+}
+
+func syncDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
+// saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a
+// later restart can resume from a locally-provable, reorg-immune anchor. It reuses the head-state
+// save cadence. Fetching the finalized state is best-effort: a miss or error is non-fatal.
+func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64) error {
+	epochFrequency := uint64(5)
+	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
+		return nil
+	}
+	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)
+	if err != nil {
+		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
+		return nil
+	}
+	if st == nil {
+		return nil
+	}
+	return writeFinalizedStateFile(dirs, st)
 }
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
@@ -332,8 +408,12 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	}
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
-	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+	if err := emitHeadEvent(cfg, headSlot, headRoot, headState); err != nil {
+		logger.Warn("failed to emit head event", "err", err)
+	}
+	if err := emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState); err != nil {
+		logger.Warn("failed to emit next payload attributes event", "err", err)
+	}
 
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)
@@ -357,16 +437,14 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 		}
 
-		// Save the head state on disk for eventual node restarts without checkpoint sync
-		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
-			return fmt.Errorf("failed to save head state on disk: %w", err)
+		if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headState.Slot()); err != nil {
+			return fmt.Errorf("failed to save finalized state on disk: %w", err)
 		}
 
 		// Shuffle validator set for the next epoch
 		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
 		return nil
 	})
-
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
@@ -418,11 +496,12 @@ func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cf
 
 		// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
 		epochsToCache := []uint64{currentEpoch + 1}
-		if currentEpoch >= 2 {
+		switch {
+		case currentEpoch >= 2:
 			epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
-		} else if currentEpoch >= 1 {
+		case currentEpoch >= 1:
 			epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
-		} else {
+		default:
 			epochsToCache = append(epochsToCache, currentEpoch)
 		}
 

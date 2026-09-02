@@ -17,12 +17,13 @@
 package builder
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -36,7 +37,7 @@ type BuilderFinishCfg struct {
 	engine                rules.Engine
 	sealCancel            chan struct{}
 	builderState          BuilderState
-	blockReader           services.FullBlockReader
+	blockReader           dbservices.FullBlockReader
 	latestBlockBuiltStore *LatestBlockBuiltStore
 }
 
@@ -45,7 +46,7 @@ func StageBuilderFinishCfg(
 	engine rules.Engine,
 	builderState BuilderState,
 	sealCancel chan struct{},
-	blockReader services.FullBlockReader,
+	blockReader dbservices.FullBlockReader,
 	latestBlockBuiltStore *LatestBlockBuiltStore,
 ) BuilderFinishCfg {
 	return BuilderFinishCfg{
@@ -58,8 +59,11 @@ func StageBuilderFinishCfg(
 	}
 }
 
-func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
+func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
 	const logPrefix = "BuilderFinish"
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -67,17 +71,32 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	//	continue
 	//}
 
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
+	var blockAccessList types.BlockAccessList
 	// Only embed the BAL hash in the header for Amsterdam+ chains.
 	// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
 	// and validated but NOT included in the block header.
-	if current.BlockAccessList != nil && cfg.chainConfig.IsAmsterdam(current.Header.Time) && !cfg.chainConfig.IsEIPDisabled(7928) {
-		hash := current.BlockAccessList.Hash()
-		block.HeaderNoCopy().BlockAccessListHash = &hash
+	if current.BlockAccessList != nil && cfg.chainConfig.IsEIPEnabled(7928, current.Header.Time) {
+		blockAccessList = current.BlockAccessList
 	}
+	var blockAccessListSidecar *types.BlockAccessListSidecar
+	if blockAccessList != nil {
+		blockAccessListSidecar = types.NewBlockAccessListSidecar(blockAccessList)
+		if err := blockAccessListSidecar.ValidateForBlock(current.Header.GasLimit); err != nil {
+			return fmt.Errorf("validate block access list: %w", err)
+		}
+		hash, err := blockAccessListSidecar.Hash()
+		if err != nil {
+			return fmt.Errorf("hash block access list: %w", err)
+		}
+		current.Header.BlockAccessListHash = &hash
+	}
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessListSidecar)
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	*current = exec.AssembledBlock{} // hack to clean global data
 

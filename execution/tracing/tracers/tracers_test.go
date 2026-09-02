@@ -56,7 +56,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
-	signer := types.LatestSignerForChainID(big.NewInt(1))
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
 	txn, err := types.SignTx(unsignedTx, *signer, privateKeyECDSA)
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -106,7 +106,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	rules := context.Rules(chain.AllProtocolChanges)
-	statedb, _ := testutil.MakePreState(rules, tx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))

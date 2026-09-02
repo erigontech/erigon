@@ -23,7 +23,6 @@ import (
 	"reflect"
 	"testing"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -54,6 +53,16 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 		"err_with_valid_json_empty_object": {
 			params:   []byte("[5]"),
 			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":{}},"error":{"code":-32000,"message":"id 4"}}`,
+		},
+		"err_with_unclosed_result_object": {
+			params:   []byte("[6]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":{"structLogs":[]},"error":{"code":-32000,"message":"id 6"}}`,
+		},
+		// JSON-RPC wants exactly one of result and error, so a callback that
+		// succeeds without writing still owes a result.
+		"no_error_no_stream_write": {
+			params:   []byte("[7]"),
+			expected: `{"jsonrpc":"2.0","id":1,"result":null}`,
 		},
 	}
 
@@ -94,6 +103,14 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
+				if id == 6 {
+					stream.WriteObjectStart()
+					stream.WriteObjectField("structLogs")
+					stream.WriteEmptyArray()
+					// intentionally leave the result object open: the tracer erroring out
+					// mid-write must not leave the response's "result" object unclosed.
+					return errors.New("id 6")
+				}
 				return nil
 			}
 
@@ -113,7 +130,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+			stream := jsonstream.New(&buf)
 
 			h := handler{}
 			h.runMethod(context.Background(), &msg, cb, args, stream)
@@ -125,4 +142,40 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 		})
 	}
 
+}
+
+// Smoke test for the streamable-callback path: runMethod writes the result
+// through the stream without panicking.
+func TestRunMethodStreamable(t *testing.T) {
+	msg := jsonrpcMessage{
+		Version: "2.0",
+		ID:      []byte{49},
+		Method:  "test_test",
+		Params:  []byte("[]"),
+	}
+
+	dummyFunc := func(stream jsonstream.Stream) error {
+		stream.WriteEmptyObject()
+		return nil
+	}
+
+	cb := &callback{
+		fn:         reflect.ValueOf(dummyFunc),
+		streamable: true,
+	}
+
+	args, err := parsePositionalArguments(msg.Params, cb.argTypes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+
+	h := handler{}
+	assert.NotPanics(t, func() {
+		h.runMethod(ctx, &msg, cb, args, stream)
+	})
 }

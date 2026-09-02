@@ -1,7 +1,7 @@
 ---
 title: "Logs"
 description: "Log levels, structured logging, and how to interpret Erigon output."
-sidebar_position: 10
+sidebar_position: 15
 ---
 
 
@@ -12,7 +12,7 @@ Erigon features a sophisticated logging framework that offers detailed visibilit
 The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.
 
 :::tip
-Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
+Erigon offers a `--metrics` flag for using Prometheus/Grafana monitoring, see [Creating a Dashboard](creating-a-dashboard).
 :::
 
 ## Logging Framework Architecture
@@ -31,6 +31,10 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 * `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
 
+**Downloader (torrent) logs**
+
+The torrent client inside the Downloader keeps its own JSON-formatted file at `<datadir>/logs/torrent.log`. The path is built from the datadir and does **not** follow `--log.dir.path`, so it stays there even when Erigon's own logs are redirected elsewhere. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
+
 **Log Levels**
 
 The logging system defines six distinct log levels in hierarchical order:
@@ -44,7 +48,7 @@ The logging system defines six distinct log levels in hierarchical order:
 
 The log level is set by using the `--verbosity` flag, for example:
 
-```
+```text
 ./build/bin/erigon --verbosity=1
 ```
 

@@ -23,12 +23,13 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/OffchainLabs/go-bitfield"
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -55,6 +56,7 @@ type Sentinel struct {
 	started  bool
 	listener *discover.UDPv5 // this is us in the network.
 	ctx      context.Context
+	cancel   context.CancelFunc
 	cfg      *SentinelConfig
 	peers    *peers.Pool
 	p2p      p2p.P2PManager
@@ -79,7 +81,6 @@ type Sentinel struct {
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
-	metadataLock sync.Mutex
 	// connectSem serializes concurrent Host.Connect() and Peerstore().RemovePeer()
 	// calls to work around a data race in libp2p v0.37.2's memoryAddrBook between
 	// addAddrsUnlocked() and the background gc() goroutine (see #19603).
@@ -104,22 +105,6 @@ func New(
 	peerDasStateReader peerdasstate.PeerDasStateReader,
 	p2p p2p.P2PManager,
 ) (*Sentinel, error) {
-	s := &Sentinel{
-		ctx:                ctx,
-		cfg:                cfg,
-		blockReader:        blockReader,
-		indiciesDB:         indiciesDB,
-		metrics:            true,
-		logger:             logger,
-		forkChoiceReader:   forkChoiceReader,
-		blobStorage:        blobStorage,
-		ethClock:           ethClock,
-		dataColumnStorage:  dataColumnStorage,
-		peerDasStateReader: peerDasStateReader,
-		p2p:                p2p,
-		connectSem:         semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections)),
-	}
-
 	// Setup discovery
 	enodes := make([]*enode.Node, len(cfg.NetworkConfig.BootNodes))
 	for i, bootnode := range cfg.NetworkConfig.BootNodes {
@@ -132,6 +117,24 @@ func New(
 	privateKey, err := crypto.GenerateKey()
 	if err != nil {
 		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	s := &Sentinel{
+		ctx:                ctx,
+		cancel:             cancel,
+		cfg:                cfg,
+		blockReader:        blockReader,
+		indiciesDB:         indiciesDB,
+		metrics:            true,
+		logger:             logger,
+		forkChoiceReader:   forkChoiceReader,
+		blobStorage:        blobStorage,
+		ethClock:           ethClock,
+		dataColumnStorage:  dataColumnStorage,
+		peerDasStateReader: peerDasStateReader,
+		p2p:                p2p,
+		connectSem:         semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections)),
 	}
 	s.discoverConfig = discover.Config{
 		PrivateKey: privateKey,
@@ -173,7 +176,8 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
-		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks).Start()
+		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
+	).Start()
 
 	/*if err := s.connectToBootnodes(); err != nil {
 		return nil, fmt.Errorf("failed to connect to bootnodes err=%w", err)
@@ -192,14 +196,34 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
+	_, connected, _ := s.GetPeersCount()
+	recordPeerMetrics(connected)
+	go s.updatePeerMetrics()
 	//go s.forkWatcher()
 
 	return s.LocalNode(), nil
 }
 
+const peerMetricsUpdateInterval = 15 * time.Second
+
+func (s *Sentinel) updatePeerMetrics() {
+	ticker := time.NewTicker(peerMetricsUpdateInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			_, connected, _ := s.GetPeersCount()
+			recordPeerMetrics(connected)
+		}
+	}
+}
+
 func (s *Sentinel) Stop() {
 	//s.listener.Close()
 	//s.subManager.Close()
+	s.cancel()
 	s.p2p.Host().Close()
 }
 

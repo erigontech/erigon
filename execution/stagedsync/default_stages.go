@@ -59,10 +59,7 @@ func DefaultStages(
 			ID:          stages.Headers,
 			Description: "Download headers",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return SpawnStageHeaders(s, u, ctx, tx, headers, logger)
+				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return HeadersUnwind(ctx, u, s, tx, headers)
@@ -88,7 +85,7 @@ func DefaultStages(
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return BodiesForward(s, u, ctx, tx, bodies, logger)
+				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindBodiesStage(u, tx, bodies)
@@ -121,7 +118,7 @@ func DefaultStages(
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
+				return PruneExecutionStage(ctx, p, tx.(kv.TemporalRwTx), exec, timeout, logger)
 			},
 		},
 		//{
@@ -171,8 +168,8 @@ func DefaultStages(
 	}
 }
 
-func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg, witnessProcessing *WitnessProcessingCfg) []*Stage {
-	stageList := []*Stage{
+func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, txLookup TxLookupCfg, finish FinishCfg) []*Stage {
+	return []*Stage{
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
@@ -225,29 +222,10 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
+				return PruneExecutionStage(ctx, p, tx.(kv.TemporalRwTx), exec, timeout, logger)
 			},
 		},
-	}
-
-	if witnessProcessing != nil {
-		stageList = append(stageList, &Stage{
-			ID:          stages.WitnessProcessing,
-			Description: "Process buffered witness data",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnStageWitnessProcessing(tx, *witnessProcessing, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindWitnessProcessingStage(u, s, tx, ctx, *witnessProcessing, logger)
-			},
-			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneWitnessProcessingStage(p, tx, *witnessProcessing, ctx, logger)
-			},
-		})
-	}
-
-	stageList = append(stageList,
-		&Stage{
+		{
 			ID:          stages.TxLookup,
 			Description: "Generate txn lookup index",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
@@ -260,7 +238,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return PruneTxLookup(p, tx, txLookup, ctx, logger)
 			},
 		},
-		&Stage{
+		{
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
 			Forward: func(badBlockUnwind bool, s *StageState, _ Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
@@ -273,9 +251,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return nil
 			},
 		},
-	)
-
-	return stageList
+	}
 }
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
@@ -372,7 +348,6 @@ var PipelineUnwindOrder = UnwindOrder{
 	stages.Finish,
 	stages.TxLookup,
 
-	stages.WitnessProcessing,
 	stages.Execution,
 	stages.Senders,
 
@@ -404,7 +379,6 @@ var PipelinePruneOrder = PruneOrder{
 	stages.Finish,
 	stages.TxLookup,
 
-	stages.WitnessProcessing,
 	stages.Execution,
 	stages.Senders,
 

@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log"
 	"testing"
 
 	"github.com/erigontech/erigon/common/crypto"
@@ -16,11 +15,8 @@ import (
 var responseJson string
 
 func TestPrintProof(t *testing.T) {
-
 	var proof accounts.AccProofResult
-	if err := json.Unmarshal([]byte(responseJson), &proof); err != nil {
-		log.Fatal(err)
-	}
+	require.NoError(t, json.Unmarshal([]byte(responseJson), &proof))
 
 	fmt.Printf("AccountProof entries: %d\n", len(proof.AccountProof))
 	for i, p := range proof.AccountProof {
@@ -45,7 +41,6 @@ func TestPrintProof(t *testing.T) {
 	fmt.Printf("StorageProof: \n")
 	for i, storageProof := range proof.StorageProof {
 		fmt.Printf("\t #%d key=%x, value=%v \n", i, storageProof.Key, storageProof.Value)
-		err = PrintProof(storageProof.Proof)
+		require.NoError(t, PrintProof(storageProof.Proof))
 	}
-	require.NoError(t, err)
 }

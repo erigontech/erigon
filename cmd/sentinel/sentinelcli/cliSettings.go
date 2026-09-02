@@ -19,7 +19,7 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/common"
@@ -40,7 +40,7 @@ type SentinelCliCfg struct {
 	StaticPeers    []string `json:"static_peers"`
 }
 
-func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
+func SetupSentinelCli(ctx *cli.Command) (*SentinelCliCfg, error) {
 	cfg := &SentinelCliCfg{}
 
 	cfg.ServerAddr = fmt.Sprintf("%s:%d", ctx.String(sentinelflags.SentinelServerAddr.Name), ctx.Int(sentinelflags.SentinelServerPort.Name))
@@ -50,7 +50,12 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 	cfg.Addr = ctx.String(sentinelflags.SentinelDiscoveryAddr.Name)
 	cfg.ServerTcpPort = uint(ctx.Uint(sentinelflags.SentinelTcpPort.Name))
 
-	cfg.LogLvl = ctx.Uint(logging.LogVerbosityFlag.Name)
+	verbosity := ctx.String(logging.LogVerbosityFlag.Name)
+	lvl, err := logging.GetLogLevel(verbosity)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --%s value %q: %w", logging.LogVerbosityFlag.Name, verbosity, err)
+	}
+	cfg.LogLvl = uint(lvl)
 	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {
 		cfg.LogLvl = uint(log.LvlDebug)
 	}
@@ -61,8 +66,11 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 	if ctx.String(sentinelflags.BootnodesFlag.Name) != "" {
 		cfg.Bootnodes = common.CliString2Array(ctx.String(sentinelflags.BootnodesFlag.Name))
 	}
-	if ctx.String(sentinelflags.SentinelStaticPeersFlag.Name) != "" {
+	if ctx.IsSet(sentinelflags.SentinelStaticPeersFlag.Name) {
 		cfg.StaticPeers = common.CliString2Array(ctx.String(sentinelflags.SentinelStaticPeersFlag.Name))
+		if cfg.StaticPeers == nil {
+			cfg.StaticPeers = []string{}
+		}
 	}
 	return cfg, nil
 }

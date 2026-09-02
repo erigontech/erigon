@@ -176,6 +176,12 @@ func (b *WitnessBuilder) processAccountStorage(n *AccountNode, hex []byte, limit
 		return b.addEmptyRoot()
 	}
 
+	// A blinded storage subtrie has nothing to expand; emit its root hash. Recursing would
+	// error in the HashNode case when the account path is retained but no storage slot is.
+	if hn, ok := n.Storage.(*HashNode); ok {
+		return b.addHashOp(hn)
+	}
+
 	// Here we substitute rs parameter for storageRs, because it needs to become the default
 	return b.makeBlockWitness(n.Storage, hex, limiter, true)
 }

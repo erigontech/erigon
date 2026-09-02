@@ -39,12 +39,12 @@ func TestFiltersDeadlock(t *testing.T) {
 	logCount := 100
 	type sub struct {
 		id LogsSubID
-		ch <-chan *types.Log
+		ch <-chan *types.RPCLog
 	}
 	ctx, cancel := context.WithCancel(context.TODO())
-	for i := 0; i < subCount; i++ {
+	for range subCount {
 		n := &sub{}
-		n.ch, n.id = f.SubscribeLogs(128, crit)
+		n.ch, n.id, _ = f.SubscribeLogs(128, crit, "")
 		// start a loop similar to an rpcdaemon subscription, that calls unsubscribe on return
 		go func() {
 			defer f.UnsubscribeLogs(n.id)
@@ -61,7 +61,7 @@ func TestFiltersDeadlock(t *testing.T) {
 	// cancel the subs at the same time
 	cancel()
 	// try to send logs
-	for i := 0; i < logCount; i++ {
+	for range logCount {
 		log := createLog()
 		// this will deadlock
 		f.OnNewLogs(log)

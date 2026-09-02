@@ -17,7 +17,9 @@
 package utils_test
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/utils"
 )
@@ -107,6 +109,30 @@ func TestIntegerSquareRoot(t *testing.T) {
 		sqrt := utils.IntegerSquareRoot(tc.n)
 		if sqrt != tc.expectedSqrt {
 			t.Errorf("IntegerSquareRoot returned incorrect result for %d. Expected: %d, Got: %d", tc.n, tc.expectedSqrt, sqrt)
+		}
+	}
+}
+
+func TestETA(t *testing.T) {
+	maxDuration := time.Duration(math.MaxInt64).Truncate(time.Second).String()
+	testCases := []struct {
+		remaining  uint64
+		ratePerSec float64
+		expected   string
+	}{
+		{100, 0, "n/a"},
+		{100, -5, "n/a"},
+		{0, 10, "0s"},
+		{100, 10, "10s"},
+		{105, 10, "10s"}, // truncated to whole seconds
+		{math.MaxUint64, 1e-9, maxDuration},
+		{math.MaxUint64, math.SmallestNonzeroFloat64, maxDuration},
+	}
+
+	for _, tc := range testCases {
+		got := utils.ETA(tc.remaining, tc.ratePerSec)
+		if got != tc.expected {
+			t.Errorf("ETA(%d, %g) = %q, want %q", tc.remaining, tc.ratePerSec, got, tc.expected)
 		}
 	}
 }

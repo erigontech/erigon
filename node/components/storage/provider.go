@@ -35,17 +35,15 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // Provider holds the storage component runtime state.
@@ -56,16 +54,13 @@ type Provider struct {
 	ChainDB              kv.TemporalRwDB
 	BlockReader          *freezeblocks.BlockReader
 	BlockWriter          *blockio.BlockWriter
-	AllSnapshots         *freezeblocks.RoSnapshots
-	AllBorSnapshots      *heimdall.RoSnapshots // nil if not Bor
-	BridgeStore          bridge.Store          // nil if not Bor
-	HeimdallStore        heimdall.Store        // nil if not Bor
+	AllSnapshots         *blocksnapshots.RoSnapshots
 	ChainConfig          *chain.Config
 	Genesis              *types.Block
 	GenesisHash          common.Hash
 	CurrentBlockNumber   uint64
 	SegmentsBuildLimiter *semaphore.Weighted
-	BlockRetire          services.BlockRetire
+	BlockRetire          dbservices.BlockRetire
 
 	logger log.Logger
 }
@@ -76,13 +71,10 @@ type Deps struct {
 	Ctx context.Context
 
 	// Outputs from SetUpBlockReader (called in backend.go).
-	ChainDB         kv.TemporalRwDB
-	BlockReader     *freezeblocks.BlockReader
-	BlockWriter     *blockio.BlockWriter
-	AllSnapshots    *freezeblocks.RoSnapshots
-	AllBorSnapshots *heimdall.RoSnapshots // nil if not Bor
-	BridgeStore     bridge.Store          // nil if not Bor
-	HeimdallStore   heimdall.Store        // nil if not Bor
+	ChainDB      kv.TemporalRwDB
+	BlockReader  *freezeblocks.BlockReader
+	BlockWriter  *blockio.BlockWriter
+	AllSnapshots *blocksnapshots.RoSnapshots
 
 	// Genesis and chain config (resolved in backend.go).
 	ChainConfig *chain.Config
@@ -94,10 +86,10 @@ type Deps struct {
 	// DBEventNotifier — NOT owned by storage. Passed in so BlockRetire and
 	// file-change callbacks can forward snapshot events. Currently backed by
 	// shards.Events; will migrate to the framework event bus.
-	DBEventNotifier services.DBEventNotifier
+	DBEventNotifier dbservices.DBEventNotifier
 
 	// Downloader client for file-change callbacks (may be nil).
-	DownloaderClient downloader.Client
+	DownloaderClient dbservices.DownloaderClient
 
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger
@@ -116,9 +108,6 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.BlockReader = deps.BlockReader
 	p.BlockWriter = deps.BlockWriter
 	p.AllSnapshots = deps.AllSnapshots
-	p.AllBorSnapshots = deps.AllBorSnapshots
-	p.BridgeStore = deps.BridgeStore
-	p.HeimdallStore = deps.HeimdallStore
 	p.ChainConfig = deps.ChainConfig
 	p.Genesis = deps.Genesis
 	p.GenesisHash = deps.Genesis.Hash()
@@ -138,8 +127,7 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.CurrentBlockNumber = currentBlock.NumberU64()
 	}
 
-	// BlockRetire — heimdallStore and bridgeStore may be nil for non-Bor chains.
-	p.BlockRetire = freezeblocks.NewBlockRetire(1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.HeimdallStore, p.BridgeStore, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
+	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
 	// Without this, retirement's db.View RO txs can overlap a commit and pin
@@ -183,4 +171,11 @@ func (p *Provider) Initialize(deps Deps) error {
 	)
 
 	return nil
+}
+
+// Close drains BlockRetire before the DB is torn down.
+func (p *Provider) Close() {
+	if p.BlockRetire != nil {
+		p.BlockRetire.Close()
+	}
 }

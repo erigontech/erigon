@@ -160,9 +160,8 @@ func ListenV4(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 	t.tab = tab
 	go tab.loop()
 
-	t.wg.Add(2)
-	go t.loop()
-	go t.readLoop(cfg.Unhandled)
+	t.wg.Go(t.loop)
+	t.wg.Go(func() { t.readLoop(cfg.Unhandled) })
 	return t, nil
 }
 
@@ -368,7 +367,10 @@ func (t *UDPv4) findnode(toid enode.ID, toAddrPort netip.AddrPort, target v4wire
 
 // RequestENR sends ENRRequest to the given node and waits for a response.
 func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
-	addr, _ := n.UDPEndpoint()
+	addr, ok := n.UDPEndpoint()
+	if !ok {
+		return nil, errNoUDPEndpoint
+	}
 	t.ensureBond(n.ID(), addr)
 
 	req := &v4wire.ENRRequest{
@@ -402,7 +404,7 @@ func (t *UDPv4) RequestENR(n *enode.Node) (*enode.Node, error) {
 		return n, nil // response record is older
 	}
 	if err := netutil.CheckRelayAddr(addr.Addr(), respN.IPAddr()); err != nil {
-		return nil, fmt.Errorf("invalid IP in response record: %v", err)
+		return nil, fmt.Errorf("invalid IP in response record: %w", err)
 	}
 	return respN, nil
 }
@@ -441,8 +443,6 @@ func (t *UDPv4) handleReply(from enode.ID, fromIP netip.Addr, req v4wire.Packet)
 // loop runs in its own goroutine. it keeps track of
 // the refresh timer and the pending reply queue.
 func (t *UDPv4) loop() {
-	defer t.wg.Done()
-
 	var (
 		plist        = list.New()
 		timeout      = time.NewTimer(0)
@@ -560,7 +560,6 @@ func (t *UDPv4) write(toaddr netip.AddrPort, toid enode.ID, what string, packet 
 
 // readLoop runs in its own goroutine. it handles incoming UDP packets.
 func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
-	defer t.wg.Done()
 	if unhandled != nil {
 		defer close(unhandled)
 	}
@@ -733,8 +732,10 @@ func (t *UDPv4) handlePing(h *packetHandlerV4, from netip.AddrPort, fromID enode
 
 	// Update node database and endpoint predictor.
 	t.db.UpdateLastPingReceived(n.ID(), from.Addr(), time.Now())
-	toaddr := netip.AddrPortFrom(netutil.IPToAddr(req.To.IP), req.To.UDP)
-	t.localNode.UDPEndpointStatement(from, toaddr)
+	if t.checkBond(fromID, from) {
+		toaddr := netip.AddrPortFrom(netutil.IPToAddr(req.To.IP), req.To.UDP)
+		t.localNode.UDPEndpointStatement(from, toaddr)
+	}
 }
 
 // PONG/v4

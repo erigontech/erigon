@@ -39,13 +39,13 @@ type ErigonAPI interface {
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
 	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]any, error)
-	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error)
+	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error)
 
 	// Receipt related (see ./erigon_receipts.go)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error)
-	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.RPCLogs, error)
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
 	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]any, error)
 

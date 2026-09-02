@@ -111,7 +111,7 @@ type SuicideTraceAction struct {
 type RewardTraceAction struct {
 	Author     common.Address `json:"author"`
 	RewardType string         `json:"rewardType"`
-	Value      hexutil.Big    `json:"value,omitempty"`
+	Value      hexutil.Big    `json:"value"`
 }
 
 type CreateTraceResult struct {

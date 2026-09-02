@@ -199,9 +199,8 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 	}
 
 	d.ctx, d.cancel = context.WithCancel(context.Background())
-	d.wg.Add(2)
-	go d.readNodes(it)
-	go d.loop(it)
+	d.wg.Go(func() { d.readNodes(it) })
+	d.wg.Go(func() { d.loop(it) })
 	return d
 }
 
@@ -385,14 +384,12 @@ loop:
 	for range d.dialing {
 		<-d.doneCh
 	}
-	d.wg.Done()
 }
 
 // readNodes runs in its own goroutine and delivers nodes from
 // the input iterator to the nodesIn channel.
 func (d *dialScheduler) readNodes(it enode.Iterator) {
 	defer dbg.LogPanic()
-	defer d.wg.Done()
 
 	for it.Next() {
 		select {
@@ -571,7 +568,8 @@ func (t *dialTask) run(d *dialScheduler) {
 	err := t.dial(d, t.dest())
 	if err != nil {
 		// For static nodes, resolve one more time if dialing fails.
-		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
+		var derr *dialError
+		if errors.As(err, &derr) && t.flags&staticDialedConn != 0 {
 			if t.resolve(d) {
 				t.dial(d, t.dest()) //nolint:errcheck
 			}
@@ -639,7 +637,8 @@ func (t *dialTask) String() string {
 }
 
 func cleanupDialErr(err error) error {
-	if netErr, ok := err.(*net.OpError); ok && netErr.Op == "dial" {
+	var netErr *net.OpError
+	if errors.As(err, &netErr) && netErr.Op == "dial" {
 		return netErr.Err
 	}
 	return err

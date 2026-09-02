@@ -17,6 +17,8 @@
 package services
 
 import (
+	"testing"
+
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -86,4 +88,18 @@ func (m *mockFuncs) VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *clt
 	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarKZGProofsWithCommitments", sidecar, kzgCommitments)
 	ret0, _ := ret[0].(bool)
 	return ret0
+}
+
+// saveSignatureGlobals restores the package-level signature-verification func
+// vars when the test finishes, so a test's mock (bound to its own gomock
+// controller) can't leak into a later shuffled test and panic there.
+func saveSignatureGlobals(t testing.TB) {
+	origComputeSigningRoot := computeSigningRoot
+	origBlsVerify := blsVerify
+	origBlsVerifyMultipleSignatures := blsVerifyMultipleSignatures
+	t.Cleanup(func() {
+		computeSigningRoot = origComputeSigningRoot
+		blsVerify = origBlsVerify
+		blsVerifyMultipleSignatures = origBlsVerifyMultipleSignatures
+	})
 }

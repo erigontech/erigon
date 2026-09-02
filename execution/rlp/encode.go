@@ -21,10 +21,8 @@ package rlp
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 	"reflect"
 	"sync"
@@ -42,8 +40,6 @@ const (
 	LongListCode        = 0xF7 // long list prefix (length 56+)
 	SingleByteThreshold = 0x80 // values below this are encoded as themselves
 )
-
-var ErrNegativeBigInt = errors.New("rlp: cannot encode negative big.Int")
 
 // Encoder is implemented by types that require custom
 // encoding rules or want to encode private fields.
@@ -66,7 +62,7 @@ type Encoder interface {
 // buffered.
 //
 // Please see package-level documentation of encoding rules.
-func Encode(w io.Writer, val interface{}) error {
+func Encode(w io.Writer, val any) error {
 	// Optimization: reuse *encBuffer when called by EncodeRLP.
 	if buf := encBufferFromWriter(w); buf != nil {
 		return buf.encode(val)
@@ -82,7 +78,7 @@ func Encode(w io.Writer, val interface{}) error {
 
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
-func EncodeToBytes(val interface{}) ([]byte, error) {
+func EncodeToBytes(val any) ([]byte, error) {
 	buf := getEncBuffer()
 	defer encBufferPool.Put(buf)
 
@@ -97,7 +93,7 @@ func EncodeToBytes(val interface{}) ([]byte, error) {
 // data.
 //
 // Please see the documentation of Encode for the encoding rules.
-func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
+func EncodeToReader(val any) (size int, r io.Reader, err error) {
 	buf := getEncBuffer()
 	if err := buf.encode(val); err != nil {
 		encBufferPool.Put(buf)
@@ -128,10 +124,6 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 	switch {
 	case typ == rawValueType:
 		return writeRawValue, nil
-	case typ.AssignableTo(reflect.PointerTo(bigInt)):
-		return writeBigIntPtr, nil
-	case typ.AssignableTo(bigInt):
-		return writeBigIntNoPtr, nil
 	case typ == reflect.PointerTo(u256Int):
 		return writeU256IntPtr, nil
 	case typ == u256Int:
@@ -184,28 +176,6 @@ func writeInt(val reflect.Value, w *encBuffer) error {
 
 func writeBool(val reflect.Value, w *encBuffer) error {
 	w.writeBool(val.Bool())
-	return nil
-}
-
-func writeBigIntPtr(val reflect.Value, w *encBuffer) error {
-	ptr := val.Interface().(*big.Int)
-	if ptr == nil {
-		w.str = append(w.str, EmptyStringCode)
-		return nil
-	}
-	if ptr.Sign() == -1 {
-		return ErrNegativeBigInt
-	}
-	w.writeBigInt(ptr)
-	return nil
-}
-
-func writeBigIntNoPtr(val reflect.Value, w *encBuffer) error {
-	i := val.Interface().(big.Int)
-	if i.Sign() == -1 {
-		return ErrNegativeBigInt
-	}
-	w.writeBigInt(&i)
 	return nil
 }
 
@@ -308,7 +278,7 @@ func makeSliceWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		// w.list is not called for them.
 		wfn = func(val reflect.Value, w *encBuffer) error {
 			vlen := val.Len()
-			for i := 0; i < vlen; i++ {
+			for i := range vlen {
 				if err := etypeinfo.writer(val.Index(i), w); err != nil {
 					return err
 				}
@@ -324,7 +294,7 @@ func makeSliceWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 				return nil
 			}
 			listOffset := w.list()
-			for i := 0; i < vlen; i++ {
+			for i := range vlen {
 				if err := etypeinfo.writer(val.Index(i), w); err != nil {
 					return err
 				}
@@ -512,44 +482,6 @@ func EncodeU64(i uint64, w io.Writer, buffer []byte) error {
 	return err
 }
 
-// BigIntLen returns the RLP-encoded length of i.
-func BigIntLen(i *big.Int) int {
-	bitLen := 0 // treat nil as 0
-	if i != nil {
-		bitLen = i.BitLen()
-	}
-	if bitLen < 8 {
-		return 1
-	}
-	// Strictly speaking, +1 is not correct when the number is longer than 55 bytes
-	// (see https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/),
-	// but in practice all our numbers are smaller than that.
-	return 1 + common.BitLenToByteLen(bitLen)
-}
-
-// EncodeBigInt encodes i as an RLP string via w.
-func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
-	bitLen := 0 // treat nil as 0
-	if i != nil {
-		bitLen = i.BitLen()
-	}
-	if bitLen < 8 {
-		if bitLen > 0 {
-			buffer[0] = byte(i.Uint64())
-		} else {
-			buffer[0] = EmptyStringCode
-		}
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-
-	size := common.BitLenToByteLen(bitLen)
-	buffer[0] = EmptyStringCode + byte(size)
-	i.FillBytes(buffer[1 : 1+size])
-	_, err := w.Write(buffer[:1+size])
-	return err
-}
-
 // Uint256Len returns the RLP-encoded length of i.
 func Uint256Len(i uint256.Int) int {
 	bitLen := i.BitLen()
@@ -711,7 +643,7 @@ func encodePrefix(size int, w io.Writer, buffer []byte, smallTag, largeTag byte)
 // StringListLen returns the RLP-encoded size of a [][]byte as a list of strings.
 func StringListLen(bb [][]byte) int {
 	size := 0
-	for i := 0; i < len(bb); i++ {
+	for i := range bb {
 		size += StringLen(bb[i])
 	}
 	return size + ListPrefixLen(size)
@@ -720,7 +652,7 @@ func StringListLen(bb [][]byte) int {
 // EncodeStringList encodes a [][]byte as an RLP list of strings via w.
 func EncodeStringList(bb [][]byte, w io.Writer, b []byte) error {
 	totalSize := 0
-	for i := 0; i < len(bb); i++ {
+	for i := range bb {
 		totalSize += StringLen(bb[i])
 	}
 
@@ -728,7 +660,7 @@ func EncodeStringList(bb [][]byte, w io.Writer, b []byte) error {
 		return err
 	}
 
-	for i := 0; i < len(bb); i++ {
+	for i := range bb {
 		if err := EncodeString(bb[i], w, b); err != nil {
 			return err
 		}

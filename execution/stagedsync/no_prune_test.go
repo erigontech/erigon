@@ -24,9 +24,9 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -41,8 +41,8 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(ctx)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
@@ -54,7 +54,6 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		{kv.BlockAccessList, "b1", "ba1"},
 		{kv.BlockAccessList, "b2", "ba2"},
 		{kv.TxLookup, "t1", "tl1"},
-		{kv.BorWitnesses, "w1", "wit1"},
 	}
 	for _, s := range seeds {
 		require.NoError(t, tx.Put(s.table, []byte(s.key), []byte(s.value)))
@@ -70,7 +69,7 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		}
 		return n
 	}
-	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup, kv.BorWitnesses}
+	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup}
 	pre := map[string]int{}
 	for _, table := range tracked {
 		pre[table] = countRows(t, table)
@@ -84,7 +83,6 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 	const forward uint64 = 10_000
 	require.NoError(t, PruneExecutionStage(ctx, &PruneState{ID: stages.Execution, ForwardProgress: forward}, tx, ExecuteBlockCfg{}, 0, logger))
 	require.NoError(t, PruneTxLookup(&PruneState{ID: stages.TxLookup, ForwardProgress: forward}, tx, TxLookupCfg{}, ctx, logger))
-	require.NoError(t, PruneWitnessProcessingStage(&PruneState{ID: stages.WitnessProcessing, ForwardProgress: forward}, tx, WitnessProcessingCfg{}, ctx, logger))
 	require.NoError(t, SnapshotsPrune(&PruneState{ID: stages.Snapshots, ForwardProgress: forward}, SnapshotsCfg{}, ctx, tx, logger))
 
 	for _, table := range tracked {
@@ -103,17 +101,16 @@ func TestNoPruneFlagBookkeeping(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx, err := db.BeginRw(ctx)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	const forward uint64 = 12_345
 	require.NoError(t, PruneExecutionStage(ctx, &PruneState{ID: stages.Execution, ForwardProgress: forward}, tx, ExecuteBlockCfg{}, 0, logger))
 	require.NoError(t, PruneTxLookup(&PruneState{ID: stages.TxLookup, ForwardProgress: forward}, tx, TxLookupCfg{}, ctx, logger))
-	require.NoError(t, PruneWitnessProcessingStage(&PruneState{ID: stages.WitnessProcessing, ForwardProgress: forward}, tx, WitnessProcessingCfg{}, ctx, logger))
 
-	for _, id := range []stages.SyncStage{stages.Execution, stages.TxLookup, stages.WitnessProcessing} {
+	for _, id := range []stages.SyncStage{stages.Execution, stages.TxLookup} {
 		got, err := stages.GetStagePruneProgress(tx, id)
 		require.NoError(t, err)
 		require.Equal(t, forward, got, "stage %s did not record PruneProgress under --exec.no-prune", id)

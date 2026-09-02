@@ -1,0 +1,129 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commitment
+
+import (
+	"context"
+	"encoding/hex"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+func lifecycleCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, kc [][]byte, uc []Update) {
+	var addrs []string
+	for i, nib := range []int{1, 3, 7, 0xb} {
+		addrs = append(addrs, addrHex(findAddressForNibble(nib, 600+i)), addrHex(findAddressForNibble(nib, 700+i)))
+	}
+
+	ub1 := NewUpdateBuilder()
+	for i, a := range addrs {
+		ub1.Balance(a, uint64(1000+i))
+	}
+	ub1.Storage(addrs[0], hex.EncodeToString(slotHashBytes(1)), "beef")
+	ub1.Storage(addrs[0], hex.EncodeToString(slotHashBytes(2)), "f00d")
+	k1, u1 = ub1.Build()
+
+	ub2 := NewUpdateBuilder().Balance(addrs[2], 2222).Balance(addrs[5], 5555)
+	k2, u2 = ub2.Build()
+
+	ubc := NewUpdateBuilder()
+	for i, a := range addrs {
+		bal := uint64(1000 + i)
+		switch i {
+		case 2:
+			bal = 2222
+		case 5:
+			bal = 5555
+		}
+		ubc.Balance(a, bal)
+	}
+	ubc.Storage(addrs[0], hex.EncodeToString(slotHashBytes(1)), "beef")
+	ubc.Storage(addrs[0], hex.EncodeToString(slotHashBytes(2)), "f00d")
+	kc, uc = ubc.Build()
+	return k1, u1, k2, u2, kc, uc
+}
+
+func touchBatch(t *testing.T, ms *MockState, ut *Updates, keys [][]byte, upds []Update) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, ut.TouchAccount)
+	}
+}
+
+func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
+	t.Parallel()
+	k1, u1, k2, u2, kc, uc := lifecycleCorpus()
+
+	t.Run("parallel", func(t *testing.T) {
+		t.Parallel()
+		oracle, _ := engineRoot(t, modeSeq, 0, kc, uc)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		tr := newParTrie(t, ms, 4)
+		defer tr.Release()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+
+		touchBatch(t, ms, ut, k1, u1)
+		require.Equal(t, uint64(len(k1)), ut.Size())
+		processRoot(t, tr, ut)
+		require.Zero(t, ut.Size(), "Process left the touched-key collection unconsumed")
+		if root := ut.parallel.trie.root; root != nil {
+			require.Zero(t, root.subtreeCount, "Process left the prefix trie populated")
+		}
+
+		touchBatch(t, ms, ut, k2, u2)
+		require.Equal(t, uint64(len(k2)), ut.Size(), "block-2 collection must hold only block-2 keys")
+		got := processRoot(t, tr, ut)
+		require.Zero(t, ut.Size())
+		require.Equal(t, oracle, got)
+
+		again := processRoot(t, tr, ut)
+		require.Equal(t, got, again, "a zero-touch Process must return the carried root")
+	})
+}
+
+func TestModeParallel_ErrorKeepsCollection(t *testing.T) {
+	t.Parallel()
+	k1, u1, _, _, _, _ := lifecycleCorpus()
+	oracle, _ := engineRoot(t, modeSeq, 0, k1, u1)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	t.Run("parallel", func(t *testing.T) {
+		t.Parallel()
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		tr := newParTrie(t, ms, 4)
+		defer tr.Release()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+
+		touchBatch(t, ms, ut, k1, u1)
+		_, err := tr.Process(canceled, ut, "", nil, WarmupConfig{})
+		require.Error(t, err)
+		require.Equal(t, uint64(len(k1)), ut.Size(), "error path must keep the collection for the retry")
+
+		got := processRoot(t, tr, ut)
+		require.Zero(t, ut.Size())
+		require.Equal(t, oracle, got)
+	})
+}

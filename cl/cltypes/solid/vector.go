@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -248,7 +249,7 @@ func (v *VectorSSZ[T]) HashSSZ() ([32]byte, error) {
 	// Initialize MerkleTree if not already done
 	if v.merkleTree == nil {
 		// For vectors, the limit should be the next power of 2 for proper merkleization
-		limit := merkle_tree.NextPowerOfTwo(uint64(len(v.items)))
+		limit := math.NextPowerOfTwo(uint64(len(v.items)))
 		v.merkleTree = &merkle_tree.MerkleTree{}
 		v.merkleTree.Initialize(len(v.items), merkle_tree.OptimalMaxTreeCacheDepth, func(idx int, out []byte) {
 			hash, err := v.items[idx].HashSSZ()

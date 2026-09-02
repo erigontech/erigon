@@ -22,10 +22,86 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/p2p"
+	"github.com/erigontech/erigon/cl/p2p/mock_services"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
+	libp2p "github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/semaphore"
 )
+
+func TestListenForPeersDialsDirectPeersWithoutDiscovery(t *testing.T) {
+	local, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, local.Close()) })
+	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, remote.Close()) })
+
+	peerComponent, err := multiaddr.NewComponent("p2p", remote.ID().String())
+	require.NoError(t, err)
+	directPeer := remote.Addrs()[0].Encapsulate(peerComponent).String()
+	connected := make(chan struct{}, 1)
+	local.Network().Notify(&network.NotifyBundle{
+		ConnectedF: func(_ network.Network, connection network.Conn) {
+			if connection.RemotePeer() == remote.ID() {
+				connected <- struct{}{}
+			}
+		},
+	})
+
+	controller := gomock.NewController(t)
+	p2pManager := mock_services.NewMockP2PManager(controller)
+	p2pManager.EXPECT().Host().AnyTimes().Return(local)
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	unsupportedPeer := "/ip4/127.0.0.1/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
+	sentinel := &Sentinel{
+		ctx: ctx,
+		cfg: &SentinelConfig{P2PConfig: p2p.P2PConfig{
+			NetworkConfig: &clparams.NetworkConfig{StaticPeers: []string{unsupportedPeer, directPeer}},
+			NoDiscovery:   true,
+		}},
+		peers:      peers.NewPool(local),
+		p2p:        p2pManager,
+		connectSem: semaphore.NewWeighted(goRoutinesOpeningPeerConnections),
+	}
+
+	sentinel.listenForPeers()
+	select {
+	case <-connected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("direct peer was not dialed while discovery was disabled")
+	}
+}
+
+func TestConnectWithAllPeersWaitsForDialCapacity(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	sem := semaphore.NewWeighted(1)
+	require.NoError(t, sem.Acquire(ctx, 1))
+	sentinel := &Sentinel{ctx: ctx, connectSem: sem}
+	directPeer, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/9000/p2p/16Uiu2HAmBciu61DBo623TByPbuBaGh9So6hRQfvHpCegCE71JNp9")
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sentinel.connectWithAllPeers([]multiaddr.Multiaddr{directPeer})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("connection batch bypassed exhausted dial capacity: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+	sem.Release(1)
+}
 
 // TestConnectSemaphoreInitialized verifies that a Sentinel's connectSem field
 // is properly initialised (not nil) and that its capacity matches
@@ -39,7 +115,7 @@ func TestConnectSemaphoreInitialized(t *testing.T) {
 	require.NotNil(t, s.connectSem, "connectSem must not be nil after construction")
 
 	// We should be able to acquire exactly goRoutinesOpeningPeerConnections tokens.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for i := range goRoutinesOpeningPeerConnections {
 		ok := s.connectSem.TryAcquire(1)
 		assert.True(t, ok, "TryAcquire should succeed for token %d of %d", i+1, goRoutinesOpeningPeerConnections)
 	}
@@ -49,7 +125,7 @@ func TestConnectSemaphoreInitialized(t *testing.T) {
 	assert.False(t, ok, "TryAcquire should fail when semaphore is at capacity")
 
 	// Release all so the semaphore is left clean.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for range goRoutinesOpeningPeerConnections {
 		s.connectSem.Release(1)
 	}
 }
@@ -86,7 +162,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 	}
 
 	done := make(chan struct{}, totalGoroutines)
-	for i := 0; i < totalGoroutines; i++ {
+	for range totalGoroutines {
 		go func() {
 			defer func() { done <- struct{}{} }()
 
@@ -108,7 +184,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < totalGoroutines; i++ {
+	for range totalGoroutines {
 		select {
 		case <-done:
 		case <-ctx.Done():
@@ -140,7 +216,7 @@ func TestConnectSemaphoreReleaseAndReacquire(t *testing.T) {
 	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
 
 	// Exhaust all tokens.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for i := range goRoutinesOpeningPeerConnections {
 		ok := sem.TryAcquire(1)
 		require.True(t, ok, "should acquire token %d", i+1)
 	}
@@ -160,7 +236,7 @@ func TestConnectSemaphoreReleaseAndReacquire(t *testing.T) {
 	assert.False(t, ok, "semaphore should be exhausted again after re-acquire")
 
 	// Clean up.
-	for i := 0; i < goRoutinesOpeningPeerConnections; i++ {
+	for range goRoutinesOpeningPeerConnections {
 		sem.Release(1)
 	}
 }

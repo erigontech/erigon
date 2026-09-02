@@ -59,7 +59,7 @@ func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(32, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {
@@ -88,7 +88,7 @@ func TestSuggestPrice(t *testing.T) {
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ const (
 
 func generateUint256Slice(n int) []*uint256.Int {
 	out := make([]*uint256.Int, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out[i] = uint256.NewInt(uint64(rand.Int63()))
 	}
 	return out
@@ -154,7 +154,7 @@ func heapPercentile(values []*uint256.Int, percentile int) *uint256.Int {
 	h := sortingHeap(values)
 	heap.Init(&h)
 	pos := (h.Len() - 1) * percentile / 100
-	for i := 0; i < pos; i++ {
+	for range pos {
 		heap.Pop(&h)
 	}
 	return h[0]
@@ -179,11 +179,12 @@ func findKthUint256(values []*uint256.Int, k int) *uint256.Int {
 		pivot := left + rand.Intn(right-left+1)
 		values[pivot], values[right] = values[right], values[pivot]
 		pos := partitionUint256(values, left, right)
-		if pos == k {
+		switch {
+		case pos == k:
 			return values[k]
-		} else if pos < k {
+		case pos < k:
 			left = pos + 1
-		} else {
+		default:
 			right = pos - 1
 		}
 	}
@@ -191,7 +192,7 @@ func findKthUint256(values []*uint256.Int, k int) *uint256.Int {
 }
 
 func TestKthAlgorithmCorrectness(t *testing.T) {
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		original := generateUint256Slice(sliceSizeSmall)
 
 		// Create independent copies
@@ -217,72 +218,33 @@ func TestKthAlgorithmCorrectness(t *testing.T) {
 	}
 }
 
-func BenchmarkHeapPercentile_N20(b *testing.B) {
-	testData := make([][]*uint256.Int, iterations)
-	for i := 0; i < iterations; i++ {
-		testData[i] = generateUint256Slice(sliceSizeSmall)
-	}
-
-	for b.Loop() {
-		for j := 0; j < iterations; j++ {
-			values := copyUint256Slice(testData[j])
-			_ = heapPercentile(values, percentile)
-		}
-	}
-}
-
-func BenchmarkKthPercentile_N20(b *testing.B) {
-	testData := make([][]*uint256.Int, iterations)
-	for i := 0; i < iterations; i++ {
-		testData[i] = generateUint256Slice(sliceSizeSmall)
-	}
-
-	for b.Loop() {
-		for j := 0; j < iterations; j++ {
-			values := copyUint256Slice(testData[j])
-			index := (len(values) - 1) * percentile / 100
-			_ = findKthUint256(values, index)
-		}
-	}
-}
-
-func BenchmarkHeapPercentile(b *testing.B) {
-	testData := generateUint256Slice(sliceSizeLarge)
-
-	for b.Loop() {
-		values := copyUint256Slice(testData)
-		_ = heapPercentile(values, percentile)
-	}
-}
-
-func BenchmarkKthPercentile(b *testing.B) {
-	testData := generateUint256Slice(sliceSizeLarge)
-
-	for b.Loop() {
-		values := copyUint256Slice(testData)
-		index := (len(values) - 1) * percentile / 100
-		_ = findKthUint256(values, index)
-	}
-}
-
 // mockOracleBackend is a minimal OracleBackend for unit tests.
 // HeaderByNumber intentionally ignores ctx cancellation so the oracle can
 // proceed past the head-lookup even when the caller's context is already
 // cancelled, allowing us to verify that cancellation propagates correctly
 // through fetchBlockPricesParallel.
 type mockOracleBackend struct {
-	head *types.Header
+	head           *types.Header
+	safeBlock      uint64
+	finalizedBlock uint64
 }
 
-func (m *mockOracleBackend) HeaderByNumber(_ context.Context, _ rpc.BlockNumber) (*types.Header, error) {
-	return m.head, nil
+func (m *mockOracleBackend) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error) {
+	header := types.CopyHeader(m.head)
+	switch number {
+	case rpc.SafeBlockNumber:
+		header.Number.SetUint64(m.safeBlock)
+	case rpc.FinalizedBlockNumber:
+		header.Number.SetUint64(m.finalizedBlock)
+	}
+	return header, nil
 }
 
 func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber) (*types.Block, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return types.NewBlock(m.head, nil, nil, nil, nil), nil
+	return types.NewBlock(m.head, nil, nil, nil, nil, nil), nil
 }
 
 func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.AllProtocolChanges }
@@ -301,6 +263,89 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil // sequential mode
+}
+
+func TestFeeHistoryResolvesSafeAndFinalizedBlocks(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(25)
+	head.BaseFee = uint256.NewInt(1)
+	head.GasLimit = 30_000_000
+	head.GasUsed = 15_000_000
+
+	backend := &mockOracleBackend{
+		head:           head,
+		safeBlock:      20,
+		finalizedBlock: 18,
+	}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{
+		Blocks:      1,
+		MaxPrice:    gaspricecfg.DefaultMaxPrice,
+		IgnorePrice: gaspricecfg.DefaultIgnorePrice,
+	}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	for _, tc := range []struct {
+		name        string
+		newestBlock rpc.BlockNumber
+		wantOldest  uint64
+	}{
+		{name: "safe", newestBlock: rpc.SafeBlockNumber, wantOldest: 17},
+		{name: "finalized", newestBlock: rpc.FinalizedBlockNumber, wantOldest: 15},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				oldest, reward, baseFee, gasUsedRatio, _, _, err := oracle.FeeHistory(t.Context(), 4, tc.newestBlock, []float64{25})
+				require.NoError(t, err)
+				require.Equal(t, tc.wantOldest, oldest.Uint64())
+				require.Len(t, reward, 4)
+				require.Len(t, baseFee, 5)
+				require.Len(t, gasUsedRatio, 4)
+			})
+		})
+	}
+}
+
+func TestFeeHistoryRejectsUnknownNegativeBlockNumber(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(25)
+	head.BaseFee = uint256.NewInt(1)
+	head.GasLimit = 30_000_000
+	head.GasUsed = 15_000_000
+
+	backend := &mockOracleBackend{head: head}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{
+		Blocks:      1,
+		MaxPrice:    gaspricecfg.DefaultMaxPrice,
+		IgnorePrice: gaspricecfg.DefaultIgnorePrice,
+	}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(t.Context(), 4, rpc.BlockNumber(-6), nil)
+	require.EqualError(t, err, "invalid block number -6")
+}
+
+// TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth verifies that on a chain
+// where all sampled blocks are empty, the oracle uses GWei/1000 as the
+// fallback price (matching Geth's miner.DefaultConfig.GasPrice) rather than
+// 0 from an uninitialized cache.
+func TestSuggestTipCap_EmptyBlocksFallbackMatchesGeth(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(25)
+
+	backend := &mockOracleBackend{head: head}
+	cfg := gaspricecfg.Config{
+		Blocks:      20,
+		Percentile:  60,
+		MaxPrice:    gaspricecfg.DefaultMaxPrice,
+		IgnorePrice: gaspricecfg.DefaultIgnorePrice,
+	}
+
+	cache := jsonrpc.NewGasPriceCache()
+	oracle := gasprice.NewOracle(backend, cfg, cache, nil, log.New())
+
+	got, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(common.GWei/1000), got.Uint64(),
+		"empty-block fallback must be GWei/1000 to match Geth's default start price")
 }
 
 // TestSuggestTipCap_ContextCancelled verifies that a cancelled caller context is
@@ -345,7 +390,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 
 	// 10 blocks: only the last one (index 9) has a transaction; all others are empty.
 	const totalBlocks = 10
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(totalBlocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		if i == totalBlocks-1 {
 			tx, txErr := types.SignTx(
@@ -367,8 +412,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
@@ -393,7 +437,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
 
 	const totalBlocks = 5
-	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(_ int, b *blockgen.BlockGen) {
+	ch, err := m.GenerateChain(totalBlocks, func(_ int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// no transactions — all blocks are empty
 	})
@@ -405,8 +449,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 		Percentile: 60,
 		Default:    uint256.NewInt(common.GWei),
 	}
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)

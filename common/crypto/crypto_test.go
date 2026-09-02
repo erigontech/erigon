@@ -31,9 +31,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	xsha3 "golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/u256"
 )
 
@@ -50,10 +52,86 @@ func TestKeccak256Hash(t *testing.T) {
 	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := Keccak256Hash(in); return h[:] }, msg, exp)
 }
 
-func TestKeccak256Hasher(t *testing.T) {
-	msg := []byte("abc")
-	exp, _ := hex.DecodeString("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
-	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := HashData(in); return h[:] }, msg, exp)
+func refKeccak256(parts ...[]byte) common.Hash {
+	h := xsha3.NewLegacyKeccak256()
+	for _, p := range parts {
+		h.Write(p)
+	}
+	var out common.Hash
+	h.Sum(out[:0])
+	return out
+}
+
+// keccakTestSizes straddle the 64-byte stack buffer and the 136-byte sponge rate.
+var keccakTestSizes = []int{0, 1, 31, 32, 33, 63, 64, 65, 135, 136, 137, 500}
+
+func keccakTestData(n, seed int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(i*7 + seed)
+	}
+	return b
+}
+
+func TestKeccak256MatchesReference(t *testing.T) {
+	for _, n := range keccakTestSizes {
+		data := keccakTestData(n, 0)
+		want := refKeccak256(data)
+		if got := Keccak256Hash(data); got != want {
+			t.Fatalf("Keccak256Hash(%d bytes) = %x, want %x", n, got, want)
+		}
+		if got := common.BytesToHash(Keccak256(data)); got != want {
+			t.Fatalf("Keccak256(%d bytes) = %x, want %x", n, got, want)
+		}
+	}
+}
+
+// Covers both join paths: on the stack below keccakStackBuf, on the heap above it.
+func TestKeccak256JoinsArgs(t *testing.T) {
+	if got, want := common.BytesToHash(Keccak256()), refKeccak256(); got != want {
+		t.Fatalf("Keccak256() = %x, want %x", got, want)
+	}
+	for _, n := range keccakTestSizes {
+		for _, m := range keccakTestSizes {
+			a, b := keccakTestData(n, 0), keccakTestData(m, 1)
+			if got, want := common.BytesToHash(Keccak256(a, b)), refKeccak256(a, b); got != want {
+				t.Fatalf("Keccak256(%d,%d) = %x, want %x", n, m, got, want)
+			}
+		}
+	}
+	a, b, c := keccakTestData(2, 0), keccakTestData(3, 1), keccakTestData(200, 2)
+	if got, want := common.BytesToHash(Keccak256(a, b, c)), refKeccak256(a, b, c); got != want {
+		t.Fatalf("Keccak256(3 args) = %x, want %x", got, want)
+	}
+}
+
+// Hashing a caller-local buffer must not push it onto the heap.
+func TestKeccak256DoesNotAllocate(t *testing.T) {
+	if n := testing.AllocsPerRun(100, func() {
+		var buf [32]byte
+		sinkHash = Keccak256Hash(buf[:])
+	}); n != 0 {
+		t.Errorf("Keccak256Hash allocs = %v, want 0", n)
+	}
+	// Keccak256 returns a slice, so exactly one alloc: its result, not the caller's buffer.
+	if n := testing.AllocsPerRun(100, func() {
+		var x, y [32]byte
+		sinkBytes = Keccak256(x[:], y[:])
+	}); n != 1 {
+		t.Errorf("Keccak256(two 32-byte args) allocs = %v, want 1", n)
+	}
+	// Joins too large for the stack buffer take the pooled scratch buffer, so they
+	// allocate the result and nothing more. sync.Pool deliberately drops values under
+	// the race detector, so the pooled path always allocates there and can't be measured.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled {
+		big1, big2 := keccakTestData(500, 0), keccakTestData(500, 1)
+		if n := testing.AllocsPerRun(100, func() {
+			sinkBytes = Keccak256(big1, big2)
+		}); n != 1 {
+			t.Errorf("Keccak256(500B, 500B) allocs = %v, want 1 (pooled join buffer)", n)
+		}
+	}
 }
 
 func TestKeccak256HasherNew(t *testing.T) {
@@ -92,13 +170,6 @@ func TestToECDSAErrors(t *testing.T) {
 	}
 }
 
-func BenchmarkSha3(b *testing.B) {
-	a := []byte("hello world")
-	for b.Loop() {
-		Keccak256(a)
-	}
-}
-
 func TestUnmarshalPubkey(t *testing.T) {
 	key, err := UnmarshalPubkey(nil)
 	if !errors.Is(err, errInvalidPubkey) || key != nil {
@@ -111,10 +182,12 @@ func TestUnmarshalPubkey(t *testing.T) {
 
 	var (
 		enc, _ = hex.DecodeString("760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1b01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d")
+		pubX   = hexutil.MustDecodeU256("0x760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1")
+		pubY   = hexutil.MustDecodeU256("0xb01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d")
 		dec    = &ecdsa.PublicKey{
 			Curve: S256(),
-			X:     hexutil.MustDecodeBig("0x760c4460e5336ac9bbd87952a3c7ec4363fc0a97bd31c86430806e287b437fd1"),
-			Y:     hexutil.MustDecodeBig("0xb01abc6e1db640cf3106b520344af1d58b00b57823db3e1407cbc433e1b6d04d"),
+			X:     pubX.ToBig(),
+			Y:     pubY.ToBig(),
 		}
 	)
 	key, err = UnmarshalPubkey(enc)
@@ -227,7 +300,10 @@ func TestLoadECDSA(t *testing.T) {
 			t.Fatal(err)
 		}
 		filename := f.Name()
-		f.WriteString(test.input)
+		if _, err := f.WriteString(test.input); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
 		f.Close()
 
 		_, err = LoadECDSA(filename)
@@ -333,33 +409,5 @@ func TestPythonIntegration(t *testing.T) {
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg1, kh, sig1)
 }
 
-var benchPayload = make([]byte, 500)
-var benchPayload1 = make([]byte, 1)
-
-func BenchmarkHashBytes(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		HashData(benchPayload)
-	}
-}
-
-func BenchmarkKeccak256Hash(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		Keccak256Hash(benchPayload)
-	}
-}
-
-func BenchmarkHashBytes1(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		HashData(benchPayload1)
-	}
-}
-
-func BenchmarkKeccak256Hash1(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		Keccak256Hash(benchPayload1)
-	}
-}
+var sinkHash common.Hash
+var sinkBytes []byte

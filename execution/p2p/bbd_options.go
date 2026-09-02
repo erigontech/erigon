@@ -71,6 +71,8 @@ type bbdRequestConfig struct {
 	headerChainBatchFetchRetries uint64
 	bodiesBatchFetchTimeout      time.Duration
 	bodiesBatchFetchRetries      uint64
+	balsBatchFetchTimeout        time.Duration
+	balsRequestTimeout           time.Duration
 }
 
 var defaultBbdRequestConfig = bbdRequestConfig{
@@ -82,6 +84,8 @@ var defaultBbdRequestConfig = bbdRequestConfig{
 	initialHeaderFetchRetries:    0,           // in case of chainLengthLimit+chainLengthCurrentHead early termination
 	headerChainBatchFetchTimeout: 10 * time.Second,
 	headerChainBatchFetchRetries: 1,
-	bodiesBatchFetchTimeout:      30 * time.Second,
+	bodiesBatchFetchTimeout:      time.Minute,
 	bodiesBatchFetchRetries:      1,
+	balsBatchFetchTimeout:        time.Minute,
+	balsRequestTimeout:           10 * time.Second,
 }

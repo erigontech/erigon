@@ -18,7 +18,7 @@ package kv
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -117,23 +117,6 @@ const (
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
-	// BOR
-	BorTxLookup                = "BlockBorTransactionLookup"  // transaction_hash -> block_num_u64
-	BorEvents                  = "BorEvents"                  // event_id -> event_payload
-	BorEventNums               = "BorEventNums"               // block_num -> event_id (last event_id in that block)
-	BorEventProcessedBlocks    = "BorEventProcessedBlocks"    // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
-	BorEventTimes              = "BorEventTimes"              // timestamp -> event_id
-	BorSpans                   = "BorSpans"                   // span_id -> span (in JSON encoding)
-	BorSpansIndex              = "BorSpansIndex"              // span.StartBlockNumber -> span.Id
-	BorMilestones              = "BorMilestones"              // milestone_id -> milestone (in JSON encoding)
-	BorMilestoneEnds           = "BorMilestoneEnds"           // start block_num -> milestone_id (first block of milestone)
-	BorCheckpoints             = "BorCheckpoints"             // checkpoint_id -> checkpoint (in JSON encoding)
-	BorCheckpointEnds          = "BorCheckpointEnds"          // start block_num -> checkpoint_id (first block of checkpoint)
-	BorProducerSelections      = "BorProducerSelections"      // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
-	BorProducerSelectionsIndex = "BorProducerSelectionsIndex" // span.StartBlockNumber -> span.Id
-	BorWitnesses               = "BorWitnesses"               // block_num_u64 + block_hash -> witness
-	BorWitnessSizes            = "BorWitnessSizes"            // block_num_u64 + block_hash -> witness size (uint64)
-
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -155,6 +138,11 @@ const (
 	TblCodeHistoryKeys = "CodeHistoryKeys"
 	TblCodeHistoryVals = "CodeHistoryVals"
 	TblCodeIdx         = "CodeIdx"
+
+	// TblCodeCache holds decompressed contract code keyed by keccak(code), the
+	// persistent backing tier for the in-memory code cache so reads skip the
+	// CodeDomain decompression across restarts. Immutable (content-addressed).
+	TblCodeCache = "CodeCache"
 
 	TblCommitmentVals        = "CommitmentVals"
 	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
@@ -274,6 +262,7 @@ const (
 	// End GLOAS
 
 	StatesProcessingProgress = "StatesProcessingProgress"
+	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
@@ -285,9 +274,11 @@ var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
-	PruneTypeOlder = []byte("older")
-	PruneHistory   = []byte("pruneHistory")
-	PruneBlocks    = []byte("pruneBlocks")
+	PruneTypeOlder         = []byte("older")
+	PruneHistory           = []byte("pruneHistory")
+	PruneBlocks            = []byte("pruneBlocks")
+	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
+	PruneReceipts          = []byte("pruneReceipts")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")
@@ -312,8 +303,6 @@ var (
 // This list will be sorted in `init` method.
 // ChaindataTablesCfg - can be used to find index in sorted version of ChaindataTables list by name
 var ChaindataTables = []string{
-	E2AccountsHistory,
-	E2StorageHistory,
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
@@ -322,7 +311,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	SyncStageProgress,
-	PlainState,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -336,21 +324,6 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	BorTxLookup,
-	BorEvents,
-	BorEventNums,
-	BorEventProcessedBlocks,
-	BorEventTimes,
-	BorSpans,
-	BorSpansIndex,
-	BorMilestones,
-	BorMilestoneEnds,
-	BorCheckpoints,
-	BorCheckpointEnds,
-	BorProducerSelections,
-	BorProducerSelectionsIndex,
-	BorWitnesses,
-	BorWitnessSizes,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -365,6 +338,7 @@ var ChaindataTables = []string{
 	TblCodeHistoryKeys,
 	TblCodeHistoryVals,
 	TblCodeIdx,
+	TblCodeCache,
 
 	TblCommitmentVals,
 	TblCommitmentHistoryKeys,
@@ -426,6 +400,7 @@ var ChaindataTables = []string{
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
+	StatesPruneProgress,
 	InactivityScores,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
@@ -451,10 +426,6 @@ var ChaindataTables = []string{
 	BuilderPendingPaymentsTable,
 	PtcWindowTable,
 	LatestExecutionPayloadBidTable,
-	AccountChangeSetDeprecated,
-	StorageChangeSetDeprecated,
-	HashedAccountsDeprecated,
-	HashedStorageDeprecated,
 }
 
 const (
@@ -474,16 +445,30 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables //TODO: move bor tables from chaintables to `ConsensusTables`
-var HeimdallTables = ChaindataTables
-var PolygonBridgeTables = ChaindataTables
+var ConsensusTables = ChaindataTables
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
-var ChaindataDeprecatedTables = []string{}
+var ChaindataDeprecatedTables = []string{
+	// Pre-E3 plain / hashed state, changeset, and history-index tables.
+	// PlainState / HashedStorage / StorageChangeSet baked the per-account
+	// incarnation counter into the storage key; the rest are dead E2-era
+	// indices. The E3 execution path stores state in kv.AccountsDomain /
+	// kv.StorageDomain / kv.CommitmentDomain, which are incarnation-free.
+	// The `drop_legacy_e2_tables` migration drops these buckets on
+	// databases that still carry them; listing them here marks them as
+	// deprecated so the live schema never recreates them on fresh DBs.
+	PlainState,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+	E2AccountsHistory,
+	E2StorageHistory,
+}
 
 // Diagnostics tables
 var DiagnosticsTables = []string{
@@ -515,8 +500,14 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {Flags: DupSort},
-	PlainState:              {Flags: DupSort},
+	// E2-era tables (deprecated; see ChaindataDeprecatedTables). The
+	// DupSort flag is preserved here so that opening an existing E2
+	// database for migration uses the right bucket flags before the
+	// drop_legacy_e2_tables migration drops them.
+	PlainState:                 {Flags: DupSort},
+	HashedStorageDeprecated:    {Flags: DupSort},
+	AccountChangeSetDeprecated: {Flags: DupSort},
+	StorageChangeSetDeprecated: {Flags: DupSort},
 
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
@@ -560,31 +551,11 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var BorTablesCfg = TableCfg{
-	BorTxLookup:                {Flags: DupSort},
-	BorEvents:                  {Flags: DupSort},
-	BorEventNums:               {Flags: DupSort},
-	BorEventProcessedBlocks:    {Flags: DupSort},
-	BorEventTimes:              {Flags: DupSort},
-	BorSpans:                   {Flags: DupSort},
-	BorSpansIndex:              {Flags: DupSort},
-	BorProducerSelectionsIndex: {Flags: DupSort},
-	BorCheckpoints:             {Flags: DupSort},
-	BorCheckpointEnds:          {Flags: DupSort},
-	BorMilestones:              {Flags: DupSort},
-	BorMilestoneEnds:           {Flags: DupSort},
-	BorProducerSelections:      {Flags: DupSort},
-	BorWitnesses:               {Flags: DupSort},
-	BorWitnessSizes:            {Flags: DupSort},
-}
-
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
 var ConsensusTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
-var HeimdallTablesCfg = TableCfg{}
-var PolygonBridgeTablesCfg = TableCfg{}
 var MigrationsTablesCfg = TableCfg{Migrations: {}}
 
 func TablesCfgByLabel(label Label) TableCfg {
@@ -601,10 +572,6 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DownloaderTablesCfg
 	case dbcfg.DiagnosticsDB:
 		return DiagnosticsTablesCfg
-	case dbcfg.HeimdallDB:
-		return HeimdallTablesCfg
-	case dbcfg.PolygonBridgeDB:
-		return PolygonBridgeTablesCfg
 	case dbcfg.ConsensusDB:
 		return ConsensusTablesCfg
 	default:
@@ -612,9 +579,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 	}
 }
 func sortBuckets() {
-	sort.SliceStable(ChaindataTables, func(i, j int) bool {
-		return strings.Compare(ChaindataTables[i], ChaindataTables[j]) < 0
-	})
+	slices.Sort(ChaindataTables)
 }
 
 func init() {
@@ -673,19 +638,6 @@ func reinit() {
 		_, ok := DiagnosticsTablesCfg[name]
 		if !ok {
 			DiagnosticsTablesCfg[name] = TableCfgItem{}
-		}
-	}
-
-	for _, name := range HeimdallTables {
-		_, ok := HeimdallTablesCfg[name]
-		if !ok {
-			HeimdallTablesCfg[name] = TableCfgItem{}
-		}
-	}
-	for _, name := range PolygonBridgeTables {
-		_, ok := PolygonBridgeTablesCfg[name]
-		if !ok {
-			PolygonBridgeTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }
@@ -828,13 +780,6 @@ func String2Domain(in string) (Domain, error) {
 	}
 }
 
-func String2Forkable(in string) (ForkableId, error) {
-	switch in {
-	default:
-		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
-	}
-}
-
 const MaxUint16 uint16 = 1<<16 - 1
 
 // --- Deprecated
@@ -895,8 +840,6 @@ const (
 	   	AccountChangeSet has record: bigEndian(N) + A -> X
 	   	PlainState has record: A -> Y
 
-	   See also: docs/programmers_guide/db_walkthrough.MD#table-history-of-accounts
-
 	   As you can see if block N changes much accounts - then all records have repetitive prefix `bigEndian(N)`.
 	   MDBX can store such prefixes only once - by DupSort feature (see `docs/programmers_guide/dupsort.md`).
 	   Both buckets are DupSort-ed and have physical format:
@@ -938,8 +881,6 @@ const (
 	   It allows:
 	     - server task 1. by 1 db operation db.seekInFiles(A+bigEndian(X))
 	     - server task 2. by 1 db operation db.Get(A+0xFF)
-
-	   see also: docs/programmers_guide/db_walkthrough.MD#table-change-sets
 
 	   AccountsHistory:
 

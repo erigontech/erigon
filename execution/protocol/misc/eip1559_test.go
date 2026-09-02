@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
-// do not use e.g. SetInt() on the numbers. For testing only
 func copyConfig(original *chain.Config) *chain.Config {
 	var copy chain.Config
-	copier.Copy(&copy, original)
+	if err := copier.CopyWithOption(&copy, original, copier.Option{DeepCopy: true}); err != nil {
+		panic(err)
+	}
 	return &copy
 }
 
@@ -85,7 +85,11 @@ func TestBlockGasLimits(t *testing.T) {
 			BaseFee:  initial,
 			Number:   *uint256.NewInt(tc.pNum + 1),
 		}
-		err := VerifyEip1559Header(config(), parent, header, false /*skipGasLimit*/)
+		cfg := config()
+		err := VerifyEip1559Header(cfg, parent, header)
+		if err == nil {
+			err = VerifyParentGasLimit(cfg, parent, header)
+		}
 		if tc.ok && err != nil {
 			t.Errorf("test %d: Expected valid header: %s", i, err)
 		}

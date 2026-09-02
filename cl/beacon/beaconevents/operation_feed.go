@@ -1,6 +1,6 @@
 package beaconevents
 
-import ethevent "github.com/erigontech/erigon/p2p/event"
+import ethevent "github.com/erigontech/erigon/common/event"
 
 type operationFeed struct {
 	feed *ethevent.Feed
@@ -42,7 +42,6 @@ func (f *operationFeed) SendProposerSlashing(value *ProposerSlashingData) int {
 		Event: OpProposerSlashing,
 		Data:  value,
 	})
-
 }
 
 func (f *operationFeed) SendAttesterSlashing(value *AttesterSlashingData) int {

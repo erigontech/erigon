@@ -17,12 +17,12 @@
 package rpctest
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"maps"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/state"
 )
 
@@ -35,15 +35,15 @@ func Bench3(erigon_url, geth_url string) error {
 	req_id++
 	template := `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1", "%s", %d, true, true, true], "id":%d}`
 
-	page := common.Hash{}.Bytes()
+	zeroAddr := common.Address{}
+	page := zeroAddr[:]
 
 	accRangeTG := make(map[common.Address]state.DumpAccount)
 
 	for len(page) > 0 {
-		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, erigon_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
-			return fmt.Errorf("Could not get accountRange: %v\n", err)
+		if err := post(client, erigon_url, fmt.Sprintf(template, hexutil.Encode(page), pageSize, req_id), &sr); err != nil {
+			return fmt.Errorf("Could not get accountRange: %w\n", err)
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -56,19 +56,18 @@ func Bench3(erigon_url, geth_url string) error {
 
 	accRangeGeth := make(map[common.Address]state.DumpAccount)
 
-	page = common.Hash{}.Bytes()
+	page = zeroAddr[:]
 	for len(page) > 0 {
-		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
-		if err := post(client, geth_url, fmt.Sprintf(template, encodedKey, pageSize, req_id), &sr); err != nil {
-			return fmt.Errorf("Could not get accountRange: %v\n", err)
+		if err := post(client, geth_url, fmt.Sprintf(template, hexutil.Encode(page), pageSize, req_id), &sr); err != nil {
+			return fmt.Errorf("Could not get accountRange: %w\n", err)
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting accountRange: %d %s\n", sr.Error.Code, sr.Error.Message)
 			break
 		} else {
 			page = sr.Result.Next
-			maps.Copy(accRangeTG, sr.Result.Accounts)
+			maps.Copy(accRangeGeth, sr.Result.Accounts)
 		}
 	}
 
@@ -80,12 +79,12 @@ func Bench3(erigon_url, geth_url string) error {
 	template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
 	if err := post(client, erigon_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
-		return fmt.Errorf("Could not retrieve block %d: %v\n", 1720000, err)
+		return fmt.Errorf("Could not retrieve block %d: %w\n", 1720000, err)
 	}
 	if b.Error != nil {
 		fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 	}
-	for txindex := 0; txindex < 18; txindex++ {
+	for txindex := range 18 {
 		txhash := b.Result.Transactions[txindex].Hash
 		req_id++
 		template = `
@@ -93,21 +92,21 @@ func Bench3(erigon_url, geth_url string) error {
 			`
 		var trace EthTxTrace
 		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
-			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
-			return fmt.Errorf("Could not trace transaction %s: %v\n", txhash, err)
+			printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+			return fmt.Errorf("Could not trace transaction %s: %w\n", txhash, err)
 		}
 		if trace.Error != nil {
 			fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 		}
 		var traceg EthTxTrace
 		if err := post(client, geth_url, fmt.Sprintf(template, txhash, req_id), &traceg); err != nil {
-			print(client, geth_url, fmt.Sprintf(template, txhash, req_id))
-			return fmt.Errorf("Could not trace transaction g %s: %v\n", txhash, err)
+			printRPCRequest(client, geth_url, fmt.Sprintf(template, txhash, req_id))
+			return fmt.Errorf("Could not trace transaction g %s: %w\n", txhash, err)
 		}
 		if traceg.Error != nil {
 			return fmt.Errorf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
 		}
-		//print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+		//printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 		if !compareTraces(&trace, &traceg) {
 			return fmt.Errorf("Different traces block %d, txn %s\n", 1720000, txhash)
 		}
@@ -125,7 +124,7 @@ func Bench3(erigon_url, geth_url string) error {
 	for nextKey != nil {
 		var sr DebugStorageRange
 		if err := post(client, erigon_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
-			return fmt.Errorf("Could not get storageRange: %v\n", err)
+			return fmt.Errorf("Could not get storageRange: %w\n", err)
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -141,7 +140,7 @@ func Bench3(erigon_url, geth_url string) error {
 	for nextKey != nil {
 		var srg DebugStorageRange
 		if err := post(client, geth_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &srg); err != nil {
-			return fmt.Errorf("Could not get storageRange g: %v\n", err)
+			return fmt.Errorf("Could not get storageRange g: %w\n", err)
 		}
 		if srg.Error != nil {
 			fmt.Printf("Error getting storageRange g: %d %s\n", srg.Error.Code, srg.Error.Message)

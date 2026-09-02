@@ -39,7 +39,6 @@ func executeTestSSZQueue(t *testing.T, oldQueue, newQueue []*solid.PendingPartia
 			t.Fatalf("oldList.Get(i) != newList.Get(i): %v != %v", oldList.Get(i), newList.Get(i))
 		}
 	}
-
 }
 
 func TestSSZQueue(t *testing.T) {
@@ -101,5 +100,4 @@ func TestSSZQueue(t *testing.T) {
 	}, []*solid.PendingPartialWithdrawal{
 		{Amount: 5, ValidatorIndex: 6},
 	})
-
 }

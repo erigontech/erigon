@@ -17,18 +17,13 @@
 package recsplit
 
 import (
-	"sync"
-
-	"github.com/spaolacci/murmur3"
+	"github.com/erigontech/erigon/common/murmur3"
 )
 
 // IndexReader encapsulates Hash128 to allow concurrent access to Index
 type IndexReader struct {
 	index *Index
 	salt  uint32
-
-	bufLock sync.RWMutex
-	buf     []byte
 }
 
 // NewIndexReader creates new IndexReader
@@ -40,8 +35,6 @@ func NewIndexReader(index *Index) *IndexReader {
 }
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64) {
-	// this inlinable alloc-free version, it's faster than pre-allocated `hasher` object
-	// because `hasher` object is interface and need call many methods on it
 	return murmur3.Sum128WithSeed(key, r.salt)
 }
 
@@ -51,12 +44,9 @@ func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
+// Lookup2 looks up the concatenation key1||key2 without materializing it
 func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
-	r.bufLock.Lock()
-	// hash of 2 concatenated keys is equal to 2 separated calls of `.Write`
-	r.buf = append(append(r.buf[:0], key1...), key2...)
-	bucketHash, fingerprint := murmur3.Sum128WithSeed(r.buf, r.salt)
-	r.bufLock.Unlock()
+	bucketHash, fingerprint := murmur3.Sum128PairWithSeed(key1, key2, r.salt)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
@@ -64,12 +54,8 @@ func (r *IndexReader) Empty() bool {
 	return r.index.Empty()
 }
 
-func (r *IndexReader) Close() {
-	if r == nil || r.index == nil {
-		return
-	}
-	r.index.readers.Put(r)
-}
+// Close is a no-op kept for API compatibility: readers are stateless and shared
+func (r *IndexReader) Close() {}
 
 func (r *IndexReader) OrdinalLookup(id uint64) uint64 { return r.index.OrdinalLookup(id) }
 func (r *IndexReader) twoLayerLookup(key []byte) (uint64, bool) {

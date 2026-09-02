@@ -30,8 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdate -fuzztime=300s ./erigon/execution/commitment
-
 func Fuzz_ProcessUpdate(f *testing.F) {
 	ctx := context.Background()
 	ha, _ := hex.DecodeString("13ccfe8074645cab4cb42b423625e055f0293c87")
@@ -40,10 +38,9 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 	f.Add(uint64(2), ha, uint64(1235105), hb)
 
 	f.Fuzz(func(t *testing.T, balanceA uint64, accountA []byte, balanceB uint64, accountB []byte) {
-		if len(accountA) == 0 || len(accountA) > length.Addr || len(accountB) == 0 || len(accountB) > length.Addr {
+		if len(accountA) != length.Addr || len(accountB) != length.Addr {
 			t.Skip()
 		}
-		t.Logf("fuzzing %d keys\n", 2)
 
 		builder := NewUpdateBuilder().
 			Balance(hex.EncodeToString(accountA), balanceA).
@@ -51,11 +48,8 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
-		hphAnother := NewHexPatriciaHashed(length.Addr, ms2)
-
-		hph.SetTrace(false)
-		hphAnother.SetTrace(false)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
 		plainKeys, updates := builder.Build()
 		err := ms.applyPlainUpdates(plainKeys, updates)
@@ -63,28 +57,28 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		err = ms2.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		rootHashDirect, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
-		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
+		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys, updates)
 		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
 		require.Equal(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
+		anotherUpds.Close()
 	})
 }
 
-// go test -trimpath -v -fuzz=Fuzz_ProcessUpdates_ArbitraryUpdateCount2 -fuzztime=300s ./commitment
-
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
-	//ha, _ := hex.DecodeString("0008852883b2850c7a48f4b0eea3ccc4c04e6cb6025e9e8f7db2589c7dae81517c514790cfd6f668903161349e")
 	ctx := context.Background()
 	f.Add(uint16(100), uint32(1), uint32(2))
 
 	f.Fuzz(func(t *testing.T, keysCount uint16, ks, us uint32) {
+		keysCount %= 4096
+
 		keysSeed := rand.New(rand.NewSource(int64(ks)))
 		updateSeed := rand.New(rand.NewSource(int64(us)))
 
@@ -93,7 +87,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 		plainKeys := make([][]byte, keysCount)
 		updates := make([]Update, keysCount)
 
-		for k := uint16(0); k < keysCount; k++ {
+		for k := range keysCount {
 
 			aux := make([]byte, 32)
 
@@ -136,14 +130,13 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 
 		ms := NewMockState(t)
 		ms2 := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
-		hphAnother := NewHexPatriciaHashed(length.Addr, ms2)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		hphAnother := NewHexPatriciaHashed(length.Addr, ms2, DefaultTrieConfig())
 
-		trace := false
-		hph.SetTrace(trace)
-		hphAnother.SetTrace(trace)
+		hph.SetTraceWriter(nil)
+		hphAnother.SetTraceWriter(nil)
 
-		for i := 0; i < len(plainKeys); i++ {
+		for i := range plainKeys {
 			err := ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
 			require.NoError(t, err)
 
@@ -172,6 +165,48 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 	})
 }
 
+func Fuzz_HexPatriciaHashed_DeferredMatchesEager(f *testing.F) {
+	f.Add(uint8(8), int64(1))
+	f.Add(uint8(16), int64(42))
+
+	f.Fuzz(func(t *testing.T, keysCount uint8, seed int64) {
+		if keysCount == 0 || keysCount > 64 {
+			t.Skip()
+		}
+
+		rnd := rand.New(rand.NewSource(seed))
+		builder := NewUpdateBuilder()
+		for i := 0; i < int(keysCount); i++ {
+			addr := make([]byte, length.Addr)
+			_, err := rnd.Read(addr)
+			require.NoError(t, err)
+			addrHex := hex.EncodeToString(addr)
+
+			switch i % 4 {
+			case 0:
+				builder.Balance(addrHex, rnd.Uint64())
+			case 1:
+				builder.Nonce(addrHex, uint64(i)+rnd.Uint64()%1024)
+			case 2:
+				loc := make([]byte, length.Hash)
+				value := make([]byte, 8)
+				_, err = rnd.Read(loc)
+				require.NoError(t, err)
+				_, err = rnd.Read(value)
+				require.NoError(t, err)
+				builder.Storage(addrHex, hex.EncodeToString(loc), hex.EncodeToString(value))
+			default:
+				codeHash := make([]byte, length.Hash)
+				_, err = rnd.Read(codeHash)
+				require.NoError(t, err)
+				builder.CodeHash(addrHex, hex.EncodeToString(codeHash))
+			}
+		}
+
+		requireDeferredMatchesEager(t, builder)
+	})
+}
+
 func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 	if testing.Short() {
 		f.Skip("slow test")
@@ -192,22 +227,21 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		rnd := rand.New(rand.NewSource(seed))
 		builder := NewUpdateBuilder()
 
-		// generate updates
 		for i := 0; i < int(kc); i++ {
 			key := make([]byte, length.Addr)
 
-			for j := 0; j < len(key); j++ {
+			for j := range key {
 				key[j] = byte(rnd.Intn(256))
 			}
 			addr := hex.EncodeToString(key)
 			builder.Balance(addr, rnd.Uint64())
 			builder.Nonce(addr, uint64(i))
-			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...)))
+			builder.CodeHash(addr, hex.EncodeToString(append(key, make([]byte, 12)...))) //nolint:makezero
 		}
 		t.Logf("keys count: %d", kc)
 
 		ms := NewMockState(t)
-		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 
 		plainKeys, updates := builder.Build()
 		if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {

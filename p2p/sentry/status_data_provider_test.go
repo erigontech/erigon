@@ -2,7 +2,6 @@ package sentry
 
 import (
 	"context"
-	"math/big"
 	"testing"
 	"time"
 
@@ -12,22 +11,30 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // --- test helpers ---
 
 type testBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
+	frozenInView uint64
+	frozenHeader *types.Header
 }
 
 func (r *testBlockReader) MinimumBlockAvailable(context.Context, kv.Tx) (uint64, error) {
 	return 0, nil
+}
+
+func (r *testBlockReader) FrozenBlocksInView(kv.Getter) uint64 { return r.frozenInView }
+
+func (r *testBlockReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return r.frozenHeader, nil
 }
 
 func seedTestHeader(t *testing.T, db kv.RwDB, number uint64, difficulty uint64) common.Hash {
@@ -46,7 +53,7 @@ func seedTestHeader(t *testing.T, db kv.RwDB, number uint64, difficulty uint64) 
 	defer tx.Rollback()
 
 	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteTd(tx, hash, number, big.NewInt(int64(difficulty))))
+	require.NoError(t, rawdb.WriteTd(tx, hash, number, *uint256.NewInt(uint64(difficulty))))
 	rawdb.WriteHeadBlockHash(tx, hash)
 	require.NoError(t, tx.Commit())
 
@@ -69,7 +76,7 @@ func newTestProvider(t *testing.T, db kv.RoDB) *StatusDataProvider {
 func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
@@ -91,12 +98,11 @@ func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// First call populates cache.
 	sd1, err := p.GetStatusData(ctx)
@@ -130,20 +136,60 @@ func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 func TestGetStatusData_ConcurrentCallsCoalesce(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
 	ctx := context.Background()
 	errs := make(chan error, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			_, err := p.GetStatusData(ctx)
 			errs <- err
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		require.NoError(t, <-errs)
+	}
+}
+
+// TestGetStatusData_SnapshotFallback covers the arm taken when the db holds no
+// head header: it reads through the tx's pinned block-files view, so a wrongly
+// wired db panics here rather than returning ErrNoSnapshots.
+func TestGetStatusData_SnapshotFallback(t *testing.T) {
+	t.Parallel()
+
+	header := &types.Header{
+		Number:     *uint256.NewInt(42),
+		Difficulty: *uint256.NewInt(7),
+		Time:       1700000042,
+	}
+
+	for _, tc := range []struct {
+		name   string
+		reader *testBlockReader
+		height uint64
+		err    error
+	}{
+		{"no snapshots", &testBlockReader{}, 0, ErrNoSnapshots},
+		{"header missing from files", &testBlockReader{frozenInView: 42}, 0, ErrNoSnapshots},
+		{"head from files", &testBlockReader{frozenInView: 42, frozenHeader: header}, 42, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			s := newTestProvider(t, db)
+			s.blockReader = tc.reader
+
+			head, err := s.fetchChainHead(context.Background())
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.height, head.HeadHeight)
+			assert.Equal(t, header.Hash(), head.HeadHash)
+		})
 	}
 }

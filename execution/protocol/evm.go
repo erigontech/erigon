@@ -43,16 +43,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary accounts.Address
 	if author.IsNil() {
-		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
-			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
-
-			// In case the coinbase is not set post Rio, use the default coinbase
-			if beneficiary.IsNil() {
-				beneficiary, _ = engine.Author(header)
-			}
-		} else {
-			beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
-		}
+		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
 		beneficiary = author
 	}
@@ -84,7 +75,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = misc.Transfer
-		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
 
 	var slotNumber uint64
@@ -106,9 +96,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
-	}
-	if config.IsAmsterdam(header.Time) {
-		blockContext.CostPerStateByte = misc.CostPerStateByte(header.GasLimit)
 	}
 	return blockContext
 }
@@ -170,7 +157,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				}
 
 				lastKnownHash = hash
-				lastKnownNumber = lastKnownNumber - 1
+				lastKnownNumber--
 				if n == lastKnownNumber {
 					//fmt.Println("GH-CA1", lastKnownNumber, lastKnownHash)
 					return lastKnownHash, nil
@@ -210,10 +197,11 @@ func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint
 	balance, err := db.GetBalance(addr)
 
 	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
+		amount := amount   // avoid capture allocation unless we're tracing
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {
-				fmt.Printf("%d (%d.%d) Can't transfer %d from %x: %d\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount, addr, &balance)
+				fmt.Printf("%d (%d.%d) Can't transfer %s from %x: %s\n", db.BlockNumber(), db.TxIndex(), db.Incarnation(), amount.String(), addr, balance.String())
 			}
 		}()
 	}

@@ -17,11 +17,13 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -32,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 var initCommand = cli.Command{
@@ -55,11 +56,11 @@ It expects the genesis file as argument.`,
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
-func initGenesis(cliCtx *cli.Context) error {
+func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	var logger log.Logger
 	var tracer *tracers.Tracer
 	var err error
-	if logger, tracer, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, tracer, _, _, err = debug.Setup(ctx, cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	// Make sure we have a valid genesis JSON
@@ -74,29 +75,37 @@ func initGenesis(cliCtx *cli.Context) error {
 	}
 	defer file.Close()
 
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		utils.Fatalf("Failed to read genesis file: %v", err)
+	}
 	genesis := new(types.Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+	if err := json.Unmarshal(raw, genesis); err != nil {
+		return fmt.Errorf("invalid genesis file %s: %w", genesisPath, err)
+	}
+	if genesis.Config == nil {
+		return fmt.Errorf("invalid genesis file %s: missing 'config'", genesisPath)
 	}
 
-	if genesis.Config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
-		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", genesisPath, err))
-		}
-
-		genesis.Config.Bor = borConfig
+	// chain.Config has no 'bor' field, so a Polygon genesis would otherwise
+	// initialise with its consensus settings silently dropped.
+	var probe struct {
+		Config struct {
+			Bor json.RawMessage `json:"bor"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &probe); err == nil && len(probe.Config.Bor) > 0 && string(probe.Config.Bor) != "null" {
+		return fmt.Errorf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
 	}
 
 	// Open and initialise both full and light databases
-	stack, err := MakeNodeWithDefaultConfig(cliCtx, logger)
+	stack, err := MakeNodeWithDefaultConfig(ctx, cliCtx, logger)
 	if err != nil {
 		return err
 	}
 	defer stack.Close()
 
-	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), dbcfg.ChainDB, "", false, logger)
+	chaindb, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}

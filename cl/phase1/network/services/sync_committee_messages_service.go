@@ -22,17 +22,19 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeMessage struct {
@@ -146,12 +148,16 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
 				// ImmediateVerification is sequential so using the headState directly is safe
 				if msg.ImmediateVerification {
-					s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+					if err := s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage); err != nil {
+						log.Debug("failed to add sync committee message to pool", "err", err)
+					}
 				} else {
 					// ImmediateVerification=false is parallel so using the headState directly is unsafe
-					s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+					if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 						return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
-					})
+					}); err != nil {
+						log.Debug("failed to add sync committee message to pool", "err", err)
+					}
 				}
 			},
 		}
@@ -199,6 +205,6 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot := utils.Sha256(msg.BeaconBlockRoot[:], domain)
+	signingRoot := crypto.Sha256(msg.BeaconBlockRoot[:], domain)
 	return msg.Signature[:], signingRoot[:], publicKey[:], nil
 }

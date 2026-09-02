@@ -105,6 +105,7 @@ func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRo
 	}
 	return nil, nil
 }
+
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
 	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
 	if err != nil {
@@ -155,7 +156,6 @@ func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, electra_pre_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
 		panic(err)
-
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, electra_post_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
@@ -179,7 +179,6 @@ func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	preState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(preState, capella_pre_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
 		panic(err)
-
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, capella_post_state_ssz_snappy, int(clparams.CapellaVersion)); err != nil {
@@ -214,7 +213,7 @@ func GetPhase0Random() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState,
 func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
 	ret := make([]*cltypes.SignedBeaconBlock, 0, 96)
 	// format for blocks is blocks_{i}.ssz_snappy where i is the index of the block, starting from 0 to 95 included.
-	for i := 0; i < 96; i++ {
+	for i := range 96 {
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.BellatrixVersion)
 		// Lets do te
 		b, err := bellatrixFS.ReadFile("test_data/bellatrix/blocks_" + strconv.Itoa(i) + ".ssz_snappy")
@@ -243,5 +242,4 @@ func GetBellatrixRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconSta
 		panic(err)
 	}
 	return ret, preState, postState
-
 }

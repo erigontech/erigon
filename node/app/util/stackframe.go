@@ -120,9 +120,9 @@ func packageAndName(fn *runtime.Func) (string, string) {
 		pkg += name[:lastslash] + "/"
 		name = name[lastslash+1:]
 	}
-	if period := strings.Index(name, "."); period >= 0 {
-		pkg += name[:period]
-		name = name[period+1:]
+	if before, after, ok := strings.Cut(name, "."); ok {
+		pkg += before
+		name = after
 	}
 
 	name = strings.ReplaceAll(name, "·", ".")

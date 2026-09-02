@@ -281,7 +281,7 @@ func (m *MerkleTree) computeLayer(layerIdx int) {
 
 	iterations := ceil(m.leavesCount, currentDivisor)
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		fromOffset := i * length.Hash
 		toOffset := (i + 1) * length.Hash
 		if !bytes.Equal(m.layers[layerIdx][fromOffset:toOffset], ZeroHashes[0][:]) {

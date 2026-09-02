@@ -228,7 +228,7 @@ func measureFP(t *testing.T, shardPath string) {
 	rng := rand.New(rand.NewPCG(7, 11))
 	const probes = 200_000
 	fp := 0
-	for i := 0; i < probes; i++ {
+	for range probes {
 		if r.ContainsHash(rng.Uint64()) {
 			fp++
 		}
@@ -349,7 +349,7 @@ func TestIndexFromFile_SyntheticSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf [8]byte
-	for i := 0; i < n; i++ {
+	for range n {
 		binary.LittleEndian.PutUint64(buf[:], rng.Uint64())
 		if _, err := f.Write(buf[:]); err != nil {
 			t.Fatal(err)

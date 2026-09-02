@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -101,7 +100,7 @@ func (m *TorrentPeerManager) sync() {
 			m.addPeerToAllTorrents(pi)
 			m.logger.Debug("[bt-peers] added torrent peer from ENR",
 				"node", id.TerminalString(),
-				"addr", fmt.Sprintf("%s:%d", ip, bt))
+				"addr", pi.Addr)
 		} else {
 			m.mu.Unlock()
 		}

@@ -109,7 +109,7 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr n
 		test.t.Errorf("%s encode error: %v", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
-	if err = test.udp.handlePacket(addr, enc); err != wantError {
+	if err = test.udp.handlePacket(addr, enc); !errors.Is(err, wantError) {
 		test.t.Errorf("error mismatch: got %q, want %q", err, wantError)
 	}
 }
@@ -125,7 +125,7 @@ func (test *udpTest) packetInFromTolerate(key *ecdsa.PrivateKey, addr netip.Addr
 		test.t.Errorf("%s encode error: %v", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
-	if err = test.udp.handlePacket(addr, enc); err != nil && err != toleratedErr {
+	if err = test.udp.handlePacket(addr, enc); err != nil && !errors.Is(err, toleratedErr) {
 		test.t.Errorf("error mismatch: got %q, want nil or %q", err, toleratedErr)
 	}
 }
@@ -136,7 +136,7 @@ func (test *udpTest) waitPacketOut(validate any) (closed bool) {
 	test.t.Helper()
 
 	dgram, err := test.pipe.receive()
-	if err == errClosed {
+	if errors.Is(err, errClosed) {
 		return true
 	} else if err != nil {
 		test.t.Error("packet receive error:", err)
@@ -155,6 +155,23 @@ func (test *udpTest) waitPacketOut(validate any) (closed bool) {
 	}
 	fn.Call([]reflect.Value{reflect.ValueOf(p), reflect.ValueOf(dgram.to), reflect.ValueOf(hash)})
 	return false
+}
+
+// TestUDPv4_RequestENRNoUDPEndpoint verifies that RequestENR returns a clean
+// errNoUDPEndpoint error for a node without a usable UDP endpoint, instead of
+// silently sending a packet to the zero address and waiting for a timeout.
+// This mirrors the existing guards in ping/Ping/findnode.
+func TestUDPv4_RequestENRNoUDPEndpoint(t *testing.T) {
+	t.Parallel()
+	test := newUDPTest(t)
+	defer test.close()
+
+	key := newkey()
+	// UDP port 0 makes UDPEndpoint return ok=false.
+	node := enode.NewV4(&key.PublicKey, net.ParseIP("1.2.3.4"), 2222, 0)
+	if _, err := test.udp.RequestENR(node); !errors.Is(err, errNoUDPEndpoint) {
+		t.Errorf("expected errNoUDPEndpoint, got %v", err)
+	}
 }
 
 func TestUDPv4_packetErrors(t *testing.T) {
@@ -178,7 +195,7 @@ func TestUDPv4_pingTimeout(t *testing.T) {
 	key := newkey()
 	toaddr := &net.UDPAddr{IP: net.ParseIP("1.2.3.4"), Port: 2222}
 	node := enode.NewV4(&key.PublicKey, toaddr.IP, 0, toaddr.Port)
-	if _, err := test.udp.ping(node); err != errTimeout {
+	if _, err := test.udp.ping(node); !errors.Is(err, errTimeout) {
 		t.Error("expected timeout error, got", err)
 	}
 }
@@ -206,7 +223,7 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 		nilErr     = make(chan error, nReqs) // for requests that get a reply
 		timeoutErr = make(chan error, nReqs) // for requests that time out
 	)
-	for i := 0; i < nReqs; i++ {
+	for i := range nReqs {
 		// Create a matcher for a random request in udp.loop. Requests
 		// with ptype <= 128 will not get a reply and should time out.
 		// For all other requests, a reply is scheduled to arrive
@@ -238,10 +255,10 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 		recvDeadline        = time.After(20 * time.Second)
 		nTimeoutsRecv, nNil = 0, 0
 	)
-	for i := 0; i < nReqs; i++ {
+	for i := range nReqs {
 		select {
 		case err := <-timeoutErr:
-			if err != errTimeout {
+			if !errors.Is(err, errTimeout) {
 				t.Fatalf("got non-timeout error on timeoutErr %d: %v", i, err)
 			}
 			nTimeoutsRecv++
@@ -274,7 +291,7 @@ func TestUDPv4_findnodeTimeout(t *testing.T) {
 	toid := enode.ID{1, 2, 3, 4}
 	target := v4wire.Pubkey{4, 5, 6, 7}
 	result, err := test.udp.findnode(toid, toaddr, target)
-	if err != errTimeout {
+	if !errors.Is(err, errTimeout) {
 		t.Error("expected timeout error, got", err)
 	}
 	if len(result) > 0 {
@@ -294,7 +311,7 @@ func TestUDPv4_findnode(t *testing.T) {
 	nodes := &nodesByDistance{target: testTarget.ID()}
 	live := make(map[enode.ID]bool)
 	numCandidates := 2 * bucketSize
-	for i := 0; i < numCandidates; i++ {
+	for i := range numCandidates {
 		key := newkey()
 		ip := net.IP{10, 13, 0, byte(i)}
 		n := enode.NewV4(&key.PublicKey, ip, 0, 2000)
@@ -347,7 +364,7 @@ func TestUDPv4_findnodeLivenessCheck(t *testing.T) {
 
 	// Add nodes that have NOT been validated live.
 	numCandidates := bucketSize
-	for i := 0; i < numCandidates; i++ {
+	for i := range numCandidates {
 		key := newkey()
 		ip := net.IP{10, 13, 0, byte(i)}
 		n := enode.NewV4(&key.PublicKey, ip, 0, 2000)
@@ -414,7 +431,9 @@ func TestUDPv4_findnodeMultiReply(t *testing.T) {
 	// check that the sent neighbors are all returned by findnode
 	select {
 	case result := <-resultc:
-		want := append(list[:2], list[3:]...)
+		want := make([]*enode.Node, 0, len(list)-1)
+		want = append(want, list[:2]...)
+		want = append(want, list[3:]...)
 		if !reflect.DeepEqual(result, want) {
 			t.Errorf("neighbors mismatch:\n  got:  %v\n  want: %v", result, want)
 		}
@@ -455,6 +474,67 @@ func TestUDPv4_pingMatchIP(t *testing.T) {
 			Expiration: futureExp,
 		})
 	})
+}
+
+// endpointStatements exceeds enode's iptrackMinStatements, so a batch this size
+// moves the endpoint predictor once the statements are accepted.
+const endpointStatements = 20
+
+func TestUDPv4_unbondedPingDoesNotUpdateEndpoint(t *testing.T) {
+	test := newUDPTest(t)
+	defer test.close()
+
+	fallback := netip.MustParseAddrPort("192.0.2.1:30303")
+	test.udp.localNode.SetFallbackIP(net.IP(fallback.Addr().AsSlice()))
+	test.udp.localNode.SetFallbackUDP(int(fallback.Port()))
+	before := test.udp.localNode.Node()
+
+	claimed := netip.MustParseAddrPort("198.51.100.1:40404")
+	for i := range endpointStatements {
+		sender := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 2, byte(i + 1)}), 30303)
+		test.packetInFrom(nil, newkey(), sender, &v4wire.Ping{
+			From:       testRemote,
+			To:         v4wire.NewEndpoint(claimed, 0),
+			Version:    4,
+			Expiration: futureExp,
+		})
+	}
+
+	after := test.udp.localNode.Node()
+	if got := netip.AddrPortFrom(after.IPAddr(), uint16(after.UDP())); got != fallback {
+		t.Fatalf("local endpoint changed to %v, want %v", got, fallback)
+	}
+	if after.Seq() != before.Seq() {
+		t.Fatalf("local ENR sequence changed to %d, want %d", after.Seq(), before.Seq())
+	}
+}
+
+func TestUDPv4_bondedPingUpdatesEndpoint(t *testing.T) {
+	// Long PingInterval so table revalidation never fires an unsolicited PING,
+	// whose logging could otherwise race the test's completion.
+	test := newUDPTestWithConfig(t, Config{PingInterval: time.Hour})
+	defer test.close()
+
+	test.udp.localNode.SetFallbackIP(net.IP{192, 0, 2, 1})
+	test.udp.localNode.SetFallbackUDP(30303)
+
+	claimed := netip.MustParseAddrPort("198.51.100.1:40404")
+	for i := range endpointStatements {
+		key := newkey()
+		sender := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 2, byte(i + 1)}), 30303)
+		test.udp.db.UpdateLastPongReceived(v4wire.EncodePubkey(&key.PublicKey).ID(), sender.Addr(), time.Now())
+		test.packetInFrom(nil, key, sender, &v4wire.Ping{
+			From:       testRemote,
+			To:         v4wire.NewEndpoint(claimed, 0),
+			Version:    4,
+			Expiration: futureExp,
+		})
+	}
+
+	after := test.udp.localNode.Node()
+	if got := netip.AddrPortFrom(after.IPAddr(), uint16(after.UDP())); got != claimed {
+		t.Fatalf("local endpoint = %v, want %v", got, claimed)
+	}
 }
 
 func TestUDPv4_successfulPing(t *testing.T) {

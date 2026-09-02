@@ -69,7 +69,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		mapSize = 1 * datasize.GB
 	}
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
-		InMem(nil, r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
+		InMem(r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)
@@ -82,7 +82,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer agg.Close()
 
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -94,12 +94,11 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger)
+	tsd, err := execctx.NewSharedDomains(ctx, ttx, r.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
 	}
 	defer tsd.Close()
-	tsd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)
@@ -107,10 +106,12 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		return nil, err
 	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
-	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
+	_, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
 	if err != nil {
 		return nil, err
 	}
+	ibs.Close()
+
 	genesisRoot, err := tsd.GetCommitmentCtx().Trie().RootHash()
 	if err != nil {
 		return nil, err

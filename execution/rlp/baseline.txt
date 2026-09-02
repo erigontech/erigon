@@ -1,0 +1,67 @@
+goos: linux
+goarch: amd64
+pkg: github.com/erigontech/erigon/execution/rlp
+cpu: AMD EPYC 4244P 6-Core Processor                
+BenchmarkStreamBytes_64B-12        	16985547	        71.74 ns/op	     112 B/op	       2 allocs/op
+BenchmarkStreamBytes_64B-12        	15949454	        74.44 ns/op	     112 B/op	       2 allocs/op
+BenchmarkStreamBytes_64B-12        	14451906	        71.90 ns/op	     112 B/op	       2 allocs/op
+BenchmarkStreamBytes_64B-12        	16830919	        71.71 ns/op	     112 B/op	       2 allocs/op
+BenchmarkStreamBytes_64B-12        	16144453	        71.65 ns/op	     112 B/op	       2 allocs/op
+BenchmarkStreamBytes_4KB-12        	 2168848	       563.2 ns/op	    4144 B/op	       2 allocs/op
+BenchmarkStreamBytes_4KB-12        	 2042378	       559.1 ns/op	    4144 B/op	       2 allocs/op
+BenchmarkStreamBytes_4KB-12        	 2196766	       571.8 ns/op	    4144 B/op	       2 allocs/op
+BenchmarkStreamBytes_4KB-12        	 2145532	       553.8 ns/op	    4144 B/op	       2 allocs/op
+BenchmarkStreamBytes_4KB-12        	 2126575	       586.5 ns/op	    4144 B/op	       2 allocs/op
+BenchmarkStreamReadBytes_64B-12    	20661595	        54.30 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStreamReadBytes_64B-12    	21692367	        53.01 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStreamReadBytes_64B-12    	21736123	        55.58 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStreamReadBytes_64B-12    	22653387	        54.20 ns/op	      48 B/op	       1 allocs/op
+BenchmarkStreamReadBytes_64B-12    	21316596	        55.20 ns/op	      48 B/op	       1 allocs/op
+BenchmarkDecodeBytes_Tiny-12       	 8454478	       137.7 ns/op	      72 B/op	       4 allocs/op
+BenchmarkDecodeBytes_Tiny-12       	 8556554	       141.1 ns/op	      72 B/op	       4 allocs/op
+BenchmarkDecodeBytes_Tiny-12       	 8557137	       137.1 ns/op	      72 B/op	       4 allocs/op
+BenchmarkDecodeBytes_Tiny-12       	 8596867	       141.2 ns/op	      72 B/op	       4 allocs/op
+BenchmarkDecodeBytes_Tiny-12       	 8790051	       139.2 ns/op	      72 B/op	       4 allocs/op
+PASS
+ok  	github.com/erigontech/erigon/execution/rlp	27.975s
+goos: linux
+goarch: amd64
+pkg: github.com/erigontech/erigon/execution/types
+cpu: AMD EPYC 4244P 6-Core Processor                
+BenchmarkDecodeHeader_PreLondon-12         	 1884100	       624.0 ns/op	     824 B/op	       4 allocs/op
+BenchmarkDecodeHeader_PreLondon-12         	 1881028	       630.3 ns/op	     824 B/op	       4 allocs/op
+BenchmarkDecodeHeader_PreLondon-12         	 1883968	       628.7 ns/op	     824 B/op	       4 allocs/op
+BenchmarkDecodeHeader_PreLondon-12         	 1861474	       629.8 ns/op	     824 B/op	       4 allocs/op
+BenchmarkDecodeHeader_PreLondon-12         	 1897341	       640.1 ns/op	     824 B/op	       4 allocs/op
+BenchmarkDecodeHeader_London-12            	 1712071	       686.1 ns/op	     848 B/op	       5 allocs/op
+BenchmarkDecodeHeader_London-12            	 1747766	       687.9 ns/op	     848 B/op	       5 allocs/op
+BenchmarkDecodeHeader_London-12            	 1728181	       691.0 ns/op	     848 B/op	       5 allocs/op
+BenchmarkDecodeHeader_London-12            	 1734978	       680.1 ns/op	     848 B/op	       5 allocs/op
+BenchmarkDecodeHeader_London-12            	 1723494	       682.3 ns/op	     848 B/op	       5 allocs/op
+BenchmarkDecodeHeader_Loop_PreLondon-12    	   18632	     64203 ns/op	   82534 B/op	     400 allocs/op
+BenchmarkDecodeHeader_Loop_PreLondon-12    	   18498	     63276 ns/op	   82533 B/op	     400 allocs/op
+BenchmarkDecodeHeader_Loop_PreLondon-12    	   18693	     63424 ns/op	   82533 B/op	     400 allocs/op
+BenchmarkDecodeHeader_Loop_PreLondon-12    	   18712	     64143 ns/op	   82533 B/op	     400 allocs/op
+BenchmarkDecodeHeader_Loop_PreLondon-12    	   18741	     63549 ns/op	   82533 B/op	     400 allocs/op
+BenchmarkDecodeHeader_Loop_London-12       	   16935	     69522 ns/op	   85358 B/op	     500 allocs/op
+BenchmarkDecodeHeader_Loop_London-12       	   17038	     70438 ns/op	   85358 B/op	     500 allocs/op
+BenchmarkDecodeHeader_Loop_London-12       	   16927	     70797 ns/op	   85358 B/op	     500 allocs/op
+BenchmarkDecodeHeader_Loop_London-12       	   17034	     69700 ns/op	   85358 B/op	     500 allocs/op
+BenchmarkDecodeHeader_Loop_London-12       	   17083	     71523 ns/op	   85358 B/op	     500 allocs/op
+BenchmarkEncodeHeader_London-12            	 3400868	       344.0 ns/op	     576 B/op	       1 allocs/op
+BenchmarkEncodeHeader_London-12            	 3430648	       346.8 ns/op	     576 B/op	       1 allocs/op
+BenchmarkEncodeHeader_London-12            	 3434049	       343.1 ns/op	     576 B/op	       1 allocs/op
+BenchmarkEncodeHeader_London-12            	 3433368	       346.4 ns/op	     576 B/op	       1 allocs/op
+BenchmarkEncodeHeader_London-12            	 3401180	       343.5 ns/op	     576 B/op	       1 allocs/op
+BenchmarkHeaderHash_Mutable-12             	  613492	      1952 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Mutable-12             	  612327	      1953 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Mutable-12             	  612122	      1960 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Mutable-12             	  610338	      1964 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Mutable-12             	  612710	      1957 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Memoized-12            	72847664	        16.32 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Memoized-12            	70884770	        16.51 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Memoized-12            	72541504	        16.25 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Memoized-12            	73096962	        16.35 ns/op	      32 B/op	       1 allocs/op
+BenchmarkHeaderHash_Memoized-12            	71897209	        16.40 ns/op	      32 B/op	       1 allocs/op
+PASS
+ok  	github.com/erigontech/erigon/execution/types	61.696s

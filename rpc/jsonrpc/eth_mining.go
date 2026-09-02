@@ -85,7 +85,7 @@ func (api *APIImpl) GetWork(ctx context.Context) ([4]string, error) {
 // It returns an indication if the work was accepted.
 // Note either an invalid solution, a stale work a non-existent work will return false.
 func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error) {
-	repl, err := api.mining.SubmitWork(ctx, &txpoolproto.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: powHash.Bytes(), Digest: digest.Bytes()})
+	repl, err := api.mining.SubmitWork(ctx, &txpoolproto.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: powHash[:], Digest: digest[:]})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return false, errors.New(s.Message())
@@ -101,7 +101,7 @@ func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powH
 //
 // It accepts the miner hash rate and an identifier which must be unique
 func (api *APIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error) {
-	repl, err := api.mining.SubmitHashRate(ctx, &txpoolproto.SubmitHashRateRequest{Rate: uint64(hashRate), Id: id.Bytes()})
+	repl, err := api.mining.SubmitHashRate(ctx, &txpoolproto.SubmitHashRateRequest{Rate: uint64(hashRate), Id: id[:]})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
 			return false, errors.New(s.Message())

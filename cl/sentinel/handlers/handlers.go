@@ -41,9 +41,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-var (
-	ErrResourceUnavailable = errors.New("resource unavailable")
-)
+var ErrResourceUnavailable = errors.New("resource unavailable")
 
 type ConsensusHandlers struct {
 	handlers     map[protocol.ID]network.StreamHandler
@@ -87,7 +85,8 @@ func NewConsensusHandlers(
 	blobsStorage blob_storage.BlobStorage,
 	dataColumnStorage blob_storage.DataColumnStorage,
 	peerDasStateReader peerdasstate.PeerDasStateReader,
-	enabledBlocks bool) *ConsensusHandlers {
+	enabledBlocks bool,
+) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		hs:                 hs,
@@ -132,6 +131,8 @@ func NewConsensusHandlers(
 		// execution payload envelopes
 		hm[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = c.executionPayloadEnvelopesByRangeHandler
 		hm[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = c.executionPayloadEnvelopesByRootHandler
+		// blocks by head (consensus-specs PR #5181, Fulu)
+		hm[communication.BeaconBlocksByHeadProtocolV1] = c.beaconBlocksByHeadHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -188,10 +189,13 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			}
 		}
 
-		streamDeadline := time.Now().Add(5 * time.Second)
-		s.SetReadDeadline(streamDeadline)
-		s.SetWriteDeadline(streamDeadline)
-		s.SetDeadline(streamDeadline)
+		// SetDeadline covers both directions.
+		if err := s.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Trace("failed to set stream deadline", "err", err)
+			_ = s.Reset()
+			_ = s.Close()
+			return
+		}
 
 		if err := fn(s); err != nil {
 			if errors.Is(err, ErrResourceUnavailable) {

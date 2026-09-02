@@ -65,7 +65,7 @@ func TestGetBlockHeaders(t *testing.T) {
 	}
 
 	var blocks []*types.Block
-	for i := uint64(0); i < limit; i++ {
+	for i := range limit {
 		block, err := backend.BlockReader.BlockByNumber(backend.Ctx, tx, i)
 		require.NoError(t, err)
 		blocks = append(blocks, block)
@@ -75,7 +75,7 @@ func TestGetBlockHeaders(t *testing.T) {
 	require.NoError(t, err)
 
 	getHashes := func(from, limit uint64) (hashes []common.Hash) {
-		for i := uint64(0); i < limit; i++ {
+		for i := range limit {
 			hashes = append(hashes, blocks[from-1-i].Hash())
 		}
 		return hashes
@@ -316,7 +316,7 @@ func TestGetBlockReceipts(t *testing.T) {
 		hashes = append(hashes, block.Hash())
 		// If known, encode and queue for response packet
 
-		r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
+		r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
 		require.NoError(t, err)
 		encoded, err := rlp.EncodeToBytes(r)
 		require.NoError(t, err)
@@ -356,7 +356,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 		execmoduletester.WithKey(testKey),
 	)
 	if blocks > 0 {
-		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
+		chain, _ := m.GenerateChain(blocks, generator)
 		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}

@@ -16,17 +16,22 @@
 package seg
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 
 	"github.com/stretchr/testify/require"
@@ -63,6 +68,41 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
+func TestNextReportsPackedLiteral(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "literal.kv")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = ^uint64(0)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+
+	word := make([]byte, 6*os.Getpagesize())
+	for i := range word {
+		word[i] = byte(i)
+	}
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	require.Zero(t, d.dictWords)
+
+	g := d.MakeGetter()
+	require.Equal(t, d.wordsFileOffset, g.dataOffset)
+	g.EnableMultiPageBlockingAsyncIO()
+	var literalOffset, literalLength uint64
+	g.multiPageBlockingAsyncRead = func(_ *Getter, offset, length uint64) {
+		literalOffset, literalLength = offset, length
+	}
+	got, _ := g.Next(nil)
+
+	require.Equal(t, word, got)
+	require.Equal(t, uint64(len(word)), literalLength)
+	require.Equal(t, word, []byte(d._mmapHandle[literalOffset:literalOffset+literalLength]))
+}
+
 func TestDecompressSkip(t *testing.T) {
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
@@ -88,6 +128,40 @@ func TestDecompressSkip(t *testing.T) {
 	require.Equal(t, 8, int(offset))
 	_, offset = g.Next(nil)
 	require.Equal(t, 16, int(offset))
+}
+
+func TestOpenSequentialView(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	var want [][]byte
+	g := d.MakeGetter()
+	for g.HasNext() {
+		w, _ := g.Next(nil)
+		want = append(want, w)
+	}
+
+	readAll := func(g *Getter) [][]byte {
+		var got [][]byte
+		vg := g
+		require.Equal(t, d.wordsFileOffset, vg.dataOffset)
+		for vg.HasNext() {
+			w, _ := vg.Next(nil)
+			got = append(got, w)
+		}
+		return got
+	}
+
+	scan := func() [][]byte {
+		v, err := d.OpenSequentialView()
+		require.NoError(t, err)
+		defer v.Close()
+		return readAll(v.MakeGetter())
+	}
+	require.Equal(t, want, scan(), "separate MADV_SEQUENTIAL mmap view")
+	require.Equal(t, want, readAll(d.MakeGetter()), "shared mapping, no view")
+	// closing a view must leave the decompressor's own mmap readable
+	require.Equal(t, want, scan())
 }
 
 func TestDecompressMatchOK(t *testing.T) {
@@ -153,7 +227,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	for i := 0; i < size; i++ {
+	for i := range size {
 		if err = c.AddWord(fmt.Appendf(nil, "word-%d", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -526,12 +600,50 @@ func rmNewLine(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", "")
 }
 
-func TestDecompressTorrent(t *testing.T) {
-	t.Skip()
+func TestDecompressDeepPositionSubtable(t *testing.T) {
+	// 600 words where a common pattern appears at 600 distinct byte positions
+	// force posMaxDepth=10>9, creating subtables and exercising nextPosSubtable.
+	const nWords = 600
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "deep_pos")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
 
+	words := make([][]byte, nWords)
+	pat := []byte("SUBTABLEPATTERN")
+	for i := range words {
+		words[i] = append(bytes.Repeat([]byte{byte(i % 251)}, i), pat...)
+		require.NoError(t, c.AddWord(words[i]))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	require.NotNil(t, d.posArena)
+	require.Greater(t, len(d.posArena.tables), 1, "expected posMaxDepth>9 to create subtables")
+
+	g := d.MakeGetter()
+	for i, want := range words {
+		require.True(t, g.HasNext(), "word %d", i)
+		got, _ := g.Next(nil)
+		require.Equal(t, want, got, "word %d mismatch", i)
+	}
+	require.False(t, g.HasNext())
+}
+
+func TestDecompressTorrent(t *testing.T) {
 	fpath := "/mnt/data/chains/mainnet/snapshots/v1.0-014000-014500-transactions.seg"
 	st, err := os.Stat(fpath)
-	require.NoError(t, err)
+	if err != nil {
+		t.Skipf("requires local snapshot file %s", fpath)
+	}
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
 	d, err := NewDecompressor(fpath)
@@ -554,27 +666,27 @@ const N = 100
 func randWord() []byte {
 	size := rand.Intn(256) // size of the word
 	word := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		word[i] = byte(rand.Intn(256))
 	}
 	return word
 }
 
-func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
-	WORDS = [N][]byte{}
-	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
-	INPUT_FLAGS = []int{}  // []byte or nil input
+func generateRandWords() (words [N][]byte, wordFlags [N]bool, inputFlags []int) {
+	words = [N][]byte{}
+	wordFlags = [N]bool{} // false - uncompressed word, true - compressed word
+	inputFlags = []int{}  // []byte or nil input
 
-	for i := 0; i < N-2; i++ {
-		WORDS[i] = randWord()
+	for i := range N - 2 {
+		words[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
-	WORDS[N-2] = []byte{}
-	WORDS[N-1] = []byte{}
+	words[N-2] = []byte{}
+	words[N-1] = []byte{}
 	return
 }
 
-func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
+func prepareRandomDict(t *testing.T) (d *Decompressor, words [N][]byte, wordFlags [N]bool, inputFlags []int) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -589,32 +701,32 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	// c.DisableFsync()
 	defer c.Close()
 	rand.Seed(time.Now().UnixNano())
-	WORDS, WORD_FLAGS, INPUT_FLAGS = generateRandWords()
+	words, wordFlags, inputFlags = generateRandWords()
 
 	idx := 0
 	for idx < N {
 		n := rand.Intn(2)
 		switch n {
 		case 0: // input case
-			word := WORDS[idx]
+			word := words[idx]
 			m := rand.Intn(2)
 			if m == 1 {
 				if err = c.AddWord(word); err != nil {
 					t.Fatal(err)
 				}
-				WORD_FLAGS[idx] = true
+				wordFlags[idx] = true
 			} else {
 				if err = c.AddUncompressedWord(word); err != nil {
 					t.Fatal(err)
 				}
 			}
 			idx++
-			INPUT_FLAGS = append(INPUT_FLAGS, n)
+			inputFlags = append(inputFlags, n)
 		case 1: // nil word
 			if err = c.AddWord(nil); err != nil {
 				t.Fatal(err)
 			}
-			INPUT_FLAGS = append(INPUT_FLAGS, n)
+			inputFlags = append(inputFlags, n)
 		default:
 			t.Fatal(fmt.Errorf("case %d\n", n))
 		}
@@ -626,7 +738,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
+	return d, words, wordFlags, inputFlags
 }
 
 // TestMatchCmpCompressedBinaryKeys tests MatchCmp with binary keys similar to real storage keys.
@@ -704,7 +816,9 @@ func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
 		copy(bigger, k)
 		bigger[len(bigger)-1] = 0xff
 		if bytes.Compare(bigger, k) <= 0 {
-			bigger = append(k, 0xff)
+			bigger = make([]byte, len(k)+1)
+			copy(bigger, k)
+			bigger[len(k)] = 0xff
 		}
 		cmp = g.MatchCmp(bigger)
 		require.Equal(t, 1, cmp, "expected buf > word for key %x vs %x", bigger, k)
@@ -1147,4 +1261,118 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 	if total != int(d.wordsCount) {
 		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
 	}
+}
+
+// vmaAdvice reports the readahead hint the kernel holds for the VMA containing
+// addr, read back from /proc/self/smaps: `rr` is VM_RAND_READ, `sr` VM_SEQ_READ.
+func vmaAdvice(tb testing.TB, addr uintptr) string {
+	tb.Helper()
+	f, err := os.Open("/proc/self/smaps")
+	require.NoError(tb, err)
+	defer f.Close()
+
+	inRange := false
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		line := s.Text()
+		if flags, ok := strings.CutPrefix(line, "VmFlags:"); ok {
+			if !inRange {
+				continue
+			}
+			for fl := range strings.FieldsSeq(flags) {
+				switch fl {
+				case "rr":
+					return "random"
+				case "sr":
+					return "sequential"
+				}
+			}
+			return "normal"
+		}
+		dash := strings.IndexByte(line, '-')
+		if dash <= 0 {
+			continue
+		}
+		start, err := strconv.ParseUint(line[:dash], 16, 64)
+		if err != nil {
+			continue
+		}
+		rest := line[dash+1:]
+		sp := strings.IndexByte(rest, ' ')
+		if sp <= 0 {
+			continue
+		}
+		end, err := strconv.ParseUint(rest[:sp], 16, 64)
+		if err != nil {
+			continue
+		}
+		inRange = uint64(addr) >= start && uint64(addr) < end
+	}
+	require.NoError(tb, s.Err())
+	tb.Fatalf("no VMA covers %#x", addr)
+	return ""
+}
+
+// The scan must madvise a mapping of its own, never the one random readers fault
+// through. Touching the shared mapping is what disabled this feature before.
+func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	linux := runtime.GOOS == "linux"
+	shared := uintptr(unsafe.Pointer(&d._mmapHandle[0]))
+	if linux {
+		require.Equal(t, "random", vmaAdvice(t, shared), "NewDecompressor leaves the shared mapping MADV_RANDOM")
+	}
+
+	v, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	require.NotNil(t, v.ownMap, "a separate-readahead view must own its mapping")
+	own := uintptr(unsafe.Pointer(&v.ownMap[0]))
+	require.NotEqual(t, shared, own, "the view must not hand back the decompressor's mapping")
+
+	if linux {
+		if dbg.SnapshotMadvSequential {
+			require.Equal(t, "sequential", vmaAdvice(t, own), "the view's own VMA carries the scan hint")
+		}
+		require.Equal(t, "random", vmaAdvice(t, shared), "the shared VMA keeps MADV_RANDOM while the view is open")
+	}
+
+	v.Close()
+	if linux {
+		require.Equal(t, "random", vmaAdvice(t, shared), "and after the view is closed")
+	}
+}
+
+// Scanning through the decompressor's own getter must leave its advice alone;
+// setting MADV_NORMAL here is what forced the original revert.
+func TestSharedScanKeepsAdviceRandom(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	g := d.MakeGetter()
+	for g.HasNext() {
+		g.Next(nil)
+	}
+	if runtime.GOOS == "linux" {
+		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d._mmapHandle[0]))),
+			"reading through the shared mapping must not change its advice")
+	}
+}
+
+// The gate resolves word positions as dataOffset+pos, so every Getter must report
+// the same file offset for data[0] whichever mmap it reads through.
+func TestGetterDataOffsetIsFileOffset(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	want := uint64(d.size) - uint64(len(d.data[d.wordsStart:]))
+	require.Equal(t, want, d.MakeGetter().dataOffset)
+
+	own, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	defer own.Close()
+	require.Equal(t, want, own.MakeGetter().dataOffset, "a view with its own mmap reads the same file offsets")
+
+	require.Equal(t, want, d.MakeGetter().dataOffset)
 }

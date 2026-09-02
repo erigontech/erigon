@@ -1,7 +1,7 @@
 ---
 title: "Performance Tricks"
 description: "OS-level tuning, memory settings, and tips to maximize sync throughput."
-sidebar_position: 9
+sidebar_position: 13
 ---
 
 # Performance Tricks
@@ -24,10 +24,10 @@ These instructions are designed to improve the performance of Erigon 3, particul
 
 ## Optimize for Cloud Drives
 
-* Set `SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
+* Set `ERIGON_SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
 
 ```bash
-SNAPSHOT_MADV_RND=false
+export ERIGON_SNAPSHOT_MADV_RND=false
 ```
 
 ## Lock Latest State in RAM

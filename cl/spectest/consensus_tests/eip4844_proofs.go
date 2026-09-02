@@ -76,7 +76,7 @@ var Eip4844MerkleProof = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c s
 		proof, err := beaconBody.KzgCommitmentMerkleProof(i)
 		require.NoError(t, err)
 		commitmentInclusionProof := solid.NewHashVector(len(proof))
-		for j := 0; j < len(proof); j++ {
+		for j := range proof {
 			commitmentInclusionProof.Set(j, common.Hash(proof[j]))
 		}
 		require.True(t, cltypes.VerifyCommitmentInclusionProof(common.Bytes48(*beaconBody.GetBlobKzgCommitments().Get(i)), commitmentInclusionProof, uint64(i), c.Version(), bodyRoot))

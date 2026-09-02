@@ -20,29 +20,40 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
+// The integration tool defaults parallel exec on (the integration tool's
+// preferred mode for stage_exec), overriding the dbg package's default-off.
+// dbg.EnvBool honours both EXEC3_PARALLEL and ERIGON_EXEC3_PARALLEL — the
+// latter is what envLookup auto-prepends, so CI workflows that set
+// ERIGON_EXEC3_PARALLEL=false actually take effect.
+func init() {
+	dbg.Exec3Parallel = dbg.EnvBool("EXEC3_PARALLEL", true)
+}
+
 var (
-	chaindata                     string
-	databaseVerbosity             int
-	referenceChaindata            string
-	block, pruneTo, unwind        uint64
-	unwindEvery                   uint64
-	batchSizeStr                  string
-	domain                        string
-	reset, noCommit, squeeze, yes bool
-	bucket                        string
-	datadirCli, toChaindata       string
-	migration                     string
-	integrityFast, integritySlow  bool
-	file                          string
-	HeimdallURL                   string
-	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
-	chain                         string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                 string
+	chaindata                    string
+	databaseVerbosity            int
+	referenceChaindata           string
+	block, unwind                uint64
+	limit                        uint64
+	unwindEvery                  uint64
+	batchSizeStr                 string
+	domain                       string
+	reset, squeeze, yes          bool
+	bucket                       string
+	datadirCli, toChaindata      string
+	migration                    string
+	integrityFast, integritySlow bool
+	file                         string
+	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                        string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                string
 
 	startTxNum uint64
 
@@ -54,6 +65,11 @@ var (
 	noHistory                       bool
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
+
+	convertSqueeze   bool
+	convertNibblesV2 bool
+	convertRestore   bool
+	convertContinue  bool
 )
 
 func must(err error) {
@@ -94,17 +110,13 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
 
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&limit, "limit", 0, "execute at most this many blocks past current progress, then stop (0 = unlimited, overridden by --block if --block is lower)")
+}
+
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withNoCommit(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
-}
-
-func withPruneTo(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
-}
-
 func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
@@ -118,7 +130,14 @@ func withYes(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", false, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withConvertFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&convertSqueeze, "squeeze", false, "target state for the value squeeze axis: true = squeezed (offsets), false = unsqueezed (plain keys inline)")
+	cmd.Flags().BoolVar(&convertNibblesV2, "nibbles.v2", false, "target state for the key encoding axis: true = V2 (prefix-sort trie locality), false = V1 (compact bytes)")
+	cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")
+	cmd.Flags().BoolVar(&convertContinue, "continue", false, "Resume a prior interrupted conversion. Skips files whose converted shard already exists in <datadir>/snap/rebuild/domain/. Flags --squeeze and --nibbles.v2 MUST match the original interrupted run; mismatch produces mixed-encoding output. Mutually exclusive with --restore.")
 }
 
 func withClearCommitment(cmd *cobra.Command) {
@@ -139,7 +158,7 @@ func withBucket(cmd *cobra.Command) {
 
 func withDataDir2(cmd *cobra.Command) {
 	// --datadir is required, but no --chain flag: read chainConfig from db instead
-	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
+	flags.DirVar(cmd.Flags(), &datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 
@@ -150,12 +169,17 @@ func withDataDir2(cmd *cobra.Command) {
 func withDataDir(cmd *cobra.Command) {
 	withDataDir2(cmd)
 
-	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
+	flags.DirVar(cmd.Flags(), &chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
 }
 
-func withConcurrentCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
+// withExperimentalCommitment binds the flag erigon uses to pick the commitment
+// trie. The default ORs erigon's own flag default with the env-derived value so
+// that flipping the default in one binary cannot leave the other on a different
+// trie.
+func withExperimentalCommitment(cmd *cobra.Command) {
+	def := statecfg.ExperimentalParallelCommitment || utils.ExperimentalParallelCommitmentFlag.Value
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -184,10 +208,6 @@ func withChain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("chain"))
 }
 
-func withHeimdall(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
-}
-
 func withWorkers(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&syncCfg.ExecWorkerCount, "exec.workers", ethconfig.Defaults.Sync.ExecWorkerCount, "")
 }
@@ -210,19 +230,17 @@ func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
 		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
-// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, unwind.
 func withStageBase(cmd *cobra.Command) {
 	withConfig(cmd)
 	withDataDir(cmd)
 	withChain(cmd)
 	withChaosMonkey(cmd)
-	withHeimdall(cmd)
 	withUnwind(cmd)
 }
 
 // withTraceFlags applies flags shared by exec-style tracing commands.
 func withTraceFlags(cmd *cobra.Command) {
-	withNoCommit(cmd)
 	withBatchSize(cmd)
 	withTxTrace(cmd)
 	withWorkers(cmd)

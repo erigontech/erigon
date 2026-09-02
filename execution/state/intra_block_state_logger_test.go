@@ -25,6 +25,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -34,35 +35,38 @@ func TestStateLogger(t *testing.T) {
 
 	cases := []struct {
 		name                    string
-		run                     func(state *IntraBlockState)
+		run                     func(state *IntraBlockState) error
 		checker                 func(t *testing.T, state *IntraBlockState)
 		wantBalanceChangeTraces []balanceChangeTrace
 	}{
 		{
 			name: "multiple add balance",
-			run: func(state *IntraBlockState) {
-				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+			run: func(state *IntraBlockState) error {
+				if err := state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified); err != nil {
+					return err
+				}
+				return state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				if len(stateDB.journal.entries) != 3 {
-					t.Errorf("Incorrect number of jounal entries expectedBalance: %d, got:%d", 3, len(stateDB.journal.entries))
+					t.Errorf("Incorrect number of journal entries expectedBalance: %d, got:%d", 3, len(stateDB.journal.entries))
 				}
 				for i := range stateDB.journal.entries {
-					switch balanceInc := stateDB.journal.entries[i].(type) {
-					case balanceChange:
+					e := stateDB.journal.entries[i]
+					switch e.kind {
+					case kindBalance:
 						var expectedPrev *uint256.Int
 						if i == 1 {
 							expectedPrev = uint256.NewInt(0)
 						} else {
 							expectedPrev = uint256.NewInt(2)
 						}
-						if !reflect.DeepEqual(&balanceInc.prev, expectedPrev) {
-							t.Errorf("Incorrect BalanceInc in jounal for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, expectedPrev, &balanceInc.prev)
+						if !e.value.Eq(expectedPrev) {
+							t.Errorf("Incorrect BalanceInc in journal for  %s expectedBalance: %s, got:%s", accounts.ZeroAddress, expectedPrev, &e.value)
 						}
-					case createObjectChange:
+					case kindCreateObject:
 					default:
-						t.Errorf("Invalid journal entry found:  %s", reflect.TypeOf(stateDB.journal.entries[i]))
+						t.Errorf("Invalid journal entry found:  kind %d", e.kind)
 					}
 				}
 
@@ -80,9 +84,11 @@ func TestStateLogger(t *testing.T) {
 		},
 		{
 			name: "sub balance",
-			run: func(state *IntraBlockState) {
-				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.SubBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+			run: func(state *IntraBlockState) error {
+				if err := state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified); err != nil {
+					return err
+				}
+				return state.SubBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				so, err := stateDB.GetOrNewStateObject(accounts.ZeroAddress)
@@ -109,10 +115,11 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(tx))
+			state := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
+			defer state.Close()
 			state.SetHooks(mt.Hooks())
 
-			tt.run(state)
+			require.NoError(t, tt.run(state))
 			tt.checker(t, state)
 			require.Equal(t, tt.wantBalanceChangeTraces, mt.balanceChangeTraces)
 		})

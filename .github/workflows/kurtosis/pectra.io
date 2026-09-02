@@ -5,7 +5,7 @@ participants_matrix:
       el_log_level: "debug"
   cl:
     - cl_type: teku
-      cl_image: consensys/teku:25.9.1
+      cl_image: consensys/teku:26.4.0
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
 

@@ -17,6 +17,7 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -37,11 +38,8 @@ type LogsFilterAggregator struct {
 	events         *shards.Events
 }
 
-// LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
-// and "aggregated" log filter representing a union of all subscribers. Therefore, the values in
-// the mappings are counters (of type int) and they get deleted when counter goes back to 0
-// Also, addAddr and allTopic are int instead of bool because they are also counter, counting
-// how many subscribers have this set on
+// LogsFilter represents one subscriber or the aggregate of all subscribers.
+// Aggregate address and topic values are reference counts.
 type LogsFilter struct {
 	allAddrs  int
 	addrs     map[common.Address]int
@@ -79,6 +77,17 @@ func (a *LogsFilterAggregator) checkEmpty() {
 func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
+	a.removeLogsFilterLocked(filterId, filter)
+}
+
+func (a *LogsFilterAggregator) removeLogsFilterLocked(filterId uint64, filter *LogsFilter) {
+	storedFilter, ok := a.logsFilters[filterId]
+	if !ok {
+		return
+	}
+	if filter == nil || filter != storedFilter {
+		filter = storedFilter
+	}
 	a.subtractLogFilters(filter)
 	delete(a.logsFilters, filterId)
 	a.checkEmpty()
@@ -149,7 +158,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF { // termination
+	if !errors.Is(recvErr, io.EOF) { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)
 	}
 	return nil
@@ -162,7 +171,6 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*notifications.LogNotificat
 	defer a.logsFilterLock.Unlock()
 
 	filtersToDelete := make(map[uint64]*LogsFilter)
-outerLoop:
 	for _, lg := range logs {
 		// Use aggregate filter first — native types, no conversion needed
 		if a.aggLogsFilter.allAddrs == 0 {
@@ -178,6 +186,9 @@ outerLoop:
 		// Convert to protobuf once for all matching subscribers
 		var proto *remoteproto.SubscribeLogsReply
 		for filterId, filter := range a.logsFilters {
+			if _, markedForDelete := filtersToDelete[filterId]; markedForDelete {
+				continue
+			}
 			if filter.allAddrs == 0 {
 				if _, addrOk := filter.addrs[lg.Address]; !addrOk {
 					continue
@@ -194,14 +205,13 @@ outerLoop:
 			}
 			if err := filter.sender.Send(proto); err != nil {
 				filtersToDelete[filterId] = filter
-				continue outerLoop
+				continue
 			}
 		}
 	}
 	// remove malfunctioned filters
 	for filterId, filter := range filtersToDelete {
-		a.subtractLogFilters(filter)
-		delete(a.logsFilters, filterId)
+		a.removeLogsFilterLocked(filterId, filter)
 	}
 
 	return nil
@@ -232,5 +242,6 @@ func logNotificationToProto(lg *notifications.LogNotification) *remoteproto.Subs
 		TransactionHash:  gointerfaces.ConvertHashToH256(lg.TxHash),
 		TransactionIndex: uint64(lg.TxIndex),
 		Removed:          lg.Removed,
+		BlockTimestamp:   lg.BlockTimestamp,
 	}
 }

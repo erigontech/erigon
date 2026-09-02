@@ -17,7 +17,11 @@
 package network
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,4 +198,29 @@ func TestDetermineGloasFullRoots_MixedVersions(t *testing.T) {
 	rootLookahead, _ := lookahead.Block.HashSSZ()
 	assert.Contains(t, roots, rootFull)
 	assert.Contains(t, roots, rootLookahead)
+}
+
+func TestBackwardBeaconDownloaderHTTPPreferredEmptyResponseFallsBack(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	downloader := &BackwardBeaconDownloader{
+		reqInterval:     time.NewTicker(time.Hour),
+		httpFallbackURL: server.URL,
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+	}
+	defer downloader.reqInterval.Stop()
+	downloader.slotToDownload.Store(63)
+	downloader.httpPreferred.Store(true)
+
+	blocks, err := downloader.fetchBlockRange(ctx)
+	if err == nil {
+		t.Fatalf("fetchBlockRange returned nil error for %d blocks, want fallback instead of empty HTTP success", len(blocks))
+	}
+	if downloader.httpPreferred.Load() {
+		t.Fatal("httpPreferred remained true after empty HTTP response")
+	}
 }

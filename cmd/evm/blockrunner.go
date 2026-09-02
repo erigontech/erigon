@@ -21,16 +21,16 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sync"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -45,12 +45,13 @@ var blockTestCommand = cli.Command{
 		&DumpFlag,
 		&JSONOutputFlag,
 		&RunFlag,
+		&ExcludeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
 	},
 }
 
-func blockTestCmd(ctx *cli.Context) error {
+func blockTestCmd(_ context.Context, ctx *cli.Command) error {
 	path := ctx.Args().First()
 
 	// Set up logging
@@ -64,10 +65,14 @@ func blockTestCmd(ctx *cli.Context) error {
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
+	if err != nil {
+		return err
+	}
 
 	if len(path) != 0 {
-		collected := collectFiles(path)
-		results, err := runBlockTestsParallel(ctx, collected, workers)
+		collected := filter.filterFiles(collectFiles(path))
+		results, err := runBlockTestsParallel(ctx, collected, workers, filter)
 		if err != nil {
 			return err
 		}
@@ -81,7 +86,7 @@ func blockTestCmd(ctx *cli.Context) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		results, err := runBlockTest(ctx, fname)
+		results, err := runBlockTest(ctx, fname, filter)
 		if err != nil {
 			return err
 		}
@@ -97,11 +102,17 @@ type fileResult struct {
 	err     error
 }
 
-func runBlockTestsParallel(ctx *cli.Context, files []string, workers uint64) ([]testResult, error) {
+func runBlockTestsParallel(ctx *cli.Command, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+	return runTestFilesParallel(files, workers, func(path string) ([]testResult, error) {
+		return runBlockTest(ctx, path, filter)
+	})
+}
+
+func runTestFilesParallel(files []string, workers uint64, runner func(string) ([]testResult, error)) ([]testResult, error) {
 	if workers == 1 {
-		results := make([]testResult, 0, len(files)*4) // pre-allocate: most files have a few tests
-		for _, fname := range files {
-			r, err := runBlockTest(ctx, fname)
+		results := make([]testResult, 0, len(files))
+		for _, path := range files {
+			r, err := runner(path)
 			if err != nil {
 				return nil, err
 			}
@@ -113,27 +124,25 @@ func runBlockTestsParallel(ctx *cli.Context, files []string, workers uint64) ([]
 		wg     sync.WaitGroup
 		fileCh = make(chan struct {
 			index int
-			fname string
+			path  string
 		}, len(files))
 		resultCh = make(chan fileResult, len(files))
 	)
-	for i, fname := range files {
+	for i, path := range files {
 		fileCh <- struct {
 			index int
-			fname string
-		}{i, fname}
+			path  string
+		}{i, path}
 	}
 	close(fileCh)
 
-	for w := uint64(0); w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for item := range fileCh {
-				r, err := runBlockTest(ctx, item.fname)
+				r, err := runner(item.path)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
-		}()
+		})
 	}
 	go func() {
 		wg.Wait()
@@ -189,20 +198,15 @@ func collectFiles(path string) []string {
 	return out
 }
 
-func runBlockTest(ctx *cli.Context, fname string) ([]testResult, error) {
+func runBlockTest(ctx *cli.Command, fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
 	}
 
 	var tests map[string]*testutil.BlockTest
-	if err = json.Unmarshal(src, &tests); err != nil {
+	if err := json.Unmarshal(src, &tests); err != nil {
 		return nil, err
-	}
-
-	re, err := regexp.Compile(ctx.String(RunFlag.Name))
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex -%s: %v", RunFlag.Name, err)
 	}
 
 	// Pull out keys to sort and ensure tests are run in order
@@ -211,7 +215,7 @@ func runBlockTest(ctx *cli.Context, fname string) ([]testResult, error) {
 	// Run all the tests
 	results := make([]testResult, 0, len(keys))
 	for _, name := range keys {
-		if !re.MatchString(name) {
+		if !filter.includeCase(fname, name) {
 			continue
 		}
 

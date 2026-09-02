@@ -17,11 +17,18 @@
 package rpctest
 
 import (
+	"encoding/json"
+	"fmt"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func MockRequestGenerator(reqId int) *RequestGenerator {
@@ -414,6 +421,9 @@ func TestRequestGenerator_getLogs2(t *testing.T) {
 }
 
 func TestRequestGenerator_accountRange(t *testing.T) {
+	addr1 := common.HexToAddress("0x6f9e34c00812a80fa87df26208bbe69411e36d6a")
+	addr2 := common.HexToAddress("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812")
+	addr3 := common.HexToAddress("0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c")
 	testCases := []struct {
 		reqId    int
 		blockNum uint64
@@ -424,23 +434,23 @@ func TestRequestGenerator_accountRange(t *testing.T) {
 		{
 			1,
 			4756370,
-			common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca").Bytes(),
+			addr1[:],
 			1,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "b540wAgSqA+offJiCLvmlBHjbWqfALNURO9BgfbEg8o=", 1, false, false], "id":1}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x489392", "0x6f9e34c00812a80fa87df26208bbe69411e36d6a", 1, false, false], "id":1}`,
 		},
 		{
 			2,
 			0,
-			common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de").Bytes(),
+			addr2[:],
 			2,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "HP586VoWlNiWk2XLRyzkoNPu2BLFQP13CLvmlB40xN4=", 2, false, false], "id":2}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x0", "0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812", 2, false, false], "id":2}`,
 		},
 		{
 			3,
 			1234567,
-			common.HexToHash("0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c27664463fb5978b97f8b2d1b").Bytes(),
+			addr3[:],
 			3,
-			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "HNc8et9bMfPPlMZ7niUeaZVZ2RwnZkRj+1l4uX+LLRs=", 3, false, false], "id":3}`,
+			`{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x12d687", "0x1cd73c7adf5b31f3cf94c67b9e251e699559d91c", 3, false, false], "id":3}`,
 		},
 	}
 
@@ -486,4 +496,156 @@ func TestRequestGenerator_getProof(t *testing.T) {
 		got := reqGen.getProof(testCase.blockNum, testCase.account, testCase.storageList)
 		require.Equal(t, testCase.expected, got)
 	}
+}
+
+func TestRequestGenerator_getLogsForTopics(t *testing.T) {
+	hash1 := common.HexToHash("0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca")
+	hash2 := common.HexToHash("0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de")
+
+	testCases := []struct {
+		topics   [][]common.Hash
+		expected string
+	}{
+		{
+			// pos 0 non-nil: single topic at position 0
+			[][]common.Hash{{hash1}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"]]}],"id":1}`,
+		},
+		{
+			// pos 0 nil, pos 1 non-nil: wildcard then topic (typical positional filter)
+			[][]common.Hash{nil, {hash1}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [null,["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"]]}],"id":2}`,
+		},
+		{
+			// all nil: three wildcard positions
+			[][]common.Hash{nil, nil, nil},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [null,null,null]}],"id":3}`,
+		},
+		{
+			// multiple topics at the same position (OR semantics)
+			[][]common.Hash{{hash1, hash2}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca","0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"]]}],"id":4}`,
+		},
+		{
+			// mixed: nil, non-nil, nil, non-nil across all four positions
+			[][]common.Hash{nil, {hash1}, nil, {hash2}},
+			`{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x64", "toBlock": "0x64", "topics": [null,["0x6f9e34c00812a80fa87df26208bbe69411e36d6a9f00b35444ef4181f6c483ca"],null,["0x1cfe7ce95a1694d8969365cb472ce4a0d3eed812c540fd7708bbe6941e34c4de"]]}],"id":5}`,
+		},
+	}
+
+	reqGen := MockRequestGenerator(0)
+	for _, tc := range testCases {
+		got := reqGen.getLogsForTopics(100, 100, tc.topics)
+		require.Equal(t, tc.expected, got)
+	}
+}
+
+// TestEthGetLogsInvariants_WideFilters pins that a block with more distinct addresses or
+// topics than the server's query limit is still checked, by splitting the filter over
+// several requests.
+func TestEthGetLogsInvariants_WideFilters(t *testing.T) {
+	const (
+		queryLimit = 100
+		logCount   = 250
+		blockNum   = 1
+	)
+
+	sig := common.BigToHash(big.NewInt(1))
+	logs := make([]Log, logCount)
+	for i := range logs {
+		logs[i] = Log{
+			Address:     common.BigToAddress(big.NewInt(int64(i + 1))),
+			Topics:      []common.Hash{sig, sig, common.BigToHash(big.NewInt(int64(i + 2)))},
+			BlockNumber: blockNum,
+			Index:       hexutil.Uint(i),
+		}
+	}
+
+	srv := fakeLogsServer(t, logs, queryLimit)
+	err := EthGetLogsInvariants(t.Context(), srv.URL, "", false, blockNum, blockNum+1, false, true, queryLimit)
+	require.NoError(t, err)
+}
+
+// fakeLogsServer serves eth_blockNumber and eth_getLogs over logs, rejecting filters with
+// more than queryLimit addresses or topic alternatives at one position - the way rpcdaemon
+// does for --rpc.logs.querylimit.
+func fakeLogsServer(t *testing.T, logs []Log, queryLimit int) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+			Params []struct {
+				FromBlock hexutil.Uint64   `json:"fromBlock"`
+				ToBlock   hexutil.Uint64   `json:"toBlock"`
+				Address   []common.Address `json:"address"`
+				Topics    [][]common.Hash  `json:"topics"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decoding request: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+
+		if req.Method == "eth_blockNumber" {
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":"0x%x"}`, req.ID, 1_000_000)
+			return
+		}
+
+		if len(req.Params) == 0 {
+			t.Errorf("no params in %s request", req.Method)
+			http.Error(w, "no params", http.StatusBadRequest)
+			return
+		}
+		crit := req.Params[0]
+		tooWide := len(crit.Address) > queryLimit
+		for _, alternatives := range crit.Topics {
+			tooWide = tooWide || len(alternatives) > queryLimit
+		}
+		if tooWide {
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32602,"message":"query exceeds the maximum of %d addresses or topics per search position"}}`, req.ID, queryLimit)
+			return
+		}
+
+		result := []Log{}
+		for i := range logs {
+			l := &logs[i]
+			if l.BlockNumber < crit.FromBlock || l.BlockNumber > crit.ToBlock {
+				continue
+			}
+			if logMatchesFilter(l, crit.Address, crit.Topics) {
+				result = append(result, *l)
+			}
+		}
+		resp, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+		if err != nil {
+			t.Errorf("encoding response: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Write(resp) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func logMatchesFilter(l *Log, addresses []common.Address, topics [][]common.Hash) bool {
+	if len(addresses) > 0 && !slices.Contains(addresses, l.Address) {
+		return false
+	}
+	if len(topics) > len(l.Topics) {
+		return false
+	}
+	for pos, alternatives := range topics {
+		if len(alternatives) == 0 {
+			continue
+		}
+		if pos >= len(l.Topics) || !slices.Contains(alternatives, l.Topics[pos]) {
+			return false
+		}
+	}
+	return true
 }

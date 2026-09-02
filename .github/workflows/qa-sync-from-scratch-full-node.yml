@@ -1,0 +1,248 @@
+name: QA - Sync from scratch (full node)
+
+on:
+  push:
+    branches:
+      - 'release/3.*'
+  schedule:
+    - cron: '0 0 1 * *'  # Run on the 1st of each month at 00:00 AM UTC
+  workflow_dispatch:     # Run manually
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  full-node-sync-from-scratch-test:
+    name: full-node-sync-from-scratch-test-${{ matrix.chain }}
+    runs-on: [self-hosted, qa, long-running]
+    timeout-minutes: 1440  # 24 hours
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chain: mainnet   # Chain name as specified on the erigon command line
+            total_time_seconds: 82800  # 23 hours (1h buffer before job timeout)
+          - chain: gnosis
+            total_time_seconds: 43200  # 12 hours
+    env:
+      ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      ERIGON_ASSERT: true
+      TRACKING_TIME_SECONDS: 7200 # 2 hours
+      TOTAL_TIME_SECONDS: ${{ matrix.total_time_seconds }}
+      CHAIN: ${{ matrix.chain }}
+      NODE_TYPE: full_node
+      MODE: full
+      RETIREMENT_TIMEOUT_SECONDS: 1800 # 30 minutes to observe the first retirement
+      RETIREMENT_SETTLE_SECONDS: 300 # a full -> minimal backlog is tens of GB to unlink
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Clean Erigon Build & Data Directories
+        run: |
+          make clean
+          rm -rf $ERIGON_DATA_DIR
+
+      - name: Build Erigon
+        run: |
+          make erigon
+        working-directory: ${{ github.workspace }}
+
+      - name: Pause the Erigon instance dedicated to db maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+      - name: Run Erigon and monitor chain sync
+        id: test_step
+        run: |
+          set +e # Disable exit on error
+
+          # Run Erigon, wait sync and check ability to maintain sync
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN $NODE_TYPE
+
+          # Capture monitoring script exit status
+          test_exit_status=$?
+
+          # Save the subsection reached status
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
+
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "Tests completed successfully"
+            echo "::notice::Tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during tests"
+            echo "::error::Error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Upload Downloader Torrent Client Status
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: torrent-client-status-${{ env.CHAIN }}-full
+          path: torrent-client-status.txt
+
+      - name: Save test results
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        env:
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch "$GITHUB_REF_NAME" \
+            --test_name sync-from-scratch-full-node \
+            --chain $CHAIN \
+            --runner "$RUNNER_NAME" \
+            --outcome $TEST_RESULT \
+            --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
+
+      - name: Upload test results
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ env.CHAIN }}-full
+          path: |
+            ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+            ${{ github.workspace }}/erigon_data/logs/
+
+      - name: Upload metric plots
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: metric-plots-${{ env.CHAIN }}-full
+          path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
+
+      - name: Upload FD Leak Analysis
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: fd-leak-analysis-${{ env.CHAIN }}-full
+          path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+      - name: Measure disk usage
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        run: |
+          set -euo pipefail
+          # Erigon has stopped by now. Drop the external-sort scratch dir (peaks
+          # ~100 GB during sync, cleaned on the next startup) so we report the
+          # durable on-disk footprint, not the transient sync peak.
+          rm -rf "$ERIGON_DATA_DIR/temp"
+          # du -sB1 = actual disk blocks used, in bytes (NOT --apparent-size).
+          BYTES=$(du -sB1 "$ERIGON_DATA_DIR" | awk '{print $1}')
+          echo "Disk usage for $CHAIN $MODE: ${BYTES} bytes"
+          echo "$BYTES" > "$GITHUB_WORKSPACE/disk-usage-$CHAIN-$MODE.txt"
+
+      - name: Upload disk usage
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: disk-usage-${{ env.CHAIN }}-${{ env.MODE }}
+          path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-${{ env.MODE }}.txt
+
+      # Restart the datadir just synced as a *minimal* node. EnsureNotChanged accepts
+      # the switch because full and minimal differ only in the size of finite
+      # retention windows.
+      #
+      # The two retirement paths need different treatment here:
+      #
+      #   blocks  the window narrows from 262144 to 100000, a 162144-block move that
+      #           is wider than the 100000-block segment size, so at least one
+      #           transactions segment always falls in it. Deterministic, hence
+      #           --require-block-retirement.
+      #
+      #   state   history files span 256 steps (~310000 blocks at mainnet tip
+      #           density), nearly twice the same 162144-block move, so both cutoffs
+      #           usually land inside one file and the mode switch alone retires
+      #           nothing. --distance auto derives a window that puts the cutoff
+      #           between the two newest boundaries instead; a fixed value cannot,
+      #           since the gap is 1, 2, 4 ... steps depending on the merge ladder.
+      - name: Test old file retirement after switching to minimal node
+        id: retirement_step
+        run: |
+          set +e # Disable exit on error
+
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/file-retirement/run_and_check_file_retirement.py \
+            "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR \
+            --chain $CHAIN \
+            --distance auto \
+            --require-block-retirement \
+            --timeout $RETIREMENT_TIMEOUT_SECONDS \
+            --settle $RETIREMENT_SETTLE_SECONDS \
+            --result-file "$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
+
+          # Capture the check script exit status
+          test_exit_status=$?
+
+          # Save the subsection reached status
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
+
+          # Dump the measures into the log. They are also uploaded as an artifact,
+          # but whoever reads the workflow output should not need to know that.
+          # Before the verdict below, so a failing run prints them too.
+          RESULT_FILE="$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
+          echo "::group::File retirement measures (result-retirement-$CHAIN-full-to-minimal.json)"
+          if [ -f "$RESULT_FILE" ]; then
+            cat "$RESULT_FILE"
+          else
+            echo "no result file at $RESULT_FILE: the check script did not reach the point where it writes one"
+          fi
+          echo "::endgroup::"
+
+          # Check the check script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "File retirement test completed successfully"
+            echo "::notice::File retirement test completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during file retirement test"
+            echo "::error::Error detected during file retirement test"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Save file retirement test results
+        if: ${{ always() && steps.retirement_step.outputs.test_executed == 'true' }}
+        env:
+          TEST_RESULT: ${{ steps.retirement_step.outputs.TEST_RESULT }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch "$GITHUB_REF_NAME" \
+            --test_name full-to-minimal-file-retirement \
+            --chain $CHAIN \
+            --runner "$RUNNER_NAME" \
+            --outcome $TEST_RESULT \
+            --result_file "$GITHUB_WORKSPACE/result-retirement-$CHAIN-full-to-minimal.json"
+
+      - name: Upload file retirement test results
+        if: ${{ always() && steps.retirement_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: file-retirement-results-${{ env.CHAIN }}-full-to-minimal
+          path: |
+            ${{ github.workspace }}/result-retirement-${{ env.CHAIN }}-full-to-minimal.json
+            ${{ github.workspace }}/erigon_data/logs/
+
+      - name: Clean up Erigon data directory
+        if: always()
+        run: |
+          rm -rf $ERIGON_DATA_DIR
+
+      - name: Resume the Erigon instance dedicated to db maintenance
+        if: always()
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true

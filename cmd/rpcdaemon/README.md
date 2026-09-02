@@ -258,8 +258,10 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_gasPrice                               | Yes     |                                                       |
 | eth_maxPriorityFeePerGas                   | Yes     |                                                       |
 | eth_feeHistory                             | Yes     |                                                       |
+| eth_baseFee                                | Yes     |                                                       |
 | eth_blobBaseFee                            | Yes     |                                                       |
 | eth_config                                 | Yes     | EIP-7910                                              |
+| eth_capabilities                           | Yes     | execution-apis#755                                    |
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
@@ -308,6 +310,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
+| eth_fillTransaction                        | Yes     | Blob sidecar generation (KZG commitments/proofs from raw blobs) not yet supported |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |
@@ -350,12 +353,16 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
 |                                            |         |                                                       |
+| testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
+| testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |
+|                                            |         |                                                       |
 | debug_accountRange                         | Yes     |                                                       |
 | debug_accountAt                            | Yes     |                                                       |
 | debug_getBadBlocks                         | Yes     |                                                       |
 | debug_getModifiedAccountsByNumber          | Yes     |                                                       |
 | debug_getModifiedAccountsByHash            | Yes     |                                                       |
 | debug_getRawBlock                          | Yes     |                                                       |
+| debug_getRawBlockAccessList                | Yes     | Added in Amsterdam (EIP-7928)                         |
 | debug_getRawHeader                         | Yes     |                                                       |
 | debug_getRawReceipts                       | Yes     |                                                       |
 | debug_getRawTransaction                    | Yes     |                                                       |
@@ -408,18 +415,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_forks                               | Yes     | Erigon only                                           |
 | erigon_nodeInfo                            | Yes     | Erigon only                                           |
 | erigon_cacheCheck                          | Yes     | Erigon only                                           |
-|                                            |         |                                                       |
-| bor_getSnapshot                            | Yes     | Bor only                                              |
-| bor_getAuthor                              | Yes     | Bor only                                              |
-| bor_getSnapshotAtHash                      | Yes     | Bor only                                              |
-| bor_getSigners                             | Yes     | Bor only                                              |
-| bor_getSignersAtHash                       | Yes     | Bor only                                              |
-| bor_getCurrentProposer                     | Yes     | Bor only                                              |
-| bor_getCurrentValidators                   | Yes     | Bor only                                              |
-| bor_getSnapshotProposer                    | Yes     | Bor only                                              |
-| bor_getSnapshotProposerSequence            | Yes     | Bor only                                              |
-| bor_getRootHash                            | Yes     | Bor only                                              |
-| bor_getVoteOnHash                          | Yes     | Bor only                                              |
 |                                            |         |                                                       |
 | ots_getApiLevel                            | Yes     | Otterscan                                             |
 | ots_getInternalOperations                  | Yes     | Otterscan                                             |
