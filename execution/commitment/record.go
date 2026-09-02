@@ -177,15 +177,18 @@ func EncodeLeafChild(cell *cellEncodeData) []byte {
 	}
 
 	baseLen := 1
+	if stateHashPresent {
+		baseLen += length.Hash
+	}
 	switch {
 	case storageLeaf:
 		baseLen += length.Hash
 	case hoistedSlot:
 		baseLen += 2 + length.Addr + length.Hash
 	case hasStorage:
-		baseLen += length.Hash + length.Hash + 2 + length.Addr
+		baseLen += length.Hash + 2 + length.Addr
 	default:
-		baseLen += length.Hash + length.Addr
+		baseLen += length.Addr
 	}
 	record := make([]byte, 0, baseLen+(extLen+1)/2)
 	record = append(record, flags)
@@ -235,7 +238,7 @@ func DecodeRecordInto(record []byte, c *cell) (mask uint16, err error) {
 	}
 
 	if flags&recordFlagLeaf == 0 {
-		if flags&(recordFlagStorageLeaf|recordFlagHasStorage) != 0 {
+		if flags&(recordFlagStorageLeaf|recordFlagHasStorage|recordFlagStorageAddr) != 0 {
 			return 0, malformedRecord("branch record has leaf-only flags 0x%x", flags)
 		}
 		if flags&recordFlagHash == 0 {
@@ -255,7 +258,7 @@ func DecodeRecordInto(record []byte, c *cell) (mask uint16, err error) {
 	}
 
 	if flags&recordFlagStorageLeaf != 0 {
-		if flags&(recordFlagHasStorage|recordFlagExtensionOdd) != 0 {
+		if flags&(recordFlagHasStorage|recordFlagExtensionOdd|recordFlagStorageAddr) != 0 {
 			return 0, malformedRecord("storage leaf has incompatible flags 0x%x", flags)
 		}
 		pos := 1

@@ -330,3 +330,78 @@ func bitsTrailingZeros16(v uint16) int {
 	}
 	return 16
 }
+
+// A record that outgrows its reserved capacity reallocates and copies, once per record.
+func TestEncodeLeafChildReservesExactCapacity(t *testing.T) {
+	t.Parallel()
+
+	stateHash := func(d *cellEncodeData) {
+		d.stateHashLen = length.Hash
+		for i := range d.stateHash {
+			d.stateHash[i] = byte(0x40 + i)
+		}
+	}
+	storageAddr := func(d *cellEncodeData) {
+		d.storageAddrLen = length.Addr + length.Hash
+		for i := range d.storageAddr {
+			d.storageAddr[i] = byte(0xa0 + i)
+		}
+	}
+	accountAddr := func(d *cellEncodeData) {
+		d.accountAddrLen = length.Addr
+		for i := range d.accountAddr {
+			d.accountAddr[i] = byte(0x20 + i)
+		}
+	}
+	hash := func(d *cellEncodeData) {
+		d.hashLen = length.Hash
+		for i := range d.hash {
+			d.hash[i] = byte(i + 1)
+		}
+	}
+
+	for _, tc := range []struct {
+		name  string
+		build func(*cellEncodeData)
+	}{
+		{"storage-leaf", func(d *cellEncodeData) { storageAddr(d); stateHash(d) }},
+		{"hoisted-slot", func(d *cellEncodeData) { accountAddr(d); storageAddr(d); stateHash(d) }},
+		{"account-with-storage", func(d *cellEncodeData) { accountAddr(d); hash(d); stateHash(d) }},
+		{"plain-account", func(d *cellEncodeData) { accountAddr(d); stateHash(d) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var d cellEncodeData
+			tc.build(&d)
+			rec := EncodeLeafChild(&d)
+			require.Equal(t, len(rec), cap(rec), "record outgrew its reserved capacity")
+		})
+	}
+}
+
+// storage-address is only meaningful on a hoisted account leaf. Accepting it elsewhere lets a
+// corrupted record decode as valid instead of failing closed.
+func TestDecodeRecordRejectsStorageAddrFlagOnWrongShapes(t *testing.T) {
+	t.Parallel()
+
+	var c cell
+
+	var b cellEncodeData
+	b.hashLen = length.Hash
+	for i := range b.hash {
+		b.hash[i] = byte(i + 1)
+	}
+	branch := EncodeBranchChild(0x1234, &b)
+	branch[0] |= recordFlagStorageAddr
+	_, err := DecodeRecordInto(branch, &c)
+	require.Error(t, err, "branch record must reject the storage-address flag")
+
+	var s cellEncodeData
+	s.storageAddrLen = length.Addr + length.Hash
+	for i := range s.storageAddr {
+		s.storageAddr[i] = byte(0xa0 + i)
+	}
+	leaf := EncodeLeafChild(&s)
+	leaf[0] |= recordFlagStorageAddr
+	_, err = DecodeRecordInto(leaf, &c)
+	require.Error(t, err, "storage leaf must reject the storage-address flag")
+}
