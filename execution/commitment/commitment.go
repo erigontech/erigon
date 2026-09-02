@@ -519,16 +519,26 @@ func latestDeferredRecords(deferred []*DeferredBranchUpdate) []*DeferredBranchUp
 		return deferred
 	}
 
-	last := make(map[string]int, len(deferred))
+	last := maphash.NewNonConcurrentMap[int]()
+	kept := 0
 	for i, upd := range deferred {
 		if upd.edgeRecord {
-			last[string(upd.prefix)] = i
+			if _, seen := last.Get(upd.prefix); !seen {
+				kept++
+			}
+			last.Set(upd.prefix, i)
+			continue
 		}
+		kept++
 	}
 
-	result := make([]*DeferredBranchUpdate, 0, len(last))
+	result := make([]*DeferredBranchUpdate, 0, kept)
 	for i, upd := range deferred {
-		if !upd.edgeRecord || last[string(upd.prefix)] == i {
+		if !upd.edgeRecord {
+			result = append(result, upd)
+			continue
+		}
+		if lastIdx, ok := last.Get(upd.prefix); ok && lastIdx == i {
 			result = append(result, upd)
 		}
 	}
@@ -654,10 +664,13 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		}
 		be.pendingPrefixes.Set(prefix, struct{}{})
 		nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+		// getDeferredRecordUpdate copies the key into a pooled buffer, so one scratch serves all.
+		key := make([]byte, len(nodeKey)+1)
+		copy(key, nodeKey)
 		for bitset := changed; bitset != 0; {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
-			key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+			key[len(nodeKey)] = 0x80 | byte(nibble)
 			var record []byte
 			if afterMap&bit == 0 {
 				record = make([]byte, 0)

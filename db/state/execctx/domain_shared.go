@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1276,14 +1275,17 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 	if !maskKnown {
 		wanted = ^uint16(0)
 	}
+	// Neither lookup retains the key, so one scratch buffer serves every nibble.
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
 	for bitset := wanted; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
-		value, valueStep, _, ok := sd.latestFromMem(kv.CommitmentDomain, key)
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		value, valueStep, _, ok := sd.latestFromMem(kv.CommitmentDomain, childKey)
 		if !ok && sd.branchCache != nil {
 			var cacheStep uint64
-			value, cacheStep, ok = sd.branchCache.Get(key)
+			value, cacheStep, ok = sd.branchCache.Get(childKey)
 			valueStep = kv.Step(cacheStep)
 		}
 		if ok {
@@ -1313,7 +1315,8 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 	for bitset := filePresent & remaining; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		records[nibble] = bytes.Clone(fileRecords[nibble])
+		// The inner read already returned owned bytes; cloning again just doubled the garbage.
+		records[nibble] = fileRecords[nibble]
 		present |= bit
 		bitset ^= bit
 	}
