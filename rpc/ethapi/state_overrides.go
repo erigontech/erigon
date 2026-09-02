@@ -134,5 +134,8 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		}
 	}
 
-	return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	// State overrides are synthetic pre-state and must not trigger EIP-161 account deletion.
+	overrideRules := *rules
+	overrideRules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
+	return ibs.FinalizeTx(&overrideRules, state.NewNoopWriter())
 }
