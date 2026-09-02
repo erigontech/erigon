@@ -30,13 +30,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// hk is copied off the walk path; pk and upd still reference the caller's storage.
-type touchedKey struct {
-	hk  []byte
-	pk  []byte
-	upd *Update
-}
-
 // maxFoldConcurrency caps storage-leaf fold fan-out at the CPUs the process may run on.
 func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
 
@@ -73,12 +66,14 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
 }
 
-func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
+func foldStorageChild(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, child *prefixNode, childPrefix []byte) (cell, error) {
 	w.mountTo(base, nib)
-	for i := range group {
-		if err := w.followAndUpdate(group[i].hk, group[i].pk, group[i].upd); err != nil {
-			return cell{}, err
-		}
+	path := make([]byte, 0, 144)
+	path = append(path, childPrefix...)
+	if err := dfsSubtree(child, path, func(hk, pk []byte, upd *Update) error {
+		return w.followAndUpdate(hk, pk, upd)
+	}); err != nil {
+		return cell{}, err
 	}
 	return w.foldMounted(ctx, nib)
 }
@@ -162,7 +157,6 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		copy(childPrefix, accPrefix)
 		childPrefix = append(childPrefix, byte(ni))
 		childPrefix = append(childPrefix, ch.ext...)
-		group := collectSubtreeKeys(ch, childPrefix)
 		g.Go(func() error {
 			if err := sem.Acquire(gctx, 1); err != nil {
 				return err
@@ -172,7 +166,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 			if w.traceW != nil {
 				w.SetTraceWriter(tracePrefix(w.traceW, accTag))
 			}
-			c, err := foldStorageLeaf(gctx, w, base, ni, group)
+			c, err := foldStorageChild(gctx, w, base, ni, ch, childPrefix)
 			if err == nil {
 				if d := w.TakeDeferredUpdates(); len(d) > 0 {
 					pu.appendDeferred(d)
@@ -271,33 +265,4 @@ func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg Trie
 			cleanup()
 		}
 	}
-}
-
-// keyArena copies walk-path nibbles into chunked buffers so each collected key gets a stable slice.
-type keyArena struct {
-	buf       []byte
-	remaining int
-}
-
-const keyArenaChunk = 64 * 1024
-
-func (a *keyArena) copy(hk []byte) []byte {
-	if len(hk) > cap(a.buf)-len(a.buf) {
-		want := len(hk) * max(a.remaining, 1)
-		a.buf = make([]byte, 0, max(min(want, keyArenaChunk), len(hk)))
-	}
-	a.remaining--
-	start := len(a.buf)
-	a.buf = append(a.buf, hk...)
-	return a.buf[start:len(a.buf):len(a.buf)]
-}
-
-func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
-	out := make([]touchedKey, 0, node.subtreeCount)
-	arena := keyArena{remaining: int(node.subtreeCount)}
-	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
-		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
-		return nil
-	})
-	return out
 }
