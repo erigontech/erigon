@@ -498,49 +498,12 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			ComputedRoot:     sealed.Root,
 		}, nil
 	}
-	// ALREADY-CANONICAL fast-path: a block already on the canonical chain was validated before it was
-	// canonicalised, so it needs no re-validation — and re-running it here builds a fresh SharedDomains
-	// parented to lagging canonical state that may compute a wrong root or fail (senders "can't find header").
-	// canonicalHeaderIfAny confirms (blockHash, blockNumber) is the canonical block for that number (a hash
-	// match, not a blind number accept), so this is sound; answer from the DB header. Falls through to full
-	// validation for any block that is NOT already canonical (foreign-peer sync, dev-l1 tip re-execution).
-	if canonHdr := e.canonicalHeaderIfAny(ctx, blockHash, blockNumber); canonHdr != nil {
-		return ValidationResult{
-			ValidationStatus: ExecutionStatusSuccess,
-			LatestValidHash:  blockHash,
-			ComputedRoot:     canonHdr.Root,
-		}, nil
-	}
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 	}
 	defer e.semaphore.Release(1)
 	return e.validateChainLocked(ctx, blockHash, blockNumber)
-}
-
-// canonicalHeaderIfAny returns the header of (blockHash, blockNumber) iff that block is already KNOWN-GOOD —
-// already validated (in the fork validator's validHashes) OR on the canonical chain — else nil. Used to
-// short-circuit ValidateChain for a block that needs no re-validation WITHOUT constructing a SharedDomains:
-// re-running an already-good block on a fresh SD parented to lagging canonical state can compute a wrong root
-// or fail ("can't find header"). The driver's OWN block-end close never comes through here (it drives
-// validateChainLocked directly / hits the sealed fast-path), so short-circuiting a validated block here does
-// not skip a legitimate close. Errors resolve to nil (fall through to full validation).
-func (e *ExecModule) canonicalHeaderIfAny(ctx context.Context, blockHash common.Hash, blockNumber uint64) *types.Header {
-	knownGood := e.forkValidator.HasValidHash(blockHash)
-	var hdr *types.Header
-	_ = e.db.View(ctx, func(tx kv.Tx) error {
-		if !knownGood {
-			canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, blockNumber)
-			if err != nil || !canonical {
-				return err
-			}
-		}
-		var err error
-		hdr, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
-		return err
-	})
-	return hdr
 }
 
 // validateChainLocked is ValidateChain's body with the exec-module semaphore ALREADY held. Split out so

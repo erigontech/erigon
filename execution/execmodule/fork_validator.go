@@ -39,15 +39,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-// HasValidHash reports whether this hash has already been validated (in the validHashes cache) — used by
-// ValidateChain to short-circuit a re-validation before building a SharedDomains.
-func (fv *ForkValidator) HasValidHash(hash common.Hash) bool {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	_, ok := fv.validHashes.Get(hash)
-	return ok
-}
-
 type BlockTimings [2]time.Duration
 
 const (
