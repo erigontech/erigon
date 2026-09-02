@@ -247,7 +247,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 			copiedRows += rows
 		}
 	}
-	logger.Info("[compact] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
+	logger.Info("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
@@ -267,7 +267,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 		return 0, err
 	}
 	if total > 0 {
-		logger.Info("[compact] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
+		logger.Info("[db-copy] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
 	}
 
 	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
@@ -276,7 +276,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)
 		if err != nil {
-			logger.Warn("[compact] read-ahead disabled", "table", table, "err", err)
+			logger.Warn("[db-copy] read-ahead disabled", "table", table, "err", err)
 		} else {
 			ra = kv.NewReadAhead(ctx, src, table, kv.ReadAheadCfg{Bounds: bounds, TableSize: size, Workers: workers, WarmValues: true})
 		}

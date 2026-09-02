@@ -106,6 +106,9 @@ func CompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err != nil {
 		return err
 	}
+	if len(dbs) == 0 {
+		return fmt.Errorf("no mdbx database found under %s", dirs.DataDir)
+	}
 	for _, db := range dbs {
 		if err := CompactInPlace(ctx, db.path, db.label, logger); err != nil {
 			return fmt.Errorf("compacting %s: %w", db.path, err)

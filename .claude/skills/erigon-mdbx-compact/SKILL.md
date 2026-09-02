@@ -36,8 +36,8 @@ not only `chaindata`.
 
 1. Run `du -sh <datadir>/chaindata/mdbx.dat` and report the size to the user.
 2. Check free space per database, not once for the datadir: a database may sit
-   on its own volume through a symlink or mount, and its copy is staged next to
-   it. Run `for f in $(find <datadir> -name mdbx.dat); do du -sh "$f"; df -h "$(dirname "$f")" | tail -1; done`
+   on its own volume through a symlink or mount, and its copy is staged next to it. Run
+   `find <datadir> -name mdbx.dat -not -path '*/compacting/*' -print0 | while IFS= read -r -d '' f; do du -sh "$f"; df -h "$(dirname "$f")" | tail -1; done`
    and compare each database against the free space on its own volume. If any
    has less free space than its own `mdbx.dat`, **abort and tell the user**.
 

@@ -56,6 +56,17 @@ func decompressZstd(t *testing.T, r io.Reader) []byte {
 	return data
 }
 
+// decompressZstd reads a zstd-compressed body and returns the raw bytes.
+func decompressZstd(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	zr, err := zstd.NewReader(r)
+	require.NoError(t, err)
+	defer zr.Close()
+	data, err := io.ReadAll(zr)
+	require.NoError(t, err)
+	return data
+}
+
 // gzipRequest issues a POST to handler with Accept-Encoding: gzip and returns the recorder.
 func gzipRequest(t *testing.T, handler http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
@@ -355,7 +366,7 @@ func TestZstdNegotiation(t *testing.T) {
 		{"", ""},
 	} {
 		t.Run(tc.accept, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 			require.NoError(t, err)
 			if tc.accept != "" {
 				req.Header.Set("Accept-Encoding", tc.accept)
@@ -379,16 +390,16 @@ func TestZstdNegotiation(t *testing.T) {
 	}
 }
 
-// TestZstdHandlerStreaming verifies that a handler which calls Flush() mid-response
-// still produces a fully decodable zstd stream. A dropped final frame or a
-// malformed mid-stream block would only show up as a short, undecodable body --
-// exactly what a size-only check cannot catch.
+// TestZstdHandlerStreaming verifies that a handler which writes, flushes, then writes again
+// still produces a fully decodable zstd stream -- a dropped frame or corrupt block shows up
+// only as a short body, which a size-only check cannot catch.
 func TestZstdHandlerStreaming(t *testing.T) {
 	parts := [][]byte{
 		[]byte(`{"jsonrpc":"2.0","result":`),
 		[]byte(`"hello"`),
 		[]byte(`}`),
 	}
+	tail := []byte(`{"jsonrpc":"2.0","result":"after flush"}`)
 	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, p := range parts {
 			_, _ = w.Write(p)
@@ -396,10 +407,11 @@ func TestZstdHandlerStreaming(t *testing.T) {
 		// Pad past minGzipBodySize: below it a response is sent verbatim.
 		_, _ = w.Write(bytes.Repeat([]byte(" "), minGzipBodySize))
 		w.(http.Flusher).Flush()
+		_, _ = w.Write(tail)
 	})))
 	defer srv.Close()
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	req.Header.Set("Accept-Encoding", "zstd")
 	resp, err := http.DefaultTransport.RoundTrip(req)
@@ -408,6 +420,7 @@ func TestZstdHandlerStreaming(t *testing.T) {
 
 	require.Equal(t, "zstd", resp.Header.Get("Content-Encoding"))
 	want := append([]byte(`{"jsonrpc":"2.0","result":"hello"}`), bytes.Repeat([]byte(" "), minGzipBodySize)...)
+	want = append(want, tail...)
 	require.Equal(t, want, decompressZstd(t, resp.Body))
 }
 
@@ -431,7 +444,7 @@ func TestCompressionMetricsAttributed(t *testing.T) {
 		t.Run(tc.accept, func(t *testing.T) {
 			beforeIn, beforeOut := tc.in.GetValueUint64(), tc.out.GetValueUint64()
 
-			req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 			require.NoError(t, err)
 			req.Header.Set("Accept-Encoding", tc.accept)
 			resp, err := http.DefaultTransport.RoundTrip(req)

@@ -291,6 +291,7 @@ func TestDatadirDBs(t *testing.T) {
 	for _, db := range found {
 		got[db.path] = db.label
 	}
+	require.Len(t, found, len(got), "a db must be reported once")
 	require.Equal(t, map[string]kv.Label{
 		chaindata: dbcfg.ChainDB,
 		txpool:    dbcfg.TxPoolDB,

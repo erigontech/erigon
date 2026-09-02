@@ -23,11 +23,34 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
-except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
-alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
-working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
-receipts additionally extend receipts and logs availability from the state-history window back to genesis.
+As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
+default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
+`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
+datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency.
+
+`--prune.include-receipts` on its own does **not** extend receipts and logs back to genesis: the receipt cache follows
+the node's state-history window. On an [Archive node](#archive-node) that window is unbounded, so the cache covers the
+whole chain. On a [Full](#full-node), [Minimal](#minimal-node) or [Historical Blocks](#blocks-node) node it is the
+mode's state-history window (262,144 blocks for full and blocks, 100,000 for minimal). To keep the cache in full
+regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
+`--prune.receipts.distance=N` keeps it for the latest `N` blocks instead. Either form requires
+`--prune.include-receipts`. Note that this retains the receipt *cache* only — it does not keep the log address and topic
+indexes a filtered `eth_getLogs` needs. See
+[Historical Blocks Node](#blocks-node).
+:::
+
+:::note[New in v3.6]
+**Pruned nodes now reclaim disk from old snapshot files.** Frozen state-history (`.v`) and inverted-index (`.ef`) files
+that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted (a fresh sync already skipped
+downloading them, in v3.5 too). Before v3.6, files already on disk were retained indefinitely regardless of
+`--prune.mode`, so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still
+holds the retired files. The commitment-history and receipt-cache domains do not behave the same way here. Commitment
+history is retired against its own window, `--prune.commitment-history.distance`; left unset, nothing is retired. The
+receipt cache instead follows the general state-history window by default, and is only retired against an independent
+window when
+`--prune.receipts.distance` is set explicitly (with `keep-all` retiring nothing).
 :::
 
 ## Archive node
@@ -54,8 +77,18 @@ The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and
 back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
-paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
-(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts** by block
+(`eth_getBlockReceipts` back to genesis), add
 `--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
 follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
 within that same window.
+
+`keep-all` does **not** extend filtered `eth_getLogs` back to genesis. It retains the receipt-cache domain only; the log
+address and topic indexes that a filtered query needs are standalone inverted indexes, retired against the general
+state-history cutoff (`AggregatorRoTx.Retire` applies `RetireCutoffs.Default` to them, and only `RCacheDomain` carries
+the `keep-all` override). An address- or topic-filtered `eth_getLogs` can therefore miss matches older than 262,144
+blocks even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
+read path: with neither `address` nor `topics` set, `applyFiltersV3` consults no bitmap and falls back to a plain
+`stream.Range` over the retained cache, so an unfiltered range query is unaffected. For those older ranges, either query
+by block with `eth_getBlockReceipts` and filter client-side, or use an [Archive node](#archive-node), whose unbounded
+state-history window keeps the log indexes too.

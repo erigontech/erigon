@@ -923,10 +923,11 @@ func (c *stalledCountingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in
 	return nil, ctx.Err()
 }
 
-// TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout pins that no caller is held
-// for longer than a single fetch timeout. This getter takes no context and is reached
-// with a read transaction open, so waiting for one fetch and then running another would
-// double what a stalled backend costs the handler pool.
+// TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout pins that a stalled backend
+// costs each caller a single timeout: a caller reaches the backend at most once, so one
+// that waited on an in-flight fetch cannot then spend a fresh timeout of its own. This
+// getter takes no context and is reached with a read transaction open, so stacking a
+// wait and a fetch of its own would double what a stalled backend costs the handler pool.
 func TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -935,7 +936,6 @@ func TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout(t *testing.T) {
 	reader := NewRemoteBlockReader(client)
 	reader.frozenBlocksTimeout = timeout
 
-	started := time.Now()
 	first := make(chan uint64, 1)
 	go func() { first <- reader.FrozenBlocks() }()
 	<-client.entered
@@ -944,6 +944,6 @@ func TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout(t *testing.T) {
 	go func() { waiting <- reader.FrozenBlocks() }()
 
 	require.Zero(t, <-waiting, "a stalled backend leaves nothing to report")
-	require.Less(t, time.Since(started), timeout+timeout/2, "the wait and a fetch of its own must not stack up")
+	require.LessOrEqual(t, client.calls.Load(), int64(2), "each caller reaches the backend once, so no caller spends more than its own timeout")
 	require.Zero(t, <-first)
 }

@@ -1,0 +1,247 @@
+name: QA - Exec from zero (archive node)
+on:
+  schedule:
+    - cron: '0 0 * * 6'  # Run on Saturday at 00:00 AM UTC
+  workflow_dispatch:     # Run manually
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Same goal as qa-sync-from-scratch, with state snapshot download disabled. That
+# forces Erigon to execute from genesis instead of starting from a downloaded
+# state, so the run answers two questions: can the node reach the tip on its own
+# execution, and does the state it builds on the way match what the project
+# publishes.
+#
+# The second question is answered on the state data files only -- domain/*.kv,
+# history/*.v, idx/*.ef. The accessors built over them (.bt, .kvi, .kvei, .vi,
+# .efi) are recsplit and btree structures seeded with the salt in
+# salt-state.txt, and skipping the state download makes Erigon generate that
+# salt locally instead of taking the published one, so their hashes differ from
+# the published ones even when the data underneath is identical. A consequence
+# worth knowing: the datadir this job produces cannot seed the published
+# snapshots, only prove that executing from genesis reproduces their contents.
+#
+# The 6-hour job limit is a GitHub-hosted one and does not apply on our runners,
+# so the ceiling here is the 35-day workflow-run limit -- 50400 minutes, what
+# mainnet is set to. Keep total_time_seconds below timeout_minutes: the driver's
+# own deadline ends the run with a report, timeout_minutes just cancels the job.
+#
+jobs:
+  exec-from-zero-test:
+    name: exec-from-zero-test-${{ matrix.chain }}
+    runs-on: [ self-hosted, qa, long-running ]
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chain: gnosis   # Chain name as specified on the erigon command line
+            tracking_time_seconds: 7200
+            total_time_seconds: 2937600  # 34 days
+            timeout_minutes: 50400       # 35 days, the workflow-run limit
+        #  - chain: mainnet
+        #    tracking_time_seconds: 7200
+        #    total_time_seconds: 2937600  # 34 days
+        #    timeout_minutes: 50400       # 35 days, the workflow-run limit
+        #  - chain: sepolia
+        #    tracking_time_seconds: 7200
+        #    total_time_seconds: 151200 # 42 hours
+        #    timeout_minutes: 2760      # 46 hours
+        #  - chain: hoodi
+        #    tracking_time_seconds: 3600
+        #    total_time_seconds: 43200  # 12 hours
+        #    timeout_minutes: 840       # 14 hours
+        #  - chain: chiado
+        #    tracking_time_seconds: 3600
+        #    total_time_seconds: 21600  # 6 hours
+        #    timeout_minutes: 480       # 8 hours
+    env:
+      ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      ERIGON_QA_PATH: /home/qarunner/erigon-qa
+      TRACKING_TIME_SECONDS: ${{ matrix.tracking_time_seconds }}
+      TOTAL_TIME_SECONDS: ${{ matrix.total_time_seconds }}
+      CHAIN: ${{ matrix.chain }}
+      ERIGON_ASSERT: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Clean Erigon Build & Data Directories
+        run: |
+          make clean
+          rm -rf $ERIGON_DATA_DIR
+
+      - name: Build Erigon
+        run: |
+          make erigon downloader
+        working-directory: ${{ github.workspace }}
+
+      - name: Pause the Erigon instance dedicated to db maintenance
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+      - name: Run Erigon and monitor chain sync
+        id: test_step
+        run: |
+          set +e # Disable exit on error
+          
+          # Run Erigon, wait sync and check ability to maintain sync
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
+            "$GITHUB_WORKSPACE/build/bin" $ERIGON_DATA_DIR \
+            --tracking-time $TRACKING_TIME_SECONDS \
+            --total-time $TOTAL_TIME_SECONDS \
+            --erigon-version Erigon3 \
+            --chain $CHAIN \
+            --node-type archive_node \
+            --extra-erigon-args "--snap.skip-state-snapshot-download"
+          
+          # Capture monitoring script exit status
+          test_exit_status=$?
+          
+          # Save the subsection reached status
+          echo "test_executed=true" >> "$GITHUB_OUTPUT"
+          
+          # Check test runner script exit status
+          if [ $test_exit_status -eq 0 ]; then
+            echo "Tests completed successfully"
+            echo "::notice::Tests completed successfully"
+            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "Error detected during tests"
+            echo "::error::Error detected during tests"
+            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Upload Downloader Torrent Client Status
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: torrent-client-status-${{ env.CHAIN }}-exec-from-zero
+          path: torrent-client-status.txt
+
+      - name: Save test results
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        env:
+          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch "$GITHUB_REF_NAME" \
+            --test_name exec-from-zero \
+            --chain $CHAIN \
+            --runner "$RUNNER_NAME" \
+            --outcome $TEST_RESULT \
+            --result_file "$GITHUB_WORKSPACE/result-$CHAIN.json"
+
+      - name: Upload test results
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ env.CHAIN }}-exec-from-zero
+          path: |
+            ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+            ${{ github.workspace }}/erigon_data/logs/
+
+      - name: Upload metric plots
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: metric-plots-${{ env.CHAIN }}-exec-from-zero
+          path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
+
+      - name: Upload FD Leak Analysis
+        if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: fd-leak-analysis-${{ env.CHAIN }}-exec-from-zero
+          path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
+
+      # Erigon has stopped by now, so the .torrent files it wrote for the state
+      # snapshots it built are final. Their infohashes are what the published
+      # preverified.toml lists, which makes the comparison a plain name-to-hash
+      # lookup rather than a re-hash of the datadir.
+      #
+      # Restricted to the data files: accessors and indexes are salt-seeded and so
+      # are not comparable across nodes (see STATE_DATA_EXTS in the compare script).
+      - name: Check produced state snapshots against the published hashes
+        id: hash_check_step
+        if: ${{ steps.test_step.outputs.TEST_RESULT == 'success' }}
+        run: |
+          set +e # Disable exit on error
+          
+          "$GITHUB_WORKSPACE/build/bin/downloader" torrent_hashes \
+            --datadir "$ERIGON_DATA_DIR" --chain "$CHAIN" > "$GITHUB_WORKSPACE/hashes-$CHAIN.txt"
+          hashes_exit_status=$?
+          
+          echo "hash_check_executed=true" >> "$GITHUB_OUTPUT"
+          
+          if [ $hashes_exit_status -ne 0 ]; then
+            echo "::error::Could not collect the local snapshot hashes"
+            echo "HASH_CHECK_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          
+          python3 "$GITHUB_WORKSPACE/.github/workflows/scripts/compare_state_snapshot_hashes.py" \
+            --local-hashes "$GITHUB_WORKSPACE/hashes-$CHAIN.txt" \
+            --published-toml "$ERIGON_DATA_DIR/snapshots/preverified.toml" \
+            --chain "$CHAIN" \
+            --dirs domain,history,idx \
+            --exts kv,v,ef \
+            --result-file "$GITHUB_WORKSPACE/result-state-hashes-$CHAIN.json" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+          compare_exit_status=$?
+          
+          if [ $compare_exit_status -eq 0 ]; then
+            echo "Produced state snapshots match the published ones"
+            echo "::notice::Produced state snapshots match the published ones"
+            echo "HASH_CHECK_RESULT=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Produced state snapshots differ from the published ones"
+            echo "HASH_CHECK_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Save state snapshot hash check results
+        if: ${{ always() && steps.hash_check_step.outputs.hash_check_executed == 'true' }}
+        env:
+          HASH_CHECK_RESULT: ${{ steps.hash_check_step.outputs.HASH_CHECK_RESULT }}
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch "$GITHUB_REF_NAME" \
+            --test_name state-snapshot-hash-check \
+            --chain $CHAIN \
+            --runner "$RUNNER_NAME" \
+            --outcome $HASH_CHECK_RESULT \
+            --result_file "$GITHUB_WORKSPACE/result-state-hashes-$CHAIN.json"
+
+      - name: Upload state snapshot hash check results
+        if: ${{ always() && steps.hash_check_step.outputs.hash_check_executed == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: state-snapshot-hashes-${{ env.CHAIN }}
+          path: |
+            ${{ github.workspace }}/hashes-${{ env.CHAIN }}.txt
+            ${{ github.workspace }}/result-state-hashes-${{ env.CHAIN }}.json
+            ${{ env.ERIGON_DATA_DIR }}/snapshots/preverified.toml
+
+      - name: Clean up Erigon data directory
+        if: always()
+        run: |
+          rm -rf $ERIGON_DATA_DIR
+
+      - name: Resume the Erigon instance dedicated to db maintenance
+        if: always()
+        run: |
+          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true

@@ -65,6 +65,73 @@ then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
 
+## Beacon-chain withdrawals
+
+Beacon-chain withdrawals credit balances outside of any transaction, so by default no trace mentions them. `trace_block`
+and `trace_replayBlockTransactions` can be asked to include them by passing a trace-settings object as the last
+positional parameter. It is positional, so the parameters before it have to be supplied even when they are not otherwise
+needed:
+
+```js
+// trace_block(blockNumber, gasBailOut, traceSettings)
+["0x1194bf0", false, { "IncludeWithdrawals": true }]
+
+// trace_replayBlockTransactions(blockNumber, traceTypes, gasBailOut, traceSettings)
+["0x1194bf0", ["stateDiff"], false, { "IncludeWithdrawals": true }]
+```
+
+The default is off — omit the object, or leave the field out, and withdrawals are not reported. How they appear depends
+on the method:
+
+* **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a
+  `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set to the withdrawal address and
+  `action.value` to the amount **in wei** (the beacon chain denominates withdrawals in Gwei). These entries carry no
+  `transactionHash` or
+  `transactionPosition`, since no transaction caused them.
+
+* **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction result shape, so withdrawals
+  surface only through `stateDiff`. You must request
+  `"stateDiff"` in the trace types; when you do, one extra entry is appended to the result array, carrying the
+  withdrawal state changes. Its shape depends on whether the recipient already existed: an existing account gets a `"*"`
+  balance change with `code`
+  and `nonce` marked `"="`, while an account created by the withdrawal itself gets `"+"`
+  entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either way. Multiple withdrawals to the
+  same address are merged into a single balance change.
+
+## The gasBailOut option
+
+`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
+`trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
+`trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
+`trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and always enable it internally, so
+everything below applies to them unconditionally.
+
+:::warning
+`gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It changes replayed state in ways that
+make the output unsuitable for reconstructing balances:
+
+* **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
+  calls whenever the flag is set, for *every* replayed transaction — funded senders included, not only underfunded ones.
+* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout` — that is the internal Go parameter,
+  spelled with a lowercase `o`, not the JSON-RPC
+  `gasBailOut` this section documents.
+* **The producer is still paid.** The block producer's tip is credited as usual.
+* **An unaffordable value transfer is credited anyway.** When the sender cannot cover a non-zero `value`, the EVM-level
+  bailout engages and `Transfer` skips the sender debit while still crediting the recipient. Value appears from nowhere,
+  so a trace can show what looks like balance creation.
+* **Where the chain configures a burn contract, that contract is credited too.** A **non-free** London transaction
+  credits the configured `burntContract` with
+  `gasUsed * baseFee`; on Aura from Prague the blob fee is added on top. Gnosis and Chiado are the chains that configure
+  one. The sender was never debited, so this is a second source of apparent balance creation in `stateDiff`. Aura marks
+  zero-fee certified service transactions as free and the credit is guarded by `!msg.IsFree()`, so those are excluded.
+  Chains with no configured contract never receive this extra credit — every other effect above still applies to them.
+  :::
+
+Whether one transaction's altered state is visible to the next depends on the execution path. Replaying a historical
+block for traces alone runs each transaction in parallel against its own canonical pre-state, so nothing propagates. The
+sequential path — taken when `stateDiff` or `vmTrace` is requested, and for single-transaction blocks — carries the
+altered state forward to every later transaction in the block.
+
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing

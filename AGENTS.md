@@ -48,6 +48,13 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 2. **Green** — write the minimum production code needed to make the test pass. Do not write code the current failing test does not demand.
 3. **Refactor** — clean up code and tests with the suite staying green. Skipping this step is how technical debt accumulates.
 
+### Before adding a test
+
+Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended
+reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate
+coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused
+regression test materially improves failure diagnosis.
+
 ### For bug fixes
 
 Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips red → green when the fix lands.
@@ -74,6 +81,12 @@ TDD is the default for behavior changes (bug fixes, new logic, new endpoints). I
 - Pure refactors with no behavior change — existing tests are the safety net; do not write new tests just to satisfy the cycle.
 - Exploratory spikes — throw the spike away and TDD the real implementation.
 - Mechanical changes — renames, generated code regeneration, dependency bumps.
+- Trivial changes that introduce no new logic — comments, documentation, formatting, build metadata, and simple
+  constant, fixture-value, or version updates. Use the existing test suite, build, or lint checks instead of adding a
+  test that merely mirrors the edit.
+- Feature removals — remove or update tests for the obsolete behavior; do not add a test merely to prove that deleted
+  code is absent. Add coverage when the removal changes remaining observable behavior or when absence is itself a
+  required contract.
 
 When skipping TDD for one of these reasons, say so explicitly in the PR description.
 
@@ -170,9 +183,32 @@ Function docstrings follow the same rule: a one-line summary, plus param/return 
 
 **For automated agents specifically:** previous iterations of this guidance were not enough — agents kept producing multi-paragraph block comments enumerating call sites and incident history. The forensic-detail and scenario rules above are hard limits; length is a judgment call with clarity as the tiebreaker. When a comment grows, look at what the growth is made of: call-site inventories and incident history move to the commit message; a sentence that saves the reader a wrong guess stays.
 
+## Code Reviews
+
+Keep review feedback focused on the behavior and code changed by the PR. Do not require unrelated pre-existing issues to
+be fixed in the same change. When a review uncovers one, ask the author to create a follow-up issue or PR instead.
+Expand the current PR only when the pre-existing issue prevents the proposed change from being correct or safe. Keeping
+changes focused shortens the development cycle and makes the PR easier to review.
+
 ## Pull Requests & Workflows
 
 When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
+
+### Pull request scope
+
+Keep each PR focused on one coherent unit of work. Judge scope by the concepts changed, not only by the number of lines
+or files. Prefer a small diff when practical, but do not split an implementation from the tests that verify it or make a
+change incomplete only to reduce its size.
+
+A large PR is acceptable when one cohesive change must touch many places, such as a mass rename, an API or package
+migration, generated-code updates, a mechanical refactor across call sites, or applying one established pattern
+consistently across the codebase. Keep unrelated behavior changes out of such PRs.
+
+### Stacked pull requests
+
+For a large change with multiple dependent, independently reviewable parts, consider using stacked pull requests instead
+of one large PR. Keep each layer focused, buildable, testable, and safe to merge. Put foundational changes below
+dependent changes. Do not add unrelated work or pre-existing issues to the stack; track them in separate issues or PRs.
 
 ### Referring to numbered points in GitHub text
 
