@@ -27,7 +27,7 @@ import (
 )
 
 type commitmentRecordReader interface {
-	ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) ([16][]byte, uint16, kv.Step, error)
+	ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, wm kv.GetLatestMetrics) ([16][]byte, uint16, kv.Step, error)
 }
 
 // nodeKeysFromRecords groups a flat record view by parent: a record key is its node key plus one
@@ -68,7 +68,7 @@ func requireNodeRecordsMatch(t *testing.T, db kv.TemporalRoDB, byNode map[string
 			wantMask |= uint16(1) << nibble
 		}
 
-		got, present, _, err := reader.ReadCommitmentRecords(tx, []byte(nodeKey), 0, false, math.MaxUint64)
+		got, present, _, err := reader.ReadCommitmentRecords(tx, []byte(nodeKey), 0, false, math.MaxUint64, nil)
 		require.NoErrorf(t, err, "unbounded read of node %x", nodeKey)
 		require.Equalf(t, wantMask, present, "present mask for node %x", nodeKey)
 		for nibble := range 16 {
@@ -82,7 +82,7 @@ func requireNodeRecordsMatch(t *testing.T, db kv.TemporalRoDB, byNode map[string
 		// A caller that already knows the mask must get the same bytes for the slots it asked for
 		// and nothing for the rest.
 		masked := wantMask &^ (wantMask & -wantMask)
-		gotMasked, presentMasked, _, err := reader.ReadCommitmentRecords(tx, []byte(nodeKey), masked, true, math.MaxUint64)
+		gotMasked, presentMasked, _, err := reader.ReadCommitmentRecords(tx, []byte(nodeKey), masked, true, math.MaxUint64, nil)
 		require.NoErrorf(t, err, "masked read of node %x", nodeKey)
 		require.Equalf(t, masked, presentMasked, "masked present for node %x", nodeKey)
 		for bitset := masked; bitset != 0; {

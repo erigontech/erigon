@@ -29,7 +29,7 @@ type StateReader interface {
 }
 
 type commitmentRecordSource interface {
-	ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error)
+	ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error)
 }
 
 type commitmentFileRecordSource interface {
@@ -44,7 +44,7 @@ func readCommitmentRecordsAt(tx kv.TemporalTx, nodeKey []byte, mask uint16, mask
 	if !ok {
 		return records, 0, 0, nil
 	}
-	return source.ReadCommitmentRecords(tx, nodeKey, mask, maskKnown, maxTxNum)
+	return source.ReadCommitmentRecords(tx, nodeKey, mask, maskKnown, maxTxNum, nil)
 }
 
 func readCommitmentRecordsFromFiles(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error) {
@@ -110,7 +110,7 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 }
 
 func (r *LatestStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
-	return r.sharedDomains.ReadCommitmentRecords(r.srcTx, nodeKey, mask, maskKnown)
+	return r.sharedDomains.ReadCommitmentRecords(r.srcTx, nodeKey, mask, maskKnown, r.metrics)
 }
 
 func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {

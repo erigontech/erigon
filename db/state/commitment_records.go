@@ -23,7 +23,9 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -31,17 +33,20 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-func (at *AggregatorRoTx) ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error) {
-	return at.readCommitmentRecords(roTx, nodeKey, mask, maskKnown, maxTxNum, true)
+func (at *AggregatorRoTx) ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
+	return at.readCommitmentRecords(roTx, nodeKey, mask, maskKnown, maxTxNum, true, wm)
 }
 
 func (at *AggregatorRoTx) ReadCommitmentRecordsFromFiles(nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error) {
-	return at.readCommitmentRecords(nil, nodeKey, mask, maskKnown, maxTxNum, false)
+	return at.readCommitmentRecords(nil, nodeKey, mask, maskKnown, maxTxNum, false, nil)
 }
 
-func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, includeDB bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, includeDB bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
 	if at == nil || at.d[kv.CommitmentDomain] == nil {
 		return records, 0, 0, nil
+	}
+	if !dbg.KVReadLevelledMetrics {
+		wm = nil
 	}
 	wanted := mask
 	if !maskKnown {
@@ -63,8 +68,17 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 	childKey := make([]byte, len(nodeKey)+1)
 	copy(childKey, nodeKey)
 
+	// Cache fills are gathered and applied once per node: one Put per record costs two allocations
+	// each, and a node resolves 3 records on average.
+	var cacheMask uint16
+	var cacheSteps, cacheTxNums [16]uint64
+
 	if includeDB && roTx != nil {
 		var dbSteps [16]kv.Step
+		var dbStart time.Time
+		if wm != nil {
+			dbStart = time.Now()
+		}
 		before := present
 		if maxStep == kv.NoStepBound {
 			present, err = scanCommitmentChildrenFromDb(dt, roTx, nodeKey, childKey, wanted, present, &records, &dbSteps)
@@ -93,10 +107,14 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 		for bitset := present &^ before; bitset != 0; {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
-			childKey[len(nodeKey)] = 0x80 | byte(nibble)
-			at.cacheLatestBranch(cacheBranch, childKey, records[nibble], dbSteps[nibble], dbSteps[nibble].LastTxNum(at.StepSize()))
+			cacheMask |= bit
+			cacheSteps[nibble] = uint64(dbSteps[nibble])
+			cacheTxNums[nibble] = dbSteps[nibble].LastTxNum(at.StepSize())
 			if dbSteps[nibble] > step {
 				step = dbSteps[nibble]
+			}
+			if wm != nil {
+				wm.UpdateDbReads(kv.CommitmentDomain, dbStart)
 			}
 			bitset ^= bit
 		}
@@ -124,6 +142,10 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 			continue
 		}
 		before := present
+		var fileStart time.Time
+		if wm != nil {
+			fileStart = time.Now()
+		}
 		present, err = scanCommitmentRecordFile(dt, i, nodeKey, childKey, wanted, present, &records)
 		if err != nil {
 			return records, present, step, err
@@ -136,12 +158,18 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 			for bitset := present &^ before; bitset != 0; {
 				bit := bitset & -bitset
 				nibble := bits.TrailingZeros16(bit)
-				childKey[len(nodeKey)] = 0x80 | byte(nibble)
-				at.cacheLatestBranch(cacheBranch, childKey, records[nibble], fileStep, file.endTxNum)
+				cacheMask |= bit
+				cacheSteps[nibble] = uint64(fileStep)
+				cacheTxNums[nibble] = file.endTxNum
+				if wm != nil {
+					childKey[len(nodeKey)] = 0x80 | byte(nibble)
+					wm.UpdateFileReadsUnique(kv.CommitmentDomain, childKey, fileStart)
+				}
 				bitset ^= bit
 			}
 		}
 	}
+	at.cacheLatestBranchChildren(cacheBranch, nodeKey, cacheMask, &records, &cacheSteps, &cacheTxNums)
 	return records, present, step, nil
 }
 

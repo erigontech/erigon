@@ -54,7 +54,7 @@ type branchCountSharedDomains struct {
 	nodeKey []byte
 }
 
-func (s *branchCountSharedDomains) ReadCommitmentRecords(_ kv.TemporalTx, nodeKey []byte, _ uint16, _ bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+func (s *branchCountSharedDomains) ReadCommitmentRecords(_ kv.TemporalTx, nodeKey []byte, _ uint16, _ bool, _ kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
 	s.nodeKey = append(s.nodeKey[:0], nodeKey...)
 	return s.records, s.present, 0, nil
 }

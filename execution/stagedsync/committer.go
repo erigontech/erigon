@@ -1141,7 +1141,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 }
 
 func (r *asOfStateReader) ReadCommitmentRecords(nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
-	return r.sd.ReadCommitmentRecords(r.roTx, nodeKey, mask, maskKnown)
+	return r.sd.ReadCommitmentRecords(r.roTx, nodeKey, mask, maskKnown, nil)
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {

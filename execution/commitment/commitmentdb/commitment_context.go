@@ -40,7 +40,7 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
+	ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error)
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -409,7 +409,7 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
 	if sdc.edgeRecords {
 		nodeKey := nibbles.EncodeKeyV3(nibblePrefix)
-		records, present, _, err := sdc.sharedDomains.ReadCommitmentRecords(tx, nodeKey, 0, false)
+		records, present, _, err := sdc.sharedDomains.ReadCommitmentRecords(tx, nodeKey, 0, false, nil)
 		if err != nil {
 			return 0, err
 		}

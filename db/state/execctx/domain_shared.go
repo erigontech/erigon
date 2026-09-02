@@ -1270,10 +1270,22 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
 }
 
-func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+// ReadCommitmentRecords resolves a node's edge records across mem, branch cache, db and files. wm
+// is the caller's read accumulator: v3 never reaches getLatest, so without it every
+// kv_read_count{domain="commitment"} series reads zero on a v3 node.
+func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
 	wanted := mask
 	if !maskKnown {
 		wanted = ^uint16(0)
+	}
+	if !dbg.KVReadLevelledMetrics {
+		wm = nil
+	} else if wm == nil {
+		wm = sd.reqMetrics
+	}
+	var cacheStart time.Time
+	if wm != nil {
+		cacheStart = time.Now()
 	}
 	// Neither lookup retains the key, so one scratch buffer serves every nibble.
 	childKey := make([]byte, len(nodeKey)+1)
@@ -1294,6 +1306,9 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 			if valueStep > step {
 				step = valueStep
 			}
+			if wm != nil {
+				wm.UpdateCacheReads(kv.CommitmentDomain, cacheStart)
+			}
 		}
 		bitset ^= bit
 	}
@@ -1303,12 +1318,12 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 		return records, present, step, nil
 	}
 	source, ok := tx.AggTx().(interface {
-		ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error)
+		ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error)
 	})
 	if !ok {
 		return records, present, step, nil
 	}
-	fileRecords, filePresent, fileStep, err := source.ReadCommitmentRecords(tx, nodeKey, remaining, true, ^uint64(0))
+	fileRecords, filePresent, fileStep, err := source.ReadCommitmentRecords(tx, nodeKey, remaining, true, ^uint64(0), wm)
 	if err != nil {
 		return records, present, step, err
 	}
