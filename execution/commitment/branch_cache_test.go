@@ -194,7 +194,7 @@ func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	key := []byte{0x00}
 	preClearEpoch := c.coh.Epoch()
 	c.Clear()
-	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
+	c.store(key, branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
 	c.Unwind(150)
 
 	_, _, ok := c.Get(key)

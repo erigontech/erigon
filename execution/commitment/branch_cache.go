@@ -97,6 +97,13 @@ type keyedBranchCacheEntry struct {
 	prefix    [maxCompactKeyLen]byte
 }
 
+// keyedEntryBytes is what one *keyedBranchCacheEntry costs to allocate: 120B of
+// struct, rounded up to Go's 128B size class. Both hash-addressed tiers budget
+// against it.
+const keyedEntryBytes = 128
+
+func newBranchCacheEntry(entry branchCacheEntry) *branchCacheEntry { return &entry }
+
 func newKeyedBranchCacheEntry(prefix []byte, entry branchCacheEntry) *keyedBranchCacheEntry {
 	k := &keyedBranchCacheEntry{branchCacheEntry: entry}
 	k.prefixLen = uint8(copy(k.prefix[:], prefix))
@@ -499,30 +506,33 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	return &ke.branchCacheEntry, true
 }
 
-func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
+// store takes entry by value so each tier allocates only what it stores: the
+// hash-addressed tiers need a *keyedBranchCacheEntry, and boxing here first
+// would leave every one of their writes trailing a dead *branchCacheEntry.
+func (c *BranchCache) store(prefix []byte, entry branchCacheEntry) {
 	if isRootPrefix(prefix) {
-		c.root.Store(entry)
+		c.root.Store(newBranchCacheEntry(entry))
 		return
 	}
 	if slot := c.trunkSlot(prefix, true); slot != nil {
-		slot.Store(entry)
+		slot.Store(newBranchCacheEntry(entry))
 		return
 	}
 	var nibBuf [4]byte
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			for cur := slot.Load(); cur != nil; cur = slot.Load() {
-				if slot.CompareAndSwap(cur, entry) {
+				if slot.CompareAndSwap(cur, newBranchCacheEntry(entry)) {
 					return
 				}
 			}
 			// Get is lock-free; ReplaceIfPresent locks the bucket even on a
 			// miss, and a miss is the common case here.
-		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, newKeyedBranchCacheEntry(prefix, *entry)) {
+		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, newKeyedBranchCacheEntry(prefix, entry)) {
 			return
 		}
 	}
-	c.tailForWrite().Add(maphash.Hash(prefix), newKeyedBranchCacheEntry(prefix, *entry))
+	c.tailForWrite().Add(maphash.Hash(prefix), newKeyedBranchCacheEntry(prefix, entry))
 }
 
 // PinEntry copies data; safe to mutate the input after the call.
@@ -548,7 +558,7 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		// Swap publishes and reads prior occupancy in one step: eviction
 		// (Invalidate from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
-		if slot.Swap(&entry) == nil {
+		if slot.Swap(newBranchCacheEntry(entry)) == nil {
 			c.pinnedEntries.Add(1)
 		}
 		return
@@ -592,7 +602,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	c.store(prefix, &branchCacheEntry{
+	c.store(prefix, branchCacheEntry{
 		data:  dataCopy,
 		step:  step,
 		txN:   txN,

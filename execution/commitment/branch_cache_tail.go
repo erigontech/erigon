@@ -29,7 +29,9 @@ import (
 const (
 	tailStartCapacity = 512
 	tailGrowFactor    = 4
-	tailEntryBytes    = 512
+	// Per tail entry: the keyed entry allocation, plus ~464B for the freelru
+	// slot and the branch encoding it points at.
+	tailEntryBytes = keyedEntryBytes + 464
 )
 
 // Writes racing a resize may be dropped (benign cache miss; re-read from DB).
