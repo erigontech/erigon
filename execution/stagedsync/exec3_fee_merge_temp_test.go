@@ -388,3 +388,109 @@ func BenchmarkDropStaleVersionedWrites(b *testing.B) {
 		})
 	}
 }
+
+// A re-credit at the same headers only moves the fee values, so the round must
+// rewrite them in the recorded set rather than rebuild it from the tx's whole
+// write set and pool the one it replaces.
+func TestRecordFeeMerge_ReCreditRewritesTheRecordedSet(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+	r := newFeeCreditRound(t, s)
+
+	require.NotNil(t, r.run(t), "the first round must credit the tip")
+	merged := r.recorded()
+
+	r.setPreCreditBalance(s.coinbase, 9_000)
+	credit := r.run(t)
+	require.NotNil(t, credit, "a moved coinbase makes the credit differ")
+
+	require.Same(t, merged, r.recorded(), "the same headers must be rewritten, not rebuilt")
+	require.Same(t, merged, r.credited(), "the rewritten set is still this version's credit")
+	require.Equal(t, findBalance(credit, s.coinbase).Val, findBalance(merged, s.coinbase).Val,
+		"the recorded set must carry the round's credit")
+	require.Equal(t, findAddress(credit, s.coinbase).Val, findAddress(merged, s.coinbase).Val,
+		"the account sibling must carry it too")
+
+	r.be.superseded.release()
+	require.False(t, merged.Released(), "the recorded set must not be released")
+}
+
+func feeMergeBenchWorkerWrites(b *testing.B, addrs, slots int) *state.WriteSet {
+	b.Helper()
+	ws := &state.WriteSet{}
+	for a := range addrs {
+		addr := feeMergeTestAddr(fmt.Sprintf("0x%040x", a+1))
+		ws.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath},
+			Val:         *uint256.NewInt(uint64(a)),
+		})
+		ws.SetNonce(addr, &state.VersionedWrite[uint64]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath},
+			Val:         uint64(a),
+		})
+		for k := range slots {
+			key := accounts.InternKey(common.HexToHash(fmt.Sprintf("0x%x", k+1)))
+			ws.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
+				WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key},
+				Val:         *uint256.NewInt(uint64(k)),
+			})
+		}
+	}
+	return ws
+}
+
+func feeMergeBenchTip(version state.Version, coinbase, burnt accounts.Address, amount uint64) *state.WriteSet {
+	tip := &state.WriteSet{}
+	for _, addr := range [...]accounts.Address{coinbase, burnt} {
+		acc := accounts.Account{Balance: *uint256.NewInt(amount), CodeHash: accounts.EmptyCodeHash}
+		tip.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Version: version},
+			Val:         acc.Balance,
+		})
+		tip.SetAddress(addr, &state.VersionedWrite[*accounts.Account]{
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.AddressPath, Version: version},
+			Val:         &acc,
+		})
+	}
+	return tip
+}
+
+// BenchmarkRecordFeeMerge measures one re-credit round against a worker write
+// set the size mainnet actually produces. The percentiles come from replaying
+// blocks 25881700-15, where a tx that gets credited sees 12-24 rounds.
+func BenchmarkRecordFeeMerge(b *testing.B) {
+	coinbase := feeMergeTestAddr("0x00000000000000000000000000000000000000c0")
+	burnt := feeMergeTestAddr("0x00000000000000000000000000000000000000b1")
+	version := state.Version{TxIndex: 0, TxNum: 1}
+	feeAddrs := [2]accounts.Address{coinbase, burnt}
+
+	for _, size := range []struct {
+		name         string
+		addrs, slots int
+	}{
+		{"p50=4", 2, 0},
+		{"p90=10", 2, 3},
+		{"p99=24", 4, 4},
+		{"max=444", 37, 10},
+	} {
+		b.Run(size.name, func(b *testing.B) {
+			be := feeMergeTestExecutor(b)
+			base := feeMergeBenchWorkerWrites(b, size.addrs, size.slots)
+			be.recordWorkerWrites(version, base)
+			be.recordFeeMerge(version, base, feeMergeBenchTip(version, coinbase, burnt, 1), feeCreditNew, feeAddrs)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			rounds := 0
+			for ; b.Loop(); rounds++ {
+				tip := feeMergeBenchTip(version, coinbase, burnt, uint64(rounds+2))
+				be.recordFeeMerge(version, be.blockIO.WriteSet(version.TxIndex), tip, feeCreditNew, feeAddrs)
+			}
+			b.StopTimer()
+			// Only a rebuild supersedes a set, so this counts the rounds that
+			// rebuilt rather than rewrote.
+			b.ReportMetric(float64(len(be.superseded))/float64(rounds), "rebuilds/op")
+			be.superseded.release()
+		})
+	}
+}
