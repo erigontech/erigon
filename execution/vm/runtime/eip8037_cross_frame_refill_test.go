@@ -56,11 +56,6 @@ func sstore(slot, value byte) []byte {
 	return []byte{byte(vm.PUSH1), value, byte(vm.PUSH1), slot, byte(vm.SSTORE)}
 }
 
-// TestStateGasReturnsToGasLeftAcrossFrames pins EIP-8037's promise that state
-// gas is never stranded in the reservoir. The first child allocates a slot and
-// spills from its gas_left; the second clears the same slot, but has no spill
-// of its own, so its refill lands in the reservoir. The merge must absorb it,
-// leaving the reservoir at its start-of-transaction value.
 // deployStateGasContracts installs the setter/clearer pair plus a caller running
 // callerCode, and returns the caller and the state it was deployed into.
 func deployStateGasContracts(t *testing.T, callerCode []byte) (accounts.Address, *state.IntraBlockState) {
@@ -83,6 +78,11 @@ func deployStateGasContracts(t *testing.T, callerCode []byte) (accounts.Address,
 	return deploy(callerAddr, callerCode), statedb
 }
 
+// TestStateGasReturnsToGasLeftAcrossFrames pins EIP-8037's promise that state
+// gas is never stranded in the reservoir. The first child allocates a slot and
+// spills from its gas_left; the second clears the same slot, but has no spill
+// of its own, so its refill lands in the reservoir. The merge must absorb it,
+// leaving the reservoir at its start-of-transaction value.
 func TestStateGasReturnsToGasLeftAcrossFrames(t *testing.T) {
 	t.Parallel()
 
