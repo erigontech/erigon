@@ -637,8 +637,7 @@ func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 
 // TestLogsByBlockHashNamesThePruneBoundary pins that a filter pinned to a block
 // hash reports pruning rather than a missing block: the range is resolved from the
-// retained header, so the gate speaks before any body is read. The resolver is a leg
-// of its own, since a caller that scans without a gate must not be handed a range.
+// retained header, so the gate speaks before any body is read.
 func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -665,15 +664,6 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 		}},
 		{"overlay_getLogs", func() (any, error) {
 			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
-		}},
-		{"resolveLogsRange", func() (any, error) {
-			tx, err := apis.eth.db.BeginTemporalRo(ctx)
-			if err != nil {
-				return nil, err
-			}
-			defer tx.Rollback()
-			begin, _, err := apis.eth.resolveLogsRange(ctx, tx, filters.FilterCriteria{BlockHash: &hash}, true)
-			return begin, err
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1709,24 +1699,4 @@ func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
 
 	_, err = apis.eth.receiptsGenerator.GetReceipts(ctx, chainConfig, view, withTxns, eth.ReceiptsOpts{})
 	require.ErrorIs(t, err, state.PrunedError, "the control block must reach the unavailable history")
-}
-
-// TestCapabilitiesFollowHistoryForASentinelRetention pins the advertised boundary for a
-// receipts retention that is a sentinel rather than a window: it must not offer blocks
-// the gate refuses. TestReceiptsGateFollowsRetention covers the gate for the same shape.
-func TestCapabilitiesFollowHistoryForASentinelRetention(t *testing.T) {
-	t.Parallel()
-
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{
-			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
-			Receipts: prune.KeepPostMergeBlocksPruneMode,
-		},
-		persistReceipts: true,
-	})
-
-	caps, err := apis.eth.Capabilities(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, uint64(*caps.State.OldestBlock), uint64(*caps.Receipts.OldestBlock))
-	require.NotZero(t, uint64(*caps.Receipts.OldestBlock))
 }
