@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,36 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package estimate
+//go:build windows
 
-import (
-	"runtime/debug"
-	"sync"
+package backup
 
-	"github.com/shirou/gopsutil/v4/mem"
-)
+import "os"
 
-var (
-	totalMemoryOnce   sync.Once
-	totalMemoryCached uint64
-)
-
-func TotalMemory() uint64 {
-	totalMemoryOnce.Do(func() {
-		var total uint64
-		if vm, err := mem.VirtualMemory(); err == nil {
-			total = vm.Total
-		}
-
-		if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
-			total = min(total, cgroupsMemLimit)
-		}
-
-		if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
-			total = min(total, uint64(goMemLimit))
-		}
-
-		totalMemoryCached = total
-	})
-	return totalMemoryCached
-}
+func restoreOwner(os.FileInfo, string) error { return nil }
