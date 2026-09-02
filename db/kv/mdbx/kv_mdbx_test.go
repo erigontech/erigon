@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -1122,4 +1124,41 @@ func TestTxnDpLimitFromRealPageSize(t *testing.T) {
 	dpLimit, err := db.(*mdbx.MdbxKV).Env().GetOption(mdbxgo.OptTxnDpLimit)
 	require.NoError(t, err)
 	require.Equal(t, dirtySpace/db.PageSize().Bytes(), dpLimit)
+}
+
+func TestValueFileRegionResolvesOverflowPages(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	table := "T"
+	db := mdbx.New(dbcfg.ChainDB, logger).Path(path).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.TableCfg{table: kv.TableCfgItem{}} }).
+		MapSize(1 * datasize.GB).MustOpen()
+	defer db.Close()
+
+	val := make([]byte, 64*1024)
+	for i := range val {
+		val[i] = byte(i*7 + 3)
+	}
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(table, []byte("k"), val)
+	}))
+
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		got, err := tx.GetOne(table, []byte("k"))
+		require.NoError(t, err)
+		require.Len(t, got, len(val))
+
+		fd, off, ok := db.(*mdbx.MdbxKV).ValueFileRegion(got)
+		if runtime.GOOS != "linux" {
+			require.False(t, ok, "region resolution is linux-only")
+			return nil
+		}
+		require.True(t, ok, "a 64KiB value must live on overflow pages inside the data mapping")
+
+		onDisk := make([]byte, len(got))
+		_, err = unix.Pread(int(fd), onDisk, off)
+		require.NoError(t, err)
+		require.Equal(t, got, onDisk, "computed file offset must contain the value bytes")
+		return nil
+	}))
 }

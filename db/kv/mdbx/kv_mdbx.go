@@ -466,6 +466,7 @@ type MdbxKV struct {
 	txSize       uint64
 	closed       atomic.Bool
 	path         string
+	dataMap      atomic.Pointer[dataMapping]
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
