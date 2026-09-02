@@ -562,7 +562,7 @@ func TestEnsureNotChanged_DefaultMigrations(t *testing.T) {
 	}
 }
 
-func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {
+func TestEnsureNotChanged_BlocksFiniteToHistoryExpiryAccepted(t *testing.T) {
 	// Operator passes --prune.distance.blocks=18446744073709551615 (the
 	// KeepPostMergeBlocksPruneMode magic number) after the auto-upgrade already
 	// rewrote Blocks to a finite distance. The shim accepts this reverse

@@ -44,8 +44,8 @@ const DefaultReferencesInCommitmentBranches = false
 const EnableHistoryV4InTest = true
 
 // DefaultPruneDistance is the block and state-history window used by full mode,
-// and the state-history window used by blocks mode. Its block count covers every
-// configured network's slot-based MIN_EPOCHS_FOR_BLOCK_REQUESTS window at the
+// and the state-history window used by blocks mode. Its block count covers the
+// MIN_EPOCHS_FOR_BLOCK_REQUESTS window of every built-in beacon network at the
 // conservative rate of one execution block per slot.
 const DefaultPruneDistance = 1_100_000
 

@@ -28,8 +28,8 @@ type pruneFloorAtHead struct {
 	floor uint64
 }
 
-// pruneFloorCache coalesces backend reads at one chain height. A new height
-// refreshes the floor so newly downloaded or retired files become visible.
+// pruneFloorCache caches successful floor reads for an exact chain head and
+// coalesces concurrent requests. A different head triggers a fresh read.
 type pruneFloorCache struct {
 	value atomic.Pointer[pruneFloorAtHead]
 	load  singleflight.Group

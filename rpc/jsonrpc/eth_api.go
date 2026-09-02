@@ -482,18 +482,16 @@ const defaultPreMergeDataTTL = 30 * time.Second
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
 
-// checks the pruning state to see if we would hold information about this
-// block in state history or not.  Some strange issues arise getting account
-// history for blocks that have been pruned away giving nonce too low errors
-// etc. as red herrings
+// checkPruneHistory gates historical state reads on both configured retention
+// and the state-history floor currently available on disk.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
 		return api.stateHistoryStartBlock(ctx, tx, head)
 	})
 }
 
-// checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
-// that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
+// checkPruneBlocks gates RPCs that need retained block transactions,
+// independently of state history.
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
 	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
 	if err != nil {

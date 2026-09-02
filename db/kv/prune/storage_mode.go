@@ -94,17 +94,9 @@ type Mode struct {
 	Receipts          BlockAmount
 }
 
-// String renders m in the shape an operator would type on the CLI: the named
-// mode if m matches one exactly, otherwise a recognized legacy shape
-// ("full(legacy)" / "blocks --prune.distance=N"), otherwise an "archive
-// --prune.distance=...  --prune.distance.blocks=..." fallback that mirrors
-// the FromCli input the operator presumably supplied. The string is
-// informational (used in error messages, warning logs, and seg du output)
-// and reflects the configured shape, not necessarily the named mode's usual
-// retention behaviour — e.g. a mode constructed by `--prune.mode=archive
-// --prune.distance=N --prune.distance.blocks=M` still renders with the
-// "archive" prefix even though the finite distances cause distance-based
-// pruning.
+// String describes m in operator-facing output. Current named modes use their
+// CLI names, older known shapes use diagnostic labels such as "full(previous)"
+// and "full(legacy)", and custom shapes include CLI-style distance overrides.
 func (m Mode) String() string {
 	if !m.Initialised {
 		return archiveModeStr
@@ -123,14 +115,9 @@ func (m Mode) String() string {
 		return fullModeStr + "(previous)"
 	}
 
-	// Recognise legacy shapes that don't match any current named mode but
-	// would otherwise produce a misleading "archive ..." rendering. These
-	// surface on first start of a pre-EIP-8252 datadir under the new binary
-	// (the compat shim in EnsureNotChanged rewrites the persisted value, so
-	// the legacy label only appears briefly in the upgrade-time warning).
+	// Recognise legacy shapes before rendering generic custom distances.
 	if m.Blocks == KeepPostMergeBlocksPruneMode && m.History.Enabled() {
-		// Pre-EIP-8252 full mode: chain-history-expiry for blocks + finite
-		// state history. Render as "full(legacy)" + the finite history.
+		// Legacy full mode used chain history expiry for blocks and finite state history.
 		var sb strings.Builder
 		sb.WriteString(fullModeStr + "(legacy)")
 		if m.History.toValue() != FullMode.History.toValue() {
@@ -153,10 +140,7 @@ func (m Mode) String() string {
 		return sb.String()
 	}
 
-	// Fallback: archive + overrides. Preserves the historical rendering for
-	// "archive with custom distances" and for any shape we don't special-case
-	// above (e.g., legacy archive {KeepPostMergeBlocksPruneMode, KeepPostMergeBlocksPruneMode}
-	// before the archive-default-bump compat rewrites it).
+	// Preserve the archive-based rendering for custom shapes.
 	var sb strings.Builder
 	sb.WriteString(archiveModeStr)
 	if m.History.toValue() != DefaultMode.History.toValue() {
@@ -321,7 +305,8 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 	return stageHead - uint64(p)
 }
 
-// EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
+// EnsureNotChanged initializes prune settings or applies only compatible
+// retention changes to an existing datadir.
 func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	if pruneMode.Initialised {
 		pruneMode.CommitmentHistory = commitmentHistoryOrDefault(pruneMode.CommitmentHistory)
@@ -346,9 +331,8 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 			(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
 			return pruneMode, nil
 		}
-		// Persist finite window changes so named-mode defaults can migrate. A
-		// wider window does not recover deleted data; a narrower one may delete
-		// data on the next prune pass. Keep-all transitions remain explicit.
+		// Compatible window changes are persisted. Widening cannot recover deleted
+		// data; narrowing may delete data on the next prune pass.
 		if isRetentionWindowChange(pm, pruneMode) {
 			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
 				"previous", pm.String(), "current", pruneMode.String())
@@ -357,7 +341,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 			}
 			return pruneMode, nil
 		}
-		// If storage mode is not explicitly specified, we take whatever is in the database
+		// Reject incompatible changes to an initialized datadir.
 		if !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
 		}
@@ -365,9 +349,10 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	return pm, nil
 }
 
-// isRetentionWindowChange accepts finite history changes and block changes
-// between finite retention and chain history expiry. Keep-all transitions are
-// mode changes and remain explicit.
+// isRetentionWindowChange accepts finite History changes, Blocks changes between
+// finite retention and chain history expiry, and supported CommitmentHistory or
+// Receipts policy changes. Non-finite History changes and Blocks transitions
+// involving keep-all remain explicit mode changes.
 func isRetentionWindowChange(persisted, requested Mode) bool {
 	if persisted.History == requested.History &&
 		persisted.Blocks == requested.Blocks &&
