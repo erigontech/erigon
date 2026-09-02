@@ -2148,6 +2148,9 @@ func (e *feeEntry) shapeRecordedIn(ws *state.WriteSet, version state.Version, ad
 	return e.recordedIn(ws, version)
 }
 
+// feeWritePaths are the account paths a fee credit can occupy — see writeTo.
+var feeWritePaths = [...]state.AccountPath{state.AddressPath, state.BalancePath, state.SelfDestructPath}
+
 // hasFeeWrite reports whether ws carries a fee write for addr. The version tells
 // one apart from the worker's own write to the same address: the task version
 // carries a TxNum, a worker's own writes do not.
@@ -2606,7 +2609,7 @@ func (be *blockExecutor) creditedWrites(txVersion state.Version, ws *state.Write
 // and reclaims the merge product it supersedes. Releasing that product is safe
 // because MergeInto shares VersionedWrite pointers rather than the maps holding
 // them, so pooling those maps leaves the merged writes intact.
-func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites *state.WriteSet, outcome feeOutcome) {
+func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites *state.WriteSet, outcome feeOutcome, feeAddrs [2]accounts.Address) {
 	if outcome == feeCreditRecorded {
 		return
 	}
@@ -2631,7 +2634,7 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	var stale *state.WriteSet
 	if superseded && merged != temp.writes {
 		stale = temp.writes
-		be.dropStaleVersionedWrites(txVersion, stale, merged)
+		be.dropStaleVersionedWrites(txVersion, stale, merged, feeAddrs)
 	}
 	// Record before releasing: until the replacement is recorded, a reader of
 	// this tx's writes still holds the superseded set the release clears.
@@ -2646,13 +2649,19 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	}
 }
 
-// dropStaleVersionedWrites removes this tx's version-map entries for the writes
-// prev published and next no longer carries. The recorded set is flushed after
-// every round, so a dropped entry stays visible to later txs until deleted here.
-func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev, next *state.WriteSet) {
-	for h := range prev.AllHeaders() {
-		if !next.Has(h) {
-			be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
+// dropStaleVersionedWrites deletes the fee writes prev published and next no
+// longer carries: every round flushes the recorded set, so they stay visible to
+// later txs until deleted. next holds prev's own base, so nothing else goes stale.
+func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev, next *state.WriteSet, feeAddrs [2]accounts.Address) {
+	for _, addr := range feeAddrs {
+		if addr.IsNil() {
+			continue
+		}
+		for _, path := range feeWritePaths {
+			h := state.WriteHeader{Address: addr, Path: path}
+			if prev.Has(h) && !next.Has(h) {
+				be.versionMap.Delete(addr, path, h.Key, txVersion.TxIndex, false)
+			}
 		}
 	}
 }
@@ -2922,7 +2931,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err != nil {
 				return nil, err
 			}
-			be.recordFeeMerge(txVersion, existingWrites, tipWrites, outcome)
+			be.recordFeeMerge(txVersion, existingWrites, tipWrites, outcome,
+				[2]accounts.Address{txResult.Coinbase, txResult.ExecutionResult.BurntContractAddress})
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,

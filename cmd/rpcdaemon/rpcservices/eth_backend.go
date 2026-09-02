@@ -119,6 +119,9 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 
 func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) FrozenBlocksInView(tx kv.Getter) uint64 {
+	return back.blockReader.FrozenBlocksInView(tx)
+}
 func (back *RemoteBackend) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	return back.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
 }
