@@ -18,6 +18,7 @@ package grpcutil
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -43,6 +44,18 @@ var ErrSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscri
 // Every subscriber has its own bounded queue, drained by the gRPC handler
 // goroutine that registered it. Broadcast therefore never waits on a
 // subscriber, and no subscriber waits on another.
+//
+// Delivery is best-effort, not a reliable log. A subscriber that falls
+// subscriberQueueLen messages behind is disconnected with ErrSubscriberTooSlow
+// instead of being buffered further; it has to resubscribe and there is no way
+// for it to recover what it missed in between. The alternative - buffering
+// without bound, or waiting for the slow subscriber - costs either memory or
+// the liveness of every other subscriber and of the producer.
+//
+// Broadcast takes ownership of the message it is given: the message may still
+// be queued for or in flight to a subscriber after Broadcast returns, and every
+// subscriber is handed the same pointer, so callers must neither mutate nor
+// reuse it.
 //
 // T is the response message type (e.g. OnAddReply, OnMinedBlockReply).
 type StreamBroadcaster[T any] struct {
@@ -81,9 +94,11 @@ func (s *StreamBroadcaster[T]) Subscribe(ctx context.Context, stream grpc.Server
 
 // Broadcast queues reply for every registered subscriber. The lock is held only
 // across non-blocking queue writes, so an unresponsive subscriber can stall
-// neither the caller nor the other subscribers. A subscriber whose queue is
-// full is unregistered and its queue closed, which ends its Subscribe call with
-// ErrSubscriberTooSlow once it has drained what was already buffered.
+// neither the caller nor the other subscribers.
+//
+// A subscriber whose queue is full stops being a subscriber here and receives
+// nothing further. Its Subscribe call only returns once it drains what was
+// already queued, which for one wedged in Send means when that Send unblocks.
 func (s *StreamBroadcaster[T]) Broadcast(reply *T, logger log.Logger) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -91,7 +106,7 @@ func (s *StreamBroadcaster[T]) Broadcast(reply *T, logger log.Logger) {
 		select {
 		case queue <- reply:
 		default:
-			logger.Warn("[grpc] dropping stream subscriber that stopped reading")
+			logger.Warn("[grpc] dropping stream subscriber that stopped reading", "stream", fmt.Sprintf("%T", reply))
 			delete(s.subs, id)
 			close(queue)
 		}

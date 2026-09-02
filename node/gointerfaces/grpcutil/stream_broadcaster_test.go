@@ -276,3 +276,108 @@ func TestConcurrentBroadcastsKeepEverySubscriberInTheSameOrder(t *testing.T) {
 		require.Equal(t, want, got)
 	}
 }
+
+// An overflowing subscriber stops being a subscriber straight away, but a
+// Subscribe wedged in Send only returns once that Send does.
+func TestOverflowedSubscriberReturnsWhenItsStreamEnds(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	var b StreamBroadcaster[testMsg]
+
+	streamCtx, cancel := context.WithCancel(ctx)
+	stalled := newFakeStream(streamCtx)
+	stalled.gate = make(chan struct{})
+	errs := subscribe(t, &b, ctx, stalled)
+
+	for i := range subscriberQueueLen + 2 {
+		broadcastNow(t, &b, &testMsg{n: i})
+	}
+	require.Equal(t, 0, subCount(&b))
+	select {
+	case err := <-errs:
+		t.Fatalf("Subscribe returned %v while still inside Send", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case err := <-errs:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(testTimeout):
+		t.Fatal("Subscribe did not return after the stream was cancelled")
+	}
+}
+
+func TestOverflowedSubscriberReportsItsSendError(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	var b StreamBroadcaster[testMsg]
+
+	boom := errors.New("boom")
+	stalled := newFakeStream(ctx)
+	stalled.gate = make(chan struct{}, 1)
+	stalled.sendErr = boom
+	errs := subscribe(t, &b, ctx, stalled)
+
+	for i := range subscriberQueueLen + 2 {
+		broadcastNow(t, &b, &testMsg{n: i})
+	}
+	stalled.gate <- struct{}{}
+
+	select {
+	case err := <-errs:
+		require.ErrorIs(t, err, boom)
+	case <-time.After(testTimeout):
+		t.Fatal("Subscribe did not return after Send failed")
+	}
+}
+
+func TestDroppedSubscriberDoesNotUnregisterALaterOne(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	var b StreamBroadcaster[testMsg]
+
+	dropped := newFakeStream(ctx)
+	dropped.gate = make(chan struct{}, subscriberQueueLen*2)
+	errs := subscribe(t, &b, ctx, dropped)
+	for i := range subscriberQueueLen + 2 {
+		broadcastNow(t, &b, &testMsg{n: i})
+	}
+	for range subscriberQueueLen * 2 {
+		dropped.gate <- struct{}{}
+	}
+	select {
+	case err := <-errs:
+		require.ErrorIs(t, err, ErrSubscriberTooSlow)
+	case <-time.After(testTimeout):
+		t.Fatal("Subscribe did not return after the subscriber fell behind")
+	}
+
+	// The teardown of the dropped subscriber must not take the new one with it.
+	fresh := newFakeStream(ctx)
+	subscribe(t, &b, ctx, fresh)
+	require.Eventually(t, func() bool { return subCount(&b) == 1 }, testTimeout, time.Millisecond)
+	broadcastNow(t, &b, &testMsg{n: 99})
+	require.Equal(t, 99, recvMsg(t, fresh).n)
+	require.Equal(t, 1, subCount(&b))
+}
+
+// Broadcast hands every subscriber the same message, which is why callers must
+// not reuse or mutate one after passing it in.
+func TestBroadcastDoesNotCopyTheMessage(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	var b StreamBroadcaster[testMsg]
+
+	streams := make([]*fakeStream, 3)
+	for i := range streams {
+		streams[i] = newFakeStream(ctx)
+		subscribe(t, &b, ctx, streams[i])
+	}
+
+	msg := &testMsg{n: 7}
+	broadcastNow(t, &b, msg)
+	for _, stream := range streams {
+		require.Same(t, msg, recvMsg(t, stream))
+	}
+}
