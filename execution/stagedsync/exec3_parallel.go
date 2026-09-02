@@ -83,6 +83,7 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 
+
 type parallelExecutor struct {
 	txExecutor
 	// failedBlock/failedHash record the implicated block when execution fails
@@ -2396,9 +2397,11 @@ func (result *execResult) calcFees(
 	if cw, ok := result.TxOut.GetCreateContract(result.Coinbase); ok {
 		coinbaseCreatedContract = cw.Val
 	}
+	burntOverride := false
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
 			newBurntBalance = bw.Val
+			burntOverride = true
 		}
 	}
 	oldCoinbaseBalance := newCoinbaseBalance
@@ -2501,7 +2504,7 @@ func (result *execResult) calcFees(
 			}
 		}
 	}
-	if hasBurnt && newBurntBalance != oldBurntBalance {
+	if hasBurnt && (newBurntBalance != oldBurntBalance || burntOverride) {
 		addWrites.SetBalance(burntAddr, &state.VersionedWrite[uint256.Int]{
 			WriteHeader: state.WriteHeader{
 				Address: burntAddr,
@@ -3303,6 +3306,21 @@ func (be *blockExecutor) revalCandidates(changedTx int, newWrites, oldWrites *st
 	return out
 }
 
+// feeRecipientHeldBalance reports whether h is a Balance/Address write to a fee
+// recipient — the coinbase or the base-fee burn contract — whose final value is
+// not known until calcFees. Such writes are held as Estimates at the
+// out-of-order commit so a reader pauses on the dependency instead of committing
+// the pre-fee value; calcFees then publishes the single Done. Both recipients
+// must be held: a worker gas-debit to a sender that is itself the burn contract
+// lands in the write set, and leaving it Done here lets calcFees mutate it at
+// the same version.
+func feeRecipientHeldBalance(h state.WriteHeader, coinbase, burnt accounts.Address) bool {
+	if h.Path != state.BalancePath && h.Path != state.AddressPath {
+		return false
+	}
+	return h.Address == coinbase || (!burnt.IsNil() && h.Address == burnt)
+}
+
 // runDepOrderValidation is the DEP_ORDER_VAL validation pass. It first finalizes
 // the contiguous validated-but-not-yet-finalized prefix (calcFees coinbase sweep
 // + finalize tail), then selects the dependency-ready txs — read-deps validated,
@@ -3337,12 +3355,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			txResult := be.results[tx]
 			txVersion := txResult.Task.Version()
 
-			var trace bool
-			var tracePrefix string
-			if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-				tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-			}
-
 			// Trust the worker's self-loop verdict: it validated this result before
 			// streaming it, and advanceCoinbaseAndFinalize re-validates authoritatively
 			// at the settled contiguous prefix (the barrier), so re-walking the read-set
@@ -3352,17 +3364,18 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
 			if !be.coinbase.IsNil() {
 				cb := be.coinbase
-				isCoinbaseBal := func(h state.WriteHeader) bool {
-					return h.Address == cb && (h.Path == state.BalancePath || h.Path == state.AddressPath)
-				}
-				be.versionMap.FlushVersionedWrites(writeSet.Filter(func(h state.WriteHeader) bool { return !isCoinbaseBal(h) }), true, tracePrefix)
-				// The coinbase Balance/Address stays an Estimate here: its tip is not
-				// folded until calcFees materializes the Done in the in-order finalize
-				// sweep, so an out-of-order reader pauses on the Dependency instead of
-				// reading the tip-stale Done (the [validate,finalize] residual).
-				be.versionMap.FlushVersionedWrites(writeSet.Filter(isCoinbaseBal), false, tracePrefix)
+				burnt := txResult.ExecutionResult.BurntContractAddress
+				held := func(h state.WriteHeader) bool { return feeRecipientHeldBalance(h, cb, burnt) }
+				// The worker already flushed these writes as Estimates; advance the
+				// non-fee ones to Done in place (value unchanged, only the status).
+				be.versionMap.MarkWritesComplete(writeSet.Filter(func(h state.WriteHeader) bool { return !held(h) }))
+				// The coinbase/burnt Balance/Address stay Estimates here: their fee
+				// deltas are not folded until calcFees materializes the Done in the
+				// in-order finalize sweep, so an out-of-order reader pauses on the
+				// Dependency instead of reading the pre-fee Done (the
+				// [validate,finalize] residual).
 			} else {
-				be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
+				be.versionMap.MarkWritesComplete(writeSet)
 			}
 			if dbg.TraceTransactionIO {
 				be.versionMap.SetTrace(false)

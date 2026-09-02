@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -541,6 +542,53 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 		"StoragePath read with different value should be invalid")
 }
 
+// TestPutCell_OneFinalValuePerVersion pins the B1 wrong-root invariant: a cell
+// holds ONE FINAL value per version. Once a value is published Done at a
+// (TxIndex, Incarnation), it is immutable at that version — a downstream reader
+// records that version and version-based OCC validation accepts it without
+// re-reading the value, so a post-publish value change would go undetected and
+// commit stale. Re-writing the SAME value is idempotent; changing it must panic.
+
+// TestValidateVersion_MapReadValueAware is the read-side backstop: a recorded
+// MapRead whose value no longer matches the live cell is invalidated (not just
+// the version), so the tx re-executes rather than committing a stale value.
+func TestValidateVersion_MapReadValueAware(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(44)
+	slot := accounts.InternKey(common.BigToHash(big.NewInt(11)))
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, slot, Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(100), true)
+
+	// TX 10 records a MapRead at the writer's version but with a value that differs
+	// from the live cell (a stale value from an earlier snapshot of that version).
+	io := NewVersionedIO(11)
+	rs := ReadSet{}
+	rs.SetStorage(addr, slot, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 5, Incarnation: 1}},
+		Val:        *uint256.NewInt(100),
+	})
+	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
+	require.Equal(t, VersionValid, vm.ValidateVersion(10, io, validateEqualVersion, false, ""),
+		"matching value is valid")
+
+	io2 := NewVersionedIO(11)
+	rs2 := ReadSet{}
+	rs2.SetStorage(addr, slot, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 5, Incarnation: 1}},
+		Val:        *uint256.NewInt(100),
+	})
+	// Overwrite the recorded value with a stale one at the same version.
+	rs2.SetStorage(addr, slot, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 5, Incarnation: 1}},
+		Val:        *uint256.NewInt(42),
+	})
+	io2.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs2)
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(10, io2, validateEqualVersion, false, ""),
+		"a MapRead whose recorded value differs from the live cell must be invalidated")
+}
+
 // TestFlushEstimate_ValidTxNotMarkedEstimate verifies that when
 // FlushVersionedWrites is called with complete=true for a valid TX,
 // the entries are FlagDone (not FlagEstimate). This is critical:
@@ -576,6 +624,55 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDependency, res2.Status(),
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
+}
+
+// TestMarkWritesComplete_FlagFlipPreservesValue verifies the commit-boundary
+// Estimate→Done transition advances only the status, leaving the speculative
+// value intact. It also checks that the assert-gated consistency checks fire
+// under ERIGON_ASSERT, and that a missing cell always fails.
+func TestMarkWritesComplete_FlagFlipPreservesValue(t *testing.T) {
+	addr := getAddress(46)
+	vm := NewVersionMap(nil)
+
+	// Worker flushes TX 5's write as an Estimate (the speculative publish).
+	writes := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+	)
+	vm.FlushVersionedWrites(writes, false, "")
+
+	_, res, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDependency, res.Status(), "estimate flush reads back as a dependency")
+
+	// Advance to Done without rewriting the value — production path, no asserts.
+	vm.MarkWritesComplete(writes)
+
+	val, res2, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res2.Status(), "MarkWritesComplete must advance Estimate to Done")
+	require.Equal(t, 5, res2.DepIdx())
+	require.Equal(t, 1, res2.Incarnation())
+	require.Equal(t, *uint256.NewInt(100), val, "the flag flip must not change the value")
+
+	// A missing Estimate cell always fails (structural, not assert-gated).
+	missing := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: getAddress(47), Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(100)},
+	)
+	require.Panics(t, func() { vm.MarkWritesComplete(missing) }, "completing a missing cell must panic")
+
+	// The consistency checks (changed value, stale incarnation) are assert-gated.
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	mismatch := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 1}}, Val: *uint256.NewInt(999)},
+	)
+	require.Panics(t, func() { vm.MarkWritesComplete(mismatch) },
+		"completing with a changed value must panic under assert")
+
+	wrongInc := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 2}}, Val: *uint256.NewInt(100)},
+	)
+	require.Panics(t, func() { vm.MarkWritesComplete(wrongInc) },
+		"completing a mismatched incarnation must panic under assert")
 }
 
 func validateEqualVersion(readVersion, writeVersion Version) VersionValidity {

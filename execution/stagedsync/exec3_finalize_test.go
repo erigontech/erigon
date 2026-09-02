@@ -691,7 +691,11 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 		task := result.Task.(*taskVersion)
 		task.version = iterVersion
 
-		vm.FlushVersionedWrites(result.TxOut, true, "")
+		// The worker's coinbase debit is held as an Estimate until calcFees
+		// materializes the tip-inclusive Done — mirroring the real exec hold —
+		// so the flush below and the calcFees flush at 700 are one Estimate→Done
+		// transition at (txIdx,0), not two Done writes at the same version.
+		vm.FlushVersionedWritesFeeEstimate(result.TxOut, true, "", func(a accounts.Address) bool { return a == s.coinbase })
 
 		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
@@ -723,7 +727,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	s := senderIsCoinbaseScenario(t, 0, preBlockBal, tip, false)
 
 	s.txOut.SetBalance(s.coinbase, &state.VersionedWrite[uint256.Int]{
-		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
+		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath, Version: state.Version{TxIndex: 0, Incarnation: 1}},
 		Val:         *uint256.NewInt(reExecutedPostBal),
 	})
 
@@ -753,6 +757,77 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	assert.Equal(t, *want, got,
 		"re-execution: finalize must use re-executed TxOut value (%d) + tip (%d) = %d, NOT abandoned incarnation-0 value (%d) + tip = %d",
 		reExecutedPostBal, tip, expectedFinal, abandonedPostBal, abandonedPostBal+tip)
+}
+
+// TestFinalizeTx_BurntRecipient_HeldEstimateUntilCalcFees pins a latent
+// same-version Done-mutation on the base-fee burn contract. When the tx sender
+// is itself the burn contract, the worker's gas-debit lands in the write set as
+// a burnt BalancePath write. If the out-of-order commit publishes that as Done
+// (as the coinbase-only hold did), calcFees then re-publishes the burn-credited
+// value at the same version — a torn value a parallel reader can observe.
+// Holding both fee recipients' Balance/Address as Estimates makes calcFees the
+// single Done writer: one value per version.
+func TestFinalizeTx_BurntRecipient_HeldEstimateUntilCalcFees(t *testing.T) {
+	t.Parallel()
+
+	const (
+		preBlockBal    = uint64(1_000_000)
+		tip            = uint64(11_000)
+		workerBurntBal = uint64(499_000) // worker gas-debited the burn contract (the sender)
+	)
+	s := senderIsCoinbaseScenario(t, 0, preBlockBal, tip, true /* london */)
+	burnt := s.burntAddr
+	burn := s.feeBurnt.Uint64()
+	require.NotZero(t, burn, "london scenario must have a non-zero burn")
+
+	// The worker wrote the burn contract's balance (sender==burnt gas-debit).
+	// calcFees republishes it as workerBurntBal+burn — a different value at the
+	// same version.
+	s.txOut.SetBalance(burnt, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: burnt, Path: state.BalancePath, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		Val:         *uint256.NewInt(workerBurntBal),
+	})
+
+	build := func() (*execResult, *taskVersion) {
+		r := s.buildExecResult()
+		r.TxIn = copyReadSet(s.txIn)
+		r.TxOut = copyWrites(s.txOut)
+		return r, r.Task.(*taskVersion)
+	}
+
+	// The buggy coinbase-only hold flushes the burnt balance Done, so calcFees
+	// mutates a published Done cell.
+	t.Run("coinbase_only_hold_mutates_burnt", func(t *testing.T) {
+		r, task := build()
+		vm := state.NewVersionMap(nil)
+		coinbaseOnly := func(h state.WriteHeader) bool {
+			return h.Address == s.coinbase && (h.Path == state.BalancePath || h.Path == state.AddressPath)
+		}
+		vm.FlushVersionedWrites(r.TxOut.Filter(func(h state.WriteHeader) bool { return !coinbaseOnly(h) }), true, "")
+		vm.FlushVersionedWrites(r.TxOut.Filter(coinbaseOnly), false, "")
+		writes, err := r.calcFees(task, vm, s.makeReader(), s.rules)
+		require.NoError(t, err)
+		require.Panics(t, func() { vm.FlushVersionedWrites(writes, true, "") },
+			"burnt flushed Done then re-published by calcFees is a same-version Done mutation")
+	})
+
+	// The fix holds both fee recipients as Estimates, so calcFees is the single
+	// Done writer and the Estimate→Done transition is the one legal value change.
+	t.Run("fee_recipient_hold_is_clean", func(t *testing.T) {
+		r, task := build()
+		vm := state.NewVersionMap(nil)
+		held := func(h state.WriteHeader) bool { return feeRecipientHeldBalance(h, s.coinbase, burnt) }
+		vm.FlushVersionedWrites(r.TxOut.Filter(func(h state.WriteHeader) bool { return !held(h) }), true, "")
+		vm.FlushVersionedWrites(r.TxOut.Filter(held), false, "")
+		writes, err := r.calcFees(task, vm, s.makeReader(), s.rules)
+		require.NoError(t, err)
+		require.NotPanics(t, func() { vm.FlushVersionedWrites(writes, true, "") },
+			"Estimate→Done at calcFees is the single legal value change at this version")
+		burntWrite := findBalance(writes, burnt)
+		require.NotNil(t, burntWrite, "calcFees must publish the burnt Done")
+		assert.Equal(t, *uint256.NewInt(workerBurntBal+burn), burntWrite.Val,
+			"burnt resolves to worker debit (%d) + burn (%d)", workerBurntBal, burn)
+	})
 }
 
 // TestFinalizeTxSimple_VersionOnWrites verifies that all finalize writes

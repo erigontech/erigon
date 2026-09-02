@@ -3,12 +3,14 @@ package state
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -125,10 +127,12 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 	return cells
 }
 
-// markCellFlag sets the flag on an existing typed cell. Panics with msg if
-// no cell is present at txIdx — used by MarkEstimate/MarkComplete which
-// require a prior write.
-func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statusFlag, msg string) {
+// markCellFlag sets the flag on an existing typed cell. Panics with msg if no
+// cell is present at txIdx — used by MarkEstimate/MarkComplete which require a
+// prior write. When incarnation >= 0 the cell must be at that incarnation: a
+// newer one means the flip targets a stale version, which the value-writing path
+// would reject, so panic rather than mark the wrong incarnation.
+func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx, incarnation int, flag statusFlag, msg string) {
 	if cells == nil {
 		panic(msg)
 	}
@@ -136,18 +140,53 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag s
 	if !ok {
 		panic(msg)
 	}
+	if incarnation >= 0 && ci.incarnation != incarnation {
+		panic(fmt.Sprintf("%s: incarnation have=%d want=%d", msg, ci.incarnation, incarnation))
+	}
 	ci.flag = flag
+}
+
+// markCellComplete advances an existing cell to Done as a consistency check, not
+// a write. The cell must already hold value at incarnation — the value published
+// speculatively when the tx's result arrived is final, so committing only
+// advances the status. A missing cell, a newer incarnation, or a changed value
+// is a one-value-per-version violation and panics rather than being silently
+// overwritten. This is the commit-boundary enforcement point.
+func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, value T) {
+	msg := fmt.Sprintf("markComplete: missing cell addr=%x path=%s key=%x txIdx=%d", addr.Value(), path, key.Value(), txIdx)
+	if cells == nil {
+		panic(msg)
+	}
+	ci, ok := cells.Get(txIdx)
+	if !ok {
+		panic(msg)
+	}
+	if dbg.AssertEnabled {
+		if ci.incarnation != incarnation {
+			panic(fmt.Sprintf("markComplete: incarnation addr=%x path=%s txIdx=%d have=%d want=%d", addr.Value(), path, txIdx, ci.incarnation, incarnation))
+		}
+		if !reflect.DeepEqual(ci.Value, value) {
+			panic(fmt.Sprintf("markComplete: value changed at published version addr=%x path=%s txIdx=%d inc=%d old=%v new=%v", addr.Value(), path, txIdx, incarnation, ci.Value, value))
+		}
+	}
+	ci.flag = FlagDone
 }
 
 type VersionMap struct {
 	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
-	s      sync.Map // accounts.Address -> *AddressEntry
+	s        sync.Map // accounts.Address -> *AddressEntry
 	trace  bool
 	HasBAL bool // When true, all significant writes are pre-populated from BAL
 
 	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
+
+	// MapReadValueInvalidations counts how often the value-aware MapRead check
+	// invalidates a version-consistent read. With write-side one-value-per-version
+	// enforced (MarkWritesComplete), this should stay zero — a non-zero count is a
+	// diagnostic that a write path mutated a value at a fixed version.
+	MapReadValueInvalidations atomic.Int64
 }
 
 // SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
@@ -756,35 +795,91 @@ func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key 
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	markFlag(e, addr, path, key, txIdx, FlagEstimate)
+	markFlag(e, addr, path, key, txIdx, -1, FlagEstimate)
+}
+
+// MarkWritesComplete advances every cell named by writes from its speculative
+// Estimate to Done. It writes no values: each cell must already hold the write's
+// value at the write's incarnation (the flush when the tx's result arrived). It
+// is the commit-boundary consistency check that enforces one-value-per-version —
+// a mismatch panics rather than silently overwriting.
+func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
+	if writes == nil {
+		return
+	}
+	seen := make(map[accounts.Address]struct{})
+	writes.forEachAddr(func(addr accounts.Address) {
+		if _, dup := seen[addr]; dup {
+			return
+		}
+		seen[addr] = struct{}{}
+		e := vm.load(addr)
+		if e == nil {
+			panic(fmt.Sprintf("markComplete: no entry addr=%x", addr.Value()))
+		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if vw, ok := writes.address[addr]; ok {
+			markCellComplete(e.Address, addr, AddressPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.selfDestruct[addr]; ok {
+			markCellComplete(e.SelfDestruct, addr, SelfDestructPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.balance[addr]; ok {
+			markCellComplete(e.Balance, addr, BalancePath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.nonce[addr]; ok {
+			markCellComplete(e.Nonce, addr, NoncePath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.incarnation[addr]; ok {
+			markCellComplete(e.Incarnation, addr, IncarnationPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.code[addr]; ok {
+			markCellComplete(e.Code, addr, CodePath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.codeHash[addr]; ok {
+			markCellComplete(e.CodeHash, addr, CodeHashPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.codeSize[addr]; ok {
+			markCellComplete(e.CodeSize, addr, CodeSizePath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if vw, ok := writes.createContract[addr]; ok {
+			markCellComplete(e.CreateContract, addr, CreateContractPath, accounts.NilKey, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+		}
+		if inner, ok := writes.storage[addr]; ok {
+			for key, vw := range inner {
+				markCellComplete(e.Storage[key], addr, StoragePath, key, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
+			}
+		}
+	})
 }
 
 // markFlag updates the flag on an existing (addr, path, key, txIdx) cell.
-// Caller must hold e.mu.Lock(). Panics if no cell is present at txIdx —
-// MarkEstimate requires a prior write.
-func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, flag statusFlag) {
+// Caller must hold e.mu.Lock(). Panics if no cell is present at txIdx. When
+// incarnation >= 0 the cell must be at that incarnation.
+func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, flag statusFlag) {
 	msg := fmt.Sprintf("markFlag: missing cell. addr=%x path=%s key=%x txIdx=%d", addr, path, key, txIdx)
 	switch path {
 	case AddressPath:
-		markCellFlag(e.Address, txIdx, flag, msg)
+		markCellFlag(e.Address, txIdx, incarnation, flag, msg)
 	case SelfDestructPath:
-		markCellFlag(e.SelfDestruct, txIdx, flag, msg)
+		markCellFlag(e.SelfDestruct, txIdx, incarnation, flag, msg)
 	case BalancePath:
-		markCellFlag(e.Balance, txIdx, flag, msg)
+		markCellFlag(e.Balance, txIdx, incarnation, flag, msg)
 	case NoncePath:
-		markCellFlag(e.Nonce, txIdx, flag, msg)
+		markCellFlag(e.Nonce, txIdx, incarnation, flag, msg)
 	case IncarnationPath:
-		markCellFlag(e.Incarnation, txIdx, flag, msg)
+		markCellFlag(e.Incarnation, txIdx, incarnation, flag, msg)
 	case CodePath:
-		markCellFlag(e.Code, txIdx, flag, msg)
+		markCellFlag(e.Code, txIdx, incarnation, flag, msg)
 	case CodeHashPath:
-		markCellFlag(e.CodeHash, txIdx, flag, msg)
+		markCellFlag(e.CodeHash, txIdx, incarnation, flag, msg)
 	case CodeSizePath:
-		markCellFlag(e.CodeSize, txIdx, flag, msg)
+		markCellFlag(e.CodeSize, txIdx, incarnation, flag, msg)
 	case CreateContractPath:
-		markCellFlag(e.CreateContract, txIdx, flag, msg)
+		markCellFlag(e.CreateContract, txIdx, incarnation, flag, msg)
 	case StoragePath:
-		markCellFlag(e.Storage[key], txIdx, flag, msg)
+		markCellFlag(e.Storage[key], txIdx, incarnation, flag, msg)
 	default:
 		panic(fmt.Errorf("markFlag: unknown path %v", path))
 	}
@@ -1060,6 +1155,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
+			// Value-aware MapRead: the version-only check can accept a read whose
+			// cell value has since changed at the same (TxIndex,Incarnation) — the
+			// one-final-value-per-version violation. Also compare the recorded value
+			// against the live cell value and invalidate on mismatch so the reader
+			// re-executes rather than committing stale.
+			if valid == VersionValid && matchesLive != nil && !matchesLive() {
+				valid = VersionInvalid
+				vm.MapReadValueInvalidations.Add(1)
+			}
 			// An origin AddressPath read is the committed baseline; re-run the
 			// create/destruct cross-checks so a concurrent lower-tx create or
 			// SELFDESTRUCT still invalidates it.
