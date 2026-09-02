@@ -85,31 +85,19 @@ func SynthesizeBranchRow(mask uint16, maskKnown bool, records [16][]byte, record
 		return BranchRecordRead{}, nil
 	}
 
-	var cells [16]cellEncodeData
+	var decoded [16]cell
 	var result BranchRecordRead
+	childMasks, childMasksKnown, decErr := decodeRecordsIntoCells(
+		effectiveMask, records, recordsPresent, &legacyCells, legacyMaps.AfterMap, &decoded)
+	if decErr != nil {
+		return BranchRecordRead{}, decErr
+	}
+	result.ChildMasks, result.ChildMasksKnown = childMasks, childMasksKnown
+	var cells [16]cellEncodeData
 	for bitset := effectiveMask; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		switch {
-		case recordsPresent&bit != 0:
-			if len(records[nibble]) == 0 {
-				return BranchRecordRead{}, malformedRecord("empty record at nibble %d", nibble)
-			}
-			var c cell
-			recordMask, err := DecodeRecordInto(records[nibble], &c)
-			if err != nil {
-				return BranchRecordRead{}, fmt.Errorf("decode edge record at nibble %d: %w", nibble, err)
-			}
-			cells[nibble] = cellEncodeDataFromCell(&c)
-			if recordMask != 0 {
-				result.ChildMasks[nibble] = recordMask
-				result.ChildMasksKnown |= bit
-			}
-		case legacyMaps.AfterMap&bit != 0:
-			cells[nibble] = cellEncodeDataFromCell(&legacyCells[nibble])
-		default:
-			return BranchRecordRead{}, fmt.Errorf("missing record for mask bit %d", nibble)
-		}
+		cells[nibble] = cellEncodeDataFromCell(&decoded[nibble])
 		bitset ^= bit
 	}
 
@@ -129,6 +117,38 @@ func SynthesizeBranchRow(mask uint16, maskKnown bool, records [16][]byte, record
 // nothing on this path merges.
 var branchRowEncoders = sync.Pool{
 	New: func() any { return &BranchEncoder{buf: bytes.NewBuffer(make([]byte, 0, 1024))} },
+}
+
+// decodeRecordsIntoCells fills out[nibble] for every bit of effectiveMask, from this node's edge
+// records where present and from a bundled legacy row otherwise, and reports each child's own
+// bitmap. Sole decoder for both the direct read and the legacy row synthesis. legacyCells may be
+// nil when legacyAfterMap is 0, since no bit then resolves to it.
+func decodeRecordsIntoCells(effectiveMask uint16, records [16][]byte, recordsPresent uint16,
+	legacyCells *[16]cell, legacyAfterMap uint16, out *[16]cell) (childMasks [16]uint16, childMasksKnown uint16, err error) {
+	for bitset := effectiveMask; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		switch {
+		case recordsPresent&bit != 0:
+			if len(records[nibble]) == 0 {
+				return childMasks, childMasksKnown, malformedRecord("empty record at nibble %d", nibble)
+			}
+			recordMask, decErr := DecodeRecordInto(records[nibble], &out[nibble])
+			if decErr != nil {
+				return childMasks, childMasksKnown, fmt.Errorf("decode edge record at nibble %d: %w", nibble, decErr)
+			}
+			if recordMask != 0 {
+				childMasks[nibble] = recordMask
+				childMasksKnown |= bit
+			}
+		case legacyAfterMap&bit != 0:
+			out[nibble] = legacyCells[nibble]
+		default:
+			return childMasks, childMasksKnown, fmt.Errorf("missing record for mask bit %d", nibble)
+		}
+		bitset ^= bit
+	}
+	return childMasks, childMasksKnown, nil
 }
 
 func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {

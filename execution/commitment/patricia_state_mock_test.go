@@ -101,7 +101,9 @@ func (ms *MockState) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, nil
 }
 
-func (ms *MockState) BranchWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+func (ms *MockState) EdgeRecords() bool { return ms.edgeRecords }
+
+func (ms *MockState) BranchRecords(prefix []byte, mask uint16, maskKnown bool) ([16][]byte, uint16, kv.Step, error) {
 	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
 	wanted := mask
 	if !maskKnown {
@@ -120,6 +122,14 @@ func (ms *MockState) BranchWithMask(prefix []byte, mask uint16, maskKnown bool) 
 			records[nibble] = bytes.Clone(record)
 			present |= bit
 		}
+	}
+	return records, present, 0, nil
+}
+
+func (ms *MockState) BranchWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	records, present, _, err := ms.BranchRecords(prefix, mask, maskKnown)
+	if err != nil {
+		return nil, 0, [16]uint16{}, 0, err
 	}
 	read, err := SynthesizeBranchRow(mask, maskKnown, records, present, nil)
 	return read.Data, 0, read.ChildMasks, read.ChildMasksKnown, err

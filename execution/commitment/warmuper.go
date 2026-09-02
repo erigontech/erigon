@@ -146,9 +146,14 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	var compactBuf [maxCompactKeyLen]byte
 	// A v3 parent record carries its child's bitmap, so every node below the first can be read
 	// by its exact mask instead of probing all 16 nibbles across every commitment file.
+	recordReader, _ := trieCtx.(BranchRecordReader)
 	maskReader, _ := trieCtx.(BranchMaskReader)
 	var mask uint16
 	maskKnown := false
+	if recordReader != nil && recordReader.EdgeRecords() {
+		w.warmupKeyRecords(recordReader, hashedKey, startDepth)
+		return
+	}
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
@@ -313,4 +318,50 @@ func (w *Warmuper) Close() {
 	// w.work is never closed: that would race a concurrent WarmKey send into a
 	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
+}
+
+// warmupKeyRecords is the v3 descent: one record decoded per level, no legacy row built and taken
+// apart, and the child's own bitmap carried into the next read.
+func (w *Warmuper) warmupKeyRecords(reader BranchRecordReader, hashedKey []byte, startDepth int) {
+	depth := startDepth
+	var compactBuf [maxCompactKeyLen]byte
+	var mask uint16
+	maskKnown := false
+	for depth <= len(hashedKey) && depth <= w.maxDepth {
+		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
+
+		records, present, _, err := reader.BranchRecords(prefix, mask, maskKnown)
+		if err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] failed to read records", w.logPrefix),
+				"prefix", common.Bytes2Hex(prefix), "error", err)
+			return
+		}
+		if present == 0 || depth >= len(hashedKey) {
+			return
+		}
+
+		nextNibble := hashedKey[depth]
+		bit := uint16(1) << nextNibble
+		if present&bit == 0 || len(records[nextNibble]) == 0 {
+			return
+		}
+
+		var c cell
+		childMask, err := DecodeRecordInto(records[nextNibble], &c)
+		if err != nil {
+			log.Debug(fmt.Sprintf("[%s][warmup] failed to decode record", w.logPrefix),
+				"prefix", common.Bytes2Hex(prefix), "nibble", nextNibble, "error", err)
+			return
+		}
+		if c.accountAddrLen > 0 || c.storageAddrLen > 0 {
+			return
+		}
+
+		mask, maskKnown = childMask, childMask != 0
+		if c.extLen > 0 {
+			depth += int(c.extLen)
+			continue
+		}
+		depth++
+	}
 }

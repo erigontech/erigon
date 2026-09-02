@@ -1066,6 +1066,22 @@ func (sdc *TrieContext) branchLegacy(pref []byte) ([]byte, kv.Step, error) {
 	return bytes.Clone(enc), step, nil
 }
 
+func (sdc *TrieContext) EdgeRecords() bool { return sdc.edgeRecords }
+
+// BranchRecords is branchEdge without the legacy row: the caller decodes what it needs.
+func (sdc *TrieContext) BranchRecords(pref []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error) {
+	if !sdc.edgeRecords {
+		return records, 0, 0, nil
+	}
+	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
+	records, present, step, err = sdc.stateReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
+	if err != nil {
+		return records, 0, 0, err
+	}
+	sdc.applyLocalEdgeWrites(nodeKey, mask, maskKnown, &records, &present)
+	return records, present, step, nil
+}
+
 func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
 	// No legacy read here: a v3 node is addressed only by its child records. Reading pref would
 	// also be wrong, not just wasteful, because a compact node key and a v3 child key can be the

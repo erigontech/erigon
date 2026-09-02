@@ -126,6 +126,15 @@ type BranchMaskReader interface {
 	BranchWithMask(prefix []byte, mask uint16, maskKnown bool) (data []byte, step kv.Step, childMasks [16]uint16, childMasksKnown uint16, err error)
 }
 
+// BranchRecordReader hands back a node's edge records unencoded, so a v3 reader can decode the
+// cells it wants instead of paying for a legacy row it would only take apart again.
+// EdgeRecords is part of the contract rather than inferred: a v2 context implements this
+// interface too, and an empty record set there means "wrong format", not "empty node".
+type BranchRecordReader interface {
+	EdgeRecords() bool
+	BranchRecords(prefix []byte, mask uint16, maskKnown bool) (records [16][]byte, present uint16, step kv.Step, err error)
+}
+
 type TrieVariant string
 
 const (

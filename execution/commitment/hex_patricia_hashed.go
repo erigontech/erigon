@@ -2820,6 +2820,58 @@ func (hph *HexPatriciaHashed) branchWithMasksFromCacheOrDB(key []byte) ([]byte, 
 	return data, [16]uint16{}, 0, err
 }
 
+// recordReader returns the context's v3 record reader, or nil when this trie or that context is
+// not on edge records.
+func (hph *HexPatriciaHashed) recordReader() BranchRecordReader {
+	if !hph.cfg.EdgeRecords {
+		return nil
+	}
+	reader, ok := hph.ctx.(BranchRecordReader)
+	if !ok || !reader.EdgeRecords() {
+		return nil
+	}
+	return reader
+}
+
+// unfoldRecordsIntoRow decodes a node's edge records straight into grid[row], skipping the legacy
+// row a v3 read would otherwise build and immediately take apart. Caller resets the row first.
+func (hph *HexPatriciaHashed) unfoldRecordsIntoRow(row int, depth int16, records [16][]byte, present uint16) (uint16, error) {
+	var tombstones uint16
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		bit := bitset & -bitset
+		if len(records[bits.TrailingZeros16(bit)]) == 0 {
+			tombstones |= bit
+		}
+	}
+	effectiveMask := present &^ tombstones
+	if effectiveMask == 0 {
+		return 0, nil
+	}
+
+	childMasks, childMasksKnown, err := decodeRecordsIntoCells(effectiveMask, records, present, nil, 0, &hph.grid[row])
+	if err != nil {
+		return 0, err
+	}
+	hph.touchMap[row] = effectiveMask
+	hph.afterMap[row] = effectiveMask
+
+	account := hph.enclosingAccountAddr()
+	for bitset := effectiveMask; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		c := &hph.grid[row][nibble]
+		if err := c.inheritStorageAddress(account); err != nil {
+			return 0, fmt.Errorf("storage leaf at depth %d nibble %x: %w", depth, nibble, err)
+		}
+		if err := c.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			return 0, err
+		}
+		bitset ^= bit
+	}
+	hph.stampChildMasks(row, childMasks, childMasksKnown)
+	return effectiveMask, nil
+}
+
 // stampChildMasks records, per decoded cell, the bitmap of the node it points at.
 func (hph *HexPatriciaHashed) stampChildMasks(row int, childMasks [16]uint16, childMasksKnown uint16) {
 	for bitset := childMasksKnown; bitset != 0; {

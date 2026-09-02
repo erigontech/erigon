@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -118,4 +119,71 @@ func TestUnfoldStorageBaseStampsChildMasks(t *testing.T) {
 
 	require.True(t, base.grid[0][nibble].branchMaskKnown, "storage-root children lost the masks the record carried")
 	require.Equal(t, childMask, base.grid[0][nibble].branchMask)
+}
+
+type recordWarmupCtx struct {
+	maskRecordingCtx
+	edgeRecords bool
+	records     map[string][16][]byte
+	present     map[string]uint16
+	recordCalls []maskCall
+}
+
+func (c *recordWarmupCtx) EdgeRecords() bool { return c.edgeRecords }
+
+func (c *recordWarmupCtx) BranchRecords(prefix []byte, mask uint16, maskKnown bool) ([16][]byte, uint16, kv.Step, error) {
+	c.recordCalls = append(c.recordCalls, maskCall{prefix: string(prefix), mask: mask, maskKnown: maskKnown})
+	return c.records[string(prefix)], c.present[string(prefix)], 0, nil
+}
+
+// The v3 warmup reads records directly and carries each child's own bitmap down.
+func TestWarmupRecordDescentCarriesChildMask(t *testing.T) {
+	t.Parallel()
+
+	const nibble = 3
+	const childMask = uint16(0x0f0f)
+
+	var branchCell cellEncodeData
+	branchCell.hashLen = length.Hash
+	for i := range branchCell.hash {
+		branchCell.hash[i] = byte(i + 1)
+	}
+	var records [16][]byte
+	records[nibble] = EncodeBranchChild(childMask, &branchCell)
+
+	rootPrefix := string(nibbles.HexToCompact(nil))
+	ctx := &recordWarmupCtx{
+		edgeRecords: true,
+		records:     map[string][16][]byte{rootPrefix: records},
+		present:     map[string]uint16{rootPrefix: 1 << nibble},
+	}
+
+	w := &Warmuper{maxDepth: 64}
+	w.warmupKey(ctx, []byte{nibble, 5, 7}, 0)
+
+	require.GreaterOrEqual(t, len(ctx.recordCalls), 2, "v3 warmup must descend past the root")
+	require.Empty(t, ctx.calls, "v3 warmup must not build a legacy row")
+	require.False(t, ctx.recordCalls[0].maskKnown)
+	require.True(t, ctx.recordCalls[1].maskKnown, "the child's bitmap was not carried down")
+	require.Equal(t, childMask, ctx.recordCalls[1].mask)
+}
+
+// A v2 context implements BranchRecordReader too; taking the record path there would warm nothing.
+func TestWarmupV2ContextDoesNotTakeTheRecordPath(t *testing.T) {
+	t.Parallel()
+
+	var cells [16]cellEncodeData
+	cells[3] = recordTestData("branch", nil)
+	row, err := NewBranchEncoder(1024).EncodeBranch(1<<3, 1<<3, 1<<3, &cells)
+	require.NoError(t, err)
+
+	rootPrefix := string(nibbles.HexToCompact(nil))
+	ctx := &recordWarmupCtx{edgeRecords: false}
+	ctx.rows = map[string][]byte{rootPrefix: append([]byte(nil), row...)}
+
+	w := &Warmuper{maxDepth: 64}
+	w.warmupKey(ctx, []byte{3, 5, 7}, 0)
+
+	require.Empty(t, ctx.recordCalls, "a v2 context must not be read as records")
+	require.NotEmpty(t, ctx.calls, "v2 warmup must still descend through the legacy row")
 }

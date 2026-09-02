@@ -55,7 +55,24 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	}
 	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
 
-	branch, childMasks, childMasksKnown, err := base.branchWithMasksFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
+	prefix := nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix)
+	if reader := base.recordReader(); reader != nil {
+		records, present, _, err := reader.BranchRecords(prefix, 0, false)
+		if err != nil {
+			return err
+		}
+		effectiveMask, err := base.unfoldRecordsIntoRow(0, d+1, records, present)
+		if err != nil {
+			return err
+		}
+		if effectiveMask == 0 {
+			return errStorageBaseNotBranch
+		}
+		base.branchBefore[0] = true
+		return nil
+	}
+
+	branch, childMasks, childMasksKnown, err := base.branchWithMasksFromCacheOrDB(prefix)
 	if err != nil {
 		return err
 	}
