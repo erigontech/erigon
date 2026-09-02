@@ -56,7 +56,7 @@ func (c blockFinalityContextStub) MaxReorgDepth() uint64 {
 	return 0
 }
 
-func (c blockFinalityContextStub) ReadyForCollation(_ context.Context, _ kv.RoDB, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+func (c blockFinalityContextStub) ReadyForCollation(_ context.Context, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	return 0, 0, 0, 0, false, nil
 }
 

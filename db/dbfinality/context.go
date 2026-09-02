@@ -16,16 +16,12 @@
 
 package dbfinality
 
-import (
-	"context"
-
-	"github.com/erigontech/erigon/db/kv"
-)
+import "context"
 
 // Context defines immutable block boundaries for database retention work.
 type Context interface {
 	PruneToBlockNum() uint64
 	RetireToBlockNum() uint64
 	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+	ReadyForCollation(ctx context.Context, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
 }

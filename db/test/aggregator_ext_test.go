@@ -774,7 +774,7 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	finalityCtx := execfinality.NewContext(blocks, 0, 5, true)
+	finalityCtx := execfinality.NewContext(blocks, 0, 5, true, execfinality.WithTxNumsReader(tdb, rawdbv3.TxNums))
 	if buildFiles2 {
 		err = agg.BuildFiles2(ctx, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
 		agg.WaitForFiles()

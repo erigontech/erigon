@@ -1160,7 +1160,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step, finalityCtx d
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step, finalityCtx dbfinality.Context) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
-	return finalityCtx.ReadyForCollation(ctx, a.db, step.LastTxNum(a.stepSize.Load()))
+	return finalityCtx.ReadyForCollation(ctx, step.LastTxNum(a.stepSize.Load()))
 }
 
 func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, maxReorgDepth uint64) (reorgSafeBlock uint64, reorgSafeStep float64, ok bool) {
