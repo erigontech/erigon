@@ -794,8 +794,8 @@ func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, e
 	return metainfo.LoadFromFile(miPath)
 }
 
-// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
-// errors.
+// Loads metainfo from disk. Returns Some metainfo if it's valid, None if it is missing. An invalid
+// metainfo is returned as an error and left on disk.
 func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (localMetainfo g.Option[*metainfo.MetaInfo], err error) {
 	miPath := d.metainfoFilePathForName(name)
 	mi, err := metainfo.LoadFromFile(miPath)
@@ -1206,14 +1206,36 @@ func (d *Downloader) prepareLocalDataForDownload(
 }
 
 // seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
-// none is on disk. Must run without d.lock: deriving it hashes the whole file. A ctx-caused
+// none is on disk. Must run without d.lock: addCompleteTorrent takes it and the lock is not
+// reentrant, so calling this under it deadlocks. Deriving also hashes the whole file. A ctx-caused
 // failure is returned but not logged; the batch counts those into one drop total.
 func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
+	if err := d.removeMalformedMetainfo(name); err != nil {
+		d.log(log.LvlWarn, "cannot remove malformed metainfo", "err", err, "name", name)
+		return err
+	}
 	err := d.AddNewSeedableFile(ctx, name)
 	if err != nil && ctx.Err() == nil {
 		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
 	}
 	return err
+}
+
+// BuildTorrentIfNeed only checks that the .torrent path exists, so metainfo that cannot be parsed
+// suppresses the derivation the kept data would otherwise supply.
+func (d *Downloader) removeMalformedMetainfo(name string) error {
+	name, err := ensureCantLeaveDir(name, d.snapDir())
+	if err != nil {
+		return err
+	}
+	removed, err := d.torrentFS.DeleteMalformed(d.metainfoFilePathForName(name))
+	if err != nil {
+		return err
+	}
+	if removed {
+		d.log(log.LvlWarn, "removed malformed metainfo, deriving a new one from kept data", "name", name)
+	}
+	return nil
 }
 
 func (d *Downloader) snapshotDataExists(name string) (bool, error) {
