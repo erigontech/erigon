@@ -82,18 +82,23 @@ func PaginateU64(f NextPageUno[uint64]) *Paginated[uint64] {
 type TransformKV2U64Iter struct {
 	it        KV
 	transform func(k, v []byte) (uint64, error)
+	err       error
 }
 
 func TransformKV2U64(it KV, transform func(k, v []byte) (uint64, error)) *TransformKV2U64Iter {
 	return &TransformKV2U64Iter{it: it, transform: transform}
 }
-func (m *TransformKV2U64Iter) HasNext() bool { return m.it.HasNext() }
-func (m *TransformKV2U64Iter) Next() (uint64, error) {
+func (m *TransformKV2U64Iter) HasNext() bool { return m.err != nil || m.it.HasNext() }
+func (m *TransformKV2U64Iter) Next() (n uint64, err error) {
+	if m.err != nil {
+		return 0, m.err
+	}
 	k, v, err := m.it.Next()
 	if err != nil {
 		return 0, err
 	}
-	return m.transform(k, v)
+	n, m.err = m.transform(k, v)
+	return n, m.err
 }
 func (m *TransformKV2U64Iter) Close() {
 	m.it.Close()
@@ -277,8 +282,4 @@ func (m *MultisetDuoIter[V]) Next() ([]byte, V, error) {
 func (m *MultisetDuoIter[V]) Close() {
 	m.x.Close()
 	m.y.Close()
-}
-
-type Closer interface {
-	Close()
 }

@@ -389,18 +389,23 @@ func (m *Intersected[T]) Close() {
 type TransformedDuo[K, V any] struct {
 	it        Duo[K, V]
 	transform func(K, V) (K, V, error)
+	err       error
 }
 
 func TransformDuo[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformedDuo[K, V] {
 	return &TransformedDuo[K, V]{it: it, transform: transform}
 }
-func (m *TransformedDuo[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *TransformedDuo[K, V]) Next() (K, V, error) {
-	k, v, err := m.it.Next()
+func (m *TransformedDuo[K, V]) HasNext() bool { return m.err != nil || m.it.HasNext() }
+func (m *TransformedDuo[K, V]) Next() (k K, v V, err error) {
+	if m.err != nil {
+		return k, v, m.err
+	}
+	k, v, err = m.it.Next()
 	if err != nil {
 		return k, v, err
 	}
-	return m.transform(k, v)
+	k, v, m.err = m.transform(k, v)
+	return k, v, m.err
 }
 func (m *TransformedDuo[K, v]) Close() {
 	m.it.Close()
@@ -410,18 +415,23 @@ func (m *TransformedDuo[K, v]) Close() {
 type TransformedDuoV[K, V, VR any] struct {
 	it        Duo[K, V]
 	transform func(K, V) (K, VR, error)
+	err       error
 }
 
 func TransformDuoV[K, V, VR any](it Duo[K, V], transform func(K, V) (K, VR, error)) *TransformedDuoV[K, V, VR] {
 	return &TransformedDuoV[K, V, VR]{it: it, transform: transform}
 }
-func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.err != nil || m.it.HasNext() }
 func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
+	if m.err != nil {
+		return k, vr, m.err
+	}
 	k, v, err := m.it.Next()
 	if err != nil {
 		return k, vr, err
 	}
-	return m.transform(k, v)
+	k, vr, m.err = m.transform(k, v)
+	return k, vr, m.err
 }
 func (m *TransformedDuoV[K, V, VR]) Close() {
 	m.it.Close()
@@ -546,17 +556,35 @@ type Paginated[T any] struct {
 	nextPage      NextPageUno[T]
 	nextPageToken string
 	initialized   bool
+	emptyPages    int
 }
 
 func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
 
-// errNoPageProgress - an empty page that hands back the token it was given would be requested
-// forever. Only "" terminates a listing, so this cannot be treated as the end.
-func errNoPageProgress(err error, pageLen int, sent, got string) error {
-	if err != nil || pageLen > 0 || got == "" || got != sent {
+// maxEmptyPages - only "" terminates a listing, so a server that keeps handing back fresh tokens
+// with no rows would be polled forever. Cycles of any length end up here, not just an echoed token.
+const maxEmptyPages = 1024
+
+func countEmptyPages(seen, pageLen int) int {
+	if pageLen > 0 {
+		return 0
+	}
+	return seen + 1
+}
+
+// errNoPageProgress - fails a run of empty pages rather than letting HasNext spin on it. An echoed
+// token is caught on the spot; a longer cycle of fresh tokens falls to the empty-page cap.
+func errNoPageProgress(err error, pageLen, emptyPages int, sent, got string) error {
+	if err != nil || pageLen > 0 {
 		return err
 	}
-	return fmt.Errorf("stream: pagination made no progress, token %q returned an empty page", sent)
+	if got != "" && got == sent {
+		return fmt.Errorf("stream: pagination made no progress, token %q returned an empty page", sent)
+	}
+	if emptyPages > maxEmptyPages {
+		return fmt.Errorf("stream: pagination made no progress, %d empty pages, last token %q", emptyPages, sent)
+	}
+	return nil
 }
 func (it *Paginated[T]) HasNext() bool {
 	for it.err == nil && it.i >= len(it.arr) {
@@ -567,7 +595,8 @@ func (it *Paginated[T]) HasNext() bool {
 		it.initialized = true
 		it.i = 0
 		it.arr, it.nextPageToken, it.err = it.nextPage(sent)
-		it.err = errNoPageProgress(it.err, len(it.arr), sent, it.nextPageToken)
+		it.emptyPages = countEmptyPages(it.emptyPages, len(it.arr))
+		it.err = errNoPageProgress(it.err, len(it.arr), it.emptyPages, sent, it.nextPageToken)
 	}
 	return true
 }
@@ -592,6 +621,7 @@ type PaginatedDuo[K, V any] struct {
 	nextPage      NextPageDuo[K, V]
 	nextPageToken string
 	initialized   bool
+	emptyPages    int
 }
 
 func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
@@ -606,7 +636,8 @@ func (it *PaginatedDuo[K, V]) HasNext() bool {
 		it.initialized = true
 		it.i = 0
 		it.keys, it.values, it.nextPageToken, it.err = it.nextPage(sent)
-		it.err = errNoPageProgress(it.err, len(it.keys), sent, it.nextPageToken)
+		it.emptyPages = countEmptyPages(it.emptyPages, len(it.keys))
+		it.err = errNoPageProgress(it.err, len(it.keys), it.emptyPages, sent, it.nextPageToken)
 	}
 	return true
 }
@@ -824,11 +855,11 @@ func (m *Validated[V]) Close()        { m.it.Close() }
 
 func (m *Validated[V]) Next() ([]byte, V, error) {
 	k, v, err := m.it.Next()
+	m.prev[0].check("key")
+	m.prev[1].check("value")
 	if err != nil {
 		return k, v, err
 	}
-	m.prev[0].check("key")
-	m.prev[1].check("value")
 	m.prev[0].remember(k)
 	if vb, ok := any(v).([]byte); ok {
 		m.prev[1].remember(vb)

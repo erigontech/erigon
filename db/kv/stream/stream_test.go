@@ -1424,3 +1424,96 @@ func kvPagesOf(ks ...[]byte) stream.NextPageDuo[[]byte, []byte] {
 		return ks, ks, "", nil
 	}
 }
+
+// TestInvariant5TransformCallback - a failing transform callback is an error like any other: the
+// iterator must repeat it, not step past it to the next source item.
+func TestInvariant5TransformCallback(t *testing.T) {
+	boom := errors.New("boom")
+	src := func() stream.KV { return &countingKV{keys: [][]byte{{1}, {2}}} }
+
+	t.Run("TransformKV", func(t *testing.T) {
+		s := stream.TransformKV(src(), func(k, v []byte) ([]byte, []byte, error) { return nil, nil, boom })
+		_, _, err := s.Next()
+		require.ErrorIs(t, err, boom)
+		for range 3 {
+			require.True(t, s.HasNext(), "HasNext went false and swallowed the error")
+			_, _, again := s.Next()
+			require.ErrorIs(t, again, boom, "error is not repeatable")
+		}
+	})
+
+	t.Run("TransformDuoV", func(t *testing.T) {
+		s := stream.TransformDuoV[[]byte, []byte, uint64](src(), func(k, v []byte) ([]byte, uint64, error) {
+			return nil, 0, boom
+		})
+		_, _, err := s.Next()
+		require.ErrorIs(t, err, boom)
+		for range 3 {
+			require.True(t, s.HasNext(), "HasNext went false and swallowed the error")
+			_, _, again := s.Next()
+			require.ErrorIs(t, again, boom, "error is not repeatable")
+		}
+	})
+
+	t.Run("TransformKV2U64", func(t *testing.T) {
+		s := stream.TransformKV2U64(src(), func(k, v []byte) (uint64, error) { return 0, boom })
+		_, err := s.Next()
+		require.ErrorIs(t, err, boom)
+		for range 3 {
+			require.True(t, s.HasNext(), "HasNext went false and swallowed the error")
+			_, again := s.Next()
+			require.ErrorIs(t, again, boom, "error is not repeatable")
+		}
+	})
+}
+
+// recyclerThenError recycles its buffer and then fails, so the violation is only visible on the
+// call that returns the error.
+type recyclerThenError struct {
+	buf []byte
+	n   int
+}
+
+func (r *recyclerThenError) HasNext() bool { return true }
+func (r *recyclerThenError) Close()        {}
+func (r *recyclerThenError) Next() ([]byte, []byte, error) {
+	r.n++
+	r.buf = append(r.buf[:0], byte(r.n))
+	if r.n > 1 {
+		return nil, nil, errors.New("boom")
+	}
+	return r.buf, r.buf, nil
+}
+
+func TestAssertValidChecksBeforeReportingAnError(t *testing.T) {
+	s := stream.NewValidated[[]byte](&recyclerThenError{})
+	require.Panics(t, func() {
+		for range 2 {
+			if _, _, err := s.Next(); err != nil {
+				return
+			}
+		}
+	})
+}
+
+// alternatingEmptyPages never returns data and never returns "", cycling A -> B -> A. The token is
+// always new, so a check that only compares against the token it sent never fires.
+func alternatingEmptyPages(calls *int) stream.NextPageUno[uint64] {
+	return func(token string) ([]uint64, string, error) {
+		*calls++
+		if token == "a" {
+			return nil, "b", nil
+		}
+		return nil, "a", nil
+	}
+}
+
+func TestPaginateFailsOnAnEmptyPageCycle(t *testing.T) {
+	calls := 0
+	s := stream.Paginate(alternatingEmptyPages(&calls))
+	require.True(t, s.HasNext(), "the pending error keeps HasNext true, per invariant 5")
+	_, err := s.Next()
+	require.Error(t, err, "the cycle must surface as an error, not a clean end or a spin")
+	require.Contains(t, err.Error(), "no progress")
+	require.LessOrEqual(t, calls, 1100, "the empty-page run must be bounded")
+}
