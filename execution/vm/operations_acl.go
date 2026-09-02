@@ -102,7 +102,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				evm.IntraBlockState().AddRefund(writeCreate)
 				if stateCreate > 0 {
-					callContext.refillStateGas(stateCreate)
+					callContext.refillStateGas(stateCreate, evm.Config().Tracer, tracing.GasChangeIgnored)
 				}
 			} else { // reset to original existing slot (2.2.2.2)
 				evm.IntraBlockState().AddRefund(writeExisting)

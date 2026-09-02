@@ -72,13 +72,13 @@ func TestStateGasReturnsToGasLeftAcrossFrames(t *testing.T) {
 		delegateCallTo(clearerAddr), stop)
 
 	for _, tc := range []struct {
-		name                    string
-		caller                  []byte
-		gasLimit, wantReservoir uint64
+		name                                 string
+		caller                               []byte
+		gasLimit, wantReservoir, wantGasLeft uint64
 	}{
-		{"reservoir equals spill", callSiblings, 2_000_000, 0},
-		{"spill under reservoir", callSiblings, params.MaxTxnGasLimit + 50_000, 50_000},
-		{"spill over reservoir", spillInBetween, 2_000_000, 0},
+		{"reservoir equals spill", callSiblings, 2_000_000, 0, 1_981_750},
+		{"spill under reservoir", callSiblings, params.MaxTxnGasLimit + 50_000, 50_000, 16_758_966},
+		{"spill over reservoir", spillInBetween, 2_000_000, 0, 1_871_724},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -106,6 +106,50 @@ func TestStateGasReturnsToGasLeftAcrossFrames(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.Equal(t, tc.wantReservoir, gasRemaining.State)
+			// The absorbed gas must land in gas_left: the reservoir assertion
+			// above also holds for a merge that drops it on the floor.
+			require.Equal(t, tc.wantGasLeft, gasRemaining.Execution)
 		})
 	}
+}
+
+// A merge moves gas_left, so a tracer following OnGasChange must be told;
+// an unannounced increase desynchronises every gas-tracking tracer.
+func TestStateGasMergeIsAnnouncedToTracer(t *testing.T) {
+	t.Parallel()
+
+	var refunds []uint64
+	hooks := &tracing.Hooks{
+		OnGasChange: func(old, newGas uint64, reason tracing.GasChangeReason) {
+			if reason == tracing.GasChangeCallLeftOverRefunded && newGas > old {
+				refunds = append(refunds, newGas-old)
+			}
+		},
+	}
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	statedb.SetNoMaterialize(true)
+	defer statedb.Close()
+
+	deploy := func(at uint16, code []byte) accounts.Address {
+		addr := accounts.InternAddress(common.BytesToAddress([]byte{byte(at >> 8), byte(at)}))
+		require.NoError(t, statedb.SetCode(addr, code, tracing.CodeChangeUnspecified))
+		return addr
+	}
+	stop := []byte{byte(vm.STOP)}
+	deploy(setterAddr, slices.Concat(sstore(1, 1), stop))
+	deploy(clearerAddr, slices.Concat(sstore(1, 0), stop))
+	caller := deploy(callerAddr, slices.Concat(delegateCallTo(setterAddr), delegateCallTo(clearerAddr), stop))
+
+	_, _, err := Call(caller, nil, &Config{
+		ChainConfig: chain.AllProtocolChanges,
+		GasLimit:    2_000_000,
+		State:       statedb,
+		EVMConfig:   vm.Config{Tracer: hooks},
+	})
+	require.NoError(t, err)
+	require.Contains(t, refunds, uint64(97_920), "the reservoir->gas_left move must be reported")
 }

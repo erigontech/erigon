@@ -1050,9 +1050,9 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	if forwarded {
 		scope.restoreChildGas(returnGas, evm.config.Tracer)
 		if suberr != nil && preparation.chargeNewAccount {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeIgnored)
 		} else if suberr == nil {
-			scope.mergeChildStateGas(childGasUsed.StateSpill)
+			scope.mergeChildStateGas(childGasUsed.StateSpill, evm.config.Tracer)
 		}
 	}
 	// Push item on the stack based on the returned error. If the ruleset is
@@ -1131,9 +1131,9 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam {
 		if err == nil {
-			scope.mergeChildStateGas(childGasUsage.StateSpill)
+			scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 		} else if scope.newAccountCharged {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeIgnored)
 		}
 	}
 	scope.Contract.selfBalanceCached = false
@@ -1183,7 +1183,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.mergeChildStateGas(childGasUsage.StateSpill)
+		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1218,7 +1218,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.mergeChildStateGas(childGasUsage.StateSpill)
+		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
@@ -1263,7 +1263,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.mergeChildStateGas(childGasUsage.StateSpill)
+		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 	}
 	evm.returnData = ret
 	return pc, ret, nil
