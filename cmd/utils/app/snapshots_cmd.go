@@ -3648,6 +3648,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		RoTxsLimiter(limiterB).
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
+
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
 	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {

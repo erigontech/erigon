@@ -131,7 +131,6 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err := agg.Sqeeze(ctx, kv.StorageDomain); err != nil {
 		return err
 	}
-
 	if err := res.TemporalDB.OpenStateSnapshots(ctx); err != nil {
 		return err
 	}
@@ -188,6 +187,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	log.Info("[squeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
+
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
