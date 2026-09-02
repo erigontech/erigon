@@ -73,14 +73,14 @@ func TestScanCommitmentRecordRunCoversSlotsAcrossFiles(t *testing.T) {
 	wanted := uint16(1<<0 | 1<<1)
 	var records [16][]byte
 	firstNext, firstSeeks := 0, 0
-	present, err := scanCommitmentRecordRun(nodeKey, wanted, 0, &records, commitmentRecordTestSeek(firstFile, &firstNext, &firstSeeks))
+	present, err := scanCommitmentRecordRunInto(nodeKey, wanted, 0, &records, commitmentRecordTestSeek(firstFile, &firstNext, &firstSeeks))
 	require.NoError(t, err)
 	require.Equal(t, uint16(1<<0), present)
 	require.Equal(t, 2, firstSeeks, "the foreign subtree must be skipped by seeking the next expected child")
 	require.Equal(t, 1, firstNext)
 
 	secondNext, secondSeeks := 0, 0
-	present, err = scanCommitmentRecordRun(nodeKey, wanted, present, &records, commitmentRecordTestSeek(secondFile, &secondNext, &secondSeeks))
+	present, err = scanCommitmentRecordRunInto(nodeKey, wanted, present, &records, commitmentRecordTestSeek(secondFile, &secondNext, &secondSeeks))
 	require.NoError(t, err)
 	require.Equal(t, wanted, present)
 	require.Equal(t, 1, secondSeeks)
@@ -118,7 +118,7 @@ func TestScanCommitmentRecordRunAdvancesPastIntruderWhenSlotAbsent(t *testing.T)
 	wanted := uint16(1<<0 | 1<<3)
 	var records [16][]byte
 	next, seeks := 0, 0
-	present, err := scanCommitmentRecordRun(nodeKey, wanted, 0, &records, commitmentRecordTestSeekBounded(file, &next, &seeks, 32))
+	present, err := scanCommitmentRecordRunInto(nodeKey, wanted, 0, &records, commitmentRecordTestSeekBounded(file, &next, &seeks, 32))
 	require.NoError(t, err)
 	require.Equal(t, uint16(1<<3), present, "child 0 is absent from this file and child 3 must still be collected")
 	require.Equal(t, []byte{0xa3}, records[3])
@@ -133,4 +133,16 @@ func TestCommitmentCursorPastEndOfIndexIsNilInterface(t *testing.T) {
 	cursor, err := commitmentCursor(nil, nil)
 	require.NoError(t, err)
 	require.True(t, cursor == nil, "a nil *btindex.Cursor must not become a non-nil interface")
+}
+
+// scanCommitmentRecordRunInto is the file-path shape of the run: collect every record found.
+func scanCommitmentRecordRunInto(nodeKey []byte, wanted, present uint16, records *[16][]byte,
+	seek func([]byte) (commitmentRecordCursor, error)) (uint16, error) {
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	return scanCommitmentRecordRun(nodeKey, childKey, wanted, present, seek,
+		func(nibble int, cursor commitmentRecordCursor) bool {
+			records[nibble] = bytes.Clone(cursor.Value())
+			return true
+		})
 }

@@ -18,6 +18,9 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
 	"math"
 	"math/bits"
 
@@ -26,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func (at *AggregatorRoTx) ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64) (records [16][]byte, present uint16, step kv.Step, err error) {
@@ -62,21 +64,39 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 	copy(childKey, nodeKey)
 
 	if includeDB && roTx != nil {
-		for bitset := wanted; bitset != 0; {
+		var dbSteps [16]kv.Step
+		before := present
+		if maxStep == kv.NoStepBound {
+			present, err = scanCommitmentChildrenFromDb(dt, roTx, nodeKey, childKey, wanted, present, &records, &dbSteps)
+			if err != nil {
+				return records, present, step, err
+			}
+		} else {
+			// A step-bounded read wants the newest value at or below the bound, which is a
+			// SeekBothRange within one key rather than a walk across keys.
+			for bitset := wanted; bitset != 0; {
+				bit := bitset & -bitset
+				nibble := bits.TrailingZeros16(bit)
+				childKey[len(nodeKey)] = 0x80 | byte(nibble)
+				value, valueStep, found, readErr := dt.getLatestFromDb(childKey, roTx, maxStep)
+				if readErr != nil {
+					return records, present, step, readErr
+				}
+				if found {
+					records[nibble] = bytes.Clone(value)
+					dbSteps[nibble] = valueStep
+					present |= bit
+				}
+				bitset ^= bit
+			}
+		}
+		for bitset := present &^ before; bitset != 0; {
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
-			key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
-			value, valueStep, found, readErr := dt.getLatestFromDb(key, roTx, maxStep)
-			if readErr != nil {
-				return records, present, step, readErr
-			}
-			if found {
-				records[nibble] = bytes.Clone(value)
-				present |= bit
-				at.cacheLatestBranch(cacheBranch, key, records[nibble], valueStep, valueStep.LastTxNum(at.StepSize()))
-				if valueStep > step {
-					step = valueStep
-				}
+			childKey[len(nodeKey)] = 0x80 | byte(nibble)
+			at.cacheLatestBranch(cacheBranch, childKey, records[nibble], dbSteps[nibble], dbSteps[nibble].LastTxNum(at.StepSize()))
+			if dbSteps[nibble] > step {
+				step = dbSteps[nibble]
 			}
 			bitset ^= bit
 		}
@@ -104,7 +124,7 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 			continue
 		}
 		before := present
-		present, err = scanCommitmentRecordFile(dt, i, nodeKey, wanted, present, &records)
+		present, err = scanCommitmentRecordFile(dt, i, nodeKey, childKey, wanted, present, &records)
 		if err != nil {
 			return records, present, step, err
 		}
@@ -146,12 +166,85 @@ func childMayBeInFile(salt uint32, filter *existence.Filter, nodeKey []byte, mis
 	return false
 }
 
-func scanCommitmentRecordFile(dt *DomainRoTx, fileIndex int, nodeKey []byte, wanted, present uint16, records *[16][]byte) (uint16, error) {
+func scanCommitmentRecordFile(dt *DomainRoTx, fileIndex int, nodeKey, childKey []byte, wanted, present uint16, records *[16][]byte) (uint16, error) {
 	index := dt.statelessBtree(fileIndex)
 	reader := dt.reusableReader(fileIndex)
-	return scanCommitmentRecordRun(nodeKey, wanted, present, records, func(key []byte) (commitmentRecordCursor, error) {
-		return commitmentCursor(index.Seek(reader, key))
-	})
+	return scanCommitmentRecordRun(nodeKey, childKey, wanted, present,
+		func(key []byte) (commitmentRecordCursor, error) {
+			return commitmentCursor(index.Seek(reader, key))
+		},
+		func(nibble int, cursor commitmentRecordCursor) bool {
+			records[nibble] = bytes.Clone(cursor.Value())
+			return true
+		})
+}
+
+// scanCommitmentChildrenFromDb reads a node's child records with one cursor run instead of a
+// B-tree descent per nibble. A node's 16 edge keys share key(P) and differ only in the last byte,
+// so they sit next to each other in the vals table; only a node whose path ends in nibble 0xf can
+// have a descendant sort between them, and the run re-seeks past those.
+func scanCommitmentChildrenFromDb(dt *DomainRoTx, roTx kv.Tx, nodeKey, childKey []byte, wanted, present uint16,
+	records *[16][]byte, steps *[16]kv.Step) (uint16, error) {
+	valsC, err := dt.valsCursor(roTx)
+	if err != nil {
+		return present, err
+	}
+	dup, ok := valsC.(kv.CursorDupSort)
+	if !ok {
+		return present, errCommitmentValsNotDupSort
+	}
+	cursor := &dbRecordCursor{c: dup}
+	filesEndTxNum := dt.files.EndTxNum()
+	return scanCommitmentRecordRun(nodeKey, childKey, wanted, present,
+		func(key []byte) (commitmentRecordCursor, error) {
+			k, v, err := dup.Seek(key)
+			if err != nil || k == nil {
+				return nil, err
+			}
+			if len(v) < 8 {
+				return nil, fmt.Errorf("commitment vals: value for %x is %d bytes, shorter than the step prefix", k, len(v))
+			}
+			cursor.k, cursor.v = k, v
+			return cursor, nil
+		},
+		func(nibble int, _ commitmentRecordCursor) bool {
+			// A db value older than the files holds no news: getLatest treats it as absent and
+			// lets the file scan supply the current record.
+			step := cursor.step()
+			if step.LastTxNum(dt.stepSize) < filesEndTxNum {
+				return false
+			}
+			records[nibble] = bytes.Clone(cursor.Value())
+			steps[nibble] = step
+			return true
+		})
+}
+
+var errCommitmentValsNotDupSort = errors.New("commitment vals table is not dup-sorted")
+
+// dbRecordCursor walks one distinct key at a time. The dup value carries the inverse step ahead of
+// the record, which is why Value trims it.
+type dbRecordCursor struct {
+	c kv.CursorDupSort
+	k []byte
+	v []byte
+}
+
+func (d *dbRecordCursor) Key() []byte   { return d.k }
+func (d *dbRecordCursor) Value() []byte { return d.v[8:] }
+func (d *dbRecordCursor) Close()        {} // the cursor belongs to the DomainRoTx
+
+func (d *dbRecordCursor) step() kv.Step {
+	return kv.Step(^binary.BigEndian.Uint64(d.v[:8]))
+}
+
+func (d *dbRecordCursor) Next() bool {
+	k, v, err := d.c.NextNoDup()
+	if err != nil || k == nil || len(v) < 8 {
+		return false
+	}
+	d.k, d.v = k, v
+	return true
 }
 
 // commitmentCursor converts Seek's result. Seek yields a nil *Cursor past the end of the
@@ -171,8 +264,11 @@ type commitmentRecordCursor interface {
 	Close()
 }
 
-func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[16][]byte, seek func([]byte) (commitmentRecordCursor, error)) (uint16, error) {
-	cursor, err := seek(nibbles.ChildKeyV3(nodeKey, 0))
+func scanCommitmentRecordRun(nodeKey, childKey []byte, wanted, present uint16,
+	seek func([]byte) (commitmentRecordCursor, error),
+	take func(nibble int, cursor commitmentRecordCursor) bool) (uint16, error) {
+	childKey[len(nodeKey)] = 0x80
+	cursor, err := seek(childKey)
 	if err != nil || cursor == nil {
 		return present, err
 	}
@@ -182,8 +278,7 @@ func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[1
 		key := cursor.Key()
 		if nibble, ok := directCommitmentChild(key, nodeKey); ok && nibble >= expected {
 			bit := uint16(1) << nibble
-			if wanted&bit != 0 && present&bit == 0 {
-				records[nibble] = bytes.Clone(cursor.Value())
+			if wanted&bit != 0 && present&bit == 0 && take(nibble, cursor) {
 				present |= bit
 			}
 			expected = nibble + 1
@@ -195,13 +290,14 @@ func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[1
 			continue
 		}
 
-		if bytes.Compare(key, nibbles.ChildKeyV3(nodeKey, 15)) > 0 {
+		childKey[len(nodeKey)] = 0x8f
+		if bytes.Compare(key, childKey) > 0 {
 			cursor.Close()
 			return present, nil
 		}
 
 		cursor.Close()
-		// A seek at expected that returns anything but that child proves the file holds no record
+		// A seek at expected that returns anything but that child proves the source holds no record
 		// for it: descendants of it sort after its key, so re-seeking the same slot returns this
 		// key again forever.
 		if seekedAtExpected {
@@ -211,7 +307,8 @@ func scanCommitmentRecordRun(nodeKey []byte, wanted, present uint16, records *[1
 			return present, nil
 		}
 		seekedAtExpected = true
-		cursor, err = seek(nibbles.ChildKeyV3(nodeKey, byte(expected)))
+		childKey[len(nodeKey)] = 0x80 | byte(expected)
+		cursor, err = seek(childKey)
 		if err != nil || cursor == nil {
 			return present, err
 		}

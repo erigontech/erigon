@@ -39,13 +39,13 @@ func TestScanCommitmentRecordRunKeepsTombstoneAheadOfOlderFile(t *testing.T) {
 	older := []commitmentRecordTestEntry{{key: childKey, val: []byte{0x99}}}
 	var records [16][]byte
 
-	present, err := scanCommitmentRecordRun(nodeKey, wanted, 0, &records, commitmentRecordTestSeek(newest, new(int), new(int)))
+	present, err := scanCommitmentRecordRunInto(nodeKey, wanted, 0, &records, commitmentRecordTestSeek(newest, new(int), new(int)))
 	require.NoError(t, err)
 	require.Equal(t, wanted, present)
 	require.NotNil(t, records[7])
 	require.Empty(t, records[7])
 
-	present, err = scanCommitmentRecordRun(nodeKey, wanted, present, &records, commitmentRecordTestSeek(older, new(int), new(int)))
+	present, err = scanCommitmentRecordRunInto(nodeKey, wanted, present, &records, commitmentRecordTestSeek(older, new(int), new(int)))
 	require.NoError(t, err)
 	require.Equal(t, wanted, present)
 	require.Empty(t, records[7], "an older file must not resurrect a deleted child")
