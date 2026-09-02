@@ -1353,7 +1353,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// optimistically without needing to worry about
 			// clashes, this should signifigatly improve tx
 			// concurrency
-			break
 		default:
 			sender, err := t.TxSender()
 			if err != nil {
