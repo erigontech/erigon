@@ -2765,6 +2765,17 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 	}
 }
 
+// cacheLatestBranchChildren fills a whole node's edge records in one call, so the cache pays two
+// allocations per node instead of two per record.
+func (at *AggregatorRoTx) cacheLatestBranchChildren(enabled bool, nodeKey []byte, present uint16, records *[16][]byte, steps, txNums *[16]uint64) {
+	if !enabled || present == 0 {
+		return
+	}
+	if branchCache := at.BranchCache(); branchCache != nil {
+		branchCache.PutChildren(nodeKey, present, records, steps, txNums)
+	}
+}
+
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, opts)

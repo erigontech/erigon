@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math/bits"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -690,6 +691,59 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 		txN:   txN,
 		epoch: c.coh.Epoch(),
 	})
+}
+
+// PutChildren stores several of one node's edge records. A v3 read resolves a whole node at once,
+// and Put costs two allocations per record; sharing one data buffer and one entry block across the
+// node turns 2*k allocations into 2. The block keeps every child of the node alive as long as any
+// one of them is cached, which is what a node's records do anyway -- they are read together.
+func (c *BranchCache) PutChildren(nodeKey []byte, present uint16, records *[16][]byte, steps, txNums *[16]uint64) {
+	if present == 0 {
+		return
+	}
+	total, count := 0, 0
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		if len(records[nibble]) == 0 {
+			continue
+		}
+		total += len(records[nibble])
+		count++
+	}
+	if count == 0 {
+		return
+	}
+	buf := make([]byte, 0, total)
+	entries := make([]branchCacheEntry, 0, count)
+	epoch := c.coh.Epoch()
+
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		record := records[nibble]
+		if len(record) == 0 {
+			continue
+		}
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		if c.isCommitmentStateKey(childKey) {
+			continue
+		}
+		start := len(buf)
+		buf = append(buf, record...)
+		entries = append(entries, branchCacheEntry{
+			data:  buf[start:len(buf):len(buf)],
+			step:  steps[nibble],
+			txN:   txNums[nibble],
+			epoch: epoch,
+		})
+		entry := &entries[len(entries)-1]
+
+		stripe := c.putStripe(childKey)
+		stripe.Lock()
+		c.store(childKey, entry)
+		stripe.Unlock()
+	}
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {
