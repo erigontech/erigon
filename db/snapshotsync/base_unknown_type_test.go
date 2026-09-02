@@ -55,8 +55,8 @@ func TestFindOverlapsSkipsUnknownCaplinType(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	unknownName := "v1.1-000000-000050-BlockProposers.seg"
 	validNames := []string{
-		snaptype.PendingDepositsDump.FileName(version.V1_1, 0, 50_000),
-		snaptype.PendingDepositsDump.FileName(version.V1_1, 50_000, 100_000),
+		snaptype.PendingDepositsDump.FileName(version.V1_1, false, 0, 50_000),
+		snaptype.PendingDepositsDump.FileName(version.V1_1, false, 50_000, 100_000),
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapCaplin, unknownName), []byte("unknown"), 0o644))
 	for _, name := range validNames {

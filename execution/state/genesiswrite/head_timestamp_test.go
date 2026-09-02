@@ -111,7 +111,7 @@ func writeHeaderSegment(t *testing.T, dirs datadir.Dirs, headers []*types.Header
 	ctx := context.Background()
 	logger := log.New()
 	from, to := headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64()+1
-	name := snaptype.SegmentFileName(version.V1_0, from, to, snaptype2.Enums.Headers)
+	name := snaptype.SegmentFileName(version.V1_0, false, from, to, snaptype2.Enums.Headers)
 
 	c, err := seg.NewCompressor(ctx, "test", filepath.Join(dirs.Snap, name), dirs.Tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
