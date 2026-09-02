@@ -1386,6 +1386,17 @@ func TestStreamResetSliceRdrCoherency(t *testing.T) {
 		check(t, s, true)
 	})
 
+	t.Run("empty-bytes-stream-rearm", func(t *testing.T) {
+		s := NewBytesStream(data)
+		defer PutStream(s)
+		s.sliceRdr = []byte{}
+		s.Reset(&s.sliceRdr, 0)
+		check(t, s, true)
+		if remaining := s.Remaining(); remaining != 0 {
+			t.Fatalf("remaining = %d, want 0", remaining)
+		}
+	})
+
 	t.Run("foreign-slice-reader-adopted", func(t *testing.T) {
 		s := NewStream(bytes.NewReader(data), uint64(len(data)))
 		foreign := sliceReader(data)

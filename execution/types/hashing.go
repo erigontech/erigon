@@ -40,43 +40,136 @@ func DeriveSha(list DerivableList) common.Hash {
 		return trie.EmptyRoot
 	}
 
-	var curr bytes.Buffer
-	var succ bytes.Buffer
 	var value bytes.Buffer
-
-	hb := trie.NewHashBuilder(false)
-
-	hb.Reset()
-	curr.Reset()
-	succ.Reset()
-
-	hexWriter := &hexWriter{&succ}
-
-	var groups, branches, hashes []uint16
-	var leafData trie.GenStructStepLeafData
+	builder := newDeriveShaBuilder()
 
 	traverseInLexOrder(list, func(i int, next int) {
-		curr.Reset()
-		curr.Write(succ.Bytes())
-		succ.Reset()
-
-		if next >= 0 {
-			encodeUint(uint(next), hexWriter)
-			if err := hexWriter.Commit(); err != nil {
-				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
-			}
-		}
-
 		value.Reset()
-
-		if curr.Len() > 0 {
+		if i >= 0 {
 			list.EncodeIndex(i, &value)
-			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
-			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
 		}
+		builder.add(value.Bytes(), next)
 	})
 
-	hash, _ := hb.RootHash()
+	return builder.root()
+}
+
+// DeriveShaRawTransactions derives a transaction root from an encoded transaction-list payload.
+func DeriveShaRawTransactions(encoded []byte) (common.Hash, error) {
+	return deriveShaRawValues(encoded, true)
+}
+
+// DeriveShaRawValues derives a trie root from an encoded list payload without materializing its values.
+func DeriveShaRawValues(encoded []byte) (common.Hash, error) {
+	return deriveShaRawValues(encoded, false)
+}
+
+func deriveShaRawValues(encoded []byte, unwrapStrings bool) (common.Hash, error) {
+	count, err := rlp.CountValues(encoded)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if count == 0 {
+		return trie.EmptyRoot, nil
+	}
+
+	builder := newDeriveShaBuilder()
+	first := 0
+	if count > 1 {
+		first = 1
+	}
+	builder.add(nil, first)
+
+	var firstValue []byte
+	for i := 0; len(encoded) > 0; i++ {
+		kind, content, rest, err := rlp.Split(encoded)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		value := encoded[:len(encoded)-len(rest)]
+		if unwrapStrings && kind != rlp.List {
+			value = content
+		}
+
+		if i == 0 {
+			firstValue = value
+		} else {
+			if i == 128 {
+				builder.add(firstValue, 128)
+			}
+			builder.add(value, nextRawDerivationIndex(i, count))
+		}
+		encoded = rest
+	}
+	if count <= 128 {
+		builder.add(firstValue, -1)
+	}
+
+	return builder.root(), nil
+}
+
+func nextRawDerivationIndex(index, count int) int {
+	switch {
+	case index < 127 && index < count-1:
+		return index + 1
+	case index <= 127:
+		return 0
+	case index < count-1:
+		return index + 1
+	default:
+		return -1
+	}
+}
+
+type deriveShaBuilder struct {
+	curr     bytes.Buffer
+	succ     bytes.Buffer
+	hb       *trie.HashBuilder
+	groups   []uint16
+	branches []uint16
+	hashes   []uint16
+	leafData trie.GenStructStepLeafData
+}
+
+func newDeriveShaBuilder() *deriveShaBuilder {
+	builder := &deriveShaBuilder{hb: trie.NewHashBuilder(false)}
+	builder.hb.Reset()
+	return builder
+}
+
+func (b *deriveShaBuilder) add(value []byte, next int) {
+	b.curr.Reset()
+	b.curr.Write(b.succ.Bytes())
+	b.succ.Reset()
+
+	if next >= 0 {
+		hexWriter := &hexWriter{&b.succ}
+		encodeUint(uint(next), hexWriter)
+		if err := hexWriter.Commit(); err != nil {
+			panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+		}
+	}
+	if b.curr.Len() == 0 {
+		return
+	}
+
+	b.leafData.Value = rlp.RlpEncodedBytes(value)
+	b.groups, b.branches, b.hashes, _ = trie.GenStructStep(
+		retain,
+		b.curr.Bytes(),
+		b.succ.Bytes(),
+		b.hb,
+		nil,
+		&b.leafData,
+		b.groups,
+		b.branches,
+		b.hashes,
+		false,
+	)
+}
+
+func (b *deriveShaBuilder) root() common.Hash {
+	hash, _ := b.hb.RootHash()
 	return hash
 }
 

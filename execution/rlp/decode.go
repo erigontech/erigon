@@ -1122,6 +1122,9 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 		case *strings.Reader:
 			s.remaining = uint64(br.Len())
 			s.limited = true
+		case *sliceReader:
+			s.remaining = uint64(len(*br))
+			s.limited = true
 		default:
 			s.limited = false
 		}
