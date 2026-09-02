@@ -1311,3 +1311,22 @@ func TestKeptLocalSnapshotWithInfolessMetainfoIsSeeded(t *testing.T) {
 	require.NotNil(tor.Info(), "the kept snapshot is registered against an info-less torrent")
 	requireLoggedForName(t, logs, "removed malformed metainfo", name)
 }
+
+// metainfoFilePathForName appends .torrent unconditionally, AtomicTorrentFS.Delete only when it is
+// missing. A snapshot whose own name ends in .torrent made the two resolve to different files, so
+// the repair read the metainfo and deleted the data.
+func TestRemoveMalformedMetainfoKeepsDataForTorrentSuffixedName(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	name := "domain/v2.0-accounts.0-1024.kv.torrent"
+	path := d.filePathForName(name)
+	miPath := d.metainfoFilePathForName(name)
+	require.NoError(os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(os.WriteFile(path, []byte("locally rebuilt"), 0o644))
+	require.NoError(os.WriteFile(miPath, []byte("not bencode"), 0o644))
+
+	require.NoError(d.removeMalformedMetainfo(name))
+
+	require.FileExists(path, "the snapshot data must survive the metainfo repair")
+	require.NoFileExists(miPath, "the malformed metainfo must be the file that goes")
+}

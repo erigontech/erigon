@@ -1265,6 +1265,7 @@ func (d *Downloader) prepareLocalDataForDownload(
 func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
 	if err := d.removeMalformedMetainfo(name); err != nil {
 		d.log(log.LvlWarn, "cannot remove malformed metainfo", "err", err, "name", name)
+		return err
 	}
 	err := d.AddNewSeedableFile(ctx, name)
 	if err != nil && ctx.Err() == nil {
@@ -1274,27 +1275,19 @@ func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
 }
 
 // BuildTorrentIfNeed only checks that the .torrent path exists, so metainfo that cannot be parsed
-// suppresses the derivation the kept data would otherwise supply. Remove it only when the bytes are
-// confirmed malformed: a file we could not read says nothing about its contents.
-// metainfo.Load never unmarshals InfoBytes, so the info dict needs its own check.
+// suppresses the derivation the kept data would otherwise supply.
 func (d *Downloader) removeMalformedMetainfo(name string) error {
 	name, err := ensureCantLeaveDir(name, d.snapDir())
 	if err != nil {
 		return err
 	}
-	b, err := os.ReadFile(d.metainfoFilePathForName(name))
+	removed, err := d.torrentFS.DeleteMalformed(d.metainfoFilePathForName(name))
 	if err != nil {
-		return nil
-	}
-	if mi, err := metainfo.Load(bytes.NewReader(b)); err == nil {
-		if _, err := mi.UnmarshalInfo(); err == nil {
-			return nil
-		}
-	}
-	if err := d.torrentFS.Delete(name); err != nil {
 		return err
 	}
-	d.log(log.LvlWarn, "removed malformed metainfo, deriving a new one from kept data", "name", name)
+	if removed {
+		d.log(log.LvlWarn, "removed malformed metainfo, deriving a new one from kept data", "name", name)
+	}
 	return nil
 }
 
