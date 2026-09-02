@@ -47,6 +47,10 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
+	// CheckBlockReceiptsAvailable reports whether the transactions and receipts of a
+	// block can still be served under the node's retention.
+	CheckBlockReceiptsAvailable(ctx context.Context, blockNumber uint64) error
+
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
 	// If the backend does not support forking, it returns (nil, nil, nil) and

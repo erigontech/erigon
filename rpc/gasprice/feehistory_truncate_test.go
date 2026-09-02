@@ -66,6 +66,8 @@ func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Re
 
 func (b *gapBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return nil, nil }
 
+func (b *gapBackend) CheckBlockReceiptsAvailable(context.Context, uint64) error { return nil }
+
 func (b *gapBackend) Fork(context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil
 }

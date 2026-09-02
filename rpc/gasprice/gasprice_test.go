@@ -261,6 +261,10 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
+func (m *mockOracleBackend) CheckBlockReceiptsAvailable(_ context.Context, _ uint64) error {
+	return nil
+}
+
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil // sequential mode
 }

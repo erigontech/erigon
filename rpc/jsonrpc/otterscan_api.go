@@ -95,7 +95,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
@@ -219,7 +219,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
 	if err != nil {
 		return nil, err
 	}
