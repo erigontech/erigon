@@ -300,9 +300,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
   * Default: `10000`
-* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
+* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses accepted per log subscription.
   * Default: `0`
-* `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
+* `--rpc.subscription.filters.maxtopics value`: Maximum topic alternatives accepted across all positions per log subscription.
   * Default: `0`
 * `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
   * Default: `5m0s`
@@ -617,6 +617,10 @@ http = true
 
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
+:::tip
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which do not take the `ERIGON_` prefix — can be set with or without it. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form. Erigon logs every variable it reads at warn level either way, but the bare name draws an extra `use ERIGON_ prefix for env` warning on top, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+:::
+
 ### Core Environment Variables
 
 **Database and Performance:**
@@ -686,16 +690,16 @@ When running Erigon in [Docker](/fundamentals/docker-compose), you can configure
 **Basic Performance Tuning:**
 
 ```bash
-export MDBX_LOCK_IN_RAM=true
-export SNAPSHOT_MADV_RND=false
+export ERIGON_MDBX_LOCK_IN_RAM=true
+export ERIGON_SNAPSHOT_MADV_RND=false
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Memory Debugging:**
 
 ```bash
-export SAVE_HEAP_PROFILE=true
-export HEAP_PROFILE_THRESHOLD=45
+export ERIGON_SAVE_HEAP_PROFILE=true
+export ERIGON_HEAP_PROFILE_THRESHOLD=45
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
