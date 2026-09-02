@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -324,29 +323,31 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 		return pruneMode, err
 	}
 
-	if pruneMode.Initialised {
-		// Old archive datadirs stored the history-expiry sentinel for both fields.
-		// Treat that pair as the current keep-all archive mode.
-		if (pm.History == KeepPostMergeBlocksPruneMode && pruneMode.History == KeepPostMergeBlocksPruneMode) &&
-			(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
-			return pruneMode, nil
-		}
-		// Compatible window changes are persisted. Widening cannot recover deleted
-		// data; narrowing may delete data on the next prune pass.
-		if isRetentionWindowChange(pm, pruneMode) {
-			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
-				"previous", pm.String(), "current", pruneMode.String())
-			if err := overwriteStoredMode(tx, pruneMode); err != nil {
-				return pruneMode, err
-			}
-			return pruneMode, nil
-		}
-		// Reject incompatible changes to an initialized datadir.
-		if !reflect.DeepEqual(pm, pruneMode) {
-			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
-		}
+	if !pruneMode.Initialised {
+		return pm, nil
 	}
-	return pm, nil
+
+	// Old archive datadirs stored the history-expiry sentinel for both fields.
+	// Treat that pair as the current keep-all archive mode.
+	if (pm.History == KeepPostMergeBlocksPruneMode && pruneMode.History == KeepPostMergeBlocksPruneMode) &&
+		(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
+		return pruneMode, nil
+	}
+	if modeEquals(pm, pruneMode) {
+		return pm, nil
+	}
+	if !isRetentionWindowChange(pm, pruneMode) {
+		return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
+	}
+
+	// Compatible window changes are persisted. Widening cannot recover deleted
+	// data; narrowing may delete data on the next prune pass.
+	log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
+		"previous", pm.String(), "current", pruneMode.String())
+	if err := overwriteStoredMode(tx, pruneMode); err != nil {
+		return pruneMode, err
+	}
+	return pruneMode, nil
 }
 
 // isRetentionWindowChange accepts finite History changes, Blocks changes between
@@ -354,10 +355,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 // Receipts policy changes. Non-finite History changes and Blocks transitions
 // involving keep-all remain explicit mode changes.
 func isRetentionWindowChange(persisted, requested Mode) bool {
-	if persisted.History == requested.History &&
-		persisted.Blocks == requested.Blocks &&
-		persisted.CommitmentHistory == requested.CommitmentHistory &&
-		persisted.Receipts == requested.Receipts {
+	if modeEquals(persisted, requested) {
 		return false
 	}
 	historyOK := persisted.History == requested.History ||
@@ -412,10 +410,7 @@ func isBlocksRetentionPolicy(b BlockAmount) bool {
 // shape).
 func isFiniteDistance(b BlockAmount) bool {
 	d, ok := b.(Distance)
-	if !ok {
-		return false
-	}
-	return d != KeepAllBlocksPruneMode && d != KeepPostMergeBlocksPruneMode
+	return ok && d.Enabled()
 }
 
 // writeBlockAmount stores one BlockAmount under the given key, replacing any

@@ -110,14 +110,7 @@ func TestModeString_LegacyShapes(t *testing.T) {
 }
 
 func TestModeString_PreviousFullDefault(t *testing.T) {
-	previousFull := Mode{
-		Initialised:       true,
-		History:           previousDefaultPruneDistance,
-		Blocks:            previousDefaultPruneDistance,
-		CommitmentHistory: KeepAllBlocksPruneMode,
-		Receipts:          KeepAllBlocksPruneMode,
-	}
-	assert.Equal(t, "full(previous)", previousFull.String())
+	assert.Equal(t, "full(previous)", previousFullMode.String())
 }
 
 func TestParseCLIMode(t *testing.T) {
@@ -405,6 +398,13 @@ func TestIsCommitmentHistoryRetentionPolicy(t *testing.T) {
 	assert.True(t, isCommitmentHistoryRetentionPolicy(Distance(100_000)))
 	// KeepPostMergeBlocksPruneMode is meaningless for commitment history.
 	assert.False(t, isCommitmentHistoryRetentionPolicy(KeepPostMergeBlocksPruneMode))
+}
+
+func TestIsFiniteDistanceRejectsSentinels(t *testing.T) {
+	assert.True(t, isFiniteDistance(Distance(100_000)))
+	assert.False(t, isFiniteDistance(KeepPostMergeBlocksPruneMode))
+	assert.False(t, isFiniteDistance(KeepAllBlocksPruneMode))
+	assert.False(t, isFiniteDistance(KeepAllReceiptsPruneMode))
 }
 
 func TestIsRetentionWindowChange_CommitmentHistory(t *testing.T) {

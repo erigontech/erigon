@@ -3833,6 +3833,10 @@ func duIsReceiptRelated(f duFileInfo) bool {
 		strings.Contains(lname, "logaddrs") || strings.Contains(lname, "logtopics")
 }
 
+func duIsTransactionSegment(f duFileInfo) bool {
+	return f.Category == duCatBlocks && !f.IsState && strings.Contains(strings.ToLower(f.Name), "transactions")
+}
+
 // duIsRcacheDomainFile returns true for rcache files in the domain/ directory.
 // Domain files are never pruned by the snapshot pruning logic.
 func duIsRcacheDomainFile(f duFileInfo) bool {
@@ -3871,10 +3875,7 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	// isTxSegmentPruned returns true when a transactions block segment lies
 	// entirely below the block cutoff implied by `windowBlocks`.
 	isTxSegmentPruned := func(f duFileInfo, windowBlocks uint64) bool {
-		if f.Category != duCatBlocks || f.IsState {
-			return false
-		}
-		if !strings.Contains(strings.ToLower(f.Name), "transactions") {
+		if !duIsTransactionSegment(f) {
 			return false
 		}
 		return f.To > 0 && maxBlock > windowBlocks && f.To <= maxBlock-windowBlocks
@@ -3883,6 +3884,15 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	// applies the state-history step cutoff to.
 	isStateHistoryCategory := func(f duFileInfo) bool {
 		return f.Category == duCatHistory || f.Category == duCatInvIdx || f.Category == duCatAccessors
+	}
+	isStateFilePruned := func(f duFileInfo, historyWindowSteps, receiptsWindowSteps uint64) bool {
+		if !f.IsState {
+			return false
+		}
+		if duIsReceiptRelated(f) {
+			return !duIsRcacheDomainFile(f) && isStateHistoryPruned(f, receiptsWindowSteps)
+		}
+		return isStateHistoryCategory(f) && isStateHistoryPruned(f, historyWindowSteps)
 	}
 
 	var archiveTotal, fullTotal, blocksTotal, minimalTotal int64
@@ -3903,22 +3913,9 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 		// Full mode: prunes state history, inverted indices, accessors,
 		// receipt-related state, and transaction block segments older than
 		// fullPruneDistance.
-		includeInFull := nonArchiveBase
-		if includeInFull && isStateHistoryCategory(f) && f.IsState &&
-			!duIsReceiptRelated(f) && isStateHistoryPruned(f, fullStepPruneDistance) {
-			includeInFull = false
-		}
-		if includeInFull && isTxSegmentPruned(f, fullPruneDistance) {
-			includeInFull = false
-		}
-		// Receipt-related state files (rcache hist/idx, logaddrs, logtopics)
-		// follow the block-distance prune cutoff (same formula as state
-		// history). Domain rcache files are never pruned.
-		if includeInFull && duIsReceiptRelated(f) && !duIsRcacheDomainFile(f) && f.IsState {
-			if isStateHistoryPruned(f, fullStepPruneDistance) {
-				includeInFull = false
-			}
-		}
+		includeInFull := nonArchiveBase &&
+			!isStateFilePruned(f, fullStepPruneDistance, fullStepPruneDistance) &&
+			!isTxSegmentPruned(f, fullPruneDistance)
 		if includeInFull {
 			fullTotal += f.Size
 		}
@@ -3927,30 +3924,16 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 		// blocksRetentionCutoff returns 0 for KeepAllBlocksPruneMode, so the
 		// receipts filter is a no-op) but prunes state history at the same
 		// finite History distance as full (DefaultPruneDistance).
-		includeInBlocks := nonArchiveBase
-		if includeInBlocks && isStateHistoryCategory(f) && f.IsState &&
-			!duIsReceiptRelated(f) && isStateHistoryPruned(f, fullStepPruneDistance) {
-			includeInBlocks = false
-		}
+		includeInBlocks := nonArchiveBase && !isStateFilePruned(f, fullStepPruneDistance, 0)
 		if includeInBlocks {
 			blocksTotal += f.Size
 		}
 
 		// Minimal mode: same shape as full but with the smaller
 		// MinimalPruneDistance, so it prunes strictly more.
-		includeInMinimal := includeInFull
-		if includeInMinimal && isStateHistoryCategory(f) && f.IsState &&
-			!duIsReceiptRelated(f) && isStateHistoryPruned(f, minimalStepPruneDistance) {
-			includeInMinimal = false
-		}
-		if includeInMinimal && isTxSegmentPruned(f, minimalPruneDistance) {
-			includeInMinimal = false
-		}
-		if includeInMinimal && duIsReceiptRelated(f) && !duIsRcacheDomainFile(f) && f.IsState {
-			if isStateHistoryPruned(f, minimalStepPruneDistance) {
-				includeInMinimal = false
-			}
-		}
+		includeInMinimal := nonArchiveBase &&
+			!isStateFilePruned(f, minimalStepPruneDistance, minimalStepPruneDistance) &&
+			!isTxSegmentPruned(f, minimalPruneDistance)
 		if includeInMinimal {
 			minimalTotal += f.Size
 		}
@@ -4008,7 +3991,7 @@ func duDetectNodeType(files []duFileInfo) string {
 			if f.To > maxBlock {
 				maxBlock = f.To
 			}
-			if f.From == 0 && strings.Contains(strings.ToLower(f.Name), "transactions") {
+			if f.From == 0 && duIsTransactionSegment(f) {
 				hasGenesisTxSegment = true
 			}
 		}
@@ -4044,8 +4027,7 @@ func duDetectNodeType(files []duFileInfo) string {
 	// indicates full mode.
 	if maxBlock > minimalPruneDistance {
 		for _, f := range files {
-			if f.Category == duCatBlocks && !f.IsState && strings.Contains(strings.ToLower(f.Name), "transactions") &&
-				f.To > 0 && f.To <= maxBlock-minimalPruneDistance {
+			if duIsTransactionSegment(f) && f.To > 0 && f.To <= maxBlock-minimalPruneDistance {
 				return "full"
 			}
 		}
