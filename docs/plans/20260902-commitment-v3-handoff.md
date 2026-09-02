@@ -188,8 +188,12 @@ report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc c
 
 ## State at handoff
 
-Run 6: both arms running from 0 on `3.7.0-dev-d7a9d63f` (md5 `d7ac02c70c`), started 10:14Z with
-`--prune.mode=full --prune.include-commitment-history`, `KV_READ_METRICS=true`. Run 5's records are
-in `~/hoodi-runs/{v2,v3}-20260902T1014*`. The calcState fix is PR #23737 against main from
+Run 6: both arms running from 0 on `3.7.0-dev-d7a9d63f` (md5 `d7ac02c70c`), started together at
+10:29:35Z (v3) / 10:29:36Z (v2) with `--prune.mode=full --prune.include-commitment-history`,
+`KV_READ_METRICS=true`, on wiped chaindata and no state snapshot files (checked on disk). A first
+10:14Z start had a 26 s offset between the arms and was replaced; its records are in
+`~/hoodi-runs/{v2,v3}-20260902T1029*`, run 5's in `-20260902T1014*`. To start the arms together,
+stop both, then run each host's `restart-arm.sh` behind `sleep $((T - $(date +%s)))` with one
+shared epoch `T`. The calcState fix is PR #23737 against main from
 `~/org/wrk/wt/calcstate-dirty`, `make lint` clean, `execution/stagedsync` green, judged HOLDS;
 Copilot review requested. `MACHINES.org` carries both arms under snap-arb1 and edev.
