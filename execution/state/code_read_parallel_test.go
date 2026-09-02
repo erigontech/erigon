@@ -1,7 +1,6 @@
 package state
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -111,22 +110,6 @@ func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash
 	require.Len(tb, got, codeLen)
 
 	return ibs, addr
-}
-
-// BenchmarkGetStateObjectAfterCodeRead measures the rebuild every account-field
-// read falls through to. Cost growing with code size means the bytes are hashed.
-func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
-	for _, codeLen := range []int{32, 1024, 24576} {
-		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
-			ibs, addr := committedCodeIBS(b, codeLen, nil)
-			b.ReportAllocs()
-			for b.Loop() {
-				if _, err := ibs.getStateObject(addr, false); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
 }
 
 // TestCommittedCodeHashComesFromAccountRecord pins the account record as the
