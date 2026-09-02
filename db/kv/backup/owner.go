@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package cmp
+//go:build !windows
+
+package backup
 
 import (
-	"cmp"
+	"os"
+	"syscall"
 )
 
-// InRange - ensure val is in [min,max] range
-func InRange[T cmp.Ordered](_min, _max, val T) T {
-	if _min >= val {
-		return _min
+// restoreOwner gives path the uid/gid src was stat'ed with, so a compaction run
+// as root doesn't leave behind a data file the node's own user can't open.
+func restoreOwner(src os.FileInfo, path string) error {
+	st, ok := src.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
 	}
-	if _max <= val {
-		return _max
-	}
-	return val
+	return os.Chown(path, int(st.Uid), int(st.Gid))
 }
