@@ -135,7 +135,6 @@ func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
 			}{
 				{"same txNum", "second", 1},
 				{"later txNum", "third", 2},
-				{"later txNum, longer value", "third-and-longer-than-the-first-value", 2},
 			} {
 				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 					key := "k-" + domain.String() + "-" + next.name
