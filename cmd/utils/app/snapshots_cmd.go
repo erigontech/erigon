@@ -3475,7 +3475,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
+	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false,
+		execfinality.WithTxNumsReader(res.TemporalDB, blockReader.TxnumReader()))
 	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}

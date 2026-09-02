@@ -407,7 +407,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
 		if err != nil {
 			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("undecodable blockAccessList: %v", err)),
+			}, nil
 		}
 		hash, err := blockAccessList.Hash()
 		if err != nil {
