@@ -809,6 +809,10 @@ func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, e.err
 }
 
+func (e *errorTrieContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return nil, 0, e.err
+}
+
 func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	return e.err
 }
@@ -1042,10 +1046,6 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branchBuf, step, nil
 }
 
-// BranchNoCopy returns the branch bytes uncopied, for a caller that consumes them
-// before its next read -- the trie warmup. The result is valid only until the
-// next call on this context and must not be mutated; anything that keeps branch
-// data uses Branch.
 func (sdc *TrieContext) BranchNoCopy(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branch(pref)
 }

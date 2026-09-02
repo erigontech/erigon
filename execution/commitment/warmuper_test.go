@@ -262,9 +262,8 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 	}
 }
 
-// countingBranchCtx records which read path the warmuper took, and holds
-// BranchNoCopy to its contract: each call poisons what the previous one returned,
-// so a caller that kept the bytes reads garbage and descends differently.
+// countingBranchCtx holds BranchNoCopy to its contract: each call poisons what
+// the previous one returned.
 type countingBranchCtx struct {
 	src      []byte
 	last     []byte
@@ -290,9 +289,6 @@ func (c *countingBranchCtx) PutBranch(prefix, data, prevData []byte) error { ret
 func (c *countingBranchCtx) Account(plainKey []byte) (*Update, error)      { return nil, nil }
 func (c *countingBranchCtx) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
 
-// TestWarmuperUsesBranchNoCopy pins the warmuper on the non-copying read. It keeps
-// nothing it reads, and it issues several times more branch reads than the fold
-// does, so an owning read there is the bulk of the copying.
 func TestWarmuperUsesBranchNoCopy(t *testing.T) {
 	t.Parallel()
 	// touchMap, afterMap with nibble 0 set, then one cell with no fields.
@@ -309,7 +305,6 @@ func TestWarmuperUsesBranchNoCopy(t *testing.T) {
 	w.CloseAndWait()
 
 	require.Zero(t, ctx.owned.Load(), "warmup still copies branch bytes it drops immediately")
-	// One read per nibble of the key, then one more that stops at its end. A
-	// caller holding a poisoned branch would read 0xff and stop short.
+	// One read per nibble, then one that stops at the key's end.
 	require.Equal(t, int64(5), ctx.borrowed.Load(), "warmup descent read the wrong number of branches")
 }

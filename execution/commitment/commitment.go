@@ -114,20 +114,14 @@ type CommitProgress struct {
 
 type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
+	// BranchNoCopy returns branch bytes the caller must consume before its next
+	// read on this context, and must not mutate.
+	BranchNoCopy(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
-}
-
-// BranchNoCopyReader is the optional half of PatriciaContext. A context that can
-// hand out branch bytes without copying implements it; one that cannot -- a
-// recorder, a mock -- leaves it off and the caller falls back to Branch. The
-// result aliases the reader's memory: valid until the next call on the same
-// context, and not to be mutated.
-type BranchNoCopyReader interface {
-	BranchNoCopy(prefix []byte) ([]byte, kv.Step, error)
 }
 
 type TrieVariant string
