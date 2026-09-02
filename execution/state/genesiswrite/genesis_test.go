@@ -354,6 +354,26 @@ func TestAllocConstructor(t *testing.T) {
 	assert.Equal(u256.U64(0x01c9), storage1)
 }
 
+func TestGenesisAllocWithoutBalanceUsesZero(t *testing.T) {
+	t.Parallel()
+
+	address := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000c0ffee00"))
+	genSpec := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			address.Value(): {Nonce: 1},
+		},
+	}
+
+	_, ibs, err := genesiswrite.GenesisToBlock(genSpec, datadir.New(t.TempDir()), log.Root())
+	require.NoError(t, err)
+	defer ibs.Close()
+
+	balance, err := ibs.GetBalance(address)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+}
+
 // A genesis alloc carrying storage but otherwise EIP-161-empty must still be materialized as a present account (so its storage never sits under an absent account).
 func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	if testing.Short() {
