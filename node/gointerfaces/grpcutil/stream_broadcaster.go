@@ -95,8 +95,9 @@ func (s *StreamBroadcaster[T]) Subscribe(ctx context.Context, stream grpc.Server
 // A subscriber whose queue is full stops being a subscriber here, and its queued
 // messages are released rather than delivered: the queue bounds a count, and a
 // single reply can be large, so a Send that stays wedged would otherwise keep
-// all of them reachable. Its Subscribe returns ErrSubscriberTooSlow once that
-// Send unblocks.
+// all of them reachable. Its Subscribe returns once that Send resolves, with
+// ErrSubscriberTooSlow unless the cancellation or send error that resolved it is
+// returned instead.
 func (s *StreamBroadcaster[T]) Broadcast(reply *T, logger log.Logger) {
 	var dropped int
 	s.mu.Lock()
