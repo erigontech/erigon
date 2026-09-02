@@ -238,6 +238,35 @@ func TestReceiptsGateFollowsHistoryWhereTheCacheIsNotServed(t *testing.T) {
 		"a cache the generator will not serve does not widen availability")
 }
 
+// TestReceiptEndpointsCloseWhenTheCacheIsNotServed is the endpoint counterpart of
+// TestReceiptsGateFollowsHistoryWhereTheCacheIsNotServed: a receipt retention outliving
+// history opens the block only while the cache is served, and the endpoint has to
+// surface the refusal rather than leave it at the gate.
+//
+// Not parallel: it flips a process-wide assertion flag.
+func TestReceiptEndpointsCloseWhenTheCacheIsNotServed(t *testing.T) {
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+	})
+	ctx := t.Context()
+	old := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
+
+	served, err := apis.eth.GetBlockReceipts(ctx, old)
+	require.NoError(t, err)
+	require.Len(t, served, 1, "the retention reaches past the history cutoff")
+
+	defer func(enabled bool) { dbg.AssertEnabled = enabled }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	_, err = apis.eth.GetBlockReceipts(ctx, old)
+	require.ErrorIs(t, err, state.PrunedError,
+		"without the cache the block is only reachable by re-executing, which history no longer allows")
+}
+
 // TestCapabilitiesFollowHistoryWhereTheCacheIsNotServed pins the same premise in the
 // advertised boundary: it must not offer blocks the receipt endpoints would refuse.
 //
