@@ -41,41 +41,33 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 		return nil, &ErrTooManyBodies{requested: len(headers), received: bodyCount}
 	}
 
-	bodies := make([]*types.Body, 0, bodyCount)
-	for len(encodedBodies) > 0 {
-		_, _, rest, err := rlp.Split(encodedBodies)
+	bodies := make([]*types.Body, bodyCount)
+	for bodyIndex := range bodies {
+		bodyPayload, rest, err := rlp.SplitList(encodedBodies)
 		if err != nil {
-			return nil, fmt.Errorf("split block body %d: %w", len(bodies), err)
+			return nil, fmt.Errorf("split block body %d: %w", bodyIndex, err)
 		}
 		encodedBody := encodedBodies[:len(encodedBodies)-len(rest)]
 		encodedBodies = rest
 
-		rawBody, err := splitRawBlockBody(encodedBody)
+		rawBody, err := splitRawBlockBody(bodyPayload)
 		if err != nil {
-			return nil, fmt.Errorf("split block body %d: %w", len(bodies), err)
+			return nil, fmt.Errorf("split block body %d: %w", bodyIndex, err)
 		}
-		if err := rawBody.matchesHeader(headers[len(bodies)]); err != nil {
+		if err := rawBody.matchesHeader(headers[bodyIndex]); err != nil {
 			return nil, err
 		}
 
 		body := new(types.Body)
 		if err := rlp.DecodeBytes(encodedBody, body); err != nil {
-			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
+			return nil, fmt.Errorf("decode block body %d: %w", bodyIndex, err)
 		}
-		bodies = append(bodies, body)
+		bodies[bodyIndex] = body
 	}
 	return bodies, nil
 }
 
-func splitRawBlockBody(encoded []byte) (rawBlockBody, error) {
-	body, rest, err := rlp.SplitList(encoded)
-	if err != nil {
-		return rawBlockBody{}, err
-	}
-	if len(rest) != 0 {
-		return rawBlockBody{}, rlp.ErrMoreThanOneValue
-	}
-
+func splitRawBlockBody(body []byte) (rawBlockBody, error) {
 	transactions, _, body, err := splitRawList(body)
 	if err != nil {
 		return rawBlockBody{}, err

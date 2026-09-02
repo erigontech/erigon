@@ -36,20 +36,22 @@ type DerivableList interface {
 }
 
 func DeriveSha(list DerivableList) common.Hash {
-	if list.Len() < 1 {
+	count := list.Len()
+	if count < 1 {
 		return trie.EmptyRoot
 	}
 
 	var value bytes.Buffer
 	builder := newDeriveShaBuilder()
-
-	traverseInLexOrder(list, func(i int, next int) {
+	next := firstDerivationIndex(count)
+	builder.add(nil, next)
+	for next >= 0 {
+		index := next
 		value.Reset()
-		if i >= 0 {
-			list.EncodeIndex(i, &value)
-		}
+		list.EncodeIndex(index, &value)
+		next = nextDerivationIndex(index, count)
 		builder.add(value.Bytes(), next)
-	})
+	}
 
 	return builder.root()
 }
@@ -74,11 +76,8 @@ func deriveShaRawValues(encoded []byte, unwrapStrings bool) (common.Hash, error)
 	}
 
 	builder := newDeriveShaBuilder()
-	first := 0
-	if count > 1 {
-		first = 1
-	}
-	builder.add(nil, first)
+	builder.add(nil, firstDerivationIndex(count))
+	afterZero := nextDerivationIndex(0, count)
 
 	var firstValue []byte
 	for i := 0; len(encoded) > 0; i++ {
@@ -94,31 +93,45 @@ func deriveShaRawValues(encoded []byte, unwrapStrings bool) (common.Hash, error)
 		if i == 0 {
 			firstValue = value
 		} else {
-			if i == 128 {
-				builder.add(firstValue, 128)
+			if i == afterZero {
+				builder.add(firstValue, afterZero)
 			}
-			builder.add(value, nextRawDerivationIndex(i, count))
+			builder.add(value, nextDerivationIndex(i, count))
 		}
 		encoded = rest
 	}
-	if count <= 128 {
-		builder.add(firstValue, -1)
+	if afterZero < 0 {
+		builder.add(firstValue, afterZero)
 	}
 
 	return builder.root(), nil
 }
 
-func nextRawDerivationIndex(index, count int) int {
+// RLP-encoded trie indices sort as 1 through 127, then 0, then 128 and above.
+func firstDerivationIndex(count int) int {
+	if count <= 0 {
+		return -1
+	}
+	if count == 1 {
+		return 0
+	}
+	return 1
+}
+
+func nextDerivationIndex(index, count int) int {
 	switch {
+	case index == 0 && count > 128:
+		return 128
+	case index == 0:
+		return -1
 	case index < 127 && index < count-1:
 		return index + 1
 	case index <= 127:
 		return 0
 	case index < count-1:
 		return index + 1
-	default:
-		return -1
 	}
+	return -1
 }
 
 type deriveShaBuilder struct {
@@ -192,31 +205,6 @@ func (w *hexWriter) WriteByte(b byte) error {
 
 func (w *hexWriter) Commit() error {
 	return w.w.WriteByte(16)
-}
-
-func adjustIndex(i int, l int) int {
-	if i >= 0 && i < 127 && i < l-1 {
-		return i + 1
-	} else if i == 127 || (i < 127 && i >= l-1) {
-		return 0
-	}
-	return i
-}
-
-// traverseInLexOrder visits RLP-encoded list indices in the order required by HashBuilder.
-// Their keys sort as 1 through 127, then 0, then 128 and above. The callback also
-// receives the next index; -1 marks the initial or final boundary.
-func traverseInLexOrder(list DerivableList, traverser func(int, int)) {
-	for i := -1; i < list.Len(); i++ {
-		adjustedIndex := adjustIndex(i, list.Len())
-		nextIndex := i + 1
-		if nextIndex >= list.Len() {
-			nextIndex = -1
-		}
-		nextIndex = adjustIndex(nextIndex, list.Len())
-
-		traverser(adjustedIndex, nextIndex)
-	}
 }
 
 func retain(_ []byte) bool {
