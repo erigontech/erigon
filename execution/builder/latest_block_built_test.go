@@ -53,3 +53,57 @@ func TestLatestBlockBuiltKeepsRecentBlocksByHash(t *testing.T) {
 
 	assert.Same(t, blocks[len(blocks)-1], s.BlockBuilt())
 }
+
+func TestLatestBlockBuiltRefreshesRecency(t *testing.T) {
+	t.Parallel()
+
+	s := NewLatestBlockBuiltStore()
+
+	blocks := make(
+		[]*types.Block,
+		recentBlockBuiltCapacity+1,
+	)
+
+	for i := range blocks {
+		blocks[i] = types.NewBlockWithHeader(
+			&types.Header{Time: uint64(i + 1)},
+			nil,
+		)
+	}
+
+	for _, block := range blocks[:recentBlockBuiltCapacity] {
+		s.AddBlockBuilt(block)
+	}
+
+	// Rebuilding the oldest cached payload must refresh its recency.
+	s.AddBlockBuilt(blocks[0])
+
+	// Adding one more payload must therefore evict the second-oldest
+	// payload, not the payload that was just rebuilt.
+	s.AddBlockBuilt(blocks[recentBlockBuiltCapacity])
+
+	assert.Same(
+		t,
+		blocks[0],
+		s.BlockBuiltByHash(blocks[0].Hash()),
+	)
+
+	assert.Nil(
+		t,
+		s.BlockBuiltByHash(blocks[1].Hash()),
+	)
+
+	for _, block := range blocks[2:] {
+		assert.Same(
+			t,
+			block,
+			s.BlockBuiltByHash(block.Hash()),
+		)
+	}
+
+	assert.Same(
+		t,
+		blocks[recentBlockBuiltCapacity],
+		s.BlockBuilt(),
+	)
+}

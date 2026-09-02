@@ -55,10 +55,17 @@ func (s *LatestBlockBuiltStore) AddBlockBuilt(block *types.Block) {
 		s.blocks = make(map[common.Hash]*types.Block)
 	}
 
-	if _, ok := s.blocks[hash]; !ok {
-		s.order = append(s.order, hash)
+	if _, ok := s.blocks[hash]; ok {
+		for i, existing := range s.order {
+			if existing == hash {
+				copy(s.order[i:], s.order[i+1:])
+				s.order = s.order[:len(s.order)-1]
+				break
+			}
+		}
 	}
 
+	s.order = append(s.order, hash)
 	s.blocks[hash] = block
 
 	for len(s.order) > recentBlockBuiltCapacity {
