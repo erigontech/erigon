@@ -1,7 +1,7 @@
 # commitment-v3 handoff — 2026-09-02
 
 Branch `awskii/commitment-v3`, worktree `~/org/wrk/wt/commitment-v3`, off `origin/main @ 0124ab5a0c`.
-Nothing pushed. Full evidence trail: `~/org/e/research/commitment-v3-singleton-storage.org`.
+Nothing of this branch is pushed; the calcState fix it carries is PR #23737 against main. Full evidence trail: `~/org/e/research/commitment-v3-singleton-storage.org`.
 
 ## Where the model stands
 
@@ -48,28 +48,33 @@ Every non-archive prune mode keeps `CommitmentHistory: KeepAllBlocksPruneMode`, 
 commitment history without running an archive node. `DefaultMode = ArchiveMode`, so dropping
 `--prune.mode` does nothing — non-archive has to be explicit.
 
-## Open finding: v3 collapses under per-block commitment
+## Resolved: the per-block regime was throttled by two map scans in the calculator
 
-`KeepExecutionProofs` sets `forcePerBlockCompute` (exec3_parallel.go), so enabling commitment
-history moves commitment from 5000-block batches to every block. Under that regime, at equal
-wall clock:
+Under `--prune.include-commitment-history` (`forcePerBlockCompute`), run 5 showed v3 at 22 blk/s
+against v2's 40-95 and `parallel committed blk=0` for a 21790-block first cycle. Neither number
+meant what the previous version of this file said:
 
-| measure          |     v2 |      v3 |
-|------------------|--------|---------|
-| block height     | 36013  | 18401   |
-| blk/s            | 91     | 22      |
-| repeat%          | 2.83   | 36.87   |
-| abort            | 126    | 1.87k   |
-| invalid          | 11     | 3.20k   |
-| parallel committed | blk=36013 | **blk=0, blks=0** |
+- `committed blk=0` is a log artifact. `computeAndCheck` publishes only on a root mismatch and
+  `lastCommittedBlockNum` moves only when the apply channel closes, so any cycle longer than the
+  log interval prints the previous cycle's end. `domain_commitment_took_count` tracked the executed
+  block on both arms (v3: 33327 calls at blk 33324), so per-block compute was running all along.
+- `invalid=3.20k` / `repeat%=36.87` is chain content. v2 shows repeat 22-33% and invalid
+  1.8-4.7k over the same block range (1744-21567, and again from ~44k); the old table compared
+  v2 at blk 36013, a light range, with v3 at 18401, the heavy one.
 
-**Commitment compute is not the cause** — per call v3 is *faster* here: 11.25s/18500 = 0.608 ms
-against v2's 30.93s/36231 = 0.854 ms. The loss is in parallel execution: v3 aborts and
-re-executes a third of its work, and has committed nothing at all.
+The real cost was in `calc_state.go`, identical on main: `cs.accounts` keeps every account written
+since the batch started, and `FlushToUpdates` plus `ResetBlockFlags` walked the whole map once per
+block. A 30 s CPU profile of v3 at blk ~31k (edev, 09:54Z) put 27.5 s of the calculator's 30 s in
+those two scans, about 60 ms per block. A cycle ends on the byte cut (2 x sd.mem > 512 MB); v2 gets
+there in ~350 blocks (bundled rows plus their history, ~750 KB/block), v3 in ~2300 (~117 KB/block),
+so v3 ran 6x longer cycles and paid the quadratic 6x harder. v2's own slow-range cycles (7-8k
+blocks at 43-57 blk/s) pay it too.
 
-`invalid=3.20k` against v2's 11 does not look like a performance characteristic. Treat this as a
-suspected defect that the per-block regime exposed, not as a v3 cost. **This is the first thing to
-investigate.** Nothing has been done about it.
+Fix: a per-block dirty list (`markDirty`), PR #23737 (`awskii/calcstate-dirty-accounts`, commit
+`2ab3850420b`), cherry-picked here as `315bb3404bb`. Benchmark at 300k accumulated accounts:
+5.0 ms -> 22 us per block. Run 6 (both arms from 0 on `d7a9d63f`, 10:14Z) is the rig check: at
+four minutes in, v2 blk 12893 at 42 blk/s and v3 blk 11911 at 39-42 blk/s, where run 5 had v3 at
+blk 5016 and 22 blk/s. Evidence: research log, section "Two map scans in the calculator".
 
 ## What was fixed on this branch, and what it bought
 
@@ -145,9 +150,17 @@ Scripts live in `~` on both hosts: `hoodi-arm.sh` (one arm, wipes derived state 
 `restart-arm.sh` (stop, install `/tmp/erigon-new`, relaunch from 0), `measure-state.sh` (stop and
 report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc capture).
 
-- Builds happen on **snap-arb1** only. edev's `~/erigon-cv3` is repointed to `awskii/r36converter`
-  and has no commitment-v3 history. Stream the binary with `scp -C` — 34s against ~10 min without,
-  and never run two scp's at the same destination, they fight and neither finishes.
+- Builds happen on **snap-arb1** only (`~/erigon-cv3`, commits arrive as `git format-patch` +
+  `git am`, so its SHAs differ from this branch: `d7a9d63f54` there = `315bb3404bb` here). edev's
+  `~/erigon-cv3` is repointed to `awskii/r36converter` and has no commitment-v3 history. snap-arb1
+  has no ssh key for edev; stream the binary through the Mac,
+  `ssh snap-arb1 'gzip -1 -c /tmp/erigon-new' | ssh edev 'gunzip -c > /tmp/erigon-new'` (93 s),
+  and never run two transfers at the same destination.
+- Restart sequence: stop both arms (the first half of `restart-arm.sh`: kill the monitor, `kill -INT`
+  the node pid, wait), build, `cp build/bin/erigon /tmp/erigon-new`, stream to edev, then
+  `bash ~/restart-arm.sh v2 false 6061 6062 30303 42069` on snap-arb1 and
+  `bash ~/restart-arm.sh v3 true 6081 6082 30403 42169` on edev. The script moves the old run dir
+  to `~/hoodi-runs/<arm>-<ts>` and relaunches from 0.
 - Build while the nodes are **stopped**. A build on snap-arb1 steals CPU from the v2 arm only and
   biases the comparison.
 - `KV_READ_METRICS=true` gates `domain_commitment_took` and the per-domain read counters.
@@ -163,8 +176,8 @@ report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc c
 
 ## Decisions still open
 
-1. The `invalid=3.20k` / `repeat%=36.87` / never-commits behaviour under per-block commitment.
-   Suspected defect. Unstarted.
+1. Whether run 6 holds parity with v2 past the heavy range and what the v3 cycle length does to
+   flush cost: read `parallel done` (blocks per cycle, `in=`) on both arms once they pass 100k.
 2. Whether the 3.03x record multiplier is acceptable at all. Every per-key structure scales with
    it, and the read-side lever turned out to be worth ~1%. If the answer is no, the design fork
    worth considering is bundled rows for the trunk and edge records only in storage subtrees.
@@ -175,6 +188,8 @@ report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc c
 
 ## State at handoff
 
-Both arms running from 0 on `3.7.0-dev-49237559` (md5 `e9851ec56f`), started 09:29Z with
-`--prune.mode=full --prune.include-commitment-history`, `KV_READ_METRICS=true`. `make lint`
-clean, `db/state/...`, `execution/commitment/...` and `execution/stagedsync/...` green.
+Run 6: both arms running from 0 on `3.7.0-dev-d7a9d63f` (md5 `d7ac02c70c`), started 10:14Z with
+`--prune.mode=full --prune.include-commitment-history`, `KV_READ_METRICS=true`. Run 5's records are
+in `~/hoodi-runs/{v2,v3}-20260902T1014*`. The calcState fix is PR #23737 against main from
+`~/org/wrk/wt/calcstate-dirty`, `make lint` clean, `execution/stagedsync` green, judged HOLDS;
+Copilot review requested. `MACHINES.org` carries both arms under snap-arb1 and edev.
