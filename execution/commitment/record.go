@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"sync"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -112,12 +113,22 @@ func SynthesizeBranchRow(mask uint16, maskKnown bool, records [16][]byte, record
 		bitset ^= bit
 	}
 
-	encoded, err := NewBranchEncoder(1024).EncodeBranch(effectiveMask, effectiveMask, effectiveMask, &cells)
+	enc := branchRowEncoders.Get().(*BranchEncoder)
+	encoded, err := enc.EncodeBranch(effectiveMask, effectiveMask, effectiveMask, &cells)
 	if err != nil {
+		branchRowEncoders.Put(enc)
 		return BranchRecordRead{}, err
 	}
 	result.Data = bytes.Clone(encoded)
+	branchRowEncoders.Put(enc)
 	return result, nil
+}
+
+// EncodeBranch touches only buf and bitmapBuf, and the result is cloned before the encoder
+// goes back, so the pooled buffer never reaches a caller. A merger is never allocated here:
+// nothing on this path merges.
+var branchRowEncoders = sync.Pool{
+	New: func() any { return &BranchEncoder{buf: bytes.NewBuffer(make([]byte, 0, 1024))} },
 }
 
 func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {

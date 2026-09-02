@@ -1087,7 +1087,8 @@ func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, read.Data)
 	}
-	return bytes.Clone(read.Data), recordsStep, read.ChildMasks, read.ChildMasksKnown, nil
+	// SynthesizeBranchRow already returns owned bytes; cloning again just doubled the garbage.
+	return read.Data, recordsStep, read.ChildMasks, read.ChildMasksKnown, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -122,4 +123,33 @@ func TestSynthesizeBranchRowIgnoresClearedMaskRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint16(1<<2), maps.AfterMap)
 	require.Zero(t, cells[7].accountAddrLen)
+}
+
+// A pooled encode buffer must not reach the caller: SynthesizeBranchRow's result
+// outlives the call that produced it.
+func TestSynthesizeBranchRowResultSurvivesALaterCall(t *testing.T) {
+	t.Parallel()
+
+	build := func(shape string, ext []byte) (uint16, [16][]byte) {
+		var src [16]cellEncodeData
+		src[2] = recordTestData(shape, ext)
+		var records [16][]byte
+		if src[2].accountAddrLen > 0 || src[2].storageAddrLen > 0 {
+			records[2] = EncodeLeafChild(&src[2])
+		} else {
+			records[2] = EncodeBranchChild(0x1234, &src[2])
+		}
+		return uint16(1 << 2), records
+	}
+
+	maskA, recordsA := build("branch", []byte{1, 2, 3})
+	first, err := SynthesizeBranchRow(maskA, true, recordsA, maskA, nil)
+	require.NoError(t, err)
+	kept := bytes.Clone(first.Data)
+
+	maskB, recordsB := build("account", []byte{9, 9, 9, 9, 9, 9})
+	_, err = SynthesizeBranchRow(maskB, true, recordsB, maskB, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, kept, []byte(first.Data), "a later call overwrote an earlier result: the encode buffer leaked to the caller")
 }
