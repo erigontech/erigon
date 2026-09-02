@@ -195,6 +195,15 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
+// CommitmentKVWriteVersionFor returns the .kv version for a commitment file in the given
+// format, ignoring the process-wide edge-records flag. A merge must name its output from
+// the format its inputs actually carry, not from what this process would write today.
+func CommitmentKVWriteVersionFor(c *DomainCfg, edgeRecords bool) version.Version {
+	cfg := *c
+	cfg.EdgeRecordsInCommitment = edgeRecords
+	return commitmentKVWriteVersion(&cfg)
+}
+
 // CommitmentEdgeRecords reports whether a commitment file uses the v3 edge-record format.
 func CommitmentEdgeRecords(fileVersion version.Version) bool {
 	return !fileVersion.Less(commitmentKVEdgeRecordsVersion)
