@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -32,6 +33,13 @@ type rawBlockBody struct {
 	hasWithdrawals bool
 }
 
+type blockBodyCommitments struct {
+	transactionHash common.Hash
+	uncleHash       common.Hash
+	withdrawalsHash common.Hash
+	hasWithdrawals  bool
+}
+
 func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([]*types.Body, error) {
 	bodyCount, err := rlp.CountValues(encodedBodies)
 	if err != nil {
@@ -41,8 +49,9 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 		return nil, &ErrTooManyBodies{requested: len(headers), received: bodyCount}
 	}
 
-	bodies := make([]*types.Body, bodyCount)
-	for bodyIndex := range bodies {
+	bodies := make([]*types.Body, len(headers))
+	nextHeaderIndex := 0
+	for bodyIndex := range bodyCount {
 		bodyPayload, rest, err := rlp.SplitList(encodedBodies)
 		if err != nil {
 			return nil, fmt.Errorf("split block body %d: %w", bodyIndex, err)
@@ -54,15 +63,35 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 		if err != nil {
 			return nil, fmt.Errorf("split block body %d: %w", bodyIndex, err)
 		}
-		if err := rawBody.matchesHeader(headers[bodyIndex]); err != nil {
-			return nil, err
+		commitments, err := rawBody.commitments()
+		if err != nil {
+			return nil, fmt.Errorf("hash block body %d: %w", bodyIndex, err)
+		}
+
+		lastHeaderIndex := len(headers) - (bodyCount - bodyIndex)
+		firstHeaderIndex := nextHeaderIndex
+		var firstMismatch error
+		for nextHeaderIndex <= lastHeaderIndex {
+			mismatch := commitments.matchesHeader(headers[nextHeaderIndex])
+			if mismatch == nil {
+				break
+			}
+			if firstMismatch == nil {
+				firstMismatch = mismatch
+			}
+			nextHeaderIndex++
+		}
+		if nextHeaderIndex > lastHeaderIndex {
+			firstMismatch = fmt.Errorf("body matches no remaining requested header: %w", firstMismatch)
+			return nil, newBodyHeaderMismatch(headers[firstHeaderIndex], firstMismatch)
 		}
 
 		body := new(types.Body)
 		if err := rlp.DecodeBytes(encodedBody, body); err != nil {
 			return nil, fmt.Errorf("decode block body %d: %w", bodyIndex, err)
 		}
-		bodies[bodyIndex] = body
+		bodies[nextHeaderIndex] = body
+		nextHeaderIndex++
 	}
 	return bodies, nil
 }
@@ -100,44 +129,42 @@ func splitRawList(encoded []byte) (content, raw, rest []byte, err error) {
 	return content, encoded[:len(encoded)-len(rest)], rest, nil
 }
 
-func (b rawBlockBody) matchesHeader(header *types.Header) error {
+func (b rawBlockBody) commitments() (blockBodyCommitments, error) {
 	transactionHash, err := types.DeriveShaRawTransactions(b.transactions)
 	if err != nil {
-		return err
+		return blockBodyCommitments{}, err
 	}
-	if transactionHash != header.TxHash {
-		return newBodyHeaderMismatch(
-			header,
-			fmt.Errorf("body has invalid transaction hash: have %x, exp: %x", transactionHash, header.TxHash),
-		)
-	}
-
 	uncleHash := crypto.Keccak256Hash(b.uncles)
-	if uncleHash != header.UncleHash {
-		return newBodyHeaderMismatch(
-			header,
-			fmt.Errorf("body has invalid uncle hash: have %x, exp: %x", uncleHash, header.UncleHash),
-		)
+	commitments := blockBodyCommitments{
+		transactionHash: transactionHash,
+		uncleHash:       uncleHash,
+		hasWithdrawals:  b.hasWithdrawals,
+	}
+	if !b.hasWithdrawals {
+		return commitments, nil
 	}
 
+	commitments.withdrawalsHash, err = types.DeriveShaRawValues(b.withdrawals)
+	if err != nil {
+		return blockBodyCommitments{}, err
+	}
+	return commitments, nil
+}
+
+func (b blockBodyCommitments) matchesHeader(header *types.Header) error {
+	if b.transactionHash != header.TxHash {
+		return fmt.Errorf("body has invalid transaction hash: have %x, exp: %x", b.transactionHash, header.TxHash)
+	}
+	if b.uncleHash != header.UncleHash {
+		return fmt.Errorf("body has invalid uncle hash: have %x, exp: %x", b.uncleHash, header.UncleHash)
+	}
 	switch {
 	case header.WithdrawalsHash == nil && b.hasWithdrawals:
-		return newBodyHeaderMismatch(header, errors.New("body has unexpected withdrawals"))
+		return errors.New("body has unexpected withdrawals")
 	case header.WithdrawalsHash != nil && !b.hasWithdrawals:
-		return newBodyHeaderMismatch(header, errors.New("body is missing withdrawals"))
-	case header.WithdrawalsHash == nil:
-		return nil
-	}
-
-	withdrawalsHash, err := types.DeriveShaRawValues(b.withdrawals)
-	if err != nil {
-		return err
-	}
-	if withdrawalsHash != *header.WithdrawalsHash {
-		return newBodyHeaderMismatch(
-			header,
-			fmt.Errorf("body has invalid withdrawals hash: have %x, exp: %x", withdrawalsHash, *header.WithdrawalsHash),
-		)
+		return errors.New("body is missing withdrawals")
+	case header.WithdrawalsHash != nil && b.withdrawalsHash != *header.WithdrawalsHash:
+		return fmt.Errorf("body has invalid withdrawals hash: have %x, exp: %x", b.withdrawalsHash, *header.WithdrawalsHash)
 	}
 	return nil
 }

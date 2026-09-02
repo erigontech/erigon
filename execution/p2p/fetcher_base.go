@@ -122,29 +122,46 @@ func (f *FetcherBase) FetchBodies(
 	peerId *PeerId,
 	opts ...FetcherOption,
 ) (FetcherResponse[[]*types.Body], error) {
-	var bodies []*types.Body
+	bodies := make([]*types.Body, len(headers))
+	pendingHeaders := slices.Clone(headers)
+	pendingIndexes := make([]int, len(headers))
+	for i := range pendingIndexes {
+		pendingIndexes[i] = i
+	}
 	totalBodiesSize := 0
 
-	for len(headers) > 0 {
+	for len(pendingHeaders) > 0 {
 		// Request up to MaxBodiesServe headers per page. A peer may return a
-		// non-empty prefix, so continue from the first header without a body.
-		var headersChunk []*types.Header
-		if len(headers) > eth.MaxBodiesServe {
-			headersChunk = headers[:eth.MaxBodiesServe]
-		} else {
-			headersChunk = headers
-		}
+		// partial response, so continue with the headers still missing a body.
+		chunkLen := min(len(pendingHeaders), eth.MaxBodiesServe)
+		headersChunk := pendingHeaders[:chunkLen]
 
 		bodiesChunk, err := f.fetchBodiesWithRetry(ctx, headersChunk, peerId, f.config.CopyWithOptions(opts...))
 		if err != nil {
 			return FetcherResponse[[]*types.Body]{}, err
 		}
-		if len(bodiesChunk.Data) == 0 {
-			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headers)
+
+		matchedCount := 0
+		missingCount := 0
+		for i, body := range bodiesChunk.Data {
+			if body == nil {
+				pendingHeaders[missingCount] = headersChunk[i]
+				pendingIndexes[missingCount] = pendingIndexes[i]
+				missingCount++
+				continue
+			}
+
+			bodies[pendingIndexes[i]] = body
+			matchedCount++
+		}
+		if matchedCount == 0 {
+			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headersChunk)
 		}
 
-		bodies = append(bodies, bodiesChunk.Data...)
-		headers = headers[len(bodiesChunk.Data):]
+		remainingCount := copy(pendingHeaders[missingCount:], pendingHeaders[chunkLen:])
+		copy(pendingIndexes[missingCount:], pendingIndexes[chunkLen:])
+		pendingHeaders = pendingHeaders[:missingCount+remainingCount]
+		pendingIndexes = pendingIndexes[:missingCount+remainingCount]
 		totalBodiesSize += bodiesChunk.TotalSize
 	}
 

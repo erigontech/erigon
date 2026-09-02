@@ -58,6 +58,30 @@ func TestDecodeBlockBodiesResponseMatchesHeaderBeforeDecoding(t *testing.T) {
 	}
 }
 
+func TestDecodeBlockBodiesResponseAlignsSparseBodies(t *testing.T) {
+	requestedBodies := []*types.Body{
+		{},
+		{Withdrawals: []*types.Withdrawal{
+			{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4},
+		}},
+	}
+	headers := []*types.Header{
+		newMockHeaderForBody(1, requestedBodies[0]),
+		newMockHeaderForBody(2, requestedBodies[1]),
+	}
+	encoded, err := rlp.EncodeToBytes(requestedBodies[1:])
+	require.NoError(t, err)
+	encodedBodies, rest, err := rlp.SplitList(encoded)
+	require.NoError(t, err)
+	require.Empty(t, rest)
+
+	decoded, err := decodeBlockBodiesResponse(encodedBodies, headers)
+	require.NoError(t, err)
+	require.Len(t, decoded, len(headers))
+	require.Nil(t, decoded[0])
+	require.NoError(t, decoded[1].MatchesHeader(headers[1]))
+}
+
 func TestDecodeBlockBodiesResponseRejectsMismatchBeforeTransactionDecode(t *testing.T) {
 	transactions := rlpTestList([]byte{rlp.EmptyListCode})
 	body := rlpTestList(append(transactions, rlp.EmptyListCode))
@@ -92,7 +116,7 @@ func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
 
 	decoded, err := decodeBlockBodiesResponse(nil, []*types.Header{header})
 	require.NoError(t, err)
-	require.Empty(t, decoded)
+	require.Equal(t, []*types.Body{nil}, decoded)
 }
 
 func rlpTestList(content []byte) []byte {
