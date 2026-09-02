@@ -19,40 +19,73 @@ package jsonrpc
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 )
 
 type pruneFloorAtHead struct {
-	head  uint64
-	floor uint64
+	head      uint64
+	floor     uint64
+	expiresAt time.Time
 }
 
-// pruneFloorCache caches successful floor reads for an exact chain head and
-// coalesces concurrent requests. A different head triggers a fresh read.
+const defaultPruneFloorCacheTTL = time.Second
+
+// pruneFloorCache briefly caches successful floor reads for an exact chain head
+// and coalesces concurrent requests. The lifetime also bounds staleness when the
+// available files change without moving the head.
 type pruneFloorCache struct {
 	value atomic.Pointer[pruneFloorAtHead]
 	load  singleflight.Group
+	ttl   time.Duration
+	now   func() time.Time
+}
+
+func (c *pruneFloorCache) cached(head uint64) (uint64, bool) {
+	cached := c.value.Load()
+	if cached == nil || cached.head != head || !c.timeNow().Before(cached.expiresAt) {
+		return 0, false
+	}
+	return cached.floor, true
+}
+
+func (c *pruneFloorCache) timeNow() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+func (c *pruneFloorCache) cacheTTL() time.Duration {
+	if c.ttl > 0 {
+		return c.ttl
+	}
+	return defaultPruneFloorCacheTTL
 }
 
 func (c *pruneFloorCache) get(ctx context.Context, head uint64, read func() (uint64, error)) (uint64, error) {
 	for {
-		if cached := c.value.Load(); cached != nil && cached.head == head {
-			return cached.floor, nil
+		if floor, ok := c.cached(head); ok {
+			return floor, nil
 		}
 
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
 		_, err, _ := c.load.Do("floor", func() (any, error) {
-			if cached := c.value.Load(); cached != nil && cached.head == head {
-				return cached.floor, nil
+			if floor, ok := c.cached(head); ok {
+				return floor, nil
 			}
 			floor, err := read()
 			if err != nil {
 				return nil, err
 			}
-			c.value.Store(&pruneFloorAtHead{head: head, floor: floor})
+			c.value.Store(&pruneFloorAtHead{
+				head:      head,
+				floor:     floor,
+				expiresAt: c.timeNow().Add(c.cacheTTL()),
+			})
 			return floor, nil
 		})
 		if err != nil {

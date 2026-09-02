@@ -29,7 +29,7 @@ func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	t.Parallel()
 
 	var reads atomic.Uint64
-	cache := pruneFloorCache{}
+	cache := pruneFloorCache{ttl: time.Hour}
 	read := func() (uint64, error) { return reads.Add(1), nil }
 
 	floor, err := cache.get(t.Context(), 10, read)
@@ -44,12 +44,38 @@ func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	require.Equal(t, uint64(2), reads.Load())
 }
 
+func TestPruneFloorCacheRefreshesAtSameHeadAfterExpiry(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1, 0)
+	var reads atomic.Uint64
+	cache := pruneFloorCache{
+		ttl: time.Second,
+		now: func() time.Time { return now },
+	}
+	read := func() (uint64, error) { return reads.Add(1), nil }
+
+	floor, err := cache.get(t.Context(), 10, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), floor)
+	floor, err = cache.get(t.Context(), 10, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), floor)
+	require.Equal(t, uint64(1), reads.Load())
+
+	now = now.Add(time.Second)
+	floor, err = cache.get(t.Context(), 10, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), floor)
+	require.Equal(t, uint64(2), reads.Load())
+}
+
 func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	started := make(chan struct{})
 	release := make(chan struct{})
 	returned := make(chan error, 1)
-	cache := pruneFloorCache{}
+	cache := pruneFloorCache{ttl: time.Hour}
 
 	go func() {
 		_, err := cache.get(ctx, 1, func() (uint64, error) {
@@ -73,7 +99,7 @@ func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
 }
 
 func BenchmarkPruneFloorCacheHit(b *testing.B) {
-	cache := pruneFloorCache{}
+	cache := pruneFloorCache{ttl: time.Hour}
 	read := func() (uint64, error) { return 1, nil }
 	_, err := cache.get(context.Background(), 1, read)
 	require.NoError(b, err)
