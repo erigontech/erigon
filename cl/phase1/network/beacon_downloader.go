@@ -193,10 +193,6 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				return
 			}
 			probeWG.Go(func() {
-				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
-					httpFallbackRunning.Store(false)
-					return
-				}
 				latestHighestSlotProcessed, _, _ := f.progressSnapshot()
 				httpStart := latestHighestSlotProcessed + 1
 				httpBlocks, httpErr := fetchBlocksFromBeaconAPI(probeCtx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
@@ -325,9 +321,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				stopProbes()
 				return
 			case <-fallbackTimerC:
-				if len(atomicResp.Load().(peerAndBlocks).blocks) == 0 {
-					startHTTPFallback()
-				}
+				startHTTPFallback()
 				fallbackTimerC = nil
 			default:
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {

@@ -483,6 +483,10 @@ func TestForwardRequestMoreDoesNotPreferHTTPWithoutProgress(t *testing.T) {
 	firstHTTPCalls := httpCalls.Load()
 
 	sentinel.healthy.Store(true)
+	// The HTTP count below measures preference, not the fallback timer, which is entitled to fire
+	// whenever a P2P probe is slower than the delay. Put the timer out of reach so the assertion is
+	// about the httpPreferred fast path alone.
+	forwardBeaconFallbackDelay = time.Minute
 	downloader.SetProcessFunction(func(_ uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
 		return blocks[len(blocks)-1].Block.Slot, nil
 	})
