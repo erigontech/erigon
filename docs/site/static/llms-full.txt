@@ -57,15 +57,68 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 | Component | Recommendation | Notes |
 | --- | --- | --- |
-| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs.SSD performance may degrade when nearing full capacity. |
-| Disk Configuration | RAID 0 for multiple disks (Speed) | High-Speed Option: RAID 0 provides maximum speed but no redundancy (data loss risk).ZFS filesystems may be considered for Archive nodes for their data integrity features, but complex RAID-Z setups are generally not recommended. |
+| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs. SSD performance may degrade when nearing full capacity. |
+| Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](#filesystem). |
+| Filesystem | ext4 or XFS | See [Filesystem](#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
-| CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
+| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
+
+## Filesystem
+
+Use **ext4** or **XFS** on a single NVMe device. The disk figures below are measured on ext4, and that is the configuration Erigon's own measurements come from. XFS is a reasonable choice on the same reasoning, but we have not measured it.
+
+Mount with `noatime` so reads do not generate metadata writes:
+
+```
+UUID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx  /data  ext4  defaults,noatime  0 2
+```
+
+Use the filesystem UUID (`blkid` prints it) rather than a `/dev/nvme…` name, which can move between boots. The final `2` is the `fsck` pass for a non-root filesystem.
+
+### Why the filesystem matters
+
+Erigon's bottleneck is disk **latency**, not throughput or IOPS — see [Improving Performance](/help-center/known-issues#improving-performance). Erigon does pre-warm what it can, but two properties of the workload mean its reads cannot be fully predicted, so part of every block's reads lands cold:
+
+* **EVM execution reads arbitrary state.** Nothing tells you in advance which accounts or storage slots a block will touch. Once the working set no longer fits in RAM, some of those reads land on cold data no cache had reason to hold.
+* **Merkle trie updates pull in neighbours.** Updating one key requires reading the nodes next to it in the trie. Those may be accounts the EVM never touches — they are involved only because of where they sit in the trie.
+
+Every layer the filesystem adds is added on top of each of those reads. That is what favours a thin filesystem here: ext4 and XFS store a file and leave caching to the OS page cache, which is what Erigon's memory-mapped database is built to use.
+
+### Filesystems to avoid
+
+Prefer a plain journaling filesystem over a copy-on-write or database-like one:
+
+* **ZFS** behaves more like a database than a filesystem. It keeps its own write-ahead log and its own cache (**ARC**), and that cache competes with the OS page cache for the same RAM. Optional features such as encryption and dedup add work to the read path this workload is bound by, and tuning ZFS for it is not a solved problem.
+* **Btrfs** is a copy-on-write B-tree of pages, and Erigon's MDBX database is itself a B-tree of pages, so you end up running a database inside a database. Its `autodefrag` feature is the sharpest edge: it can multiply write I/O by as much as 100x. See [Background File System Features Can Hurt Performance](/help-center/known-issues#background-file-system-features-can-hurt-performance).
+
+Filesystems other than ext4 and XFS are not part of what we measure, so treat their performance as unverified rather than assumed.
+
+:::note
+Erigon checks this for you at startup. It detects the filesystem type behind each of its directories — which may sit on different mounts — and logs one warning per unrecognised type:
+
+```text
+WARN [diskutils] Filesystem is neither ext4 nor XFS, performance is unverified  fstype=zfs paths=/data/erigon see=https://docs.erigon.tech/get-started/hardware-requirements
+```
+
+It is a warning, not a refusal: the node starts and runs either way. A type Erigon cannot detect is logged at debug level instead, so no warning does not by itself confirm ext4 or XFS.
+:::
+
+A few more points that follow from Erigon's storage model — see [Database](../fundamentals/database) for the layout:
+
+* **One device is enough.** An archive node fits on a single 4 TB drive, so RAID 0 gains you no capacity you need while doubling the chance of losing the datadir. Stripe only if no single drive you have is large enough.
+* **For failure protection, use redundancy — not RAID 0.** A mirrored array and ECC memory guard against a failing disk or bad RAM, which is what [Best Practices](/help-center/best-practices) recommends. RAID 0 does the opposite.
+* **Most of the datadir is re-downloadable.** Snapshot files are content-addressed and refetched from peers, so `chaindata/` is the part worth backing up.
+* **Erigon memory-maps its database.** Leave RAM free for the page cache rather than handing it to a filesystem or volume manager to cache on its own.
+* **Network and cloud block storage are slow for block execution.** See [known issues](/help-center/known-issues#cloud-network-drives).
+
+If you must split the datadir across a fast and a slow device, see [Optimizing Storage](../fundamentals/optimizing-storage).
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+
+### Ethereum mainnet
 
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
@@ -75,6 +128,8 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 
 _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows._
 
+### Gnosis Chain
+
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
 | Archive        | 673.59 GB | 1 TB                        | 16 GB              | 32 GB                 |
@@ -83,17 +138,23 @@ _Current Disk Usage measured as of 2026-07-19; usage grows over time as the chai
 
 _Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
+### Sepolia
+
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
 | Archive        | 1.10 TB |
 
 _Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
 
+### Hoodi
+
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
 | Archive        | 133.73 GB |
 
 _Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+
+### Chiado
 
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
@@ -113,6 +174,19 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 | -------------- | -------------------- | ----------------------- |
 | Staking/Mining | 10 Mbps              | 50 Mbps                 |
 | Non-Staking    | 5 Mbps               | 25 Mbps                 |
+
+## Sync Times
+
+Approximate times to sync from scratch to the tip of the chain.
+
+| Chain    | Archive | Full (Default) | Minimal |
+| -------- | ------- | -------------- | ------- |
+| Ethereum | ~8 h    | ~4–6 h         | ~2 h    |
+| Gnosis   | ~2 h    | ~1–2 h         | ~30 m   |
+
+:::info
+These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+:::
 
 ---
 
@@ -145,6 +219,8 @@ The recommended approach involves running and syncing an **Erigon node alongside
 
 You can choose whether to migrate to Erigon + Caplin (the simplest setup) or continue using your existing CL.
 
+#### Migrate to Erigon + Caplin (Internal CL)
+
 This path offers the simplest validator configuration by using Erigon's embedded consensus client, Caplin. You will no longer need your external Consensus Layer (CL) client or a JWT secret for CL-EL communication.
 
 **Steps for Minimal Downtime**
@@ -164,6 +240,8 @@ This path offers the simplest validator configuration by using Erigon's embedded
    * To restart Erigon, there's no need to specify `--port`. Refer to this [guide](../fundamentals/caplin) for additional Erigon + Caplin configuration recommendations.
    * Crucially, reconfigure your **validator keys manager** to point directly to the Erigon Beacon API, as Erigon/Caplin now handles both layers internally.
 6. **Decommission Old Setup**: Verify Erigon/Caplin is proposing and attesting blocks correctly. If confirmed, safely remove Geth, the external CL client, and all their data, including the old JWT secret.
+
+#### Migrate to Erigon + External CL
 
 Switch to an Erigon Execution Layer (EL) while keeping your current external Consensus Layer (CL) client (e.g., Prysm, Lighthouse) and your existing JWT secret. Start by syncing Erigon with Caplin as the CL, then configure it to use the external CL.
 
@@ -188,6 +266,8 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 
 This is the simplest option as it requires no configuration adjustments. However, the node will be down until Erigon finishes syncing.
 
+#### Erigon + Caplin (Fastest Sync)
+
 This path is the fastest way to get Erigon running. It utilizes **Erigon's embedded consensus client, Caplin**, requiring no external CL client or JWT secret. This is ideal for home users with limited disk space and no critical uptime requirements.
 
 **Steps for Quickest Start**
@@ -198,6 +278,8 @@ This path is the fastest way to get Erigon running. It utilizes **Erigon's embed
 4. **Synchronization**: Start syncing Erigon with the default Caplin configuration (Caplin does not use the Engine API).
 5. **Final Setup**: Once Erigon is fully synced, your node is online.
 6. **Monitoring**: Monitor the sync progress using `eth_syncing` or the health check, and ensure no errors appear in Erigon's logs.
+
+#### Erigon + External CL (Reuse Existing CL)
 
 This path retains your existing **external Consensus Layer (CL)** client (e.g., Prysm, Lighthouse) but swaps the old EL client for Erigon. Since downtime is accepted, this process requires simpler port management.
 
@@ -300,13 +382,19 @@ URL: https://docs.erigon.tech/get-started/installation
 
 To install Erigon, begin by choosing an installation method suited to your operating system and technical preference. Options range from the simplest to the most complex, including pre-built images, containers, or source compilation.
 
+### Linux
+
 Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
 Docker — Run Erigon in an isolated container. Recommended for most users.
 Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
 Ethereum on ARM — Community image and APT repository for ARM single-board computers (Raspberry Pi, Rock 5B, Orange Pi 5).
 
+### macOS
+
 Docker — Run Erigon in an isolated container. The recommended method on macOS.
 Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
+
+### Windows
 
 Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
 WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
@@ -556,13 +644,27 @@ make -j<n> erigon
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
 
+**2.4 Installing Outside the Build Tree (Optional)**
+
+Running Erigon as a [dedicated system user](/fundamentals/security) — for example under `systemd` — is easiest when the binaries live outside your source checkout, where that user can reach them. Pass a destination to `make install`:
+
+```sh
+make DIST=/opt/erigon install
+```
+
+`make install` creates the destination directory, so a path under `/opt` needs either `sudo make DIST=/opt/erigon install` or a directory you already own (`sudo install -d -o $USER /opt/erigon`). A path under `$HOME/erigon` avoids that entirely. `make install` copies whatever is currently in `build/bin`, so build every component you intend to deploy before running it.
+
+Once installed this way, run the installed copy — `/opt/erigon/erigon` — rather than the one in the build tree.
+
 **3. Running Erigon**
 
-After installation, you can run Erigon from your terminal:
+From the build tree, run Erigon from your terminal:
 
 ```sh
 ./build/bin/erigon [options]
 ```
+
+If you completed step 2.4, run the binary at your chosen `DIST` path instead.
 
 ### Windows
 
@@ -1037,6 +1139,8 @@ scheduled forks, not after.
 
 ## Erigon with Prysm as the external CL
 
+### Prysm
+
 1.  Start Erigon adding the `--externalcl` flag:
 
     ```bash
@@ -1060,6 +1164,8 @@ scheduled forks, not after.
     --checkpoint-sync-url=https://mainnet.checkpoint.sigp.io \
     --genesis-beacon-api-url=https://mainnet.checkpoint.sigp.io
     ```
+
+### Lighthouse
 
 1.  Start Erigon adding the `--externalcl` flag:
 
@@ -1353,16 +1459,22 @@ URL: https://docs.erigon.tech/fundamentals/basic-usage
 
 Erigon is mainly operated through the command line. The commands may vary based on your installation method.
 
+## Pre-Built Binaries
+
 Open your terminal and simply start Erigon with the command:
 
 ```text
 erigon [options]
 ```
 
+## Docker
+
 * You can use Docker Compose like in this [example](/get-started/easy-nodes/how-to-run-an-ethereum-node#a-create-the-configuration-file)
 *   Alternatively you can use the Docker syntax, for example:
 
     `docker run -it erigontech/erigon:v{ERIGON_VERSION} [options]`
+
+## Built from Source
 
 Open your terminal and move to the directory where you installed Erigon
 
@@ -1375,6 +1487,8 @@ You can then start Erigon with the below command:
 ```shell
 ./build/bin/erigon [options]
 ```
+
+## Windows
 
 To run Erigon after a native compilation, enter the following command in your Command Prompt or PowerShell:
 
@@ -1756,7 +1870,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 ## Tuning knobs
 
-- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
+- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM. It is the Execution stage's commit threshold, so a larger value means larger single MDBX write transactions, which raise the file's high-water mark in bigger steps. Keeping it at or below `1G` is a useful heuristic if you want MDBX to grow more gradually.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
 - **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, so it is silently raised to the worker count. Lower `--exec.workers` instead.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
@@ -1772,6 +1886,28 @@ If you need to reclaim space without resyncing from scratch:
 | `temp/` | Cleaned automatically at startup anyway |
 | `chaindata/` | Recoverable, but triggers a resync of the post-snapshot tip from the consensus layer — not instant; keep a backup for fast recovery |
 | `snapshots/` | **Do not delete** — would force a full resync |
+
+## Reclaiming space in `chaindata/`
+
+MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat`
+never shrinks on its own. After a long sync or a large prune the file can stay
+much bigger than the data it actually holds.
+
+`erigon db compact` rewrites every mdbx database of a datadir without its free
+pages:
+
+```bash
+./build/bin/erigon db compact --datadir=<path>
+```
+
+Erigon must be stopped. The command takes the datadir lock and opens each
+database exclusively, so it fails instead of touching a database still in use.
+The copy is written inside the database's own directory, so each database needs
+free space for a second copy of itself on the volume it already lives on, and a
+big `chaindata/` can take hours.
+
+This is a manual defragmentation pass, not the background compaction of an
+LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 
@@ -1802,11 +1938,33 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
-except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
-alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
-working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
-receipts additionally extend receipts and logs availability from the state-history window back to genesis.
+As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
+default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
+`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
+datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency.
+
+`--prune.include-receipts` on its own does **not** extend receipts and logs back to genesis: the receipt cache follows
+the node's state-history window. On an [Archive node](#archive-node) that window is unbounded, so the cache covers the
+whole chain. On a [Full](#full-node), [Minimal](#minimal-node) or [Historical Blocks](#blocks-node) node it is the
+mode's state-history window (262,144 blocks for full and blocks, 100,000 for minimal). To keep the cache in full
+regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
+`--prune.receipts.distance=N` keeps it for the latest `N` blocks instead. Either form requires
+`--prune.include-receipts`. Note that this retains the receipt *cache* only — it does not keep the
+log address and topic indexes a filtered `eth_getLogs` needs. See
+[Historical Blocks Node](#blocks-node).
+:::
+
+:::note[New in v3.6]
+**Pruned nodes now reclaim disk from old snapshot files.** Frozen state-history (`.v`) and inverted-index (`.ef`) files
+that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted (a fresh sync already
+skipped downloading them, in v3.5 too). Before v3.6, files already on disk were retained indefinitely regardless of
+`--prune.mode`, so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still holds the retired
+files. The commitment-history and receipt-cache domains do not behave the same way here. Commitment history is retired
+against its own window, `--prune.commitment-history.distance`; left unset, nothing is retired. The receipt cache
+instead follows the general state-history window by default, and is only retired against an independent window when
+`--prune.receipts.distance` is set explicitly (with `keep-all` retiring nothing).
 :::
 
 ## Archive node
@@ -1833,11 +1991,21 @@ The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and
 back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
-paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
-(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts** by block
+(`eth_getBlockReceipts` back to genesis), add
 `--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
 follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
 within that same window.
+
+`keep-all` does **not** extend filtered `eth_getLogs` back to genesis. It retains the receipt-cache domain only; the
+log address and topic indexes that a filtered query needs are standalone inverted indexes, retired against the general
+state-history cutoff (`AggregatorRoTx.Retire` applies `RetireCutoffs.Default` to them, and only `RCacheDomain` carries
+the `keep-all` override). An address- or topic-filtered `eth_getLogs` can therefore miss matches older than 262,144
+blocks even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
+read path: with neither `address` nor `topics` set, `applyFiltersV3` consults no bitmap and falls back to a plain
+`stream.Range` over the retained cache, so an unfiltered range query is unaffected. For those older ranges, either query
+by block with `eth_getBlockReceipts` and filter client-side, or use an [Archive node](#archive-node), whose unbounded
+state-history window keeps the log indexes too.
 
 ---
 
@@ -1984,7 +2152,9 @@ Always **back up your `--datadir`** before running snapshot reset, upgrade, or d
 URL: https://docs.erigon.tech/fundamentals/caplin
 
 
-Caplin, the innovative Erigon's embedded Consensus Layer, significantly enhances the performance, efficiency, and reliability of Ethereum infrastructure. Its groundbreaking design minimizes disk usage, facilitating faster transaction processing and bolstering network security. By integrating the consensus layer directly into the EVM-node, Caplin eliminates the need for separate disk storage, thereby reducing system complexity and enhancing overall efficiency.
+Caplin is Erigon's embedded Consensus Layer. It runs inside the Erigon process and keeps all of its data under the same `--datadir` as the execution layer, so a full node needs neither a second client process nor a second datadir to operate.
+
+Caplin does write to disk. It maintains an indexing database at `<datadir>/caplin/indexing`, its own snapshots under `<datadir>/snapshots/caplin`, and further subdirectories for blobs, PeerDAS column data and beacon state. What Caplin removes is the separate process and separate datadir of an external consensus client — not the storage itself.
 
 ## Caplin Usage
 
@@ -2029,6 +2199,12 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
 | `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
 | `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
+
+The API is not served until you enable it with `--beacon.api=<namespaces>`; see [Caplin for staking](../staking/caplin) for the full namespace list.
+
+:::note
+Enabling the Beacon API increases RAM usage by roughly **6 GB**. Account for it when sizing your host — see [Hardware Requirements](../get-started/hardware-requirements).
+:::
 
 ---
 
@@ -2660,6 +2836,10 @@ http = true
 
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
+:::tip
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which do not take the `ERIGON_` prefix — can be set with or without it. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form. Erigon logs every variable it reads at warn level either way, but the bare name draws an extra `use ERIGON_ prefix for env` warning on top, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+:::
+
 ### Core Environment Variables
 
 **Database and Performance:**
@@ -2682,6 +2862,25 @@ Erigon supports configuration through environment variables, primarily for exper
 * `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
 * `EXEC3_WORKERS` - Sets number of parallel execution workers (default: number of CPU cores)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
+
+**State Cache:**
+
+* `USE_STATE_CACHE` - Enables the executor's domain-shared read cache (default: `true`; flag equivalent: `--exec.state-cache`). When `false` no cache is built, and neither the budgets nor the pin controller below have any effect.
+* `STATE_CACHE_ACCOUNTS` - Byte budget for the account cache (default: `150MB`). **New in v3.6**; the built-in budget it overrides was `1GB` in v3.5.
+* `STATE_CACHE_STORAGE` - Byte budget for the storage cache (default: `1GB`)
+* `STATE_CACHE_CODE` - Byte budget for the code cache, applied separately to each of its two byte-bearing layers; a third, size-only layer is sized independently (default: `512MB`)
+* `STATE_CACHE_CODE_INDEX` - Byte budget for the address-to-code index, shared by its two address-keyed LRUs (default: `32MB`, floor 1024 entries each). **New in v3.6**; the built-in budget was `16MB` in v3.5.
+* `DISABLE_ADAPTIVE_PIN` - Disables the adaptive trunk-pin controller, which watches per-contract miss pressure on the commitment branch cache and pins the hottest contracts' trunk branches in RAM to cut per-block I/O (default: `true`, so pinning is off; new in v3.6). Set to `false` to enable it — it targets workloads where a single contract dominates storage reads, and costs RAM on the commit path.
+
+The four `STATE_CACHE_*` budgets are new in v3.6. Values parse as human-readable sizes (`150MB`, `1GB`); an unparseable value aborts startup, though only when the state cache is enabled — with `USE_STATE_CACHE=false` nothing reads them.
+
+None of the four is an exact byte bound. Each is divided by a typical per-domain entry size to produce an entry-count cap, and it is that cap, not a running byte total, that evicts — so residency follows the entries actually stored. The code layers assume roughly 12 KiB per contract, and a working set of larger contracts will exceed the configured figure. `STATE_CACHE_CODE` applies to each of the two byte-bearing code layers, so their combined nominal ceiling is twice the value; a third, size-only layer answers `EXTCODESIZE`/`EXTCODEHASH` — `STATE_CACHE_CODE` does not size it, but it grows on demand from the same envelope, up to a ceiling of about 61 MiB. A contract inserted into both at once is stored once and referenced twice, but the layers are independent LRUs: once their eviction orders diverge, a refill into one while the other still holds a live entry leaves two backing arrays for the same contract, so heap use can approach the two-layer total. The account and storage caps are additionally clamped to between 1024 and 2^24 entries, which for their entry sizes means roughly 96 KiB–1.5 GiB for accounts and 88 KiB–1.375 GiB for storage; a value outside its own range makes no difference.
+
+The budgets are not reserved up front. The account, storage and code caches start small and grow in steps, funding each step from one process-wide envelope sized at 1/32 of the memory available to Erigon (system RAM, cgroup limit or `GOMEMLIMIT`, whichever is lowest) and shared with other in-process caches such as the commitment branch cache. A growth step that would overflow the envelope is refused, and that cache evicts within its current size until envelope space frees up. The small construction-time reservation is taken unconditionally, so a full envelope can be modestly overdrawn.
+
+What that means for sizing: each of these state caches starts at `max(1024, shards × 16)` entries, capped by its own ceiling. The shard count is the smaller of the ceiling over 64 and `GOMAXPROCS × 16`, each rounded up to a power of two, so on a multi-core host the initial reservation is larger than the 1024-entry floor — with 8 cores it settles at 2048 entries once the budget is big enough to support that many shards. A `STATE_CACHE_CODE` below about 12 MiB is bounded by its ceiling instead and stays under 1024 entries. That initial capacity is reserved from the envelope at construction, not on first use: the two byte-bearing code layers take 24 MiB between them before a single block executes. Only growth beyond it is demand-driven, so twice `STATE_CACHE_CODE` is the largest reservation those layers can reach, not one they hold from the start. `STATE_CACHE_CODE_INDEX` differs again — it fixes its entry count at construction but never reserves envelope bytes at all.
+
+Budgets summing past the envelope therefore mean it *can* saturate, not that it will — that depends on the working set. With 32 GiB available to Erigon after limits the whole envelope is 1 GiB — below the roughly 2.2 GiB the envelope-backed caches can reserve under the defaults (accounts, storage, twice the code budget, and the size-only layer) — so a large enough working set saturates it; past that point raising the envelope-backed budgets together adds no aggregate capacity and only changes which cache wins the space left. Where more is available the envelope may never saturate, and there raising them does help. Mind that the figure follows the *lowest* of physical RAM, the cgroup limit and `GOMEMLIMIT`: a 32 GiB host running Erigon in an 8 GiB container gets a 256 MiB envelope, not 1 GiB. `STATE_CACHE_CODE_INDEX` sits outside the envelope altogether — its entry cap is fixed up front from the budget, so above the 1024-entry floor noted above, raising it adds index capacity independently of how saturated the envelope is.
 
 ### Memory and Debugging Variables
 
@@ -2710,16 +2909,16 @@ When running Erigon in [Docker](/fundamentals/docker-compose), you can configure
 **Basic Performance Tuning:**
 
 ```bash
-export MDBX_LOCK_IN_RAM=true
-export SNAPSHOT_MADV_RND=false
+export ERIGON_MDBX_LOCK_IN_RAM=true
+export ERIGON_SNAPSHOT_MADV_RND=false
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Memory Debugging:**
 
 ```bash
-export SAVE_HEAP_PROFILE=true
-export HEAP_PROFILE_THRESHOLD=45
+export ERIGON_SAVE_HEAP_PROFILE=true
+export ERIGON_HEAP_PROFILE_THRESHOLD=45
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
@@ -3016,7 +3215,7 @@ Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your 
 URL: https://docs.erigon.tech/fundamentals/optimizing-storage
 
 
-For optimal performance, it's recommended to store the datadir on a fast NVMe-RAID disk. However, if this is not feasible, you can store the history on a cheaper disk and still achieve good performance.
+For optimal performance, store the datadir on a single fast NVMe device formatted with ext4 or XFS — see [Filesystem](../get-started/hardware-requirements#filesystem). If that is not feasible, you can keep the history on a cheaper disk and still achieve good performance.
 
 ### Step 1
 
@@ -3075,10 +3274,10 @@ These instructions are designed to improve the performance of Erigon 3, particul
 
 ## Optimize for Cloud Drives
 
-* Set `SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
+* Set `ERIGON_SNAPSHOT_MADV_RND=false` to enable the operating system's cache prefetching for better performance on cloud drives with good throughput but bad latency.
 
 ```bash
-SNAPSHOT_MADV_RND=false
+export ERIGON_SNAPSHOT_MADV_RND=false
 ```
 
 ## Lock Latest State in RAM
@@ -3231,16 +3430,6 @@ For Prometheus monitoring, each instance should expose metrics on different port
 
 ## Performance Optimization
 
-### Cloud Storage Considerations
-
-If using network-attached storage, apply these optimizations:
-
-```bash
-# Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
---db.pagesize=64kb
-```
-
 ### Memory Locking for Performance
 
 For production setups with sufficient RAM, you can lock critical data in memory:
@@ -3273,7 +3462,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon 3 (it also sensitive for disk-latency - but it will download 99% of history)
 
@@ -3364,6 +3553,10 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 * `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
 
+**Downloader (torrent) logs**
+
+The torrent client inside the Downloader keeps its own JSON-formatted file at `<datadir>/logs/torrent.log`. The path is built from the datadir and does **not** follow `--log.dir.path`, so it stays there even when Erigon's own logs are redirected elsewhere. It is written at whichever is **more verbose** of `--torrent.verbosity` and `WARN`, so warnings and errors always reach it even at the default verbosity. Messages at `--torrent.verbosity` or above are additionally forwarded to Erigon's own file and console loggers, which emit them only if `--log.dir.verbosity` and `--verbosity` are themselves set to a verbose enough level.
+
 **Log Levels**
 
 The logging system defines six distinct log levels in hierarchical order:
@@ -3444,6 +3637,10 @@ Based on best practices for execution clients, your local machine's firewall set
 | 30303    | TCP & UDP    | Peer-to-Peer (P2P) Networking | Allow inbound and outbound traffic to enable peer discovery and connections.                                                             |
 | 8545     | TCP          | JSON-RPC (Public API)         | Block all traffic _except_ from explicitly defined trusted machines. This port should never be publicly exposed without strict controls. |
 | 9090     | TCP          | Private API Communication     | Block all traffic except for communication between your internal components (e.g., RPC Daemon and core node).                            |
+
+:::note
+Some hosting providers add firewall requirements and operational pitfalls on top of these. If you run on Hetzner Cloud or a Hetzner dedicated server, see the [Hetzner firewall note](/help-center/troubleshooting#hetzner-cloud--dedicated-server-firewall-note) for the ports their edge firewall must allow, and for the reserved IPv4 ranges worth blocking yourself so outbound dials do not trip their abuse detection.
+:::
 
 #### CORS Protection
 
@@ -3781,6 +3978,8 @@ When something looks wrong with your node, ask the assistant to sift through log
 
 Add the following to your Claude Desktop configuration file (`~/.config/claude-desktop/config.json` on Linux/macOS, `%APPDATA%\claude-desktop\config.json` on Windows):
 
+### JSON-RPC mode
+
 ```json
 {
   "mcpServers": {
@@ -3792,6 +3991,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 }
 ```
 
+### Datadir mode
+
 ```json
 {
   "mcpServers": {
@@ -3802,6 +4003,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
   }
 }
 ```
+
+### Embedded (HTTP)
 
 ```json
 {
@@ -3860,12 +4063,16 @@ claude mcp remove erigon
 
 [OpenAI Codex CLI](https://github.com/openai/codex) supports MCP servers via `~/.codex/config.yaml`. Add the `mcp_servers` key to your existing config file:
 
+### Embedded SSE
+
 ```yaml
 mcp_servers:
   erigon:
     type: sse
     url: http://127.0.0.1:8553/sse
 ```
+
+### Standalone stdio
 
 ```yaml
 mcp_servers:
@@ -4948,6 +5155,20 @@ For API usage refer to the below official resources:
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 * [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
+The sections below cover only the places where Erigon adds a method that is not in that
+standard set, or where its behaviour differs from it. They are not an exhaustive
+compliance statement: anything not listed here is expected to follow the spec, but a
+deviation that has not yet been documented may still exist.
+
+:::info
+`execution-apis` is a living specification rather than a frozen standard — methods are
+still being added, and some long-standing `eth` behaviour was never specified at all — so
+parts of what follows are differences from a moving target rather than defects. Erigon
+runs the specification's own conformance vectors in CI (Hive's `rpc-compat` suite against
+a pinned `execution-apis` revision) and works with the other client teams on closing
+these gaps, so this page will change as the two converge.
+:::
+
 ### Pending state
 
 Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
@@ -4970,7 +5191,7 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It originated as an Erigon extension and has since been adopted into the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) (April 2026). It takes two parameters.
 
 **Parameters**
 
@@ -5010,6 +5231,259 @@ An object mapping each requested address to an array of 32-byte values, in the s
 * A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
 * An empty `requests` object returns error code `-32602` with the message `empty request`.
 * When `blockNumber` is a block hash, the block must be canonical.
+
+### eth\_getWitness and eth\_getTxWitness
+
+Neither method exists in the standard set. They return a state witness for the
+*pre-state* of a block: the serialized trie node stream needed to re-execute it
+without a full state database.
+
+**Parameters**
+
+| Method | Parameter | Type | Description |
+| ------ | --------- | ---- | ----------- |
+| `eth_getWitness` | blockNumberOrHash | STRING, NUMBER or OBJECT | Block to build the witness for |
+| `eth_getTxWitness` | blockNumberOrHash | STRING, NUMBER or OBJECT | Block containing the transaction |
+| `eth_getTxWitness` | txIndex | QUANTITY | Index of a transaction within that block |
+
+:::info
+`eth_getTxWitness` currently only bounds-checks `txIndex` — an index past the end of the
+block is an error, but the witness it returns is the same whole-block witness
+`eth_getWitness` produces. Two cases are not rejected: the check narrows the index with
+`int(txIndex)`, so on a 64-bit build a value from `0x8000000000000000` upward wraps
+negative and passes; and at the genesis block the check never runs at all, because both
+methods share one implementation that returns the empty witness as soon as the block
+number resolves to `0`.
+:::
+
+**Returns**
+
+`DATA` — the serialized witness. On the normal path Erigon decodes the bytes it is about
+to return and checks that they rebuild the parent state root, so the witness is
+self-verified. Two early returns skip that check because they produce no witness to
+verify: the genesis block, and any block whose access set turns out to be empty. Both
+return the empty witness.
+
+**Requirements**
+
+Both methods need commitment history for any block above genesis, so start the node with:
+
+```text
+--prune.include-commitment-history
+```
+
+The genesis block is the one exception: the empty witness is returned before the
+commitment-history check, so `eth_getWitness` and `eth_getTxWitness` succeed at block `0`
+on a node without commitment history. For every other block, without it the call fails
+with an error starting with `eth_getWitness requires commitment history`; the message
+continues with a restart hint that names the
+`--prune.experimental.include-commitment-history` alias rather than the canonical flag
+above. If the requested block is older than the retained commitment history, the call
+fails with an error starting with `commitment history pruned`, followed by the retained
+range.
+
+### eth\_fillTransaction
+
+`eth_fillTransaction` takes a partially specified transaction, fills in what is
+missing, and returns it unsigned — it neither signs nor submits anything. The method
+was added to the execution-apis specification in July 2026; Erigon (matching geth)
+deviates from it in the return shape, which keeps the `raw` field the spec dropped.
+
+**Parameters**
+
+1. `Object` — a transaction object in the same shape `eth_call` accepts.
+
+The standard `type` field is ignored. `CallArgs` has no field for it and unknown JSON
+properties are accepted silently, so the envelope is inferred from whichever fee,
+access-list and blob fields are present. On a post-London head, a request such as
+
+```json
+{
+  "from": "0x71562b71999873db5b286df957af199ec94617f7",
+  "to": "0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e",
+  "gas": "0x5208",
+  "type": "0x0"
+}
+```
+
+comes back as a type `0x2` transaction rather than the legacy type requested, because no
+`gasPrice` was supplied. The `to` field is not decoration: a fill with neither `to` nor
+contract-creation data fails with `contract creation without any data provided` before a
+transaction is built at all.
+
+**Fills in**
+
+* `nonce` — from the pending nonce of `from`, or `0` when `from` is absent
+* `value` — `0` when absent
+* `gas` — from `eth_estimateGas` against `latest`
+* `chainId` — the node's chain ID; a mismatching supplied value is an error. It is used
+  for validation and carried by every typed transaction, but it does not appear in the
+  returned `tx` when the fill infers legacy type `0x0`: `CallArgs.ToTransaction` builds a
+  `LegacyTx` with no chain-ID field, and the response encoder skips chain-ID derivation
+  while `v` is zero. That is the `default` arm of the type switch — reached only when
+  none of `authorizationList`, `blobVersionedHashes`, `maxFeePerGas` or `accessList` is
+  present. An `accessList` fill before London and a blob fill after it are typed and
+  carry `chainId`, even when `gasPrice` is supplied. An authorization-list fill is typed
+  and carries `chainId` too, but never alongside `gasPrice` — that pair is rejected
+  outright, as the fee-field rules below explain
+* fee fields — an explicitly supplied `gasPrice` is preserved, before or after London,
+  though after London it must be non-zero (`gasPrice must be non-zero after london fork`);
+  before London a zero is accepted. It cannot be combined with `maxFeePerGas` or
+  `maxPriorityFeePerGas`, and a supplied pair must satisfy `maxFeePerGas` non-zero and
+  `>= maxPriorityFeePerGas`. It also cannot be combined with an `authorizationList`
+  (`both gasPrice and authorizationList specified`) — a set-code transaction has no
+  `gasPrice` field, so honouring both would silently reinterpret it as the dynamic pair. When `gasPrice` is absent:
+  before London `gasPrice` comes from the gas oracle; after London the dynamic fields are
+  filled independently, `maxPriorityFeePerGas` from the oracle and `maxFeePerGas` as twice
+  the base fee plus the tip. The dynamic fields are rejected before London
+* `maxFeePerBlobGas` — for blob transactions, twice the current blob gas price
+
+**Rejected**
+
+Besides the fee-field rules above, a fill fails outright when:
+
+* `authorizationList` is present but empty — `need at least one authorization for a
+  set-code transaction`
+* a derived fee field would not fit 256 bits. `maxFeePerGas` is computed as twice the
+  base fee, plus the tip when one was supplied, and `maxFeePerBlobGas` as twice the blob
+  gas price; each overflow is reported separately (`maxFeePerGas overflow: 2*baseFee ...`,
+  `maxFeePerGas overflow: maxPriorityFeePerGas ... + 2*baseFee ...`,
+  `maxFeePerBlobGas overflow: 2*blobGasPrice ...`)
+
+**Returns**
+
+An object with `raw`, the unsigned transaction in its canonical binary encoding, and
+`tx`, the same transaction in JSON form. `raw` comes from `MarshalBinary`, so it is bare
+RLP only for a legacy transaction; a typed one is the EIP-2718 type byte followed by the
+encoded payload, and feeding that straight to an RLP decoder will fail. The standardized
+result carries only `tx`; the extra `raw` field is the geth-compatible shape.
+
+`tx` also carries four fields the standardized unsigned schemas do not define. `v`, `r`
+and `s` are placeholders — `SignTransactionResult.MarshalJSON` writes `"0x0"` for each —
+and a typed result adds `yParity`, likewise `0x0`. Nothing is signed here, so none of
+them is a signature.
+
+:::warning
+The `hash` field is computed before signing and **changes once the transaction is
+signed**. It is not the hash the transaction will have when submitted, so it must not be
+used to track it. Take the hash from `eth_sendRawTransaction` instead.
+:::
+
+A dynamic-fee result — types `0x2`, `0x3` and `0x4` — also carries `gasPrice: null`.
+`FillTransaction` passes no base fee to the response encoder, so `computeGasPrice`
+returns nothing and the missing key is filled with `null` — deliberate geth parity,
+pinned by `rpc/ethapi/api_test.go`. The standardized type-2 unsigned schema requires
+`gasPrice` to be a hex quantity, so a schema-validating client will reject the result;
+read `maxFeePerGas` and `maxPriorityFeePerGas` instead.
+
+Legacy (`0x0`) and access-list (`0x1`) results are not affected: `NewRPCTransaction`
+takes their `gasPrice` from the tip cap, so it is a real hex quantity. Those two carry
+`maxFeePerGas: null` and `maxPriorityFeePerGas: null` instead, filled in by the same
+rule. A type `0x1` fill is reached by supplying `gasPrice` together with an
+`accessList` — Erigon keeps the list where geth drops it to a legacy transaction.
+
+:::info
+KZG commitment and proof generation from raw blobs is not implemented. Blob
+transactions must already carry their `blobVersionedHashes`.
+
+The sidecar fields the specification defines — `blobs`, `commitments` and `proofs` — are
+not supported: `CallArgs` has no field for them, so they are dropped from the request
+without an error even when a complete precomputed sidecar is supplied, and they are
+absent from the returned `tx` and `raw`. Callers that need the sidecar must keep it
+themselves and reattach it before submitting.
+:::
+
+### Block number parameter format
+
+Erigon accepts more block-number forms than the standard schema, which allows only a
+`0x`-prefixed hex quantity string or a named tag.
+
+The rules below govern parameters decoded as `BlockNumber` or `BlockNumberOrHash` — the
+selector of `eth_getBlockByNumber`, `eth_getBalance`, `eth_call`, `trace_block` and the
+rest of that family. They do not apply to methods that select a block through a fixed
+`common.Hash` parameter: `eth_getBlockTransactionCountByHash`,
+`eth_getTransactionByBlockHashAndIndex`, `eth_getRawTransactionByBlockHashAndIndex`,
+`eth_getUncleByBlockHashAndIndex` and `eth_getUncleCountByBlockHash` take a 32-byte hash
+and nothing else. `eth_getBlockByHash` is not one of them — despite the name its
+parameter is a `BlockNumberOrHash`, so it follows the rules here.
+
+Accepted:
+
+* a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
+* a bare, unquoted JSON integer — `3`
+* the named tags `"earliest"`, `"latest"`, `"safe"`, `"finalized"`, `"pending"`
+* `null`, whose handling depends on the parameter's type, not on the method:
+  * a plain **block-number** parameter accepts it — `BlockNumber.UnmarshalJSON` maps
+    top-level `null` to `latest`, so `eth_getBlockByNumber`, `trace_block` and the rest
+    of that family take it even though the parameter is required;
+  * an **optional** block-or-hash parameter accepts it too: the selector is left unset
+    and the method's own default applies, `latest` for most;
+  * a **required** block-or-hash parameter rejects it —
+    `BlockNumberOrHash.UnmarshalJSON` decodes `null` into an empty struct and then fails
+    with `at least one of BlockNumber or BlockHash is needed if a dictionary is
+    provided` (`rpc/types.go`). This holds for every such method, including
+    `eth_getBlockReceipts`, `eth_getBlockAccessList`, `eth_simulateV1`, `eth_getWitness`,
+    `eth_getTxWitness`, `eth_getBlockByHash` and `trace_replayBlockTransactions`
+
+Rejected by both parameter types:
+
+* a quoted decimal string — `"3"`, `"100"`
+* a block number above `2^63-1` — out of range in both parameter types, though the error
+  differs: a plain **block-number** parameter fails with `block number larger than
+  int64`, while a top-level numeric or hex **block-or-hash** value fails with
+  `blocknumber too high` (`rpc/types.go`). `"0x8000000000000000"` and the equivalent
+  bare integer are rejected either way
+* hex with leading zeros — `"0x01"`
+* hex without the prefix — `"ff"`
+
+:::warning
+**Breaking change in v3.6.** Quoted decimal strings such as `"3"` used to be accepted
+and are now rejected with `hex string without 0x prefix`, returned as an
+`invalid params` error. Callers relying on that form must switch to `"0x3"`, the bare
+integer `3`, or a named tag.
+:::
+
+Two further forms exist: the Erigon-specific tag `"latestExecuted"`, and the string
+`"null"`, which means `latest`. Both are parsed by `BlockNumber.UnmarshalJSON`, so they are
+accepted unconditionally by methods whose parameter is a plain block number — such as
+`eth_getBlockByNumber`, `eth_getBlockTransactionCountByNumber` and `trace_block`.
+
+On methods taking a block-number-or-hash selector — `eth_call`, `eth_getBalance`,
+`eth_getProof` and the rest — the two behave differently.
+`BlockNumberOrHash.UnmarshalJSON` lists `latestExecuted` in its own top-level string
+switch, so the bare string works there as well. `"null"` is not in that switch: it falls
+through to the hex parser and fails. The object form accepts both, because that path
+decodes the `blockNumber` field through `BlockNumber`:
+
+```json
+{"blockNumber": "latestExecuted"}
+{"blockNumber": "null"}
+```
+
+So `{"blockNumber": "null"}` is the only way to reach `latest` by that spelling on a
+block-number-or-hash method.
+
+### Filter lifetime
+
+The standard spec does not say how long a filter lives. In Erigon, a filter created by
+`eth_newFilter`, `eth_newBlockFilter`, or `eth_newPendingTransactionFilter` is evicted
+once it has gone **5 minutes** without being polled. Only `eth_getFilterChanges` counts
+as a poll: it calls `TouchSubscription`, which resets the clock, so a filter stays alive
+on a quiet chain as long as the client keeps calling it. `eth_getFilterLogs` does **not**
+— it reads the stored criteria and serves them through the same path as `eth_getLogs`,
+without touching the deadline — so a client that only ever calls `eth_getFilterLogs`
+loses its filter after five idle minutes. A call against an evicted filter returns
+`filter not found`.
+
+Change the window, or turn eviction off entirely, with:
+
+```text
+--rpc.subscription.filters.timeout 15m   # longer window
+--rpc.subscription.filters.timeout 0     # keep filters indefinitely
+```
+
+Eviction applies only to these polling filters. WebSocket subscriptions live as long as
+their connection does.
 
 ---
 
@@ -5898,6 +6372,80 @@ A
 then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
+
+## Beacon-chain withdrawals
+
+Beacon-chain withdrawals credit balances outside of any transaction, so by default no
+trace mentions them. `trace_block` and `trace_replayBlockTransactions` can be asked to
+include them by passing a trace-settings object as the last positional parameter. It is
+positional, so the parameters before it have to be supplied even when they are not
+otherwise needed:
+
+```js
+// trace_block(blockNumber, gasBailOut, traceSettings)
+["0x1194bf0", false, { "IncludeWithdrawals": true }]
+
+// trace_replayBlockTransactions(blockNumber, traceTypes, gasBailOut, traceSettings)
+["0x1194bf0", ["stateDiff"], false, { "IncludeWithdrawals": true }]
+```
+
+The default is off — omit the object, or leave the field out, and withdrawals are not
+reported. How they appear depends on the method:
+
+* **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a
+  `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set
+  to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain
+  denominates withdrawals in Gwei). These entries carry no `transactionHash` or
+  `transactionPosition`, since no transaction caused them.
+
+* **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction
+  result shape, so withdrawals surface only through `stateDiff`. You must request
+  `"stateDiff"` in the trace types; when you do, one extra entry is appended to the
+  result array, carrying the withdrawal state changes. Its shape depends on whether the
+  recipient already existed: an existing account gets a `"*"` balance change with `code`
+  and `nonce` marked `"="`, while an account created by the withdrawal itself gets `"+"`
+  entries for `balance`, `code` (`"0x"`) and `nonce` (`"0x0"`). Storage is empty either
+  way. Multiple withdrawals to the same address are merged into a single balance change.
+
+## The gasBailOut option
+
+`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
+`trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
+`trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
+`trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and
+always enable it internally, so everything below applies to them unconditionally.
+
+:::warning
+`gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
+changes replayed state in ways that make the output unsuitable for reconstructing
+balances:
+
+* **Gas and blob fees are never deducted.** `TxnExecutor.buyGas` skips both `SubBalance`
+  calls whenever the flag is set, for *every* replayed transaction — funded senders
+  included, not only underfunded ones.
+* **Refunds are skipped.** The gas-refund path is gated on `refunds && !gasBailout` — that
+  is the internal Go parameter, spelled with a lowercase `o`, not the JSON-RPC
+  `gasBailOut` this section documents.
+* **The producer is still paid.** The block producer's tip is credited as usual.
+* **An unaffordable value transfer is credited anyway.** When the sender cannot cover a
+  non-zero `value`, the EVM-level bailout engages and `Transfer` skips the sender debit
+  while still crediting the recipient. Value appears from nowhere, so a trace can show
+  what looks like balance creation.
+* **Where the chain configures a burn contract, that contract is credited too.** A
+  **non-free** London transaction credits the configured `burntContract` with
+  `gasUsed * baseFee`; on Aura from Prague the blob fee is added on top. Gnosis and
+  Chiado are the chains that configure one. The sender was never debited, so this is a second source of apparent balance
+  creation in `stateDiff`. Aura marks zero-fee certified service transactions as free
+  and the credit is guarded by `!msg.IsFree()`, so those are excluded. Chains with no
+  configured contract never receive this extra credit — every other effect above still
+  applies to them.
+:::
+
+Whether one transaction's altered state is visible to the next depends on the execution
+path. Replaying a historical block for traces alone runs each transaction in parallel
+against its own canonical pre-state, so nothing propagates. The sequential path — taken
+when `stateDiff` or `vmTrace` is requested, and for single-transaction blocks — carries the altered state forward to every later transaction
+in the block.
 
 ## JSON-RPC methods
 
@@ -7422,6 +7970,35 @@ If you have existing validator keys, import them:
 lighthouse account validator import --directory <path_to_validator_keys>
 ```
 
+## 3. Block Production Behaviour
+
+### 3.1. Payload Preparation Ahead of the Proposer Slot
+
+Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. There is no flag for this; it is on whenever all of the following hold:
+
+* The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
+* A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
+* Caplin is driving the in-process execution layer. Passing `--caplin.use-engine-api` switches Caplin onto the Engine API and **disables the Beacon API entirely** — Erigon logs `Beacon API is automatically disabled` if you also passed `--beacon.api`. Staking through Caplin is not possible in that mode: there is no `validator` namespace, so block production and duties are unavailable, not just payload preparation.
+
+Preparation looks at most one slot ahead, and it does not alter execution-layer fork choice — it only starts the builder early. To confirm it is running, look for these lines in the Erigon log:
+
+```
+PayloadPreparation: watching for proposals
+PayloadPreparation: primed execution layer
+```
+
+Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids instead, and before Capella.
+
+### 3.2. Fork-Choice Head Published Before the Head-State Copy
+
+Since v3.6, Caplin publishes the head chosen by fork choice as soon as it is selected, rather than after the head beacon state has been copied. Beacon API endpoints that only need the head block identity — such as `/eth/v1/beacon/blocks/head` and `/eth/v2/debug/beacon/heads` — therefore reflect a new head sooner. Endpoints that read the head *state* are unchanged, and a node that is still syncing continues to return `503`. There is no flag for this.
+
+### 3.3. Default Block Graffiti
+
+Since v3.6, when the validator client does not supply a graffiti, Caplin fills it with the proposing node's connected execution and consensus clients, following the [Engine API client-identification standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md). The value is a two-letter execution client code and the first four hex characters of its commit, followed by Caplin's own code `CN` and the first four hex characters of the Erigon commit — for example `EGa53eCNa53e` when Caplin is paired with Erigon. If the execution client does not answer `engine_getClientVersionV1`, or has not answered it yet, the graffiti carries the consensus half only (`CN` plus commit). The graffiti always names the locally connected execution client. An external builder's bid does not change it: the graffiti is written into the beacon body before the payload is chosen, and the winning bid replaces only the execution side of the block — so the value still identifies the proposing node's own clients, not whoever built the payload.
+
+There is no CLI flag for graffiti. The only way to override it is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on a validator block-production endpoint — `GET /eth/v2/validator/blocks/{slot}` (deprecated), `GET /eth/v3/validator/blocks/{slot}` or `GET /eth/v4/validator/blocks/{slot}` — has its value used instead of the default. The parameter is read as a 32-byte hex value, as the Beacon API specification requires. It is not validated: a malformed or empty value is not rejected and does not fall back to the default — it silently produces an all-zero graffiti. A shorter hex value is left-padded with zeros, and a longer one is cropped from the left. Note that a validator client which sets graffiti by default — including its own client string — overrides Caplin's default; to get the client-pair graffiti, leave the validator client's graffiti unset.
+
 ---
 
 # Using an external consensus client as validator
@@ -7806,6 +8383,8 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
+If the node is wedged and you are ready to lose it, `kill -SIGQUIT <pid>` dumps every goroutine stack and terminates that process in one step. Erigon installs a stack-dump handler for `SIGUSR1` and shutdown handlers for `SIGINT` and `SIGTERM`, but none for `SIGQUIT` — so `SIGQUIT` falls through to the Go runtime's own behaviour, the same one this repository's CI watchdog relies on. Pass an explicit PID rather than `$(pidof erigon)`: `SIGQUIT` is destructive, and on a host running more than one instance `pidof` would kill all of them.
+
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
 ```bash
@@ -7823,14 +8402,52 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-| Purpose        | Port  | Protocol |
-| -------------- | ----- | -------- |
-| P2P (Ethereum) | 30303 | TCP+UDP  |
-| P2P (Caplin)   | 9000  | TCP+UDP  |
+* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, NTP and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+* **Dedicated servers (Robot)** — the firewall is stateless, so nothing is inferred from an outgoing connection. The listening ports in the table below are not enough on their own: replies to Erigon's own outbound connections — DNS, HTTPS to the snapshot webseeds, and outgoing peer dials — arrive on ephemeral local ports and need inbound rules of their own (TCP with `ack` set, plus the UDP ranges you use), and any outbound filtering needs matching reply rules. Follow [Hetzner's notes on stateless-firewall configuration](https://docs.hetzner.com/robot/dedicated-server/firewall/#notes-about-stateless-firewall-configuration) rather than porting a Cloud ruleset across.
 
-Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
+The ports to allow inbound:
+
+| Purpose                          | Port  | Protocol |
+| -------------------------------- | ----- | -------- |
+| P2P (execution layer)            | 30303 | TCP+UDP  |
+| Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
+| Caplin DISCV5 discovery          | 4000  | UDP      |
+| Caplin libp2p peering            | 4001  | TCP      |
+
+This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
+
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. Note the second flag's help text calls it a DISCV5 port, which is a misnomer: DISCV5 is UDP-only and runs on `4000`, while `4001` is the libp2p TCP listen address Caplin advertises for peering. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
+
+A public-facing Erigon node should also not attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is worth doing explicitly on Hetzner, whose abuse and netscan detection flags outbound dials to reserved ranges — that is what prompted this note, rather than their firewall filtering the traffic. Do not apply this to a node using `--caplin.local-discovery`, which deliberately peers over private IPs. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are that registry's entries most often blocked for an Ethereum node — it is a reference list, not a ruleset to paste verbatim: `127.0.0.0/8` and `255.255.255.255/32` are included for completeness but must **not** go into an outbound drop rule, for the reason given after the list (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
+
+```text
+0.0.0.0/8             "This" Network                                RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks                          RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)                       RFC 6598, Section 7
+127.0.0.0/8           Loopback                                      RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                                    RFC 3927
+172.16.0.0/12         Private-Use Networks                          RFC 1918
+192.0.0.0/24          IETF Protocol Assignments                     RFC 5736
+192.0.2.0/24          TEST-NET-1                                    RFC 5737
+192.88.99.0/24        6to4 Relay Anycast (deprecated)               RFC 3068, RFC 7526
+192.168.0.0/16        Private-Use Networks                          RFC 1918
+198.18.0.0/15         Network Interconnect Device Benchmark Testing RFC 2544
+198.51.100.0/24       TEST-NET-2                                    RFC 5737
+203.0.113.0/24        TEST-NET-3                                    RFC 5737
+224.0.0.0/4           Multicast                                     RFC 3171
+240.0.0.0/4           Reserved for Future Use                       RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast                             RFC 919 and RFC 922, Section 7
+```
+
+A near-identical list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068) is available on Stack Exchange, but do not paste it in as a blanket `OUTPUT` policy:
+
+* It omits `127.0.0.0/8`, which is correct — an `OUTPUT` drop on loopback would break Erigon's own inter-component traffic, such as the RPC Daemon reaching the core node on `127.0.0.1:9090`.
+* It has no separate `255.255.255.255/32` rule, but that address is **not** left reachable: `240.0.0.0/4` spans `240.0.0.0`–`255.255.255.255` and already covers it.
+* On **Hetzner Cloud** it drops the metadata endpoint at `169.254.169.254`, which sits inside `169.254.0.0/16`, along with legitimate private-network and multicast traffic. Exempt what your instance needs, or scope the rules to Erigon's peer dialing instead of the whole `OUTPUT` chain.
 
 ---
 
@@ -8065,9 +8682,10 @@ This section details common error messages and provides clear, actionable steps 
 
 ### Connect: connection refused or dial tcp... failures
 
-* **Error Description:** The node cannot connect to an external service, such as a local or remote consensus-layer endpoint.
-* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
-* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--externalcl`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
+* **Error Description:** The node cannot connect to a component it dials out to, such as a
+  separately run sentry or downloader, or the core instance an external RPC daemon talks to.
+* **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag naming its address points to the wrong one.
+* **Solution:** Confirm that the required services are running and that the address flags for the components you run separately are correct — for example `--sentry.api.addr`, `--downloader.api.addr`, or `--private.api.addr` for an external RPC daemon. Note that `--externalcl` is a switch, not an address: it only disables the embedded Caplin, after which the external consensus client connects inbound to Erigon's Engine API (`--authrpc.addr` / `--authrpc.port`) rather than Erigon dialling out to it. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
 
