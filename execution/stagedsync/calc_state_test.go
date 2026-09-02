@@ -82,8 +82,8 @@ func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing
 		CodeHash:    empty.CodeHash,
 		Incarnation: 1,
 		Deleted:     true,
-		dirty:       true,
 	}
+	cs.markDirty(addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -122,8 +122,8 @@ func TestFlushToUpdates_DeletedWithoutIncarnation_EmitsDelete(t *testing.T) {
 		CodeHash:    empty.CodeHash,
 		Incarnation: 0,
 		Deleted:     true,
-		dirty:       true,
 	}
+	cs.markDirty(addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -156,8 +156,8 @@ func TestFlushToUpdates_DeletedWithRetainedBalance_EmitsRegularUpdate(t *testing
 		CodeHash:    empty.CodeHash,
 		Incarnation: 1, // bumped during CREATE2 frame, retained through revert
 		Deleted:     true,
-		dirty:       true,
 	}
+	cs.markDirty(addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
@@ -188,8 +188,8 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 		Nonce:    7,
 		CodeHash: codeHashArr,
 		Deleted:  false,
-		dirty:    true,
 	}
+	cs.markDirty(addr)
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
