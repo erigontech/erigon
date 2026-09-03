@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -67,6 +68,24 @@ func (b *gapBackend) GetReceiptsGasUsed(context.Context, *types.Block) (types.Re
 func (b *gapBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) { return nil, nil }
 
 func (b *gapBackend) CheckBlockReceiptsAvailable(context.Context, uint64) error { return nil }
+
+// Zero hashes keep every height unresolved, so the oracle serves the range
+// uncached through HeaderByNumber and the missing-block gap stays visible.
+func (b *gapBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	return make([]common.Hash, to-from+1), nil
+}
+
+func (b *gapBackend) FrozenBlocks() (uint64, error) { return 0, nil }
+
+func (b *gapBackend) HeaderByHashNumber(ctx context.Context, _ common.Hash, number uint64) (*types.Header, error) {
+	return b.HeaderByNumber(ctx, rpc.BlockNumber(number))
+}
+
+func (b *gapBackend) BlockByHashNumber(context.Context, common.Hash, uint64) (*types.Block, error) {
+	return nil, nil
+}
+
+func (b *gapBackend) PrepareFork(context.Context) error { return nil }
 
 func (b *gapBackend) Fork(context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil

@@ -4,10 +4,10 @@ package native
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/holiman/uint256"
 )
 
 var _ = (*flatCallActionMarshaling)(nil)
@@ -18,7 +18,7 @@ func (f flatCallAction) MarshalJSON() ([]byte, error) {
 		Author         *common.Address `json:"author,omitempty"`
 		RewardType     string          `json:"rewardType,omitempty"`
 		SelfDestructed *common.Address `json:"address,omitempty"`
-		Balance        *hexutil.Big    `json:"balance,omitempty"`
+		Balance        *hexutil.U256   `json:"balance,omitempty"`
 		CallType       string          `json:"callType,omitempty"`
 		CreationMethod string          `json:"creationMethod,omitempty"`
 		From           *common.Address `json:"from,omitempty"`
@@ -27,13 +27,13 @@ func (f flatCallAction) MarshalJSON() ([]byte, error) {
 		Input          *hexutil.Bytes  `json:"input,omitempty"`
 		RefundAddress  *common.Address `json:"refundAddress,omitempty"`
 		To             *common.Address `json:"to,omitempty"`
-		Value          *hexutil.Big    `json:"value,omitempty"`
+		Value          *hexutil.U256   `json:"value,omitempty"`
 	}
 	var enc flatCallAction
 	enc.Author = f.Author
 	enc.RewardType = f.RewardType
 	enc.SelfDestructed = f.SelfDestructed
-	enc.Balance = (*hexutil.Big)(f.Balance)
+	enc.Balance = (*hexutil.U256)(f.Balance)
 	enc.CallType = f.CallType
 	enc.CreationMethod = f.CreationMethod
 	enc.From = f.From
@@ -42,7 +42,7 @@ func (f flatCallAction) MarshalJSON() ([]byte, error) {
 	enc.Input = (*hexutil.Bytes)(f.Input)
 	enc.RefundAddress = f.RefundAddress
 	enc.To = f.To
-	enc.Value = (*hexutil.Big)(f.Value)
+	enc.Value = (*hexutil.U256)(f.Value)
 	return json.Marshal(&enc)
 }
 
@@ -52,7 +52,7 @@ func (f *flatCallAction) UnmarshalJSON(input []byte) error {
 		Author         *common.Address `json:"author,omitempty"`
 		RewardType     *string         `json:"rewardType,omitempty"`
 		SelfDestructed *common.Address `json:"address,omitempty"`
-		Balance        *hexutil.Big    `json:"balance,omitempty"`
+		Balance        *hexutil.U256   `json:"balance,omitempty"`
 		CallType       *string         `json:"callType,omitempty"`
 		CreationMethod *string         `json:"creationMethod,omitempty"`
 		From           *common.Address `json:"from,omitempty"`
@@ -61,7 +61,7 @@ func (f *flatCallAction) UnmarshalJSON(input []byte) error {
 		Input          *hexutil.Bytes  `json:"input,omitempty"`
 		RefundAddress  *common.Address `json:"refundAddress,omitempty"`
 		To             *common.Address `json:"to,omitempty"`
-		Value          *hexutil.Big    `json:"value,omitempty"`
+		Value          *hexutil.U256   `json:"value,omitempty"`
 	}
 	var dec flatCallAction
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -77,7 +77,7 @@ func (f *flatCallAction) UnmarshalJSON(input []byte) error {
 		f.SelfDestructed = dec.SelfDestructed
 	}
 	if dec.Balance != nil {
-		f.Balance = (*big.Int)(dec.Balance)
+		f.Balance = (*uint256.Int)(dec.Balance)
 	}
 	if dec.CallType != nil {
 		f.CallType = *dec.CallType
@@ -104,7 +104,7 @@ func (f *flatCallAction) UnmarshalJSON(input []byte) error {
 		f.To = dec.To
 	}
 	if dec.Value != nil {
-		f.Value = (*big.Int)(dec.Value)
+		f.Value = (*uint256.Int)(dec.Value)
 	}
 	return nil
 }
