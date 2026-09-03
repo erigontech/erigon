@@ -471,12 +471,12 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 // queuePendingBid defers a bid until its validation dependencies are available.
 // It returns an error when the pending queue cannot admit the bid.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) error {
-	result, err := s.pending.enqueueLazy(msg, func() (pendingBidKey, error) { return pendingBidKeyFor(msg) })
-	if err != nil {
+	err := s.pending.enqueueLazy(msg, func() (pendingBidKey, error) { return pendingBidKeyFor(msg) })
+	if err != nil && !errors.Is(err, errPendingJobQueueFull) {
 		log.Warn("Failed to hash execution payload bid for pending queue",
 			"slot", msg.Message.Slot, "builderIndex", msg.Message.BuilderIndex, "err", err)
 	}
-	return pendingJobAdmissionError(result, err)
+	return err
 }
 
 func (s *executionPayloadBidService) queueBidAwaitingDependency(msg *cltypes.SignedExecutionPayloadBid, dependencyErr error) error {

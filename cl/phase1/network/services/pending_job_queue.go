@@ -38,15 +38,6 @@ type pendingJobQueueOptions struct {
 	checkInterval time.Duration
 }
 
-type pendingJobEnqueueResult uint8
-
-const (
-	pendingJobEnqueueError pendingJobEnqueueResult = iota
-	pendingJobEnqueued
-	pendingJobDuplicate
-	pendingJobQueueFull
-)
-
 type pendingJobDecision uint8
 
 const (
@@ -62,16 +53,6 @@ var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
 )
 
 var errPendingJobQueueFull = errors.New("pending job queue full")
-
-func pendingJobAdmissionError(result pendingJobEnqueueResult, err error) error {
-	if err != nil {
-		return err
-	}
-	if result == pendingJobQueueFull {
-		return errPendingJobQueueFull
-	}
-	return nil
-}
 
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
 // started by newPendingJobQueue. Jobs remain until the service callback requests
@@ -148,9 +129,9 @@ func (q *pendingJobQueue[K, M]) stopAndWait() {
 // reported as full because detecting it would require building the key. Storage
 // keeps or releases the reservation; deferred cleanup handles key-construction
 // errors and panics.
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (pendingJobEnqueueResult, error) {
+func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
-		return pendingJobQueueFull, nil
+		return errPendingJobQueueFull
 	}
 
 	reservationOwned := true
@@ -162,11 +143,11 @@ func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (
 
 	key, err := buildKey()
 	if err != nil {
-		return pendingJobEnqueueError, err
+		return err
 	}
-	result := q.storeReserved(key, msg)
+	q.storeReserved(key, msg)
 	reservationOwned = false
-	return result, nil
+	return nil
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
@@ -184,21 +165,20 @@ func (q *pendingJobQueue[K, M]) reserve() bool {
 
 // storeReserved transfers the caller's reservation to a new job, or releases
 // it if the key is already present.
-func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueResult {
+func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
 	candidate := &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),
 	}
 	if _, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
 		q.count.Add(-1)
-		return pendingJobDuplicate
+		return
 	}
 	// Wake notifications may coalesce; count determines whether work remains.
 	select {
 	case q.wakeLoop <- struct{}{}:
 	default:
 	}
-	return pendingJobEnqueued
 }
 
 func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {

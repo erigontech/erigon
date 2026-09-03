@@ -204,7 +204,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 // queuePendingEnvelope defers an envelope until its referenced block is available.
 // It returns an error when the pending queue cannot admit the envelope.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	result, err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
+	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
 		if err != nil {
 			return pendingEnvelopeKey{}, err
@@ -214,10 +214,10 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 			envelopeHash: envelopeHash,
 		}, nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errPendingJobQueueFull) {
 		log.Warn("Failed to hash envelope for pending queue", "blockRoot", blockRoot, "err", err)
 	}
-	return pendingJobAdmissionError(result, err)
+	return err
 }
 
 func (s *executionPayloadService) tryProcessPendingEnvelope(_ context.Context, key pendingEnvelopeKey, _ *cltypes.SignedExecutionPayloadEnvelope) pendingJobDecision {
