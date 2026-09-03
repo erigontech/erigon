@@ -252,8 +252,6 @@ func TestFlatCallFrameJSON(t *testing.T) {
 	zero := hexutil.U256(*uint256.NewInt(0))
 	maxU256 := hexutil.U256(*new(uint256.Int).SetAllOne())
 
-	call := func(f *callFrame) *flatCallFrame { return newFlatCall(f) }
-
 	for _, tc := range []struct {
 		name  string
 		build func() *flatCallFrame
@@ -265,7 +263,7 @@ func TestFlatCallFrameJSON(t *testing.T) {
 				f := &callFrame{From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
 					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero}
 				f.setType(vm.CALL)
-				return call(f)
+				return newFlatCall(f)
 			},
 			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x1234","input":"0xaabb","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x100","output":"0xcc"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
 		},
@@ -274,7 +272,7 @@ func TestFlatCallFrameJSON(t *testing.T) {
 			build: func() *flatCallFrame {
 				f := &callFrame{From: from, To: &to, Gas: 1, GasUsed: 2, Value: &maxU256}
 				f.setType(vm.DELEGATECALL)
-				return call(f)
+				return newFlatCall(f)
 			},
 			want: `{"action":{"callType":"delegatecall","from":"0x1111111111111111111111111111111111111111","gas":"0x1","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x2","output":"0x"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
 		},
@@ -302,7 +300,7 @@ func TestFlatCallFrameJSON(t *testing.T) {
 			build: func() *flatCallFrame {
 				f := &callFrame{From: from, To: &to, Input: nil, Output: hexutil.Bytes{}, Value: &zero}
 				f.setType(vm.CALL)
-				return call(f)
+				return newFlatCall(f)
 			},
 			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x0","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x0","output":"0x"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
 		},
@@ -311,7 +309,7 @@ func TestFlatCallFrameJSON(t *testing.T) {
 			build: func() *flatCallFrame {
 				f := &callFrame{From: from, To: &to, Value: &zero}
 				f.setType(vm.CALL)
-				fc := call(f)
+				fc := newFlatCall(f)
 				fc.Error, fc.Result = "Reverted", nil
 				return fc
 			},
