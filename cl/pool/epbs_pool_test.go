@@ -16,17 +16,17 @@ func TestRemoveHighestBidOnlyRemovesMatchingBid(t *testing.T) {
 
 	pool.StoreHighestBid(key, rejected)
 	require.False(t, pool.RemoveHighestBid(key, replacement))
-	stored, found := pool.HighestBids.Get(key)
+	stored, found := pool.GetHighestBid(key)
 	require.True(t, found)
 	require.Same(t, rejected, stored)
 
 	pool.StoreHighestBid(key, replacement)
 	require.False(t, pool.RemoveHighestBid(key, rejected))
-	stored, found = pool.HighestBids.Get(key)
+	stored, found = pool.GetHighestBid(key)
 	require.True(t, found)
 	require.Same(t, replacement, stored)
 
 	require.True(t, pool.RemoveHighestBid(key, replacement))
-	_, found = pool.HighestBids.Get(key)
+	_, found = pool.GetHighestBid(key)
 	require.False(t, found)
 }

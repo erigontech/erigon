@@ -986,7 +986,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		ParentBlockHash: selfBid.Message.ParentBlockHash,
 		ParentBlockRoot: selfBid.Message.ParentBlockRoot,
 	}
-	externalBid, found := a.epbsPool.HighestBids.Get(bidKey)
+	externalBid, found := a.epbsPool.GetHighestBid(bidKey)
 	selfExecutionValue := block.GetExecutionValue()
 	selectedValueWei, selected := selectHigherGloasP2PBidValue(selfExecutionValue, externalBid)
 	if !found || !selected {

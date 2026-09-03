@@ -374,7 +374,7 @@ func (s *executionPayloadBidService) storeValidBid(msg *cltypes.SignedExecutionP
 
 func (s *executionPayloadBidService) validateHighestBid(bid *cltypes.ExecutionPayloadBid) error {
 	bidKey := pool.HighestBidKey{Slot: bid.Slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
-	existing, found := s.epbsPool.HighestBids.Get(bidKey)
+	existing, found := s.epbsPool.GetHighestBid(bidKey)
 	if !found || existing == nil || existing.Message == nil {
 		return nil
 	}

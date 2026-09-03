@@ -820,7 +820,7 @@ func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
 	selectedRoot, err := selectedState.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, expectedRoot, selectedRoot)
-	_, found := handler.epbsPool.HighestBids.Get(fixture.bidKey)
+	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
 	require.False(t, found)
 	require.Contains(t, logs(), "builderIndex=0")
 	require.Contains(t, logs(), "bidValueGwei=3")
@@ -852,7 +852,7 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 	require.NoError(t, err)
 	require.Same(t, fixture.productionState, selectedState)
 	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
-	storedBid, found := handler.epbsPool.HighestBids.Get(fixture.bidKey)
+	storedBid, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
 	require.True(t, found)
 	require.Same(t, fixture.externalBid, storedBid)
 }
@@ -1034,7 +1034,7 @@ func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
 
 			require.NoError(t, err)
 			require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
-			_, found := handler.epbsPool.HighestBids.Get(fixture.bidKey)
+			_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
 			require.False(t, found)
 		})
 	}
