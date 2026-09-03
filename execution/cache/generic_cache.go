@@ -639,13 +639,16 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	)
 }
 
-// slotsPct is how full the cache is against the bound that actually evicts, the
-// slot cap. currentSize is not the numerator for a payloadBytes denominator:
-// that estimate counts only what an entry points at, so for a value held inline
-// in T the two disagree by the whole value. Bytes are reported as size_mb.
+// slotsPct is how full the cache is against the slots it has allocated, not
+// against maxCap: a shard refused a grow step evicts at its current size.
+// currentSize is not the numerator for a payloadBytes denominator: that
+// estimate counts only what an entry points at, so for a value held inline in T
+// the two disagree by the whole value. Bytes are reported as size_mb.
 func (c *GenericCache[T]) slotsPct() float64 {
-	if c.maxCap == 0 {
+	d := c.data.Load()
+	allocated := d.Cap()
+	if allocated == 0 {
 		return 0
 	}
-	return float64(c.data.Load().Len()) / float64(c.maxCap) * 100
+	return float64(d.Len()) / float64(allocated) * 100
 }

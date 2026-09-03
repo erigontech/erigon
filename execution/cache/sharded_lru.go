@@ -53,6 +53,9 @@ type shardedLRU[V any] struct {
 	refundGrow func(oldCap, newCap uint32)
 
 	n atomic.Int64
+	// allocCap is the sum of curCap: the slots the shards hold right now, which
+	// is smaller than maxCap for every shard the envelope refused a step.
+	allocCap atomic.Int64
 }
 
 func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, V),
@@ -70,6 +73,7 @@ func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, 
 	}
 	start := min(max(perShard(startCap, shards), 1), s.maxCap)
 	s.startCapPerShard = start
+	s.allocCap.Store(int64(start) * int64(shards))
 	for i := range s.shards {
 		s.curCap[i] = start
 		s.shards[i] = s.newShard(start)
@@ -104,6 +108,9 @@ func (s *shardedLRU[V]) idx(h uint64) uint64 { return (h >> 16) & s.mask }
 func u64mix(k uint64) uint32 { return uint32((k * 0x9E3779B97F4A7C15) >> 32) }
 
 func (s *shardedLRU[V]) Len() int { return int(s.n.Load()) }
+
+// Cap is the currently allocated slots, the bound entries are evicted against.
+func (s *shardedLRU[V]) Cap() int { return int(s.allocCap.Load()) }
 
 func (s *shardedLRU[V]) Get(h uint64) (v V, ok bool) {
 	i := s.idx(h)
@@ -198,5 +205,6 @@ func (s *shardedLRU[V]) migrateLocked(i uint64, next *freelru.LRU[uint64, V], ne
 		}
 	}
 	s.shards[i] = next
+	s.allocCap.Add(int64(newCap) - int64(s.curCap[i]))
 	s.curCap[i] = newCap
 }

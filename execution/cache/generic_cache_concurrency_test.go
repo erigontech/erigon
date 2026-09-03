@@ -704,6 +704,30 @@ func TestGenericCache_UsageReportIsNotDrivenByThePayloadEstimate(t *testing.T) {
 		c.Put(key, [128]byte{}, 1)
 	}
 
-	require.LessOrEqual(t, c.slotsPct(), 100.0,
-		"a cache that is exactly full reports %.0f%%", c.slotsPct())
+	require.InDelta(t, 100.0, c.slotsPct(), 5.0,
+		"a cache that is exactly full reports %.2f%%", c.slotsPct())
+}
+
+// A shard whose grow step the envelope refuses evicts at its current capacity,
+// so occupancy has to count the slots allocated, not the ceiling growth aims at.
+func TestGenericCache_UsageReportCountsAllocatedSlots(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(0)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, 8,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	allocated := c.data.Load().Cap()
+	require.Less(t, uint32(allocated), c.maxCap/16, "the ceiling has to stay out of reach")
+
+	key := make([]byte, 32)
+	for i := range allocated * 8 {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		c.Put(key, []byte{1}, 1)
+	}
+
+	require.Equal(t, allocated, c.data.Load().Cap(), "every grow step is refused at a zero envelope")
+	require.InDelta(t, 100.0, c.slotsPct(), 5.0,
+		"a cache evicting at its allocated %d slots reports %.2f%%", allocated, c.slotsPct())
 }
