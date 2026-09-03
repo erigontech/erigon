@@ -866,8 +866,11 @@ func gloasVerificationHeadRoot(forkChoice gloasHeadReader) (common.Hash, error) 
 }
 
 func continueGloasVerificationAfterItemFailure(ctx context.Context, completeBatch *bool) bool {
+	if ctx.Err() == nil {
+		return true
+	}
 	*completeBatch = false
-	return ctx.Err() == nil
+	return false
 }
 
 type gloasVerificationItem struct {

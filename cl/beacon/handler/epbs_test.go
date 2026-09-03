@@ -258,7 +258,7 @@ func TestPostExecutionPayloadEnvelopeWaitsForLocalBlockIntegration(t *testing.T)
 	require.Equal(t, http.StatusOK, firstRecorder.Code, firstRecorder.Body.String())
 }
 
-func TestPostExecutionPayloadEnvelopeReturnsAcceptedWhileRemoteBlockIsUnknown(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeQueuesAndReturnsUnavailableWhileRemoteBlockIsUnknown(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
 	envelope := contents.SignedExecutionPayloadEnvelope
@@ -273,9 +273,33 @@ func TestPostExecutionPayloadEnvelopeReturnsAcceptedWhileRemoteBlockIsUnknown(t 
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 	require.False(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
-	require.False(t, fcu.OnExecutionPayloadCalled)
+	require.True(t, fcu.OnExecutionPayloadCalled)
+}
+
+func TestPostExecutionPayloadEnvelopeContinuesWhenBlockAppearsDuringQueueAttempt(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
+	envelope := contents.SignedExecutionPayloadEnvelope
+	block := fcu.Blocks[envelope.Message.BeaconBlockRoot]
+	delete(fcu.Blocks, envelope.Message.BeaconBlockRoot)
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		fcu.Blocks[envelope.Message.BeaconBlockRoot] = block
+		return nil
+	}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.ValidateExecutionPayloadEnvelopeForGossipCalled)
 }
 
 func TestPostExecutionPayloadEnvelopeAdmissionBoundsLocalIntegrationWait(t *testing.T) {

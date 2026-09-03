@@ -185,6 +185,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	seen := false
+	persistencePending := false
 	defer func() {
 		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, seen)
 	}()
@@ -197,6 +198,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 			log.Debug("Execution payload envelope indices queued", "beaconBlockRoot", beaconBlockRoot, "err", err)
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed),
 			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull):
+			persistencePending = true
 			log.Debug("Execution payload envelope accepted with local persistence pending", "beaconBlockRoot", beaconBlockRoot, "err", err)
 		case errors.Is(err, forkchoice.ErrIgnore), errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable),
 			errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -204,6 +206,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		default:
 			return fmt.Errorf("failed to process execution payload: %w", err)
 		}
+	}
+	if persistencePending {
+		return nil
 	}
 	seen = true
 

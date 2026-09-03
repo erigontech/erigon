@@ -593,7 +593,7 @@ func TestGloasRecoveryScanRetainsFinalizedRootAtCapacity(t *testing.T) {
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
 	completeBatch := true
 	require.True(t, continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch))
-	require.False(t, completeBatch)
+	require.True(t, completeBatch)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	completeBatch = true
@@ -616,7 +616,7 @@ func TestGloasVerificationImmediateFailureDoesNotFreezeBatch(t *testing.T) {
 	processImmediateGloasVerificationItems(items[0], items[1], process, &completeBatch)
 
 	require.Equal(t, 2, processed)
-	require.False(t, completeBatch)
+	require.True(t, completeBatch)
 }
 
 func TestGloasEnvelopeRecoveryBudgetBoundsUnavailableFetch(t *testing.T) {

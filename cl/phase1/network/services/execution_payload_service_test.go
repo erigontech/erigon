@@ -292,7 +292,7 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 	}
 }
 
-func TestExecutionPayloadServiceAcceptsValidatedEnvelopeDespiteLocalPersistenceFailures(t *testing.T) {
+func TestExecutionPayloadServiceAcceptsButDoesNotMarkSeenOnLocalPersistenceFailures(t *testing.T) {
 	for _, processErr := range []error{
 		forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed,
 		forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull,
@@ -304,10 +304,15 @@ func TestExecutionPayloadServiceAcceptsValidatedEnvelopeDespiteLocalPersistenceF
 			fcu.FinalizedSlotVal = 50
 			fcu.OnExecutionPayloadErr = processErr
 
-			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+			envelope := newTestSignedEnvelope(100, blockRoot, 1)
+			err := service.ProcessMessage(context.Background(), nil, envelope)
 
 			require.NoError(t, err)
 			impl := service.(*executionPayloadService)
+			require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 1}))
+
+			fcu.OnExecutionPayloadErr = nil
+			require.NoError(t, service.ProcessMessage(context.Background(), nil, envelope))
 			require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 1}))
 		})
 	}

@@ -151,6 +151,17 @@ func (f *ForkChoiceStore) queueExecutionPayloadAvailable(root common.Hash, envel
 	f.queueEmit(func() { f.emitters.Operation().SendExecutionPayloadAvailable(data) })
 }
 
+func payloadDataAvailableForNotification(block *cltypes.SignedBeaconBlock, checked bool) bool {
+	if checked {
+		return true
+	}
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return false
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	return bid == nil || bid.Message == nil || bid.Message.BlobKzgCommitments.Len() == 0
+}
+
 func (f *ForkChoiceStore) captureEnvelopeIndexRepairValues(token envelopeIndexRepairToken, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) envelopeIndexRepairToken {
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return token
@@ -900,7 +911,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		if err := f.validateEnvelopePersistenceCommitmentsWhileYieldingForkChoiceLock(block, signedEnvelope, validatePayload); err != nil {
 			return false, fmt.Errorf("%w: OnExecutionPayload: invalid execution payload envelope commitments: %w", errInvalidExecutionPayloadEnvelope, err)
 		}
-		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		if f.forkGraph.HasEnvelope(beaconBlockRoot) && (!validatePayload || f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash)) {
 			if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
 				f.markPayloadVerifiedLocked(beaconBlockRoot, envelope.Payload.BlockHash)
 			}
@@ -1007,7 +1018,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
 	f.persistEnvelopeIndexRepair(indexRepair, repairTracked, signedEnvelope)
-	f.queueExecutionPayloadAvailable(beaconBlockRoot, envelope)
+	if payloadDataAvailableForNotification(block, checkBlobData) {
+		f.queueExecutionPayloadAvailable(beaconBlockRoot, envelope)
+	}
 	if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
 		f.markPayloadVerifiedLocked(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
