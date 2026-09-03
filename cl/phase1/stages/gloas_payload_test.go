@@ -781,9 +781,9 @@ func TestValidateDownloadedGloasEnvelopeRejectsBidMismatch(t *testing.T) {
 	require.NoError(t, err)
 	env.Message.BeaconBlockRoot = blockRoot
 
-	require.NoError(t, validateDownloadedGloasEnvelope(cfg, block, env))
+	require.NoError(t, network2.ValidateDownloadedGloasEnvelope(cfg, block, env))
 	env.Message.Payload.BlockHash = common.HexToHash("0x99")
-	require.ErrorContains(t, validateDownloadedGloasEnvelope(cfg, block, env), "block hash mismatch")
+	require.ErrorContains(t, network2.ValidateDownloadedGloasEnvelope(cfg, block, env), "block hash mismatch")
 }
 
 func TestAnchorEnvelopeMatches(t *testing.T) {

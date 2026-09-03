@@ -23,7 +23,7 @@ func newSlotMap[K comparable, V any](slotFor func(K) uint64) *slotMap[K, V] {
 	return &slotMap[K, V]{values: make(map[K]V), bySlot: make(map[uint64]map[K]struct{}), slotFor: slotFor}
 }
 
-func (m *slotMap[K, V]) Add(key K, value V) bool {
+func (m *slotMap[K, V]) Add(key K, value V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.values[key] = value
@@ -32,7 +32,6 @@ func (m *slotMap[K, V]) Add(key K, value V) bool {
 		m.bySlot[slot] = make(map[K]struct{})
 	}
 	m.bySlot[slot][key] = struct{}{}
-	return false
 }
 
 func (m *slotMap[K, V]) ValuesForSlot(slot uint64) []V {

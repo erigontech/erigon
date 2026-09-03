@@ -162,7 +162,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
 		if blk != nil && blk.Version() >= clparams.GloasVersion && envelope != nil {
-			if err := validateDownloadedGloasEnvelope(cfg.beaconCfg, blk, envelope); err != nil {
+			if err := network.ValidateDownloadedGloasEnvelope(cfg.beaconCfg, blk, envelope); err != nil {
 				return false, fmt.Errorf("invalid downloaded Gloas envelope: %w", err)
 			}
 		}
