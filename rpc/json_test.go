@@ -354,12 +354,12 @@ func TestResultPoolNeverHandsBackOversized(t *testing.T) {
 
 	_, pooled, err := encodeResult(res)
 	require.NoError(t, err)
-	require.Greater(t, cap(*pooled), maxPooledResultSize, "the encode did not grow past the bound")
+	require.Greater(t, pooled.Cap(), maxPooledResultSize, "the encode did not grow past the bound")
 	putEnc(pooled)
 
 	for range 16 {
-		p := encPool.Get().(*[]byte)
-		require.LessOrEqual(t, cap(*p), maxPooledResultSize, "the pool handed back an oversized buffer")
+		b := encPool.Get().(*bytes.Buffer)
+		require.LessOrEqual(t, b.Cap(), maxPooledResultSize, "the pool handed back an oversized buffer")
 	}
 }
 

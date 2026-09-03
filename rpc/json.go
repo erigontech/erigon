@@ -61,8 +61,8 @@ type jsonrpcMessage struct {
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 
-	// pooled is Result's backing array, returned to encPool once writeTo is done.
-	pooled *[]byte
+	// pooled holds Result's bytes, returned to encPool once writeTo is done.
+	pooled *bytes.Buffer
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -115,8 +115,8 @@ type fastJSONResult interface {
 
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
 	var (
-		enc    []byte
-		pooled *[]byte
+		enc    json.RawMessage
+		pooled *bytes.Buffer
 		err    error
 	)
 	if fm, ok := result.(fastJSONResult); ok {
@@ -411,31 +411,27 @@ func parseSubscriptionName(rawArgs json.RawMessage) (string, error) {
 	return method, nil
 }
 
-// Pooling the pointer keeps Put off the allocating path.
-var encPool = sync.Pool{New: func() any { b := make([]byte, 0, 1024); return &b }}
+var encPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 // One oversized response must not pin its backing array in encPool.
 const maxPooledResultSize = 16 * jsonstream.FlushThreshold
 
-func putEnc(p *[]byte) {
-	if cap(*p) > maxPooledResultSize {
-		return
+func putEnc(b *bytes.Buffer) {
+	if b.Cap() <= maxPooledResultSize {
+		encPool.Put(b)
 	}
-	*p = (*p)[:0]
-	encPool.Put(p)
 }
 
 // encodeResult matches json.Marshal, but into a pooled buffer.
-func encodeResult(result any) ([]byte, *[]byte, error) {
-	p := encPool.Get().(*[]byte)
-	buf := bytes.NewBuffer((*p)[:0])
-	err := json.NewEncoder(buf).Encode(result)
-	*p = buf.Bytes()
-	if err != nil {
-		putEnc(p)
+func encodeResult(result any) (json.RawMessage, *bytes.Buffer, error) {
+	b := encPool.Get().(*bytes.Buffer)
+	b.Reset()
+	if err := json.NewEncoder(b).Encode(result); err != nil {
+		putEnc(b)
 		return nil, nil, err
 	}
-	return (*p)[:len(*p)-1], p, nil // Encode terminates with a newline the envelope must not carry
+	enc := b.Bytes()
+	return enc[:len(enc)-1], b, nil // Encode appends a newline the envelope must not carry
 }
 
 func releaseResult(msg *jsonrpcMessage) {
