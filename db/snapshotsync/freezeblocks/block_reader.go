@@ -19,7 +19,6 @@ package freezeblocks
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -515,10 +514,6 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 			}
 		}
 		return snapshotMin, nil
-	}
-
-	if tx == nil {
-		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
 	}
 
 	dbMinBlock, err := r.findFirstCompleteBlock(tx)

@@ -500,9 +500,6 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 	if expiry && mergeHeight != nil && block < *mergeHeight {
 		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
 	}
-	if tx == nil {
-		return nil
-	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
 		return api.minimumBlockAvailable(ctx, tx, head)
 	})
