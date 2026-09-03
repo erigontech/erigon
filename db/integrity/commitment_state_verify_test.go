@@ -104,7 +104,7 @@ func TestCheckStateVerify(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files
-	err = agg.BuildFiles(txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
@@ -224,7 +224,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build snapshot files for all steps
-	err = agg.BuildFiles(400, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, 400, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	endTxNum := agg.EndTxNumMinimax()
