@@ -245,13 +245,43 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 	// Add block to forkchoice
 	fcu.Blocks[blockRoot] = newTestExecutionPayloadBlock(50, 1)
 
-	// Set finalized slot higher than envelope slot
-	fcu.FinalizedSlotVal = 100
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
 
 	err := service.ProcessMessage(context.Background(), nil, envelope)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
-	require.Contains(t, err.Error(), "envelope slot 50 < finalized slot 100")
+	require.Contains(t, err.Error(), "envelope slot 50 < finalized slot 64")
+}
+
+func TestExecutionPayloadServiceAllowsFinalizedEpochStart(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(64, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestExecutionPayloadBlock(64, 1)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2}
+
+	err := service.ProcessMessage(context.Background(), nil, envelope)
+
+	require.NoError(t, err)
+}
+
+func TestExecutionPayloadServiceRechecksFinalizedBoundaryAfterApply(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestExecutionPayloadBlock(100, 1)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 3}
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 4}
+		return nil
+	}
+
+	err := service.ProcessMessage(context.Background(), nil, envelope)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "envelope slot 100 < finalized slot 128")
+	impl := service.(*executionPayloadService)
+	require.False(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 1}))
 }
 
 func TestExecutionPayloadServiceSuccess(t *testing.T) {

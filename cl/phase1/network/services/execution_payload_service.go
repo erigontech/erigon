@@ -173,7 +173,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 
 	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
-	finalizedSlot := s.forkchoiceStore.FinalizedSlot()
+	finalizedSlot := s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
 	if block.Block.Slot < finalizedSlot {
 		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
 	}
@@ -206,6 +206,10 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		default:
 			return fmt.Errorf("failed to process execution payload: %w", err)
 		}
+	}
+	finalizedSlot = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
+	if block.Block.Slot < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
 	}
 	if persistencePending {
 		return nil
