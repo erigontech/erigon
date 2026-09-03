@@ -543,9 +543,17 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 	}
 	localRoots := f.pendingLocalSelfBuildEnvelopes.Keys()
 	gossipRoots := f.pendingEnvelopes.Keys()
-	seen := make(map[common.Hash]struct{}, len(localRoots)+len(gossipRoots))
-	for i := 0; limit > 0 && (i < len(localRoots) || i < len(gossipRoots)); i++ {
-		for _, roots := range [][]common.Hash{localRoots, gossipRoots} {
+	var availabilityRoots []common.Hash
+	if f.pendingPayloadAvailability != nil {
+		availabilityRoots = f.pendingPayloadAvailability.Keys()
+	}
+	var validationRoots []common.Hash
+	if f.pendingPayloadValidation != nil {
+		validationRoots = f.pendingPayloadValidation.Keys()
+	}
+	seen := make(map[common.Hash]struct{}, len(localRoots)+len(gossipRoots)+len(validationRoots)+len(availabilityRoots))
+	for i := 0; limit > 0 && (i < len(localRoots) || i < len(gossipRoots) || i < len(validationRoots) || i < len(availabilityRoots)); i++ {
+		for origin, roots := range [][]common.Hash{localRoots, gossipRoots, validationRoots, availabilityRoots} {
 			if i >= len(roots) {
 				continue
 			}
@@ -554,18 +562,71 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 				continue
 			}
 			seen[root] = struct{}{}
-			f.processPendingEnvelopeAfterBlock(ctx, root, true)
+			switch origin {
+			case 2:
+				f.retryPendingPayloadValidation(ctx, root)
+			case 3:
+				f.retryPendingPayloadAvailability(ctx, root)
+			default:
+				f.processPendingEnvelopeAfterBlock(ctx, root, true)
+			}
 			if f.pendingLocalSelfBuildEnvelopes.Contains(root) {
 				f.pendingLocalSelfBuildEnvelopes.Get(root)
 			}
 			if f.pendingEnvelopes.Contains(root) {
 				f.pendingEnvelopes.Get(root)
 			}
+			if f.pendingPayloadAvailability != nil && f.pendingPayloadAvailability.Contains(root) {
+				f.pendingPayloadAvailability.Get(root)
+			}
+			if f.pendingPayloadValidation != nil && f.pendingPayloadValidation.Contains(root) {
+				f.pendingPayloadValidation.Get(root)
+			}
 			limit--
 			if limit == 0 || ctx.Err() != nil {
 				return
 			}
 		}
+	}
+}
+
+func (f *ForkChoiceStore) retryPendingPayloadValidation(ctx context.Context, root common.Hash) {
+	pending, ok := f.pendingPayloadValidation.Peek(root)
+	if !ok || pending == nil {
+		return
+	}
+	_, err := f.applyEnvelope(ctx, pending, false, true, false, retryQueuedEnvelope)
+	if err != nil {
+		log.Warn("Failed to complete execution payload validation", "blockRoot", root, "err", err)
+		if !f.retryPendingEnvelopeError(err, pending) {
+			if current, ok := f.pendingPayloadValidation.Peek(root); ok && current == pending {
+				f.pendingPayloadValidation.Remove(root)
+			}
+		}
+		return
+	}
+	if current, ok := f.pendingPayloadValidation.Peek(root); ok && current == pending {
+		f.pendingPayloadValidation.Remove(root)
+	}
+}
+
+func (f *ForkChoiceStore) retryPendingPayloadAvailability(ctx context.Context, root common.Hash) {
+	pending, ok := f.pendingPayloadAvailability.Peek(root)
+	if !ok || pending == nil {
+		return
+	}
+	_, err := f.applyEnvelope(ctx, pending, true, true, false, retryQueuedEnvelope)
+	if err != nil {
+		log.Warn("Failed to complete execution payload data availability", "blockRoot", root, "err", err)
+		if !f.retryPendingEnvelopeError(err, pending) {
+			if current, ok := f.pendingPayloadAvailability.Peek(root); ok && current == pending {
+				f.pendingPayloadAvailability.Remove(root)
+			}
+		}
+		return
+	}
+	if current, ok := f.pendingPayloadAvailability.Peek(root); ok && current == pending {
+		f.pendingPayloadAvailability.Remove(root)
 	}
 }
 

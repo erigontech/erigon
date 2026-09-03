@@ -2396,7 +2396,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(a.beaconChainCfg, blk, signedEnvelope); err != nil {
 		return err
 	}
-	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, blockRoot, signedEnvelope.Message.BuilderIndex)
+	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForPublication(ctx, blockRoot, signedEnvelope.Message.BuilderIndex)
 	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
 		return nil
 	}

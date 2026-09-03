@@ -193,8 +193,10 @@ type ForkChoiceStore struct {
 	// Due to network timing, the envelope may arrive before its corresponding block.
 	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
-	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
-	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
+	pendingEnvelopes           *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	envelopeGossipAdmissions   ExecutionPayloadEnvelopeAdmissions
+	pendingPayloadAvailability *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	pendingPayloadValidation   *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -349,6 +351,14 @@ func NewForkChoiceStore(
 	if err != nil {
 		return nil, err
 	}
+	pendingPayloadAvailability, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+	pendingPayloadValidation, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
 
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash
 	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](checkpointsPerCache)
@@ -425,6 +435,8 @@ func NewForkChoiceStore(
 		partialWithdrawals:             partialWithdrawals,
 		proposerLookahead:              proposerLookahead,
 		pendingEnvelopes:               pendingEnvelopes,
+		pendingPayloadAvailability:     pendingPayloadAvailability,
+		pendingPayloadValidation:       pendingPayloadValidation,
 		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,

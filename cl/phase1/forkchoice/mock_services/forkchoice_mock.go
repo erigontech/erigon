@@ -437,6 +437,17 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 	return token, nil
 }
 
+func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForPublication(
+	ctx context.Context,
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.ClaimExecutionPayloadEnvelopeForGossipErr != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, f.ClaimExecutionPayloadEnvelopeForGossipErr
+	}
+	return f.EnvelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
+}
+
 func (f *ForkChoiceStorageMock) FinishExecutionPayloadEnvelopeForGossip(
 	token forkchoice.ExecutionPayloadEnvelopeAdmissionToken,
 	seen bool,

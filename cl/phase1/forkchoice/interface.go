@@ -139,6 +139,7 @@ type ForkChoiceStorageWriter interface {
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
 	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
+	ClaimExecutionPayloadEnvelopeForPublication(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
 	FinishExecutionPayloadEnvelopeForGossip(ExecutionPayloadEnvelopeAdmissionToken, bool)
 	ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error

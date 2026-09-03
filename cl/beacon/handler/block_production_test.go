@@ -332,7 +332,7 @@ func TestPublishDataColumnSidecarsReturnsPublishFailure(t *testing.T) {
 	require.ErrorIs(t, err, injected)
 }
 
-func TestBroadcastSelfBuildEnvelopeRetainsPayloadWhenGossipFails(t *testing.T) {
+func TestBroadcastSelfBuildEnvelopeRetriesGossipAfterPublishFailure(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -344,11 +344,23 @@ func TestBroadcastSelfBuildEnvelopeRetainsPayloadWhenGossipFails(t *testing.T) {
 	bid.Message.BlockHash = common.HexToHash("0x1234")
 	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
 	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
-	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(errors.New("publish failed"))
+	var publishes atomic.Int32
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Times(2).DoAndReturn(
+		func(context.Context, string, []byte) error {
+			if publishes.Add(1) == 1 {
+				return errors.New("publish failed")
+			}
+			return nil
+		},
+	)
 
 	require.ErrorContains(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), "publish failed")
 	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
 	require.True(t, cached)
+	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	require.EqualValues(t, 2, publishes.Load())
+	_, cached = h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.False(t, cached)
 }
 
 func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRetry(t *testing.T) {
