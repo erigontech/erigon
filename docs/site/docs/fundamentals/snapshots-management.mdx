@@ -125,9 +125,9 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 ### v3.7 default window increase
 
-Erigon v3.7 increases the **Full** block and state-history windows and the **Blocks** state-history window from 262,144 to 1,100,000 blocks. Existing datadirs that use these mode defaults migrate automatically. The wider setting does not restore previously deleted data: the available window grows as the node advances, or immediately after a re-sync. Archive, minimal, and custom distances are unchanged.
+Erigon v3.7 increases the **Full** block and state-history windows and the **Blocks** state-history window from 262,144 to 1,100,000 blocks. On the first v3.7 start, existing datadirs automatically migrate fields left at these named-mode defaults. Fields configured explicitly on that start retain their requested values; Archive and Minimal modes are unchanged. See the [Upgrading guide](../get-started/installation/upgrading#v37-pruning-window-upgrade) to keep the v3.6 defaults. The wider setting does not restore previously deleted data: the available window grows as the node advances, or immediately after a re-sync.
 
-The extra snapshots increase disk use as the window fills. Fresh syncs also download and process more snapshot data, which can increase network traffic, disk I/O, and sync time. An in-place upgrade does not download the missing backlog. A downgrade to Erigon 3.6 restores its 262,144-block default and can prune the newly accumulated data. See the [Upgrading guide](../get-started/installation/upgrading#v37-pruning-window-upgrade) before rolling back.
+The extra snapshots increase disk use as the window fills. Fresh syncs also download and process more snapshot data, which can increase network traffic, disk I/O, and sync time. A normal in-place upgrade that keeps the datadir's existing `preverified.toml` does not download the missing backlog. Running `erigon snapshots reset` or deleting that file can make Erigon request those files on the next start. A downgrade to Erigon 3.6 restores its 262,144-block default and can prune the newly accumulated data. See the [Upgrading guide](../get-started/installation/upgrading#v37-pruning-window-upgrade) before rolling back.
 
 ### Historical v3.5 EIP-8252 change
 
