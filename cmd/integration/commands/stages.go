@@ -1201,6 +1201,24 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
+		if rwDB, ok := db.(kv.RwDB); ok {
+			var needsMigration bool
+			if needsMigration, err = freezeblocks.HasDecimalBlockSegments(dirs, chainConfig); err != nil {
+				return
+			}
+			if needsMigration {
+				var unlock func()
+				if unlock, err = dirs.TryFlock(); err != nil {
+					return
+				}
+				err = freezeblocks.MigrateDecimalToEpoch(ctx, dirs, rwDB, chainConfig, estimate.CompressSnapshot.Workers(), logger)
+				unlock()
+				if err != nil {
+					return
+				}
+			}
+		}
+
 		g := &errgroup.Group{}
 		g.Go(func() error {
 			_allSnapshotsSingleton.OptimisticalyOpenFolder()

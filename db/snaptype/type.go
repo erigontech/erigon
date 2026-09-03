@@ -172,7 +172,7 @@ func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bo
 		return false
 	}
 
-	fNameMask := IdxFileMask(info.From, info.To, i.Name)
+	fNameMask := IdxFileMask(info.Epoch, info.From, info.To, i.Name)
 	fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
 	if err != nil {
 		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
@@ -209,11 +209,11 @@ type Type interface {
 	Enum() Enum
 	Versions() Versions
 	Name() string
-	FileName(version Version, from uint64, to uint64) string
-	FileInfo(dir string, from uint64, to uint64) FileInfo
-	FileInfoByMask(dir string, from uint64, to uint64) FileInfo
-	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
-	IdxFileNames(from uint64, to uint64) []string
+	FileName(version Version, epoch bool, from uint64, to uint64) string
+	FileInfo(dir string, epoch bool, from, to uint64) FileInfo
+	FileInfoByMask(dir string, epoch bool, from uint64, to uint64) FileInfo
+	IdxFileName(version Version, epoch bool, from uint64, to uint64, index ...Index) string
+	IdxFileNames(epoch bool, from uint64, to uint64) []string
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
@@ -300,27 +300,27 @@ func (s SnapType) RangeExtractor() RangeExtractor {
 	return s.rangeExtractor
 }
 
-func (s SnapType) FileName(version Version, from uint64, to uint64) string {
+func (s SnapType) FileName(version Version, epoch bool, from uint64, to uint64) string {
 	if version.Major == 0 && version.Minor == 0 {
 		version = s.versions.Current
 	}
 
-	return SegmentFileName(version, from, to, s.enum)
+	return SegmentFileName(version, epoch, from, to, s.enum)
 }
 
-func (s SnapType) FileMask(from uint64, to uint64) string {
-	return SegmentFileMask(from, to, s.enum)
+func (s SnapType) FileMask(epoch bool, from uint64, to uint64) string {
+	return SegmentFileMask(epoch, from, to, s.enum)
 }
 
-func (s SnapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
-	f, _, _ := ParseFileName(dir, s.FileName(s.versions.Current, from, to))
+func (s SnapType) FileInfo(dir string, epoch bool, from, to uint64) FileInfo {
+	f, _, _ := ParseFileName(dir, s.FileName(s.versions.Current, epoch, from, to))
 	return f
 }
 
-func (s SnapType) FileInfoByMask(dir string, from uint64, to uint64) FileInfo {
-	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileMask(from, to)))
+func (s SnapType) FileInfoByMask(dir string, epoch bool, from uint64, to uint64) FileInfo {
+	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileMask(epoch, from, to)))
 	if err != nil {
-		log.Debug("[snaptype] file mask error", "err", err, "fName", s.FileName(s.versions.Current, from, to))
+		log.Debug("[snaptype] file mask error", "err", err, "fName", s.FileName(s.versions.Current, epoch, from, to))
 		return FileInfo{}
 	}
 	if !ok {
@@ -366,16 +366,16 @@ func (s SnapType) HasIndexFiles(info FileInfo, dirEntries []string, logger log.L
 	return true
 }
 
-func (s SnapType) IdxFileNames(from uint64, to uint64) []string {
+func (s SnapType) IdxFileNames(epoch bool, from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
-		fileNames[i] = IdxFileName(index.Version.Current, from, to, index.Name)
+		fileNames[i] = IdxFileName(index.Version.Current, epoch, from, to, index.Name)
 	}
 
 	return fileNames
 }
 
-func (s SnapType) IdxFileName(ver version.Version, from uint64, to uint64, index ...Index) string {
+func (s SnapType) IdxFileName(ver version.Version, epoch bool, from uint64, to uint64, index ...Index) string {
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""
@@ -391,7 +391,7 @@ func (s SnapType) IdxFileName(ver version.Version, from uint64, to uint64, index
 		}
 	}
 
-	return IdxFileName(ver, from, to, index[0].Name)
+	return IdxFileName(ver, epoch, from, to, index[0].Name)
 }
 
 func ParseFileType(s string) (Type, bool) {
@@ -444,13 +444,12 @@ func (ft Enum) Type() Type {
 	return registeredTypes[ft]
 }
 
-func (e Enum) FileName(from uint64, to uint64) string {
-	return SegmentFileName(e.Type().Versions().Current, from, to, e)
+func (e Enum) FileName(epoch bool, from uint64, to uint64) string {
+	return SegmentFileName(e.Type().Versions().Current, epoch, from, to, e)
 }
 
-func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
-	f, _, _ := ParseFileName(dir, e.FileName(from, to))
-	return f
+func (e Enum) FileInfo(dir string, epoch bool, from, to uint64) FileInfo {
+	return e.Type().FileInfo(dir, epoch, from, to)
 }
 
 func (e Enum) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
@@ -501,7 +500,7 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 
 	cfg.KeyCount = d.Count()
 	idxVer := indexVersion.Current
-	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
+	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.Epoch, info.From, info.To))
 	versionOfRs := version.DataStructureVersion(0)
 	if !idxVer.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
 		versionOfRs = recsplit.ExistenceFilterVersion
@@ -564,7 +563,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	defer d.Close()
 
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = filepath.Join(info.Dir(), IdxFileName(info.Version, info.From, info.To, info.CaplinTypeString))
+	cfg.IndexFile = filepath.Join(info.Dir(), IdxFileName(info.Version, info.Epoch, info.From, info.To, info.CaplinTypeString))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

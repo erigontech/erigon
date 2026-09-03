@@ -35,7 +35,7 @@ import (
 
 func writeRootSeg(t *testing.T, dirs datadir.Dirs, table string, from, to uint64, words [][]byte) {
 	t.Helper()
-	name := snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, to)
+	name := snaptype.BeaconBlocks.FileName(version.ZeroVersion, false, from, to)
 	name = strings.ReplaceAll(name, "beaconblocks", table)
 	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dirs.SnapCaplin, name), dirs.Tmp, seg.DefaultCfg, log.LvlCrit, log.New())
 	require.NoError(t, err)

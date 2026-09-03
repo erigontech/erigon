@@ -45,7 +45,7 @@ func writeCaplinStateFixture(t *testing.T, dir, table string, from, to uint64, l
 
 func writeCaplinStateFixtureVersion(t *testing.T, dir, table string, from, to uint64, v version.Version, logger log.Logger) (segPath, idxPath string) {
 	t.Helper()
-	segName := strings.ReplaceAll(snaptype.BeaconBlocks.FileName(v, from, to), "beaconblocks", table)
+	segName := strings.ReplaceAll(snaptype.BeaconBlocks.FileName(v, false, from, to), "beaconblocks", table)
 	segPath = filepath.Join(dir, segName)
 
 	compressCfg := seg.DefaultCfg

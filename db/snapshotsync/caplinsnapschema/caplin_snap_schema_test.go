@@ -41,11 +41,11 @@ func TestNewCaplinSchemaUsesRegisteredStateTypes(t *testing.T) {
 
 			dataFile, err := schema.DataFile(statecfg.Version{}, 0, 50_000)
 			require.NoError(t, err)
-			require.Equal(t, filepath.Join(dirs.SnapCaplin, typ.FileName(version.ZeroVersion, 0, 50_000)), dataFile)
+			require.Equal(t, filepath.Join(dirs.SnapCaplin, typ.FileName(version.ZeroVersion, false, 0, 50_000)), dataFile)
 
 			indexFile, err := schema.AccessorIdxFile(statecfg.Version{}, 0, 50_000, 0)
 			require.NoError(t, err)
-			require.Equal(t, filepath.Join(dirs.SnapCaplin, typ.IdxFileName(typ.Indexes()[0].Version.Current, 0, 50_000)), indexFile)
+			require.Equal(t, filepath.Join(dirs.SnapCaplin, typ.IdxFileName(typ.Indexes()[0].Version.Current, false, 0, 50_000)), indexFile)
 		})
 	}
 }

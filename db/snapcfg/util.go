@@ -242,6 +242,13 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
+		// An epoch segment carries the "ep" marker as a suffix on the type, so the last dash-separated
+		// token is the marker; the type is the one before it.
+		if typeName == snaptype.EpochMarker {
+			if prevSep := strings.LastIndex(name[:lastSep], "-"); prevSep >= 0 {
+				typeName = name[prevSep+1 : lastSep]
+			}
+		}
 		include := false
 		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
@@ -433,21 +440,25 @@ type Cfg struct {
 
 // Seedable - can seed it over Bittorrent network to other nodes
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.Epoch, info.From)
 	return info.To-info.From == mergeLimit
 }
 
 // IsFrozen - can't be merged to bigger files
 func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.Epoch, info.From)
 	return info.To-info.From >= mergeLimit
 }
 
-func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
+func (c Cfg) MergeLimit(t snaptype.Enum, epoch bool, fromBlock uint64) uint64 {
 	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
-	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
+	// scan is a no-op for these types — and IsFrozen calls this per segment opened. It shards by
+	// slot rather than by block, so it keeps its own limit even on an epoch chain.
 	if snaptype.IsCaplinType(t) {
 		return snaptype.CaplinMergeLimit
+	}
+	if epoch {
+		return snaptype.EpochMergeLimit
 	}
 
 	hasType := t == snaptype.MinCoreEnum
@@ -485,7 +496,7 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		return snaptype.Erigon2MergeLimit
 	}
 
-	return c.MergeLimit(snaptype.MinCoreEnum, fromBlock)
+	return c.MergeLimit(snaptype.MinCoreEnum, epoch, fromBlock)
 }
 
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
@@ -494,17 +505,20 @@ func RegisterKnownTypes(networkName string, types []snaptype.Type) {
 
 var knownTypes = map[string][]snaptype.Type{}
 
-func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
-	return cfg.MergeLimit(snapType, fromBlock)
+func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, epoch bool, fromBlock uint64) uint64 {
+	return cfg.MergeLimit(snapType, epoch, fromBlock)
 }
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimitFromCfg(cfg, snapType, fromBlock)
+func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, epoch bool, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimitFromCfg(cfg, snapType, epoch, fromBlock)
 
-	if mergeLimit == snaptype.Erigon2OldMergeLimit {
+	switch mergeLimit {
+	case snaptype.Erigon2OldMergeLimit:
 		return oldMergeSteps
+	case snaptype.EpochMergeLimit:
+		return snaptype.EpochMergeSteps
 	}
 
 	return snaptype.MergeSteps

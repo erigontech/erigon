@@ -98,7 +98,7 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 
 	require.NoError(t, dumpBeaconBlocksRange(ctx, db, 0, snaptype.CaplinMergeLimit, 1, dirs, 1, log.LvlDebug, log.New()))
 
-	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, snaptype.CaplinMergeLimit)
+	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, false, 0, snaptype.CaplinMergeLimit)
 	f, _, ok := snaptype.ParseFileName(dirs.Snap, segName)
 	require.True(t, ok)
 
@@ -217,7 +217,7 @@ func slotWord(slot uint64) []byte {
 
 func writeCaplinSegment(t *testing.T, dirs datadir.Dirs, sType snaptype.Type, from, to uint64, withIndex bool, word func(slot uint64) []byte) {
 	t.Helper()
-	segName := sType.FileName(version.ZeroVersion, from, to)
+	segName := sType.FileName(version.ZeroVersion, false, from, to)
 	f, _, ok := snaptype.ParseFileName(dirs.Snap, segName)
 	require.True(t, ok)
 

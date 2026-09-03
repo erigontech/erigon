@@ -54,11 +54,10 @@ import (
 // receipt list per requested block in request order — an empty list for empty
 // blocks — and end at the first block that cannot be served.
 func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
-	t.Parallel()
 	const (
-		// The chain is one minimal block segment (file names encode block/1000, so
-		// segments cannot be smaller) plus a small tail that stays unfrozen in the DB.
-		frozenChainLength   = snaptype.Erigon2MinSegmentSize + 10
+		// The chain is one minimal block segment (epoch segments are 1024-aligned, so a segment
+		// cannot be smaller) plus a small tail that stays unfrozen in the DB.
+		frozenChainLength   = snaptype.EpochMinSegmentSize + 10
 		frozenEmptyBlockNum = 500
 	)
 	devp2pTestKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -87,14 +86,14 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	// Freeze the first segment's blocks into a snapshot file and prune them from
 	// the DB, exactly as block retirement does.
 	snCfg, _ := snapcfg.KnownCfg(networkname.Mainnet)
-	require.NoError(t, freezeblocks.DumpBlocks(m.Ctx, 0, snaptype.Erigon2MinSegmentSize, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB, 1, log.LvlInfo, log.New(), m.BlockReader, snCfg, nil))
+	require.NoError(t, freezeblocks.DumpBlocks(m.Ctx, 0, snaptype.EpochMinSegmentSize, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap, m.DB, 1, log.LvlInfo, log.New(), m.BlockReader, snCfg, nil))
 	require.NoError(t, m.BlockSnapshots.OpenFolder())
 	rwTx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	deleted, err := rawdb.PruneBlocks(rwTx, snaptype.Erigon2MinSegmentSize, snaptype.Erigon2MinSegmentSize)
+	deleted, err := rawdb.PruneBlocks(rwTx, snaptype.EpochMinSegmentSize, snaptype.EpochMinSegmentSize)
 	require.NoError(t, err)
-	require.Equal(t, snaptype.Erigon2MinSegmentSize-1, deleted)
+	require.Equal(t, snaptype.EpochMinSegmentSize-1, deleted)
 	require.NoError(t, rwTx.Commit())
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -108,7 +107,7 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	emptyBlockHash := blockHash(frozenEmptyBlockNum)
 	// Precondition making the scenario real: the empty block is readable via the
 	// snapshot-aware block reader but its header is gone from the DB tables.
-	require.GreaterOrEqual(t, m.BlockReader.FrozenBlocks(), uint64(snaptype.Erigon2MinSegmentSize-1))
+	require.GreaterOrEqual(t, m.BlockReader.FrozenBlocks(), uint64(snaptype.EpochMinSegmentSize-1))
 	prunedHeader, err := rawdb.ReadHeaderByHash(tx, emptyBlockHash)
 	require.NoError(t, err)
 	require.Nil(t, prunedHeader)

@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
@@ -1256,6 +1257,13 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
 	if _, err := snaptype.LoadSalt(dirs.Snap, createNewSaltFileIfNeeded, logger); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// Convert legacy decimal block segments to the epoch layout before anything opens the segment
+	// directory: the two size ladders never align, so an epoch producer cannot extend a decimal
+	// frontier without overlapping it, and that overlap breaks the frozen tx-num sequence.
+	if err := freezeblocks.MigrateDecimalToEpoch(ctx, dirs, db, chainConfig, estimate.CompressSnapshot.Workers(), logger); err != nil {
 		return nil, nil, nil, nil, err
 	}
 

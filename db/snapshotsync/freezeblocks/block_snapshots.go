@@ -74,17 +74,30 @@ import (
 // transaction_hash  -> transactions_segment_offset
 // transaction_hash  -> block_number
 
-func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) uint64 {
-	blocksPerFile := snapcfg.MergeLimitFromCfg(snCfg, snapType, from)
+func chooseSegmentEnd(epoch bool, from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) uint64 {
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snCfg, snapType, epoch, from)
+
+	minSize := uint64(snaptype.Erigon2MinSegmentSize)
+	if epoch {
+		minSize = snaptype.EpochMinSegmentSize
+	}
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)
 
-	if to < snaptype.Erigon2MinSegmentSize {
+	if to < minSize {
 		return to
 	}
 
-	return to - (to % snaptype.Erigon2MinSegmentSize) // round down to the nearest 1k
+	return to - (to % minSize) // round down to the nearest minSize
+}
+
+func segmentNoCompress(epoch bool, size uint64) bool {
+	mergeLimit := uint64(snaptype.Erigon2MergeLimit)
+	if epoch {
+		mergeLimit = snaptype.EpochMergeLimit
+	}
+	return size < mergeLimit-1
 }
 
 type BlockRetire struct {
@@ -182,8 +195,7 @@ func (br *BlockRetire) snapshots() *blocksnapshots.RoSnapshots {
 func (br *BlockRetire) canRetire(blocksInSnapshots uint64, finalityCtx dbfinality.Context, snapType snaptype.Enum) (blockFrom, blockTo uint64, can bool) {
 	blockTo = finalityCtx.RetireToBlockNum()
 	blockFrom = blocksInSnapshots + 1
-	blockFrom, blockTo, can = snapshotsync.CanRetire(blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
-	return blockFrom, blockTo, can
+	return snapshotsync.CanRetire(snaptype2.RegimeFor(br.chainConfig), blockFrom, blockTo, snapType, br.snCfg, br.config.Snapshot.E2RetireStep)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -495,8 +507,9 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 		return err
 	}
 
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
+	epoch := snaptype2.RegimeFor(chainConfig)
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(epoch, i, blockTo, snaptype2.Enums.Headers, snCfg) {
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(epoch, i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger, inProgress)
 		if err != nil {
 			return err
 		}
@@ -506,6 +519,7 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 }
 
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (lastTxNum uint64, err error) {
+	epoch := snaptype2.RegimeFor(chainConfig)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -514,17 +528,16 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		logger.Error("DumpBodies", "err", err)
 		return lastTxNum, err
 	}
-
-	if _, err = dumpRange(ctx, snaptype2.Headers.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err = dumpRange(ctx, snaptype2.Headers.FileInfo(snapDir, epoch, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return 0, err
 	}
 
-	if lastTxNum, err = dumpRange(ctx, snaptype2.Bodies.FileInfo(snapDir, blockFrom, blockTo),
+	if lastTxNum, err = dumpRange(ctx, snaptype2.Bodies.FileInfo(snapDir, epoch, blockFrom, blockTo),
 		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return lastTxNum, err
 	}
-	if _, err = dumpRange(ctx, snaptype2.Transactions.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err = dumpRange(ctx, snaptype2.Transactions.FileInfo(snapDir, epoch, blockFrom, blockTo),
 		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger, inProgress); err != nil {
 		return lastTxNum, err
 	}
@@ -569,7 +582,7 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	// Means:
 	//  - build must be fast
 	//  - merge can be slow and expensive
-	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1)
+	noCompress := segmentNoCompress(f.Epoch, f.To-f.From)
 
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
 		if noCompress {

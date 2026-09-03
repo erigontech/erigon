@@ -43,7 +43,9 @@ func TestExecModule_GivenReorgPastFinalised_WhenFinality_ThenInvalidFCU(t *testi
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	const (
-		e2RetireStepSize  = 10
+		// A power of two that divides 8192: the epoch ladder has no tier for step 10, so it would
+		// fall back to 1024 and retire nothing at this chain length.
+		e2RetireStepSize  = 8
 		e3RetireStepSize  = 3 // 3 txns per block (1 + 2 system txns)
 		maxReorgDepth     = 2
 		chainLen          = e2RetireStepSize + maxReorgDepth + 1
@@ -137,11 +139,11 @@ func TestExecModule_GivenReorgPastFinalised_WhenFinality_ThenInvalidFCU(t *testi
 	// also check that we didnt create any snapshot files for non-finalised blocks
 	err = emt.BlockSnapshots.OpenFolder()
 	require.NoError(t, err)
-	require.Equal(t, uint64(9), emt.BlockSnapshots.BlocksAvailable())
+	require.Equal(t, uint64(e2RetireStepSize-1), emt.BlockSnapshots.BlocksAvailable())
 	tx, err := emt.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.Equal(t, uint64(33), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+	require.Equal(t, uint64(finalisedBlockNum*e3RetireStepSize), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
 
 func TestExecModule_GivenReorgAtFinalisedBlock_WhenFinality_ThenInvalidFCU(t *testing.T) {
@@ -196,7 +198,9 @@ func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *tes
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	const (
-		e2RetireStepSize  = 10
+		// A power of two that divides 8192: the epoch ladder has no tier for step 10, so it would
+		// fall back to 1024 and retire nothing at this chain length.
+		e2RetireStepSize  = 8
 		e3RetireStepSize  = 3 // 3 txns per block (1 + 2 system txns)
 		maxReorgDepth     = 2
 		chainLen          = e2RetireStepSize + maxReorgDepth + 1
@@ -297,5 +301,5 @@ func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *tes
 	tx, err := emt.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.Equal(t, uint64(21), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+	require.Equal(t, uint64(finalisedBlockNum*e3RetireStepSize), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
