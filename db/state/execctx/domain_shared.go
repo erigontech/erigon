@@ -1219,14 +1219,16 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// Stash every cache-bound domain tuple during the flush and publish it only
 	// after the commit succeeds. If the commit fails, the stash is discarded, so
 	// the cache never advances ahead of durable MDBX state.
+	// It borrows the batch's buffers rather than holding a second image of the
+	// whole flush; see FlushConfig.DomainCallbacks.
 	var pendingBranches []branchCacheUpdate
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
 			if domain == kv.CommitmentDomain {
 				pendingBranches = append(pendingBranches, branchCacheUpdate{
-					key:  append([]byte(nil), k...),
-					val:  append([]byte(nil), v...),
+					key:  k,
+					val:  v,
 					step: step,
 					txN:  txNum,
 				})
@@ -1234,8 +1236,8 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 			}
 			pendingState = append(pendingState, cache.StateUpdate{
 				Domain: domain,
-				Key:    append([]byte(nil), k...),
-				Value:  append([]byte(nil), v...),
+				Key:    k,
+				Value:  v,
 				TxNum:  txNum,
 			})
 		})
@@ -1254,15 +1256,18 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	var codeStoreWrites [][2][]byte
 	if sd.stateCache != nil || sd.codeStore != nil {
 		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
+			var codeHash []byte
 			if sd.codeStore != nil && len(v) > 0 {
-				codeStoreWrites = append(codeStoreWrites, [2][]byte{crypto.Keccak256(v), append([]byte(nil), v...)})
+				codeHash = crypto.Keccak256(v)
+				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, v})
 			}
 			if sd.stateCache != nil {
 				pendingState = append(pendingState, cache.StateUpdate{
-					Domain: kv.CodeDomain,
-					Key:    append([]byte(nil), k...),
-					Value:  append([]byte(nil), v...),
-					TxNum:  txNum,
+					Domain:   kv.CodeDomain,
+					Key:      k,
+					Value:    v,
+					CodeHash: codeHash,
+					TxNum:    txNum,
 				})
 			}
 		}))
