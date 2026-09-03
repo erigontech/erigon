@@ -55,8 +55,11 @@ func (a *Allocator) lastFill(name string) int {
 func (a *Allocator) rememberFill(name string, n int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.fills == nil || len(a.fills) >= maxFillHints {
+	if a.fills == nil {
 		a.fills = make(map[string]int)
+	}
+	if _, ok := a.fills[name]; !ok && len(a.fills) >= maxFillHints {
+		return
 	}
 	a.fills[name] = n
 }

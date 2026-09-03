@@ -120,5 +120,20 @@ func TestAllocatorFillHintsAreBounded(t *testing.T) {
 			"a collector named after a one-off file must not add to the hint table forever")
 		allocator.mu.Unlock()
 	}
-	require.Equal(t, 1, allocator.lastFill(fmt.Sprintf("index-%d", 2*maxFillHints-1)), "the newest name keeps its hint across a reset")
+	require.Equal(t, 1, allocator.lastFill("index-0"), "an established name survives one-shot name churn")
+	require.Zero(t, allocator.lastFill(fmt.Sprintf("index-%d", 2*maxFillHints-1)), "a new name is refused once the table is full")
+}
+
+func TestChurnEvictsTheLongLivedHint(t *testing.T) {
+	allocator := emptyPool(BufferOptimalSize)
+	runCycle(t, NewCollectorWithAllocator("accounts.domain.flush", t.TempDir(), allocator, log.New()), 1000)
+	require.Equal(t, 1000, allocator.lastFill("accounts.domain.flush"))
+
+	for i := range maxFillHints {
+		c := NewCollectorWithAllocator(fmt.Sprintf("RecSplit Building index-%d", i), t.TempDir(), allocator, log.New())
+		collectN(t, c, 1)
+		c.Close()
+	}
+	require.Equal(t, 1000, allocator.lastFill("accounts.domain.flush"),
+		"the long-lived writer's hint must survive one-shot name churn")
 }
