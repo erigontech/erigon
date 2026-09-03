@@ -72,7 +72,7 @@ func TestBlockRetireUsesFinalityContext(t *testing.T) {
 		nil,
 		nil,
 		db,
-		&chain.Config{},
+		&chain.Config{Aura: &chain.AuRaConfig{}},
 		&cfg,
 		nil,
 		nil,
