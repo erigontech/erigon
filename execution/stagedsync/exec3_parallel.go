@@ -189,8 +189,7 @@ func (s *stopCause) Error() string {
 
 // stopCauseOf returns the stopCause published on ctx, if any.
 func stopCauseOf(ctx context.Context) (*stopCause, bool) {
-	var s *stopCause
-	if errors.As(context.Cause(ctx), &s) {
+	if s, ok := errors.AsType[*stopCause](context.Cause(ctx)); ok {
 		return s, true
 	}
 	return nil, false
@@ -228,7 +227,8 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
 	var (
 		outHeader *types.Header
 		outTx     kv.TemporalRwTx
@@ -244,8 +244,8 @@ func (pe *parallelExecutor) exec(ctx context.Context,
 func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
-
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
 	// Do NOT set pe.applyTx to the stageloop's rwTx — the rwTx is thread-bound
 	// and cannot be shared with the execLoop goroutine. The execLoop creates
 	// its own roTx at line 571. executeBlocks uses its own roTx too.
@@ -706,7 +706,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 					var blockValidatorWaiter *blockValidator
 					validateFullBlock := blockNum > 0 && !applyResult.isPartial
-					if validateFullBlock { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					if validateFullBlock { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(blockNum)
 
@@ -1469,8 +1469,7 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
 func wrapAsExecAbort(origErr error, depTxIndex int) error {
-	var abortErr protocol.ErrExecAbortError
-	if errors.As(origErr, &abortErr) {
+	if _, ok := errors.AsType[protocol.ErrExecAbortError](origErr); ok {
 		return origErr
 	}
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
@@ -1707,7 +1706,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
 		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
-
 		if err != nil {
 			return blockResult, err
 		}
@@ -1750,7 +1748,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		workersCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
-
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
 	}
@@ -2310,8 +2307,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) (result *exec.TxResult) {
-
+	calcFees bool,
+) (result *exec.TxResult) {
 	start := time.Now()
 
 	// Don't run post apply message during the state transition it is handled in finalize
@@ -2831,8 +2828,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}()
 
-		var execErr protocol.ErrExecAbortError
-		if errors.As(res.Err, &execErr) {
+		if execErr, ok := errors.AsType[protocol.ErrExecAbortError](res.Err); ok {
 			if res.Version().Incarnation > len(be.tasks) {
 				// Parallel scheduler exhausted retries for this tx. Surface
 				// through blockResult.Err for the same reason as the other
