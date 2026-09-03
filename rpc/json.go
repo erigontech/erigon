@@ -59,11 +59,9 @@ type jsonrpcMessage struct {
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 
-	// resultValue carries a success result that has not been encoded yet, so
-	// writeTo can encode it straight into the stream buffer. Exactly one of this
-	// and Result is set. It is deliberately unexported: a message holding it is
-	// not yet a complete JSON value, so it must not be marshalled as a struct.
-	resultValue any
+	// pooled is Result's backing array when it came from encPool, so writeTo can
+	// hand it back once the bytes are out.
+	pooled []byte
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -75,7 +73,7 @@ func (msg *jsonrpcMessage) isCall() bool {
 }
 
 func (msg *jsonrpcMessage) isResponse() bool {
-	return msg.hasValidID() && msg.Method == "" && msg.Params == nil && (msg.Result != nil || msg.resultValue != nil || msg.Error != nil)
+	return msg.hasValidID() && msg.Method == "" && msg.Params == nil && (msg.Result != nil || msg.Error != nil)
 }
 
 func (msg *jsonrpcMessage) hasValidID() bool {
@@ -128,9 +126,14 @@ func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
 		// cannot be told apart from "no deferred value" once it is in the message.
 		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: json.RawMessage("null")}
 	}
-	// Deferred: writeTo encodes it into the stream buffer, so the response is
-	// never materialised as a standalone []byte.
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, resultValue: result}
+	// Encoded here rather than at write time: the result must be known good
+	// before the response envelope is committed, and before the caller records
+	// the call as a success.
+	buf, err := encodeResult(result)
+	if err != nil {
+		return msg.errorResponse(err)
+	}
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: buf, pooled: buf}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -411,4 +414,28 @@ func parseSubscriptionName(rawArgs json.RawMessage) (string, error) {
 		return "", errors.New("expected subscription name as first argument")
 	}
 	return method, nil
+}
+
+// encPool reuses result buffers across responses. json.Marshal would allocate a
+// fresh one per call.
+var encPool = sync.Pool{New: func() any { return make([]byte, 0, 1024) }}
+
+// encodeResult encodes result the way json.Marshal would, straight into a
+// pooled buffer, so a response costs no allocation for its own bytes.
+func encodeResult(result any) ([]byte, error) {
+	buf := bytes.NewBuffer(encPool.Get().([]byte)[:0])
+	if err := json.NewEncoder(buf).Encode(result); err != nil {
+		encPool.Put(buf.Bytes()[:0]) //nolint:staticcheck
+		return nil, err
+	}
+	b := buf.Bytes()
+	return b[:len(b)-1], nil // Encode terminates with a newline the envelope must not carry
+}
+
+// releaseResult returns a pooled result buffer once its bytes have been written.
+func releaseResult(msg *jsonrpcMessage) {
+	if msg.pooled != nil {
+		encPool.Put(msg.pooled) //nolint:staticcheck
+		msg.pooled, msg.Result = nil, nil
+	}
 }

@@ -17,7 +17,6 @@
 package jsonstream
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
@@ -380,43 +379,4 @@ func (s *StackStream) popCommaOrField() {
 		}
 	}
 	flushIfFull(s.stream)
-}
-
-// streamBuf appends to the stream's own buffer, so encoding/json writes into the
-// pooled buffer instead of returning a freshly allocated one.
-type streamBuf struct{ s *StackStream }
-
-func (w streamBuf) Write(p []byte) (int, error) {
-	w.s.stream.SetBuffer(append(w.s.stream.Buffer(), p...))
-	return len(p), nil
-}
-
-// WriteJSONValue encodes v into the stream. Output matches json.Marshal(v) — the
-// same encoder, the same HTML escaping — but the bytes land straight in the
-// stream's buffer rather than in a per-response allocation.
-func (s *StackStream) WriteJSONValue(v any) error {
-	start := len(s.stream.Buffer())
-	if err := json.NewEncoder(streamBuf{s}).Encode(v); err != nil {
-		s.stream.SetBuffer(s.stream.Buffer()[:start]) // leave no partial value behind
-		return err
-	}
-	b := s.stream.Buffer()
-	s.stream.SetBuffer(b[:len(b)-1]) // Encode terminates with a newline; the envelope must not
-	s.popCommaOrField()
-	return nil
-}
-
-// Mark records a position the stream can be rewound to. Encoding a value can
-// fail after an enclosing object is already open, and the only correct recovery
-// is to discard the partial message and write a different one.
-func (s *StackStream) Mark() (buffered, depth int) {
-	return len(s.stream.Buffer()), len(s.stack)
-}
-
-// Rewind discards everything written since the matching Mark. It is only valid
-// while those bytes are still buffered; a caller that may have crossed
-// FlushThreshold in between cannot rely on it.
-func (s *StackStream) Rewind(buffered, depth int) {
-	s.stream.SetBuffer(s.stream.Buffer()[:buffered])
-	s.stack = s.stack[:depth]
 }

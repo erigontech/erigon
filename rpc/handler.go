@@ -696,7 +696,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // Nothing here may reach the underlying writer: the response must stay in the stream buffer
 // until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	if msg.Error != nil || (msg.Result == nil && msg.resultValue == nil) || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
+	defer releaseResult(msg)
+	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
 		buf, err := json.Marshal(msg)
 		if err != nil {
 			buf, err = json.Marshal(msg.errorResponse(err))
@@ -706,9 +707,6 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 		}
 		return
 	}
-	// Encoding a deferred result can fail once this envelope is already open, so
-	// mark the start and rewind to it rather than shipping a partial success.
-	buffered, depth := stream.Mark()
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(msg.Version)
@@ -717,13 +715,7 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	stream.WriteRawBytes(msg.ID)
 	stream.WriteMore()
 	stream.WriteObjectField("result")
-	if msg.Result != nil {
-		stream.WriteRawBytes(msg.Result)
-	} else if err := stream.WriteJSONValue(msg.resultValue); err != nil {
-		stream.Rewind(buffered, depth)
-		msg.errorResponse(err).writeTo(stream)
-		return
-	}
+	stream.WriteRawBytes(msg.Result)
 	stream.WriteObjectEnd()
 }
 
