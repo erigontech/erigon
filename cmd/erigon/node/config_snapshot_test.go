@@ -115,7 +115,7 @@ func TestConfigDefaults(t *testing.T) {
 	require.True(t, snap.InternalCL, "internal CL (Caplin) is on by default")
 	require.False(t, snap.ExperimentalBAL, "experimental BAL should be off by default")
 	require.False(t, snap.KeepExecutionProofs, "keep execution proofs should be off by default")
-	require.False(t, snap.PersistReceipts, "persist receipts should be off by default")
+	require.True(t, snap.PersistReceipts, "persist receipts is on by default")
 
 	// Snapshot defaults
 	require.True(t, snap.SnapProduceE2, "snap produce e2 should be on by default")
@@ -180,20 +180,19 @@ func TestConfigWithFlags(t *testing.T) {
 }
 
 // TestPersistReceiptsDefaultByMode pins that the historical receipts cache
-// (--prune.include-receipts) defaults to off in every prune mode, and is enabled
-// only when the operator sets the flag explicitly. The legacy --persist.receipts
-// alias must keep working.
+// defaults to on in every prune mode, and that the legacy --persist.receipts
+// alias keeps working.
 func TestPersistReceiptsDefaultByMode(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		want bool
 	}{
-		{"default mode", nil, false},
-		{"archive", []string{"--prune.mode=archive"}, false},
-		{"full", []string{"--prune.mode=full"}, false},
-		{"minimal", []string{"--prune.mode=minimal"}, false},
-		{"blocks", []string{"--prune.mode=blocks"}, false},
+		{"default mode", nil, true},
+		{"archive", []string{"--prune.mode=archive"}, true},
+		{"full", []string{"--prune.mode=full"}, true},
+		{"minimal", []string{"--prune.mode=minimal"}, true},
+		{"blocks", []string{"--prune.mode=blocks"}, true},
 		{"explicit on with full", []string{"--prune.mode=full", "--prune.include-receipts"}, true},
 		{"explicit on with archive", []string{"--prune.mode=archive", "--prune.include-receipts"}, true},
 		{"explicit off with full", []string{"--prune.mode=full", "--prune.include-receipts=false"}, false},
