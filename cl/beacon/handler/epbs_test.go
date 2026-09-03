@@ -1646,12 +1646,14 @@ func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *t
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
-	require.Contains(t, recorder.Body.String(), "reached forkchoice")
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.OnExecutionPayloadCalled)
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *testing.T) {

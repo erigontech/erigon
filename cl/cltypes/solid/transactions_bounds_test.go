@@ -162,7 +162,7 @@ func TestProgressiveTransactionsSSZValidationUsesResourceCountLimit(t *testing.T
 		maxEncodedBytes:           clparams.MaxChunkSize,
 	}
 
-	require.ErrorContains(t, transactions.ValidateProgressiveBounds(2), "too many transactions")
+	require.ErrorContains(t, transactions.ValidateProgressiveBounds(), "too many transactions")
 }
 
 func TestTransactionsSSZ_DecodeSSZ_CustomMaxBytesPerTransaction(t *testing.T) {
