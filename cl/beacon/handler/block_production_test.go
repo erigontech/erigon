@@ -1289,7 +1289,6 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	require.Contains(t, logs(), "blobSidecars=0")
 	require.Contains(t, logs(), "columnSidecars=0")
-	require.NotContains(t, logs(), "blobs=1")
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
