@@ -54,14 +54,14 @@ type callFrame struct {
 	From     common.Address  `json:"from"`
 	Gas      hexutil.Uint64  `json:"gas"`
 	GasUsed  hexutil.Uint64  `json:"gasUsed"`
-	To       *common.Address `json:"to,omitzero"`
+	To       *common.Address `json:"to,omitempty"`
 	Input    hexutil.Bytes   `json:"input"`
 	Output   hexutil.Bytes   `json:"output,omitempty"`
 	Error    string          `json:"error,omitempty"`
 	Revertal string          `json:"revertReason,omitempty"`
 	Calls    []callFrame     `json:"calls,omitempty"`
 	Logs     []callLog       `json:"logs,omitempty"`
-	Value    *hexutil.U256   `json:"value,omitzero"`
+	Value    *hexutil.U256   `json:"value,omitempty"`
 	// Last, to match the field order the generated marshaler used.
 	TypeStr string `json:"type"`
 }
