@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -39,18 +40,27 @@ func batchOfReads(n int64) *kvmetrics.DomainMetrics {
 	return dm
 }
 
-func TestMergeMetricsSeparatesNonExecSources(t *testing.T) {
-	t.Parallel()
+func sharedDomainsForMetrics(t *testing.T) *execctx.SharedDomains {
+	t.Helper()
 	db := newTestDb(t, 16)
 	ctx := context.Background()
 
 	tx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 
 	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
-	defer sd.Close()
+	t.Cleanup(sd.Close)
+	return sd
+}
+
+func TestMergeMetricsSeparatesNonExecSources(t *testing.T) {
+	prev := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
+	dbg.EnableKVReadLevelledMetrics()
+
+	sd := sharedDomainsForMetrics(t)
 
 	sd.MergeMetrics(kvmetrics.SourceExec, batchOfReads(5))
 	sd.MergeMetrics(kvmetrics.SourceCommitment, batchOfReads(3))
@@ -60,4 +70,20 @@ func TestMergeMetricsSeparatesNonExecSources(t *testing.T) {
 		"every source lands in the aggregate")
 	require.Equal(t, int64(5), mergedReads(t, sd.NonExecMetrics()),
 		"commitment and warmup are held apart from execution's reads")
+}
+
+func TestMergeMetricsSkipsNonExecSplitWithoutReadMetrics(t *testing.T) {
+	prev := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
+	dbg.KVReadLevelledMetrics = false
+
+	sd := sharedDomainsForMetrics(t)
+
+	sd.MergeMetrics(kvmetrics.SourceCommitment, batchOfReads(3))
+	sd.MergeMetrics(kvmetrics.SourceWarmup, batchOfReads(2))
+
+	require.Equal(t, int64(5), mergedReads(t, sd.Metrics()),
+		"the per-batch log aggregate is unconditional")
+	require.Zero(t, mergedReads(t, sd.NonExecMetrics()),
+		"nothing reads the split when the counters are off, so it must not pay the lock")
 }

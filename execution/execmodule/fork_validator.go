@@ -76,7 +76,7 @@ type ForkValidator struct {
 	blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
 }
 
-func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader dbservices.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
+func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader dbservices.FullBlockReader, maxReorgDepth uint64, slowBlockThreshold time.Duration) *ForkValidator {
 	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)
@@ -87,9 +87,12 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 		panic(err)
 	}
 
-	blockMetricsCache, err := lru.New[common.Hash, *blockmetrics.Record]("blockMetricsCache", timingsCacheSize)
-	if err != nil {
-		panic(err)
+	var blockMetricsCache *lru.Cache[common.Hash, *blockmetrics.Record]
+	if slowBlockThreshold >= 0 {
+		blockMetricsCache, err = lru.New[common.Hash, *blockmetrics.Record]("blockMetricsCache", timingsCacheSize)
+		if err != nil {
+			panic(err)
+		}
 	}
 	return &ForkValidator{
 		executor:          executor,
@@ -310,8 +313,11 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 	bodiesChain = append(bodiesChain, body)
 	hash := header.Hash()
 	number := header.Number.Uint64()
-	sd.TakeCommitmentTime() // discard anything left by an earlier block
-	beforeIO := blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
+	var beforeIO blockmetrics.Sample
+	if fv.blockMetricsCache != nil {
+		sd.TakeCommitmentTime() // discard anything left by an earlier block
+		beforeIO = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics())
+	}
 	if err := fv.executor.ValidateBlock(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
@@ -389,7 +395,6 @@ func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *t
 		rec.TxCount = len(body.Transactions)
 	}
 	rec.Accounts, rec.Storage, rec.Code, rec.CountersValid = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics()).Since(*beforeIO)
-	// Clamped: commitment time sums across the fold's goroutines.
 	rec.Execution = max(validation-stateHash, 0)
 	fv.blockMetricsCache.Add(hash, rec)
 }

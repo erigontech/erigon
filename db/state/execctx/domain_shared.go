@@ -621,7 +621,7 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 // Collector().TrySend, which never blocks and retains on a full buffer).
 func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
-	if source != kvmetrics.SourceExec {
+	if dbg.KVReadLevelledMetrics && source != kvmetrics.SourceExec {
 		sd.nonExecMetrics.Merge(wm)
 	}
 	sd.collector.Send(source, wm)
