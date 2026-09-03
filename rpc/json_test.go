@@ -132,33 +132,6 @@ func blockResultFixture(n int) map[string]any {
 	}
 }
 
-// The path this change replaces: a standalone []byte, copied into the stream.
-func BenchmarkResponsePreMarshal(b *testing.B) {
-	res, id := blockResultFixture(150), json.RawMessage(`1`)
-	b.ReportAllocs()
-	for b.Loop() {
-		enc, err := json.Marshal(res)
-		if err != nil {
-			b.Fatal(err)
-		}
-		s := jsonstream.Get(&bytes.Buffer{})
-		(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s)
-		_ = s.Flush()
-		jsonstream.Put(s)
-	}
-}
-
-func BenchmarkResponseEncoded(b *testing.B) {
-	res, id := blockResultFixture(150), json.RawMessage(`1`)
-	b.ReportAllocs()
-	for b.Loop() {
-		s := jsonstream.Get(&bytes.Buffer{})
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s)
-		_ = s.Flush()
-		jsonstream.Put(s)
-	}
-}
-
 // the two paths must be byte-identical
 func TestResponsePathsIdentical(t *testing.T) {
 	for _, n := range []int{0, 1, 150} {
@@ -321,53 +294,4 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.NotContains(t, back, "result")
 	}
 
-}
-
-// encodeResult must match json.Marshal on a fresh buffer and on a reused one.
-func TestEncodeResultRoundTripAndRelease(t *testing.T) {
-	t.Parallel()
-
-	for _, n := range []int{0, 1, 150} {
-		res := blockResultFixture(n)
-		want, err := json.Marshal(res)
-		require.NoError(t, err)
-
-		for _, pass := range []string{"first use", "warm reuse"} {
-			got, pooled, err := encodeResult(res)
-			require.NoError(t, err, pass)
-			require.Equal(t, string(want), string(got), pass)
-
-			msg := &jsonrpcMessage{Result: got, pooled: pooled}
-			releaseResult(msg)
-			require.Nil(t, msg.pooled, pass)
-			require.Nil(t, msg.Result, pass)
-		}
-	}
-}
-
-// Nothing above the bound may ever come back out of the pool.
-func TestResultPoolNeverHandsBackOversized(t *testing.T) {
-	res := blockResultFixture(4000)
-	enc, err := json.Marshal(res)
-	require.NoError(t, err)
-	require.Greater(t, len(enc), maxPooledResultSize, "fixture is too small to exercise the bound")
-
-	_, pooled, err := encodeResult(res)
-	require.NoError(t, err)
-	require.Greater(t, pooled.Cap(), maxPooledResultSize, "the encode did not grow past the bound")
-	putEnc(pooled)
-
-	for range 16 {
-		b := encPool.Get().(*bytes.Buffer)
-		require.LessOrEqual(t, b.Cap(), maxPooledResultSize, "the pool handed back an oversized buffer")
-	}
-}
-
-func TestEncodeResultErrorReleasesBuffer(t *testing.T) {
-	t.Parallel()
-
-	got, pooled, err := encodeResult(make(chan int))
-	require.Error(t, err)
-	require.Nil(t, got)
-	require.Nil(t, pooled)
 }

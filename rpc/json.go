@@ -30,8 +30,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -60,9 +58,6 @@ type jsonrpcMessage struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
-
-	// pooled holds Result's bytes, returned to encPool once writeTo is done.
-	pooled *bytes.Buffer
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -115,20 +110,19 @@ type fastJSONResult interface {
 
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
 	var (
-		enc    json.RawMessage
-		pooled *bytes.Buffer
-		err    error
+		enc []byte
+		err error
 	)
 	if fm, ok := result.(fastJSONResult); ok {
 		enc, err = fm.MarshalFastJSON()
 	} else {
-		enc, pooled, err = encodeResult(result)
+		enc, err = json.Marshal(result)
 	}
 	if err != nil {
 		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc, pooled: pooled}
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -409,34 +403,4 @@ func parseSubscriptionName(rawArgs json.RawMessage) (string, error) {
 		return "", errors.New("expected subscription name as first argument")
 	}
 	return method, nil
-}
-
-var encPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
-
-// One oversized response must not pin its backing array in encPool.
-const maxPooledResultSize = 16 * jsonstream.FlushThreshold
-
-func putEnc(b *bytes.Buffer) {
-	if b.Cap() <= maxPooledResultSize {
-		encPool.Put(b)
-	}
-}
-
-// encodeResult matches json.Marshal, but into a pooled buffer.
-func encodeResult(result any) (json.RawMessage, *bytes.Buffer, error) {
-	b := encPool.Get().(*bytes.Buffer)
-	b.Reset()
-	if err := json.NewEncoder(b).Encode(result); err != nil {
-		putEnc(b)
-		return nil, nil, err
-	}
-	enc := b.Bytes()
-	return enc[:len(enc)-1], b, nil // Encode appends a newline the envelope must not carry
-}
-
-func releaseResult(msg *jsonrpcMessage) {
-	if msg.pooled != nil {
-		putEnc(msg.pooled)
-		msg.pooled, msg.Result = nil, nil
-	}
 }

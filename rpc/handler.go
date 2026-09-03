@@ -696,7 +696,6 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // Nothing here may reach the underlying writer: the response must stay in the stream buffer
 // until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	defer releaseResult(msg)
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
 		buf, err := json.Marshal(msg)
 		if err != nil {
