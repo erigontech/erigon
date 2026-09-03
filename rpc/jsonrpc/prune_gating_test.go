@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
@@ -451,3 +452,50 @@ func dropTransactions(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
 	}
 	require.NoError(t, rwTx.Commit())
 }
+
+func dropBodies(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
+	t.Helper()
+	ctx := context.Background()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := from; num < to; num++ {
+		hash, err := rawdb.ReadCanonicalHash(rwTx, num)
+		require.NoError(t, err)
+		rawdb.DeleteBody(rwTx, hash, num)
+	}
+	require.NoError(t, rwTx.Commit())
+}
+
+type historyFloorDB struct {
+	kv.TemporalRoDB
+	startTxNum uint64
+}
+
+func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // Ownership passes to the caller.
+	if err != nil {
+		return nil, err
+	}
+	return historyFloorTx{TemporalTx: tx, startTxNum: db.startTxNum}, nil
+}
+
+type historyFloorTx struct {
+	kv.TemporalTx
+	startTxNum uint64
+}
+
+func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
+	return tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }).BlockFilesRoTx()
+}
+
+func (tx historyFloorTx) Debug() kv.TemporalDebugTx {
+	return historyFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), startTxNum: tx.startTxNum}
+}
+
+type historyFloorDebugTx struct {
+	kv.TemporalDebugTx
+	startTxNum uint64
+}
+
+func (tx historyFloorDebugTx) HistoryStartFrom(kv.Domain) uint64 { return tx.startTxNum }
