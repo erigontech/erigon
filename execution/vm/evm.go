@@ -492,16 +492,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	case isPrecompile:
 		if sp, ok := p.(StatefulPrecompile); ok {
 			actingAs, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
-			callValue := value
 			ctx := &PrecompileContext{
 				Self:     addr,
 				ActingAs: actingAs,
 				Caller:   frameCaller,
-				Value:    &callValue,
 				ReadOnly: evm.readOnly || typ == STATICCALL,
 				EVM:      evm,
 
-				frameValue: value,
+				value: value,
 			}
 			// Charging through the handle keeps gasUsed.State and
 			// gasUsed.StateSpill in step with gasRemaining, so the accounting

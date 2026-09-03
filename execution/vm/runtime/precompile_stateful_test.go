@@ -142,7 +142,8 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	require.Equal(t, cfg.Origin, got.Caller)
 	require.Equal(t, precompileAddr, got.Self)
 	require.Equal(t, precompileAddr, got.ActingAs)
-	require.True(t, got.Value.Eq(&value))
+	gotValue := got.Value()
+	require.True(t, gotValue.Eq(&value))
 	require.False(t, got.ReadOnly)
 
 	cfg2 := newStatefulTestConfig(t, chainID)
@@ -682,18 +683,14 @@ func TestSetPrecompilesNilRestoresChainSet(t *testing.T) {
 
 type reservoirHandoffPrecompile struct {
 	vm.NoStatelessRun
-	inner         accounts.Address
-	kind          string
-	mutateValueTo uint64
-	callErr       error
+	inner   accounts.Address
+	kind    string
+	callErr error
 }
 
 func (*reservoirHandoffPrecompile) Name() string { return "HANDOFF" }
 
 func (p *reservoirHandoffPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
-	if p.mutateValueTo != 0 {
-		ctx.Value.SetUint64(p.mutateValueTo)
-	}
 	switch p.kind {
 	case "staticcall":
 		_, p.callErr = ctx.StaticCall(gas, p.inner, nil, 50_000)
@@ -807,8 +804,7 @@ func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa8}))
 	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa9}))
 	inner := &recordingStatefulPrecompile{}
-	// Writing through the exported pointer must not reach the delegate frame.
-	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall", mutateValueTo: 99}
+	outer := &reservoirHandoffPrecompile{inner: innerAddr, kind: "delegatecall"}
 	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner}
 	})
@@ -823,7 +819,8 @@ func TestStatefulPrecompileDelegateCallKeepsFrameValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, outer.callErr)
 	require.Len(t, inner.calls, 1)
-	require.True(t, inner.calls[0].Value.Eq(&value),
+	delegateValue := inner.calls[0].Value()
+	require.True(t, delegateValue.Eq(&value),
 		"the delegate frame must observe the calling frame's value")
 }
 

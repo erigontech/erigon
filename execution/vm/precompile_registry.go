@@ -53,10 +53,7 @@ var (
 	// registryMu: Precompiles and ActivePrecompiles run 2-3 times per
 	// transaction, and an RWMutex read lock anti-scales with worker count.
 	providerCount atomic.Int64
-	// registryGen advances on every provider change. A merged set built from a
-	// provider read before the change must not be cached after it.
-	registryGen uint64
-	mergedCache = map[precompileCacheKey]*mergedPrecompileSet{}
+	mergedCache   = map[precompileCacheKey]*mergedPrecompileSet{}
 )
 
 // RegisterPrecompiles registers f as the precompile provider for chainID. A
@@ -83,7 +80,6 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 	}
 	providers[*chainID] = f
 	providerCount.Add(1)
-	registryGen++
 	dropCachedLocked(*chainID)
 }
 
@@ -99,7 +95,6 @@ func UnregisterPrecompiles(chainID *uint256.Int) {
 		delete(providers, *chainID)
 		providerCount.Add(-1)
 	}
-	registryGen++
 	dropCachedLocked(*chainID)
 }
 
@@ -133,22 +128,19 @@ func rulesChainID(rules *chain.Rules) uint256.Int {
 	return *rules.ChainID
 }
 
-func lookupProvider(chainID uint256.Int) (f PrecompilesFunc, gen uint64, ok bool) {
+func lookupProvider(chainID uint256.Int) (f PrecompilesFunc, ok bool) {
 	if providerCount.Load() == 0 {
-		return nil, 0, false
+		return nil, false
 	}
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 	f, ok = providers[chainID]
-	return f, registryGen, ok
+	return f, ok
 }
 
 // mergedSetFor returns the cached (contracts, addresses) pair for
 // (chainID, fork, rules.L2Version), building and caching it on first miss.
-// gen is the registry generation the provider was read at; a set built from a
-// provider that has since been replaced is returned to its own caller but never
-// cached.
-func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provider PrecompilesFunc, gen uint64) *mergedPrecompileSet {
+func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provider PrecompilesFunc) *mergedPrecompileSet {
 	key := precompileCacheKey{chainID: chainID, fork: fork, l2Version: rules.L2Version}
 
 	registryMu.RLock()
@@ -173,9 +165,7 @@ func mergedSetFor(rules *chain.Rules, fork forkTier, chainID uint256.Int, provid
 	if existing, ok := mergedCache[key]; ok {
 		return existing
 	}
-	if registryGen == gen {
-		mergedCache[key] = set
-	}
+	mergedCache[key] = set
 	return set
 }
 
@@ -199,14 +189,13 @@ type PrecompileContext struct {
 	Self     accounts.Address
 	ActingAs accounts.Address
 	Caller   accounts.Address
-	Value    *uint256.Int
 	ReadOnly bool
 	EVM      *EVM
-	// frameValue is the value the frame was entered with. Value is an exported
-	// pointer a precompile can write through, so delegation reads this instead:
-	// DELEGATECALL has no value operand and must not become one.
-	frameValue uint256.Int
+
+	value uint256.Int
 }
+
+func (ctx *PrecompileContext) Value() uint256.Int { return ctx.value }
 
 // PrecompileGas is the frame's gas, charged through the same helpers the
 // interpreter uses. Going through it is what keeps the reservoir and the
@@ -442,7 +431,7 @@ func (ctx *PrecompileContext) CallCode(gas *PrecompileGas, addr accounts.Address
 // deliberately no value parameter here.
 func (ctx *PrecompileContext) DelegateCall(gas *PrecompileGas, addr accounts.Address, input []byte, executionGas uint64) ([]byte, error) {
 	return ctx.reenter(gas, executionGas, func(handed mdgas.MdGas) ([]byte, mdgas.MdGas, mdgas.MdGasUsage, error) {
-		return ctx.EVM.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, ctx.frameValue, handed)
+		return ctx.EVM.DelegateCall(ctx.ActingAs, ctx.Caller, addr, input, ctx.value, handed)
 	})
 }
 

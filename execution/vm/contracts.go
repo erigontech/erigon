@@ -113,11 +113,11 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
 	fork := forkTierFor(chainRules)
 	chainID := rulesChainID(chainRules)
-	provider, gen, ok := lookupProvider(chainID)
+	provider, ok := lookupProvider(chainID)
 	if !ok {
 		return &forkSets[fork]
 	}
-	return mergedSetFor(chainRules, fork, chainID, provider, gen)
+	return mergedSetFor(chainRules, fork, chainID, provider)
 }
 
 // Precompiles returns the precompiles active under chainRules.
@@ -244,27 +244,20 @@ var (
 )
 
 func init() {
-	for tier, contracts := range map[forkTier]PrecompiledContracts{
-		forkHomestead: PrecompiledContractsHomestead,
-		forkByzantium: PrecompiledContractsByzantium,
-		forkIstanbul:  PrecompiledContractsIstanbul,
-		forkBerlin:    PrecompiledContractsBerlin,
-		forkCancun:    PrecompiledContractsCancun,
-		forkPrague:    PrecompiledContractsPrague,
-		forkOsaka:     PrecompiledContractsOsaka,
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead: {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium: {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:  {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:    {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
 	} {
-		forkSets[tier] = mergedPrecompileSet{contracts, slices.Collect(maps.Keys(contracts))}
-	}
-	for tier, addrs := range map[forkTier]*[]accounts.Address{
-		forkHomestead: &PrecompiledAddressesHomestead,
-		forkByzantium: &PrecompiledAddressesByzantium,
-		forkIstanbul:  &PrecompiledAddressesIstanbul,
-		forkBerlin:    &PrecompiledAddressesBerlin,
-		forkCancun:    &PrecompiledAddressesCancun,
-		forkPrague:    &PrecompiledAddressesPrague,
-		forkOsaka:     &PrecompiledAddressesOsaka,
-	} {
-		*addrs = forkSets[tier].addresses
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		*tierSet.addresses = forkSets[tier].addresses
 	}
 }
 
