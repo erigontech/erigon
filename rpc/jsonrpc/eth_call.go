@@ -120,7 +120,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
