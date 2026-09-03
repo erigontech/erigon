@@ -1888,7 +1888,8 @@ func (s *BaseRoSnapshots) buildMissedIndices(logPrefix string, ctx context.Conte
 
 	go func() {
 		defer close(finish)
-		g.Wait()
+		// g's task always returns nil; failures route through failedIndexes below.
+		_ = g.Wait()
 
 		fmu.Lock()
 		for fname, err := range failedIndexes {

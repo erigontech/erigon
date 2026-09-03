@@ -90,14 +90,24 @@ func createTestFileU16(b *testing.B, tmpdir string, keySize, valSize, fileSize i
 	written := 0
 	for written < fileSize {
 		*(*uint16)(unsafe.Pointer(&lenBuf[0])) = uint16(keySize)
-		w.Write(lenBuf[:])
-		w.Write(key)
+		if _, err := w.Write(lenBuf[:]); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := w.Write(key); err != nil {
+			b.Fatal(err)
+		}
 		*(*uint16)(unsafe.Pointer(&lenBuf[0])) = uint16(valSize)
-		w.Write(lenBuf[:])
-		w.Write(val)
+		if _, err := w.Write(lenBuf[:]); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := w.Write(val); err != nil {
+			b.Fatal(err)
+		}
 		written += 2 + keySize + 2 + valSize
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		b.Fatal(err)
+	}
 	f.Close()
 	return f.Name()
 }
@@ -119,14 +129,24 @@ func createTestFileU32(b *testing.B, tmpdir string, keySize, valSize, fileSize i
 	written := 0
 	for written < fileSize {
 		*(*uint32)(unsafe.Pointer(&lenBuf[0])) = uint32(keySize)
-		w.Write(lenBuf[:])
-		w.Write(key)
+		if _, err := w.Write(lenBuf[:]); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := w.Write(key); err != nil {
+			b.Fatal(err)
+		}
 		*(*uint32)(unsafe.Pointer(&lenBuf[0])) = uint32(valSize)
-		w.Write(lenBuf[:])
-		w.Write(val)
+		if _, err := w.Write(lenBuf[:]); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := w.Write(val); err != nil {
+			b.Fatal(err)
+		}
 		written += 4 + keySize + 4 + valSize
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		b.Fatal(err)
+	}
 	f.Close()
 	return f.Name()
 }

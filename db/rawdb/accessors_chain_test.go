@@ -389,7 +389,7 @@ func TestHeaderStorage(t *testing.T) {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
 	// Write and verify the header in the database
-	rawdb.WriteHeader(tx, header)
+	require.NoError(t, rawdb.WriteHeader(tx, header))
 	if entry, _ := br.Header(ctx, tx, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != header.Hash() {
@@ -399,7 +399,7 @@ func TestHeaderStorage(t *testing.T) {
 		t.Fatalf("Stored header RLP not found")
 	} else {
 		hasher := keccak.NewFastKeccak()
-		hasher.Write(entry)
+		_, _ = hasher.Write(entry)
 
 		if hash := common.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
 			t.Fatalf("Retrieved RLP header mismatch: have %v, want %v", entry, header)
@@ -471,7 +471,7 @@ func TestBodyStorage(t *testing.T) {
 			log.Error("ReadBodyRLP failed", "err", err)
 		}
 		hasher := keccak.NewFastKeccak()
-		hasher.Write(bodyRlp)
+		_, _ = hasher.Write(bodyRlp)
 
 		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
 			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
@@ -627,7 +627,9 @@ func TestPartialBlockStorage(t *testing.T) {
 	header := block.Header() // Not identical to struct literal above, due to other fields
 
 	// Store a header and check that it's not recognized as a block
-	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteHeader(tx, header); err != nil {
+		t.Fatal(err)
+	}
 	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
@@ -643,7 +645,9 @@ func TestPartialBlockStorage(t *testing.T) {
 	rawdb.DeleteBody(tx, block.Hash(), block.NumberU64())
 
 	// Store a header and a body separately and check reassembly
-	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteHeader(tx, header); err != nil {
+		t.Fatal(err)
+	}
 	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		t.Fatal(err)
 	}
@@ -768,7 +772,9 @@ func TestHeadStorage2(t *testing.T) {
 		t.Fatalf("Non head block entry returned: %v", entry)
 	}
 	// Assign separate entries for the head header and block
-	rawdb.WriteHeadHeaderHash(db, blockHead.Hash())
+	if err := rawdb.WriteHeadHeaderHash(db, blockHead.Hash()); err != nil {
+		t.Fatal(err)
+	}
 	rawdb.WriteHeadBlockHash(db, blockFull.Hash())
 
 	// Check that both heads are present, and different (i.e. two heads maintained)
@@ -795,7 +801,7 @@ func TestHeadStorage(t *testing.T) {
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full"), Number: *common.Num1}, nil)
 
 	// Assign separate entries for the head header and block
-	rawdb.WriteHeadHeaderHash(tx, blockHead.Hash())
+	require.NoError(t, rawdb.WriteHeadHeaderHash(tx, blockHead.Hash()))
 	rawdb.WriteHeadBlockHash(tx, blockFull.Hash())
 
 	// Check that both heads are present, and different (i.e. two heads maintained)
@@ -1262,7 +1268,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyRlp)
 
 	body := new(types.Body)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.Nil(body.Withdrawals)
 	require.Len(body.Transactions, 2)
@@ -1277,7 +1283,7 @@ func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.Nil(body.Withdrawals)
 	require.Equal(uint32(2), body.TxCount)
@@ -1292,7 +1298,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.NotNil(body.Withdrawals)
 	require.Len(body.Withdrawals, 2)
@@ -1304,11 +1310,11 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const bodyForStorageRlp = "c48002c0c0c0"
+	const bodyForStorageRlp = "c48002c0c0"
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.NotNil(body.Withdrawals)
 	require.Empty(body.Withdrawals)
@@ -1354,7 +1360,7 @@ func TestBadBlocks(t *testing.T) {
 
 		return header.Hash()
 	}
-	rawdb.ResetBadBlockCache(tx, 4)
+	require.NoError(rawdb.ResetBadBlockCache(tx, 4))
 
 	// put some blocks
 	for i := 1; i <= 6; i++ {
@@ -1377,7 +1383,7 @@ func TestBadBlocks(t *testing.T) {
 	require.Equal(badBlks[3].Hash(), hash1)
 
 	// testing the "limit"
-	rawdb.ResetBadBlockCache(tx, 2)
+	require.NoError(rawdb.ResetBadBlockCache(tx, 2))
 	badBlks, err = rawdb.GetLatestBadBlocks(tx)
 	require.NoError(err)
 	require.Len(badBlks, 2)

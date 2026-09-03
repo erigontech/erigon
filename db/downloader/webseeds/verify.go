@@ -63,7 +63,9 @@ func Verify(
 	}
 	g.MakeMapWithCap(&checker.state, len(chains))
 	defer func() {
-		items.Wait()
+		// Result is redundant here: either err is already set (an early return, which
+		// takes priority over anything items reports) or line 100 already captured it.
+		_ = items.Wait()
 		// Strict evaluation for the win.
 		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",
