@@ -67,8 +67,15 @@ import (
 var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
 var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 
+type engineBlockDownloader interface {
+	ReportBadHeader(common.Hash, common.Hash, string)
+	IsBadHeader(common.Hash) (bool, common.Hash, string)
+	Status() engine_block_downloader.Status
+	StartDownloading(common.Hash, *types.Block, engine_block_downloader.Trigger) bool
+}
+
 type EngineServer struct {
-	blockDownloader       *engine_block_downloader.EngineBlockDownloader
+	blockDownloader       engineBlockDownloader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 	config                *chain.Config
 	beaconCfg             atomic.Pointer[clparams.BeaconChainConfig]
@@ -637,7 +644,11 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}
 	} else {
 		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
-			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
+			locallyBuilt := s.latestBlockBuiltStore != nil &&
+				s.latestBlockBuiltStore.BlockBuiltByHash(blockHash) != nil
+			return header == nil &&
+				!locallyBuilt &&
+				s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
