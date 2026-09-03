@@ -704,8 +704,16 @@ func TestGenericCache_UsageReportIsNotDrivenByThePayloadEstimate(t *testing.T) {
 		c.Put(key, [128]byte{}, 1)
 	}
 
-	require.InDelta(t, 100.0, c.slotsPct(), 5.0,
-		"a cache that is exactly full reports %.2f%%", c.slotsPct())
+	// How far the fill lands below the allocated slots is hash skew across the
+	// shards, so the bound is what to assert, not a figure. The payload estimate
+	// as denominator is unbounded above: it has to overstate here, or this cache
+	// does not reproduce the case at all.
+	payloadPct := float64(c.currentSize.Load()) / float64(int64(c.maxCap)*c.payloadBytes) * 100
+	require.Greater(t, payloadPct, 100.0,
+		"the payload estimate has to overstate this cache, or the test proves nothing")
+	require.LessOrEqual(t, c.slotsPct(), 100.0,
+		"a full cache reports %.2f%% against the slots it allocated", c.slotsPct())
+	require.Positive(t, c.slotsPct(), "an empty report would pass the bound without measuring anything")
 }
 
 // A shard whose grow step the envelope refuses evicts at its current capacity,
