@@ -857,6 +857,35 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 	require.Same(t, fixture.externalBid, storedBid)
 }
 
+func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+	invalidBidErr := fmt.Errorf("%w: rejected candidate", eth2.ErrInvalidExecutionPayloadBid)
+	selfBuildErr := errors.New("self-build failed")
+	processBlock := func(
+		_ *state.CachingBeaconState,
+		block *cltypes.BlindOrExecutionBeaconBlock,
+	) (*eth2.Impl, error) {
+		bid := block.BeaconBody.GetSignedExecutionPayloadBid()
+		if bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
+			return nil, selfBuildErr
+		}
+		return nil, invalidBidErr
+	}
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		processBlock,
+	)
+
+	require.ErrorIs(t, err, invalidBidErr)
+	require.ErrorIs(t, err, selfBuildErr)
+	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+	require.False(t, found)
+}
+
 func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	originalRoot, err := fixture.productionState.HashSSZ()
@@ -970,6 +999,43 @@ func TestGetEthV3ValidatorBlockClearsStaleSelfBuildEnvelopeForExternalBid(t *tes
 	require.False(t, found)
 }
 
+func TestUpdateSelfBuildEnvelopeCacheRetainsMatchingEnvelope(t *testing.T) {
+	cache, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
+	require.NoError(t, err)
+	handler := &ApiHandler{selfBuildEnvelopes: cache}
+	slot := uint64(1)
+	blockRoot := common.Hash{0x01}
+	existing := &cltypes.ExecutionPayloadEnvelope{
+		BuilderIndex:    clparams.BuilderIndexSelfBuild,
+		BeaconBlockRoot: blockRoot,
+	}
+	handler.selfBuildEnvelopes.Add(slot, existing)
+
+	handler.updateSelfBuildEnvelopeCache(slot, &blockRoot, nil)
+
+	got, found := handler.selfBuildEnvelopes.Get(slot)
+	require.True(t, found)
+	require.Same(t, existing, got)
+}
+
+func TestUpdateSelfBuildEnvelopeCacheRemovesMismatchedEnvelope(t *testing.T) {
+	cache, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
+	require.NoError(t, err)
+	handler := &ApiHandler{selfBuildEnvelopes: cache}
+	slot := uint64(1)
+	existing := &cltypes.ExecutionPayloadEnvelope{
+		BuilderIndex:    clparams.BuilderIndexSelfBuild,
+		BeaconBlockRoot: common.Hash{0x01},
+	}
+	handler.selfBuildEnvelopes.Add(slot, existing)
+	producedBlockRoot := common.Hash{0x02}
+
+	handler.updateSelfBuildEnvelopeCache(slot, &producedBlockRoot, nil)
+
+	_, found := handler.selfBuildEnvelopes.Get(slot)
+	require.False(t, found)
+}
+
 func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	fixture.block.ExecutionValue = nil
@@ -1003,6 +1069,29 @@ func TestProcessProducedBlockRejectsNilBlock(t *testing.T) {
 	_, _, err := handler.processProducedBlock(fixture.productionState, nil)
 
 	require.ErrorContains(t, err, "cannot process nil block")
+}
+
+func TestProcessProducedBlockRejectsBlockWithoutBody(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	block := &cltypes.BlindOrExecutionBeaconBlock{Cfg: fixture.block.Cfg}
+	processed := false
+	processBlock := func(
+		_ *state.CachingBeaconState,
+		_ *cltypes.BlindOrExecutionBeaconBlock,
+	) (*eth2.Impl, error) {
+		processed = true
+		return &eth2.Impl{}, nil
+	}
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		block,
+		processBlock,
+	)
+
+	require.ErrorContains(t, err, "cannot process block without body")
+	require.False(t, processed)
 }
 
 func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {

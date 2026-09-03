@@ -720,6 +720,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	executionPayloadIncluded := false
 	var selfBuildEnvelope *cltypes.ExecutionPayloadEnvelope
+	var selfBuildBlockRoot *common.Hash
 	// [New in Gloas:EIP7732] For self-build blocks, compute the unsigned ExecutionPayloadEnvelope
 	// and include it in the response so the validator client can sign it.
 	// The beacon block root can only be computed here (after the state root is set).
@@ -732,6 +733,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			if err != nil {
 				log.Warn("Failed to compute beacon block root for self-build envelope", "err", err)
 			} else {
+				blockRoot := common.Hash(beaconBlockRoot)
+				selfBuildBlockRoot = &blockRoot
 				// Look up the cached execution payload for this block hash.
 				cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
 				if ok {
@@ -772,14 +775,30 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	)
 	// The slot cache must reflect only a complete, successful production result.
 	if block.Version() >= clparams.GloasVersion {
-		if selfBuildEnvelope == nil {
-			a.selfBuildEnvelopes.Remove(targetSlot)
-		} else {
-			a.selfBuildEnvelopes.Add(targetSlot, selfBuildEnvelope)
-		}
+		a.updateSelfBuildEnvelopeCache(targetSlot, selfBuildBlockRoot, selfBuildEnvelope)
 	}
 
 	return resp, nil
+}
+
+func (a *ApiHandler) updateSelfBuildEnvelopeCache(
+	targetSlot uint64,
+	selfBuildBlockRoot *common.Hash,
+	selfBuildEnvelope *cltypes.ExecutionPayloadEnvelope,
+) {
+	if selfBuildEnvelope == nil {
+		if selfBuildBlockRoot != nil {
+			// Reuse is safe only when the cached envelope commits to the same block.
+			cached, found := a.selfBuildEnvelopes.Get(targetSlot)
+			if found && cached != nil && cached.BuilderIndex == clparams.BuilderIndexSelfBuild &&
+				cached.BeaconBlockRoot == *selfBuildBlockRoot {
+				return
+			}
+		}
+		a.selfBuildEnvelopes.Remove(targetSlot)
+		return
+	}
+	a.selfBuildEnvelopes.Add(targetSlot, selfBuildEnvelope)
 }
 
 func (a *ApiHandler) produceBlock(
@@ -967,6 +986,9 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	if block == nil {
 		return baseState, nil, errors.New("cannot process nil block")
 	}
+	if block.BeaconBody == nil && block.BlindedBeaconBody == nil {
+		return baseState, nil, errors.New("cannot process block without body")
+	}
 	// Gloas carries its signed builder bid in the full body and has no blinded block form.
 	if block.Version().AfterOrEqual(clparams.GloasVersion) && block.BeaconBody == nil {
 		return baseState, nil, errors.New("cannot process blinded Gloas block")
@@ -1025,6 +1047,10 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		return candidateState, candidateMachine, nil
 	}
 
+	// Candidate processing includes work unrelated to the bid. Evict only errors
+	// marked as deterministic bid-validation failures.
+	removed := errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) &&
+		a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	selfBuildMachine, selfBuildErr := processBlock(baseState, block)
 	if selfBuildErr != nil {
 		return baseState, selfBuildMachine, fmt.Errorf(
@@ -1034,10 +1060,6 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		)
 	}
 
-	// Candidate processing includes work unrelated to the bid. Evict only errors
-	// marked as deterministic bid-validation failures.
-	removed := errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) &&
-		a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	log.Warn("GLOAS: external builder bid failed production transition; using self-build",
 		"slot", block.Slot,
 		"builderIndex", externalBid.Message.BuilderIndex,
