@@ -36,10 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-//go:generate go run github.com/fjl/gencodec -type flatCallAction -field-override flatCallActionMarshaling -out gen_flatcallaction_json.go
-//go:generate go run github.com/fjl/gencodec -type flatCallResult -field-override flatCallResultMarshaling -out gen_flatcallresult_json.go
-//go:generate go run github.com/fjl/gencodec -type flatCallFrame -out gen_flatcallframe_json.go
-
 func init() {
 	register("flatCallTracer", newFlatCallTracer)
 }
@@ -81,37 +77,23 @@ type flatCallAction struct {
 	Author         *common.Address `json:"author,omitempty"`
 	RewardType     string          `json:"rewardType,omitempty"`
 	SelfDestructed *common.Address `json:"address,omitempty"`
-	Balance        *uint256.Int    `json:"balance,omitempty"`
+	Balance        *hexutil.U256   `json:"balance,omitempty"`
 	CallType       string          `json:"callType,omitempty"`
 	CreationMethod string          `json:"creationMethod,omitempty"`
 	From           *common.Address `json:"from,omitempty"`
 	Gas            *hexutil.Uint64 `json:"gas,omitempty"`
-	Init           *[]byte         `json:"init,omitempty"`
-	Input          *[]byte         `json:"input,omitempty"`
+	Init           *hexutil.Bytes  `json:"init,omitempty"`
+	Input          *hexutil.Bytes  `json:"input,omitempty"`
 	RefundAddress  *common.Address `json:"refundAddress,omitempty"`
 	To             *common.Address `json:"to,omitempty"`
-	Value          *uint256.Int    `json:"value,omitempty"`
-}
-
-type flatCallActionMarshaling struct {
-	Balance *hexutil.U256
-	Gas     *hexutil.Uint64
-	Init    *hexutil.Bytes
-	Input   *hexutil.Bytes
-	Value   *hexutil.U256
+	Value          *hexutil.U256   `json:"value,omitempty"`
 }
 
 type flatCallResult struct {
 	Address *common.Address `json:"address,omitempty"`
-	Code    *[]byte         `json:"code,omitempty"`
+	Code    *hexutil.Bytes  `json:"code,omitempty"`
 	GasUsed *hexutil.Uint64 `json:"gasUsed,omitempty"`
-	Output  *[]byte         `json:"output,omitempty"`
-}
-
-type flatCallResultMarshaling struct {
-	Code    *hexutil.Bytes
-	GasUsed *hexutil.Uint64
-	Output  *hexutil.Bytes
+	Output  *hexutil.Bytes  `json:"output,omitempty"`
 }
 
 // flatCallTracer reports call frame information of a tx in a flat format, i.e.
@@ -316,8 +298,8 @@ func toHexUint64Ptr(v uint64) *hexutil.Uint64 {
 
 func newFlatCreate(input *callFrame) *flatCallFrame {
 	var (
-		actionInit = []byte(input.Input)
-		resultCode = []byte(input.Output)
+		actionInit = input.Input
+		resultCode = input.Output
 	)
 
 	return &flatCallFrame{
@@ -326,7 +308,7 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 			CreationMethod: strings.ToLower(input.Type.String()),
 			From:           &input.From,
 			Gas:            toHexUint64Ptr(uint64(input.Gas)),
-			Value:          (*uint256.Int)(input.Value),
+			Value:          input.Value,
 			Init:           &actionInit,
 		},
 		Result: &flatCallResult{
@@ -339,8 +321,8 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 
 func newFlatCall(input *callFrame) *flatCallFrame {
 	var (
-		actionInput  = []byte(input.Input)
-		resultOutput = []byte(input.Output)
+		actionInput  = input.Input
+		resultOutput = input.Output
 	)
 
 	return &flatCallFrame{
@@ -349,7 +331,7 @@ func newFlatCall(input *callFrame) *flatCallFrame {
 			From:     &input.From,
 			To:       input.To,
 			Gas:      toHexUint64Ptr(uint64(input.Gas)),
-			Value:    (*uint256.Int)(input.Value),
+			Value:    input.Value,
 			CallType: strings.ToLower(input.Type.String()),
 			Input:    &actionInput,
 		},
@@ -365,7 +347,7 @@ func newFlatSelfdestruct(input *callFrame) *flatCallFrame {
 		Type: "suicide",
 		Action: flatCallAction{
 			SelfDestructed: &input.From,
-			Balance:        (*uint256.Int)(input.Value),
+			Balance:        input.Value,
 			RefundAddress:  input.To,
 		},
 	}
