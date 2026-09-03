@@ -30,14 +30,18 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 const maxBuilderConfigRequestSize = 2 << 20
 
 type gloasBlockProductionOptions struct {
-	builderConfig      *cltypes.BuilderConfig
-	includePayload     bool
-	selectedBuilderURL string
+	builderConfig       *cltypes.BuilderConfig
+	includePayload      bool
+	selectedBuilderURL  string
+	selfBuildPayload    *selfBuildPayload
+	payloadFeeRecipient *common.Address
+	deferPayloadCache   bool
 }
 
 type gloasBlockProductionOptionsKey struct{}

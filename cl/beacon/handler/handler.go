@@ -57,7 +57,10 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
+const (
+	maxBlobBundleCacheSize    = 48 // 8 blocks worth of blobs
+	maxPendingBuilderPayloads = 4
+)
 
 // Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
 type BlobBundle struct {
@@ -69,6 +72,63 @@ type BlobBundle struct {
 type selfBuildPayload struct {
 	Payload           *cltypes.Eth1Block
 	ExecutionRequests *cltypes.ExecutionRequests
+	BlobBundles       []BlobBundle
+}
+
+type selfBuildPayloadCache interface {
+	Add(common.Hash, *selfBuildPayload) bool
+	Get(common.Hash) (*selfBuildPayload, bool)
+}
+
+type blobBundleCache interface {
+	Add(common.Bytes48, BlobBundle) bool
+	Get(common.Bytes48) (BlobBundle, bool)
+}
+
+type pendingBuilderPayload struct {
+	slot      uint64
+	blockHash common.Hash
+	payload   *selfBuildPayload
+}
+
+type pendingBuilderPayloadStore struct {
+	mu       sync.Mutex
+	capacity int
+	entries  map[common.Hash]pendingBuilderPayload
+}
+
+func newPendingBuilderPayloadStore(capacity int) *pendingBuilderPayloadStore {
+	return &pendingBuilderPayloadStore{capacity: capacity, entries: make(map[common.Hash]pendingBuilderPayload, capacity)}
+}
+
+func (s *pendingBuilderPayloadStore) Add(currentSlot, slot uint64, hash, bidRoot common.Hash, payload *selfBuildPayload) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, entry := range s.entries {
+		if entry.slot < currentSlot {
+			delete(s.entries, key)
+		}
+	}
+	if entry, ok := s.entries[bidRoot]; ok {
+		return entry.slot == slot && entry.blockHash == hash
+	}
+	if len(s.entries) >= s.capacity {
+		return false
+	}
+	s.entries[bidRoot] = pendingBuilderPayload{slot: slot, blockHash: hash, payload: payload}
+	return true
+}
+
+func (s *pendingBuilderPayloadStore) Get(currentSlot, slot uint64, hash, bidRoot common.Hash) (*selfBuildPayload, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, entry := range s.entries {
+		if entry.slot < currentSlot {
+			delete(s.entries, key)
+		}
+	}
+	entry, ok := s.entries[bidRoot]
+	return entry.payload, ok && entry.slot == slot && entry.blockHash == hash
 }
 
 type selfBuildEnvelopeKey struct {
@@ -116,7 +176,7 @@ type ApiHandler struct {
 	// unregisteredProposers remembers which proposers have already been warned about, so the
 	// warning is once per proposer rather than once per proposal.
 	unregisteredProposers              *lru.Cache[uint64, struct{}]
-	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
+	blobBundles                        blobBundleCache // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
@@ -144,7 +204,8 @@ type ApiHandler struct {
 	executionPayloadBidService services.ExecutionPayloadBidService
 	payloadAttestationService  services.PayloadAttestationService
 	proposerPreferencesService services.ProposerPreferencesService
-	selfBuildPayloads          *lru.Cache[common.Hash, *selfBuildPayload]
+	selfBuildPayloads          selfBuildPayloadCache
+	pendingBuilderPayloads     *pendingBuilderPayloadStore
 	// selfBuildEnvelopes caches the unsigned ExecutionPayloadEnvelope by slot so
 	// the validator client can retrieve it via
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
@@ -271,6 +332,7 @@ func NewApiHandler(
 		payloadAttestationService:        payloadAttestationService,
 		proposerPreferencesService:       proposerPreferencesService,
 		selfBuildPayloads:                selfBuildPayloads,
+		pendingBuilderPayloads:           newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
 		selfBuildEnvelopes:               selfBuildEnvelopes,
 		builderRoutes:                    builderRoutes,
 	}

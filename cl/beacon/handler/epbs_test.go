@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -38,9 +40,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
@@ -49,8 +54,10 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
@@ -543,6 +550,88 @@ func TestPostExecutionPayloadEnvelopesRejectsMalformedContents(t *testing.T) {
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	if clparams.GetBeaconConfig() == nil {
+		cfg := clparams.MainnetBeaconConfig
+		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+	}
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	currentSlot := handler.ethClock.GetCurrentSlot()
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	handler.ethClock = clock
+	handler.beaconChainCfg.GloasForkEpoch = 0
+
+	blob := goethkzg.Blob{}
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 0)
+	require.NoError(t, err)
+	_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
+	require.NoError(t, err)
+	require.Len(t, proofs, int(handler.beaconChainCfg.NumberOfColumns))
+	bundleProofs := make([]common.Bytes48, len(proofs))
+	for i := range proofs {
+		bundleProofs[i] = common.Bytes48(proofs[i])
+	}
+
+	executionRequests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	executionRequestsRoot, err := executionRequests.HashSSZ()
+	require.NoError(t, err)
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.BlockHash = common.HexToHash("0x1234")
+	payload.SlotNumber = currentSlot
+
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = currentSlot
+	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.BuilderIndex = 3
+	bid.BlockHash = payload.BlockHash
+	bid.ExecutionRequestsRoot = common.Hash(executionRequestsRoot)
+	bid.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&commitment))
+	bidRoot, err := bid.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, handler.pendingBuilderPayloads.Add(currentSlot, currentSlot, payload.BlockHash, common.Hash(bidRoot), &selfBuildPayload{
+		Payload: payload, ExecutionRequests: executionRequests, BlobBundles: []BlobBundle{{
+			Commitment: common.Bytes48(commitment), Blob: (*cltypes.Blob)(&blob), KzgProofs: bundleProofs,
+		}},
+	}))
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Blocks[common.Hash(blockRoot)] = block
+
+	var columnsWritten atomic.Int32
+	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), common.Hash(blockRoot), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+			columnsWritten.Add(1)
+			return nil
+		}).Times(int(handler.beaconChainCfg.NumberOfColumns))
+	handler.columnStorage = columnStorage
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		if columnsWritten.Load() != int32(handler.beaconChainCfg.NumberOfColumns) {
+			return forkchoice.ErrEIP7594ColumnDataNotAvailable
+		}
+		return nil
+	}
+
+	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		Payload: payload, ExecutionRequests: executionRequests, BuilderIndex: bid.BuilderIndex,
+		BeaconBlockRoot: common.Hash(blockRoot), ParentBeaconBlockRoot: block.Block.ParentRoot,
+	}}
+	body, err := json.Marshal(signedEnvelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, int32(handler.beaconChainCfg.NumberOfColumns), columnsWritten.Load())
 }
 
 func TestPostExecutionPayloadEnvelopesSSZDecodesReferencedScheduleCapacity(t *testing.T) {
@@ -1298,33 +1387,96 @@ func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
 	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
 }
 
-func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
-	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.FuluForkEpoch = 0
 	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
 	require.NoError(t, postState.UpgradeToFulu())
 	require.NoError(t, postState.UpgradeToGloas())
+	postState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
 	for range 4 {
-		postState.GetBuilders().Append(&cltypes.Builder{})
+		postState.GetBuilders().Append(&cltypes.Builder{
+			Version:           handler.beaconChainCfg.PayloadBuilderVersion,
+			Balance:           handler.beaconChainCfg.MinDepositAmount + 10,
+			WithdrawableEpoch: handler.beaconChainCfg.FarFutureEpoch,
+		})
 	}
-	require.NoError(t, handler.syncedData.OnHeadState(postState))
 	handler.epbsPool = pool.NewEpbsPool()
-	slot := handler.ethClock.GetCurrentSlot()
-	bid := newTestExecutionPayloadBid(slot, 3, 1000)
-	handler.epbsPool.StoreHighestBid(pool.HighestBidKey{
-		Slot:            bid.Slot,
-		ParentBlockHash: bid.ParentBlockHash,
-		ParentBlockRoot: bid.ParentBlockRoot,
-	}, &cltypes.SignedExecutionPayloadBid{Message: bid})
+	slot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(slot)
+	require.NoError(t, err)
+	dependentRoot, err := state.GetProposerDependentRoot(postState, state.GetEpochAtSlot(handler.beaconChainCfg, slot))
+	require.NoError(t, err)
+	feeRecipient := common.Address{0x42}
+	handler.epbsPool.ProposerPreferences.Add(
+		pool.ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot},
+		&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+			ProposalSlot: slot, ValidatorIndex: proposerIndex, FeeRecipient: feeRecipient,
+			TargetGasLimit: 30_000_000, DependentRoot: dependentRoot,
+		}},
+	)
+	parentBid := postState.GetLatestExecutionPayloadBid()
+	require.NotNil(t, parentBid)
+	parentBid.ParentBlockHash = common.HexToHash("0xaaaa")
+	parentBid.BlockHash = common.HexToHash("0xbbbb")
+	require.NoError(t, handler.syncedData.OnHeadState(postState))
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	clock.EXPECT().GetSlotTime(slot).Return(time.Now()).AnyTimes()
+	handler.ethClock = clock
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/3", slot), http.NoBody)
+	baseRoot, err := postState.BlockRoot()
+	require.NoError(t, err)
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = parentBid.ParentBlockHash
+	payload.BlockHash = common.HexToHash("0x1234")
+	payload.SlotNumber = slot
+	payload.FeeRecipient = feeRecipient
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	var gotFeeRecipient common.Address
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			gotFeeRecipient = attrs.SuggestedFeeRecipient
+			return []byte{1}, nil
+		}).Times(2)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil).Times(2)
+	handler.engine = engine
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", slot), http.NoBody)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, feeRecipient, gotFeeRecipient)
 	require.Contains(t, recorder.Body.String(), `"builder_index":"3"`)
+	require.Contains(t, recorder.Body.String(), `"block_hash":"0x0000000000000000000000000000000000000000000000000000000000001234"`)
+	require.Contains(t, recorder.Body.String(), `"value":"2"`)
+	require.Contains(t, recorder.Body.String(), `"fee_recipient":"0x4200000000000000000000000000000000000000"`)
 	require.NotContains(t, recorder.Body.String(), `"signature"`)
 	require.NotContains(t, recorder.Body.String(), `"message"`)
+
+	forkchoiceStore.Envelopes[baseRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	var headSnapshots atomic.Int32
+	forkchoiceStore.GetHeadNodeFn = func() (forkchoice.ForkChoiceNode, error) {
+		status := cltypes.PayloadStatusEmpty
+		if headSnapshots.Add(1) > 1 {
+			status = cltypes.PayloadStatusFull
+		}
+		return forkchoice.ForkChoiceNode{Root: baseRoot, PayloadStatus: status}, nil
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
 
 	for _, path := range []string{
 		"/eth/v1/validator/execution_payload_bid/0/3",
@@ -1335,6 +1487,127 @@ func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
 		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	}
+}
+
+func TestGetValidatorExecutionPayloadBidRejectsInactiveBuilder(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	postState.GetBuilders().Append(&cltypes.Builder{})
+	require.NoError(t, handler.syncedData.OnHeadState(postState))
+	slot := postState.Slot() + 1
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	clock.EXPECT().GetSlotTime(slot).Return(time.Now()).AnyTimes()
+	handler.ethClock = clock
+	baseRoot, err := postState.BlockRoot()
+	require.NoError(t, err)
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).AnyTimes()
+	handler.engine = engine
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/0", slot), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestGetValidatorExecutionPayloadEnvelopeBuildsFromSelectedLocalBid(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	slot := uint64(3)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	handler.ethClock = clock
+
+	payloadHash := common.HexToHash("0x1234")
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.BlockHash = payloadHash
+	payload.SlotNumber = slot
+	executionRequests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	pending := &selfBuildPayload{
+		Payload:           payload,
+		ExecutionRequests: executionRequests,
+	}
+	for i := byte(1); i <= 4; i++ {
+		handler.selfBuildPayloads.Add(common.Hash{i}, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)})
+	}
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = common.HexToHash("0xabcd")
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 3
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payloadHash
+	executionRequestsRoot, err := executionRequests.HashSSZ()
+	require.NoError(t, err)
+	block.Block.Body.SignedExecutionPayloadBid.Message.ExecutionRequestsRoot = common.Hash(executionRequestsRoot)
+	bidRoot, err := block.Block.Body.SignedExecutionPayloadBid.Message.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, handler.pendingBuilderPayloads.Add(slot, slot, payloadHash, common.Hash(bidRoot), pending))
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	forkchoiceStore.Blocks[common.Hash(blockRoot)] = block
+
+	forkchoiceStore.HeadVal = common.HexToHash("0xffff")
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+		fmt.Sprintf("/eth/v1/validator/execution_payload_envelopes/%d/%s", slot, common.Hash(blockRoot)), http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+
+	forkchoiceStore.HeadVal = common.Hash(blockRoot)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"builder_index":"3"`)
+	require.Contains(t, recorder.Body.String(), `"block_hash":"0x0000000000000000000000000000000000000000000000000000000000001234"`)
+
+	forkchoiceStore.HeadVal = common.HexToHash("0xeeee")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusNotFound, recorder.Code, recorder.Body.String())
+}
+
+func TestPendingBuilderPayloadStoreRefusesEvictionUntilSlotExpires(t *testing.T) {
+	store := newPendingBuilderPayloadStore(1)
+	firstHash := common.HexToHash("0x01")
+	secondHash := common.HexToHash("0x02")
+	first := &selfBuildPayload{}
+	second := &selfBuildPayload{}
+
+	firstBidRoot := common.HexToHash("0x11")
+	secondBidRoot := common.HexToHash("0x12")
+	require.True(t, store.Add(3, 3, firstHash, firstBidRoot, first))
+	require.False(t, store.Add(3, 4, secondHash, secondBidRoot, second))
+	got, ok := store.Get(3, 3, firstHash, firstBidRoot)
+	require.True(t, ok)
+	require.Same(t, first, got)
+	require.True(t, store.Add(4, 4, secondHash, secondBidRoot, second))
+	_, ok = store.Get(4, 3, firstHash, firstBidRoot)
+	require.False(t, ok)
+
+	sharedPayloadStore := newPendingBuilderPayloadStore(2)
+	require.True(t, sharedPayloadStore.Add(3, 3, firstHash, firstBidRoot, first))
+	require.True(t, sharedPayloadStore.Add(3, 3, firstHash, secondBidRoot, first))
+	_, ok = sharedPayloadStore.Get(3, 3, firstHash, firstBidRoot)
+	require.True(t, ok)
+	_, ok = sharedPayloadStore.Get(3, 3, firstHash, secondBidRoot)
+	require.True(t, ok)
 }
 
 func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {
@@ -1686,13 +1959,14 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 }
 
 func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	slot := uint64(64)
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
 	handler.ethClock = clock
 	root := common.HexToHash("0x1234")
+	fcu.HeadVal = root
 	envelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
 	envelope.BeaconBlockRoot = root
 	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: root}, envelope)
@@ -1708,7 +1982,7 @@ func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
 		want int
 	}{
 		{name: "matching current slot and root", slot: slot, root: root, want: http.StatusOK},
-		{name: "same slot alternate root", slot: slot, root: otherRoot, want: http.StatusOK},
+		{name: "same slot alternate root", slot: slot, root: otherRoot, want: http.StatusNotFound},
 		{name: "wrong root", slot: slot, root: common.HexToHash("0x9999"), want: http.StatusNotFound},
 		{name: "old slot", slot: slot - 1, root: root, want: http.StatusNotFound},
 	}
