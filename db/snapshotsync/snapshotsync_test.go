@@ -19,6 +19,8 @@ package snapshotsync
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 
@@ -584,4 +586,36 @@ func TestGetMaxStepRangeInSnapshots(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid domain snapshot filename")
 	})
+}
+
+// The receipt cache follows the state-history window by default, which is what
+// keeps a pruned node from downloading the whole chain's worth of it. That
+// default is spelled KeepAllBlocksPruneMode, which reads like the opposite, so
+// pin the cutoff each mode actually produces.
+func TestReceiptsSegmentRetentionCutoff_FollowsHistoryWindow(t *testing.T) {
+	t.Parallel()
+	const head = 23_000_000
+	const rcacheName = "history/v1.0-rcache.100-200.v"
+
+	for _, tc := range []struct {
+		name string
+		mode prune.Mode
+		want uint64
+	}{
+		{"minimal keeps only its history window", prune.MinimalMode, head - config3.MinimalPruneDistance},
+		{"full keeps only its history window", prune.FullMode, head - config3.DefaultPruneDistance},
+		{"blocks keeps only its history window", prune.BlocksMode, head - config3.DefaultPruneDistance},
+		{"archive keeps everything", prune.ArchiveMode, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.True(t, tc.mode.ReceiptsFollowHistory(),
+				"presets leave Receipts unset, which for receipts means follow-history")
+			require.Equal(t, tc.want, receiptsSegmentRetentionCutoff(tc.mode, nil, head, rcacheName))
+		})
+	}
+
+	// A log index is not rcache, so it follows the blocks window instead.
+	require.Equal(t, uint64(head-config3.MinimalPruneDistance),
+		receiptsSegmentRetentionCutoff(prune.MinimalMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
+	require.Zero(t, receiptsSegmentRetentionCutoff(prune.ArchiveMode, nil, head, "idx/v1.0-logaddrs.100-200.ef"))
 }
