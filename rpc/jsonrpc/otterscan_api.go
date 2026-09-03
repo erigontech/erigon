@@ -219,9 +219,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the sentinel for the newest page, not a request to read genesis;
+	// the blocks the scan lands on are gated as it reaches them.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
@@ -246,9 +250,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the sentinel for the oldest page, which starts wherever the
+	// indices still reach rather than at genesis.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }

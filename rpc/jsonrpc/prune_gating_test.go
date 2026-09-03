@@ -582,3 +582,44 @@ func dropTransactions(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
 	}
 	require.NoError(t, rwTx.Commit())
 }
+
+// TestGetBlockByTimestampGatesGenesisBranch pins the gate on the branch that answers
+// a timestamp at or before the genesis one: the block it resolves is block 0, which a
+// blocks window prunes away.
+func TestGetBlockByTimestampGatesGenesisBranch(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	_, err := apis.erigon.GetBlockByTimestamp(t.Context(), 0, false)
+	require.ErrorIs(t, err, state.PrunedError)
+}
+
+// archiveBlocksWindowMode keeps every state history while block bodies follow a
+// window, the only shape where the blocks boundary is stricter than the history one.
+func archiveBlocksWindowMode() prune.Mode {
+	return prune.Mode{Initialised: true, History: prune.ArchiveMode.History, Blocks: pruneGatingDistance}
+}
+
+// TestSearchTransactionsBeforeNewestPage pins that the newest-page sentinel is not
+// read as a request for genesis: the page it answers with lies above the blocks cutoff.
+func TestSearchTransactionsBeforeNewestPage(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: archiveBlocksWindowMode()})
+	res, err := apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 3)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Txs)
+}
+
+// TestSearchTransactionsBeforeGatesScannedBlocks pins that a page whose backward scan
+// crosses the blocks cutoff is rejected instead of served from bodies the prune mode
+// claims are gone.
+func TestSearchTransactionsBeforeGatesScannedBlocks(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: archiveBlocksWindowMode()})
+	_, err := apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 25)
+	require.ErrorIs(t, err, state.PrunedError)
+}
