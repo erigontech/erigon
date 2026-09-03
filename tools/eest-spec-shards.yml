@@ -445,13 +445,7 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 25088
-  exclude: &declined_eip7610_zkevm
-    # TODO: legacy fixtures that haven't been updated to remove EIP-7610 yet (DFI'd)
-    - 'init_collision_create_opcode.*opcode_CREATE2?-non-empty-balance-correct-initcode'
-    - 'init_collision_create_tx.*tx_type_[0-2].*non-empty-balance-(correct|revert)-initcode'
-    - 'collision_with_create2_revert_in_initcode'
-    - 'create2_collision_storage'
+  expected-tests: 25150
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
   max-allowed-failures: 0
@@ -506,5 +500,4 @@
   workers: 8
   max-allowed-failures: 0
   commitment-parallel: false
-  expected-tests: 25088
-  exclude: *declined_eip7610_zkevm
+  expected-tests: 25150
