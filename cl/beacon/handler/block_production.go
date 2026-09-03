@@ -1747,10 +1747,15 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	_ = validation
 
 	if err := a.broadcastBlock(ctx, block.SignedBlock, block.SignedExecutionPayloadEnvelope); err != nil {
+		if errors.Is(err, errPublishedBlockIntegrationPending) {
+			return nil, beaconhttp.NewEndpointError(http.StatusAccepted, err)
+		}
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return newBeaconResponse(nil), nil
 }
+
+var errPublishedBlockIntegrationPending = errors.New("published beacon block integration pending")
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	resp, err := a.publishBlindedBlocks(w, r, 1)
@@ -2340,7 +2345,7 @@ func publishSelfBuildEnvelopeAfterIntegration(
 		select {
 		case err := <-blockIntegrated:
 			if err != nil {
-				published <- fmt.Errorf("failed to integrate block and blobs: %w", err)
+				published <- fmt.Errorf("%w: failed to integrate block and blobs: %w", errPublishedBlockIntegrationPending, err)
 				return
 			}
 			published <- publish(ownerCtx)
@@ -2355,7 +2360,7 @@ func publishSelfBuildEnvelopeAfterIntegration(
 	case err := <-published:
 		return err
 	case <-waitCtx.Done():
-		return waitCtx.Err()
+		return fmt.Errorf("%w: %w", errPublishedBlockIntegrationPending, waitCtx.Err())
 	}
 }
 
@@ -2391,6 +2396,17 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(a.beaconChainCfg, blk, signedEnvelope); err != nil {
 		return err
 	}
+	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, blockRoot, signedEnvelope.Message.BuilderIndex)
+	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to claim self-build envelope publication: %w", err)
+	}
+	published := false
+	defer func() {
+		a.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, published)
+	}()
 
 	applyErr := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
 	persistenceFailed := false
@@ -2413,6 +2429,7 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
 		return fmt.Errorf("failed to publish self-build execution payload envelope: %w", err)
 	}
+	published = true
 	if persistenceFailed {
 		return fmt.Errorf("published self-build envelope before local persistence retry: %w", applyErr)
 	}

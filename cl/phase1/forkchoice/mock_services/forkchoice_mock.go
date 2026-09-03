@@ -91,6 +91,7 @@ type ForkChoiceStorageMock struct {
 	ValidateExecutionPayloadEnvelopeForConsensusErr    error
 	ValidateExecutionPayloadEnvelopeForConsensusCalled bool
 	ApplyLocalSelfBuildEnvelopeErr                     error
+	ClaimExecutionPayloadEnvelopeForGossipErr          error
 	EnvelopeGossipAdmissions                           forkchoice.ExecutionPayloadEnvelopeAdmissions
 	ReadEnvelopeFromDiskFunc                           func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	OnBlockFunc                                        func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error
@@ -403,6 +404,9 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 	beaconBlockRoot common.Hash,
 	builderIndex uint64,
 ) (forkchoice.ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.ClaimExecutionPayloadEnvelopeForGossipErr != nil {
+		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, f.ClaimExecutionPayloadEnvelopeForGossipErr
+	}
 	token, err := f.EnvelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
 		return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, err
@@ -423,7 +427,7 @@ func (f *ForkChoiceStorageMock) ClaimExecutionPayloadEnvelopeForGossip(
 			}
 		} else if envelope.Message.BuilderIndex == builderIndex {
 			f.EnvelopeGossipAdmissions.Finish(token, true)
-			return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+			return forkchoice.ExecutionPayloadEnvelopeAdmissionToken{}, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen
 		}
 	}
 	if err := ctx.Err(); err != nil {

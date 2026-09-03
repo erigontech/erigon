@@ -351,6 +351,24 @@ func (s *skippedFullBlockTrackerStub) MarkSkippedFullBlocksRecovered(roots []com
 	s.pending = retained
 }
 
+func (s *skippedFullBlockTrackerStub) RotateSkippedFullBlocks(roots []common.Hash) {
+	rotated := make(map[common.Hash]struct{}, len(roots))
+	for _, root := range roots {
+		rotated[root] = struct{}{}
+	}
+	retained := make([]network.SkippedFullBlock, 0, len(s.pending))
+	deferred := make([]network.SkippedFullBlock, 0, len(roots))
+	for _, pending := range s.pending {
+		if _, ok := rotated[common.Hash(pending.Root)]; ok {
+			deferred = append(deferred, pending)
+		} else {
+			retained = append(retained, pending)
+		}
+	}
+	retained = append(retained, deferred...)
+	s.pending = retained
+}
+
 func (s *skippedFullBlockTrackerStub) SkippedFullBlocksAtCapacity() bool {
 	return len(s.pending) >= 64
 }
@@ -371,7 +389,8 @@ func TestTrackedSkippedFullBlockCapacityDrainResumesAfterPartialRecovery(t *test
 	require.Equal(t, trackedHistoryRelieved, result)
 	require.Equal(t, 1, attempts)
 	require.Len(t, tracker.pending, 57)
-	require.Equal(t, byte(1), tracker.pending[0].Root[0])
+	require.Equal(t, byte(9), tracker.pending[0].Root[0])
+	require.Equal(t, byte(1), tracker.pending[len(tracker.pending)-1].Root[0])
 }
 
 func TestTrackedSkippedFullBlockCapacityDrainChecksPastUnavailableBatch(t *testing.T) {
@@ -393,7 +412,8 @@ func TestTrackedSkippedFullBlockCapacityDrainChecksPastUnavailableBatch(t *testi
 	require.Equal(t, trackedHistoryRelieved, result)
 	require.Equal(t, 2, attempts)
 	require.Len(t, tracker.pending, 56)
-	require.Equal(t, byte(1), tracker.pending[0].Root[0])
+	require.Equal(t, byte(17), tracker.pending[0].Root[0])
+	require.Equal(t, byte(1), tracker.pending[len(tracker.pending)-skippedEnvelopeRecoveryBatchSize].Root[0])
 }
 
 func TestTrackedSkippedFullBlockCapacityReliefReturnsStalledWithoutLosingEntries(t *testing.T) {
@@ -432,6 +452,38 @@ func TestTrackedSkippedFullBlockCapacityReliefHasOverallDeadline(t *testing.T) {
 	require.Equal(t, 1, attempts)
 	require.Less(t, time.Since(started), time.Second)
 	require.Equal(t, want, tracker.pending)
+}
+
+func TestTrackedSkippedFullBlockCapacityReliefRotatesTimedOutPrefix(t *testing.T) {
+	tracker := &skippedFullBlockTrackerStub{pending: make([]network.SkippedFullBlock, 64)}
+	for i := range tracker.pending {
+		tracker.pending[i].Root[0] = byte(i + 1)
+	}
+
+	result := relieveTrackedHistoryBackfillWithin(context.Background(), tracker, 20*time.Millisecond,
+		func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			<-ctx.Done()
+			return pending
+		})
+
+	require.Equal(t, trackedHistoryStalled, result)
+	require.Equal(t, byte(skippedEnvelopeRecoveryBatchSize+1), tracker.pending[0].Root[0])
+	require.Equal(t, byte(1), tracker.pending[len(tracker.pending)-skippedEnvelopeRecoveryBatchSize].Root[0])
+}
+
+func TestLowestTrackedHistorySlotIgnoresMalformedEntries(t *testing.T) {
+	pending := []network.SkippedFullBlock{
+		{},
+		{Block: &cltypes.SignedBeaconBlock{}},
+		{Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 23}}},
+		{Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 7}}},
+	}
+
+	slot, ok := lowestTrackedHistorySlot(pending)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), slot)
+	_, ok = lowestTrackedHistorySlot(pending[:2])
+	require.False(t, ok)
 }
 
 func TestTrackedSkippedFullBlockCapacityReliefPreservesCallerCancellation(t *testing.T) {

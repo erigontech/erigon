@@ -473,19 +473,18 @@ func TestGloasRecoveryRetainsFailedRootAcrossCursorReset(t *testing.T) {
 	require.Empty(t, nextGloasEnvelopeRecoveryBatch(cfg))
 }
 
-func TestGloasRecoveryPendingQueueIsBoundedAndRotatesFailures(t *testing.T) {
+func TestGloasRecoveryPendingQueueAppliesBackpressureAndRotatesFailures(t *testing.T) {
 	cfg := &Cfg{}
 	for i := range maxGloasEnvelopeRecoveryPending {
 		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
 	}
 	newRoot := common.HexToHash("0xffff")
-	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
-	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
+	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
 	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
 
 	first := nextGloasEnvelopeRecoveryBatch(cfg)
 	require.Len(t, first, maxGloasAncestorVisitsPerCycle)
-	require.Contains(t, first, [32]byte(newRoot))
 	finishGloasEnvelopeRecoveryBatch(cfg, first, func(common.Hash) bool { return false })
 	second := nextGloasEnvelopeRecoveryBatch(cfg)
 	require.NotEqual(t, first[0], second[0])
@@ -528,24 +527,20 @@ func TestGloasRecoveryPendingReleasesOnlyRootsOutsideForkChoiceOwnership(t *test
 	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
 }
 
-func TestGloasRecoveryPendingEvictedRootCanBeRediscovered(t *testing.T) {
+func TestGloasRecoveryPendingDoesNotEvictUnresolvedRoot(t *testing.T) {
 	cfg := &Cfg{}
 	for i := range maxGloasEnvelopeRecoveryPending {
 		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i), byte(i >> 8)}))
 	}
-	evicted := cfg.gloasEnvelopeRecoveryPending[0]
+	oldest := cfg.gloasEnvelopeRecoveryPending[0]
 	newRoot := common.HexToHash("0xffff")
-	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
-	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, evicted)
-	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
-
-	advanceGloasEnvelopeRecoveryCursor(cfg, common.HexToHash("0x1234"), true)
-	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, evicted))
-	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, evicted)
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, newRoot))
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, oldest)
+	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, newRoot)
 	require.Len(t, cfg.gloasEnvelopeRecoveryPending, maxGloasEnvelopeRecoveryPending)
 }
 
-func TestGloasRecoveryScanRediscoversEvictedFinalizedRootWhileBlockIsRetained(t *testing.T) {
+func TestGloasRecoveryScanRetainsFinalizedRootAtCapacity(t *testing.T) {
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.AltairForkEpoch = 0
 	beaconCfg.BellatrixForkEpoch = 0
@@ -576,8 +571,8 @@ func TestGloasRecoveryScanRediscoversEvictedFinalizedRootWhileBlockIsRetained(t 
 	for i := 1; i < maxGloasEnvelopeRecoveryPending; i++ {
 		require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.Hash{byte(i + 16), byte(i >> 8)}))
 	}
-	require.True(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
-	require.NotContains(t, cfg.gloasEnvelopeRecoveryPending, finalizedRoot)
+	require.False(t, trackGloasEnvelopeRecoveryRoot(cfg, common.HexToHash("0xffff")))
+	require.Contains(t, cfg.gloasEnvelopeRecoveryPending, finalizedRoot)
 
 	_, completed := scanGloasEnvelopeRecoveryAncestors(
 		cfg,
@@ -598,7 +593,7 @@ func TestGloasRecoveryScanRediscoversEvictedFinalizedRootWhileBlockIsRetained(t 
 func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
 	completeBatch := true
 	require.True(t, continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch))
-	require.True(t, completeBatch)
+	require.False(t, completeBatch)
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
 	completeBatch = true
@@ -621,7 +616,15 @@ func TestGloasVerificationImmediateFailureDoesNotFreezeBatch(t *testing.T) {
 	processImmediateGloasVerificationItems(items[0], items[1], process, &completeBatch)
 
 	require.Equal(t, 2, processed)
-	require.True(t, completeBatch)
+	require.False(t, completeBatch)
+}
+
+func TestGloasEnvelopeRecoveryBudgetBoundsUnavailableFetch(t *testing.T) {
+	started := time.Now()
+	runGloasEnvelopeRecovery(t.Context(), 20*time.Millisecond, func(ctx context.Context) {
+		<-ctx.Done()
+	})
+	require.Less(t, time.Since(started), time.Second)
 }
 
 func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {

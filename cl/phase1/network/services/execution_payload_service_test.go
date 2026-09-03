@@ -206,6 +206,26 @@ func TestExecutionPayloadServiceSharesSeenEnvelopeAdmissionWithREST(t *testing.T
 	require.False(t, fcu.OnExecutionPayloadCalled)
 }
 
+func TestExecutionPayloadServiceQueuesValidEnvelopeWhenAdmissionIsBusy(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	fcu.Blocks[blockRoot] = newTestExecutionPayloadBlock(100, 1)
+	fcu.ClaimExecutionPayloadEnvelopeForGossipErr = forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	impl := service.(*executionPayloadService)
+	require.Equal(t, int32(1), impl.pending.count.Load())
+	require.False(t, fcu.OnExecutionPayloadCalled)
+
+	fcu.ClaimExecutionPayloadEnvelopeForGossipErr = nil
+	impl.pending.processPending(t.Context())
+	require.Equal(t, int32(0), impl.pending.count.Load())
+	require.True(t, fcu.OnExecutionPayloadCalled)
+}
+
 func TestExecutionPayloadServiceIgnoresSeenEnvelopeWhenPersistenceIsUnavailable(t *testing.T) {
 	service, fcu := setupExecutionPayloadService(t)
 	blockRoot := common.HexToHash("0x1234")
@@ -272,7 +292,7 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 	}
 }
 
-func TestExecutionPayloadServiceIgnoresLocalPersistenceFailures(t *testing.T) {
+func TestExecutionPayloadServiceAcceptsValidatedEnvelopeDespiteLocalPersistenceFailures(t *testing.T) {
 	for _, processErr := range []error{
 		forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed,
 		forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull,
@@ -286,7 +306,9 @@ func TestExecutionPayloadServiceIgnoresLocalPersistenceFailures(t *testing.T) {
 
 			err := service.ProcessMessage(context.Background(), nil, newTestSignedEnvelope(100, blockRoot, 1))
 
-			require.ErrorIs(t, err, ErrIgnore)
+			require.NoError(t, err)
+			impl := service.(*executionPayloadService)
+			require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{beaconBlockRoot: blockRoot, builderIndex: 1}))
 		})
 	}
 }

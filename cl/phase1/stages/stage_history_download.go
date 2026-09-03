@@ -410,6 +410,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				case trackedHistoryCanceled:
 					return
 				case trackedHistoryStalled:
+					pending := cfg.downloader.SkippedFullBlocks()
+					if lowestSlot, ok := lowestTrackedHistorySlot(pending); ok {
+						log.Warn("[BackwardBeaconDownloader] backfill frozen by unavailable GLOAS envelopes",
+							"lowestSlot", lowestSlot, "count", len(pending))
+					} else {
+						log.Warn("[BackwardBeaconDownloader] backfill frozen by unavailable GLOAS envelopes",
+							"count", len(pending))
+					}
 					select {
 					case historyDownloadStalled <- struct{}{}:
 					default:
@@ -501,6 +509,7 @@ type skippedFullBlockTracker interface {
 	SkippedFullBlocks() []network.SkippedFullBlock
 	SkippedFullBlocksAtCapacity() bool
 	MarkSkippedFullBlocksRecovered([]common.Hash)
+	RotateSkippedFullBlocks([]common.Hash)
 }
 
 type trackedHistoryRelief uint8
@@ -568,6 +577,22 @@ func waitForTrackedHistoryRetry(ctx context.Context, retryInterval time.Duration
 	}
 }
 
+func lowestTrackedHistorySlot(pending []network.SkippedFullBlock) (uint64, bool) {
+	var lowest uint64
+	found := false
+	for _, skipped := range pending {
+		if skipped.Block == nil || skipped.Block.Block == nil {
+			continue
+		}
+		slot := skipped.Block.Block.Slot
+		if !found || slot < lowest {
+			lowest = slot
+			found = true
+		}
+	}
+	return lowest, found
+}
+
 func waitForHistoryDownloadReady(ctx context.Context, stalled <-chan struct{}, ready func() bool) error {
 	for !ready() {
 		if err := ctx.Err(); err != nil {
@@ -592,8 +617,11 @@ func waitForHistoryDownloadReady(ctx context.Context, stalled <-chan struct{}, r
 
 func markTrackedHistoryRecovery(tracker skippedFullBlockTracker, pending, failed []network.SkippedFullBlock) {
 	failedRoots := make(map[common.Hash]struct{}, len(failed))
+	failedRootList := make([]common.Hash, 0, len(failed))
 	for _, skippedBlock := range failed {
-		failedRoots[common.Hash(skippedBlock.Root)] = struct{}{}
+		root := common.Hash(skippedBlock.Root)
+		failedRoots[root] = struct{}{}
+		failedRootList = append(failedRootList, root)
 	}
 	recoveredRoots := make([]common.Hash, 0, len(pending)-len(failed))
 	for _, skippedBlock := range pending {
@@ -603,6 +631,7 @@ func markTrackedHistoryRecovery(tracker skippedFullBlockTracker, pending, failed
 		}
 	}
 	tracker.MarkSkippedFullBlocksRecovered(recoveredRoots)
+	tracker.RotateSkippedFullBlocks(failedRootList)
 }
 
 func completeTrackedHistoryBackfill(

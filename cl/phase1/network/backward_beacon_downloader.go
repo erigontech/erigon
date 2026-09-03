@@ -590,6 +590,29 @@ func (b *BackwardBeaconDownloader) MarkSkippedFullBlocksRecovered(roots []common
 	b.skippedFullBlocks = retained
 }
 
+func (b *BackwardBeaconDownloader) RotateSkippedFullBlocks(roots []common.Hash) {
+	if len(roots) == 0 {
+		return
+	}
+	rotated := make(map[common.Hash]struct{}, len(roots))
+	for _, root := range roots {
+		rotated[root] = struct{}{}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	retained := make([]SkippedFullBlock, 0, len(b.skippedFullBlocks))
+	deferred := make([]SkippedFullBlock, 0, len(roots))
+	for _, skipped := range b.skippedFullBlocks {
+		if _, ok := rotated[common.Hash(skipped.Root)]; ok {
+			deferred = append(deferred, skipped)
+		} else {
+			retained = append(retained, skipped)
+		}
+	}
+	retained = append(retained, deferred...)
+	b.skippedFullBlocks = retained
+}
+
 // RecoverSkippedEnvelopes retries fetching envelopes for blocks that were
 // skipped during backward download. Returns a map of successfully fetched
 // envelopes keyed by beacon block root.

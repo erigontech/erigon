@@ -31,7 +31,10 @@ const (
 	maxWaitersPerExecutionPayloadEnvelope = 1
 )
 
-var ErrExecutionPayloadEnvelopeAdmissionBusy = errors.New("execution payload envelope admission busy")
+var (
+	ErrExecutionPayloadEnvelopeAdmissionBusy = errors.New("execution payload envelope admission busy")
+	ErrExecutionPayloadEnvelopeAlreadySeen   = errors.New("execution payload envelope already seen")
+)
 
 type executionPayloadEnvelopeIdentity struct {
 	beaconBlockRoot common.Hash
@@ -71,7 +74,7 @@ func (a *ExecutionPayloadEnvelopeAdmissions) Claim(
 		a.mu.Lock()
 		if _, ok := a.seen[identity]; ok {
 			a.mu.Unlock()
-			return ExecutionPayloadEnvelopeAdmissionToken{}, errors.New("execution payload envelope already seen")
+			return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeAlreadySeen
 		}
 		if admission, ok := a.inflight[identity]; ok {
 			if admission.waiters >= maxWaitersPerExecutionPayloadEnvelope {

@@ -28,6 +28,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -370,6 +371,45 @@ func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRe
 	require.True(t, cached)
 }
 
+func TestBroadcastSelfBuildEnvelopeCoalescesConcurrentPublication(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	var publishes atomic.Int32
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return nil
+	}
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).DoAndReturn(
+		func(context.Context, string, []byte) error {
+			publishes.Add(1)
+			return nil
+		},
+	).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+
+	done := make(chan error, 2)
+	go func() { done <- h.broadcastSelfBuildEnvelope(t.Context(), block, envelope) }()
+	<-started
+	go func() { done <- h.broadcastSelfBuildEnvelope(t.Context(), block, envelope) }()
+	close(release)
+
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+	require.EqualValues(t, 1, calls.Load())
+	require.EqualValues(t, 1, publishes.Load())
+}
+
 func TestPublishSelfBuildEnvelopeAfterIntegration(t *testing.T) {
 	t.Run("optional envelope absent does not wait for integration", func(t *testing.T) {
 		integrated := make(chan error, 1)
@@ -596,6 +636,34 @@ func TestParseGloasRequestBeaconBlockAcceptsConfiguredWrappedJSON(t *testing.T) 
 	require.Equal(t, clparams.GloasVersion, parsed.SignedExecutionPayloadEnvelope.Message.Payload.Version())
 	require.Equal(t, clparams.GloasVersion, parsed.SignedExecutionPayloadEnvelope.Message.ExecutionRequests.Version())
 	require.Equal(t, 1, parsed.SignedExecutionPayloadEnvelope.Message.Payload.Withdrawals.Len())
+}
+
+func TestPostBeaconBlocksReturnsAcceptedAfterPublishedBlockIntegrationFailure(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	injected := errors.New("injected block integration failure")
+	fcu.OnBlockFunc = func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+		return injected
+	}
+	fcu.OnTickFunc = func(uint64) {}
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	wrapper := cltypes.NewDenebSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	wrapper.SignedBlock = block
+	wrapper.SignedExecutionPayloadEnvelope = envelope
+	body, err := json.Marshal(wrapper)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+
+	_, err = h.postBeaconBlocks(httptest.NewRecorder(), request, 2)
+
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusAccepted, endpointErr.Code)
+	require.ErrorContains(t, err, injected.Error())
 }
 
 func TestParseGloasRequestBeaconBlockRejectsMalformedWrappedEnvelope(t *testing.T) {

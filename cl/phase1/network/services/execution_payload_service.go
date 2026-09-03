@@ -179,6 +179,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 	admissionToken, err := s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) {
+			s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
+		}
 		return fmt.Errorf("%w: %w", ErrIgnore, err)
 	}
 	seen := false
@@ -189,15 +192,16 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
-		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
+		switch {
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
 			log.Debug("Execution payload envelope indices queued", "beaconBlockRoot", beaconBlockRoot, "err", err)
-		} else {
-			if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-				errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) ||
-				errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull) ||
-				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
-			}
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed),
+			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull):
+			log.Debug("Execution payload envelope accepted with local persistence pending", "beaconBlockRoot", beaconBlockRoot, "err", err)
+		case errors.Is(err, forkchoice.ErrIgnore), errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable),
+			errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
+		default:
 			return fmt.Errorf("failed to process execution payload: %w", err)
 		}
 	}

@@ -28,6 +28,7 @@ const (
 	maxGloasAncestorVisitsPerCycle    = 32
 	maxGloasEnvelopeRecoveryPending   = 128
 	maxPendingGloasPayloadsPerCycle   = 32
+	gloasEnvelopeRecoveryBudget       = time.Second
 	gloasPayloadRetryBudget           = 2 * time.Second
 )
 
@@ -538,10 +539,7 @@ func trackGloasEnvelopeRecoveryRoot(cfg *Cfg, root common.Hash) bool {
 		return true
 	}
 	if len(cfg.gloasEnvelopeRecoveryPending) >= maxGloasEnvelopeRecoveryPending {
-		idx := cfg.gloasEnvelopeRecoveryReplace % len(cfg.gloasEnvelopeRecoveryPending)
-		cfg.gloasEnvelopeRecoveryPending[idx] = root
-		cfg.gloasEnvelopeRecoveryReplace = (idx + 1) % maxGloasEnvelopeRecoveryPending
-		return true
+		return false
 	}
 	cfg.gloasEnvelopeRecoveryPending = append(cfg.gloasEnvelopeRecoveryPending, root)
 	return true
@@ -868,11 +866,8 @@ func gloasVerificationHeadRoot(forkChoice gloasHeadReader) (common.Hash, error) 
 }
 
 func continueGloasVerificationAfterItemFailure(ctx context.Context, completeBatch *bool) bool {
-	if ctx.Err() == nil {
-		return true
-	}
 	*completeBatch = false
-	return false
+	return ctx.Err() == nil
 }
 
 type gloasVerificationItem struct {
@@ -1087,11 +1082,19 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 	}
 }
 
+func runGloasEnvelopeRecovery(ctx context.Context, budget time.Duration, recover func(context.Context)) {
+	recoveryCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	recover(recoveryCtx)
+}
+
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 	if shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
-		recoverMissingEnvelopes(ctx, cfg)
+		runGloasEnvelopeRecovery(ctx, gloasEnvelopeRecoveryBudget, func(recoveryCtx context.Context) {
+			recoverMissingEnvelopes(recoveryCtx, cfg)
+		})
 	}
 	canValidatePayloads := canValidateGloasPayloads(cfg)
 	retryPhases := []func(context.Context){func(retryCtx context.Context) {

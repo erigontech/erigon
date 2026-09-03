@@ -951,11 +951,15 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(status, fmt.Errorf("local beacon block integration failed: %w", err)).WriteTo(w)
 			return
 		}
-		if block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot); ok {
-			if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-				return
-			}
+		var ok bool
+		block, ok = a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if !ok || block == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
 		}
 	}
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
@@ -1021,6 +1025,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("failed to publish execution payload envelope: %w", err)).WriteTo(w)
 			return
 		}
+		accepted = true
 	}
 
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, true, true); err != nil {
