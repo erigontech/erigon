@@ -517,6 +517,11 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
+	if f.engine == nil && envelope.Payload != nil {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
+		}
+	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
 	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
@@ -549,6 +554,12 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
 		f.mu.Unlock()
 		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
+	}
+	if f.engine == nil {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+			f.mu.Unlock()
+			return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
+		}
 	}
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
 	f.headHash = common.Hash{}

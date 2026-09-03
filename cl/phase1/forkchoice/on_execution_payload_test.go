@@ -82,6 +82,22 @@ type dataAvailabilityForkGraph struct {
 	block    *cltypes.SignedBeaconBlock
 }
 
+type persistedEnvelopeForkGraph struct {
+	dataAvailabilityForkGraph
+	hasEnvelope bool
+}
+
+func (g *persistedEnvelopeForkGraph) HasEnvelope(common.Hash) bool { return g.hasEnvelope }
+func (g *persistedEnvelopeForkGraph) DumpEnvelopeOnDisk(common.Hash, *cltypes.SignedExecutionPayloadEnvelope) error {
+	g.hasEnvelope = true
+	return nil
+}
+func (g *persistedEnvelopeForkGraph) IsBlockInvalid(common.Hash) bool          { return false }
+func (g *persistedEnvelopeForkGraph) IsPayloadUnavailable(common.Hash) bool    { return false }
+func (g *persistedEnvelopeForkGraph) MarkPayloadAvailable(common.Hash)         {}
+func (g *persistedEnvelopeForkGraph) MarkPayloadAccepted(common.Hash, bool)    {}
+func (g *persistedEnvelopeForkGraph) PayloadAccepted(common.Hash) (bool, bool) { return false, false }
+
 type admissionYieldForkGraph struct {
 	dataAvailabilityForkGraph
 	stateRead   chan struct{}
@@ -353,6 +369,23 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 	retained, ok = pending.Peek(blockRoot)
 	require.True(t, ok)
 	require.Same(t, envelope, retained)
+}
+
+func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	root := envelope.Message.BeaconBlockRoot
+	f := newPayloadVoteTestStore(t, root, false, false)
+	f.beaconCfg = cfg
+	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{
+		state: blockState,
+		block: block,
+	}}
+
+	require.NoError(t, f.OnExecutionPayload(t.Context(), envelope, false, true))
+	require.True(t, f.isPayloadAvailable(root))
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {

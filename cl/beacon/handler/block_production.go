@@ -1502,6 +1502,7 @@ func (a *ApiHandler) produceBeaconBody(
 			head = gloasProposalExecutionHead(baseBlockSlot, a.beaconChainCfg, parentBid, buildOnFull)
 			switch {
 			case isPreGloasParent:
+				gloasWithdrawalsState = baseState
 			case buildOnFull:
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
