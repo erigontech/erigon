@@ -17,6 +17,7 @@
 package native
 
 import (
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -203,4 +204,13 @@ func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
 	require.False(t, inPre, "unmodified account with only a zero storage slot must not remain in pre state")
 	_, inPost := tr.post[addr]
 	require.False(t, inPost, "unmodified account with only a zero storage slot must not appear in post state")
+}
+
+// A MarshalJSON on callFrame makes encoding/json re-scan every nested frame's
+// bytes at each level, which is quadratic in call depth. Reflection over the
+// wire types encodes children inline instead.
+func TestCallFrameHasNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	_, bad := any(&callFrame{}).(json.Marshaler)
+	require.False(t, bad, "callFrame must not implement json.Marshaler")
 }

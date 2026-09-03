@@ -37,8 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-//go:generate gencodec -type callFrame -field-override callFrameMarshaling -out gen_callframe_json.go
-
 func init() {
 	register("callTracer", newCallTracer)
 }
@@ -54,22 +52,23 @@ type callLog struct {
 type callFrame struct {
 	Type     vm.OpCode       `json:"-"`
 	From     common.Address  `json:"from"`
-	Gas      uint64          `json:"gas"`
-	GasUsed  uint64          `json:"gasUsed"`
-	To       *common.Address `json:"to,omitempty" rlp:"optional"`
-	Input    []byte          `json:"input" rlp:"optional"`
-	Output   []byte          `json:"output,omitempty" rlp:"optional"`
-	Error    string          `json:"error,omitempty" rlp:"optional"`
+	Gas      hexutil.Uint64  `json:"gas"`
+	GasUsed  hexutil.Uint64  `json:"gasUsed"`
+	To       *common.Address `json:"to,omitzero"`
+	Input    hexutil.Bytes   `json:"input"`
+	Output   hexutil.Bytes   `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
 	Revertal string          `json:"revertReason,omitempty"`
-	Calls    []callFrame     `json:"calls,omitempty" rlp:"optional"`
-	Logs     []callLog       `json:"logs,omitempty" rlp:"optional"`
-	// Placed at end on purpose. The RLP will be decoded to 0 instead of
-	// nil if there are non-empty elements after in the struct.
-	Value *uint256.Int `json:"value,omitempty" rlp:"optional"`
+	Calls    []callFrame     `json:"calls,omitempty"`
+	Logs     []callLog       `json:"logs,omitempty"`
+	Value    *hexutil.U256   `json:"value,omitzero"`
+	// Last, to match the field order the generated marshaler used.
+	TypeStr string `json:"type"`
 }
 
-func (f *callFrame) TypeString() string {
-	return f.Type.String()
+// setType keeps the opcode and its wire spelling in step.
+func (f *callFrame) setType(op vm.OpCode) {
+	f.Type, f.TypeStr = op, op.String()
 }
 
 func (f *callFrame) failed() bool {
@@ -96,15 +95,6 @@ func (f *callFrame) processOutput(output []byte, err error) {
 	if unpacked, err := abi.UnpackRevert(output); err == nil {
 		f.Revertal = unpacked
 	}
-}
-
-type callFrameMarshaling struct {
-	TypeString string `json:"type"`
-	Gas        hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Value      *hexutil.U256
-	Input      hexutil.Bytes
-	Output     hexutil.Bytes
 }
 
 type callTracer struct {
@@ -168,18 +158,18 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to account
 		toValue = &v
 	}
 	t.callstack[0] = callFrame{
-		Type:  vm.CALL,
 		From:  from.Value(),
 		To:    toValue,
 		Input: bytes.Clone(input),
-		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
+		Gas:   hexutil.Uint64(t.gasLimit), // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
 		v := *value
-		t.callstack[0].Value = &v
+		t.callstack[0].Value = (*hexutil.U256)(&v)
 	}
+	t.callstack[0].setType(vm.CALL)
 	if create {
-		t.callstack[0].Type = vm.CREATE
+		t.callstack[0].setType(vm.CREATE)
 	}
 }
 
@@ -216,19 +206,19 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		toValue = &v
 	}
 	call := callFrame{
-		Type:  vm.OpCode(typ),
 		From:  from.Value(),
 		To:    toValue,
 		Input: bytes.Clone(input),
-		Gas:   gas,
+		Gas:   hexutil.Uint64(gas),
 	}
 
+	call.setType(vm.OpCode(typ))
 	if call.Type != vm.STATICCALL {
-		call.Value = &value
+		call.Value = (*hexutil.U256)(&value)
 	}
 
 	if depth == 0 {
-		call.Gas = t.gasLimit
+		call.Gas = hexutil.Uint64(t.gasLimit)
 	}
 	t.callstack = append(t.callstack, call)
 }
@@ -263,7 +253,7 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
-	call.GasUsed = gasUsed
+	call.GasUsed = hexutil.Uint64(gasUsed)
 	call.processOutput(output, err)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
@@ -293,7 +283,7 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 
-	t.callstack[0].GasUsed = receipt.GasUsed
+	t.callstack[0].GasUsed = hexutil.Uint64(receipt.GasUsed)
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
 		clearFailedLogs(&t.callstack[0], false, t.logGaps)

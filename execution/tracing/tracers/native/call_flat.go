@@ -179,7 +179,7 @@ func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to 
 	// Child calls must have a value, even if it's zero.
 	// Practically speaking, only STATICCALL has nil value. Set it to zero.
 	if t.tracer.callstack[len(t.tracer.callstack)-1].Value == nil && value.IsZero() {
-		t.tracer.callstack[len(t.tracer.callstack)-1].Value = new(uint256.Int)
+		t.tracer.callstack[len(t.tracer.callstack)-1].Value = new(hexutil.U256)
 	}
 }
 
@@ -316,8 +316,8 @@ func toHexUint64Ptr(v uint64) *hexutil.Uint64 {
 
 func newFlatCreate(input *callFrame) *flatCallFrame {
 	var (
-		actionInit = input.Input
-		resultCode = input.Output
+		actionInit = []byte(input.Input)
+		resultCode = []byte(input.Output)
 	)
 
 	return &flatCallFrame{
@@ -325,12 +325,12 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 		Action: flatCallAction{
 			CreationMethod: strings.ToLower(input.Type.String()),
 			From:           &input.From,
-			Gas:            toHexUint64Ptr(input.Gas),
-			Value:          input.Value,
+			Gas:            toHexUint64Ptr(uint64(input.Gas)),
+			Value:          (*uint256.Int)(input.Value),
 			Init:           &actionInit,
 		},
 		Result: &flatCallResult{
-			GasUsed: toHexUint64Ptr(input.GasUsed),
+			GasUsed: toHexUint64Ptr(uint64(input.GasUsed)),
 			Address: input.To,
 			Code:    &resultCode,
 		},
@@ -339,8 +339,8 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 
 func newFlatCall(input *callFrame) *flatCallFrame {
 	var (
-		actionInput  = input.Input
-		resultOutput = input.Output
+		actionInput  = []byte(input.Input)
+		resultOutput = []byte(input.Output)
 	)
 
 	return &flatCallFrame{
@@ -348,13 +348,13 @@ func newFlatCall(input *callFrame) *flatCallFrame {
 		Action: flatCallAction{
 			From:     &input.From,
 			To:       input.To,
-			Gas:      toHexUint64Ptr(input.Gas),
-			Value:    input.Value,
+			Gas:      toHexUint64Ptr(uint64(input.Gas)),
+			Value:    (*uint256.Int)(input.Value),
 			CallType: strings.ToLower(input.Type.String()),
 			Input:    &actionInput,
 		},
 		Result: &flatCallResult{
-			GasUsed: toHexUint64Ptr(input.GasUsed),
+			GasUsed: toHexUint64Ptr(uint64(input.GasUsed)),
 			Output:  &resultOutput,
 		},
 	}
@@ -365,7 +365,7 @@ func newFlatSelfdestruct(input *callFrame) *flatCallFrame {
 		Type: "suicide",
 		Action: flatCallAction{
 			SelfDestructed: &input.From,
-			Balance:        input.Value,
+			Balance:        (*uint256.Int)(input.Value),
 			RefundAddress:  input.To,
 		},
 	}
