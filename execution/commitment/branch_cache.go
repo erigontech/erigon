@@ -18,9 +18,7 @@ package commitment
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"math/bits"
 	"os"
 	"sync"
@@ -64,6 +62,10 @@ type BranchCache struct {
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
 	accountTrunk *trunk
 
+	// edgeTrunk holds v3 edge records. An edge P->n and the node P||n share a (depth, path), so
+	// one trunk would make them evict each other on every write; they get separate arrays.
+	edgeTrunk *trunk
+
 	pinned        atomic.Pointer[maphash.Map[*trunk]]
 	pinnedMu      sync.Mutex
 	pinnedEntries atomic.Int64
@@ -102,9 +104,12 @@ type branchCacheEntry struct {
 	step  uint64 // on-disk file step; 0 = untracked
 	txN   uint64 // write txN, upper bound of validity; 0 = frozen/untracked
 	epoch uint32
-	// node marks data as a whole v3 node's encoded edge records rather than one value. The two
-	// share slots -- the v3 root's node key is byte-identical to KeyCommitmentState, and an edge
-	// record for P->n routes to the same trunk slot as node P||n -- so every reader must check it.
+	// present is the node's child mask, set only when node is true. A node entry carries the mask
+	// and nothing else: the records themselves live one per edge key in edgeTrunk, and only the
+	// ones actually written are cached. An unwritten sibling is a db read, not a cache miss to fix.
+	present uint16
+	// node marks this entry as a v3 node's mask rather than a value. The v3 root's node key is
+	// byte-identical to KeyCommitmentState, so the root slot still needs the discriminator.
 	node bool
 }
 
@@ -258,6 +263,7 @@ func NewBranchCache(tailCapacity int, edgeRecords ...bool) *BranchCache {
 		tailCap:       uint32(tailCapacity),
 		maxDepth:      maxDepth,
 		accountTrunk:  newAccountTrunk(maxDepth),
+		edgeTrunk:     newAccountTrunk(maxDepth),
 		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
 	if len(edgeRecords) == 0 || edgeRecords[0] {
@@ -346,7 +352,7 @@ func (c *BranchCache) v3TrunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[
 	for i := range depth {
 		nib[i] = v3EdgeNibble(prefix, depth, i)
 	}
-	return c.accountTrunk.slot(&nib, depth, forWrite)
+	return c.edgeTrunk.slot(&nib, depth, forWrite)
 }
 
 // trunkSlot: bit 4 of byte 0 is the odd-length flag; the low nibble of byte 0
@@ -508,7 +514,14 @@ func storageNibbles(prefix []byte, nib *[4]byte) (n int) {
 // clearTrunk stores nil per-slot rather than swapping the pointer, since
 // lock-free readers deref c.accountTrunk concurrently.
 func (c *BranchCache) clearTrunk() {
-	t := c.accountTrunk
+	c.clearOneTrunk(c.accountTrunk)
+	c.clearOneTrunk(c.edgeTrunk)
+}
+
+func (c *BranchCache) clearOneTrunk(t *trunk) {
+	if t == nil {
+		return
+	}
 	t.d0.Store(nil)
 	for i := range t.d1 {
 		t.d1[i].Store(nil)
@@ -711,12 +724,6 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
-// A v3 read resolves a whole node: it wants every child record under key(P). One entry per record
-// puts each child at its own trunk slot one level below its node, so a node sitting at the deepest
-// trunk level has all 16 children spill to the LRU tail while v2 keeps that same node in the trunk
-// array -- v3 loses a level of trunk coverage and multiplies entries by the branching factor.
-// Keying the entry by the node restores v2's slot mapping and its entry count.
-
 // v3NodeDepth reads the nibble depth out of a node key (pack(P) || term).
 func v3NodeDepth(nodeKey []byte) (int, bool) {
 	if len(nodeKey) == 0 {
@@ -763,55 +770,6 @@ func (c *BranchCache) v3NodeTrunkSlot(nodeKey []byte, forWrite bool) *atomic.Poi
 		nib[i] = v3NodeNibble(nodeKey, depth, i)
 	}
 	return c.accountTrunk.slot(&nib, depth, forWrite)
-}
-
-// encodeNodeRecords packs a node's records into one value: present mask, a length per present
-// child, then the payloads. Returns nil for a record too long to describe, which is not cached.
-func encodeNodeRecords(present uint16, records *[16][]byte) []byte {
-	size := 2 + 2*bits.OnesCount16(present)
-	for bitset := present; bitset != 0; bitset &= bitset - 1 {
-		n := len(records[bits.TrailingZeros16(bitset&-bitset)])
-		if n > math.MaxUint16 {
-			return nil
-		}
-		size += n
-	}
-	blob := make([]byte, size)
-	binary.BigEndian.PutUint16(blob, present)
-	pos := 2
-	for bitset := present; bitset != 0; bitset &= bitset - 1 {
-		binary.BigEndian.PutUint16(blob[pos:], uint16(len(records[bits.TrailingZeros16(bitset&-bitset)])))
-		pos += 2
-	}
-	for bitset := present; bitset != 0; bitset &= bitset - 1 {
-		pos += copy(blob[pos:], records[bits.TrailingZeros16(bitset&-bitset)])
-	}
-	return blob
-}
-
-// decodeNodeRecords slices the payloads back out. They alias the cache's buffer, so a caller
-// keeping them past the read must copy.
-func decodeNodeRecords(blob []byte, out *[16][]byte) (uint16, bool) {
-	if len(blob) < 2 {
-		return 0, false
-	}
-	present := binary.BigEndian.Uint16(blob)
-	header := 2 + 2*bits.OnesCount16(present)
-	if len(blob) < header {
-		return 0, false
-	}
-	pos, lenPos := header, 2
-	for bitset := present; bitset != 0; bitset &= bitset - 1 {
-		nibble := bits.TrailingZeros16(bitset & -bitset)
-		size := int(binary.BigEndian.Uint16(blob[lenPos:]))
-		lenPos += 2
-		if pos+size > len(blob) {
-			return 0, false
-		}
-		out[nibble] = blob[pos : pos+size : pos+size]
-		pos += size
-	}
-	return present, true
 }
 
 func (c *BranchCache) storeNode(nodeKey []byte, entry *branchCacheEntry) {
@@ -875,8 +833,11 @@ func (c *BranchCache) lookupNode(nodeKey []byte) *branchCacheEntry {
 	return entry
 }
 
-// GetNode serves a whole node's edge records. The returned slices alias the cache's buffer.
-func (c *BranchCache) GetNode(nodeKey []byte, out *[16][]byte) (present uint16, step uint64, ok bool) {
+// GetNode serves the wanted edge records of a node. The node entry carries only the child mask;
+// each record is looked up under its own edge key, and only the wanted bits are probed -- an
+// unfold asking for one nibble costs one edge lookup, not a whole node. Returned slices alias
+// the cache's buffers, so a caller keeping them past the read must copy.
+func (c *BranchCache) GetNode(nodeKey []byte, wanted uint16, out *[16][]byte) (present uint16, step uint64, ok bool) {
 	coh := c.coh.Snapshot()
 	entry := c.lookupNode(nodeKey)
 	if entry == nil || !entry.node {
@@ -890,12 +851,35 @@ func (c *BranchCache) GetNode(nodeKey []byte, out *[16][]byte) (present uint16, 
 		c.staleEvicted.Add(1)
 		return 0, 0, false
 	}
-	present, ok = decodeNodeRecords(entry.data, out)
-	if !ok {
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	for bitset := wanted & entry.present; bitset != 0; bitset &= bitset - 1 {
+		nibble := bits.TrailingZeros16(bitset & -bitset)
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		rec, recStep, hit := c.Get(childKey)
+		if !hit {
+			continue
+		}
+		out[nibble] = rec
+		present |= uint16(1) << nibble
+		step = max(step, recStep)
+	}
+	if present == 0 {
 		return 0, 0, false
 	}
-	c.bytesServed.Add(uint64(len(entry.data)))
-	return present, entry.step, true
+	return present, step, true
+}
+
+// putNodeMask ors bits into a node's mask entry. Callers hold the node's put stripe.
+func (c *BranchCache) putNodeMask(nodeKey []byte, add uint16, step, txN uint64) {
+	present, entryStep, entryTxN := add, step, txN
+	if existing := c.peekNode(nodeKey); existing != nil && existing.node {
+		present |= existing.present
+		entryStep = max(entryStep, existing.step)
+		// IsStale fires at txN >= floor, so the newest child decides: below the floor, all are.
+		entryTxN = max(entryTxN, existing.txN)
+	}
+	c.storeNode(nodeKey, &branchCacheEntry{present: present, step: entryStep, txN: entryTxN, epoch: c.coh.Epoch(), node: true})
 }
 
 func (c *BranchCache) InvalidateNode(nodeKey []byte) {
@@ -919,32 +903,42 @@ func (c *BranchCache) invalidateChild(nodeKey []byte, nibble int) {
 	stripe.Lock()
 	defer stripe.Unlock()
 
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	childKey[len(nodeKey)] = 0x80 | byte(nibble)
+	c.dropEdge(childKey)
+
 	entry := c.peekNode(nodeKey)
 	if entry == nil || !entry.node {
 		return
 	}
-	var records [16][]byte
-	present, ok := decodeNodeRecords(entry.data, &records)
 	bit := uint16(1) << nibble
-	if !ok || present&bit == 0 {
+	if entry.present&bit == 0 {
 		return
 	}
-	present &^= bit
-	records[nibble] = nil
+	present := entry.present &^ bit
 	if present == 0 {
 		c.InvalidateNode(nodeKey)
 		return
 	}
-	blob := encodeNodeRecords(present, &records)
-	if blob == nil {
-		c.InvalidateNode(nodeKey)
-		return
-	}
-	c.storeNode(nodeKey, &branchCacheEntry{data: blob, step: entry.step, txN: entry.txN, epoch: entry.epoch, node: true})
+	c.storeNode(nodeKey, &branchCacheEntry{present: present, step: entry.step, txN: entry.txN, epoch: entry.epoch, node: true})
 }
 
-// PutChildren merges records into their node's single entry. A publish carries only the records
-// that changed, so dropping the siblings would send every later read back to the db.
+// dropEdge removes one edge record from whichever tier holds it.
+func (c *BranchCache) dropEdge(childKey []byte) {
+	if slot := c.trunkSlot(childKey, false); slot != nil {
+		slot.Store(nil)
+		return
+	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(childKey))
+	}
+}
+
+// PutChildren caches the records a publish actually wrote, one entry per edge key, and ors their
+// nibbles into the node's mask. Siblings that were not written are left alone: re-caching them
+// would mean re-encoding the whole node on every single-child write, and a later read for one is
+// a legitimate db read rather than a miss worth paying for.
 func (c *BranchCache) PutChildren(nodeKey []byte, present uint16, records *[16][]byte, steps, txNums *[16]uint64) {
 	if present == 0 {
 		return
@@ -953,39 +947,29 @@ func (c *BranchCache) PutChildren(nodeKey []byte, present uint16, records *[16][
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	merged := *records
-	mergedPresent := present
+	childKey := make([]byte, len(nodeKey)+1)
+	copy(childKey, nodeKey)
+	epoch := c.coh.Epoch()
+	var written uint16
 	var step, txN uint64
 	for bitset := present; bitset != 0; bitset &= bitset - 1 {
 		nibble := bits.TrailingZeros16(bitset & -bitset)
-		if len(merged[nibble]) == 0 {
-			mergedPresent &^= uint16(1) << nibble
+		record := records[nibble]
+		if len(record) == 0 {
 			continue
 		}
+		childKey[len(nodeKey)] = 0x80 | byte(nibble)
+		data := make([]byte, len(record))
+		copy(data, record)
+		c.store(childKey, &branchCacheEntry{data: data, step: steps[nibble], txN: txNums[nibble], epoch: epoch})
+		written |= uint16(1) << nibble
 		step = max(step, steps[nibble])
-		// IsStale fires at txN >= floor, so the newest child decides: below the floor, all are.
 		txN = max(txN, txNums[nibble])
 	}
-	if existing := c.peekNode(nodeKey); existing != nil && existing.node {
-		var old [16][]byte
-		if oldPresent, ok := decodeNodeRecords(existing.data, &old); ok {
-			for bitset := oldPresent &^ mergedPresent; bitset != 0; bitset &= bitset - 1 {
-				nibble := bits.TrailingZeros16(bitset & -bitset)
-				merged[nibble] = old[nibble]
-				mergedPresent |= uint16(1) << nibble
-			}
-			step = max(step, existing.step)
-			txN = max(txN, existing.txN)
-		}
-	}
-	if mergedPresent == 0 {
+	if written == 0 {
 		return
 	}
-	blob := encodeNodeRecords(mergedPresent, &merged)
-	if blob == nil {
-		return
-	}
-	c.storeNode(nodeKey, &branchCacheEntry{data: blob, step: step, txN: txN, epoch: c.coh.Epoch(), node: true})
+	c.putNodeMask(nodeKey, written, step, txN)
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {

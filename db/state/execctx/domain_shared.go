@@ -1385,12 +1385,12 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 	if wm != nil {
 		cacheStart = time.Now()
 	}
-	// One node lookup instead of one per nibble: the cache keeps a node's records together.
+	// Only the wanted nibbles are probed: the node entry carries the mask, each record its own key.
 	var cached [16][]byte
 	var cachedPresent uint16
 	var cachedStep uint64
 	if sd.branchCache != nil {
-		cachedPresent, cachedStep, _ = sd.branchCache.GetNode(nodeKey, &cached)
+		cachedPresent, cachedStep, _ = sd.branchCache.GetNode(nodeKey, wanted, &cached)
 	}
 	// Neither lookup retains the key, so one scratch buffer serves every nibble.
 	childKey := make([]byte, len(nodeKey)+1)

@@ -43,7 +43,7 @@ func TestBranchCachePutChildrenRoundTrips(t *testing.T) {
 	c.PutChildren(nodeKey, present, &records, &steps, &txNums)
 
 	var got [16][]byte
-	gotPresent, step, ok := c.GetNode(nodeKey, &got)
+	gotPresent, step, ok := c.GetNode(nodeKey, ^uint16(0), &got)
 	require.True(t, ok)
 	require.Equal(t, present, gotPresent)
 	require.Equal(t, uint64(16), step, "the node reports its newest child's step")
@@ -53,7 +53,7 @@ func TestBranchCachePutChildrenRoundTrips(t *testing.T) {
 
 	// Records share one buffer, so appending to one must allocate rather than write into the next.
 	_ = append(got[0], 0xff, 0xff, 0xff, 0xff)
-	_, _, ok = c.GetNode(nodeKey, &got)
+	_, _, ok = c.GetNode(nodeKey, ^uint16(0), &got)
 	require.True(t, ok)
 	require.Equal(t, records[3], got[3], "a neighbour record was overwritten through the shared buffer")
 }
@@ -76,7 +76,7 @@ func TestBranchCachePutChildrenMergesWithExisting(t *testing.T) {
 	c.PutChildren(nodeKey, 1<<4|1<<7, &second, &steps, &txNums)
 
 	var got [16][]byte
-	present, _, ok := c.GetNode(nodeKey, &got)
+	present, _, ok := c.GetNode(nodeKey, ^uint16(0), &got)
 	require.True(t, ok)
 	require.Equal(t, uint16(1<<1|1<<4|1<<7), present, "the untouched sibling must survive the second put")
 	require.Equal(t, []byte{0xa1}, got[1], "untouched sibling")
@@ -96,7 +96,7 @@ func TestBranchCachePutChildrenSkipsEmptyRecords(t *testing.T) {
 	c.PutChildren(nodeKey, 1<<2|1<<5, &records, &steps, &txNums)
 
 	var got [16][]byte
-	present, _, ok := c.GetNode(nodeKey, &got)
+	present, _, ok := c.GetNode(nodeKey, ^uint16(0), &got)
 	require.True(t, ok)
 	require.Zero(t, present&(1<<2), "an empty record must not be cached")
 	require.Equal(t, []byte{9}, got[5])
