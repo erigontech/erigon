@@ -131,8 +131,7 @@ func (f *FetcherBase) FetchBodies(
 	totalBodiesSize := 0
 
 	for len(pendingHeaders) > 0 {
-		// Request up to MaxBodiesServe headers per page. A peer may return a
-		// partial response, so continue with the headers still missing a body.
+		// BlockBodies responses preserve request order but may omit unavailable bodies.
 		chunkLen := min(len(pendingHeaders), eth.MaxBodiesServe)
 		headersChunk := pendingHeaders[:chunkLen]
 
