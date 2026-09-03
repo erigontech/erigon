@@ -175,11 +175,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, bool, error) {
 	oldHash, number, sd := e.preExec.Active()
 	if sd == nil || oldHash == (common.Hash{}) {
-		e.logger.Warn("[ATTRS-SEAL] bail: no extending fork", "reqParent", params.ParentHash, "sdNil", sd == nil, "oldHash", oldHash)
+		e.logger.Debug("assemblePreconfirmed: no block open — from-scratch builder", "reqParent", params.ParentHash)
 		return nil, false, nil // no preconfirmed flashblock → from-scratch builder
 	}
 	if e.currentContext == nil || e.currentContext.BlockOverlay() == nil {
-		e.logger.Warn("[ATTRS-SEAL] bail: no currentContext/overlay", "reqParent", params.ParentHash)
+		e.logger.Debug("assemblePreconfirmed: no current context — from-scratch builder", "reqParent", params.ParentHash)
 		return nil, false, nil
 	}
 
@@ -200,7 +200,7 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 		return nil, false, herr
 	}
 	if inHdr == nil || body == nil {
-		e.logger.Warn("[ATTRS-SEAL] bail: nil in-progress header/body", "extForkNum", number, "oldHash", oldHash,
+		e.logger.Debug("assemblePreconfirmed: in-progress header/body missing", "num", number, "oldHash", oldHash,
 			"hdrNil", inHdr == nil, "bodyNil", body == nil)
 		return nil, false, nil
 	}
@@ -208,28 +208,13 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	// proposer attributes the FCU supplies — otherwise the sealed header (in-progress header + output)
 	// would be inconsistent with the requested block. Disagreement ⇒ fall back to the from-scratch builder.
 	if inHdr.ParentHash != params.ParentHash || !preconfirmAttrsMatch(inHdr, params) {
-		// The accumulated flashblock's attributes diverge from the FCU params — fall back to the
-		// from-scratch builder rather than seal a header inconsistent with the requested block.
-		var pbbrReq common.Hash
-		if params.ParentBeaconBlockRoot != nil {
-			pbbrReq = *params.ParentBeaconBlockRoot
-		}
-		var pbbrHdr common.Hash
-		if inHdr.ParentBeaconBlockRoot != nil {
-			pbbrHdr = *inHdr.ParentBeaconBlockRoot
-		}
-		whReq := types.DeriveSha(types.Withdrawals(params.Withdrawals))
-		var whHdr common.Hash
-		if inHdr.WithdrawalsHash != nil {
-			whHdr = *inHdr.WithdrawalsHash
-		}
-		e.logger.Warn("[ATTRS-SEAL] preconfirmed parent/attrs mismatch — from-scratch builder",
-			"extForkNum", number, "parentOK", inHdr.ParentHash == params.ParentHash,
-			"hdrParent", inHdr.ParentHash, "reqParent", params.ParentHash,
+		// Reaching here means the reconcile did not re-open the block under these attributes, so seal it
+		// is not: the header would claim attributes the body was not executed under.
+		e.logger.Warn("[execmodule] in-progress block does not match the requested attributes — from-scratch builder",
+			"num", number, "parentOK", inHdr.ParentHash == params.ParentHash,
 			"tsOK", inHdr.Time == params.Timestamp, "hdrTs", inHdr.Time, "reqTs", params.Timestamp,
 			"randaoOK", inHdr.MixDigest == params.PrevRandao,
-			"coinbaseOK", inHdr.Coinbase == params.SuggestedFeeRecipient,
-			"beaconRootOK", pbbrHdr == pbbrReq, "wdOK", whHdr == whReq)
+			"coinbaseOK", inHdr.Coinbase == params.SuggestedFeeRecipient)
 		return nil, false, nil
 	}
 
@@ -307,17 +292,25 @@ func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, 
 	// Exec OWNS the frontier: the block just sealed is the head the successor flashblock chains onto.
 	e.frontierHeader.Store(sealedHdr)
 
-	// OPEN N+1 ATOMICALLY on the new frontier ([[dag_block_production_atomic_marker]]): STILL holding the exec
-	// semaphore, open the empty successor parented to N's STILL-LIVE sealed SD, so no FCU can tear down N's SD
-	// between the close and the open (the two-acquisition gap that made this racy when the driver stitched it).
-	// Provisional attrs (from params + the sealed header); N+1's OWN marker re-stamps them via the reconcile.
-	nextInputs := e.flashInputsForChild(sealedHdr, params, sealedHdr.Time+1)
-	if _, _, vr, oerr := e.preExecuteFlashblockLocked(ctx, nextInputs, nil); oerr != nil || vr.ValidationStatus != ExecutionStatusSuccess {
-		e.logger.Warn("[execmodule] boundary open N+1 failed", "err", oerr, "status", vr.ValidationStatus, "num", nextInputs.Number)
-	}
+	// CLOSE the in-progress block: its body is now IN the sealed block, so there is nothing open any more.
+	// The successor opens when its own attributes arrive. Leaving this set would make the next reconcile
+	// believe the sealed block is still in progress and carry ITS body into the successor.
+	e.flash.mu.Lock()
+	e.flash.resetLocked(0)
+	e.flash.mu.Unlock()
 
-	e.logger.Info("[execmodule] boundary assembled (sealed N, opened N+1)",
-		"number", sealedHdr.Number.Uint64(), "hash", sealedHdr.Hash(), "parent", params.ParentHash, "openedNext", nextInputs.Number)
+	// N+1 is NOT opened here. Every attribute a block opens under — timestamp, prevRandao, coinbase,
+	// parentBeaconBlockRoot, withdrawals — is EXECUTION-affecting: the timestamp gates fork activation and
+	// keys the EIP-4788 ring buffer, block-start writes the beacon root into state, PREVRANDAO and COINBASE
+	// are opcodes, and withdrawals credit accounts. Opening under guesses (N's attrs, N's time + 1) therefore
+	// produces a block whose STATE is wrong, not merely mislabelled — and it cannot be patched afterwards,
+	// only re-executed. So the successor opens when its real attributes arrive, in NewPayloadAttrs.
+	//
+	// This used to be done here, under the same semaphore hold, so that no FCU could tear down N's
+	// SharedDomains in the gap between the close and the open. That race is gone: pre-exec state lives in
+	// its own space now and the FCU cannot reach it ([[preexec_validation_space_separation]]).
+	e.logger.Info("[execmodule] block sealed", "number", sealedHdr.Number.Uint64(), "hash", sealedHdr.Hash(),
+		"parent", params.ParentHash)
 	return br, nil
 }
 
@@ -342,22 +335,24 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 		e.flash.resetLocked(0)
 	}
 	recorded := e.flash.valid
-	empty := len(e.flash.body) == 0
 	built := e.flash.built
 	e.flash.mu.Unlock()
 
-	openUnderParams := func() error {
+	// openUnderParams opens the block under params, re-executing body if given. Passing the accumulated body
+	// back in is what makes a re-open under corrected attributes non-destructive: the txs are re-executed
+	// under the right values instead of being dropped.
+	openUnderParams := func(body [][]byte) error {
 		parent := e.frontierOrHead(ctx)
 		if parent == nil {
 			return fmt.Errorf("reconcileForAssembleLocked: no parent header to open on")
 		}
 		in := e.flashInputsForChild(parent, params, params.Timestamp)
-		_, _, vr, err := e.preExecuteFlashblockLocked(ctx, in, nil)
+		_, _, vr, err := e.preExecuteFlashblockLocked(ctx, in, body)
 		if err != nil {
 			return err
 		}
 		if vr.ValidationStatus != ExecutionStatusSuccess {
-			return fmt.Errorf("reconcileForAssembleLocked: open empty status=%v", vr.ValidationStatus)
+			return fmt.Errorf("reconcileForAssembleLocked: open status=%v txs=%d", vr.ValidationStatus, len(body))
 		}
 		return nil
 	}
@@ -369,18 +364,34 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 		if recorded {
 			e.abandonExtendingForkLocked()
 		}
-		return openUnderParams()
+		return openUnderParams(nil)
 	}
 
 	switch {
 	case !recorded:
-		return openUnderParams()
-	case empty && !builtAttrsMatchParams(built, params):
+		return openUnderParams(nil)
+	case !builtAttrsMatchParams(built, params):
+		// The block is open under attributes that are no longer the ones being asked for — the CL missed a
+		// slot, so the next slot's attributes describe this same block. They cannot be patched onto the
+		// header: every one of them is execution-affecting, so the accumulated execution itself is wrong.
+		// Re-open under the CL's attributes and re-execute the body, which costs one block-start plus the
+		// txs so far. (This used to run only for an EMPTY block; a non-empty one was left alone, and then
+		// the seal rejected it every slot thereafter — the block could never be produced.)
+		body := e.flashBodyCopy()
+		e.logger.Info("[execmodule] attrs changed for the open block — re-opening", "txs", len(body),
+			"builtTs", built.Timestamp, "reqTs", params.Timestamp)
 		e.abandonExtendingForkLocked()
-		return openUnderParams()
+		return openUnderParams(body)
 	default:
 		return nil
 	}
+}
+
+// flashBodyCopy returns a copy of the in-progress block's accumulated tx RLPs.
+func (e *ExecModule) flashBodyCopy() [][]byte {
+	e.flash.mu.Lock()
+	defer e.flash.mu.Unlock()
+	return append([][]byte(nil), e.flash.body...)
 }
 
 // flashInputsForChild builds the FlashblockInputs for the child of parent, taking proposer attrs from params and
