@@ -115,6 +115,28 @@ If you need to reclaim space without resyncing from scratch:
 | `chaindata/` | Recoverable, but triggers a resync of the post-snapshot tip from the consensus layer — not instant; keep a backup for fast recovery |
 | `snapshots/` | **Do not delete** — would force a full resync |
 
+## Reclaiming space in `chaindata/`
+
+MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat`
+never shrinks on its own. After a long sync or a large prune the file can stay
+much bigger than the data it actually holds.
+
+`erigon db compact` rewrites every mdbx database of a datadir without its free
+pages:
+
+```bash
+./build/bin/erigon db compact --datadir=<path>
+```
+
+Erigon must be stopped. The command takes the datadir lock and opens each
+database exclusively, so it fails instead of touching a database still in use.
+The copy is written inside the database's own directory, so each database needs
+free space for a second copy of itself on the volume it already lives on, and a
+big `chaindata/` can take hours.
+
+This is a manual defragmentation pass, not the background compaction of an
+LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
+
 ## Where to go next
 
 - [Architecture](architecture) — how this storage model fits into staged sync and the flat-KV state design

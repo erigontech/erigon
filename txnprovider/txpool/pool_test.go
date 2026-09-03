@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -2163,88 +2164,6 @@ func newSender(nonce uint64, balance uint256.Int) *sender {
 	return &sender{nonce: nonce, balance: balance}
 }
 
-func BenchmarkProcessRemoteTxns(b *testing.B) {
-	require := require.New(b)
-	ch := make(chan Announcements, 100)
-	coreDB := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
-	db := mdbxtest.NewTestPoolDB(b)
-	ctx, cancel := context.WithCancel(context.Background())
-	b.Cleanup(cancel)
-	cfg := txpoolcfg.DefaultConfig
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
-	require.NotEqual(pool, nil)
-
-	// Start the transaction pool
-	err = pool.start(ctx)
-	require.NoError(err)
-
-	// Set up initial blockchain state
-	var stateVersionID uint64 = 0
-	pendingBaseFee := uint64(200000)
-	h1 := gointerfaces.ConvertHashToH256([32]byte{})
-	change := &remoteproto.StateChangeBatch{
-		StateVersionId:      stateVersionID,
-		PendingBlockBaseFee: pendingBaseFee,
-		BlockGasLimit:       1000000,
-		ChangeBatch: []*remoteproto.StateChange{
-			{BlockHeight: 0, BlockHash: h1},
-		},
-	}
-
-	// Create 100 test accounts with 1 ETH balance each
-	for i := range 100 {
-		var addr [20]byte
-		addr[0] = uint8(i + 1)
-		acc := accounts3.Account{
-			Nonce:       0,
-			Balance:     *uint256.NewInt(1 * common.Ether),
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 1,
-		}
-		v := accounts3.SerialiseV3(&acc)
-		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
-			Action:  remoteproto.Action_UPSERT,
-			Address: gointerfaces.ConvertAddressToH160(addr),
-			Data:    v,
-		})
-	}
-
-	// Apply the initial state to the pool
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
-	require.NoError(err)
-
-	// Create test transactions for benchmarking
-	var testTxns TxnSlots
-	for i := 0; i < b.N; i++ {
-		var addr [20]byte
-		addr[0] = uint8(i%100 + 1)                                          // Use one of our test accounts
-		txnSlot := newTestTxnSlot(uint64(i/100), 0, 300000, 300000, 100000) // Different nonce for each account
-		txnSlot.IDHash[0] = uint8(i + 1)
-		testTxns.Append(txnSlot, addr[:], true)
-	}
-
-	b.ResetTimer()
-
-	// Run the benchmark: process transactions one by one
-	// This measures the performance of adding and processing remote transactions
-	for i := 0; i < b.N; i++ {
-		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]}, nil, nil)
-		err := pool.processRemoteTxns(ctx)
-		require.NoError(err)
-	}
-
-	b.StopTimer()
-
-	// Log final pool statistics after processing all transactions
-	pending, baseFee, queued := pool.CountContent()
-	b.Logf("Final pool stats - pending: %d, baseFee: %d, queued: %d", pending, baseFee, queued)
-}
-
 // TestZombieQueuedEviction verifies that queued transactions whose nonce is so far ahead of
 // the sender's on-chain nonce that they can never become pending are evicted from the pool.
 // This covers Bug #2: "zombie" queued txns on Gnosis Chain (e.g. on-chain nonce=281 but
@@ -2791,4 +2710,58 @@ func TestFromDBLoadsUnderPoolLock(t *testing.T) {
 	<-onNewBlockDone
 	req.NoError(onNewBlockErr)
 	req.True(lockHeld, "fromDB must hold p.lock while it populates the pool")
+}
+
+// failingGetOnePoolDB hands out read transactions whose GetOne always fails, so
+// a test can make OnNewBlock fail inside the lock.
+type failingGetOnePoolDB struct {
+	kv.RwDB
+	err error
+}
+
+func (d failingGetOnePoolDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	//nolint:gocritic // pass-through: the caller owns the rollback
+	tx, err := d.RwDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return failingGetOneTx{Tx: tx, err: d.err}, nil
+}
+
+type failingGetOneTx struct {
+	kv.Tx
+	err error
+}
+
+func (t failingGetOneTx) GetOne(_ string, _ []byte) ([]byte, error) { return nil, t.err }
+
+// A block OnNewBlock failed to apply is not a block the pool has seen. The
+// failure has to reach the deferred block that advances lastSeenBlock, which the
+// same branch guards the waiter broadcast with, so a shadowed error there would
+// leave the pool claiming progress it never made.
+func TestOnNewBlockFailureKeepsChainProgress(t *testing.T) {
+	ctx, pool, poolDB, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	// The blob lookup is the first read inside the lock, and it is the only one
+	// whose error the compiler cannot see is dropped.
+	blobTxn := newTestBlobTxnSlot(0, 0, 1, 2, 21_000)
+	blobTxn.IDHash[0] = 7
+	var unwindBlobTxns TxnSlots
+	unwindBlobTxns.Append(blobTxn, sender[:], false)
+
+	readErr := errors.New("pool read failed")
+	pool.poolDB = failingGetOnePoolDB{RwDB: poolDB, err: readErr}
+
+	before := pool.lastSeenBlock.Load()
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:      1,
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: before + 1,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+		}},
+	}
+	require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, unwindBlobTxns, TxnSlots{}), readErr)
+	require.Equal(t, before, pool.lastSeenBlock.Load())
 }

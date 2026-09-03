@@ -53,7 +53,7 @@ func (c finalityContextStub) ReadyForCollation(_ context.Context, _ kv.RoDB, _ u
 }
 
 func TestReadyForCollationPreservesFinalityContextResult(t *testing.T) {
-	_, agg := testDbAndAggregatorv3(t, 10)
+	db, agg := testDbAndAggregatorv3(t, 10)
 	finalityCtx := finalityContextStub{
 		finalisedBlockNum: 12,
 		lastBlockInStep:   10,
@@ -61,7 +61,7 @@ func TestReadyForCollationPreservesFinalityContextResult(t *testing.T) {
 		lastTxInDB:        25,
 		ready:             true,
 	}
-	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ready, err := agg.readyForCollation(t.Context(), kv.Step(0), finalityCtx)
+	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ready, err := agg.readyForCollation(t.Context(), db, kv.Step(0), finalityCtx)
 	require.NoError(t, err)
 	require.True(t, ready)
 	require.Equal(t, uint64(12), finalisedBlockNum)

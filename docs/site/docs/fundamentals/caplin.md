@@ -6,7 +6,9 @@ sidebar_position: 6
 
 # Caplin
 
-Caplin, the innovative Erigon's embedded Consensus Layer, significantly enhances the performance, efficiency, and reliability of Ethereum infrastructure. Its groundbreaking design minimizes disk usage, facilitating faster transaction processing and bolstering network security. By integrating the consensus layer directly into the EVM-node, Caplin eliminates the need for separate disk storage, thereby reducing system complexity and enhancing overall efficiency.
+Caplin is Erigon's embedded Consensus Layer. It runs inside the Erigon process and keeps all of its data under the same `--datadir` as the execution layer, so a full node needs neither a second client process nor a second datadir to operate.
+
+Caplin does write to disk. It maintains an indexing database at `<datadir>/caplin/indexing`, its own snapshots under `<datadir>/snapshots/caplin`, and further subdirectories for blobs, PeerDAS column data and beacon state. What Caplin removes is the separate process and separate datadir of an external consensus client — not the storage itself.
 
 ## Caplin Usage
 

@@ -429,9 +429,30 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, rawDB)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("create aggregator: %w", err)
+		}
+
+		// Built before the snapshot stats below and before onNewSnapshot fires: both
+		// resolve txNum to block, which needs a tx pinning a block-files view.
+		db, err = temporal.New(rawDB, agg, allSnapshots)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+
+		logSnapshotStats := func() {
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				aggTx := agg.BeginFilesRo()
+				defer aggTx.Close()
+				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
+					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
+					return histBlockNumProgress, err
+				})
+				return nil
+			}); err != nil {
+				logger.Error("[rpc] log stats", "err", err)
+			}
 		}
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
@@ -447,19 +468,9 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
-			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+			_ = agg.OpenFolder(db)
 
-			if err := rawDB.View(context.Background(), func(tx kv.Tx) error {
-				aggTx := agg.BeginFilesRo()
-				defer aggTx.Close()
-				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
-					return histBlockNumProgress, err
-				})
-				return nil
-			}); err != nil {
-				logger.Error("[rpc] log stats", "err", err)
-			}
+			logSnapshotStats()
 		} else {
 			logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 		}
@@ -476,30 +487,16 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allSnapshots.LogStat("reopen")
 				}
 
-				if err = agg.OpenFolder(); err != nil {
+				if err = agg.OpenFolder(db); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					if err := rawDB.View(context.Background(), func(tx kv.Tx) error {
-						ac := agg.BeginFilesRo()
-						defer ac.Close()
-						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
-							return histBlockNumProgress, err
-						})
-						return nil
-					}); err != nil {
-						logger.Error("[rpc] log stats", "err", err)
-					}
+					logSnapshotStats()
 				}
 				return nil
 			})
 		}
 		onNewSnapshot()
 
-		db, err = temporal.New(rawDB, agg, allSnapshots)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
-		}
 		stateCache = kvcache.NewLatestBatchCache()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
