@@ -696,12 +696,12 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	agg, err := dbstate.New(dirs).SanityOldNaming().Logger(log.Root()).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	agg, err := dbstate.New(dirs).SanityOldNaming().Logger(log.Root()).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(chainDB); err != nil {
 		return err
 	}
 	elDB, err := temporal.New(chainDB, agg, allSnapshots)
