@@ -300,3 +300,49 @@ func TestApplyDiscoveredChainToml_LocalWiderDropsPeerNarrower(t *testing.T) {
 	assert.Contains(t, merged, "v1.1-003500-003600-headers.seg",
 		"peer's entry past local coverage must survive — fills a genuine gap")
 }
+
+// TestDeriveBlockTipFromDisk_IgnoresManifestClaims pins the tip source
+// for the discovery filter. chain.toml is not evidence of what we hold:
+// the bootstrap-preverified merge writes registry entries into it, and
+// ApplyDiscoveredChainToml writes peer content into it. Deriving the
+// "local" tip from that file lets an external manifest raise our own
+// tip, after which the filter it gates degrades to a pass-through.
+// Disk is the only self-consistent source.
+func TestDeriveBlockTipFromDisk_IgnoresManifestClaims(t *testing.T) {
+	snapDir := t.TempDir()
+	// Disk holds a complete block triple through 3430000.
+	for _, typ := range []string{"headers", "bodies", "transactions"} {
+		require.NoError(t, os.WriteFile(
+			filepath.Join(snapDir, "v1.1-003420-003430-"+typ+".seg"),
+			[]byte("stub"), 0o644))
+	}
+	// The published manifest claims far more than disk holds.
+	require.NoError(t, SaveChainToml(snapDir, []byte(
+		`"v1.1-003500-003501-headers.seg" = "aa"
+"v1.1-003500-003501-bodies.seg" = "bb"
+"v1.1-003500-003501-transactions.seg" = "cc"
+`)))
+
+	require.Equal(t, uint64(3_429_999), deriveBlockTipFromDisk(snapDir),
+		"tip must come from the block files on disk, not from what chain.toml advertises")
+}
+
+// TestDeriveBlockTipFromDisk_RequiresCompleteTriple pins that a partial
+// triple yields no tip: a range is only ours to serve when all three
+// block types cover it. Mirrors deriveBlockTipFromMap.
+func TestDeriveBlockTipFromDisk_RequiresCompleteTriple(t *testing.T) {
+	snapDir := t.TempDir()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(snapDir, "v1.1-003420-003430-headers.seg"), []byte("stub"), 0o644))
+
+	require.Zero(t, deriveBlockTipFromDisk(snapDir),
+		"headers alone is not a servable range — no tip")
+}
+
+// TestDeriveBlockTipFromDisk_EmptyDirIsColdStart pins the bootstrap
+// escape: no block files means no tip, which callers treat as a
+// pass-through.
+func TestDeriveBlockTipFromDisk_EmptyDirIsColdStart(t *testing.T) {
+	require.Zero(t, deriveBlockTipFromDisk(t.TempDir()))
+	require.Zero(t, deriveBlockTipFromDisk(""))
+}

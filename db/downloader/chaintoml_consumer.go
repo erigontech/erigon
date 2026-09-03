@@ -355,6 +355,48 @@ func (a ipPortAddr) String() string {
 // ParseFileName returns ok=false here even though From/To/TypeString
 // parse cleanly. ParseRange exposes those range-only fields without
 // requiring the enum registration.
+// deriveBlockTipFromDisk returns the local block tip from the .seg
+// files actually present in snapDir, using the same complete-triple
+// rule as deriveBlockTipFromMap.
+//
+// chain.toml cannot serve as this input even though it is our own file:
+// the bootstrap-preverified merge folds registry entries into it and
+// ApplyDiscoveredChainToml writes merged peer content back to it, so a
+// tip read from there can be raised by an external manifest — and the
+// filter it gates then stops rejecting anything.
+func deriveBlockTipFromDisk(snapDir string) uint64 {
+	if snapDir == "" {
+		return 0
+	}
+	cov := snaptype.BuildLocalCoverageIndex(snapDir)
+	maxTo := map[string]uint64{}
+	for k, ranges := range cov {
+		if k.Subdir != "" || k.Ext != ".seg" {
+			continue
+		}
+		switch k.TypeStr {
+		case "headers", "bodies", "transactions":
+		default:
+			continue
+		}
+		for _, r := range ranges {
+			if r.To > maxTo[k.TypeStr] {
+				maxTo[k.TypeStr] = r.To
+			}
+		}
+	}
+	if len(maxTo) < 3 {
+		return 0
+	}
+	tip := maxTo["headers"]
+	tip = min(tip, maxTo["bodies"])
+	tip = min(tip, maxTo["transactions"])
+	if tip == 0 {
+		return 0
+	}
+	return tip - 1
+}
+
 func deriveBlockTipFromMap(m map[string]string) uint64 {
 	var maxHeaders, maxBodies, maxTxs uint64
 	for name := range m {
@@ -511,18 +553,17 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 	// any block entry whose FromBlock is at or below our local tip —
 	// those overlap with what we've already published. Cold start
 	// (tip == 0) is a pass-through so initial bootstrap works.
-	// Source of localTip: our own runtime snapDir/chain.toml — that's
-	// the durable record of what we've published locally.
-	if localBytes, ferr := LoadChainToml(snapDir); ferr == nil && len(localBytes) > 0 {
-		if localMap, perr := parseChainTomlAuto(localBytes); perr == nil {
-			if localTip := deriveBlockTipFromMap(localMap); localTip > 0 {
-				before := len(discovered)
-				discovered = filterDiscoveredByLocalTip(discovered, localTip)
-				if dropped := before - len(discovered); dropped > 0 {
-					_ = dropped // logged at the call-site once SetLogger plumbing lands
-				}
-			}
-			_ = localMap // kept in scope for the coverage filter below (parseChainTomlAuto avoids the double parse)
+	//
+	// The tip comes from disk, not from chain.toml: this function writes
+	// merged peer content back to that file and the bootstrap-preverified
+	// merge folds registry entries into it, so reading the tip from there
+	// would let an external manifest raise our own tip and turn this
+	// filter into a pass-through.
+	if localTip := deriveBlockTipFromDisk(snapDir); localTip > 0 {
+		before := len(discovered)
+		discovered = filterDiscoveredByLocalTip(discovered, localTip)
+		if dropped := before - len(discovered); dropped > 0 {
+			_ = dropped // logged at the call-site once SetLogger plumbing lands
 		}
 	}
 	// Local-overrides-external: drop any discovered entry whose
