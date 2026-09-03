@@ -58,6 +58,12 @@ type jsonrpcMessage struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
+
+	// resultValue carries a success result that has not been encoded yet, so
+	// writeTo can encode it straight into the stream buffer. Exactly one of this
+	// and Result is set. It is deliberately unexported: a message holding it is
+	// not yet a complete JSON value, so it must not be marshalled as a struct.
+	resultValue any
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -69,7 +75,7 @@ func (msg *jsonrpcMessage) isCall() bool {
 }
 
 func (msg *jsonrpcMessage) isResponse() bool {
-	return msg.hasValidID() && msg.Method == "" && msg.Params == nil && (msg.Result != nil || msg.Error != nil)
+	return msg.hasValidID() && msg.Method == "" && msg.Params == nil && (msg.Result != nil || msg.resultValue != nil || msg.Error != nil)
 }
 
 func (msg *jsonrpcMessage) hasValidID() bool {
@@ -109,20 +115,22 @@ type fastJSONResult interface {
 }
 
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
-	var (
-		enc []byte
-		err error
-	)
 	if fm, ok := result.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
-	} else {
-		enc, err = json.Marshal(result)
+		enc, err := fm.MarshalFastJSON()
+		if err != nil {
+			// TODO: wrap with 'internal server error'
+			return msg.errorResponse(err)
+		}
+		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
 	}
-	if err != nil {
-		// TODO: wrap with 'internal server error'
-		return msg.errorResponse(err)
+	if result == nil {
+		// JSON-RPC requires the member on a success response, and an untyped nil
+		// cannot be told apart from "no deferred value" once it is in the message.
+		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: json.RawMessage("null")}
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+	// Deferred: writeTo encodes it into the stream buffer, so the response is
+	// never materialised as a standalone []byte.
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, resultValue: result}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
