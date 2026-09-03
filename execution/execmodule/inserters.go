@@ -68,7 +68,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 }
 
 // insertBlocksLocked is InsertBlocks' body with the caller ALREADY holding e.semaphore. It is the reusable core
-// so the atomic assemble (SealBoundary sealing N then opening N+1) can insert the successor block under its
+// so the atomic assemble (SealBlock sealing N then opening N+1) can insert the successor block under its
 // single semaphore hold — re-acquiring here would deadlock. InsertBlocks acquires the semaphore and calls this.
 func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	// Do NOT clear the extending-fork state when this insert is a flashblock UPDATE — a re-insert of

@@ -194,16 +194,16 @@ type ExecutionModule interface {
 	// given payloadID.  The result is Busy when the builder has not finished.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
-	// SealBoundary is the marker-driven CLOSE: the boundary assembler calls it when a block-end marker
+	// SealBlock is the marker-driven CLOSE: the boundary assembler calls it when a block-end marker
 	// commits in consensus to seal the pre-executed in-progress flashblock (zero re-execution) and store
 	// it by parent hash, so GetAssembledBlock (proposer) / newPayload (follower) retrieve it without
-	// re-sealing. Runs on every node at the marker. See execmodule.SealBoundary.
-	SealBoundary(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error)
+	// re-sealing. Runs on every node at the marker. See execmodule.SealBlock.
+	SealBlock(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error)
 
 	// FrontierHeader returns the exec-owned run-ahead FRONTIER head — the last sealed block a newly-opening
 	// flashblock chains onto — or nil before the first seal. This is a LOCK-FREE ATOMIC READ (not a semaphore
 	// operation), the one legitimate cross-boundary read the driver needs for its consensus open-decision — like
-	// CurrentHeader. Exec sets it internally (SealBoundary advances it; AssembleBlock re-anchors it).
+	// CurrentHeader. Exec sets it internally (SealBlock advances it; AssembleBlock re-anchors it).
 	FrontierHeader() *types.Header
 
 	// ExecCostUpperQuartile returns the running window's 75th-percentile per-tx execution TIME and GAS — the
@@ -222,7 +222,7 @@ type ExecutionModule interface {
 	// methods on *ExecModule. Tests reach them by asserting the concrete type; production code never needs them.
 
 	// NOTE: discarding a stale in-progress flashblock (the former AbandonExtendingFork) is exec-INTERNAL now —
-	// its only triggers, the SealBoundary reconcile and the AssembleBlock boundary re-anchor, run under the exec
+	// its only triggers, the SealBlock reconcile and the AssembleBlock boundary re-anchor, run under the exec
 	// semaphore and call abandonExtendingForkLocked directly. There is no public wrapper (it would be a
 	// semaphore-free mutation on this interface — the anti-pattern this refactor removed).
 

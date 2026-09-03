@@ -284,13 +284,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// canonical, so ValidateChain no longer needs to accept it — drop it to keep the map bounded to the
 	// run-ahead depth.
 	if finishProgressBefore > 0 {
-		e.pendingBoundaryMu.Lock()
+		e.pendingBlockMu.Lock()
 		for h, hdr := range e.sealedByHash {
 			if hdr.Number.Uint64() <= finishProgressBefore {
 				delete(e.sealedByHash, h)
 			}
 		}
-		e.pendingBoundaryMu.Unlock()
+		e.pendingBlockMu.Unlock()
 	}
 
 	e.logger.Debug("[execmodule] updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())

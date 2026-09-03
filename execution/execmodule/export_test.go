@@ -9,10 +9,10 @@ import (
 // ValidateChain's accept-by-lookup path without driving the full marker seal. Test-only (compiled only under
 // _test.go); it does not widen the production API.
 func (e *ExecModule) RecordSealedForTest(h *types.Header) {
-	e.pendingBoundaryMu.Lock()
+	e.pendingBlockMu.Lock()
 	if e.sealedByHash == nil {
 		e.sealedByHash = make(map[common.Hash]*types.Header)
 	}
 	e.sealedByHash[h.Hash()] = h
-	e.pendingBoundaryMu.Unlock()
+	e.pendingBlockMu.Unlock()
 }

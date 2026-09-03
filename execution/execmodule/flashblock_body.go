@@ -94,7 +94,7 @@ type flashBodyState struct {
 	// The in-progress block's IDENTITY + the inputs it was built under, so exec (not the driver) owns the
 	// whole in-progress flashblock. The driver reads these via FlashblockState() instead of caching its own
 	// ib* under ibMu; the OUTPUT root/receipts are the last pre-exec's computed values (the final sealed
-	// values come from the CLOSE — SealBoundary's returned block). Set on a successful PreExecute, cleared on
+	// values come from the CLOSE — SealBlock's returned block). Set on a successful PreExecute, cleared on
 	// reset. This is what removes the driver-data-lock-vs-exec-semaphore deadlock class.
 	valid    bool             // a PreExecute has validated for this in-progress block
 	built    FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
@@ -191,7 +191,7 @@ func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs Flashblock
 }
 
 // preExecuteFlashblockLocked is PreExecuteFlashblock's body with the caller ALREADY holding e.semaphore, so
-// SealBoundary can open the successor flashblock (empty round) atomically inside its own hold.
+// SealBlock can open the successor flashblock (empty round) atomically inside its own hold.
 func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {

@@ -69,7 +69,7 @@ type ForkValidator struct {
 	// (depth 1 = just sharedDom). See preExecStack methods below.
 	preExecStack []*preExecGen
 	// frontierMode arms the decoupled-boundary lifecycle (DAG-L2 producer, set via SetFrontierMode from
-	// ExecModule.SetBoundaryAssembler). When true, MergeExtendingFork PARKS the canonicalised block's SD
+	// ExecModule.SetBlockAssembler). When true, MergeExtendingFork PARKS the canonicalised block's SD
 	// (keep-alive) so the successor block reads its live commitment through the parent chain, and retires
 	// parked gens STRICTLY below the canonicalised number. When false (normal sync/reorg), the merged SD
 	// is dropped on canonicalisation exactly as before. See [[consensus_advance_untested_regression]].

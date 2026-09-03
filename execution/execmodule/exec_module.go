@@ -215,26 +215,26 @@ type ExecModule struct {
 	// GetAssembledBlock. Distinct from `builders` (the from-scratch async path). See assemblePreconfirmed.
 	preconfirmedBlocks map[uint64]*types.BlockWithReceipts
 
-	// boundaryAssembler, when set (a DAG-driven L2), makes AssembleBlock DEFER block production to the
+	// blockAssembler, when set (a DAG-driven L2), makes AssembleBlock DEFER block production to the
 	// ordering layer instead of building from-scratch from the txpool. The CL's FCU-with-attributes calls
 	// in; the assembler inserts a block-end MARKER carrying those attrs into the DAG and WAITS (bounded,
 	// inside the CL assembly delay) for the marker to appear in the committed stream — the point at which
 	// every node agrees the block ends ([[dag_start_end_system_tx]]). It then seals the pre-executed body
 	// (zero re-execution) and returns it. nil ⇒ standard txpool/from-scratch builder. Set via
-	// SetBoundaryAssembler (dependency inversion: the interface lives here, the cocoon rollup driver
+	// SetBlockAssembler (dependency inversion: the interface lives here, the cocoon rollup driver
 	// implements it — erigon cannot import cocoon).
-	boundaryAssembler BoundaryAssembler
-	// pendingBoundary maps a payload id to the build params for a DAG boundary assemble whose marker was
-	// inserted by AssembleBlock (BeginBoundary) but whose body+seal is completed lazily in GetAssembledBlock
-	// (AwaitBoundary + assemblePreconfirmed). Guarded by pendingBoundaryMu because AssembleBlock (writer,
+	blockAssembler BlockAssembler
+	// pendingBlock maps a payload id to the build params for a DAG boundary assemble whose marker was
+	// inserted by AssembleBlock (AssembleBlock) but whose body+seal is completed lazily in GetAssembledBlock
+	// (GetAssembledBlock + assemblePreconfirmed). Guarded by pendingBlockMu because AssembleBlock (writer,
 	// holds the semaphore) and GetAssembledBlock (reader, must check BEFORE acquiring the semaphore) race.
-	pendingBoundary   map[uint64]*builder.Parameters
-	pendingBoundaryMu sync.Mutex
-	// preconfirmedByParent holds a boundary block SEALED by the marker handler (SealBoundary) when the
+	pendingBlock   map[uint64]*builder.Parameters
+	pendingBlockMu sync.Mutex
+	// preconfirmedByParent holds a boundary block SEALED by the marker handler (SealBlock) when the
 	// block-end marker committed in consensus, keyed by the block's PARENT hash. This is the UNIVERSAL
 	// close — it runs on every node at the marker, decoupled from the CL role — so GetAssembledBlock
 	// (proposer) just RETRIEVES the already-sealed block by its build params' ParentHash instead of
-	// re-sealing. Guarded by pendingBoundaryMu.
+	// re-sealing. Guarded by pendingBlockMu.
 	preconfirmedByParent map[common.Hash]*types.BlockWithReceipts
 
 	// sealedByHash records every block this node SEALED locally (marker-driven close), keyed by its sealed
@@ -243,7 +243,7 @@ type ExecModule struct {
 	// (lagging) canonical state is both redundant AND WRONG — the fresh SD lacks the frontier predecessor's
 	// state/txNum, so it computes a different root or fails (nonce-too-low / can't-find-header) and falsely
 	// marks our own valid block INVALID. Accept-by-hash keeps the architecture's single-execution property.
-	// Guarded by pendingBoundaryMu. Pruned as blocks canonicalize (updateForkChoice).
+	// Guarded by pendingBlockMu. Pruned as blocks canonicalize (updateForkChoice).
 	sealedByHash map[common.Hash]*types.Header
 
 	// flash is the exec-owned in-progress flashblock body (see flashBodyState / PreExecuteFlashblock): the
@@ -251,7 +251,7 @@ type ExecModule struct {
 	flash flashBodyState
 
 	// frontierHeader is the exec-owned run-ahead FRONTIER head — the sealed block a newly-opening flashblock
-	// chains onto (set by SealBoundary at the marker close; also settable when the CL accepts a head). It is
+	// chains onto (set by SealBlock at the marker close; also settable when the CL accepts a head). It is
 	// EXECUTION state (a sealed header exec produced), so it lives here, not mirrored under a driver lock. Read
 	// LOCK-FREE via FrontierHeader(): AssembleBlock holds the exec semaphore and its anchor path reads this, so
 	// it must NOT touch the semaphore or a lock the semaphore-holder already contends on (the ibMu↔semaphore
@@ -325,7 +325,7 @@ func NewExecModule(
 		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
-		pendingBoundary:         make(map[uint64]*builder.Parameters),
+		pendingBlock:         make(map[uint64]*builder.Parameters),
 		preconfirmedByParent:    make(map[common.Hash]*types.BlockWithReceipts),
 		sealedByHash:            make(map[common.Hash]*types.Header),
 		builderFunc:             builderFunc,
@@ -491,7 +491,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// accepted and its state durably applied — never re-validate it. Caplin re-validates such LAGGING blocks
 	// (its NewPayload backfill); by then the sealedByHash entry has been pruned (forkchoice), so the seal path
 	// below misses and validateChainLocked would build a FRESH SharedDomains that ValidatePayload ADOPTS as
-	// fv.sharedDom — DISPLACING the DAG frontier/extending-fork SD the next SealBoundary needs, which wedges L2
+	// fv.sharedDom — DISPLACING the DAG frontier/extending-fork SD the next SealBlock needs, which wedges L2
 	// block production (block-end markers stop sealing). committedHeight is the reliable "already applied"
 	// signal (independent of the pruned sealed set and the not-yet-durable overlay canonical row). The caller
 	// uses only status + LatestValidHash (ComputedRoot is ignored). Only fires for number <= committed, so a
@@ -500,9 +500,9 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if blockNumber <= e.forkValidator.CommittedHeight() {
 		return ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}, nil
 	}
-	e.pendingBoundaryMu.Lock()
+	e.pendingBlockMu.Lock()
 	sealed := e.sealedByHash[blockHash]
-	e.pendingBoundaryMu.Unlock()
+	e.pendingBlockMu.Unlock()
 	if sealed != nil && sealed.Number.Uint64() == blockNumber {
 		e.logger.Info("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
 			"number", blockNumber, "hash", blockHash, "root", sealed.Root)
@@ -807,7 +807,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		// BlockPostValidation computes for an empty block. Gating this on len>0 left ReceiptHash at its
 		// ZERO value for an empty block, so the sealed header carried ReceiptHash=0x00.. and re-validation
 		// rejected it ("receiptHash mismatch: 56e81f17… != 0000…"). That is the cold-boot empty heartbeat
-		// block-1 that froze the DAG-L2 at block 0 (BoundaryAdvance only exercised NON-empty blocks, so it
+		// block-1 that froze the DAG-L2 at block 0 (BlockAdvance only exercised NON-empty blocks, so it
 		// never caught this). GasUsed=0 and an empty bloom are the correct output side for a 0-tx block.
 		fbReceipts := doms.FlashblockReceipts()
 		var cum uint64
@@ -980,9 +980,9 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	}
 	// Record the sealed block so newPayload/ValidateChain ACCEPTS it (this node produced+validated it once on
 	// the frontier) instead of re-executing it on a fresh SD against lagging canonical state.
-	e.pendingBoundaryMu.Lock()
+	e.pendingBlockMu.Lock()
 	e.sealedByHash[newHash] = sealed
-	e.pendingBoundaryMu.Unlock()
+	e.pendingBlockMu.Unlock()
 	e.logger.Debug("[execmodule] flashblock sealed (newPayload ingest)",
 		"number", number, "deferredHash", oldHash, "sealedHash", newHash, "root", sealed.Root)
 	return nil

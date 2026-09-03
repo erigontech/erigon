@@ -66,7 +66,7 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 }
 
 // preExecuteLocked is PreExecute's body with the caller ALREADY holding e.semaphore. PreExecute TryAcquires and
-// calls this; the atomic assemble path (opening the successor flashblock inside SealBoundary) calls it directly.
+// calls this; the atomic assemble path (opening the successor flashblock inside SealBlock) calls it directly.
 func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	e.currentContext.ResetPendingUpdates()
 

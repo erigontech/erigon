@@ -32,31 +32,31 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-// BoundaryAssembler is the DAG-driven L2 block-production hook. On such an L2, AssembleBlock defers to
+// BlockAssembler is the DAG-driven L2 block-production hook. On such an L2, AssembleBlock defers to
 // this instead of building from-scratch from the txpool: the implementation (the cocoon rollup driver)
 // inserts a block-end MARKER carrying the CL's proposer attributes into the ordering layer and WAITS
 // (bounded, inside the CL assembly delay) for it to appear in the committed stream — the consensus point
 // at which every node agrees the block ends — then seals the already-pre-executed body (zero re-execution)
 // and returns it. The interface lives in erigon and is implemented in cocoon (dependency inversion:
 // erigon cannot import cocoon). See [[dag_start_end_system_tx]].
-type BoundaryAssembler interface {
-	// BeginBoundary inserts the block-end marker carrying params' attrs into the ordering layer and returns
+type BlockAssembler interface {
+	// AssembleBlock inserts the block-end marker carrying params' attrs into the ordering layer and returns
 	// IMMEDIATELY (non-blocking). Called from AssembleBlock, which must return a PayloadID promptly — the CL's
 	// ForkChoiceUpdate blocks on it, so it cannot wait here for the DAG round trip.
-	BeginBoundary(ctx context.Context, params *builder.Parameters) error
-	// AwaitBoundary blocks (bounded, the CL assembly delay) until the marker has committed and the block's
+	AssembleBlock(ctx context.Context, params *builder.Parameters) error
+	// GetAssembledBlock blocks (bounded, the CL assembly delay) until the marker has committed and the block's
 	// body is fully pre-executed + recorded as the extending-fork flashblock (so a follow-up assemblePreconfirmed
 	// seals it with zero re-execution). Called from GetAssembledBlock, the GetPayload path — and CRUCIALLY the
 	// caller must NOT hold the exec semaphore while awaiting, or the commits-handler PreExecute (which needs the
 	// semaphore to record the body) deadlocks against it. Returns an error (non-fatal) if the marker does not
 	// commit in time; the CL skips the slot and retries, and the retry adopts the block if it sealed meanwhile.
-	AwaitBoundary(ctx context.Context, params *builder.Parameters) error
+	GetAssembledBlock(ctx context.Context, params *builder.Parameters) error
 }
 
-// SetBoundaryAssembler installs the DAG-L2 boundary assembler (see BoundaryAssembler). Called at wiring
+// SetBlockAssembler installs the DAG-L2 boundary assembler (see BlockAssembler). Called at wiring
 // time by the cocoon node for a chain whose builder is the incremental/DAG model.
-func (e *ExecModule) SetBoundaryAssembler(ba BoundaryAssembler) {
-	e.boundaryAssembler = ba
+func (e *ExecModule) SetBlockAssembler(ba BlockAssembler) {
+	e.blockAssembler = ba
 	// A DAG-boundary producer runs the decoupled frontier: block N+1 pre-execs on N's still-live SD
 	// while N's FCU lags. Arm the fork validator to KEEP the canonicalised block's SD alive (park it)
 	// so the successor reads N's live commitment. Off for normal sync/reorg (drop-on-merge as before).
@@ -114,22 +114,22 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// appear in the committed stream, the point every node agrees the block ends; then seals the already-
 	// pre-executed body (zero re-execution). The marker carrying params gives attribute agreement for free
 	// (pre-exec ran under these same attrs, sourced from this FCU). See [[dag_start_end_system_tx]].
-	if e.boundaryAssembler != nil {
+	if e.blockAssembler != nil {
 		// RE-ANCHOR (exec-internal, under this semaphore hold): if the CL is now building on a DIFFERENT parent
 		// than the in-progress flashblock was opened on, Caplin accepted a new head — drop the stale fork and
 		// re-anchor the frontier to that head so the boundary opens FRESH on it. This replaced the driver's
 		// AnchorFrontier callback, which was semaphore-free only because it rode inside this hold (an anti-pattern
 		// on the public interface); the trigger + action now live where the semaphore is genuinely held.
-		e.reanchorFrontierForBoundaryLocked(ctx, params)
+		e.reanchorFrontierForBlockLocked(ctx, params)
 		// Insert the block-end marker NOW (non-blocking) so it starts committing during the CL assembly
-		// delay, and record the params so GetAssembledBlock can AwaitBoundary + seal. MUST NOT wait here —
+		// delay, and record the params so GetAssembledBlock can GetAssembledBlock + seal. MUST NOT wait here —
 		// the CL's ForkChoiceUpdate blocks on AssembleBlock returning a PayloadID.
-		if err := e.boundaryAssembler.BeginBoundary(ctx, params); err != nil {
+		if err := e.blockAssembler.AssembleBlock(ctx, params); err != nil {
 			return AssembleBlockResult{}, err
 		}
-		e.pendingBoundaryMu.Lock()
-		e.pendingBoundary[e.nextPayloadId] = params
-		e.pendingBoundaryMu.Unlock()
+		e.pendingBlockMu.Lock()
+		e.pendingBlock[e.nextPayloadId] = params
+		e.pendingBlockMu.Unlock()
 		e.logger.Info("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash)
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 	}
@@ -242,13 +242,13 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	return &types.BlockWithReceipts{Block: block, Receipts: receipts}, true, nil
 }
 
-// SealBoundary is the marker-driven CLOSE (the UNIVERSAL block-production step). The boundary assembler
+// SealBlock is the marker-driven CLOSE (the UNIVERSAL block-production step). The boundary assembler
 // (the cocoon driver's commits handler) calls it when the block-end MARKER commits in consensus — on EVERY
 // node, decoupled from the CL role. It seals the pre-executed in-progress flashblock via assemblePreconfirmed
 // (zero re-execution) and stores it keyed by the block's PARENT hash, so the CL's GetAssembledBlock (proposer)
 // — riding behind — just RETRIEVES the already-sealed block instead of re-sealing it. Returns the sealed
 // block (or nil if there is no matching preconfirmed flashblock for these params). Acquires the semaphore.
-func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error) {
+func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, forceEmpty bool) (*types.BlockWithReceipts, error) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return nil, err
 	}
@@ -266,9 +266,9 @@ func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameter
 	if err != nil || !ok || br == nil {
 		return nil, err
 	}
-	e.pendingBoundaryMu.Lock()
+	e.pendingBlockMu.Lock()
 	e.preconfirmedByParent[params.ParentHash] = br
-	e.pendingBoundaryMu.Unlock()
+	e.pendingBlockMu.Unlock()
 	sealedHdr := br.Block.Header()
 	// Exec OWNS the frontier: the block just sealed is the head the successor flashblock chains onto.
 	e.frontierHeader.Store(sealedHdr)
@@ -400,14 +400,14 @@ func builtAttrsMatchParams(built FlashblockInputs, params *builder.Parameters) b
 // ibMu-guarded d.frontier cache and the ibMu↔exec-semaphore deadlock.
 func (e *ExecModule) FrontierHeader() *types.Header { return e.frontierHeader.Load() }
 
-// reanchorFrontierForBoundaryLocked re-anchors the run-ahead frontier when the CL's FCU (AssembleBlock's params)
+// reanchorFrontierForBlockLocked re-anchors the run-ahead frontier when the CL's FCU (AssembleBlock's params)
 // builds on a DIFFERENT parent than the in-progress flashblock was opened on — Caplin accepted a new head
 // (catch-up/reorg). It drops the stale in-progress fork and re-anchors the frontier to that accepted head, so the
 // boundary opens FRESH on it. Abandoning is what makes a SAME-HEIGHT reorg safe (PreExecuteFlashblock only auto-
 // resets its body on a NUMBER change). No in-progress block, or the CL still on the same parent ⇒ no-op — this
 // must NOT fire during normal run-ahead (frontier legitimately ahead of the accepted head). Caller (AssembleBlock)
 // holds e.semaphore; this is the exec-internal replacement for the driver's former AnchorFrontier callback.
-func (e *ExecModule) reanchorFrontierForBoundaryLocked(ctx context.Context, params *builder.Parameters) {
+func (e *ExecModule) reanchorFrontierForBlockLocked(ctx context.Context, params *builder.Parameters) {
 	e.flash.mu.Lock()
 	valid := e.flash.valid
 	inProgressParent := e.flash.built.Parent
@@ -440,7 +440,7 @@ func (e *ExecModule) headerByHashLocked(ctx context.Context, hash common.Hash) *
 
 // abandonExtendingForkLocked discards the active pre-executed in-progress block so the next PreExecute re-opens
 // it from a fresh SD (re-running block-start under corrected attrs). Caller MUST hold e.semaphore. It is exec-
-// INTERNAL — the reconcile (SealBoundary) and the boundary re-anchor (AssembleBlock) are its only callers, both
+// INTERNAL — the reconcile (SealBlock) and the boundary re-anchor (AssembleBlock) are its only callers, both
 // already under the semaphore; there is no public AbandonExtendingFork on the interface (a semaphore-free public
 // wrapper would be the anti-pattern this refactor removed). See ForkValidator.AbandonExtendingFork.
 func (e *ExecModule) abandonExtendingForkLocked() {
@@ -497,35 +497,35 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 
 func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
 	// DAG BOUNDARY: complete a boundary assemble whose marker was inserted (non-blocking) by AssembleBlock.
-	// AwaitBoundary FIRST, WITHOUT the semaphore — the commits-handler PreExecute needs the semaphore to
+	// GetAssembledBlock FIRST, WITHOUT the semaphore — the commits-handler PreExecute needs the semaphore to
 	// record the body, so holding it here would deadlock the wait. Then acquire the semaphore and seal via
 	// assemblePreconfirmed (zero re-execution; the marker carried these attrs so its checks match).
-	e.pendingBoundaryMu.Lock()
-	params, isBoundary := e.pendingBoundary[payloadID]
-	e.pendingBoundaryMu.Unlock()
-	if isBoundary {
-		// GetPayload just RETURNS the block the marker handler already sealed (SealBoundary) — it does NOT
-		// seal. AwaitBoundary drives the DAG so the marker commits (and the commits handler seals+stores);
+	e.pendingBlockMu.Lock()
+	params, isBlock := e.pendingBlock[payloadID]
+	e.pendingBlockMu.Unlock()
+	if isBlock {
+		// GetPayload just RETURNS the block the marker handler already sealed (SealBlock) — it does NOT
+		// seal. GetAssembledBlock drives the DAG so the marker commits (and the commits handler seals+stores);
 		// then the block is retrieved by its parent hash. The CL is riding behind the marker-driven close.
-		if err := e.boundaryAssembler.AwaitBoundary(ctx, params); err != nil {
+		if err := e.blockAssembler.GetAssembledBlock(ctx, params); err != nil {
 			// Marker not committed in time (e.g. a quiet DAG at boot). Drop it and return no block — the CL
 			// skips this slot and retries on the NEXT slot with a fresh boundary; if the marker committed
-			// meanwhile, that retry's AwaitBoundary adopts the already-sealed block. Not fatal.
-			e.pendingBoundaryMu.Lock()
-			delete(e.pendingBoundary, payloadID)
-			e.pendingBoundaryMu.Unlock()
+			// meanwhile, that retry's GetAssembledBlock adopts the already-sealed block. Not fatal.
+			e.pendingBlockMu.Lock()
+			delete(e.pendingBlock, payloadID)
+			e.pendingBlockMu.Unlock()
 			e.logger.Info("[GetPayload] DAG boundary not ready, skipping slot", "payload", payloadID, "err", err)
 			return AssembledBlockResult{}, nil
 		}
-		e.pendingBoundaryMu.Lock()
+		e.pendingBlockMu.Lock()
 		br, ready := e.preconfirmedByParent[params.ParentHash]
 		if ready {
 			delete(e.preconfirmedByParent, params.ParentHash)
-			delete(e.pendingBoundary, payloadID)
+			delete(e.pendingBlock, payloadID)
 		}
-		e.pendingBoundaryMu.Unlock()
+		e.pendingBlockMu.Unlock()
 		if !ready {
-			// AwaitBoundary returned but the commits handler has not stored the sealed block yet (a race at
+			// GetAssembledBlock returned but the commits handler has not stored the sealed block yet (a race at
 			// the marker) — report not-ready so the CL retries GetPayload rather than skipping the slot.
 			e.logger.Warn("[GetPayload] DAG boundary awaited but sealed block not yet stored", "payload", payloadID)
 			return AssembledBlockResult{}, nil
