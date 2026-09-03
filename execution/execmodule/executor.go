@@ -269,7 +269,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			// snapshot files advance as PFB processes frozen blocks.
 			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
 				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-					agg.BuildFilesInBackground(agg.EndTxNumMinimax()+agg.StepSize(), finalityCtx)
+					agg.BuildFilesInBackground(pe.db, agg.EndTxNumMinimax()+agg.StepSize(), finalityCtx)
 				}
 			}
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
