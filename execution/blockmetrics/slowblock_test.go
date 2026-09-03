@@ -66,7 +66,6 @@ func sampleRecord() *Record {
 func TestEmitThreshold(t *testing.T) {
 	t.Parallel()
 
-	// Total is 100ms.
 	for _, tc := range []struct {
 		name      string
 		threshold time.Duration
@@ -130,13 +129,8 @@ func TestEmitJSONSchema(t *testing.T) {
 	assert.Equal(t, float64(50), timing["state_hash_ms"])
 	assert.Equal(t, float64(10), timing["commit_ms"])
 	assert.Equal(t, float64(11), timing["state_read_ms"])
-	// execution + state_hash + commit = 40+50+10. state_read is a breakdown of
-	// execution and is deliberately not a summand.
 	assert.Equal(t, float64(100), timing["total_ms"])
 
-	// gas over execution_ms, matching the reference records: benchmarkoor's besu
-	// fixture publishes 103.01 for 100 Mgas at execution 970.80ms, which is
-	// gas/execution and not gas/total.
 	assert.InDelta(t, 30.0/0.040, got["throughput"].(map[string]any)["mgas_per_sec"], 1e-6)
 
 	reads := got["state_reads"].(map[string]any)
@@ -151,8 +145,6 @@ func TestEmitJSONSchema(t *testing.T) {
 	account := got["cache"].(map[string]any)["account"].(map[string]any)
 	assert.Equal(t, float64(8), account["hits"])
 	assert.Equal(t, float64(2), account["misses"])
-	// A percentage, not a fraction: the reference records publish 83.02 for
-	// 44 hits against 9 misses.
 	assert.InDelta(t, 80.0, account["hit_rate"], 1e-9)
 }
 
@@ -185,10 +177,6 @@ func TestMgasPerSecWithoutTime(t *testing.T) {
 	assert.Zero(t, rec.mgasPerSec())
 }
 
-// State-read time is nested inside execution_ms and must not be added again,
-// matching reth. Adding it would make total_ms exceed the wall clock the parts
-// were measured from, and geth's opposite convention is what makes this worth
-// pinning.
 func TestStateReadIsInsideExecution(t *testing.T) {
 	t.Parallel()
 
@@ -200,8 +188,6 @@ func TestStateReadIsInsideExecution(t *testing.T) {
 	assert.Equal(t, 15*time.Millisecond, rec.Total(), "reads are already inside execution; adding them double-counts")
 }
 
-// A stateCache hit returns before the mem/db/file counters are touched, so it
-// must still be counted as a read; a miss falls through and is counted there.
 func TestDiffCountsStateCacheHitsAsReads(t *testing.T) {
 	t.Parallel()
 
@@ -248,8 +234,6 @@ func TestSinceRequiresBothSamples(t *testing.T) {
 	assert.True(t, ok)
 }
 
-// The read path skips the counters unless KV_READ_METRICS is set, so sampling
-// must report "not collected" rather than a zero delta.
 func TestTakeIsInertWithoutReadMetrics(t *testing.T) {
 	prev := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
@@ -270,10 +254,6 @@ func domainWithReads(domain kv.Domain, count int64, d time.Duration) *kvmetrics.
 	return dm
 }
 
-// The state root reads the same domains execution does, and both land in the
-// SharedDomains aggregate. geth and reth report EVM reads only, so commitment's
-// share has to come back out or state_read_ms means something no other client
-// reports.
 func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 	prev := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prev })
@@ -283,7 +263,6 @@ func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 	nonExec := kvmetrics.NewDomainMetrics()
 	before := Take(total, nonExec)
 
-	// 10 reads over the block, 4 of them the commitment's.
 	total.Merge(domainWithReads(kv.AccountsDomain, 10, 10*time.Millisecond))
 	nonExec.Merge(domainWithReads(kv.AccountsDomain, 4, 4*time.Millisecond))
 
@@ -293,8 +272,6 @@ func TestCommitmentReadsAreNotExecutionReads(t *testing.T) {
 	assert.Equal(t, 6*time.Millisecond, accounts.ReadTime)
 }
 
-// The two aggregates are merged at different moments, so a snapshot can catch
-// commitment ahead of the total. That must floor at zero, not wrap negative.
 func TestExecOnlyClampsInsteadOfGoingNegative(t *testing.T) {
 	t.Parallel()
 
@@ -306,9 +283,7 @@ func TestExecOnlyClampsInsteadOfGoingNegative(t *testing.T) {
 	assert.Zero(t, got.ReadTime)
 }
 
-// harnessPattern is the shape ethpandaops/benchmarkoor's Erigon parser expects.
-// The console rendering is as much a cross-client contract as the field names:
-// reformat it and the harness silently records nothing for us.
+// The console rendering is a cross-client contract, like the field names.
 var harnessPattern = regexp.MustCompile(
 	`^\[(?:TRACE|DBUG|INFO|WARN|EROR|CRIT)\] \[[^\]]+\] (\{.+\})\s*$`)
 
@@ -334,8 +309,6 @@ func TestEmittedLineMatchesTheHarnessContract(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(m[1]), &probe))
 
-	// The parser keys on the message, and the harness joins records to tests on
-	// the block hash.
 	assert.Equal(t, "Slow block", probe.Msg)
 	assert.NotEmpty(t, probe.Block.Hash)
 }

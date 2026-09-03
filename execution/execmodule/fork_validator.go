@@ -369,16 +369,11 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	return BlockTimings{}
 }
 
-// recordBlockMetrics stores what newPayload can measure; the forkchoice update
-// adds the commit time and emits it.
 func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *types.Header, body *types.RawBody, hash common.Hash, validation time.Duration, beforeIO *blockmetrics.Sample, blocksValidated int) {
 	if fv.blockMetricsCache == nil {
 		return
 	}
-	// Walking back to a canonical ancestor validates the whole fork in one call,
-	// and the measurement covers all of it while the header describes only the
-	// tip. There is no way to split it after the fact, so report nothing rather
-	// than charge the ancestors' work to the tip.
+	// One call validates the whole fork; the header describes only the tip.
 	if blocksValidated != 1 {
 		sd.TakeCommitmentTime()
 		return
@@ -394,9 +389,7 @@ func (fv *ForkValidator) recordBlockMetrics(sd *execctx.SharedDomains, header *t
 		rec.TxCount = len(body.Transactions)
 	}
 	rec.Accounts, rec.Storage, rec.Code, rec.CountersValid = blockmetrics.Take(sd.Metrics(), sd.NonExecMetrics()).Since(*beforeIO)
-	// State reads stay inside Execution; only the state-root computation comes
-	// out. Clamped because commitment time is summed across the fold's
-	// goroutines and can exceed the wall clock it is subtracted from.
+	// Clamped: commitment time sums across the fold's goroutines.
 	rec.Execution = max(validation-stateHash, 0)
 	fv.blockMetricsCache.Add(hash, rec)
 }

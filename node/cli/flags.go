@@ -304,9 +304,6 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	cfg.Sync.SlowBlockThreshold = ctx.Duration(utils.SlowBlockThresholdFlag.Name)
 	if cfg.Sync.SlowBlockThreshold >= 0 {
-		// The record carries a read breakdown and the counters behind it are off by
-		// default. Asking for the record is asking for them; reth ties the two
-		// together the same way.
 		dbg.EnableKVReadLevelledMetrics()
 	}
 

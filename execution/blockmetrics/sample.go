@@ -24,9 +24,6 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
-// Sample copies the cumulative domain counters; a block's cost is the
-// difference between two. The commitment's own counters are carried alongside
-// so they can be taken back out — the state root's reads are not execution's.
 type Sample struct {
 	accounts kvmetrics.DomainIOMetrics
 	storage  kvmetrics.DomainIOMetrics
@@ -39,9 +36,6 @@ type Sample struct {
 	taken bool
 }
 
-// Take returns an untaken sample unless KV_READ_METRICS is on, since the read
-// path skips the counters entirely without it and every delta would be zero.
-// nonExec may be nil, in which case nothing is attributed to commitment.
 func Take(dm, nonExec *kvmetrics.DomainMetrics) Sample {
 	if dm == nil || !dbg.KVReadLevelledMetrics {
 		return Sample{}
@@ -57,8 +51,6 @@ func Take(dm, nonExec *kvmetrics.DomainMetrics) Sample {
 	}
 }
 
-// Since reports what execution alone did between the two samples: the whole
-// delta minus the part commitment contributed.
 func (s Sample) Since(before Sample) (accounts, storage, code DomainCounts, ok bool) {
 	if !s.taken || !before.taken {
 		return
@@ -69,8 +61,6 @@ func (s Sample) Since(before Sample) (accounts, storage, code DomainCounts, ok b
 		true
 }
 
-// execOnly subtracts commitment's share, clamped: the two aggregates are merged
-// at different moments, so a snapshot can catch one ahead of the other.
 func execOnly(total, nonExec DomainCounts) DomainCounts {
 	return DomainCounts{
 		Reads:     max(total.Reads-nonExec.Reads, 0),
@@ -81,9 +71,6 @@ func execOnly(total, nonExec DomainCounts) DomainCounts {
 	}
 }
 
-// reads counts one read per served request. A stateCache hit returns without
-// touching the mem/db/file counters, so it is added separately; a stateCache
-// miss falls through to db or file and is already counted there.
 func reads(m kvmetrics.DomainIOMetrics) int64 {
 	return m.CacheReadCount + m.DbReadCount + m.FileReadCount + m.StateCacheHitCount
 }
@@ -102,7 +89,6 @@ func diff(before, after kvmetrics.DomainIOMetrics) DomainCounts {
 	}
 }
 
-// nonNeg absorbs a counter reset between samples.
 func nonNeg(v int64) int64 {
 	if v < 0 {
 		return 0

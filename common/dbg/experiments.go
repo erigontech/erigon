@@ -160,10 +160,7 @@ var (
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
 
-// EnableKVReadLevelledMetrics turns the KV_READ_METRICS counters on for a
-// caller that needs them without the operator setting the env var. Startup
-// only: the flag is read without synchronisation on every domain read, so it
-// must be set while the process is still single-threaded.
+// Startup only: read unsynchronised on every domain read.
 func EnableKVReadLevelledMetrics() { KVReadLevelledMetrics = true }
 
 func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {

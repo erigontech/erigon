@@ -80,10 +80,6 @@ func (c *jsonLogCollector) records(t *testing.T) []map[string]any {
 	return out
 }
 
-// TestSlowBlockMetricsAreEmittedForValidatedBlocks drives real newPayload and
-// forkchoice-update calls and asserts the emitted record carries live numbers.
-// The unit tests in execution/blockmetrics cover the schema; this covers the
-// plumbing that fills it, which a schema test cannot see.
 func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -105,8 +101,7 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 		execmoduletester.WithSlowBlockThreshold(0),
 	)
 
-	// After New: it installs its own root handler at LvlError, which would both
-	// replace the collector and filter out the Warn the emitter uses.
+	// New installs a root handler at LvlError, replacing any earlier collector.
 	collector := installCollector(t)
 
 	chainResult, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
@@ -148,8 +143,6 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 		}
 	}
 
-	// Catches dead plumbing: the JSON is structurally valid whether or not the
-	// exec path actually reports into it.
 	assert.True(t, sawStateHash, "state_hash_ms was zero in every record — commitment timing is not reaching the emitter")
 	assert.True(t, sawAccountReads, "state_reads.accounts was zero in every record — the counters are not reaching the emitter")
 }

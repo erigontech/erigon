@@ -62,9 +62,6 @@ func TestSlowBlockThresholdFlag(t *testing.T) {
 		require.Equal(t, 250*time.Millisecond, cfg.Sync.SlowBlockThreshold)
 	})
 
-	// The record carries a read breakdown whose counters are off by default, so
-	// the flag has to switch them on. One-way and process-wide, so this only
-	// asserts the enabling direction.
 	t.Run("threshold enables the read counters", func(t *testing.T) {
 		buildEthCfg(t, []string{"--debug.slow-block-threshold", "250ms"})
 		require.True(t, dbg.KVReadLevelledMetrics)

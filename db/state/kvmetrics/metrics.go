@@ -51,11 +51,8 @@ type DomainIOMetrics struct {
 	// from CacheReadCount which counts sd.mem and sd.parent.mem hits.
 	// Hit means stateCache.Get returned ok (we skipped MDBX+files).
 	// Miss means stateCache.Get returned !ok and we fell through to aggTx.
-	StateCacheHitCount  int64
-	StateCacheMissCount int64
-	// StateCacheHitDuration is the time a hit spent in the cache. A hit returns
-	// before the db/file timers, so without it a cache-served block reports zero
-	// read time.
+	StateCacheHitCount    int64
+	StateCacheMissCount   int64
 	StateCacheHitDuration time.Duration
 }
 
@@ -253,8 +250,6 @@ func (dm *DomainMetrics) Merge(src *DomainMetrics) {
 	dm.mergeLocked(src)
 }
 
-// SnapshotDomain copies one domain's counters; difference two to attribute IO
-// to a bounded span.
 func (dm *DomainMetrics) SnapshotDomain(domain kv.Domain) DomainIOMetrics {
 	if dm == nil {
 		return DomainIOMetrics{}

@@ -373,7 +373,6 @@ func WithMaxReorgDepth(d uint64) Option {
 	}
 }
 
-// WithSlowBlockThreshold enables the cross-client per-block metrics emitter.
 func WithSlowBlockThreshold(d time.Duration) Option {
 	return func(opts *options) {
 		opts.slowBlockThreshold = &d

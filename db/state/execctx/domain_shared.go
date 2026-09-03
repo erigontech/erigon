@@ -261,10 +261,7 @@ type SharedDomains struct {
 	discardCommitment bool
 	mem               kv.TemporalMemBatch
 	metrics           kvmetrics.DomainMetrics
-	// Reads the commitment and its warmup workers made, kept apart so a
-	// block's read breakdown can be reported for execution alone — geth and
-	// reth both count EVM reads only.
-	nonExecMetrics kvmetrics.DomainMetrics
+	nonExecMetrics    kvmetrics.DomainMetrics
 
 	commitmentNanos atomic.Int64
 
@@ -615,11 +612,8 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 
 // MergeMetrics hands a boundary producer's accumulator to three sinks: the
 // per-batch sd.metrics (under one lock, for the per-batch log line), the
-// process-level collector (grouped by source, for Prometheus), and — for any
-// source other than exec — sd.nonExecMetrics, which is subtracted out so a
-// block's reported read breakdown covers execution alone. A caller picking a
-// Source therefore decides Prometheus grouping and that subtraction at once.
-// For low-frequency
+// process-level collector (grouped by source), and, unless the source is exec,
+// sd.nonExecMetrics, subtracted back out of a block's read breakdown. For low-frequency
 // boundary producers (commitment fold, warmup teardown) off the per-tx hot path:
 // the collector send blocks if the buffer is momentarily full (rare, brief, and
 // lossless). Ownership of wm transfers to the collector — the caller must not
@@ -1769,20 +1763,14 @@ func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
 	return &sd.metrics
 }
 
-// NonExecMetrics is the part of Metrics produced by commitment rather than by
-// execution. Subtract it to get the execution-only figure.
 func (sd *SharedDomains) NonExecMetrics() *kvmetrics.DomainMetrics {
 	return &sd.nonExecMetrics
 }
 
-// AddCommitmentTime accumulates state-root computation time. Called from the
-// commitment context, which every root computation routes through.
 func (sd *SharedDomains) AddCommitmentTime(d time.Duration) {
 	sd.commitmentNanos.Add(int64(d))
 }
 
-// TakeCommitmentTime reads and resets, so consecutive blocks on the same
-// SharedDomains are attributed separately.
 func (sd *SharedDomains) TakeCommitmentTime() time.Duration {
 	return time.Duration(sd.commitmentNanos.Swap(0))
 }

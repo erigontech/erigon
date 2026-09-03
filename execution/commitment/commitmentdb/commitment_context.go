@@ -50,8 +50,6 @@ type sd interface {
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
 
-	// AddCommitmentTime accumulates state-root computation time for the block
-	// being executed, for the cross-client per-block metrics.
 	AddCommitmentTime(d time.Duration)
 
 	// Metrics exposes the per-SD DomainMetrics so callers can read

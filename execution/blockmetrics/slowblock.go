@@ -105,18 +105,11 @@ type Record struct {
 	Storage  DomainCounts
 	Code     DomainCounts
 
-	// Separates "nothing was read" from "nothing was counted": an absent source
-	// must not chart as zero cost.
 	CountersValid bool
 }
 
-// StateRead is the part of Execution that went to domain reads. It is a
-// breakdown of Execution, not a sibling of it, so Total does not add it —
-// reth reports the same way (crates/engine/tree/src/tree/mod.rs, "state_read_duration
-// is already included in execution_duration"). Geth instead subtracts reads
-// from its execution figure, so the two clients disagree about what
-// execution_ms means; this follows reth, because a subtraction that can go
-// negative is a number that silently absorbs whatever else went missing.
+// Nested inside Execution, so Total does not add it. Follows reth; geth
+// subtracts reads from execution instead, so the two disagree.
 func (r *Record) StateRead() time.Duration {
 	return r.Accounts.ReadTime + r.Storage.ReadTime + r.Code.ReadTime
 }
