@@ -171,14 +171,6 @@ func TestCheckRelayIP(t *testing.T) {
 	}
 }
 
-func BenchmarkCheckRelayIP(b *testing.B) {
-	sender := parseIP("23.55.1.242")
-	addr := parseIP("23.55.1.2")
-	for b.Loop() {
-		CheckRelayIP(sender, addr)
-	}
-}
-
 func TestSameNet(t *testing.T) {
 	tests := []struct {
 		ip, other string

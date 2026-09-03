@@ -161,11 +161,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	if l.cfg.Limit != 0 && l.cfg.Limit <= l.opcodeSteps {
 		return
 	}
-	l.opcodeSteps++
-	if !l.firstCapture {
+	l.writePrologueOnce()
+	if l.opcodeSteps > 0 {
 		l.stream.WriteMore()
 	}
-	l.writePrologueOnce()
+	l.opcodeSteps++
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract

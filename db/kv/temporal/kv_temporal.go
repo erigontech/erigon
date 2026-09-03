@@ -76,14 +76,14 @@ var ( // Compile time interface checks
 type DB struct {
 	kv.RwDB
 	stateFiles *state.Aggregator
-	// blockFiles: block snapshots, the peer of stateFiles. Optional; nil for
-	// state-only tools, in which case block reads fall back to their own view.
+	// blockFiles: block snapshots, the peer of stateFiles. Nil for state-only
+	// tools; a tx from such a DB pins no view and panics on any block read.
 	blockFiles *blocksnapshots.RoSnapshots
 }
 
 // New wires the temporal DB over a raw kv.RwDB, its state aggregator, and the
-// (optional) block snapshots — the block-data peer of stateFiles. Pass nil
-// blockSnaps for state-only tools.
+// block snapshots — the block-data peer of stateFiles. Pass nil blockSnaps only
+// for a tool that never reads block data: block reads panic without a view.
 func New(db kv.RwDB, agg *state.Aggregator, blockSnaps *blocksnapshots.RoSnapshots) (*DB, error) {
 	return &DB{RwDB: db, stateFiles: agg, blockFiles: blockSnaps}, nil
 }
@@ -745,7 +745,7 @@ func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
 func (db *DB) BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) (err error) {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers, opts...)
+	return db.stateFiles.BuildMissedAccessors(ctx, db, workers, opts...)
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()

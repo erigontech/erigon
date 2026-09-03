@@ -1273,32 +1273,6 @@ func ExampleStream() {
 	// [102 111 111 98 97 114] <nil>
 }
 
-func BenchmarkDecode(b *testing.B) {
-	enc := encodeTestSlice(90000)
-	b.SetBytes(int64(len(enc)))
-	b.ReportAllocs()
-
-	for b.Loop() {
-		var s []uint
-		if err := DecodeBytes(enc, &s); err != nil {
-			b.Fatalf("Decode error: %v", err)
-		}
-	}
-}
-
-func BenchmarkDecodeIntSliceReuse(b *testing.B) {
-	enc := encodeTestSlice(100000)
-	b.SetBytes(int64(len(enc)))
-	b.ReportAllocs()
-
-	var s []uint
-	for b.Loop() {
-		if err := DecodeBytes(enc, &s); err != nil {
-			b.Fatalf("Decode error: %v", err)
-		}
-	}
-}
-
 func encodeTestSlice(n uint) []byte {
 	s := make([]uint, n)
 	for i := range n {

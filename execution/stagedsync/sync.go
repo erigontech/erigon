@@ -499,8 +499,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
-		var errExhausted *ErrLoopExhausted
-		if errors.As(err, &errExhausted) {
+		if _, ok := errors.AsType[*ErrLoopExhausted](err); ok {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
 			return true, nil

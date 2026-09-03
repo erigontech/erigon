@@ -1293,14 +1293,14 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
 			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
 		}
-		agg, openErr := aggOpts.Open(ctx, db)
+		agg, openErr := aggOpts.Open(ctx)
 		if openErr != nil {
 			return nil, nil, nil, nil, openErr
 		}
 		agg.SetSnapshotBuildSema(blockSnapBuildSema)
 		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
 		if allSegmentsDownloadComplete {
-			_ = agg.OpenFolder()
+			_ = agg.OpenFolder(db)
 		}
 		temporalDb, err = temporal.New(db, agg, allSnapshots)
 		if err != nil {
