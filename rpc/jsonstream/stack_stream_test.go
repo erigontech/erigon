@@ -1240,22 +1240,6 @@ func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
 	require.Equal(t, `{"result":`+string(payload)+`}`, string(s.Buffer()))
 }
 
-// Mirrors the response path: pooled stream, envelope, one big pre-encoded result.
-func BenchmarkWriteRawBytesLargeResult(b *testing.B) {
-	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4<<20)...)
-	payload = append(payload, '"')
-	b.ReportAllocs()
-	for b.Loop() {
-		s := Get(io.Discard)
-		s.WriteObjectStart()
-		s.WriteObjectField("result")
-		s.WriteRawBytes(payload)
-		s.WriteObjectEnd()
-		_ = s.Flush()
-		Put(s)
-	}
-}
-
 // The mirror of TestPutDropsOversizedBuffer: a large result no longer grows the
 // buffer, so the stream survives Put instead of being dropped by the size check.
 func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
@@ -1271,5 +1255,35 @@ func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
 		"a written-through result must not grow the buffer past the pool limit")
 
 	Put(s)
-	require.Same(t, s, Get(nil).(*StackStream), "the stream must go back to the pool, not be dropped")
+	// sync.Pool may drop an admitted stream at any time, so admission is observed
+	// through the reset Put does on the way in, not through what Get hands back.
+	require.Empty(t, s.Buffer(), "an admitted stream is reset by Put")
+	require.Nil(t, s.out, "an admitted stream pins no writer")
+}
+
+// The write-through path must surface a writer failure the same way the buffered
+// path does, and must not let the failed bytes accumulate.
+func TestWriteRawBytesWriteThroughError(t *testing.T) {
+	t.Parallel()
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4*FlushThreshold)...)
+	payload = append(payload, '"')
+
+	for name, out := range map[string]io.Writer{
+		// Fails on the prefix flush, before the payload is handed over.
+		"prefix-flush": goneWriter{},
+		// Takes the prefix, then fails on the direct write of the payload.
+		"direct-write": &failingWriter{failAfter: len(payload) - 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := New(out).(*StackStream)
+			s.WriteObjectStart()
+			s.WriteObjectField("result")
+			s.WriteRawBytes(payload)
+			s.WriteObjectEnd()
+
+			require.Error(t, s.Flush(), "the writer failure must reach the caller")
+			require.Less(t, len(s.Buffer()), FlushThreshold,
+				"a failed write must not accumulate, buffer holds %d", len(s.Buffer()))
+		})
+	}
 }
