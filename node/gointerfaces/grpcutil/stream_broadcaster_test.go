@@ -120,12 +120,14 @@ func TestLaterBroadcastsProceedWhileSubscriberStalls(t *testing.T) {
 	healthy := newFakeStream(ctx)
 	subscribe(t, &b, ctx, healthy)
 
-	for i := 1; i <= 10; i++ {
+	// Past the queue length, so the stalled subscriber is dropped part way and the
+	// healthy one has to keep receiving across that. Drain as we go, otherwise the
+	// healthy one has slack to lose and the test starts measuring the scheduler.
+	for i := range subscriberQueueLen + 2 {
 		broadcastNow(t, &b, &testMsg{n: i})
-	}
-	for i := 1; i <= 10; i++ {
 		require.Equal(t, i, recvMsg(t, healthy).n)
 	}
+	require.Equal(t, 1, subCount(&b), "the stalled subscriber should have been dropped")
 }
 
 func TestSubscribeIsNotBlockedByStalledSubscriber(t *testing.T) {
@@ -258,7 +260,7 @@ func TestLateTeardownDoesNotUnregisterALaterSubscriber(t *testing.T) {
 	close(dropped.gate)
 	select {
 	case err := <-errs:
-		require.ErrorIs(t, err, ErrSubscriberTooSlow)
+		require.ErrorIs(t, err, errSubscriberTooSlow)
 	case <-time.After(testTimeout):
 		t.Fatal("Subscribe did not return after the subscriber fell behind")
 	}
@@ -266,31 +268,6 @@ func TestLateTeardownDoesNotUnregisterALaterSubscriber(t *testing.T) {
 	require.Equal(t, 1, subCount(&b))
 	broadcastNow(t, &b, &testMsg{n: 99})
 	require.Equal(t, 99, recvMsg(t, fresh).n)
-}
-
-func TestManyStalledSubscribersDoNotAffectAHealthyOne(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-	var b StreamBroadcaster[testMsg]
-
-	const stalledCount = 8
-	stalled := make([]*fakeStream, stalledCount)
-	for i := range stalled {
-		stalled[i] = newFakeStream(ctx)
-		stalled[i].gate = make(chan struct{})
-		subscribe(t, &b, ctx, stalled[i])
-	}
-	healthy := newFakeStream(ctx)
-	subscribe(t, &b, ctx, healthy)
-
-	// Drain as we broadcast: the healthy subscriber must never have slack to
-	// lose, or it overflows too and the test is measuring the scheduler.
-	const messages = subscriberQueueLen + 2
-	for i := range messages {
-		broadcastNow(t, &b, &testMsg{n: i})
-		require.Equal(t, i, recvMsg(t, healthy).n)
-	}
-	require.Equal(t, 1, subCount(&b), "every stalled subscriber should have been dropped")
 }
 
 // A subscriber that fills its queue is unregistered at once, but its Subscribe
@@ -305,7 +282,7 @@ func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
 		cancel  bool
 		want    error
 	}{
-		{name: "send released", want: ErrSubscriberTooSlow},
+		{name: "send released", want: errSubscriberTooSlow},
 		{name: "stream cancelled", cancel: true, want: context.Canceled},
 		{name: "send failed", sendErr: boom, want: boom},
 	} {

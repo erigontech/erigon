@@ -32,26 +32,19 @@ import (
 // durability buffer.
 const subscriberQueueLen = 64
 
-// ErrSubscriberTooSlow ends a subscription that fell behind. IsRetryLater
+// errSubscriberTooSlow ends a subscription that fell behind. IsRetryLater
 // recognises the code, so clients back off and resubscribe.
-var ErrSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscriber fell behind")
+var errSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscriber fell behind")
 
 // StreamBroadcaster fans a message out to a set of gRPC server-streaming
 // subscribers. It is safe to use as a non-pointer value.
 //
-// Every subscriber has its own bounded queue, drained by the gRPC handler
-// goroutine that registered it. Broadcast therefore never waits on a
-// subscriber, and no subscriber waits on another.
+// Delivery is best-effort: a subscriber that falls subscriberQueueLen messages
+// behind is dropped and has to resubscribe.
 //
-// Delivery is best-effort, not a reliable log. A subscriber that falls
-// subscriberQueueLen messages behind is dropped rather than buffered further
-// (see Broadcast); it has to resubscribe and there is no way for it to recover
-// what it missed in between.
-//
-// Broadcast takes ownership of the message it is given: the message may still
-// be queued for or in flight to a subscriber after Broadcast returns, and every
-// subscriber is handed the same pointer, so callers must neither mutate nor
-// reuse it.
+// Broadcast takes ownership of the message it is given: every subscriber is
+// handed the same pointer and it may still be queued after Broadcast returns,
+// so callers must neither mutate nor reuse it.
 //
 // T is the response message type (e.g. OnAddReply, OnMinedBlockReply).
 type StreamBroadcaster[T any] struct {
@@ -79,7 +72,7 @@ func (s *StreamBroadcaster[T]) Subscribe(ctx context.Context, stream grpc.Server
 			return streamCtx.Err()
 		case reply, ok := <-queue:
 			if !ok {
-				return ErrSubscriberTooSlow
+				return errSubscriberTooSlow
 			}
 			if err := stream.Send(reply); err != nil {
 				return err
@@ -92,12 +85,9 @@ func (s *StreamBroadcaster[T]) Subscribe(ctx context.Context, stream grpc.Server
 // across non-blocking queue writes, so an unresponsive subscriber can stall
 // neither the caller nor the other subscribers.
 //
-// A subscriber whose queue is full stops being a subscriber here, and its queued
-// messages are released rather than delivered: the queue bounds a count, and a
-// single reply can be large, so a Send that stays wedged would otherwise keep
-// all of them reachable. Its Subscribe returns once that Send resolves, with
-// ErrSubscriberTooSlow unless the cancellation or send error that resolved it is
-// returned instead.
+// A subscriber whose queue is full is dropped, and its queued messages are
+// released rather than delivered: a wedged Send would otherwise keep all of them
+// reachable. Its Subscribe returns whatever ended that Send.
 func (s *StreamBroadcaster[T]) Broadcast(reply *T, logger log.Logger) {
 	var dropped int
 	s.mu.Lock()
