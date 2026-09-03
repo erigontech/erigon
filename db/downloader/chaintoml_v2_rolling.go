@@ -56,6 +56,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -295,6 +296,12 @@ type RollingV2Publisher struct {
 	// coverage the publisher cannot serve. Zero disables the filter
 	// (full-history publisher default).
 	retentionFloor uint64
+
+	// servableSource samples the torrent client's loaded info-hashes at
+	// publish time — the set changes between publishes, so it cannot be
+	// captured once. Nil disables the servable gate (callers with no
+	// torrent client). See FilterManifestByServable.
+	servableSource func() map[metainfo.Hash]struct{}
 }
 
 // ManifestSelfCheckFn is the type of the producer-side self-check
@@ -414,6 +421,16 @@ func (r *RollingV2Publisher) SetRetentionFloor(floor uint64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.retentionFloor = floor
+}
+
+// SetServableSource installs the publish-time sampler for the torrent
+// client's loaded info-hashes. Entries the client cannot serve are
+// dropped from the manifest — the V2 half of "validate before
+// advertise". Nil (the default) disables the gate.
+func (r *RollingV2Publisher) SetServableSource(fn func() map[metainfo.Hash]struct{}) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.servableSource = fn
 }
 
 // SetParentSection installs the ParentSection stamped onto every
@@ -581,6 +598,20 @@ func (r *RollingV2Publisher) Publish(
 	populateInventoryTorrentHashes(inv, r.snapDir)
 
 	manifest := GenerateV2(inv)
+
+	// Servable gate: the inventory is add-only with respect to file
+	// deletion, so an unwind's discard, an adoption cutover, or any
+	// other unlink leaves entries carrying a stale TorrentHash. Drop
+	// whatever the torrent client cannot actually serve before any
+	// downstream step sees the manifest.
+	if r.servableSource != nil {
+		if servable := r.servableSource(); servable != nil {
+			if dropped := FilterManifestByServable(manifest, servable); dropped > 0 && r.downloader != nil {
+				r.downloader.log(log.LvlWarn, "[chaintoml] v2 servable gate dropped unservable entries",
+					"dropped", dropped)
+			}
+		}
+	}
 
 	// Retention-floor filter: a minimal-mode publisher drops entries
 	// whose range falls entirely below its prune window. Coverage[0]

@@ -1044,6 +1044,21 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if retentionFloor > 0 {
 		pub.SetRetentionFloor(retentionFloor)
 	}
+	// Validate before advertise: sample the torrent client's loaded
+	// info-hashes at publish time so the manifest never lists a file
+	// this node cannot serve. V1 has had this gate since the rule was
+	// written; see FilterManifestByServable for why the inventory alone
+	// is not sufficient.
+	pub.SetServableSource(func() map[metainfo.Hash]struct{} {
+		if d.torrentClient == nil {
+			return nil
+		}
+		servable := make(map[metainfo.Hash]struct{})
+		for _, t := range d.torrentClient.Torrents() {
+			servable[t.InfoHash()] = struct{}{}
+		}
+		return servable
+	})
 	if parentSection != nil {
 		pub.SetParentSection(parentSection)
 	}
