@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"sync"
@@ -314,20 +315,32 @@ func (g *PrecompileGas) RefundExecution(amount uint64) bool {
 // against what this frame charged, since a forwarded refund did not come from
 // it, and a frame that clears more than it created legitimately ends with a
 // negative net state usage.
-func (g *PrecompileGas) RefundState(amount uint64) {
+func (g *PrecompileGas) RefundState(amount uint64) bool {
 	if !g.live() {
-		return
+		return false
 	}
 	if !g.amsterdam {
 		// Mirrors ChargeState: the charge went to execution, so the refund has
 		// to come back from it rather than invent reservoir gas that cannot
 		// exist before Amsterdam.
-		g.RefundExecution(amount)
-		return
+		return g.RefundExecution(amount)
+	}
+	if !g.stateRefundFits(amount) {
+		return false
 	}
 	before, spilledBefore := *g.remaining, g.used.StateSpill
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.StateGas)
 	g.onGasChange(before, spilledBefore-g.used.StateSpill, mdgas.StateGas, tracing.GasChangeCallLeftOverRefunded)
+	return true
+}
+
+func (g *PrecompileGas) stateRefundFits(amount uint64) bool {
+	if amount > math.MaxInt64 || g.used.State < math.MinInt64+int64(amount) {
+		return false
+	}
+	spill := min(amount, g.used.StateSpill)
+	return spill <= math.MaxUint64-g.remaining.Execution &&
+		amount-spill <= math.MaxUint64-g.remaining.State
 }
 
 // StatefulPrecompile is a PrecompiledContract that additionally receives the
@@ -374,12 +387,25 @@ func (ctx *PrecompileContext) reenter(gas *PrecompileGas, executionGas uint64,
 	// The child's own revert already restored its entry reservoir into
 	// leftover.State, so this is the whole reservoir back on the error path.
 	gas.remaining.State = leftover.State
-	if err == nil {
-		gas.used.State += usage.State
-		gas.used.StateSpill += usage.StateSpill
-	}
+	overflowed := err == nil && !gas.adoptChildUsage(usage)
 	gas.RefundExecution(leftover.Execution)
+	if overflowed {
+		return ret, ErrGasUintOverflow
+	}
 	return ret, err
+}
+
+func (g *PrecompileGas) adoptChildUsage(usage mdgas.MdGasUsage) bool {
+	state := g.used.State + usage.State
+	if (usage.State > 0 && state < g.used.State) || (usage.State < 0 && state > g.used.State) {
+		return false
+	}
+	if usage.StateSpill > math.MaxUint64-g.used.StateSpill {
+		return false
+	}
+	g.used.State = state
+	g.used.StateSpill += usage.StateSpill
+	return true
 }
 
 func orZero(v *uint256.Int) uint256.Int {

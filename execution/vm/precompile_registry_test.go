@@ -18,6 +18,7 @@ package vm
 
 import (
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"sync"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -347,5 +349,85 @@ func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
 	} {
 		require.NotEmpty(t, tc.addrs, name)
 		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
+	}
+}
+
+func TestRefundStateRejectsUnrepresentableAmounts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining mdgas.MdGas
+		used      mdgas.MdGasUsage
+		amount    uint64
+		accepted  bool
+		want      mdgas.MdGas
+		wantUsed  mdgas.MdGasUsage
+	}{
+		{
+			name:      "amount above MaxInt64 cannot reach the signed usage",
+			remaining: mdgas.MdGas{Execution: 1_000, State: 50},
+			amount:    math.MaxInt64 + 1,
+		},
+		{
+			name:      "MaxUint64 refund would read as minus one",
+			remaining: mdgas.MdGas{Execution: 1_000, State: 50},
+			amount:    math.MaxUint64,
+		},
+		{
+			name:      "signed usage would underflow",
+			remaining: mdgas.MdGas{Execution: 1_000, State: 50},
+			used:      mdgas.MdGasUsage{State: -2},
+			amount:    math.MaxInt64,
+		},
+		{
+			name:      "reservoir addition would wrap",
+			remaining: mdgas.MdGas{Execution: 1_000, State: math.MaxUint64 - 10},
+			used:      mdgas.MdGasUsage{State: 10},
+			amount:    math.MaxInt64,
+		},
+		{
+			name:      "spill restore would wrap execution gas",
+			remaining: mdgas.MdGas{Execution: math.MaxUint64 - 5, State: 0},
+			used:      mdgas.MdGasUsage{State: 10, StateSpill: 10},
+			amount:    10,
+		},
+		{
+			name:      "the exact signed boundary is representable",
+			remaining: mdgas.MdGas{Execution: 1_000},
+			used:      mdgas.MdGasUsage{State: -1},
+			amount:    math.MaxInt64,
+			accepted:  true,
+			want:      mdgas.MdGas{Execution: 1_000, State: math.MaxInt64},
+			wantUsed:  mdgas.MdGasUsage{State: math.MinInt64},
+		},
+		{
+			name:      "an ordinary refund restores the reservoir",
+			remaining: mdgas.MdGas{Execution: 1_000, State: 40},
+			used:      mdgas.MdGasUsage{State: 10},
+			amount:    10,
+			accepted:  true,
+			want:      mdgas.MdGas{Execution: 1_000, State: 50},
+		},
+		{
+			name:      "a spilled refund comes back to execution gas first",
+			remaining: mdgas.MdGas{Execution: 970, State: 0},
+			used:      mdgas.MdGasUsage{State: 40, StateSpill: 30},
+			amount:    40,
+			accepted:  true,
+			want:      mdgas.MdGas{Execution: 1_000, State: 10},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remaining, used := tc.remaining, tc.used
+			g := &PrecompileGas{remaining: &remaining, used: &used, amsterdam: true}
+
+			require.Equal(t, tc.accepted, g.RefundState(tc.amount))
+			if !tc.accepted {
+				require.Equal(t, tc.remaining, remaining, "a rejected refund must leave the reservoir alone")
+				require.Equal(t, tc.used, used, "a rejected refund must leave usage alone")
+				return
+			}
+			require.Equal(t, tc.want, remaining)
+			require.Equal(t, tc.wantUsed, used)
+		})
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -970,4 +971,101 @@ func TestRuntimeStartsTracerWithFullVMContext(t *testing.T) {
 		require.NoError(t, err)
 		assertFull(t, got)
 	})
+}
+
+type overflowRefundStatefulPrecompile struct {
+	vm.NoStatelessRun
+	refundErr error
+}
+
+func (*overflowRefundStatefulPrecompile) Name() string { return "OVERFLOWREFUND" }
+
+func (p *overflowRefundStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeState(10) {
+		return nil, vm.ErrOutOfGas
+	}
+	if gas.RefundState(math.MaxUint64) {
+		p.refundErr = errors.New("refund of MaxUint64 accepted")
+		return nil, nil
+	}
+	if gas.RefundState(math.MaxInt64 + 1) {
+		p.refundErr = errors.New("refund above MaxInt64 accepted")
+		return nil, nil
+	}
+	if !gas.RefundState(10) {
+		p.refundErr = errors.New("refund of the charged total was rejected")
+	}
+	return nil, nil
+}
+
+func TestStatefulPrecompileCannotOverflowStateRefund(t *testing.T) {
+	const chainID = 900418
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9c}))
+	p := &overflowRefundStatefulPrecompile{}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: p}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 50}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.NoError(t, p.refundErr)
+	require.Equal(t, uint64(50), remaining.State, "an unrepresentable refund must leave the reservoir alone")
+	require.Zero(t, gasUsed.State, "an unrepresentable refund must not move state usage")
+	require.Equal(t, uint64(10_000), remaining.Execution)
+}
+
+type deepRefundInner struct {
+	vm.NoStatelessRun
+	accepted [2]bool
+}
+
+func (*deepRefundInner) Name() string { return "DEEPREFUNDINNER" }
+
+func (p *deepRefundInner) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	p.accepted[0] = gas.RefundState(math.MaxInt64)
+	p.accepted[1] = gas.RefundState(1)
+	return nil, nil
+}
+
+type deepRefundOuter struct {
+	vm.NoStatelessRun
+	inner   accounts.Address
+	callErr error
+}
+
+func (*deepRefundOuter) Name() string { return "DEEPREFUNDOUTER" }
+
+func (p *deepRefundOuter) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	if !gas.RefundState(1) {
+		return nil, errors.New("the outer refund was rejected")
+	}
+	_, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, nil)
+	return nil, p.callErr
+}
+
+func TestStatefulPrecompileNestedUsageFoldCannotWrap(t *testing.T) {
+	const chainID = 900419
+	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9d}))
+	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9e}))
+	inner := &deepRefundInner{}
+	outer := &deepRefundOuter{inner: innerAddr}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, outerAddr)
+
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, outerAddr, nil, mdgas.MdGas{Execution: 100_000, State: 50}, uint256.Int{}, false)
+	require.Equal(t, [2]bool{true, true}, inner.accepted, "each refund is representable in the child's own usage")
+	require.ErrorIs(t, outer.callErr, vm.ErrGasUintOverflow, "a child usage the parent cannot adopt must fail the nested call")
+	require.ErrorIs(t, err, vm.ErrGasUintOverflow)
+	require.Equal(t, int64(-1), gasUsed.State, "only the parent's own refund reaches its usage")
+	require.Zero(t, gasUsed.StateClamped(), "a frame that only refunded must not report state gas at the block level")
+	require.Equal(t, uint64(50), remaining.State, "the entry reservoir goes back to the caller")
 }
