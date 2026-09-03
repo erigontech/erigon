@@ -51,21 +51,27 @@ func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 
 // TestProviderUnwind_ValidationOK_ReachesSubOps pins that an aligned
 // Provider with a non-nil Tx passes the precondition guards and
-// proceeds into the sub-op chain. The minimum-shape Provider here
-// (no Inventory, no BlockReader) makes snapshot-trim a no-op and
-// fails fast inside ensureCommitmentAtBlock with the BlockReader-nil
-// check — that's the next step in the chain, exactly what we want
-// to pin without standing up a real harness. The full happy path
-// lands with the commit-3 scenario-3 E2E test against a real
-// snapshot fixture.
+// proceeds into the sub-op chain. The minimum-shape Provider here (no
+// Inventory, no BlockReader) makes snapshot-trim a no-op and then fails
+// fast on the BlockReader-nil check — the expected next-step failure on
+// this fixture, without standing up a real harness.
+//
+// The sub-op it names is load-bearing, not incidental: db-reset (which
+// wipes the writable shadow past lastTxNum) must run BEFORE the
+// commitment-anchor compute. With the shadow still holding forward-exec
+// tip state, the compute's GetAsOf falls through to GetLatest and reads
+// tip, contaminating the touch set into a wrong root. Asserting on
+// db-reset here means an accidental re-ordering fails this test rather
+// than surfacing as a wrong-root much later.
 func TestProviderUnwind_ValidationOK_ReachesSubOps(t *testing.T) {
 	t.Parallel()
 	p := &Provider{}
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "commitment-anchor")
-	require.Contains(t, err.Error(), "nil BlockReader",
-		"reaching commitment-anchor proves the sub-op chain is wired in; the BlockReader-nil error is the expected next-step failure on this minimum-shape fixture")
+	require.Contains(t, err.Error(), "db-reset",
+		"db-reset must be the first sub-op to touch state — it wipes the writable shadow the commitment compute then reads")
+	require.Contains(t, err.Error(), "BlockReader is nil",
+		"reaching a sub-op proves the chain is wired in; BlockReader-nil is the expected failure on this minimum-shape fixture")
 }
 
 // touchSeg writes an empty file at <dir>/<name>; used to fabricate
