@@ -2462,3 +2462,43 @@ func TestGraphQLGetBlockDetails_PinsOverlayView(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, details)
 }
+
+// TestCall_PublishCycleDuringTxAcquisition pins that eth_call acquires
+// (tx, overlay) atomically: a publish/commit/unpublish cycle landing between
+// the tx open and the overlay capture leaves the head block visible in neither
+// layer, so the call would resolve against a snapshot that predates the commit.
+func TestCall_PublishCycleDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	h.events.PublishOverlay(nil)
+	h.doms.Close()
+
+	db := newCycleHookDB(h, true)
+	api := newEthApiForTest(h.base, db, nil, nil)
+
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	blockNr := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(h.overlayHeader.Number.Uint64()))
+	_, err := api.Call(h.m.Ctx, ethapi.CallArgs{From: &h.m.Address, To: &to}, &blockNr, nil, nil)
+	require.NoError(t, err,
+		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+}
+
+// TestGraphQLCall_PublishCycleDuringTxAcquisition is the GraphQL twin of
+// TestCall_PublishCycleDuringTxAcquisition: the same handler shape, so the
+// same torn (tx, overlay) acquisition hides the head block.
+func TestGraphQLCall_PublishCycleDuringTxAcquisition(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	h.events.PublishOverlay(nil)
+	h.doms.Close()
+
+	db := newCycleHookDB(h, true)
+	api := NewGraphQLAPI(h.base, db, newEthApiForTest(h.base, db, nil, nil), nil,
+		&rpccfg.GraphQLApiConfig{GasCap: 50_000_000})
+
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	_, err := api.Call(h.m.Ctx, rpc.BlockNumber(h.overlayHeader.Number.Uint64()),
+		ethapi.CallArgs{From: &h.m.Address, To: &to})
+	require.NoError(t, err,
+		"a publish/commit/unpublish cycle during tx acquisition must not hide the head block")
+}
