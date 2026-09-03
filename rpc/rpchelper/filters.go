@@ -34,8 +34,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -182,6 +184,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 	}()
 
 	go func() {
+		defer dbg.LogPanic()
 		if ethBackend == nil {
 			return
 		}
@@ -1146,39 +1149,75 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 	return ff.latestSD.Load()
 }
 
-func isOverlayReadView(tx kv.Tx) bool {
-	view, ok := tx.(interface{ IsOverlayReadView() bool })
-	return ok && view.IsOverlayReadView()
-}
-
-// WithOverlay preserves an existing overlay view or wraps tx with the currently
-// published overlay. A wrapped view keeps that generation across nested calls.
+// WithOverlay preserves the overlay a tx is already pinned to, or wraps tx
+// with the currently published overlay. A wrapped view keeps that generation
+// across nested calls; a tx that already carries a pinned view is returned
+// unchanged (see membatchwithdb.CarriesOverlayView).
 // Safe to call on a nil receiver.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
-	if ff == nil || isOverlayReadView(tx) {
+	if membatchwithdb.CarriesOverlayView(tx) {
 		return tx
 	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	if overlay := ff.latestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
 }
 
+// OverlaySnapshot returns the published block overlay together with its
+// publish sequence number as one coherent pair, or (nil, 0) in remote mode
+// where no overlay is ever published.
+func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
+	if ff == nil || ff.events == nil {
+		return nil, 0
+	}
+	sd, seq := ff.events.OverlaySnapshot()
+	if sd == nil {
+		return nil, seq
+	}
+	return sd.BlockOverlay(), seq
+}
+
+// BeginTemporalRoWithOverlay opens a read tx and pins it to the block overlay
+// published at that moment, as one consistent pair: a commit or (un)publish
+// landing between the overlay capture and the tx open can leave a head block
+// visible in neither layer, so the tx is reopened whenever the publish
+// sequence number moves around the open. A capture that never stabilizes ends
+// on an explicit no-overlay pin: the committed snapshot is coherent on its own,
+// while an overlay the helper failed to match against it may belong to another
+// chain. The returned handle reads through the pinned view and its Rollback
+// releases the underlying tx.
+func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
+	const maxAttempts = 5
+	for attempt := 1; ; attempt++ {
+		overlay, seq := ff.OverlaySnapshot()
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			return nil, err
+		}
+		if _, current := ff.OverlaySnapshot(); current == seq {
+			return PinToOverlay(tx, overlay), nil
+		}
+		if attempt == maxAttempts {
+			return PinToOverlay(tx, nil), nil
+		}
+		tx.Rollback()
+	}
+}
+
+// latestOverlay returns the block overlay behind the latest published SD, or nil.
+func (ff *Filters) latestOverlay() *membatchwithdb.MemoryMutation {
+	overlay, _ := ff.OverlaySnapshot()
+	return overlay
+}
+
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
-	if ff == nil || isOverlayReadView(tx) {
+	if membatchwithdb.CarriesOverlayView(tx) {
 		return tx
 	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	if overlay := ff.latestOverlay(); overlay != nil {
 		return overlay.NewTemporalReadView(tx)
 	}
 	return tx

@@ -601,7 +601,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := a.BuildFiles2(ctx, fromStep, toStep, finalityCtx, false); err != nil {
+		if err := a.BuildFiles2(ctx, rwDb, fromStep, toStep, finalityCtx, false); err != nil {
 			return err
 		}
 		a.WaitForFiles()
@@ -864,7 +864,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Warn("[rebuild_commitment_history] failed to reload folder after squeeze", "err", err)
 	}
 
-	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
+	if err = a.BuildMissedAccessors(ctx, rwDb, 4); err != nil {
 		logger.Warn("[rebuild_commitment_history] failed to build missed accessors", "err", err)
 		return nil, err
 	}
@@ -960,7 +960,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			continue
 		}
 
-		roTx, err := a.db.BeginRo(ctx)
+		roTx, err := rwDb.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1161,7 +1161,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		logger.Warn("[squeeze] failed to reload folder after squeeze", "err", err)
 	}
 
-	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
+	if err = a.BuildMissedAccessors(ctx, rwDb, 4); err != nil {
 		logger.Warn("[squeeze] failed to build missed accessors", "err", err)
 		return nil, err
 	}

@@ -142,16 +142,6 @@ func TestUnmarshalBig(t *testing.T) {
 	}
 }
 
-func BenchmarkUnmarshalBig(b *testing.B) {
-	input := []byte(`"0x123456789abcdef123456789abcdef"`)
-	for b.Loop() {
-		var v Big
-		if err := v.UnmarshalJSON(input); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func TestMarshalBig(t *testing.T) {
 	for idx, test := range encodeBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
@@ -295,26 +285,6 @@ func TestMarshalU256WordBoundaries(t *testing.T) {
 	}
 }
 
-func BenchmarkU256AppendText(b *testing.B) {
-	buf := make([]byte, 0, 66)
-	for _, tc := range []struct {
-		name string
-		v    *uint256.Int
-	}{
-		{"small", uint256.NewInt(42)},
-		{"u64", uint256.NewInt(0x1234567890abcdef)},
-		{"full", new(uint256.Int).SetAllOne()},
-	} {
-		v := U256(*tc.v)
-		b.Run(tc.name, func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				buf, _ = v.AppendText(buf[:0])
-			}
-		})
-	}
-}
-
 var unmarshalUint16Tests = []unmarshalTest{
 	// invalid encoding
 	{input: "", wantErr: errJSONEOF},
@@ -399,14 +369,6 @@ func TestUnmarshalUint64(t *testing.T) {
 				require.EqualValues(t, test.want, v)
 			}
 		})
-	}
-}
-
-func BenchmarkUnmarshalUint64(b *testing.B) {
-	input := []byte(`"0x123456789abcdf"`)
-	for b.Loop() {
-		var v Uint64
-		_ = v.UnmarshalJSON(input)
 	}
 }
 
