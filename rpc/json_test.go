@@ -149,8 +149,9 @@ func BenchmarkResponsePreMarshal(b *testing.B) {
 	}
 }
 
-// BenchmarkResponseDeferred encodes the value straight into the pooled stream.
-func BenchmarkResponseDeferred(b *testing.B) {
+// BenchmarkResponseEncoded encodes the value into a pooled result buffer, which
+// writeTo then hands to the stream.
+func BenchmarkResponseEncoded(b *testing.B) {
 	res, id := blockResultFixture(150), json.RawMessage(`1`)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -268,9 +269,8 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 }
 
 // A result too large to buffer must still reach the client byte-for-byte, and
-// must not grow the stream buffer past what the pool keeps: the deferred encode
-// gives up and the value is streamed as raw bytes instead.
-func TestLargeDeferredResultStreamsAndStaysPoolable(t *testing.T) {
+// must not grow the stream buffer past what the stream pool keeps.
+func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 	res := blockResultFixture(4000)
 	enc, err := json.Marshal(res)
 	if err != nil {
@@ -289,7 +289,7 @@ func TestLargeDeferredResultStreamsAndStaysPoolable(t *testing.T) {
 	s2 := jsonstream.Get(&got)
 	(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
 	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
-		"deferred encode grew the buffer past the pool limit")
+		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 
 	require.Equal(t, want.String(), got.String())
@@ -330,4 +330,65 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.NotContains(t, back, "result")
 	}
 
+}
+
+// Only buffers within the bound may be admitted to the result pool.
+func TestPoolableResultBound(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, poolableResult(make([]byte, 0, maxPooledResultSize-1)))
+	require.True(t, poolableResult(make([]byte, 0, maxPooledResultSize)))
+	require.False(t, poolableResult(make([]byte, 0, maxPooledResultSize+1)))
+}
+
+// encodeResult must match json.Marshal on a fresh buffer and on a reused one,
+// and releaseResult must leave nothing on the message.
+func TestEncodeResultRoundTripAndRelease(t *testing.T) {
+	t.Parallel()
+
+	for _, n := range []int{0, 1, 150} {
+		res := blockResultFixture(n)
+		want, err := json.Marshal(res)
+		require.NoError(t, err)
+
+		for _, pass := range []string{"first use", "warm reuse"} {
+			got, pooled, err := encodeResult(res)
+			require.NoError(t, err, pass)
+			require.Equal(t, string(want), string(got), pass)
+
+			msg := &jsonrpcMessage{Result: got, pooled: pooled}
+			releaseResult(msg)
+			require.Nil(t, msg.pooled, pass)
+			require.Nil(t, msg.Result, pass)
+		}
+	}
+}
+
+// An oversized response must not pin its backing array in the pool, so nothing
+// above the bound may ever come back out of it.
+func TestResultPoolNeverHandsBackOversized(t *testing.T) {
+	res := blockResultFixture(4000)
+	enc, err := json.Marshal(res)
+	require.NoError(t, err)
+	require.Greater(t, len(enc), maxPooledResultSize, "fixture is too small to exercise the bound")
+
+	_, pooled, err := encodeResult(res)
+	require.NoError(t, err)
+	require.Greater(t, cap(*pooled), maxPooledResultSize, "the encode did not grow past the bound")
+	putEnc(pooled)
+
+	for range 16 {
+		p := encPool.Get().(*[]byte)
+		require.LessOrEqual(t, cap(*p), maxPooledResultSize, "the pool handed back an oversized buffer")
+	}
+}
+
+// A failed encode releases its buffer instead of leaking it.
+func TestEncodeResultErrorReleasesBuffer(t *testing.T) {
+	t.Parallel()
+
+	got, pooled, err := encodeResult(make(chan int))
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Nil(t, pooled)
 }

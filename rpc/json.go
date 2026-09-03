@@ -30,6 +30,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -61,7 +63,7 @@ type jsonrpcMessage struct {
 
 	// pooled is Result's backing array when it came from encPool, so writeTo can
 	// hand it back once the bytes are out.
-	pooled []byte
+	pooled *[]byte
 }
 
 func (msg *jsonrpcMessage) isNotification() bool {
@@ -129,11 +131,11 @@ func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
 	// Encoded here rather than at write time: the result must be known good
 	// before the response envelope is committed, and before the caller records
 	// the call as a success.
-	buf, err := encodeResult(result)
+	buf, pooled, err := encodeResult(result)
 	if err != nil {
 		return msg.errorResponse(err)
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: buf, pooled: buf}
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: buf, pooled: pooled}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -417,25 +419,42 @@ func parseSubscriptionName(rawArgs json.RawMessage) (string, error) {
 }
 
 // encPool reuses result buffers across responses. json.Marshal would allocate a
-// fresh one per call.
-var encPool = sync.Pool{New: func() any { return make([]byte, 0, 1024) }}
+// fresh one per call. The pointer is what goes in and out, so Put does not box.
+var encPool = sync.Pool{New: func() any { b := make([]byte, 0, 1024); return &b }}
+
+// maxPooledResultSize bounds what a result buffer carries back into encPool. One
+// oversized response must not pin its backing array there.
+const maxPooledResultSize = 16 * jsonstream.FlushThreshold
+
+func poolableResult(b []byte) bool { return cap(b) <= maxPooledResultSize }
+
+func putEnc(p *[]byte) {
+	if !poolableResult(*p) {
+		return
+	}
+	*p = (*p)[:0]
+	encPool.Put(p)
+}
 
 // encodeResult encodes result the way json.Marshal would, straight into a
 // pooled buffer, so a response costs no allocation for its own bytes.
-func encodeResult(result any) ([]byte, error) {
-	buf := bytes.NewBuffer(encPool.Get().([]byte)[:0])
+func encodeResult(result any) ([]byte, *[]byte, error) {
+	p := encPool.Get().(*[]byte)
+	buf := bytes.NewBuffer((*p)[:0])
 	if err := json.NewEncoder(buf).Encode(result); err != nil {
-		encPool.Put(buf.Bytes()[:0]) //nolint:staticcheck
-		return nil, err
+		*p = buf.Bytes()
+		putEnc(p)
+		return nil, nil, err
 	}
-	b := buf.Bytes()
-	return b[:len(b)-1], nil // Encode terminates with a newline the envelope must not carry
+	*p = buf.Bytes()
+	b := *p
+	return b[:len(b)-1], p, nil // Encode terminates with a newline the envelope must not carry
 }
 
 // releaseResult returns a pooled result buffer once its bytes have been written.
 func releaseResult(msg *jsonrpcMessage) {
 	if msg.pooled != nil {
-		encPool.Put(msg.pooled) //nolint:staticcheck
+		putEnc(msg.pooled)
 		msg.pooled, msg.Result = nil, nil
 	}
 }
