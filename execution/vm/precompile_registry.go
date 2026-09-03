@@ -212,6 +212,7 @@ type PrecompileGas struct {
 	amsterdam bool
 	// Execution gas charged through this handle and not yet given back.
 	chargedExecution uint64
+	aborted          error
 }
 
 // onGasChange reports a charge or refund the way the interpreter's useMdGas
@@ -230,6 +231,11 @@ func (g *PrecompileGas) onGasChange(before mdgas.MdGas, spilled uint64, typ mdga
 // returns die with the frame, so a handle stashed past that point would
 // otherwise mutate a dead copy and still report success.
 func (g *PrecompileGas) release() { g.remaining, g.used = nil, nil }
+
+func (g *PrecompileGas) abort(err error) {
+	g.aborted = err
+	g.release()
+}
 
 func (g *PrecompileGas) live() bool { return g.remaining != nil }
 
@@ -373,14 +379,15 @@ func (ctx *PrecompileContext) reenter(gas *PrecompileGas, executionGas uint64,
 
 	ret, leftover, usage, err := run(handed)
 
+	if err == nil && !gas.adoptChildUsage(usage) {
+		gas.abort(ErrGasUintOverflow)
+		return nil, ErrGasUintOverflow
+	}
+
 	// The child's own revert already restored its entry reservoir into
 	// leftover.State, so this is the whole reservoir back on the error path.
 	gas.remaining.State = leftover.State
-	overflowed := err == nil && !gas.adoptChildUsage(usage)
 	gas.RefundExecution(leftover.Execution)
-	if overflowed {
-		return ret, ErrGasUintOverflow
-	}
 	return ret, err
 }
 

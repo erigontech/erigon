@@ -1066,3 +1066,67 @@ func TestStatefulPrecompileNestedUsageFoldCannotWrap(t *testing.T) {
 	require.Zero(t, gasUsed.StateClamped(), "a frame that only refunded must not report state gas at the block level")
 	require.Equal(t, uint64(50), remaining.State, "the entry reservoir goes back to the caller")
 }
+
+var unadoptedChildSlot = accounts.InternKey(common.BytesToHash([]byte{0x77}))
+
+type unadoptableWriteInner struct {
+	vm.NoStatelessRun
+	target  accounts.Address
+	refunds [2]bool
+}
+
+func (*unadoptableWriteInner) Name() string { return "UNADOPTABLEWRITEINNER" }
+
+func (p *unadoptableWriteInner) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	if err := ctx.EVM.IntraBlockState().SetState(p.target, unadoptedChildSlot, *uint256.NewInt(42)); err != nil {
+		return nil, err
+	}
+	p.refunds[0] = gas.RefundState(math.MaxInt64)
+	p.refunds[1] = gas.RefundState(1)
+	return []byte{0xff}, nil
+}
+
+type swallowingOuter struct {
+	vm.NoStatelessRun
+	inner   accounts.Address
+	callRet []byte
+	callErr error
+}
+
+func (*swallowingOuter) Name() string { return "SWALLOWINGOUTER" }
+
+func (p *swallowingOuter) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	if !gas.RefundState(1) {
+		return nil, errors.New("the outer refund was rejected")
+	}
+	p.callRet, p.callErr = ctx.Call(gas, p.inner, nil, 50_000, nil)
+	return nil, nil
+}
+
+func TestStatefulPrecompileCannotSwallowUnadoptableChildUsage(t *testing.T) {
+	const chainID = 900420
+	outerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x9f}))
+	innerAddr := accounts.InternAddress(common.BytesToAddress([]byte{0xa0}))
+	cfg := newStatefulTestConfig(t, chainID)
+	inner := &unadoptableWriteInner{target: cfg.Origin}
+	outer := &swallowingOuter{inner: innerAddr}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{outerAddr: outer, innerAddr: inner}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	vmenv := prepareStatefulCall(t, cfg, outerAddr)
+	ret, remaining, _, err := vmenv.Call(cfg.Origin, outerAddr, nil, mdgas.MdGas{Execution: 100_000, State: 50}, uint256.Int{}, false)
+	require.Equal(t, [2]bool{true, true}, inner.refunds, "each refund is representable in the child's own usage")
+	require.ErrorIs(t, outer.callErr, vm.ErrGasUintOverflow, "a child usage the parent cannot adopt must fail the nested call")
+	require.Nil(t, outer.callRet, "a failed nested call returns no data")
+
+	slot, readErr := cfg.State.GetState(cfg.Origin, unadoptedChildSlot)
+	require.NoError(t, readErr)
+	require.True(t, slot.IsZero(), "the child's writes must not survive a usage the parent cannot adopt")
+
+	require.ErrorIs(t, err, vm.ErrGasUintOverflow, "swallowing the nested error must not let the frame commit")
+	require.Nil(t, ret, "an aborted frame returns no data")
+	require.Equal(t, uint64(50), remaining.State, "the frame's entry reservoir goes back to its caller, not the child's minted one")
+	require.Zero(t, remaining.Execution, "an unrepresentable frame consumes its execution gas")
+}

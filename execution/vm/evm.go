@@ -512,6 +512,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				defer evm.enterFrame(ctx.ReadOnly)()
 				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
+			if pgas.aborted != nil {
+				ret, err = nil, pgas.aborted
+			}
 			// Frame-level classification compares the bare sentinel, so an
 			// idiomatically wrapped revert would burn the frame's gas and skip
 			// the return-data copy while the receipt still read as reverted.
