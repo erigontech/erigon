@@ -57,7 +57,7 @@ func acceptanceFilesFixture(t *testing.T) (kv.TemporalRwDB, *state.Aggregator, m
 	}
 	byNode := nodeKeysFromRecords(nonEmptyAcceptanceRecords(allAcceptanceRecords(t, db)))
 	require.NotEmpty(t, byNode)
-	require.NoError(t, agg.BuildFiles(4))
+	require.NoError(t, agg.BuildFiles(db, 4, unboundedFinalityCtx))
 	files := agg.FilesAmount()[kv.CommitmentDomain]
 	require.Positive(t, files, "the records must have moved into .kv files")
 	return db, agg, byNode, files

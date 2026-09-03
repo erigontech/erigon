@@ -17,7 +17,6 @@
 package logger
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -132,6 +132,61 @@ func TestTracer_AccessList_Equal(t *testing.T) {
 			a, b := build(tc.a), build(tc.b)
 			require.Equal(t, tc.equal, a.equal(b))
 			require.Equal(t, tc.equal, b.equal(a), "equal must be symmetric")
+		})
+	}
+}
+
+type testOpContext struct {
+	tracing.OpContext
+	stack   []uint256.Int
+	address accounts.Address
+}
+
+func (c *testOpContext) StackData() []uint256.Int  { return c.stack }
+func (c *testOpContext) Address() accounts.Address { return c.address }
+func (c *testOpContext) MemoryData() []byte        { return nil }
+
+// countingOpContext counts stack lookups. Kept out of the benchmark: the counter
+// runs once per opcode before this change and once per stack-using opcode after,
+// so timing it would credit the change with removing its own instrumentation.
+type countingOpContext struct {
+	testOpContext
+	stackReads int
+}
+
+func (c *countingOpContext) StackData() []uint256.Int { c.stackReads++; return c.stack }
+
+func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
+	for _, tc := range []struct {
+		op    vm.OpCode
+		reads int
+	}{
+		{vm.ADD, 0},
+		{vm.PUSH1, 0},
+		{vm.MSTORE, 0},
+		{vm.JUMPDEST, 0},
+		{vm.POP, 0},
+		{vm.CREATE, 0}, // reads the account nonce, not the stack
+		{vm.SLOAD, 1},
+		{vm.SSTORE, 1},
+		{vm.BALANCE, 1},
+		{vm.EXTCODESIZE, 1},
+		{vm.EXTCODEHASH, 1},
+		{vm.EXTCODECOPY, 1},
+		{vm.SELFDESTRUCT, 1},
+		{vm.CALL, 1},
+		{vm.CALLCODE, 1},
+		{vm.DELEGATECALL, 1},
+		{vm.STATICCALL, 1},
+		{vm.CREATE2, 1},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			scope := &countingOpContext{testOpContext: testOpContext{
+				address: accounts.InternAddress(addr),
+				stack:   make([]uint256.Int, 8),
+			}}
+			NewAccessListTracer(nil, nil, nil).OnOpcode(0, byte(tc.op), 100, 3, scope, nil, 1, nil)
+			require.Equal(t, tc.reads, scope.stackReads)
 		})
 	}
 }
@@ -256,36 +311,4 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
 	require.True(t, seeded.UsedBeforeCreation(addr))
 	require.Empty(t, seeded.CreatedContracts())
-}
-
-func BenchmarkAccessListTracerSeed(b *testing.B) {
-	// Real eth_createAccessList lists are small: a handful of addresses with a
-	// few slots each. The wide shapes are here for scale.
-	for _, shape := range []struct{ nAddrs, nSlots int }{
-		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
-	} {
-		prev := NewAccessListTracer(nil, nil, nil)
-		for a := range shape.nAddrs {
-			address := common.BytesToAddress([]byte{byte(a + 1)})
-			for s := range shape.nSlots {
-				prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
-			}
-		}
-		// AccessList() is built either way, so only the seeding half differs.
-		acl := prev.AccessList()
-		name := fmt.Sprintf("%dx%d", shape.nAddrs, shape.nSlots)
-
-		b.Run(name+"/roundTrip", func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				_ = NewAccessListTracer(acl, nil, nil)
-			}
-		})
-		b.Run(name+"/seedNew", func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				_ = prev.SeedNew(nil)
-			}
-		})
-	}
 }

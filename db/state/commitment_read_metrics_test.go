@@ -63,7 +63,7 @@ func TestCommitmentV3RecordReadsAreMetered(t *testing.T) {
 	fromDB := readAll()
 	require.Positive(t, fromDB.DbReadCount, "records still in chaindata must count as db reads")
 
-	require.NoError(t, agg.BuildFiles(4))
+	require.NoError(t, agg.BuildFiles(db, 4, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 	fromFiles := readAll()
 	require.Positive(t, fromFiles.FileReadCount, "records served from .kv must count as file reads")

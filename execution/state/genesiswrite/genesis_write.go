@@ -288,9 +288,11 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers}, false); err != nil {
 		return 0, fmt.Errorf("opening the header files to date head %x at %d: %w", hash, number, err)
 	}
-	// A nil tx keeps the lookup on these segments: a temporal tx carries its own pinned
-	// block-files view, which has nothing open this early in startup.
-	head, err := freezeblocks.NewBlockReader(snaps).Header(context.Background(), nil, hash, number)
+	// Read through this RoSnapshots' own view: the tx above pins the node's own
+	// snapshots, not the private ones just opened here.
+	view := snaps.View()
+	defer view.Close()
+	head, err := freezeblocks.NewBlockReader(snaps).HeaderFromView(view, number)
 	if err != nil {
 		return 0, err
 	}
@@ -422,7 +424,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	if err != nil {
 		return nil, nil, err
 	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx, genesisTmpDB)
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -486,9 +488,12 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	for _, addr := range addrs {
 		account := g.Alloc[addr]
 
-		balance, overflow := uint256.FromBig(account.Balance)
-		if overflow {
-			panic("overflow at genesis allocs")
+		balance := new(uint256.Int)
+		if account.Balance != nil {
+			var overflow bool
+			if balance, overflow = uint256.FromBig(account.Balance); overflow {
+				panic("overflow at genesis allocs")
+			}
 		}
 		address := accounts.InternAddress(addr)
 		err := statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)

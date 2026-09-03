@@ -49,6 +49,8 @@ type Events struct {
 	syncStateSubscriptions      map[int]chan *remoteproto.SyncingReply
 	retirementStartSubscription map[int]chan bool
 	retirementDoneSubscription  map[int]chan struct{}
+	stateRetirementStartSubs    map[int]chan bool
+	stateRetirementDoneSubs     map[int]chan struct{}
 	pendingLogsSubscriptions    map[int]PendingLogsSubscription
 	pendingBlockSubscriptions   map[int]PendingBlockSubscription
 	pendingTxsSubscriptions     map[int]PendingTxsSubscription
@@ -58,9 +60,21 @@ type Events struct {
 	hasReceiptSubscriptions     bool
 	lock                        sync.RWMutex
 
-	// latestSD holds the most recently published SharedDomains from FCU.
-	// Accessible lock-free for the builder and RPC layer.
-	latestSD atomic.Pointer[execctx.SharedDomains]
+	// latestPub holds the most recently published SharedDomains from FCU
+	// together with its publish sequence number, as one atomic snapshot so
+	// readers can never observe the SD and the sequence out of step.
+	// Reads are lock-free; the store is a load-modify-store (seq increments
+	// from the previous value), so publishers must hold e.lock to keep the
+	// sequence monotonic.
+	latestPub atomic.Pointer[overlayPub]
+}
+
+// overlayPub pairs a published SharedDomains with a monotonic publish
+// sequence number. The first publish gets seq 1, so seq 0 uniquely means
+// "nothing was ever published".
+type overlayPub struct {
+	sd  *execctx.SharedDomains
+	seq uint64
 }
 
 func NewEvents() *Events {
@@ -76,6 +90,8 @@ func NewEvents() *Events {
 		syncStateSubscriptions:      map[int]chan *remoteproto.SyncingReply{},
 		retirementStartSubscription: map[int]chan bool{},
 		retirementDoneSubscription:  map[int]chan struct{}{},
+		stateRetirementStartSubs:    map[int]chan bool{},
+		stateRetirementDoneSubs:     map[int]chan struct{}{},
 	}
 }
 
@@ -189,6 +205,36 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 	}
 }
 
+func (e *Events) AddStateRetirementStartSubscription() (chan bool, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan bool, 8)
+	e.id++
+	id := e.id
+	e.stateRetirementStartSubs[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.stateRetirementStartSubs, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddStateRetirementDoneSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 8)
+	e.id++
+	id := e.id
+	e.stateRetirementDoneSubs[id] = ch
+	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
+		delete(e.stateRetirementDoneSubs, id)
+		close(ch)
+	}
+}
+
 func (e *Events) AddLogsSubscription() (chan []*notifications.LogNotification, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -266,9 +312,13 @@ func (e *Events) AddOverlaySubscription() (chan *execctx.SharedDomains, func()) 
 // PublishOverlay sends the SharedDomains to all in-process subscribers.
 // The SD is shared read-only; the background commit goroutine owns its lifecycle.
 func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
-	e.latestSD.Store(sd)
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	seq := uint64(1)
+	if prev := e.latestPub.Load(); prev != nil {
+		seq = prev.seq + 1
+	}
+	e.latestPub.Store(&overlayPub{sd: sd, seq: seq})
 	for _, ch := range e.overlaySubscriptions {
 		common.PrioritizedSend(ch, sd)
 	}
@@ -276,7 +326,20 @@ func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
 
 // LatestSD returns the most recently published SharedDomains, or nil.
 func (e *Events) LatestSD() *execctx.SharedDomains {
-	return e.latestSD.Load()
+	sd, _ := e.OverlaySnapshot()
+	return sd
+}
+
+// OverlaySnapshot returns the published SharedDomains together with its
+// publish sequence number as one coherent pair. Comparing the sequence around
+// a tx open detects any publish landing in between — including a
+// publish/unpublish cycle that leaves the SD pointer unchanged.
+func (e *Events) OverlaySnapshot() (*execctx.SharedDomains, uint64) {
+	p := e.latestPub.Load()
+	if p == nil {
+		return nil, 0
+	}
+	return p.sd, p.seq
 }
 
 func (e *Events) OnNewPendingLogs(logs types.Logs) {
@@ -317,6 +380,22 @@ func (e *Events) OnRetirementDone() {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.retirementDoneSubscription {
+		common.PrioritizedSend(ch, struct{}{})
+	}
+}
+
+func (e *Events) OnStateRetirementStart(started bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.stateRetirementStartSubs {
+		common.PrioritizedSend(ch, started)
+	}
+}
+
+func (e *Events) OnStateRetirementDone() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.stateRetirementDoneSubs {
 		common.PrioritizedSend(ch, struct{}{})
 	}
 }

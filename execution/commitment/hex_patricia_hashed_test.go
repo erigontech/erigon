@@ -659,6 +659,61 @@ func TestHexPatriciaHashedLoadStateIfNeededReturnsCounters(t *testing.T) {
 	})
 }
 
+func TestCellPartialAccountUpdateReadsMissingFields(t *testing.T) {
+	t.Parallel()
+
+	addrHex := "00112233445566778899aabbccddeeff00112233"
+	ms := NewMockState(t)
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(addrHex, 7).
+		Nonce(addrHex, 3).
+		Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+
+	newAccountCell := func(addr []byte) cell {
+		var c cell
+		copy(c.accountAddr[:], addr)
+		c.accountAddrLen = int16(len(addr))
+		c.CodeHash = empty.CodeHash
+		return c
+	}
+
+	t.Run("state fills what the update left out", func(t *testing.T) {
+		c := newAccountCell(common.FromHex("0x" + addrHex))
+		c.setFromUpdate(&Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(11)})
+		require.False(t, c.loaded.account(), "a balance-only update does not load the account")
+
+		_, err := hph.loadStateIfNeeded(&c, skipStat{})
+		require.NoError(t, err)
+		require.True(t, c.loaded.account())
+		require.Equal(t, uint64(3), c.Nonce, "nonce must come from state")
+		require.Equal(t, uint64(11), c.Balance.Uint64(), "the update's balance must outrank the state read")
+	})
+
+	t.Run("hashing a cell fills the gaps too", func(t *testing.T) {
+		c := newAccountCell(common.FromHex("0x" + addrHex))
+		c.setFromUpdate(&Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(11)})
+
+		_, err := hph.computeCellHash(&c, 0, nil)
+		require.NoError(t, err)
+		require.True(t, c.loaded.account(), "one read is enough, the next hash must not repeat it")
+		require.Equal(t, uint64(11), c.Balance.Uint64())
+		require.Equal(t, uint64(3), c.Nonce)
+	})
+
+	t.Run("state without the account does not delete it", func(t *testing.T) {
+		c := newAccountCell(common.FromHex("0xff00000000000000000000000000000000000011"))
+		c.setFromUpdate(&Update{Flags: NonceUpdate, Nonce: 4})
+
+		_, err := hph.loadStateIfNeeded(&c, skipStat{})
+		require.NoError(t, err)
+		require.False(t, c.Deleted(), "an account the update is creating is not in state yet")
+		require.Equal(t, uint64(4), c.Nonce)
+	})
+}
+
 func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	t.Parallel()
 
@@ -1361,8 +1416,6 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
-	// TODO(#20961): untouched sibling cell hashed instead of inlined under ModeUpdate.
-	t.Skip("known parallel-calc sibling-encoding bug, see #20961")
 	t.Parallel()
 	ctx := context.Background()
 
@@ -1429,6 +1482,41 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 
 	require.Equal(t, root2Direct, root2Update,
 		"block 2 roots should match — sibling accounts must be encoded consistently")
+}
+
+// A single-account trie keeps its leaf in hph.root across Process calls, so a follow-up
+// block carrying only a balance must still hash the account's real code hash.
+func Test_ModeUpdate_RootLeafKeepsCodeHash(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const codeHash = "5ea78a5e3cec82b66117982ea93e22a8e0018a9a8adac0ef093ca1aca0e78466"
+
+	root := func(mode Mode) []byte {
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
+		defer hph.Release()
+
+		keys1, upds1 := NewUpdateBuilder().
+			Balance("00", 100).
+			Nonce("00", 7).
+			CodeHash("00", codeHash).
+			Build()
+		require.NoError(t, ms.applyPlainUpdates(keys1, upds1))
+		block1 := WrapKeyUpdates(t, mode, KeyToHexNibbleHash, keys1, upds1)
+		defer block1.Close()
+		_, err := hph.Process(ctx, block1, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		keys2, upds2 := NewUpdateBuilder().Balance("00", 150).Build()
+		require.NoError(t, ms.applyPlainUpdates(keys2, upds2))
+		block2 := WrapKeyUpdates(t, mode, KeyToHexNibbleHash, keys2, upds2)
+		defer block2.Close()
+		got, err := hph.Process(ctx, block2, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		return bytes.Clone(got)
+	}
+
+	require.Equal(t, root(ModeDirect), root(ModeUpdate))
 }
 
 func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {

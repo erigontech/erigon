@@ -36,11 +36,7 @@ func (s *StackStream) closeAllPendingElements() error {
 }
 
 func TestStackStream_BasicOperations(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write a simple object
 	ss.WriteObjectStart()
@@ -56,11 +52,7 @@ func TestStackStream_BasicOperations(t *testing.T) {
 }
 
 func TestStackStream_NestedStructures(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write a nested structure
 	ss.WriteObjectStart()
@@ -88,11 +80,7 @@ func TestStackStream_NestedStructures(t *testing.T) {
 }
 
 func TestStackStream_ArrayOperations(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write an array
 	ss.WriteArrayStart()
@@ -108,11 +96,7 @@ func TestStackStream_ArrayOperations(t *testing.T) {
 }
 
 func TestStackStream_MixedStructures(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write a complex structure
 	ss.WriteObjectStart()
@@ -140,11 +124,7 @@ func TestStackStream_MixedStructures(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Start an object but don't finish it
 	ss.WriteObjectStart()
@@ -168,11 +148,7 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Start an array but don't finish it
 	ss.WriteArrayStart()
@@ -196,11 +172,7 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure but don't complete it
 	ss.WriteObjectStart()
@@ -232,11 +204,7 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 }
 
 func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure but don't complete it
 	ss.WriteArrayStart()
@@ -269,11 +237,7 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 }
 
 func TestStackStream_BufferAsString(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create incomplete JSON
 	ss.WriteObjectStart()
@@ -290,11 +254,7 @@ func TestStackStream_BufferAsString(t *testing.T) {
 }
 
 func TestStackStream_Reset(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Write some data
 	ss.WriteObjectStart()
@@ -320,11 +280,7 @@ func TestStackStream_Reset(t *testing.T) {
 }
 
 func TestStackStream_GetStackSummary(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Empty stack
 	assert.Equal(t, "Empty", ss.StackSummary())
@@ -347,11 +303,7 @@ func TestStackStream_GetStackSummary(t *testing.T) {
 
 // TestStackStream_SequentialOperations tests sequential operations without chaining
 func TestStackStream_SequentialOperations(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Perform operations without chaining
 	ss.WriteObjectStart()
@@ -369,11 +321,7 @@ func TestStackStream_SequentialOperations(t *testing.T) {
 
 // TestStackStream_RecoveryFromIncompleteState tests recovery from the incomplete state
 func TestStackStream_RecoveryFromIncompleteState(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create an incomplete structure
 	ss.WriteObjectStart()
@@ -448,11 +396,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			json := jsoniter.ConfigCompatibleWithStandardLibrary
-			stream := json.BorrowStream(nil)
-			defer json.ReturnStream(stream)
-
-			ss := NewStackStream(stream)
+			ss := newStackStream(nil, InitialBufferSize)
 			tc.buildStructure(ss)
 
 			// Verify structure is incomplete
@@ -471,11 +415,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 
 // TestStackStream_ClosePendingObjectsWithEmptyStack tests closePendingObjects with empty stack
 func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Stack is already empty
 	assert.True(t, ss.IsComplete())
@@ -488,11 +428,7 @@ func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
 
 // TestStackStream_MultipleFlushCalls tests multiple flush calls
 func TestStackStream_MultipleFlushCalls(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create an incomplete structure
 	ss.WriteObjectStart()
@@ -513,11 +449,7 @@ func TestStackStream_MultipleFlushCalls(t *testing.T) {
 
 // TestStackStream_EmptyStructures tests handling of empty objects and arrays
 func TestStackStream_EmptyStructures(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test empty object
 	ss.WriteObjectStart()
@@ -549,11 +481,7 @@ func TestStackStream_EmptyStructures(t *testing.T) {
 
 // TestStackStream_AllDataTypes tests all data types supported by StackStream
 func TestStackStream_AllDataTypes(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test all primitive data types
 	ss.WriteObjectStart()
@@ -632,11 +560,7 @@ func TestStackStream_AllDataTypes(t *testing.T) {
 
 // TestStackStream_BoundaryValues tests boundary values for numeric types
 func TestStackStream_BoundaryValues(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test boundary values
 	ss.WriteObjectStart()
@@ -697,11 +621,7 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 
 // TestStackStream_ExtremeNesting tests deeply nested structures
 func TestStackStream_ExtremeNesting(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure (50 levels deep)
 	const nestingDepth = 50
@@ -732,14 +652,11 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 
 // TestStackStream_ErrorHandlingWithoutClosing tests error handling and propagation *without* closing pending elements
 func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
 
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
-	stream := json.BorrowStream(failWriter)
-	defer json.ReturnStream(stream)
 
-	ss := NewStackStream(stream)
+	ss := newStackStream(failWriter, InitialBufferSize)
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
@@ -754,14 +671,11 @@ func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
 
 // TestStackStream_ErrorHandlingWithClosing tests error handling and propagation *with* closing pending elements
 func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
 
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
-	stream := json.BorrowStream(failWriter)
-	defer json.ReturnStream(stream)
 
-	ss := NewStackStream(stream)
+	ss := newStackStream(failWriter, InitialBufferSize)
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
@@ -778,11 +692,7 @@ func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
 
 // TestStackStream_StackManipulationEdgeCases tests edge cases in stack manipulation
 func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test 1: Popping from an empty stack should not panic
 	ss.pop(ItemObject)
@@ -813,11 +723,7 @@ func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
 
 // TestStackStream_MixedWriteOperations tests mixing different write operations
 func TestStackStream_MixedWriteOperations(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	// Test mixing WriteRaw with other operations
 	ss.WriteObjectStart()
@@ -929,11 +835,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			json := jsoniter.ConfigCompatibleWithStandardLibrary
-			stream := json.BorrowStream(nil)
-			defer json.ReturnStream(stream)
-
-			ss := NewStackStream(stream)
+			ss := newStackStream(nil, InitialBufferSize)
 			tc.buildStructure(ss)
 
 			// Verify structure is incomplete
@@ -954,11 +856,8 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(failWriter)
-	defer json.ReturnStream(stream)
 
-	ss := NewStackStream(stream)
+	ss := newStackStream(failWriter, InitialBufferSize)
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
@@ -980,10 +879,7 @@ func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 
 // TestStackStream_Depth verifies that Depth() tracks nesting level correctly.
 func TestStackStream_Depth(t *testing.T) {
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
-	stream := json.BorrowStream(nil)
-	defer json.ReturnStream(stream)
-	ss := NewStackStream(stream)
+	ss := newStackStream(nil, InitialBufferSize)
 
 	assert.Equal(t, 0, ss.Depth())
 	ss.WriteArrayStart()
@@ -1005,10 +901,7 @@ func TestStackStream_Depth(t *testing.T) {
 // subsequent writes continue inside the preserved nesting level.
 func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 	newSS := func() *StackStream {
-		json := jsoniter.ConfigCompatibleWithStandardLibrary
-		stream := json.BorrowStream(nil)
-		t.Cleanup(func() { json.ReturnStream(stream) })
-		return NewStackStream(stream)
+		return newStackStream(nil, InitialBufferSize)
 	}
 
 	t.Run("nothing_to_close_when_at_target_depth", func(t *testing.T) {
@@ -1103,7 +996,7 @@ func TestFlushErrorDoesNotBuffer(t *testing.T) {
 	s := New(goneWriter{}).(*StackStream)
 
 	chunk := strings.Repeat("x", 4096)
-	for range 2000 {
+	for range 128 * FlushThreshold / len(chunk) {
 		s.WriteRaw(chunk)
 	}
 
@@ -1188,7 +1081,7 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 		}, `{"a":[1]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			s := newStackStream(nil, 64)
 			tc.write(s)
 
 			require.Equal(t, tc.want, string(s.Buffer()))
@@ -1230,7 +1123,7 @@ func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 		"WriteEmptyArray":  func(s Stream) { s.WriteEmptyArray() },
 	} {
 		t.Run(name, func(t *testing.T) {
-			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner := newStackStream(nil, 64)
 			inner.WriteObjectStart()
 			lazy := NewLazyFieldStream(inner, "result", false)
 
@@ -1253,7 +1146,7 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
 	} {
 		t.Run(name, func(t *testing.T) {
-			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner := newStackStream(nil, 64)
 			inner.WriteObjectStart()
 			lazy := NewLazyFieldStream(inner, "result", false)
 
@@ -1263,4 +1156,29 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 			require.NotContains(t, string(inner.Buffer()), `"result":`)
 		})
 	}
+}
+
+// Put clears the writer as well as the bytes. A pooled stream that kept one
+// would pin the connection it came from until the next Get.
+func TestPutReleasesWriterAndBytes(t *testing.T) {
+	var out bytes.Buffer
+	s := Get(&out).(*StackStream)
+	s.WriteString("pending")
+	Put(s)
+
+	require.Empty(t, s.Buffer())
+	require.NoError(t, s.Flush())
+	require.Empty(t, out.String())
+}
+
+// A response above the bound is dropped rather than pooled, so one outsized
+// value cannot pin its peak per goroutine.
+func TestPutDropsOversizedBuffer(t *testing.T) {
+	s := Get(nil).(*StackStream)
+	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
+	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
+
+	Put(s)
+	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
+	require.NotSame(t, s, Get(nil).(*StackStream))
 }

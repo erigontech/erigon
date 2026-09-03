@@ -51,9 +51,9 @@ func newCommitmentV3TestDB(t *testing.T, stepSize uint64) kv.TemporalRwDB {
 	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(rawDB.Close)
-	agg := statepkg.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := statepkg.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)

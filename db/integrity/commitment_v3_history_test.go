@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -66,7 +67,7 @@ func TestStateRootVerifyByHistoryRebuildsFromAccountAndStorageHistory(t *testing
 	ctx := t.Context()
 	logger := log.New()
 	statecfg.EnableHistoricalCommitment()
-	db := temporaltest.NewTestDBWithStepSize(t, datadir.New(t.TempDir()), stepSize)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(stepSize))
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)
 
@@ -115,7 +116,7 @@ func TestStateRootVerifyByHistoryRebuildsFromAccountAndStorageHistory(t *testing
 		roots[blockNum] = writeHistoryBlock(t, db, logger, blockNum, address, storageKey)
 	}
 
-	require.NoError(t, agg.BuildFiles2(ctx, 0, kv.Step(blocks*2+1), false))
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, kv.Step(blocks*2+1), execfinality.NewContext(^uint64(0), ^uint64(0), 0, false), false))
 	agg.WaitForFiles()
 	samplerCfg, err := integrity.NewSamplerCfg(1, 1)
 	require.NoError(t, err)

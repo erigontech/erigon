@@ -51,7 +51,7 @@ func setupEdgeRecordTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execc
 	rawDB := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx, rawDB)
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx)
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
 	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, true)

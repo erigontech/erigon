@@ -194,10 +194,10 @@ func newBenchDB(t testing.TB, dir string, stepSize uint64, cache bool) (kv.Tempo
 	if !cache {
 		opts = opts.DisableBranchCache()
 	}
-	agg, err := opts.Open(t.Context(), rawDB)
+	agg, err := opts.Open(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
@@ -291,14 +291,14 @@ func runBenchArm(t testing.TB, arm benchArm, blocks, blocksPerTx, buildEvery, pr
 		runSpan(start, end, w.block, true)
 
 		if buildEvery > 0 && end%buildEvery == 0 {
-			require.NoError(t, agg.BuildFiles(uint64(end)))
+			require.NoError(t, agg.BuildFiles(db, uint64(end), unboundedFinalityCtx))
 		}
 		if end%progressEvery == 0 {
 			t.Logf("%s %d/%d blocks, commit %s", arm.name, end, blocks, commitWall.Round(time.Millisecond))
 		}
 	}
 
-	require.NoError(t, agg.BuildFiles(uint64(blocks)))
+	require.NoError(t, agg.BuildFiles(db, uint64(blocks), unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(ctx))
 
 	cacheStats := "disabled"

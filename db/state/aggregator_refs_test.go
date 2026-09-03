@@ -47,7 +47,7 @@ func openTestAggForRefs(t *testing.T, dirs datadir.Dirs, settings *ErigonDBSetti
 	logger := log.New()
 	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := NewTest(dirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	agg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
 	return agg
@@ -62,7 +62,7 @@ func TestReloadErigonDBSettingsAppliesCommitmentRefsFlag(t *testing.T) {
 	logger := log.New()
 	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 
 	require.NoError(t, agg.ReloadErigonDBSettings(true))

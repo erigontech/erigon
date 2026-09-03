@@ -610,9 +610,10 @@ type FlushConfig struct {
 	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
-	// The key arrives as a string so Flush does not allocate one per tuple for a
-	// callback that has to own its copy anyway. v is only valid for the call.
-	DomainCallbacks map[Domain]func(k string, v []byte, step Step, txNum uint64)
+	//
+	// k belongs to the callback; v is the batch's own storage, which is never
+	// rewritten in place, so a consumer may retain it.
+	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
 // FlushOption configures a TemporalMemBatch.Flush call.
@@ -620,10 +621,10 @@ type FlushOption func(*FlushConfig)
 
 // WithFlushCallback registers cb to receive every (key, value, step, txNum)
 // tuple of the given domain during Flush.
-func WithFlushCallback(domain Domain, cb func(k string, v []byte, step Step, txNum uint64)) FlushOption {
+func WithFlushCallback(domain Domain, cb func(k []byte, v []byte, step Step, txNum uint64)) FlushOption {
 	return func(c *FlushConfig) {
 		if c.DomainCallbacks == nil {
-			c.DomainCallbacks = make(map[Domain]func(k string, v []byte, step Step, txNum uint64))
+			c.DomainCallbacks = make(map[Domain]func(k []byte, v []byte, step Step, txNum uint64))
 		}
 		c.DomainCallbacks[domain] = cb
 	}

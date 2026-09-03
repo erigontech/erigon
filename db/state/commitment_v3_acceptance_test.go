@@ -60,9 +60,9 @@ func newAcceptanceDB(t *testing.T, stepSize, frozenSteps uint64) (kv.TemporalRwD
 		StepSize(stepSize).
 		StepsInFrozenFile(frozenSteps).
 		Logger(logger).
-		MustOpen(t.Context(), rawDB)
+		MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
@@ -242,9 +242,12 @@ func TestCommitmentV3RootsMatchLegacyAcrossBatches(t *testing.T) {
 		require.Equalf(t, wantRoot, gotRoot, "batch %d root", txNum)
 	}
 
-	for _, agg := range []*state.Aggregator{legacyAgg, v3Agg} {
-		require.NoError(t, agg.BuildFiles(4))
-		require.NoError(t, agg.MergeLoop(t.Context()))
+	for _, arm := range []struct {
+		db  kv.TemporalRwDB
+		agg *state.Aggregator
+	}{{legacyDB, legacyAgg}, {v3DB, v3Agg}} {
+		require.NoError(t, arm.agg.BuildFiles(arm.db, 4, unboundedFinalityCtx))
+		require.NoError(t, arm.agg.MergeLoop(t.Context()))
 	}
 	requireArmRecordFormat(t, legacyAgg, false)
 	requireArmRecordFormat(t, v3Agg, true)
@@ -265,7 +268,7 @@ func TestCommitmentV3MergedFileHoldsLatestRecords(t *testing.T) {
 		recordsByTxNum[txNum] = cloneAcceptanceRecords(nonEmptyAcceptanceRecords(allAcceptanceRecords(t, db)))
 	}
 
-	require.NoError(t, agg.BuildFiles(4))
+	require.NoError(t, agg.BuildFiles(db, 4, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	var mergedFile kv.VisibleFile
@@ -306,7 +309,7 @@ func TestCommitmentV3FilesMatchTheirVersion(t *testing.T) {
 	for batchNumber, batch := range batches {
 		v3Root = applyAcceptanceBatch(t, db, batch, uint64(batchNumber+1))
 	}
-	require.NoError(t, agg.BuildFiles(4))
+	require.NoError(t, agg.BuildFiles(db, 4, unboundedFinalityCtx))
 
 	files := acceptanceCommitmentFiles(t, agg)
 	require.NotEmpty(t, files, "arm produced no commitment files")

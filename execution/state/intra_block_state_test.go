@@ -58,8 +58,7 @@ func TestSnapshotRandom(t *testing.T) {
 	err := quick.Check(func() bool {
 		return ts.run(t)
 	}, config)
-	var cerr *quick.CheckError
-	if errors.As(err, &cerr) {
+	if cerr, ok := errors.AsType[*quick.CheckError](err); ok {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
 	} else if err != nil {

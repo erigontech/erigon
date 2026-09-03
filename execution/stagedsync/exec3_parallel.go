@@ -189,8 +189,7 @@ func (s *stopCause) Error() string {
 
 // stopCauseOf returns the stopCause published on ctx, if any.
 func stopCauseOf(ctx context.Context) (*stopCause, bool) {
-	var s *stopCause
-	if errors.As(context.Cause(ctx), &s) {
+	if s, ok := errors.AsType[*stopCause](context.Cause(ctx)); ok {
 		return s, true
 	}
 	return nil, false
@@ -1153,10 +1152,10 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// blockResults on a separate goroutine) can find this block's
 		// saved changeset via GetChangesetByBlockNum at compute time.
 		// In per-block compute mode (changeset window), the
-		// calculator switches the accumulator to this saved CS for the
-		// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-		// so branch writes land in block N's CS rather than whatever the
-		// exec loop has installed as current. If we saved AFTER sendResult,
+		// calculator passes this saved CS to ComputeCommitment as an explicit
+		// diff (committer.go:computeWithBlockAccumulator) so branch writes land
+		// in block N's CS rather than whatever the exec loop has installed as
+		// current. If we saved AFTER sendResult,
 		// the calculator could race ahead and look up an unsaved CS,
 		// causing branch deltas to leak into the next block's CS and
 		// produce wrong-trie-root chains on subsequent reorg-driven
@@ -1353,7 +1352,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			// optimistically without needing to worry about
 			// clashes, this should signifigatly improve tx
 			// concurrency
-			break
 		default:
 			sender, err := t.TxSender()
 			if err != nil {
@@ -1463,8 +1461,7 @@ func (fc *failCandidate) consider(block uint64, blockHash common.Hash, exec bool
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
 func wrapAsExecAbort(origErr error, depTxIndex int) error {
-	var abortErr protocol.ErrExecAbortError
-	if errors.As(origErr, &abortErr) {
+	if _, ok := errors.AsType[protocol.ErrExecAbortError](origErr); ok {
 		return origErr
 	}
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
@@ -2148,6 +2145,9 @@ func (e *feeEntry) shapeRecordedIn(ws *state.WriteSet, version state.Version, ad
 	return e.recordedIn(ws, version)
 }
 
+// feeWritePaths are the account paths a fee credit can occupy — see writeTo.
+var feeWritePaths = [...]state.AccountPath{state.AddressPath, state.BalancePath, state.SelfDestructPath}
+
 // hasFeeWrite reports whether ws carries a fee write for addr. The version tells
 // one apart from the worker's own write to the same address: the task version
 // carries a TxNum, a worker's own writes do not.
@@ -2606,13 +2606,25 @@ func (be *blockExecutor) creditedWrites(txVersion state.Version, ws *state.Write
 // and reclaims the merge product it supersedes. Releasing that product is safe
 // because MergeInto shares VersionedWrite pointers rather than the maps holding
 // them, so pooling those maps leaves the merged writes intact.
-func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites *state.WriteSet, outcome feeOutcome) {
+func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites *state.WriteSet, outcome feeOutcome, feeAddrs [2]accounts.Address) {
 	if outcome == feeCreditRecorded {
 		return
 	}
 	temp, superseded := be.feeMergeTemp[txVersion.TxIndex]
 	superseded = superseded && temp.writes == prev
 	if outcome == feeCreditNone && !superseded {
+		return
+	}
+
+	// The credit almost always lands on the same headers as the round before it,
+	// carrying only a moved value: overwrite those entries in the product that
+	// already holds them rather than pour the tx's whole write set into a fresh
+	// one and pool the set it replaces.
+	if outcome == feeCreditNew && superseded && rewritesCredit(temp.writes, tipWrites, feeAddrs) {
+		overwriteFeeWrites(temp.writes, tipWrites)
+		// calcFees hands the credit to this call and keeps no reference, so its
+		// maps go back to the pool now rather than waiting for the block.
+		tipWrites.ReleaseMaps()
 		return
 	}
 
@@ -2631,7 +2643,7 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	var stale *state.WriteSet
 	if superseded && merged != temp.writes {
 		stale = temp.writes
-		be.dropStaleVersionedWrites(txVersion, stale, merged)
+		be.dropStaleVersionedWrites(txVersion, stale, merged, feeAddrs)
 	}
 	// Record before releasing: until the replacement is recorded, a reader of
 	// this tx's writes still holds the superseded set the release clears.
@@ -2646,13 +2658,58 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	}
 }
 
-// dropStaleVersionedWrites removes this tx's version-map entries for the writes
-// prev published and next no longer carries. The recorded set is flushed after
-// every round, so a dropped entry stays visible to later txs until deleted here.
-func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev, next *state.WriteSet) {
-	for h := range prev.AllHeaders() {
-		if !next.Has(h) {
-			be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, false)
+// rewritesCredit reports whether tip writes every fee entry recorded still
+// holds, so overwriting them in place leaves the set a rebuild would. An entry
+// recorded holds and tip does not would otherwise survive.
+func rewritesCredit(recorded, tip *state.WriteSet, feeAddrs [2]accounts.Address) bool {
+	for _, addr := range feeAddrs {
+		if addr.IsNil() {
+			continue
+		}
+		for _, path := range feeWritePaths {
+			h := state.WriteHeader{Address: addr, Path: path}
+			if recorded.Has(h) && !tip.Has(h) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// overwriteFeeWrites replaces dst's entries at tip's headers. It copies only
+// feeWritePaths, so a credit reaching any other path would be dropped.
+func overwriteFeeWrites(dst, tip *state.WriteSet) {
+	copied := 0
+	for a, vw := range tip.Addresses() {
+		dst.SetAddress(a, vw)
+		copied++
+	}
+	for a, vw := range tip.Balances() {
+		dst.SetBalance(a, vw)
+		copied++
+	}
+	for a, vw := range tip.SelfDestructs() {
+		dst.SetSelfDestruct(a, vw)
+		copied++
+	}
+	if dbg.AssertEnabled && copied != tip.Count() {
+		panic("fee credit wrote a path overwriteFeeWrites does not copy")
+	}
+}
+
+// dropStaleVersionedWrites deletes the fee writes prev published and next no
+// longer carries: every round flushes the recorded set, so they stay visible to
+// later txs until deleted. next holds prev's own base, so nothing else goes stale.
+func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev, next *state.WriteSet, feeAddrs [2]accounts.Address) {
+	for _, addr := range feeAddrs {
+		if addr.IsNil() {
+			continue
+		}
+		for _, path := range feeWritePaths {
+			h := state.WriteHeader{Address: addr, Path: path}
+			if prev.Has(h) && !next.Has(h) {
+				be.versionMap.Delete(addr, path, h.Key, txVersion.TxIndex, false)
+			}
 		}
 	}
 }
@@ -2682,8 +2739,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
-		var execErr protocol.ErrExecAbortError
-		if errors.As(res.Err, &execErr) {
+		if execErr, ok := errors.AsType[protocol.ErrExecAbortError](res.Err); ok {
 			if res.Version().Incarnation > len(be.tasks) {
 				// Parallel scheduler exhausted retries for this tx. Surface
 				// through blockResult.Err for the same reason as the other
@@ -2922,7 +2978,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if err != nil {
 				return nil, err
 			}
-			be.recordFeeMerge(txVersion, existingWrites, tipWrites, outcome)
+			be.recordFeeMerge(txVersion, existingWrites, tipWrites, outcome,
+				[2]accounts.Address{txResult.Coinbase, txResult.ExecutionResult.BurntContractAddress})
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
@@ -3070,28 +3127,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// committed for addr (sd.mem + domain files), so a self-destruct
 					// emits the full StoragePath=0 cascade — covers genesis-allocated
 					// and prior-block storage that vm.StorageKeys doesn't see.
-					var domainKeysErr error
-					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-						var keys []accounts.StorageKey
-						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
-							return nil
-						}
-						return keys
-					}
+					domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
-					if domainKeysErr != nil {
-						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
-					}
 					if normErr != nil {
 						return nil, fmt.Errorf("[parallel] normalize block writes: %w", normErr)
 					}
@@ -3341,28 +3380,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// so.data via MakeWriteSet. This keeps the parallel commit sourced
 				// solely from versionedWrites so the write-path stateObject is
 				// redundant.
-				var domainKeysErr error
-				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
-						return nil
-					}
-					return keys
-				}
+				domainStorageKeys := state.CommittedStorageKeysFn(pe.rs.Domains(), applyTx)
 				emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 				var normErr error
 				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
-				if domainKeysErr != nil {
-					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
-				}
 				if normErr != nil {
 					return nil, fmt.Errorf("[parallel] normalize finalize writes: %w", normErr)
 				}

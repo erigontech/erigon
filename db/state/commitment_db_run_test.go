@@ -113,7 +113,7 @@ func TestCommitmentV3DbRecordsMatchLatestView(t *testing.T) {
 
 	// Freeze the first batches into files, then write over some of them: the run now has to reject
 	// the db records the files already superseded and keep the ones that are newer.
-	require.NoError(t, agg.BuildFiles(2))
+	require.NoError(t, agg.BuildFiles(db, 2, unboundedFinalityCtx))
 	for batchNumber, batch := range batches[2:] {
 		applyAcceptanceBatch(t, db, batch, uint64(len(batches)-1+batchNumber+1))
 	}

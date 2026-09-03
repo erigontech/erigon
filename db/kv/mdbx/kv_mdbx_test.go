@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"math/rand"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,19 +54,28 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	return db
 }
 
-func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
-	b.Helper()
-	path := b.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, logger), path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MapSize(128 * datasize.MB).MustOpen()
-	b.Cleanup(db.Close)
-	return db
+func TestChaindataReadahead(t *testing.T) {
+	tests := []struct {
+		name            string
+		value           string
+		wantNoReadahead bool
+	}{
+		{name: "default", wantNoReadahead: false},
+		{name: "disabled", value: "false", wantNoReadahead: true},
+		{name: "enabled", value: "true", wantNoReadahead: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CHAINDATA_READAHEAD", test.value)
+			opts := mdbx.New(dbcfg.ChainDB, log.New())
+			require.Equal(t, test.wantNoReadahead, opts.HasFlag(mdbxgo.NoReadahead))
+		})
+	}
+
+	t.Setenv("CHAINDATA_READAHEAD", "true")
+	opts := mdbx.New(dbcfg.TxPoolDB, log.New())
+	require.True(t, opts.HasFlag(mdbxgo.NoReadahead))
 }
 
 func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
@@ -1002,135 +1010,6 @@ func TestDB_BatchTime(t *testing.T) {
 	}
 }
 
-func BenchmarkDB_BeginRO(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	db := _db.(*mdbx.MdbxKV)
-
-	for b.Loop() {
-		tx, _ := db.BeginRo(b.Context())
-		tx.Rollback()
-	}
-}
-
-func BenchmarkDB_Get(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*mdbx.MdbxKV)
-
-	// buffered so we never leak goroutines
-	err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		return tx.Put(table, u64tob(uint64(1)), u64tob(uint64(1)))
-	})
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	// Ensure data is correct.
-	if err := db.View(b.Context(), func(tx kv.Tx) error {
-		key := u64tob(uint64(1))
-		for b.Loop() {
-			v, err := tx.GetOne(table, key)
-			if err != nil {
-				return err
-			}
-			if v == nil {
-				b.Errorf("key not found: %d", 1)
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
-func BenchmarkDB_Put(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*mdbx.MdbxKV)
-
-	const keyCount = 10000
-	keys := make([][]byte, keyCount)
-	for i := 1; i <= keyCount; i++ {
-		keys[i-1] = u64tob(uint64(i))
-	}
-
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		var idx int
-		for b.Loop() {
-			err := tx.Put(table, keys[idx%len(keys)], keys[idx%len(keys)])
-			if err != nil {
-				return err
-			}
-			idx++
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
-func BenchmarkDB_PutRandom(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*mdbx.MdbxKV)
-
-	// Ensure data is correct.
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		keys := make(map[string]struct{}, b.N)
-		for len(keys) < b.N {
-			keys[string(u64tob(uint64(rand.Intn(1e10))))] = struct{}{}
-		}
-		b.ResetTimer()
-		for key := range keys {
-			err := tx.Put(table, []byte(key), []byte(key))
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
-func BenchmarkDB_Delete(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*mdbx.MdbxKV)
-
-	const keyCount = 10000
-	keys := make([][]byte, keyCount)
-	for i := 1; i <= keyCount; i++ {
-		keys[i-1] = u64tob(uint64(i))
-	}
-
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		for i := range keys {
-			err := tx.Put(table, keys[i], keys[i])
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		var idx int
-		for b.Loop() {
-			err := tx.Delete(table, keys[idx%len(keys)])
-			if err != nil {
-				return err
-			}
-			idx++
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
 func TestSequenceOps(t *testing.T) {
 	table1 := []byte("Table132323")
 	table2 := []byte("Table232232")
@@ -1178,24 +1057,6 @@ func TestSequenceOps(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(3), t1)
 	})
-}
-
-func BenchmarkDB_ResetSequence(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	//db := _db.(*mdbx.MdbxKV)
-	ctx := b.Context()
-
-	tx, err := _db.BeginRw(ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
-
-	for i := 0; b.Loop(); i++ {
-		err = tx.ResetSequence(table, uint64(i))
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {

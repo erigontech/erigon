@@ -65,6 +65,41 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
+    modernize:
+      # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
+      disable:
+        - newexpr
+    staticcheck:
+      # The only place staticcheck checks are turned off. A text: exclusion runs
+      # the check and drops its output, which is how the SA/S1 gap this list
+      # replaces went unnoticed. SA1019 waits on 42 deprecations; the rest are
+      # golangci's own default-off ST plus the ST/QF we find too noisy.
+      checks:
+        - all
+        - -SA1019
+        - -QF1001
+        - -QF1002
+        - -QF1003
+        - -QF1006
+        - -QF1007
+        - -QF1008
+        - -QF1010
+        - -QF1011
+        - -QF1012
+        - -ST1000
+        - -ST1003
+        - -ST1005
+        - -ST1008
+        - -ST1012
+        - -ST1016
+        - -ST1017
+        - -ST1019
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -ST1023
+        - -ST1029
+        - -ST5011
     govet:
       enable:
         - nilness
@@ -90,23 +125,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cmd/capcli\
-          |cmd/caplin/caplin1\
-          |cmd/evm\
-          |cmd/evm/internal/t8ntool\
-          |cmd/integration/commands\
-          |cmd/rlpdump\
-          |cmd/rpcdaemon/cli\
-          |cmd/rpcdaemon/health\
-          |cmd/utils/app\
-          |cmd/utils/cmdtest\
-          |common\
-          |common/crypto\
-          |common/crypto/blake2b\
-          |common/iouring\
-          |common/log/v3\
-          |common/mmap\
-          |db/datadir\
+          db/datadir\
           |db/datadir/reset\
           |db/datastruct/btindex\
           |db/datastruct/fusefilter\
@@ -166,9 +185,6 @@ linters:
           |txnprovider/txpool\
           |txnprovider/txpool/tests\
           )/[^/]+\\.go$"
-      - linters:
-          - staticcheck
-        text: ST1019|ST1029|ST5011|QF1003|SA1019|QF1008|S1021|QF1001|SA6005|S1002|QF1002|QF1012|QF1006|ST1005|SA5011|ST1023|ST1012|QF1011|S1019|S1000|S1000|S1009|ST1008|S1016|S1016|ST1017|SA4009|QF1007|SA6002|QF1010|SA9003|SA4006|SA4010
       - linters:
           - gosec
           - perfsprint

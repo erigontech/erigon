@@ -70,7 +70,7 @@ func TestApplyDeferredV3LastWriteWinsPerRecord(t *testing.T) {
 			val []byte
 		}{bytes.Clone(key), bytes.Clone(val)})
 		return nil
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, written)
 	require.Equal(t, []byte{3, 4, 5}, got[0].val)
@@ -114,7 +114,7 @@ func TestApplyDeferredV3DisjointChildSetsCommute(t *testing.T) {
 		written, err := ApplyDeferredBranchUpdates(deferred, 2, func(key, val, _ []byte) error {
 			got[string(key)] = bytes.Clone(val)
 			return nil
-		})
+		}, nil)
 		require.NoError(t, err)
 		require.Equal(t, 2, written)
 		return got
@@ -159,7 +159,7 @@ func TestConcurrentWorkersV3WriteDisjointChildSetsUnderParent(t *testing.T) {
 	written, err := ApplyDeferredBranchUpdates(deferred, 2, func(key, value, _ []byte) error {
 		got[string(key)] = bytes.Clone(value)
 		return nil
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Equal(t, len(workerNibbles), written)
 	for _, nibble := range workerNibbles {
