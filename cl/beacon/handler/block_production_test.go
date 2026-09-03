@@ -720,14 +720,14 @@ func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
 	require.ErrorContains(t, err, "missing blobs bundle")
 }
 
-func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
+func TestSelectHigherGloasP2PBidValueUsesWei(t *testing.T) {
 	t.Run("higher bid", func(t *testing.T) {
 		localValueWei := gweiToWei(big.NewInt(2))
 		externalBid := &cltypes.SignedExecutionPayloadBid{
 			Message: &cltypes.ExecutionPayloadBid{Value: 3},
 		}
 
-		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
+		selectedValueWei, selected := selectHigherGloasP2PBidValue(localValueWei, externalBid)
 
 		require.True(t, selected)
 		require.Equal(t, "3000000000", selectedValueWei.String())
@@ -739,7 +739,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 			Message: &cltypes.ExecutionPayloadBid{Value: 2},
 		}
 
-		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
+		selectedValueWei, selected := selectHigherGloasP2PBidValue(localValueWei, externalBid)
 
 		require.False(t, selected)
 		require.Same(t, localValueWei, selectedValueWei)
@@ -751,7 +751,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 		}
 		wantWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
 
-		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid)
+		selectedValueWei, selected := selectHigherGloasP2PBidValue(new(big.Int), externalBid)
 
 		require.True(t, selected)
 		require.Equal(t, wantWei, selectedValueWei)

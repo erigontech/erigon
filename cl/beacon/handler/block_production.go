@@ -938,7 +938,7 @@ func preferLocalExecutionValue(localValueWei, builderValueWei *big.Int, boostFac
 	return localWeightedValue.Cmp(builderWeightedValue) >= 0
 }
 
-func selectHigherGloasBidValue(
+func selectHigherGloasP2PBidValue(
 	localValueWei *big.Int,
 	externalBid *cltypes.SignedExecutionPayloadBid,
 ) (*big.Int, bool) {
@@ -988,7 +988,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	}
 	externalBid, found := a.epbsPool.HighestBids.Get(bidKey)
 	selfExecutionValue := block.GetExecutionValue()
-	selectedValueWei, selected := selectHigherGloasBidValue(selfExecutionValue, externalBid)
+	selectedValueWei, selected := selectHigherGloasP2PBidValue(selfExecutionValue, externalBid)
 	if !found || !selected {
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
