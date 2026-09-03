@@ -69,6 +69,10 @@ func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, c
 	return nil, nil
 }
 
+func (forkChoiceSpectestEngine) NewPayloadAttrs(context.Context, common.Hash, *engine_types.PayloadAttributes) error {
+	return nil
+}
+
 func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
 func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block, [][]byte) error {

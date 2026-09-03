@@ -40,6 +40,12 @@ import (
 // and returns it. The interface lives in erigon and is implemented in cocoon (dependency inversion:
 // erigon cannot import cocoon). See [[dag_start_end_system_tx]].
 type BlockAssembler interface {
+	// NewPayloadAttrs delivers the NEXT block's payload attributes (the CL builds them per slot from the head
+	// beacon state, on EVERY client, not just the proposer) BEFORE AssembleBlock. It is what TRIGGERS the next
+	// block's start of execution: the assembler opens that block on params.ParentHash and begins executing it
+	// (header + block-start system tx + coinbase) under these attrs, instead of waiting for the build trigger to
+	// hand them over. Non-blocking. params carries the parent (head) and the attrs.
+	NewPayloadAttrs(ctx context.Context, params *builder.Parameters) error
 	// AssembleBlock inserts the block-end marker carrying params' attrs into the ordering layer and returns
 	// IMMEDIATELY (non-blocking). Called from AssembleBlock, which must return a PayloadID promptly — the CL's
 	// ForkChoiceUpdate blocks on it, so it cannot wait here for the DAG round trip.
@@ -61,6 +67,17 @@ func (e *ExecModule) SetBlockAssembler(ba BlockAssembler) {
 	// while N's FCU lags. Arm the fork validator to KEEP the canonicalised block's SD alive (park it)
 	// so the successor reads N's live commitment. Off for normal sync/reorg (drop-on-merge as before).
 	e.forkValidator.SetFrontierMode(true)
+}
+
+// NewPayloadAttrs forwards the CL-delivered next-block payload attributes to the DAG boundary assembler so it
+// can open the block and start executing it ahead of AssembleBlock. Thin passthrough — the assembler (cocoon
+// driver) records the attrs and drives its own pre-execution; the exec semaphore is NOT held here (the record
+// is non-blocking and the drain that follows acquires the semaphore itself). No-op when no assembler is set.
+func (e *ExecModule) NewPayloadAttrs(ctx context.Context, params *builder.Parameters) error {
+	if e.blockAssembler == nil {
+		return nil
+	}
+	return e.blockAssembler.NewPayloadAttrs(ctx, params)
 }
 
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {

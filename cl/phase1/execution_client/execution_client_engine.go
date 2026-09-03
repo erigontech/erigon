@@ -249,6 +249,13 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
 
+// NewPayloadAttrs is a no-op over the wire engine API — there is no standard engine method to deliver
+// attributes ahead of block production. A based-rollup L2 that wants early attrs runs the in-process
+// ExecutionClientDirect instead.
+func (cc *ExecutionClientEngine) NewPayloadAttrs(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) error {
+	return nil
+}
+
 func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }

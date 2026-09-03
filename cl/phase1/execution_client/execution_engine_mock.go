@@ -28,7 +28,6 @@ import (
 type MockExecutionEngine struct {
 	ctrl     *gomock.Controller
 	recorder *MockExecutionEngineMockRecorder
-	isgomock struct{}
 }
 
 // MockExecutionEngineMockRecorder is the mock recorder for MockExecutionEngine.
@@ -551,6 +550,44 @@ func (c *MockExecutionEngineNewPayloadCall) Do(f func(context.Context, *cltypes.
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockExecutionEngineNewPayloadCall) DoAndReturn(f func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (PayloadStatus, error)) *MockExecutionEngineNewPayloadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// NewPayloadAttrs mocks base method.
+func (m *MockExecutionEngine) NewPayloadAttrs(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "NewPayloadAttrs", ctx, head, attributes)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// NewPayloadAttrs indicates an expected call of NewPayloadAttrs.
+func (mr *MockExecutionEngineMockRecorder) NewPayloadAttrs(ctx, head, attributes any) *MockExecutionEngineNewPayloadAttrsCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NewPayloadAttrs", reflect.TypeOf((*MockExecutionEngine)(nil).NewPayloadAttrs), ctx, head, attributes)
+	return &MockExecutionEngineNewPayloadAttrsCall{Call: call}
+}
+
+// MockExecutionEngineNewPayloadAttrsCall wrap *gomock.Call
+type MockExecutionEngineNewPayloadAttrsCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineNewPayloadAttrsCall) Return(arg0 error) *MockExecutionEngineNewPayloadAttrsCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineNewPayloadAttrsCall) Do(f func(context.Context, common.Hash, *engine_types.PayloadAttributes) error) *MockExecutionEngineNewPayloadAttrsCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineNewPayloadAttrsCall) DoAndReturn(f func(context.Context, common.Hash, *engine_types.PayloadAttributes) error) *MockExecutionEngineNewPayloadAttrsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

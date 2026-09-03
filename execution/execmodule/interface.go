@@ -186,6 +186,11 @@ type ExecutionModule interface {
 
 	// --- Block building ---------------------------------------------------
 
+	// NewPayloadAttrs delivers the next block's payload attributes (built by the CL per slot from the head
+	// beacon state, on every client) BEFORE AssembleBlock, so the DAG boundary assembler can open that block
+	// and start executing it under the correct attrs. Non-blocking; no-op when no boundary assembler is set.
+	NewPayloadAttrs(ctx context.Context, params *builder.Parameters) error
+
 	// AssembleBlock initiates building a new block with the supplied
 	// parameters.  Returns the payload ID assigned to the build job.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)

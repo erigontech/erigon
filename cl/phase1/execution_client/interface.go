@@ -38,6 +38,10 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 type ExecutionEngine interface {
 	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *common.Hash, versionedHashes []common.Hash, executionRequestsList []hexutil.Bytes) (PayloadStatus, error)
 	ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error)
+	// NewPayloadAttrs delivers the next block's payload attributes (built per slot from the head beacon state,
+	// on every client) to the EL ahead of block production, so a DAG-L2 based rollup can start executing the
+	// block early. head is the parent (fork-choice head) execution hash. No-op on engines that don't support it.
+	NewPayloadAttrs(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) error
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error
 	InsertBlock(ctx context.Context, block *types.Block, bal []byte) error

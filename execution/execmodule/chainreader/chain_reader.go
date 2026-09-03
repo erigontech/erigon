@@ -309,6 +309,24 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
+// NewPayloadAttrs forwards the CL-delivered next-block attributes to the execution module ahead of AssembleBlock
+// so the DAG boundary assembler can open the block on baseHash and start executing it. Maps the CL attributes into
+// builder.Parameters exactly as AssembleBlock does (same CustomTxnProvider for the based-rollup body source).
+func (c ChainReaderWriterEth1) NewPayloadAttrs(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) error {
+	params := &builder.Parameters{
+		ParentHash:            baseHash,
+		Timestamp:             uint64(attributes.Timestamp),
+		PrevRandao:            attributes.PrevRandao,
+		SuggestedFeeRecipient: attributes.SuggestedFeeRecipient,
+		Withdrawals:           attributes.Withdrawals,
+		SlotNumber:            (*uint64)(attributes.SlotNumber),
+		TargetGasLimit:        (*uint64)(attributes.TargetGasLimit),
+		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
+		CustomTxnProvider:     c.clAssemblyTxnProvider,
+	}
+	return c.executionModule.NewPayloadAttrs(ctx, params)
+}
+
 func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
 		ParentHash:            baseHash,

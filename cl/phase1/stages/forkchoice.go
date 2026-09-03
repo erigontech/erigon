@@ -229,7 +229,7 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	return nil
 }
 
-func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
+func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
 	// [GLOAS] payload_attributes event is obsolete in GLOAS: the builder gossips SignedExecutionPayloadBid
 	// instead, and LatestExecutionPayloadHeader is no longer updated in GLOAS states.
 	if cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
@@ -284,6 +284,20 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		},
 	}
 	cfg.emitter.State().SendPayloadAttributes(e)
+
+	// Deliver the SAME next-slot attributes to the execution layer AHEAD of block production, so a DAG-L2
+	// based rollup can open the block and start executing it (header + block-start system tx) under them
+	// instead of waiting for the build trigger. Runs per slot on EVERY client (this routine is not the
+	// proposer path). No-op on execution clients that don't support it (the wire engine API). The parent
+	// (head) execution hash is the head payload header's block hash.
+	// TODO(fee-recipient): SuggestedFeeRecipient is empty here (a follower can't know the proposer's local
+	// registration). Once the L2 validator-registration contract lands, source it deterministically by
+	// proposerIndex (GetBeaconProposerIndexForSlot) so every client executes the identical coinbase.
+	if cfg.executionClient != nil {
+		if err := cfg.executionClient.NewPayloadAttrs(ctx, headPayloadHeader.BlockHash, &payloadAttributes); err != nil {
+			log.Warn("failed to deliver payload attributes to execution", "err", err)
+		}
+	}
 	return nil
 }
 
@@ -359,7 +373,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	cfg.blobDownloader.SetHeadSlot(headSlot)
 	// First emit events that depend on the head state.
 	emitHeadEvent(cfg, headSlot, headRoot, headState)
-	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)
+	emitNextPaylodAttributesEvent(ctx, cfg, headSlot, headRoot, headState)
 
 	if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(tx, headState, headRoot, headState.Slot()); err != nil {
 		logger.Warn("failed to produce and cache attestation data", "err", err)

@@ -154,6 +154,13 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	return idBytes, nil
 }
 
+func (cc *ExecutionClientDirect) NewPayloadAttrs(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) error {
+	if attributes == nil {
+		return nil
+	}
+	return cc.chainRW.NewPayloadAttrs(ctx, head, attributes)
+}
+
 func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
