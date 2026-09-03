@@ -41,8 +41,8 @@ type seenPayloadAttestationKey struct {
 	validatorIndex uint64
 }
 
-// pendingPayloadAttestationKey tracks attestations waiting for their block to arrive.
-// Key is (blockRoot, validatorIndex) since each validator can only submit one attestation per block.
+// pendingPayloadAttestationKey identifies a queued attestation. messageRoot keeps
+// messages with the same block and validator distinct until validation.
 type pendingPayloadAttestationKey struct {
 	blockRoot      common.Hash
 	validatorIndex uint64
@@ -69,7 +69,7 @@ type payloadAttestationService struct {
 	// Cache to track seen attestations: (slot, validatorIndex) -> struct{}
 	seenAttestationsCache *lru.Cache[seenPayloadAttestationKey, struct{}]
 
-	// Pending attestations waiting for block to arrive.
+	// pending retains attestations until their referenced blocks are available.
 	pending             *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage]
 	validationAdmission chan struct{}
 }
@@ -95,15 +95,20 @@ func NewPayloadAttestationService(
 		seenAttestationsCache: seenCache,
 		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
-	s.pending = s.newPendingQueue()
-	go s.pending.loop(ctx)
+	s.pending = s.newPendingQueue(ctx)
 	return s
 }
 
-func (s *payloadAttestationService) newPendingQueue() *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
-	return newPendingJobQueue(maxPendingAttestations, pendingPayloadAttestationExpiry, pendingPayloadAttestationCheckInterval,
+func (s *payloadAttestationService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "payload_attestation",
+		capacity:      maxPendingAttestations,
+		expiry:        pendingPayloadAttestationExpiry,
+		checkInterval: pendingPayloadAttestationCheckInterval,
+	},
 		s.tryProcessPendingAttestation,
-		func(key pendingPayloadAttestationKey) {
+		s.processPendingAttestation,
+		func(key pendingPayloadAttestationKey, _ *cltypes.PayloadAttestationMessage) {
 			log.Trace("Pending payload attestation expired", "blockRoot", key.blockRoot)
 		})
 }
@@ -157,7 +162,9 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	blockHeader, ok := s.forkchoiceStore.GetHeader(blockRoot)
 	if !ok {
 		// Block hasn't arrived yet, queue attestation for later processing
-		s.queuePendingAttestation(blockRoot, msg)
+		if err := s.queuePendingAttestation(blockRoot, msg); err != nil {
+			return fmt.Errorf("%w: payload attestation pending queue admission failed: %w", ErrIgnore, err)
+		}
 		log.Trace("Queued payload attestation for later processing",
 			"blockRoot", blockRoot,
 			"validatorIndex", validatorIndex)
@@ -203,37 +210,47 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	return nil
 }
 
-// queuePendingAttestation adds an attestation to the pending queue for later processing.
-func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	_ = s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
-		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
+// queuePendingAttestation defers an attestation until its referenced block is available.
+// It returns an error when the pending queue cannot admit the attestation.
+func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) error {
+	err := s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
+		return pendingPayloadAttestationKeyFor(blockRoot, msg)
 	})
+	if err != nil && !errors.Is(err, errPendingJobQueueFull) {
+		log.Warn("Failed to hash payload attestation for pending queue",
+			"blockRoot", blockRoot, "validatorIndex", msg.ValidatorIndex, "err", err)
+	}
+	return err
 }
 
-func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
-	root, _ := msg.HashSSZ()
+func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return pendingPayloadAttestationKey{}, err
+	}
 	return pendingPayloadAttestationKey{
 		blockRoot:      blockRoot,
 		validatorIndex: msg.ValidatorIndex,
 		messageRoot:    common.Hash(root),
-	}
+	}, nil
 }
 
-// tryProcessPendingAttestation re-runs validation via ProcessMessage once the block has arrived,
-// dropping attestations that are no longer for the current slot.
-func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) (func(), bool) {
+// tryProcessPendingAttestation drops stale messages, keeps messages whose block
+// is unavailable, and schedules the rest for validation after removal.
+func (s *payloadAttestationService) tryProcessPendingAttestation(_ context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) pendingJobDecision {
 	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
 		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
-		return nil, true
+		return pendingJobRemove
 	}
 
 	if _, ok := s.forkchoiceStore.GetHeader(key.blockRoot); !ok {
-		return nil, false
+		return pendingJobKeep
 	}
+	return pendingJobRemoveThenProcess
+}
 
-	return func() {
-		if err := s.ProcessMessage(ctx, nil, msg); err != nil {
-			log.Trace("Failed to process pending payload attestation", "blockRoot", key.blockRoot, "err", err)
-		}
-	}, true
+func (s *payloadAttestationService) processPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) {
+	if err := s.ProcessMessage(ctx, nil, msg); err != nil {
+		log.Trace("Failed to process pending payload attestation", "blockRoot", key.blockRoot, "err", err)
+	}
 }
