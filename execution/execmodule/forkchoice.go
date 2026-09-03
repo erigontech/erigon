@@ -173,18 +173,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	defer UpdateForkChoiceDuration(time.Now())
 	// The next semaphore acquirer must observe settled state, so the bg-commit/
 	// bg-prune paths run this eagerly before handing the semaphore to their goroutine.
-	// Do NOT clear a RUN-AHEAD extending fork. In the frontier flow the atomic marker opens N+1 the instant
-	// N is sealed, so by the time N's FCU lands the ACTIVE extending fork is N+1 while this FCU canonicalises
-	// N from a PARKED gen (see PromoteBlock below). Clearing here closes N+1's live SharedDomains — the
-	// successor PromoteBlock deliberately kept alive — so the next assemble finds no extending fork and, since
-	// that bail returns before SealBlock's open-N+1 step, no successor is ever opened again. InsertBlocks
-	// guards the same state via frontierExtension; this is the FCU's equivalent.
-	var fcuNumber uint64
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
 		e.currentContext.ResetPendingUpdates()
-		if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && e.forkValidator.FrontierMode() && extNum > fcuNumber {
-			return
-		}
 		e.forkValidator.ClearWithUnwind()
 	})
 	defer cleanupBeforeSemaRelease()
@@ -280,7 +270,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
-	fcuNumber = fcuHeader.Number.Uint64()              // read by cleanupBeforeSemaRelease (run-ahead fork guard)
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
@@ -343,22 +332,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			finalisedBlockNum = *bn
 		}
-		// PREFETCH PROMOTE-ONCE no-op: a re-FCU of the block PromoteBlock just canonicalised. On the frontier
-		// path the promoted gen is kept LIVE as its successor's read-through parent (retired only when the
-		// successor canonicalises), so an L2 CL re-sending FCU(head) every slot would otherwise re-pass
-		// HasLiveGen below and RE-PROMOTE the same block — re-merging it and tearing down the eager-opened
-		// successor frontier (block N+1 then fails to assemble: the live-stall bug). The stock duplicate-FCU
-		// short-circuit just below MISSES this because a frontier block's canonicalHash(N) can legitimately
-		// differ from the promoted head until a clean canonicalisation lands. Match on the promoted-head record
-		// instead and no-op (writeForkChoiceHashes + Success), leaving the frontier untouched.
-		if e.forkValidator.IsPromotedHead(blockHash, fcuHeader.Number.Uint64()) {
-			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				LatestValidHash: blockHash,
-				Status:          ExecutionStatusSuccess,
-			}, false)
-			return nil
-		}
 		// as per https://github.com/ethereum/execution-apis/pull/786
 		// we short circuit reorgs if:
 		//   1. the head is an ancestor of the last finalised block
@@ -396,7 +369,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// misses them and the walk would backtrack to genesis and re-execute (GetDiffset failures). Treat a LIVE
 		// pre-executed gen as a valid merge point too — its state is already in memory, so there is nothing to
 		// unwind/re-execute below it; FCU adopts the target from the gen (PromoteBlock), no re-execution.
-		mergePoint := isCanonicalHash || e.forkValidator.HasLiveGen(currentParentHash, currentParentNumber)
+		mergePoint := isCanonicalHash || e.preExec.Live(currentParentHash, currentParentNumber)
 		// Find such point, and collect all hashes
 		newCanonicals := make([]*canonicalEntry, 0, 64)
 		newCanonicals = append(newCanonicals, &canonicalEntry{
@@ -427,7 +400,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
-			mergePoint = isCanonicalHash || e.forkValidator.HasLiveGen(currentParentHash, currentParentNumber)
+			mergePoint = isCanonicalHash || e.preExec.Live(currentParentHash, currentParentNumber)
 		}
 
 		unwindTarget := currentParentNumber
@@ -542,18 +515,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	// The FCU target is canonicalised from the pre-exec frontier when it is the active extending-fork head
-	// (the caught-up case — legacy MergeExtendingFork, UNCHANGED) OR, only in the run-ahead frontier flow, a
-	// PARKED gen below the active head (the marker-driven atomic open opened N+1 before N's FCU → the FCU
-	// target N is a parked gen). Parked-gen promotion is gated on frontierMode so non-frontier flows keep the
-	// legacy single-active-fork path exactly as before.
-	// Canonicalise the FCU target from the pre-exec frontier when it is the active extending-fork head OR,
-	// only in the run-ahead frontier flow, a PARKED gen below the active head (the marker-driven atomic open
-	// opened N+1 before N's FCU). PromoteBlock handles all three (active head in either mode, parked gen in
-	// frontier mode) and is byte-identical to the legacy MergeExtendingFork for the non-frontier active head;
-	// it returns false only if the target vanished, in which case we fall through to normal canonicalisation.
-	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash() ||
-		(e.forkValidator.FrontierMode() && e.forkValidator.HasLiveGen(blockHash, fcuHeader.Number.Uint64()))
+	// Canonicalise the FCU target from the in-memory candidate when it IS that candidate. There is one path
+	// here for both producer and follower: newPayload has already put the right SharedDomains in the
+	// validation slot — executing the payload for a follower, adopting the pre-executed generation for a
+	// block this node produced (see ValidatePayload's bridge) — so the FCU need not know which it was.
+	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
@@ -566,17 +532,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
-		promoted, err := e.forkValidator.PromoteBlock(ctx, tx, currentContext, e.accum, blockHash, fcuHeader.Number.Uint64())
-		if err != nil {
+		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		if promoted {
-			rawdb.WriteHeadBlockHash(tx, blockHash)
-		} else {
-			// Target vanished between the check and here — fall through to the normal canonical path.
-			mergeExtendingFork = false
-			stateFlushingInParallel = false
-		}
+		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice.
 	// TODO: rename initialCycle → atTip (inverted polarity) across stage/prune APIs.
@@ -764,7 +723,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				// Merged state through this head is now durable in the DB → let the fork validator retire
 				// parked pre-exec gens up to here (their branches are now readable from the committed DB).
 				if err == nil && headNumber != nil {
-					e.forkValidator.NotifyCommitted(*headNumber)
+					e.preExec.NotifyCommitted(*headNumber)
 				}
 				// Signal that the DB commit is done — RPC consumers can
 				// drop their SD reference and read from committed DB.
@@ -784,7 +743,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// Merged state through this head is now durable in the DB → let the fork validator retire parked
 			// pre-exec gens up to here (their branches are now readable from the committed DB, not only mem).
 			if headNumber != nil {
-				e.forkValidator.NotifyCommitted(*headNumber)
+				e.preExec.NotifyCommitted(*headNumber)
 			}
 			commitTimings = ct
 

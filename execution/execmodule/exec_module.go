@@ -202,6 +202,9 @@ type ExecModule struct {
 	// goroutines inherit the semaphore, releasing it only when their work is done.
 	semaphore        *semaphore.Weighted
 	forkValidator    *ForkValidator
+	// preExec is the PRODUCER's pre-executed block chain — separate from the fork validator's candidate
+	// slot, which is validation space (see preexec_frontier.go).
+	preExec          *preExecFrontier
 	pipelineExecutor *PipelineExecutor
 
 	logger log.Logger
@@ -315,13 +318,15 @@ func NewExecModule(
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
-	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
+	preExec := newPreExecFrontier()
+	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, preExec)
 
 	em := &ExecModule{
 		blockReader:             blockReader,
 		db:                      db,
 		logger:                  logger,
 		forkValidator:           forkValidator,
+		preExec:                 preExec,
 		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
@@ -497,15 +502,20 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// uses only status + LatestValidHash (ComputedRoot is ignored). Only fires for number <= committed, so a
 	// freshly-produced tip block (dev-l1 or L2, number > committed) still executes normally — it does NOT
 	// short-circuit an un-applied block (the canonicalHeaderIfAny/HasValidHash mistake that froze dev-l1).
-	if blockNumber <= e.forkValidator.CommittedHeight() {
+	if blockNumber <= e.preExec.CommittedHeight() {
 		return ValidationResult{ValidationStatus: ExecutionStatusSuccess, LatestValidHash: blockHash}, nil
 	}
 	e.pendingBlockMu.Lock()
 	sealed := e.sealedByHash[blockHash]
 	e.pendingBlockMu.Unlock()
 	if sealed != nil && sealed.Number.Uint64() == blockNumber {
+		// This is newPayload for a block THIS node produced, so it is where the pre-executed generation
+		// crosses into validation space — the FCU that follows canonicalises it through the ordinary merge
+		// path, exactly as it would a block a follower had executed. Without the adopt the block is accepted
+		// but no candidate is installed, and the FCU falls through to re-executing it from canonical state.
+		adopted := e.forkValidator.AdoptPreExecuted(blockHash, blockNumber)
 		e.logger.Info("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
-			"number", blockNumber, "hash", blockHash, "root", sealed.Root)
+			"number", blockNumber, "hash", blockHash, "root", sealed.Root, "adopted", adopted)
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusSuccess,
 			LatestValidHash:  blockHash,
@@ -582,7 +592,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	// Flashblock detection: check whether this block is a prefix-extension
 	// of an in-progress flashblock before clearing the fork validator state.
 	// body.Transactions is needed for the prefix comparison.
-	flashUpdate := e.forkValidator.CheckFlashblockUpdate(blockNumber, body.Transactions)
+	flashUpdate := e.preExec.CheckUpdate(blockNumber, body.Transactions)
 	if flashUpdate.IsUpdate {
 		e.logger.Debug("[execmodule] flashblock update detected",
 			"number", blockNumber, "hash", blockHash,
@@ -702,7 +712,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 
 	// Record tx hashes for flashblock prefix detection on subsequent updates.
 	if status == engine_types.ValidStatus && body != nil {
-		e.forkValidator.RecordFlashblockTxHashes(body.Transactions)
+		e.preExec.RecordTxHashes(body.Transactions)
 
 		// Intra-block notification: tell subscribers these txs are validated.
 		// Noop when no subscribers (standard Ethereum). In flashblock mode
@@ -834,7 +844,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 // node supplies the body from HERE rather than from the wire (the transmission optimization: the body was
 // already delivered as DAG tx hashes and pre-executed). Empty extending fork ⇒ error.
 func (e *ExecModule) GetPreExecutedBody(ctx context.Context) (*types.RawBody, common.Hash, uint64, error) {
-	oldHash, number, sd := e.forkValidator.ExtendingFork()
+	oldHash, number, sd := e.preExec.Active()
 	if sd == nil || oldHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: no in-progress flashblock")
 	}
@@ -975,9 +985,12 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	if err := ov.Delete(kv.HeaderTD, dbutils.HeaderKey(number, oldHash)); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: delete deferred TD: %w", err)
 	}
-	if err := e.forkValidator.SealInPlace(oldHash, newHash, number); err != nil {
+	if err := e.preExec.SealActive(oldHash, newHash, number); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: seal in place: %w", err)
 	}
+	// The block is now fully sealed (its block-end has run), so record the sealed hash as validated: a
+	// newPayload of it short-circuits rather than re-executing.
+	e.forkValidator.MarkValid(newHash)
 	// Record the sealed block so newPayload/ValidateChain ACCEPTS it (this node produced+validated it once on
 	// the frontier) instead of re-executing it on a fresh SD against lagging canonical state.
 	e.pendingBlockMu.Lock()

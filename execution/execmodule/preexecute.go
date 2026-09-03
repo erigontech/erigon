@@ -106,7 +106,7 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 	}
 
 	// Flashblock prefix detection against the in-progress flashblock.
-	flashUpdate := e.forkValidator.CheckFlashblockUpdate(blockNumber, body.Transactions)
+	flashUpdate := e.preExec.CheckUpdate(blockNumber, body.Transactions)
 	reuse := flashUpdate.IsUpdate && flashUpdate.SD != nil
 	prefixLen := 0 // already-executed txs (kept as-is); only the NEW suffix past this is candidate-filtered
 	if reuse {
@@ -136,32 +136,24 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 		// txs. The block-end system tx is NOT skipped: it shifts as the body grows and re-runs each
 		// round (op-rbuilder revert/reapply). The skip-loop (exec3.go) then creates tasks only for the
 		// new txs → prefix not re-executed, OnTx fires once, state comes from the carried-forward SD.
-		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, roTx, blockNumber); merr == nil {
+		// Resolve the block's first txNum through the SD's OWN overlay, not the bare DB tx: an in-progress
+		// block is not in the DB, so a DB-only read resolves to a STALE lower block and execution resumes
+		// inside an ALREADY-SEALED block, replaying its txs ("nonce too low"). The overlay carries this
+		// block's txNum index (written at open, and copied forward along the frontier chain).
+		resumeTx := kv.TemporalTx(roTx)
+		if ov := doms.BlockOverlay(); ov != nil {
+			resumeTx = ov
+		}
+		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, resumeTx, blockNumber); merr == nil {
 			doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
 			defer doms.ClearPreExecStart()
 		}
 	} else {
-		// Frontier SD chain ([[venue_exec_on_round_plan]]): the PREVIOUS block's still-live pre-executed
-		// SD (parked on the fork validator's stack, or the current extending fork when this is its
-		// successor) — the decoupled-boundary/under-load case where the predecessor opened but has not
-		// canonicalised yet. Capture it BEFORE constructing the SD so its initial SeekCommitment resolves
-		// through the parent's LIVE commitment, not the lagging DB. Fall back to currentContext (canonical)
-		// when no live frontier parent.
-		// PICK THE IMMEDIATE PREDECESSOR (blockNumber-1), not the newest PARKED gen (user 2026-08-26). Right
-		// after a marker close+open, block N's SD is the ACTIVE extending fork (just sealed, number ==
-		// blockNumber-1) and has NOT been parked yet — so NewestFrontierSD() is block N-1 (the GRANDPARENT).
-		// Chaining to the grandparent copies a txNum index missing block N's entry → AppendCanonicalTxNums for
-		// this block fails "append with gap" → the block can't open → no extending fork → seal returns nothing
-		// → FCU frozen. So prefer the extending fork when it IS the predecessor; fall back to the newest parked
-		// gen (deeper run-ahead) and then any lower extending fork.
-		var frontierParent *execctx.SharedDomains
-		if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && blockNumber > 0 && extNum == blockNumber-1 {
-			frontierParent = extSD
-		} else if p := e.forkValidator.NewestFrontierSD(); p != nil {
-			frontierParent = p
-		} else if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && extNum < blockNumber {
-			frontierParent = extSD
-		}
+		// Chain onto the predecessor's still-live pre-executed SD, captured BEFORE constructing this block's
+		// SD so its initial SeekCommitment resolves through the parent's LIVE commitment rather than the
+		// lagging DB (the predecessor has opened but not canonicalised). Falls back to currentContext
+		// (canonical) when there is no live ancestor — the first block after a restart.
+		frontierParent := e.preExec.ParentFor(blockNumber)
 		parent := frontierParent
 		if parent == nil {
 			parent = e.currentContext
@@ -263,19 +255,27 @@ func (e *ExecModule) preExecuteLocked(ctx context.Context, blockHash common.Hash
 		}
 	}
 
-	// EXECUTE only the new txs into the maintained SD (offset resumes past the prefix). The
-	// finished-block checks (gas/root) are gated off for the fork-validation flow — PreExecute
-	// is execution, not validation. ValidatePayload stores doms as fv.sharedDom (the guard there
-	// skips closing it when we pass it straight back in).
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
+	// EXECUTE only the new txs into the maintained SD (offset resumes past the prefix). PreExecute is
+	// EXECUTION, not validation — so it runs the block through ExecuteInto, which touches no validation
+	// state. (It used to call ValidatePayload, whose side effect of storing doms as fv.sharedDom is what
+	// put producer state in the validation slot and subjected it to newPayload/FCU teardown.)
+	status, notifications, validationError, criticalError := e.forkValidator.ExecuteInto(ctx, doms, tx, header, body.RawBody())
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
 	}
+	lvh := header.Hash()
 
-	// Record the accumulated tx hashes as the in-progress flashblock so the next PreExecute (and
-	// the final ValidateChain) detect the prefix and skip re-execution.
+	// Record the block in the pre-exec frontier — its own space, keyed by the hash it currently carries
+	// (the header re-hashes every round as the body grows, and the seal re-keys it again).
 	if status == engine_types.ValidStatus {
-		e.forkValidator.RecordFlashblockTxHashes(body.Transactions)
+		if reuse {
+			e.preExec.SetActiveHead(lvh, blockNumber)
+			e.preExec.SetActiveNotifications(notifications)
+		} else {
+			e.preExec.Open(doms, lvh, blockNumber)
+			e.preExec.SetActiveNotifications(notifications)
+		}
+		e.preExec.RecordTxHashes(body.Transactions)
 		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil && len(body.Transactions) > 0 {
 			txHashes := make([]common.Hash, len(body.Transactions))
 			for i, t := range body.Transactions {

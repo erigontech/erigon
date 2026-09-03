@@ -63,10 +63,6 @@ type BlockAssembler interface {
 // time by the cocoon node for a chain whose builder is the incremental/DAG model.
 func (e *ExecModule) SetBlockAssembler(ba BlockAssembler) {
 	e.blockAssembler = ba
-	// A DAG-boundary producer runs the decoupled frontier: block N+1 pre-execs on N's still-live SD
-	// while N's FCU lags. Arm the fork validator to KEEP the canonicalised block's SD alive (park it)
-	// so the successor reads N's live commitment. Off for normal sync/reorg (drop-on-merge as before).
-	e.forkValidator.SetFrontierMode(true)
 }
 
 // NewPayloadAttrs forwards the CL-delivered next-block payload attributes to the DAG boundary assembler so it
@@ -177,7 +173,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 // on the preconfirm path; (nil, false) to fall back to the normal from-scratch builder (no matching
 // preconfirmed block, or its attributes disagree with the FCU params). Caller MUST hold e.semaphore.
 func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, bool, error) {
-	oldHash, number, sd := e.forkValidator.ExtendingFork()
+	oldHash, number, sd := e.preExec.Active()
 	if sd == nil || oldHash == (common.Hash{}) {
 		e.logger.Warn("[ATTRS-SEAL] bail: no extending fork", "reqParent", params.ParentHash, "sdNil", sd == nil, "oldHash", oldHash)
 		return nil, false, nil // no preconfirmed flashblock → from-scratch builder
@@ -265,7 +261,7 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 
 	// Receipts the close accumulated + restamped on the sealed SD (zero re-exec).
 	var receipts types.Receipts
-	if _, _, sealedSD := e.forkValidator.ExtendingFork(); sealedSD != nil {
+	if _, _, sealedSD := e.preExec.Active(); sealedSD != nil {
 		receipts = sealedSD.FlashblockReceipts()
 	}
 
@@ -339,7 +335,7 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 	// "no extending fork", and — since that bail returns before SealBlock's open-N+1 step — every later assemble
 	// bails the same way. Treat "no SD" as "not open" and re-open fresh (resetting the stale body, which
 	// preExecuteFlashblockLocked would otherwise keep: it only auto-resets on a NEW block number).
-	_, _, extSD := e.forkValidator.ExtendingFork()
+	_, _, extSD := e.preExec.Active()
 
 	e.flash.mu.Lock()
 	if extSD == nil {
@@ -491,10 +487,9 @@ func (e *ExecModule) headerByHashLocked(ctx context.Context, hash common.Hash) *
 // abandonExtendingForkLocked discards the active pre-executed in-progress block so the next PreExecute re-opens
 // it from a fresh SD (re-running block-start under corrected attrs). Caller MUST hold e.semaphore. It is exec-
 // INTERNAL — the reconcile (SealBlock) and the boundary re-anchor (AssembleBlock) are its only callers, both
-// already under the semaphore; there is no public AbandonExtendingFork on the interface (a semaphore-free public
-// wrapper would be the anti-pattern this refactor removed). See ForkValidator.AbandonExtendingFork.
+// already under the semaphore.
 func (e *ExecModule) abandonExtendingForkLocked() {
-	e.forkValidator.AbandonExtendingFork()
+	e.preExec.Abandon()
 	// The driver re-opens the SAME block number FRESH after an abandon, so drop the maintained flashblock body
 	// too — otherwise PreExecuteFlashblock (which only auto-resets on a NEW number) would keep the stale body.
 	e.flash.mu.Lock()

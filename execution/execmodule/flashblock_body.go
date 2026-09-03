@@ -223,7 +223,7 @@ func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs Flas
 	}
 	{
 		var forkTxNum, curTxNum uint64
-		if _, _, esd := e.forkValidator.ExtendingFork(); esd != nil {
+		if _, _, esd := e.preExec.Active(); esd != nil {
 			forkTxNum = esd.TxNum()
 		}
 		if e.currentContext != nil {
@@ -319,15 +319,12 @@ func (e *ExecModule) frontierStateReader(ctx context.Context) (state.StateReader
 	if err != nil {
 		return nil, func() {}, err
 	}
-	// Mirror PreExecute's frontier-parent selection so the filter reads the SAME accumulated state execution
-	// will build on: the live extending fork if present, else the newest PARKED pre-executed gen (run-ahead:
-	// the last sealed block is parked, not yet canonical), else the canonical context. Reading lagging
-	// canonical DB here would make a valid next-nonce tx look like a future gap and be wrongly dropped.
+	// Read the SAME accumulated state execution will build on — the in-progress block's own SD — so the
+	// filter sees the nonces already applied on the frontier. Reading the lagging canonical DB here would
+	// make a valid next-nonce tx look like a future gap and be wrongly dropped.
 	var sd *execctx.SharedDomains
-	if _, _, extSD := e.forkValidator.ExtendingFork(); extSD != nil {
-		sd = extSD
-	} else if p := e.forkValidator.NewestFrontierSD(); p != nil {
-		sd = p
+	if _, _, activeSD := e.preExec.Active(); activeSD != nil {
+		sd = activeSD
 	} else {
 		sd = e.currentContext
 	}

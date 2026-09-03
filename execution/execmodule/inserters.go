@@ -24,7 +24,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -71,22 +70,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 // so the atomic assemble (SealBlock sealing N then opening N+1) can insert the successor block under its
 // single semaphore hold — re-acquiring here would deadlock. InsertBlocks acquires the semaphore and calls this.
 func (e *ExecModule) insertBlocksLocked(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
-	// Do NOT clear the extending-fork state when this insert is a flashblock UPDATE — a re-insert of
-	// the in-progress block number with a grown body. Clearing would close the accumulated PreExecute
-	// SharedDomains, forcing the next PreExecute to re-execute the whole body from scratch. A normal
-	// insert (new/different block, or no flashblock in progress) still clears as before.
-	flashblockUpdate := len(blocks) == 1 && blocks[0].Header != nil && e.forkValidator.InFlashblock(blocks[0].Header.Number.Uint64())
-	// A SUCCESSOR block that chains onto the live extending fork (its parent IS the extending-fork head)
-	// is the NEXT frontier block — it opens its SharedDomains parented to the extending fork's SD and reads
-	// that block's still-in-memory state. Clearing the extending fork here would physically destroy the
-	// parent the successor is about to chain to, forcing a re-execution of the pre-executed predecessor
-	// ("nonce too low"). Preserve it; FCU retires the frontier stack in order once it canonicalises.
-	frontierExtension := len(blocks) == 1 && blocks[0].Header != nil &&
-		e.forkValidator.ExtendingForkHeadHash() != (common.Hash{}) &&
-		blocks[0].Header.ParentHash == e.forkValidator.ExtendingForkHeadHash()
-	if !flashblockUpdate && !frontierExtension {
-		e.forkValidator.ClearWithUnwind()
-	}
+	// Clearing the validation candidate here is safe again: the producer's in-progress and run-ahead blocks
+	// live in the pre-exec frontier, which this cannot reach. (This used to need two guards — a flashblock
+	// UPDATE and a frontier EXTENSION — because both kinds of insert would otherwise have closed the
+	// SharedDomains the producer was still accumulating into or chaining onto.)
+	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the

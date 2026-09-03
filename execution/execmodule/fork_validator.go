@@ -57,32 +57,17 @@ type ForkValidator struct {
 	extendingForkHeadHash common.Hash
 	extendingForkNumber   uint64
 	maxReorgDepth         uint64
-	// preExecStack is an AUXILIARY chain of older, not-yet-canonical pre-executed SDs
-	// (frontier SD chain, [[venue_exec_on_round_plan]]). It sits ALONGSIDE the single
-	// sharedDom above — sharedDom stays the ACTIVE in-progress block exactly as before,
-	// and every existing method keeps operating on it unchanged. The stack holds only the
-	// PREVIOUS blocks' SDs that were pushed at OPEN (instead of being closed) so they
-	// survive as read-through parents while their FCU is still pending. Under load the
-	// pre-exec frontier outruns FCU; the stack lets block N+1 read N's carried-forward
-	// state instead of stale canonical. Ordered oldest→newest (tail = frontierParent's
-	// oldest, next to canonicalise). Popped+released on flush (FCU). Empty in steady state
-	// (depth 1 = just sharedDom). See preExecStack methods below.
-	preExecStack []*preExecGen
-	// frontierMode arms the decoupled-boundary lifecycle (DAG-L2 producer, set via SetFrontierMode from
-	// ExecModule.SetBlockAssembler). When true, MergeExtendingFork PARKS the canonicalised block's SD
-	// (keep-alive) so the successor block reads its live commitment through the parent chain, and retires
-	// parked gens STRICTLY below the canonicalised number. When false (normal sync/reorg), the merged SD
-	// is dropped on canonicalisation exactly as before. See [[consensus_advance_untested_regression]].
-	frontierMode bool
+	// preExec is the PRODUCER's pre-executed block chain — a separate space with its own lifecycle (see
+	// preexec_frontier.go). The validator only ever READS it, for the two things validation legitimately
+	// needs to know: that an ancestor is already pre-executed and must not be re-executed as a side fork,
+	// and that the block newPayload is validating is one we already built, so it can be PROMOTED into
+	// validation space instead of re-executed. Nothing here writes it; the dependency is one-directional.
+	preExec *preExecFrontier
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
 	blockReader services.FullBlockReader
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
-	// committedHeight is the last block whose merged state is FLUSHED+COMMITTED to the durable DB
-	// (set by NotifyCommitted after the FCU commit). Parked pre-exec gens are retired only once
-	// committed — see retireParkedUpTo. Guarded by fv.lock.
-	committedHeight uint64
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[common.Hash, bool]
 
@@ -92,10 +77,6 @@ type ForkValidator struct {
 	lock sync.Mutex
 
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
-
-	// Flashblock state: tracks tx hashes already executed for the
-	// in-progress block so we can detect prefix-extension updates.
-	flashblockTxHashes []common.Hash
 
 	// promotedHash/promotedNumber record the LAST block canonicalised by PromoteBlock (the prefetch
 	// "promoted" lifecycle state). A prefetched gen is kept live after promotion (it stays the read-through
@@ -108,40 +89,7 @@ type ForkValidator struct {
 	promotedNumber uint64
 }
 
-// preExecGen is one older, not-yet-canonical pre-executed SharedDomains parked on the
-// auxiliary preExecStack. It carries only what FCU needs to flush+retire it in order:
-// the SD itself and the block it belongs to. It does NOT duplicate the active-block
-// bookkeeping (flashblockTxHashes/notifications) — those stay on the ForkValidator for
-// the single active sharedDom.
-type preExecGen struct {
-	sd       *execctx.SharedDomains
-	headHash common.Hash
-	number   uint64
-}
-
-// pushPreExec parks an outgoing in-progress SD on the auxiliary stack at block OPEN, so
-// it survives as the read-through parent of the next block instead of being closed.
-// Caller must hold fv.lock.
-func (fv *ForkValidator) pushPreExec(sd *execctx.SharedDomains, headHash common.Hash, number uint64) {
-	if sd == nil {
-		return
-	}
-	fv.preExecStack = append(fv.preExecStack, &preExecGen{sd: sd, headHash: headHash, number: number})
-}
-
-// NewestFrontierSD returns the SD of the most-recently-parked pre-exec generation (the
-// parent a newly-opening block should chain to), or nil if the stack is empty. Takes the
-// lock — safe to call from PreExecute (which does not hold fv.lock).
-func (fv *ForkValidator) NewestFrontierSD() *execctx.SharedDomains {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	if len(fv.preExecStack) == 0 {
-		return nil
-	}
-	return fv.preExecStack[len(fv.preExecStack)-1].sd
-}
-
-func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
+func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader services.FullBlockReader, maxReorgDepth uint64, preExec *preExecFrontier) *ForkValidator {
 	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)
@@ -152,6 +100,7 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 		panic(err)
 	}
 	return &ForkValidator{
+		preExec:       preExec,
 		executor:      executor,
 		currentHeight: currentHeight,
 		blockReader:   blockReader,
@@ -163,51 +112,15 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 }
 
 // ExtendingForkHeadHash return the fork head hash of the fork that extends the canonical chain.
-// SetFrontierMode arms/disarms the decoupled-boundary keep-alive lifecycle (see frontierMode field).
-func (fv *ForkValidator) SetFrontierMode(on bool) {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	fv.frontierMode = on
-}
-
 func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	return fv.extendingForkHeadHash
 }
 
-// FrontierMode reports whether the decoupled-boundary keep-alive lifecycle is armed (the marker-driven
-// run-ahead flow). forkchoice uses it to gate parked-gen promotion (PromoteBlock) so non-frontier flows keep
-// the legacy single-active-fork merge path exactly as before.
-func (fv *ForkValidator) FrontierMode() bool {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.frontierMode
-}
-
-// NotifyCommitted records the last block whose merged state has been FLUSHED + COMMITTED to the durable DB
-// (called after runForkchoiceFlushCommit). A parked pre-exec gen may only be retired once its own merged state
-// is committed here — until then its commitment branches live only in its SD mem (no later merge carries them),
-// so closing it early makes a successor's commitment read them empty ("empty branch data read during unfold").
-// See retireParkedUpTo. Caller must NOT hold fv.lock.
-func (fv *ForkValidator) NotifyCommitted(height uint64) {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	if height > fv.committedHeight {
-		fv.committedHeight = height
-	}
-}
-
-// CommittedHeight is the last block whose merged state is flushed+committed to the durable DB. ValidateChain
-// uses it to short-circuit re-validation of already-applied (lagging) blocks WITHOUT building a fresh
-// SharedDomains that would displace the DAG frontier SD — see the ALREADY-COMMITTED fast-path.
-func (fv *ForkValidator) CommittedHeight() uint64 {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.committedHeight
-}
-
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
+// The head advancing invalidates a VALIDATION candidate fork built on the old head, so it is dropped here —
+// this no longer needs a frontier exemption, because the producer's run-ahead blocks are not in this slot.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
@@ -215,13 +128,6 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
-	// FRONTIER (user 2026-08-26): the active extending fork is a block AHEAD of the head (the frontier runs
-	// ahead of FCU), so the head advancing must NOT tear it down — FCU is a status update, not a block
-	// operation. Closing it here made block N+1's marker seal find "no extending fork" (guard1) the moment
-	// FCU advanced the head to N. Only the legacy sync/reorg flow invalidates the extending fork on head change.
-	if fv.frontierMode {
-		return
-	}
 	// If the head changed, previous assumptions on head are incorrect now.
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
@@ -230,29 +136,6 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.extendingForkNotifications = nil
 	fv.extendingForkNumber = 0
 	fv.extendingForkHeadHash = common.Hash{}
-}
-
-// AbandonExtendingFork closes and clears the ACTIVE extending-fork SD without touching the parked pre-exec
-// generations (which are prior blocks' read-through parents). It is used by the DAG producer to DISCARD a
-// PROVISIONALLY pre-executed in-progress block so the next open re-executes it from a fresh SD: the marker-
-// driven atomic open eager-opens block N+1 BEFORE its CL attributes are known (stamping placeholder attrs +
-// a placeholder block-start), and when N+1 stays empty until its own marker those attrs must be corrected.
-// A flashblock re-run alone cannot fix it — CheckFlashblockUpdate would REUSE the maintained SD and skip the
-// block-start system tx (SetPreExecStart), leaving the old ParentBeaconBlockRoot/PrevRandao state baked in.
-// Abandoning the SD forces PreExecute down its fresh-SD path, which re-runs block-start under the real attrs
-// and re-parents to the still-parked predecessor. Off the FCU path; safe because the abandoned block was never
-// canonicalised. Caller must NOT hold fv.lock.
-func (fv *ForkValidator) AbandonExtendingFork() {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	if fv.sharedDom != nil {
-		fv.sharedDom.Close()
-	}
-	fv.sharedDom = nil
-	fv.extendingForkNotifications = nil
-	fv.extendingForkHeadHash = common.Hash{}
-	fv.extendingForkNumber = 0
-	fv.flashblockTxHashes = nil
 }
 
 // MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
@@ -272,10 +155,10 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 		if err != nil {
 			return err
 		}
-		// closeOther = !frontierMode: in the frontier flow keep block N's SD alive+readable as its
-		// successor's read-through parent (parenting), rather than closing it in the merge (which broke
-		// parenting past the first hop). Canonical/normal flow closes it as before.
-		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum, !fv.frontierMode)
+		// Close the merged SD only if it is OURS. When it is a promoted pre-exec generation it is still the
+		// read-through parent of the block above it, and the frontier releases it in order once its state is
+		// durable — closing it here would break that chain past the first hop.
+		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum, !fv.preExec.Owns(fv.sharedDom))
 		if err != nil {
 			return err
 		}
@@ -285,33 +168,13 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
 	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
-	// Retire any parked pre-exec generations that are at/below the block just canonicalised
-	// (their state is now durable in the DB via the merge above / prior FCUs). Frontier SD
-	// chain retire step: flush+release TAIL-FIRST so a still-live child never reads a closed
-	// parent. Under the current serialized boundary the stack is empty and this is a no-op;
-	// under the decoupled boundary it bounds memory (the OOM guard). See
-	// [[venue_exec_on_round_plan]].
-	// Retire parked gens. In frontierMode retire STRICTLY BELOW the block just canonicalised (its own SD
-	// is kept parked as the successor's read-through frontier); otherwise retire ≤ (legacy behaviour).
-	retireUpTo := fv.extendingForkNumber
-	if fv.frontierMode {
-		fv.retireParkedUpTo(ctx, tx, retireUpTo, false /* strictlyBelow → keep the just-canonicalised gen */)
-		// FRONTIER KEEP-ALIVE ([[consensus_advance_untested_regression]], user 2026-08-24): do NOT drop this
-		// block's SD on canonicalisation. The successor block N+1 reads N's commitment trie THROUGH this SD
-		// (read-through parent) — the just-committed DB can be INCOMPLETE for that read (a near-root
-		// commitment branch is empty/absent until N is fully durable → "empty branch data read during
-		// unfold" when N+1 closes). Park N's SD so N+1 reads N's LIVE, complete commitment; it is retired one
-		// step later, when N+1 canonicalises, by which point N is fully durable. This is the "each preexec
-		// block moves preexec→currentContext in turn" lifecycle: the FCU promotes N into the canonical state
-		// but keeps N's preexec SD alive until the frontier moves past it.
-		if fv.sharedDom != nil {
-			fv.pushPreExec(fv.sharedDom, fv.extendingForkHeadHash, fv.extendingForkNumber)
-		}
-	} else {
-		fv.retireParkedUpTo(ctx, tx, retireUpTo, true /* inclusive ≤ — legacy */)
-	}
-	// Clean the ACTIVE extending-fork slot (its SD now lives on the park stack in frontierMode; legacy just
-	// clears the reference exactly as before — its state was transferred into the canonical SD by the merge).
+	// Release pre-exec generations strictly below the block just canonicalised: their state is now durable,
+	// while this block's own generation stays live as its successor's read-through parent (the committed DB
+	// can be incomplete for that read until the block is fully durable → "empty branch data read during
+	// unfold"). A no-op when the block did not come from the frontier.
+	fv.preExec.RetireBelow(ctx, tx, fv.extendingForkNumber)
+	// Clear the validation slot — its state was transferred into the canonical SD by the merge above (and
+	// the SD itself closed, unless the frontier still owns it).
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingForkNumber = 0
@@ -319,202 +182,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	return nil
 }
 
-// PromoteBlock canonicalises the specific block the FCU chose (blockHash/blockNumber) into the canonical
-// sd — which, when the frontier runs AHEAD (the marker-driven atomic open opened N+1 before N's FCU), may be
-// a PARKED pre-exec generation BELOW the active extending-fork head, not the head itself. It merges that
-// block's SD into canonical with keep-alive (closeOther=false, so the block stays readable as its successor's
-// read-through parent), retires parked gens strictly below it, and LEAVES the active run-ahead frontier
-// intact. Returns (true,nil) when it promoted a live pre-exec gen (active head or parked); (false,nil) when
-// the target is not a live gen (the caller falls back to the normal RunLoop canonicalisation — unchanged for
-// non-run-ahead flows). Caller must NOT hold fv.lock.
-func (fv *ForkValidator) PromoteBlock(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation, blockHash common.Hash, blockNumber uint64) (bool, error) {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-
-	activeHead := fv.sharedDom != nil && fv.extendingForkHeadHash == blockHash && fv.extendingForkNumber == blockNumber
-	var promoteSD *execctx.SharedDomains
-	if activeHead {
-		promoteSD = fv.sharedDom
-	} else {
-		for _, g := range fv.preExecStack {
-			if g.sd != nil && g.headHash == blockHash && g.number == blockNumber {
-				promoteSD = g.sd
-				break
-			}
-		}
-	}
-	if promoteSD == nil {
-		return false, nil // not a live pre-exec block → caller uses the normal canonical path
-	}
-
-	start := time.Now()
-	// Merge the chosen block's state into the canonical sd. closeOther follows the legacy rule: in the
-	// frontier flow keep the block's SD alive (closeOther=false) so its successor keeps reading it as the
-	// read-through parent; the normal/non-frontier flow closes it as before. This makes the ACTIVE-HEAD case
-	// byte-for-byte identical to MergeExtendingFork in both modes (so non-frontier flows are unchanged).
-	if err := promoteSD.FlushPendingUpdates(ctx, tx); err != nil {
-		return false, err
-	}
-	sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	otherTxNum, _, err := promoteSD.SeekCommitment(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	// Re-key canonical[N] in the PROMOTED gen's OWN overlay to its sealed head hash before the merge flushes
-	// that overlay into the canonical sd. During pre-exec StateStep wrote canonical[N]=deferred-placeholder
-	// there so exec3 could locate the in-progress block; copyFrontierChainTables then copied that placeholder
-	// forward through the whole frontier chain, and it has no stored header after the seal. promoteSD is the
-	// PARKED gen at the front of the queue (the sealed block N) — NOT the running frontier — so re-keying it
-	// here corrects the value sd.Merge propagates to the FCU sd (and thence durable) WITHOUT touching the live
-	// frontier's exec or a successor's SeekCommitment (the RunAheadEmptyTailDrain corruption Fix A caused by
-	// writing fv.sharedDom, the wrong SD). blockHash is the gen's sealed head. Without this the placeholder
-	// rides the merge to durable, and the first safe-checkpoint that lands on block N reads a header-less
-	// canonical hash → verifyForkchoiceHashes false → InvalidForkchoice → FCU skips its commit (the stall).
-	if ov := promoteSD.BlockOverlay(); ov != nil {
-		if err := rawdb.WriteCanonicalHash(ov, blockHash, blockNumber); err != nil {
-			return false, err
-		}
-	}
-	if err := sd.Merge(ctx, sdTxNum, promoteSD, otherTxNum, !fv.frontierMode); err != nil {
-		return false, err
-	}
-	timings, _ := fv.timingsCache.Get(blockHash)
-	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
-	fv.timingsCache.Add(blockHash, timings)
-	if fv.extendingForkNotifications != nil {
-		fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
-		fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
-	}
-
-	if fv.frontierMode {
-		// Frontier flow: retire parked gens STRICTLY BELOW the promoted block (their state is now durable);
-		// keep the promoted block itself parked as its successor's read-through frontier.
-		fv.retireParkedUpTo(ctx, tx, blockNumber, false)
-		if activeHead {
-			// Caught-up: promoted the active head — park it (keep-alive) then clear the active slot.
-			fv.pushPreExec(fv.sharedDom, fv.extendingForkHeadHash, fv.extendingForkNumber)
-			fv.sharedDom = nil
-			fv.extendingForkHeadHash = common.Hash{}
-			fv.extendingForkNumber = 0
-			fv.extendingForkNotifications = nil
-		} else {
-			// Run-ahead: promoted a parked gen below the active head — kept parked by retireParkedUpTo above;
-			// the active extending fork (the frontier running ahead) is untouched and keeps accumulating.
-			if err := fv.ensureParked(promoteSD, blockHash, blockNumber); err != nil {
-				return false, err
-			}
-		}
-	} else {
-		// Legacy non-frontier flow: identical to MergeExtendingFork — retire ≤ inclusive, clear the active slot
-		// (its state was transferred into the canonical SD by the merge, which also closed it).
-		fv.retireParkedUpTo(ctx, tx, blockNumber, true)
-		fv.sharedDom = nil
-		fv.extendingForkHeadHash = common.Hash{}
-		fv.extendingForkNumber = 0
-		fv.extendingForkNotifications = nil
-	}
-	// Record the promoted head so a re-FCU of the same block is a true no-op (promote-once). ONLY in
-	// frontier mode: there a promoted gen is kept live (re-FCU would re-promote) AND canonicalHash(N) can
-	// diverge from the head so the stock duplicate-FCU short-circuit misses. In non-frontier mode the stock
-	// short-circuit already handles a duplicate FCU, and recording here would wrongly no-op a re-FCU that
-	// must still recover (e.g. state-ahead-of-txNums) — so leave it untouched.
-	if fv.frontierMode {
-		fv.promotedHash = blockHash
-		fv.promotedNumber = blockNumber
-	}
-	return true, nil
-}
-
-// IsPromotedHead reports whether (hash, number) is exactly the last block PromoteBlock canonicalised,
-// i.e. a re-FCU of the current promoted head. updateForkChoice uses this to no-op such a re-FCU instead
-// of re-promoting (which would re-merge the block and tear down the eager-opened successor frontier).
-// Caller must NOT hold fv.lock.
-func (fv *ForkValidator) IsPromotedHead(hash common.Hash, number uint64) bool {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.promotedHash != (common.Hash{}) && fv.promotedHash == hash && fv.promotedNumber == number
-}
-
-// ensureParked guarantees the given SD is present on the park stack (idempotent) — used after promoting a
-// parked gen, whose retire step keeps it but whose bookkeeping we normalise here. Caller must hold fv.lock.
-func (fv *ForkValidator) ensureParked(sd *execctx.SharedDomains, headHash common.Hash, number uint64) error {
-	for _, g := range fv.preExecStack {
-		if g.sd == sd {
-			return nil
-		}
-	}
-	fv.pushPreExec(sd, headHash, number)
-	return nil
-}
-
-// retireParkedUpTo flushes+releases parked pre-exec generations whose block number is ≤
-// upTo, oldest-first (tail-first). Called from the FCU merge once a block canonicalises:
-// the parked predecessors' state is now durable in the DB, so their SDs can be released and
-// the auxiliary stack shrinks back toward empty. Best-effort on flush error (logged) — a
-// parked gen that fails to flush is still removed to avoid an unbounded stack, since its
-// state is either already durable (canonicalised) or will be re-derived on the next open.
-// Caller must hold fv.lock.
-func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx, upTo uint64, inclusive bool) {
-	// Retire parked pre-exec generations so the live-SD count stays FLAT. In frontierMode the caller passes
-	// inclusive=false (retire STRICTLY BELOW the just-canonicalised block, keeping that one block's SD parked as
-	// the successor's read-through parent); legacy passes inclusive=true. (This was temporarily disabled as a
-	// diagnostic in 2026-08 to rule out "SD closed too early"; re-enabled now that the consensus/txpool/L1
-	// issues are fixed — a growing preExecStack is a real SD leak.)
-	kept := fv.preExecStack[:0]
-	for _, g := range fv.preExecStack {
-		// inclusive=true → retire ≤ upTo (legacy). inclusive=false → retire STRICTLY BELOW upTo: the
-		// just-canonicalised block's own SD (g.number == upTo) is kept parked as the read-through frontier
-		// for its successor; it retires when the NEXT block canonicalises.
-		retire := g.number < upTo || (inclusive && g.number == upTo)
-		if retire {
-			if g.sd != nil {
-				// Best-effort flush: a parked gen at/below the canonicalised block either has
-				// its state already durable (via the active-block merge / a prior FCU) or it
-				// will be re-derived on the next open, so a flush error must not wedge FCU nor
-				// leak the stack — release regardless.
-				_ = g.sd.FlushPendingUpdates(ctx, tx)
-				g.sd.Close()
-			}
-			continue
-		}
-		kept = append(kept, g)
-	}
-	fv.preExecStack = kept
-}
-
 type HasDiff interface {
 	Diff() (*membatchwithdb.MemoryDiff, error)
-}
-
-// isPreExecutedLive reports whether (hash, number) is a block this validator has already PRE-EXECUTED
-// and still holds LIVE in memory — the active extending fork, or a parked frontier generation. Such a
-// block is a valid BASE for its successor: its full post-execution state lives in the SharedDomains the
-// successor chains to (preexecute SetParent), so ValidatePayload must NOT re-assemble+re-execute it as an
-// unvalidated side fork (which replays its txs against its own already-applied state → "nonce too low").
-// Caller must hold fv.lock.
-func (fv *ForkValidator) isPreExecutedLive(hash common.Hash, number uint64) bool {
-	if fv.sharedDom != nil && fv.extendingForkHeadHash == hash && fv.extendingForkNumber == number {
-		return true
-	}
-	for _, g := range fv.preExecStack {
-		if g.sd != nil && g.headHash == hash && g.number == number {
-			return true
-		}
-	}
-	return false
-}
-
-// HasLiveGen is the exported, locked form of isPreExecutedLive: reports whether (hash, number) is a live
-// pre-exec generation (the active extending fork or a parked frontier gen). forkchoice uses it to decide
-// whether an FCU target can be promoted from the frontier (PromoteBlock) — including a parked gen below the
-// run-ahead head — rather than re-executed via the normal canonical path.
-func (fv *ForkValidator) HasLiveGen(hash common.Hash, number uint64) bool {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.isPreExecutedLive(hash, number)
 }
 
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
@@ -530,6 +199,20 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	}
 	hash := header.Hash()
 	number := header.Number.Uint64()
+
+	// THE BRIDGE. This is the ONLY action that moves a SharedDomains from pre-exec space into validation
+	// space. When the payload is a block WE pre-executed — the producer's own block arriving back from the
+	// consensus layer — its post-state is already live in the frontier generation, so adopt that generation
+	// as the validation candidate instead of re-executing the body against its own already-applied state
+	// (which would fail "nonce too low"). The FCU then canonicalises it through the ordinary merge path, so
+	// producer and follower share one canonicalisation route.
+	//
+	// The generation is LENT, not handed over: the frontier still owns it and is still building the block
+	// above it, so every place that would close fv.sharedDom asks preExec.Owns first.
+	if fv.adoptPreExecutedLocked(hash, number) {
+		logger.Debug("[execmodule] newPayload promoted a pre-executed block", "number", number, "hash", hash)
+		return engine_types.ValidStatus, hash, nil, nil
+	}
 
 	// A flashblock CLOSE reuses the maintained accumulating SD (sd == fv.sharedDom) with accumulation
 	// now off. The accumulation rounds already ran the block's body through this same ValidatePayload
@@ -573,7 +256,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// SD (FCU lags). Chain to that live SD rather than treating it as a committed-canonical base — the
 	// latter reads a lagging/absent DB base and makes the commitment root diverge. A genuinely committed
 	// (non-live) canonical ancestor is unaffected: isPreExecutedLive is false there.
-	if fv.isPreExecutedLive(currentHash, unwindPoint) {
+	if fv.preExec.Live(currentHash, unwindPoint) {
 		foundCanonical = true
 		baseIsPreExecLive = true
 	}
@@ -618,7 +301,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		// blocks at once, so a run of extending blocks can still be un-canonicalised here). Its state is
 		// already in memory on the frontier stack — do not re-execute it. Takes PRECEDENCE over a canonical
 		// marking (a re-keyed-canonical-but-still-live frontier block must chain to its live SD, not the DB).
-		if fv.isPreExecutedLive(currentHash, unwindPoint) {
+		if fv.preExec.Live(currentHash, unwindPoint) {
 			foundCanonical = true
 			baseIsPreExecLive = true
 		}
@@ -634,26 +317,10 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	// Do NOT close the SD we are about to reuse. PreExecute (the flashblock
-	// pre-execution path) passes fv.sharedDom straight back in to carry the
-	// accumulated execution state forward across rounds — closing it here would
-	// destroy the very state being extended.
-	//
-	// When sd is a FRESH SD (a new block opening) the old sharedDom is being displaced.
-	// Two cases:
-	//  - SUCCESSOR opening (new block number > old): under the decoupled boundary the old
-	//    block may not have canonicalised yet, and the fresh block's SD is parented to it
-	//    (preexecute SetParent). Closing it would destroy the read-through parent, so PARK
-	//    it on the auxiliary preExecStack; FCU flushes+releases it in order later.
-	//  - Same/lower number (a fork replacement at this height, or a normal single-block
-	//    flow where the previous block already canonicalised): the old SD is obsolete →
-	//    close it, exactly as before.
-	if fv.sharedDom != nil && fv.sharedDom != sd {
-		if number > fv.extendingForkNumber && fv.extendingForkNumber != 0 {
-			fv.pushPreExec(fv.sharedDom, fv.extendingForkHeadHash, fv.extendingForkNumber)
-		} else {
-			fv.sharedDom.Close()
-		}
+	// Displace the previous validation candidate. Never close a SharedDomains the frontier owns — a promoted
+	// generation is on loan to validation, and the producer is still building on it.
+	if fv.sharedDom != nil && fv.sharedDom != sd && !fv.preExec.Owns(fv.sharedDom) {
+		fv.sharedDom.Close()
 	}
 	fv.sharedDom = sd
 	// Use the validation pipeline's own notifications object so that state
@@ -678,34 +345,23 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 // clear wipes out current extending fork data, this method is called after fcu is called,
 // because fcu decides what the head is and after the call is done all the non-chosen forks are
 // to be considered obsolete.
+// Only a SharedDomains that validation OWNS is closed here — a generation lent by the frontier
+// (an adopted pre-executed block) belongs to the producer, which is still building on top of it.
 func (fv *ForkValidator) clear() {
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingForkNumber = 0
-	if fv.sharedDom != nil {
+	if fv.sharedDom != nil && !fv.preExec.Owns(fv.sharedDom) {
 		fv.sharedDom.Close()
 	}
 	fv.sharedDom = nil
-	fv.flashblockTxHashes = nil
+	fv.extendingForkNotifications = nil
 }
 
-// InFlashblock reports whether an in-progress flashblock is being built at blockNumber. Used by
-// InsertBlocks to AVOID clearing the extending-fork state when a flashblock update (a re-insert of
-// the same in-progress block number with a grown body) arrives — clearing would destroy the
-// accumulated PreExecute SharedDomains that the update carries forward.
-func (fv *ForkValidator) InFlashblock(blockNumber uint64) bool {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	return fv.extendingForkNumber != 0 && fv.extendingForkNumber == blockNumber && len(fv.flashblockTxHashes) > 0
-}
-
-// ClearWithUnwind wipes out current extending fork data.
+// ClearWithUnwind wipes out current extending fork data. Unconditional again: with pre-exec state held
+// separately, this can no longer reach the producer's run-ahead blocks.
 func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	if fv.extendingForkNumber != 0 || fv.sharedDom != nil {
-		log.Warn("[FORK-CLEAR] wiping extending fork", "num", fv.extendingForkNumber,
-			"flashTxs", len(fv.flashblockTxHashes), "frontierMode", fv.frontierMode, "sdNil", fv.sharedDom == nil)
-	}
 	fv.clear()
 }
 
@@ -722,58 +378,88 @@ type FlashblockUpdate struct {
 	SD *execctx.SharedDomains
 }
 
-// CheckFlashblockUpdate checks whether the given block is a flashblock
-// update (prefix-extension) of the in-progress block.
+// AdoptPreExecuted moves the pre-executed generation for (hash, number) into validation space, making it the
+// candidate the next FCU canonicalises. It reports whether there was one.
 //
-// Returns IsUpdate=true when:
-//  1. The block number matches the in-progress extending fork number
-//  2. The in-progress block has flashblock tx hashes recorded
-//  3. Every previously-executed tx hash appears at the same position
-//     in the new block's transaction list (prefix match)
-//
-// When the prefix does NOT match (reordered transactions), the caller
-// should treat this as a restart: clear the old state and re-execute.
-func (fv *ForkValidator) CheckFlashblockUpdate(blockNumber uint64, txs []types.Transaction) FlashblockUpdate {
+// This is THE BRIDGE, and newPayload is its only caller — either ValidatePayload for a block that reaches
+// execution, or ValidateChain's locally-sealed fast path, which is what the producer's own block takes when
+// the consensus layer hands it back. Nothing else may move a SharedDomains from pre-exec into validation.
+func (fv *ForkValidator) AdoptPreExecuted(hash common.Hash, number uint64) bool {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-
-	// Reuse the maintained SD whenever it is already open for THIS block number. An EMPTY (0-tx)
-	// in-progress block IS reusable: the marker-driven atomic open creates N+1's SD (parented to N's live
-	// SD) as an empty block at close, then the first content round carries forward into it with PrefixLen=0.
-	// (Previously a `len(flashblockTxHashes) == 0` guard forced a fresh SD here, discarding the eager-opened
-	// one — the reuse conflict that made the atomic open create a second SD.)
-	if fv.extendingForkNumber != blockNumber || fv.sharedDom == nil {
-		return FlashblockUpdate{}
-	}
-
-	prevHashes := fv.flashblockTxHashes
-	if len(txs) < len(prevHashes) {
-		return FlashblockUpdate{}
-	}
-
-	for i, h := range prevHashes {
-		if txs[i].Hash() != h {
-			return FlashblockUpdate{}
-		}
-	}
-
-	return FlashblockUpdate{
-		IsUpdate:  true,
-		PrefixLen: len(prevHashes),
-		SD:        fv.sharedDom,
-	}
+	return fv.adoptPreExecutedLocked(hash, number)
 }
 
-// RecordFlashblockTxHashes records the transaction hashes executed for
-// the current in-progress flashblock so that subsequent updates can
-// detect prefix matches.
-func (fv *ForkValidator) RecordFlashblockTxHashes(txs []types.Transaction) {
+// adoptPreExecutedLocked is AdoptPreExecuted with fv.lock held. The generation is LENT, not transferred: the
+// frontier still owns the SharedDomains and is still building the block above it, so every place that would
+// close fv.sharedDom asks preExec.Owns first.
+func (fv *ForkValidator) adoptPreExecutedLocked(hash common.Hash, number uint64) bool {
+	sd, notifications := fv.preExec.Gen(hash, number)
+	if sd == nil {
+		return false
+	}
+	if fv.sharedDom != nil && fv.sharedDom != sd && !fv.preExec.Owns(fv.sharedDom) {
+		fv.sharedDom.Close()
+	}
+	fv.sharedDom = sd
+	fv.extendingForkHeadHash = hash
+	fv.extendingForkNumber = number
+	fv.extendingForkNotifications = notifications
+	fv.validHashes.Add(hash, true)
+	return true
+}
+
+// ExecuteInto runs header+body into the CALLER's SharedDomains and reports the outcome, touching no
+// validation state whatsoever — no extending fork, no validHashes, no candidate slot. It is the
+// PRODUCER's execution primitive: pre-exec needs execution, not validation, and routing it through
+// ValidatePayload (as it used to) is precisely what deposited pre-exec SharedDomains in the validation
+// slot and made block production inherit the validator's teardown rules.
+//
+// No unwind point: the block extends the pre-exec frontier in memory, whose state the SD already carries
+// through its parent chain — there is no canonical ancestor to unwind to.
+//
+// Returns the notifications accumulated for this block so the frontier can hold them; the FCU publishes
+// them if and when the block canonicalises.
+func (fv *ForkValidator) ExecuteInto(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody,
+) (status engine_types.EngineStatus, notifications *shards.Notifications, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	fv.flashblockTxHashes = make([]common.Hash, len(txs))
-	for i, tx := range txs {
-		fv.flashblockTxHashes[i] = tx.Hash()
+	if fv.executor == nil {
+		return engine_types.AcceptedStatus, nil, nil, nil
 	}
+	hash := header.Hash()
+	number := header.Number.Uint64()
+
+	// Use the pipeline's own notifications object so the state changes exec3 accumulates are visible here,
+	// reset per round to match a fresh Sync's behaviour.
+	notifications = fv.executor.ValidationNotifications()
+	notifications.Accumulator.Reset(0)
+	notifications.RecentReceipts.Clear()
+
+	start := time.Now()
+	if err := fv.executor.ValidateBlock(ctx, sd, tx, 0, []*types.Header{header}, []*types.RawBody{body}); err != nil {
+		if errors.Is(err, rules.ErrInvalidBlock) {
+			validationError = err
+		} else {
+			return status, nil, nil, fmt.Errorf("ExecuteInto: %w", err)
+		}
+	}
+	fv.timingsCache.Add(hash, BlockTimings{time.Since(start), 0})
+	if validationError != nil {
+		return engine_types.InvalidStatus, notifications, validationError, nil
+	}
+	if _, err := rawdb.WriteRawBodyIfNotExists(tx, hash, number, body); err != nil {
+		return status, nil, nil, err
+	}
+	return engine_types.ValidStatus, notifications, nil, nil
+}
+
+// MarkValid records a block hash as fully validated. The producer calls it once a block is SEALED (its
+// block-end has run), so a later newPayload of that hash short-circuits.
+func (fv *ForkValidator) MarkValid(hash common.Hash) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.validHashes.Add(hash, true)
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
@@ -834,46 +520,6 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 
 	status = engine_types.ValidStatus
 	return
-}
-
-// SealInPlace re-keys a freshly-closed flashblock from its deferred-output in-progress hash to the
-// SEALED header hash. After the CLOSE, validateAndStorePayload set extendingForkHeadHash and validHashes
-// to the in-progress (zero-output) hash; the exec module has now materialised the real-root header H1 in
-// the block overlay. Point the extending fork at H1 and mark it valid, so a normal FCU(H1) takes the
-// merge-extending-fork fast path (no re-execution) and canonicalises the correct header. The maintained
-// sharedDom (already holding the sealed state) and extendingForkNumber are unchanged.
-func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash, number uint64) error {
-	fv.lock.Lock()
-	defer fv.lock.Unlock()
-	if fv.extendingForkHeadHash == oldHash {
-		fv.extendingForkHeadHash = newHash
-	}
-	fv.validHashes.Add(newHash, true)
-	// The extending fork's SD block-overlay recorded HeadHeaderKey = oldHash (the executed in-progress
-	// header) during fork-validation StateStep. On the merge-extending-fork FCU, MergeExtendingFork
-	// flushes THIS overlay into the FCU tx (domain_shared.go), which would clobber the FCU's own
-	// HeadHeaderKey=newHash with the stale oldHash — and stage_finish then copies that into the head
-	// block hash, yielding a head/blockHash mismatch. Rewrite it to the sealed newHash here so the merge
-	// replays the correct head. (After this, the merged FCU state is identical to a normal newPayload's.)
-	if fv.sharedDom != nil {
-		if ov := fv.sharedDom.BlockOverlay(); ov != nil {
-			if err := rawdb.WriteHeadHeaderHash(ov, newHash); err != nil {
-				return err
-			}
-			// StateStep wrote kv.HeaderCanonical[number] = the deferred (root-0) placeholder hash during
-			// pre-exec so exec3 could locate the in-progress block; the seal above materialised the real
-			// sealed header but left that canonical row pointing at the placeholder. copyFrontierChainTables
-			// copies this SD's overlay canonical rows FORWARD into successor blocks' overlays, so the stale
-			// placeholder propagates and a later ValidateChain of this block reads a header-less canonical
-			// hash (senders "can't find header") and rebuilds+leaks a SharedDomains ([[shared_domain_lifecycle_leak]]).
-			// Re-key the canonical row to the sealed hash here, alongside HeadHeaderKey, so the forward copy
-			// carries the sealed hash and every later read resolves the real header.
-			if err := rawdb.WriteCanonicalHash(ov, newHash, number); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // GetTimings returns the timings of the last block validation.
