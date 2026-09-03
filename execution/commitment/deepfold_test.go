@@ -975,6 +975,40 @@ func buildStorageOnlyWhale(seed int64, wide, touch []byte, perNibble1, perNibble
 	return k1, u1, k2, u2
 }
 
+func FuzzParallelStorageOnlyEquivalence(f *testing.F) {
+	f.Add(int64(20260902), uint16(60), uint16(350), uint8(2))
+	f.Add(int64(0xB2), uint16(20), uint16(140), uint8(3))
+	f.Add(int64(0xC3), uint16(8), uint16(40), uint8(1))
+	f.Add(int64(0xD4), uint16(48), uint16(200), uint8(4))
+
+	f.Fuzz(func(t *testing.T, seed int64, per1, per2 uint16, nibCount uint8) {
+		perNibble1 := int(per1%32) + 1
+		perNibble2 := int(per2%192) + 1
+		nibbleCount := int(nibCount%3) + 2
+		wide := make([]byte, 0, nibbleCount)
+		for i := range nibbleCount {
+			wide = append(wide, byte(i*4))
+		}
+
+		k1, u1, k2, u2 := buildStorageOnlyWhale(seed, wide, wide, perNibble1, perNibble2)
+		for _, u := range u2 {
+			require.Equal(t, StorageUpdate, u.Flags, "batch 2 must carry storage writes only")
+		}
+
+		seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
+		parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+		require.Equal(t, seqRoot, parRoot)
+		if len(k2) > deepStorageThreshold {
+			require.NotZero(t, deepFolds,
+				"a storage-only round of %d slots over %d nibbles must deep-fold", len(k2), nibbleCount)
+		}
+	})
+}
+
 func TestDeepFold_StorageOnlyWhaleFoldsParallel(t *testing.T) {
 	k1, u1, k2, u2 := buildStorageOnlyWhale(20260902, nibs(3, 7), nibs(3, 7), 60, 350)
 	fk, fu := buildMixedCorpus(557, 200)
