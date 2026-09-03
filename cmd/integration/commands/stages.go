@@ -250,22 +250,13 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
 		migrateDB := func(label kv.Label, path string) {
-			logger.Info("Opening DB", "label", label, "path", path)
-			// Non-accede and exclusive mode - to apply creation of new tables if needed.
-			cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
-			db, err := openDB(ctx, cfg, true, chain, logger)
-			if err != nil {
+			if err := runMigrationsForDB(label, path, logger); err != nil {
 				logger.Error("Opening DB", "error", err)
-				return
 			}
-			defer db.Close()
-			// Nothing to do, migrations will be applied automatically
 		}
 
-		// Chaindata DB *must* be the first one because guaranteed to contain data in Config table
-		// (see openSnapshotOnce in allSnapshots below).
 		migrateDB(dbcfg.ChainDB, chaindata)
 
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
@@ -275,6 +266,17 @@ var cmdRunMigrations = &cobra.Command{
 			migrateDB(dbcfg.ConsensusDB, consensus)
 		}
 	},
+}
+
+func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
+	logger.Info("Opening DB", "label", label, "path", path)
+	cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
+	db, err := openRawDB(cfg, true, logger)
+	if err != nil {
+		return err
+	}
+	db.Close()
+	return nil
 }
 
 func init() {
