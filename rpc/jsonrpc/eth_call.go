@@ -91,20 +91,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
