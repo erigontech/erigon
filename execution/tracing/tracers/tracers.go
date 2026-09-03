@@ -30,6 +30,12 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 )
 
+// RawWriter takes already-encoded JSON. It is the half of the RPC stream a
+// tracer needs, kept here so tracers do not depend on the stream package.
+type RawWriter interface {
+	WriteRawBytes(content []byte)
+}
+
 // Context contains some contextual infos for a transaction execution that is not
 // available from within the EVM object.
 type Context struct {

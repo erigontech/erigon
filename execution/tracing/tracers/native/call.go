@@ -332,10 +332,9 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if len(t.callstack) != 1 {
 		return nil, errors.New("incorrect number of top-level calls")
 	}
-	res, err := json.Marshal(t.callstack[0])
-	if err != nil {
-		return nil, err
-	}
+	var buf byteWriter
+	t.callstack[0].AppendJSON(&buf)
+	res := buf.b
 	if p := t.reason.Load(); p != nil {
 		return res, *p
 	}
