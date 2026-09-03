@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -309,4 +310,26 @@ func TestEmitHeadEventsPreservesLegacyHeadFields(t *testing.T) {
 	require.True(t, legacy.ExecutionOptimistic)
 	require.Equal(t, headEvent.Data.CurrentEpochDependentRoot, legacy.PreviousDutyDependentRoot)
 	require.Equal(t, headEvent.Data.NextEpochDependentRoot, legacy.CurrentDutyDependentRoot)
+}
+
+func TestEmitHeadEventsPreGloasEmitsHeadV2AsFull(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "full"}}
+
+	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		return headRoot, 10, "full", false, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, beaconevents.StateHead, (<-ch).Event)
+	select {
+	case v2 := <-ch:
+		require.Equal(t, beaconevents.StateHeadV2, v2.Event)
+		require.Equal(t, "full", v2.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	case <-time.After(time.Second):
+		t.Fatal("head_v2 event was not emitted")
+	}
 }

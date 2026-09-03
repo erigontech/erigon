@@ -310,6 +310,23 @@ func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 	}
 }
 
+func TestNewForkGraphDiskKeepsAnchorHeaderVisibleAcrossSkippedSlots(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	anchorState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, anchorState.SetSlot(64))
+	anchorState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 31})
+	anchorRoot, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+
+	forkGraph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := forkGraph.(*forkGraphDisk)
+
+	_, ok := graph.GetHeader(anchorRoot)
+	require.True(t, ok)
+	require.Equal(t, uint64(64), graph.LowestAvailableSlot())
+}
+
 // A prune for an already-covered slot (e.g. from a concurrent lock-free drain)
 // must not move the lowest-available marker backward past deleted data.
 func TestPruneKeepsLowestAvailableBlockMonotonic(t *testing.T) {
