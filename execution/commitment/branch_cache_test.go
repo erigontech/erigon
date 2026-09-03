@@ -384,7 +384,7 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	nodeKey, nibble, ok := v3NodeKeyOf(deepKey)
 	require.True(t, ok)
 	var records [16][]byte
-	present, _, ok := c.GetNode(nodeKey, &records)
+	present, _, ok := c.GetNode(nodeKey, ^uint16(0), &records)
 	require.True(t, ok, "invalidating the state key must not evict real entries")
 	require.NotZero(t, present&(uint16(1)<<nibble))
 	require.Equal(t, []byte("d"), records[nibble])

@@ -50,7 +50,7 @@ func TestBranchCacheKeepsV3RecordKeysDistinct(t *testing.T) {
 		nodeKey, nibble, ok := v3NodeKeyOf(tc.key)
 		require.True(t, ok)
 		var records [16][]byte
-		present, _, ok := c.GetNode(nodeKey, &records)
+		present, _, ok := c.GetNode(nodeKey, ^uint16(0), &records)
 		require.Truef(t, ok, "record %x was evicted", tc.key)
 		require.NotZerof(t, present&(uint16(1)<<nibble), "record %x was evicted", tc.key)
 		require.Equalf(t, []byte(tc.want), records[nibble], "record %x reads back another node's value", tc.key)
@@ -67,7 +67,7 @@ func TestBranchCacheNodeEntryKeepsChildrenDistinct(t *testing.T) {
 		c.Put(v3RecordKey(path, byte(child)), []byte{byte(child), 0xaa}, uint64(child), uint64(child))
 	}
 	var records [16][]byte
-	present, step, ok := c.GetNode(nibbles.EncodeKeyV3(path), &records)
+	present, step, ok := c.GetNode(nibbles.EncodeKeyV3(path), ^uint16(0), &records)
 	require.True(t, ok)
 	require.Equal(t, ^uint16(0), present, "every child written must be present")
 	require.Equal(t, uint64(15), step, "the node reports the newest child's step")
@@ -77,7 +77,7 @@ func TestBranchCacheNodeEntryKeepsChildrenDistinct(t *testing.T) {
 
 	// Dropping one child must leave the rest in place.
 	c.Invalidate(v3RecordKey(path, 7))
-	present, _, ok = c.GetNode(nibbles.EncodeKeyV3(path), &records)
+	present, _, ok = c.GetNode(nibbles.EncodeKeyV3(path), ^uint16(0), &records)
 	require.True(t, ok)
 	require.Zero(t, present&(1<<7), "the invalidated child must be gone")
 	require.Equal(t, ^uint16(0)&^uint16(1<<7), present, "its siblings must survive")
@@ -91,6 +91,7 @@ func TestBranchCacheV3EdgeKeysRouteToDistinctSlots(t *testing.T) {
 	// under test, so pin it rather than let the adaptive depth decide.
 	c.maxDepth = trunkDepthFull
 	c.accountTrunk = newAccountTrunk(trunkDepthFull)
+	c.edgeTrunk = newAccountTrunk(trunkDepthFull)
 
 	// Compared by address: two empty slots are deep-equal, only identity distinguishes them.
 	seen := make(map[string][]byte, 16+256+4096+65536)
@@ -146,4 +147,37 @@ func v3PathsUpTo(maxLen int) [][]byte {
 		}
 	}
 	return paths
+}
+
+func TestBranchCacheV3CachesOnlyWrittenChildren(t *testing.T) {
+	c := NewBranchCache(1024, true)
+	defer c.Close()
+
+	path := []byte{6, 2}
+	nodeKey := nibbles.EncodeKeyV3(path)
+
+	c.Put(v3RecordKey(path, 3), []byte("child-3"), 4, 40)
+
+	var records [16][]byte
+	present, _, ok := c.GetNode(nodeKey, ^uint16(0), &records)
+	require.True(t, ok)
+	require.Equal(t, uint16(1)<<3, present,
+		"a node must cache the one child written, not its unwritten siblings")
+
+	c.Put(v3RecordKey(path, 9), []byte("child-9"), 5, 50)
+
+	present, step, ok := c.GetNode(nodeKey, ^uint16(0), &records)
+	require.True(t, ok)
+	require.Equal(t, uint16(1)<<3|uint16(1)<<9, present,
+		"a later write must not drop the sibling written before it")
+	require.Equal(t, []byte("child-3"), records[3])
+	require.Equal(t, []byte("child-9"), records[9])
+	require.Equal(t, uint64(5), step, "the node reports the newest child's step")
+
+	var narrow [16][]byte
+	present, _, ok = c.GetNode(nodeKey, uint16(1)<<9, &narrow)
+	require.True(t, ok)
+	require.Equal(t, uint16(1)<<9, present, "an unfold must get only the nibble it asked for")
+	require.Nil(t, narrow[3], "a masked-out sibling must not be materialised")
+	require.Equal(t, []byte("child-9"), narrow[9])
 }
