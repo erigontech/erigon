@@ -336,7 +336,12 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
-		prepared.codeHash = crypto.Keccak256(prepared.value)
+		// GetCodeByHash is called with a 32-byte keccak; anything else would
+		// file the entry under an address no reader queries.
+		prepared.codeHash = update.CodeHash
+		if len(prepared.codeHash) != len(common.Hash{}) {
+			prepared.codeHash = crypto.Keccak256(prepared.value)
+		}
 	}
 	return prepared
 }
@@ -504,11 +509,6 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool, updates []StateUpdate) {
-	prepared := make([]preparedStateUpdate, len(updates))
-	for i := range updates {
-		prepared[i] = prepareStateUpdate(updates[i])
-	}
-
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	if !c.beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum, hasUnwind) {
@@ -518,8 +518,9 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// Sub-caches synchronize their own reads and writes. While publishing is
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
-	for i := range prepared {
-		c.applyPrepared(prepared[i])
+	// One at a time: preparing the batch up front clones every value at once.
+	for i := range updates {
+		c.applyPrepared(prepareStateUpdate(updates[i]))
 	}
 
 	c.finishPublication(committedStateVersion)
