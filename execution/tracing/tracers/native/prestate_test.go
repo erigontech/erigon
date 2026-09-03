@@ -207,6 +207,40 @@ func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
 	require.False(t, inPost, "unmodified account with only a zero storage slot must not appear in post state")
 }
 
+// A MarshalJSON on callFrame makes encoding/json re-scan every nested frame's
+// bytes at each level, which is quadratic in call depth. Reflection over the
+// wire types encodes children inline instead.
+func TestCallFrameHasNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	_, bad := any(&callFrame{}).(json.Marshaler)
+	require.False(t, bad, "callFrame must not implement json.Marshaler")
+}
+
+// A zero value and a call to the zero address are both real, so only a nil
+// pointer may be omitted. The flat tracer depends on this: it fills in a zero
+// value for child calls precisely so the key is present.
+func TestOnlyNilPointersAreOmitted(t *testing.T) {
+	t.Parallel()
+	zeroV := hexutil.U256(*uint256.NewInt(0))
+	var zeroAddr common.Address
+
+	var set callFrame
+	set.setType(vm.CALL)
+	set.Value, set.To = &zeroV, &zeroAddr
+	b, err := json.Marshal(set)
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"value":"0x0"`)
+	require.Contains(t, string(b), `"to":"0x0000000000000000000000000000000000000000"`)
+
+	var unset callFrame
+	unset.setType(vm.CREATE)
+	b, err = json.Marshal(unset)
+	require.NoError(t, err)
+	require.NotContains(t, string(b), `"value"`)
+	require.NotContains(t, string(b), `"to"`)
+	require.Contains(t, string(b), `"input":"0x"`, "input carries no omitempty")
+}
+
 // A MarshalJSON on account makes encoding/json re-parse every account's bytes
 // while encoding the map that holds them. Reflection over the wire types does
 // not.
