@@ -210,7 +210,7 @@ func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 		to   = call.To
 	)
 	if typ == vm.CALL || typ == vm.STATICCALL {
-		if t.isPrecompiled(to) {
+		if to != nil && t.isPrecompiled(*to) {
 			t.tracer.callstack[len(t.tracer.callstack)-1].Calls = parent.Calls[:len(parent.Calls)-1]
 		}
 	}
@@ -332,7 +332,7 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 		},
 		Result: &flatCallResult{
 			GasUsed: toHexUint64Ptr(input.GasUsed),
-			Address: &input.To,
+			Address: input.To,
 			Code:    &resultCode,
 		},
 	}
@@ -348,7 +348,7 @@ func newFlatCall(input *callFrame) *flatCallFrame {
 		Type: strings.ToLower(vm.CALL.String()),
 		Action: flatCallAction{
 			From:     &input.From,
-			To:       &input.To,
+			To:       input.To,
 			Gas:      toHexUint64Ptr(input.Gas),
 			Value:    input.Value,
 			CallType: strings.ToLower(input.Type.String()),
@@ -367,7 +367,7 @@ func newFlatSelfdestruct(input *callFrame) *flatCallFrame {
 		Action: flatCallAction{
 			SelfDestructed: &input.From,
 			Balance:        input.Value,
-			RefundAddress:  &input.To,
+			RefundAddress:  input.To,
 		},
 	}
 }

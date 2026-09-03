@@ -396,9 +396,7 @@ func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, bea
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
 	// Retrieve the head state.
-	var headState *state.CachingBeaconState
-	var err error
-	headState, err = cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
