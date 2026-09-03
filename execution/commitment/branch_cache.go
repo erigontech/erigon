@@ -541,7 +541,8 @@ func (c *BranchCache) store(prefix []byte, entry branchCacheEntry) {
 			}
 			// Get is lock-free; ReplaceIfPresent locks the bucket even on a
 			// miss, and a miss is the common case here.
-		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, newKeyedBranchCacheEntry(prefix, entry)) {
+		} else if ke, present := st.deep.Get(prefix); present && ke != nil && ke.matchesPrefix(prefix) &&
+			st.deep.ReplaceIfPresent(prefix, newKeyedBranchCacheEntry(prefix, entry)) {
 			return
 		}
 	}

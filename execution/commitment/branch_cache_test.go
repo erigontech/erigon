@@ -639,6 +639,39 @@ func TestBranchCache_DeepTierPrefixMismatchServesMiss(t *testing.T) {
 	require.False(t, ok, "deep-tier entry whose stored prefix no longer matches must miss, not serve foreign bytes")
 }
 
+func TestBranchCache_DeepTierCollidingWriteKeepsForeignEntry(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefix := make([]byte, 33+3)
+	prefix[0] = 0x10
+	for i := 1; i < len(prefix); i++ {
+		prefix[i] = byte(i * 13)
+	}
+	c.PinEntry(prefix, []byte("foreign-data"), 0, 0)
+
+	var nibBuf [4]byte
+	st, n, ok := c.storageRoute(prefix, false, &nibBuf)
+	require.True(t, ok)
+	require.Nil(t, st.slot(&nibBuf, n, false), "prefix must overflow into the deep tier for this test to be meaningful")
+
+	ke, found := st.deep.Get(prefix)
+	require.True(t, found)
+	foreign := []byte("a-different-prefix-entirely")
+	ke.prefixLen = uint8(copy(ke.prefix[:], foreign))
+
+	c.Put(prefix, []byte("own-data"), 0, 0)
+
+	after, found := st.deep.Get(prefix)
+	require.True(t, found)
+	require.True(t, after.matchesPrefix(foreign), "a colliding write must not evict the entry that owns the bucket")
+	require.Equal(t, []byte("foreign-data"), after.data)
+
+	data, _, hit := c.Get(prefix)
+	require.True(t, hit, "the colliding write must still be readable, from the keyed tail")
+	require.Equal(t, []byte("own-data"), data)
+}
+
 func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 	for depth := range 9 {
 		total := 64 + depth
