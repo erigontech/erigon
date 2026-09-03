@@ -311,7 +311,7 @@ func TestBlocksGateUsesOnDiskFloor(t *testing.T) {
 	require.ErrorIs(t, err, state.PrunedError)
 }
 
-func TestFeeHistoryUsesPhysicalTransactionFloor(t *testing.T) {
+func TestFeeHistoryTruncatesAtPhysicalTransactionFloor(t *testing.T) {
 	t.Parallel()
 
 	wide := prune.Distance(pruneGatingChainLen * 3)
@@ -320,8 +320,14 @@ func TestFeeHistoryUsesPhysicalTransactionFloor(t *testing.T) {
 	})
 	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: chainInfo.old.num + 1}
 
-	_, err := apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(chainInfo.old.num), []float64{50})
-	require.ErrorIs(t, err, state.PrunedError)
+	result, err := apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(chainInfo.old.num), []float64{50})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.Reward)
+	require.Empty(t, result.BaseFee)
+	require.Empty(t, result.GasUsedRatio)
+	require.Empty(t, result.BlobBaseFee)
+	require.Empty(t, result.BlobGasUsedRatio)
 }
 
 func TestPruneGatesSkipPhysicalFloorsAtHead(t *testing.T) {

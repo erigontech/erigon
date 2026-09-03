@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -721,7 +720,8 @@ func (b *GasPriceOracleBackend) HeaderByHashNumber(ctx context.Context, hash com
 }
 
 func (b *GasPriceOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
-	if err := b.checkBlockAvailable(ctx, number); err != nil {
+	available, err := b.isBlockAvailable(ctx, number)
+	if err != nil || !available {
 		return nil, err
 	}
 	return b.baseApi.blockWithSenders(ctx, b.tx, hash, number)
@@ -739,13 +739,14 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 }
 
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	if err := b.checkBlockAvailable(ctx, number.Uint64()); err != nil {
+	available, err := b.isBlockAvailable(ctx, number.Uint64())
+	if err != nil || !available {
 		return nil, err
 	}
 	return b.baseApi.blockByNumberWithSenders(ctx, b.baseApi.filters.WithOverlay(b.tx), number.Uint64())
 }
 
-func (b *GasPriceOracleBackend) checkBlockAvailable(ctx context.Context, number uint64) error {
+func (b *GasPriceOracleBackend) isBlockAvailable(ctx context.Context, number uint64) (bool, error) {
 	// One backend serves one request through a pinned transaction, so its physical
 	// block floor is stable and needs to be resolved only once.
 	b.blocksFloorOnce.Do(func() {
@@ -757,12 +758,9 @@ func (b *GasPriceOracleBackend) checkBlockAvailable(ctx context.Context, number 
 		b.blocksFloor, b.blocksFloorErr = b.baseApi.blocksAvailableFrom(ctx, b.tx, head)
 	})
 	if b.blocksFloorErr != nil {
-		return b.blocksFloorErr
+		return false, b.blocksFloorErr
 	}
-	if number < b.blocksFloor {
-		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, number, b.blocksFloor)
-	}
-	return nil
+	return number >= b.blocksFloor, nil
 }
 
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
