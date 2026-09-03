@@ -84,7 +84,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(lastTxNum, unboundedFinalityCtx)
+	err = agg.BuildFiles(m.DB, lastTxNum, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {
@@ -178,7 +178,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(lastTxNum, unboundedFinalityCtx)
+	err = agg.BuildFiles(m.DB, lastTxNum, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {
