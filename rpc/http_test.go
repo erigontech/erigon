@@ -361,6 +361,14 @@ func TestHTTPRequestFraming(t *testing.T) {
 		// replaced stopped after the first value and ignored the rest.
 		{"trailing second value", `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]}{"a":1}`, `parse error`},
 		{"trailing garbage", `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]} oops`, `parse error`},
+		// Valid JSON that is not an object reaches the handler as a zero message
+		// and is an invalid request, not a parse error.
+		{"bare number body", `1`, `"code":-32600`},
+		{"bare string body", `"str"`, `"code":-32600`},
+		{"bare bool body", `true`, `"code":-32600`},
+		// Only the offending field is dropped, so the id still comes back and the
+		// caller can match the error to its request.
+		{"wrong-type field keeps the id", `{"jsonrpc":"2.0","id":7,"method":123,"params":["a",1]}`, `"id":7`},
 	}
 
 	srv := newTestServer(log.New())
