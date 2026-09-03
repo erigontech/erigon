@@ -925,8 +925,8 @@ func (ht *HistoryTraceKeyDB) advance() error {
 }
 
 func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
-	var err error
 	if ht.valsCDup == nil {
+		var err error
 		if ht.valsCDup, err = ht.roTx.CursorDupSort(ht.valsTable); err != nil {
 			return err
 		}
@@ -946,7 +946,8 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 			return err
 		}
 	} else {
-		ht.k, ht.v, err = ht.valsCDup.NextDup()
+		k, v, err := ht.valsCDup.NextDup()
+		ht.k, ht.v = k, v
 		if err != nil {
 			return err
 		}
@@ -967,8 +968,8 @@ func (ht *HistoryTraceKeyDB) advanceSmallVals() error {
 }
 
 func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
-	var err error
 	if ht.valsC == nil {
+		var err error
 		if ht.valsC, err = ht.roTx.Cursor(ht.valsTable); err != nil {
 			return err
 		}
@@ -993,7 +994,8 @@ func (ht *HistoryTraceKeyDB) advanceLargeVals() error {
 		return nil
 	}
 
-	ht.k, ht.v, err = ht.valsC.Next()
+	k, v, err := ht.valsC.Next()
+	ht.k, ht.v = k, v
 	if err != nil {
 		return err
 	}
