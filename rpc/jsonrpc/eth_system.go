@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -583,9 +584,6 @@ func (b *GasPriceOracleBackend) PrepareFork(context.Context) error {
 		return b.parentTipErr
 	}
 	b.forkPrepared = true
-	if b.db == nil {
-		return nil
-	}
 	b.parentTip, b.parentTipErr = tipCanonicalMarker(b.tx)
 	return b.parentTipErr
 }
@@ -656,6 +654,7 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	}
 	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
+		log.Debug("gas price: fork tx unavailable, serving sequentially", "err", err)
 		return nil, nil, nil
 	}
 	// A fresh tx takes its own database snapshot, which can already carry a
@@ -667,6 +666,7 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if tx.ViewID() != b.parentViewID {
 		keeps, err := b.keepsParentIdentities(tx)
 		if err != nil || !keeps {
+			log.Debug("gas price: fork snapshot unusable, serving sequentially", "keepsParentIdentities", keeps, "err", err)
 			tx.Rollback()
 			return nil, nil, nil
 		}

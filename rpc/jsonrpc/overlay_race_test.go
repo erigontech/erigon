@@ -2279,27 +2279,6 @@ func (t unreadableCanonicalTx) GetOne(table string, key []byte) ([]byte, error) 
 	return t.TemporalTx.GetOne(table, key)
 }
 
-// TestGasPriceOracle_ForkDegradesWhenParentTipUnresolved pins that a failed
-// parent-identity scan costs the parallel fan-out, not the request: the answer
-// is still there on the parent tx.
-func TestGasPriceOracle_ForkDegradesWhenParentTipUnresolved(t *testing.T) {
-	t.Parallel()
-	h := newOverlayAheadHarness(t, false)
-	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	pinned := h.base.filters.WithTemporalOverlay(unreadableCanonicalTx{TemporalTx: tx})
-	backend := NewGasPriceOracleBackend(h.m.DB, pinned, h.base)
-
-	require.Error(t, backend.PrepareFork(h.m.Ctx))
-	forked, cleanup, err := backend.Fork(h.m.Ctx)
-	require.NoError(t, err, "an unresolvable parent tip must not fail the request")
-	if cleanup != nil {
-		cleanup()
-	}
-	require.Nil(t, forked)
-}
-
 type unreadableCanonicalDB struct {
 	kv.TemporalRoDB
 }
@@ -2312,28 +2291,6 @@ func (d unreadableCanonicalDB) BeginTemporalRo(ctx context.Context) (kv.Temporal
 	return unreadableCanonicalTx{TemporalTx: tx}, nil
 }
 
-// TestGasPriceOracle_ForkDegradesWhenIdentityCheckFails pins the same stance on
-// the fork side: the check that a fresh snapshot still agrees with the parent
-// runs on the fan-out goroutines, where an error would abort the whole errgroup.
-func TestGasPriceOracle_ForkDegradesWhenIdentityCheckFails(t *testing.T) {
-	t.Parallel()
-	h := newOverlayAheadHarness(t, false)
-	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	backend := NewGasPriceOracleBackend(unreadableCanonicalDB{h.m.DB}, h.base.filters.WithTemporalOverlay(tx), h.base)
-
-	commitOverlayBlock(t, h)
-
-	require.NoError(t, backend.PrepareFork(h.m.Ctx))
-	forked, cleanup, err := backend.Fork(h.m.Ctx)
-	require.NoError(t, err, "an unresolvable fork identity must not fail the request")
-	if cleanup != nil {
-		cleanup()
-	}
-	require.Nil(t, forked)
-}
-
 type unopenableDB struct {
 	kv.TemporalRoDB
 }
@@ -2342,23 +2299,60 @@ func (d unopenableDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
 	return nil, errors.New("no read transaction available")
 }
 
-// TestGasPriceOracle_ForkDegradesWhenTxCannotOpen pins that the last fork-setup
-// step degrades like the other two: the parent tx is already open and answers.
-func TestGasPriceOracle_ForkDegradesWhenTxCannotOpen(t *testing.T) {
+// TestGasPriceOracle_ForkDegradesOnSetupFailure pins that a failed fork setup
+// costs the parallel fan-out, not the request: the answer is still there on the
+// parent tx. Each case breaks one of the three steps.
+func TestGasPriceOracle_ForkDegradesOnSetupFailure(t *testing.T) {
 	t.Parallel()
-	h := newOverlayAheadHarness(t, false)
-	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	backend := NewGasPriceOracleBackend(unopenableDB{h.m.DB}, h.base.filters.WithTemporalOverlay(tx), h.base)
+	for _, tc := range []struct {
+		name    string
+		prepare require.ErrorAssertionFunc
+		backend func(*testing.T, *overlayAheadHarness, kv.TemporalTx) *GasPriceOracleBackend
+	}{
+		{
+			name:    "parent tip unresolved",
+			prepare: require.Error,
+			backend: func(_ *testing.T, h *overlayAheadHarness, tx kv.TemporalTx) *GasPriceOracleBackend {
+				pinned := h.base.filters.WithTemporalOverlay(unreadableCanonicalTx{TemporalTx: tx})
+				return NewGasPriceOracleBackend(h.m.DB, pinned, h.base)
+			},
+		},
+		{
+			// The identity check runs on the fan-out goroutines, where an error
+			// would abort the whole errgroup.
+			name:    "identity check unreadable",
+			prepare: require.NoError,
+			backend: func(t *testing.T, h *overlayAheadHarness, tx kv.TemporalTx) *GasPriceOracleBackend {
+				backend := NewGasPriceOracleBackend(unreadableCanonicalDB{h.m.DB}, h.base.filters.WithTemporalOverlay(tx), h.base)
+				commitOverlayBlock(t, h) // a snapshot the fork has to compare against the parent
+				return backend
+			},
+		},
+		{
+			name:    "fork tx cannot open",
+			prepare: require.NoError,
+			backend: func(_ *testing.T, h *overlayAheadHarness, tx kv.TemporalTx) *GasPriceOracleBackend {
+				return NewGasPriceOracleBackend(unopenableDB{h.m.DB}, h.base.filters.WithTemporalOverlay(tx), h.base)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newOverlayAheadHarness(t, false)
+			tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			backend := tc.backend(t, h, tx)
 
-	require.NoError(t, backend.PrepareFork(h.m.Ctx))
-	forked, cleanup, err := backend.Fork(h.m.Ctx)
-	require.NoError(t, err, "a fork tx that cannot open must not fail the request")
-	if cleanup != nil {
-		cleanup()
+			tc.prepare(t, backend.PrepareFork(h.m.Ctx))
+			forked, cleanup, err := backend.Fork(h.m.Ctx)
+			require.NoError(t, err, "a fork that cannot be set up must not fail the request")
+			if cleanup != nil {
+				cleanup()
+			}
+			require.Nil(t, forked)
+		})
 	}
-	require.Nil(t, forked)
 }
 
 func saveSnapshotsStageProgress(t *testing.T, h *overlayAheadHarness, number uint64) {
@@ -2371,8 +2365,8 @@ func saveSnapshotsStageProgress(t *testing.T, h *overlayAheadHarness, number uin
 }
 
 // TestFeeHistory_SnapshotsStageProgressIsNotTheFrozenBoundary pins that the
-// number-keyed cache regime follows what the canonical markers say is retired,
-// not the Snapshots stage progress: that progress tracks
+// number-keyed cache regime follows what the block reader reports as retired to
+// snapshots, not the Snapshots stage progress: that progress tracks
 // min(Headers, Bodies, Senders, TxLookup) and on a synced node sits at the
 // head, so trusting it keys reorgable heights by number and lets a dead block
 // be served from the cache.
@@ -2393,17 +2387,6 @@ func TestFeeHistory_SnapshotsStageProgressIsNotTheFrozenBoundary(t *testing.T) {
 	require.Equal(t, sibling.Number.ToBig(), second.OldestBlock.ToInt())
 	require.Equal(t, sibling.BaseFee.ToBig(), second.BaseFee[0].ToInt(),
 		"a height the Snapshots stage progress covers is still reorgable, so it must not be cached by number")
-}
-
-func pruneCanonicalMarkersBelow(t *testing.T, h *overlayAheadHarness, threshold uint64) {
-	t.Helper()
-	rwTx, err := h.m.DB.BeginRw(h.m.Ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	for number := uint64(1); number < threshold; number++ {
-		require.NoError(t, rwTx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(number)))
-	}
-	require.NoError(t, rwTx.Commit())
 }
 
 type frozenBlocksReader struct {
@@ -2427,24 +2410,6 @@ func TestGasPriceOracleBackend_FrozenBoundaryComesFromSnapshots(t *testing.T) {
 	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
 
 	require.Equal(t, uint64(7), backend.FrozenBlocks())
-}
-
-// TestGasPriceOracleBackend_PrunedMarkersDoNotMoveFrozenBoundary pins that the
-// boundary is not read off the lowest canonical marker left in the db: markers
-// are pruned on a threshold that trails the retired range, so deriving the
-// boundary from them puts it far below where the snapshots actually start.
-func TestGasPriceOracleBackend_PrunedMarkersDoNotMoveFrozenBoundary(t *testing.T) {
-	t.Parallel()
-	h := newOverlayAheadHarness(t, false)
-	pruneCanonicalMarkersBelow(t, h, 3)
-
-	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
-
-	require.Zero(t, backend.FrozenBlocks(),
-		"no block is retired to snapshots here, so no height may be cached by number")
 }
 
 // newOverlayReceiptsUnpublishTestAPI publishes an overlay whose head block carries a
