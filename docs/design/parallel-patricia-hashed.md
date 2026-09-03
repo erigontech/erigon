@@ -174,10 +174,19 @@ variant (§10).
 3. **Aggregate.** `stitchSplitCells` overlays the folded child cells onto the unfolded
    base row (setting/clearing each touched present bit, leaving untouched on-disk
    siblings intact) and `foldSplitRow` folds it once to the account's storage-root cell.
-4. **Inject.** `setAccountStorageRoot` writes that hash into the account leaf
-   (`cell.hash`, `hashLen = 32`); `computeCellHash` uses it as the storageRoot for an
-   account whose storage cell was not streamed, so the leaf hashes identically to the
-   serial path. The DFS then skips the account's storage children.
+   Three outcomes: an empty row with no prior branch returns an empty cell; two or more
+   survivors fold into a branch cell and write the branch record at the split prefix;
+   a single survivor does not fold at all — `splitCellFromSingleChild` deletes the
+   branch record at the split prefix and promotes the survivor one nibble shallower,
+   prepending its nibble to the extension of a keyless sub-branch (and mirroring it into
+   `hashedExtension`) or to the hashed path of a keyed leaf, exactly as
+   `fillFromLowerCell`/`deriveHashedKeys` would at the destination depth.
+4. **Inject.** `setAccountStorageRoot` carries the returned cell onto the account leaf:
+   a branch or extension root as `cell.extension`/`cell.hash`, a single surviving slot as
+   `storageAddr`/`Storage` with `hashLen = 0`. `computeCellHash` derives the storageRoot
+   from whichever it finds for an account whose storage cell was not streamed, so the
+   leaf hashes identically to the serial path. The DFS then skips the account's storage
+   children.
 
 Below `deepStorageThreshold`, or with storage in a single first nibble, the account
 streams inline as in §4.1 — the per-account setup cost (a pooled worker, a fresh
