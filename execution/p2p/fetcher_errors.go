@@ -170,8 +170,8 @@ func (e ErrBodyDoesNotMatchHeader) Unwrap() error {
 }
 
 func (e ErrBodyDoesNotMatchHeader) Is(err error) bool {
-	var mismatchErr *ErrBodyDoesNotMatchHeader
-	return errors.As(err, &mismatchErr)
+	_, ok := errors.AsType[*ErrBodyDoesNotMatchHeader](err)
+	return ok
 }
 
 func NewErrMissingBodies(headers []*types.Header) *ErrMissingBodies {
