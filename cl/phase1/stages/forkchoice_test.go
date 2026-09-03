@@ -287,6 +287,40 @@ func TestEmitHeadEventsDropsStalePayloadStatus(t *testing.T) {
 	require.Empty(t, ch)
 }
 
+func TestEmitHeadEventsDoesNotHoldHeadEventLockWhileLegacySubscriberBlocks(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	legacyEvents := make(chan *beaconevents.EventStream)
+	sub := emitter.State().Subscribe(legacyEvents)
+	defer sub.Unsubscribe()
+
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{PayloadStatus: "pending"}}
+	validated := make(chan struct{})
+	emitDone := make(chan error, 1)
+	go func() {
+		emitDone <- emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+			select {
+			case <-validated:
+			default:
+				close(validated)
+			}
+			return headRoot, 10, "pending", false, nil
+		})
+	}()
+	<-validated
+
+	lockAcquired := make(chan struct{})
+	go emitter.WithHeadEventLock(func() { close(lockAcquired) })
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("slow legacy subscriber held the shared head event lock")
+	}
+
+	sub.Unsubscribe()
+	require.NoError(t, <-emitDone)
+}
+
 func TestEmitHeadEventsPreservesLegacyHeadFields(t *testing.T) {
 	emitter := beaconevents.NewEventEmitter()
 	ch := make(chan *beaconevents.EventStream, 2)

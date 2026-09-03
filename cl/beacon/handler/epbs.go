@@ -858,7 +858,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		return
 	}
 
-	if signedEnvelope.Message == nil {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
 	}
@@ -1094,12 +1094,7 @@ func (a *ApiHandler) pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope
 	if bid == nil || bid.Message == nil || bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
 		return nil, nil
 	}
-	bidRoot, err := bid.Message.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
-	cached, ok := a.pendingBuilderPayloads.Get(a.ethClock.GetCurrentSlot(), block.Block.Slot,
-		bid.Message.BlockHash, common.Hash(bidRoot))
+	cached, ok := a.pendingBuilderPayloads.Get(a.ethClock.GetCurrentSlot(), bid.Message)
 	if !ok || cached == nil || len(cached.BlobBundles) == 0 {
 		return nil, nil
 	}
@@ -1410,10 +1405,6 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	if err != nil {
 		return nil, err
 	}
-	if !state.CanBuilderCoverBid(baseState, builderIndex, value) {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("execution payload bid is unavailable for builder index %d", builderIndex))
-	}
 	latestSlot := a.ethClock.GetCurrentSlot()
 	if slot < latestSlot || slot-latestSlot > 1 {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
@@ -1442,23 +1433,20 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 			errors.New("execution payload bid is unavailable because the execution parent changed"))
 	}
 	bid.BuilderIndex = builderIndex
-	bid.Value = value
-	bid.ExecutionPayment = 0
+	bid.Value = 0
+	bid.ExecutionPayment = value
 	if options.selfBuildPayload == nil {
 		return nil, errors.New("local execution payload is unavailable")
 	}
 	if err := validateLocalExecutionPayloadBid(a.beaconChainCfg, slot, bid, options.selfBuildPayload); err != nil {
 		return nil, err
 	}
-	bidRoot, err := bid.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
-	if !a.pendingBuilderPayloads.Add(latestSlot, slot, bid.BlockHash, common.Hash(bidRoot), options.selfBuildPayload) {
+	storedBid, ok := a.pendingBuilderPayloads.Add(latestSlot, bid, options.selfBuildPayload)
+	if !ok {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			errors.New("pending execution payload bid capacity is unavailable"))
 	}
-	return newBeaconResponse(bid).WithVersion(clparams.GloasVersion), nil
+	return newBeaconResponse(storedBid).WithVersion(clparams.GloasVersion), nil
 }
 
 func executionPayloadValueGwei(value *big.Int) (uint64, error) {
@@ -1638,12 +1626,7 @@ func (a *ApiHandler) localExecutionPayloadEnvelope(root common.Hash, block *clty
 	if bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
 		cached, ok = a.selfBuildPayloads.Get(bid.Message.BlockHash)
 	} else if a.pendingBuilderPayloads != nil {
-		bidRoot, hashErr := bid.Message.HashSSZ()
-		if hashErr != nil {
-			return nil, hashErr
-		}
-		cached, ok = a.pendingBuilderPayloads.Get(a.ethClock.GetCurrentSlot(), block.Block.Slot,
-			bid.Message.BlockHash, common.Hash(bidRoot))
+		cached, ok = a.pendingBuilderPayloads.Get(a.ethClock.GetCurrentSlot(), bid.Message)
 	}
 	if !ok {
 		return nil, nil

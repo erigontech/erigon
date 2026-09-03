@@ -1756,8 +1756,10 @@ func TestForwardBeaconDownloaderMixedOwnerProcessErrorRestartsOverlap(t *testing
 
 	requests := make(chan cltypes.BeaconBlocksByRangeRequest, 3)
 	var requestCount atomic.Int32
+	var banned []string
 	downloader := &ForwardBeaconDownloader{
 		beaconCfg: &clparams.MainnetBeaconConfig,
+		banPeer:   func(peerID string) { banned = append(banned, peerID) },
 		requestBlocksByRange: func(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 			requests <- cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count}
 			switch requestCount.Add(1) {
@@ -1784,6 +1786,7 @@ func TestForwardBeaconDownloaderMixedOwnerProcessErrorRestartsOverlap(t *testing
 	downloader.RequestMore(t.Context())
 	<-requests
 	require.Equal(t, frontier, downloader.GetHighestProcessedSlot())
+	require.Equal(t, []string{"peer-a"}, banned)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -1795,6 +1798,39 @@ func TestForwardBeaconDownloaderMixedOwnerProcessErrorRestartsOverlap(t *testing
 	cancel()
 	<-done
 	require.Equal(t, frontier-2, retry.StartSlot)
+}
+
+func TestForwardBeaconDownloaderMixedOwnerProcessErrorBansCurrentPeerAfterLookahead(t *testing.T) {
+	const frontier = uint64(100)
+	cached := makeGloasBlock(frontier+1, hash(0xa1), common.Hash{})
+	successor := makeGloasBlock(frontier+2, hash(0xa2), hash(0xb1))
+	grandchild := makeGloasBlock(frontier+3, hash(0xa3), hash(0xb2))
+	linkBeaconBlocks(t, cached, successor, grandchild)
+
+	var requestCount atomic.Int32
+	var banned []string
+	downloader := &ForwardBeaconDownloader{
+		beaconCfg: &clparams.MainnetBeaconConfig,
+		banPeer:   func(peerID string) { banned = append(banned, peerID) },
+		requestBlocksByRange: func(_ context.Context, _, _ uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			if requestCount.Add(1) == 1 {
+				return []*cltypes.SignedBeaconBlock{cached}, "peer-a", nil
+			}
+			return []*cltypes.SignedBeaconBlock{successor, grandchild}, "peer-b", nil
+		},
+	}
+	downloader.SetHighestProcessedSlot(frontier)
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		if len(blocks) == 0 {
+			return highest, nil
+		}
+		return cached.Block.Slot, errors.New("current response block failed")
+	})
+
+	downloader.RequestMore(t.Context())
+	downloader.RequestMore(t.Context())
+
+	require.Equal(t, []string{"peer-b"}, banned)
 }
 
 func TestForwardBeaconDownloaderSingleOwnerProcessErrorRestartsOverlap(t *testing.T) {
@@ -1877,6 +1913,39 @@ func TestForwardBeaconDownloaderNoProgressRestartsOverlap(t *testing.T) {
 	secondRequest := <-requests
 	require.Equal(t, frontier-2, secondRequest.StartSlot)
 	require.Equal(t, frontier+1, downloader.GetHighestProcessedSlot())
+}
+
+func TestForwardBeaconDownloaderMissingFirstEnvelopeRestartsOverlap(t *testing.T) {
+	const frontier = uint64(100)
+	overlap1 := makeGloasBlock(frontier-2, hash(0x91), common.Hash{})
+	overlap2 := makeGloasBlock(frontier-1, hash(0x92), common.Hash{})
+	overlap3 := makeGloasBlock(frontier, hash(0x93), common.Hash{})
+	first := makeGloasBlock(frontier+1, hash(0xa1), common.Hash{})
+	successor := makeGloasBlock(frontier+2, hash(0xa2), first.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash)
+	linkBeaconBlocks(t, overlap1, overlap2, overlap3, first, successor)
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	requests := make(chan cltypes.BeaconBlocksByRangeRequest, 2)
+	downloader := &ForwardBeaconDownloader{
+		beaconCfg:       gloasFromGenesisConfig(),
+		httpFallbackURL: server.URL,
+		requestBlocksByRange: func(_ context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
+			requests <- cltypes.BeaconBlocksByRangeRequest{StartSlot: start, Count: count}
+			return []*cltypes.SignedBeaconBlock{overlap1, overlap2, overlap3, first, successor}, "http-fallback", nil
+		},
+	}
+	downloader.SetHighestProcessedSlot(frontier)
+	downloader.SetProcessFunction(func(highest uint64, _ []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		return highest, nil
+	})
+
+	downloader.RequestMore(t.Context())
+	firstRequest := <-requests
+	require.Equal(t, frontier-2, firstRequest.StartSlot)
+	downloader.RequestMore(t.Context())
+	secondRequest := <-requests
+	require.Equal(t, frontier-2, secondRequest.StartSlot)
 }
 
 func TestForwardBeaconDownloaderOverlapOnlyProgressRetainsLookahead(t *testing.T) {

@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
@@ -552,6 +553,19 @@ func TestPostExecutionPayloadEnvelopesRejectsMalformedContents(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
+func TestPostExecutionPayloadEnvelopesRejectsNullEnvelope(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes",
+		strings.NewReader(`{"signed_execution_payload_envelope":null,"kzg_proofs":[],"blobs":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	require.NotPanics(t, func() { handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request) })
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
 func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	if clparams.GetBeaconConfig() == nil {
@@ -587,16 +601,16 @@ func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) 
 	block.Block.Slot = currentSlot
 	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
 	bid.BuilderIndex = 3
+	bid.Slot = currentSlot
 	bid.BlockHash = payload.BlockHash
 	bid.ExecutionRequestsRoot = common.Hash(executionRequestsRoot)
 	bid.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&commitment))
-	bidRoot, err := bid.HashSSZ()
-	require.NoError(t, err)
-	require.True(t, handler.pendingBuilderPayloads.Add(currentSlot, currentSlot, payload.BlockHash, common.Hash(bidRoot), &selfBuildPayload{
+	_, ok := handler.pendingBuilderPayloads.Add(currentSlot, bid, &selfBuildPayload{
 		Payload: payload, ExecutionRequests: executionRequests, BlobBundles: []BlobBundle{{
 			Commitment: common.Bytes48(commitment), Blob: (*cltypes.Blob)(&blob), KzgProofs: bundleProofs,
 		}},
-	}))
+	})
+	require.True(t, ok)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	fcu.Blocks[common.Hash(blockRoot)] = block
@@ -1446,9 +1460,16 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 			gotFeeRecipient = attrs.SuggestedFeeRecipient
 			return []byte{1}, nil
-		}).Times(2)
+		}).Times(6)
+	var assembled atomic.Uint32
 	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
-		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil).Times(2)
+		DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			built := *payload
+			if call := assembled.Add(1); call > 1 {
+				built.BlockHash = common.Hash{31: byte(call)}
+			}
+			return &built, &engine_types.BlobsBundle{}, nil, big.NewInt(2_000_000_000), nil
+		}).Times(6)
 	handler.engine = engine
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/validator/execution_payload_bids/%d/3", slot), http.NoBody)
@@ -1460,10 +1481,17 @@ func TestGetValidatorExecutionPayloadBidBuildsUnsignedBidWithoutGossip(t *testin
 	require.Equal(t, feeRecipient, gotFeeRecipient)
 	require.Contains(t, recorder.Body.String(), `"builder_index":"3"`)
 	require.Contains(t, recorder.Body.String(), `"block_hash":"0x0000000000000000000000000000000000000000000000000000000000001234"`)
-	require.Contains(t, recorder.Body.String(), `"value":"2"`)
+	require.Contains(t, recorder.Body.String(), `"value":"0"`)
+	require.Contains(t, recorder.Body.String(), `"execution_payment":"2"`)
 	require.Contains(t, recorder.Body.String(), `"fee_recipient":"0x4200000000000000000000000000000000000000"`)
 	require.NotContains(t, recorder.Body.String(), `"signature"`)
 	require.NotContains(t, recorder.Body.String(), `"message"`)
+	for range 4 {
+		recorder = httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Contains(t, recorder.Body.String(), `"block_hash":"0x0000000000000000000000000000000000000000000000000000000000001234"`)
+	}
 
 	forkchoiceStore.Envelopes[baseRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
 	var headSnapshots atomic.Int32
@@ -1552,13 +1580,13 @@ func TestGetValidatorExecutionPayloadEnvelopeBuildsFromSelectedLocalBid(t *testi
 	block.Block.Slot = slot
 	block.Block.ParentRoot = common.HexToHash("0xabcd")
 	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 3
+	block.Block.Body.SignedExecutionPayloadBid.Message.Slot = slot
 	block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payloadHash
 	executionRequestsRoot, err := executionRequests.HashSSZ()
 	require.NoError(t, err)
 	block.Block.Body.SignedExecutionPayloadBid.Message.ExecutionRequestsRoot = common.Hash(executionRequestsRoot)
-	bidRoot, err := block.Block.Body.SignedExecutionPayloadBid.Message.HashSSZ()
-	require.NoError(t, err)
-	require.True(t, handler.pendingBuilderPayloads.Add(slot, slot, payloadHash, common.Hash(bidRoot), pending))
+	_, ok := handler.pendingBuilderPayloads.Add(slot, block.Block.Body.SignedExecutionPayloadBid.Message, pending)
+	require.True(t, ok)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	forkchoiceStore.Blocks[common.Hash(blockRoot)] = block
@@ -1590,24 +1618,47 @@ func TestPendingBuilderPayloadStoreRefusesEvictionUntilSlotExpires(t *testing.T)
 	first := &selfBuildPayload{}
 	second := &selfBuildPayload{}
 
-	firstBidRoot := common.HexToHash("0x11")
-	secondBidRoot := common.HexToHash("0x12")
-	require.True(t, store.Add(3, 3, firstHash, firstBidRoot, first))
-	require.False(t, store.Add(3, 4, secondHash, secondBidRoot, second))
-	got, ok := store.Get(3, 3, firstHash, firstBidRoot)
+	firstBid := newTestExecutionPayloadBid(3, 1, 0)
+	firstBid.BlockHash = firstHash
+	secondBid := newTestExecutionPayloadBid(3, 1, 0)
+	secondBid.BlockHash = secondHash
+	_, ok := store.Add(3, firstBid, first)
+	require.True(t, ok)
+	coalesced, ok := store.Add(3, secondBid, second)
+	require.True(t, ok)
+	require.Equal(t, firstHash, coalesced.BlockHash)
+	got, ok := store.Get(3, firstBid)
 	require.True(t, ok)
 	require.Same(t, first, got)
-	require.True(t, store.Add(4, 4, secondHash, secondBidRoot, second))
-	_, ok = store.Get(4, 3, firstHash, firstBidRoot)
+	_, ok = store.Get(3, secondBid)
+	require.False(t, ok)
+	thirdBid := newTestExecutionPayloadBid(3, 2, 0)
+	thirdBid.BlockHash = secondHash
+	coalescedForOtherBuilder, ok := store.Add(3, thirdBid, second)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), coalescedForOtherBuilder.BuilderIndex)
+	require.Equal(t, firstHash, coalescedForOtherBuilder.BlockHash)
+	got, ok = store.Get(3, coalescedForOtherBuilder)
+	require.True(t, ok)
+	require.Same(t, first, got)
+	require.Len(t, store.entries, 1)
+	fourthBid := newTestExecutionPayloadBid(4, 2, 0)
+	fourthBid.BlockHash = secondHash
+	_, ok = store.Add(4, fourthBid, second)
+	require.True(t, ok)
+	_, ok = store.Get(4, firstBid)
 	require.False(t, ok)
 
-	sharedPayloadStore := newPendingBuilderPayloadStore(2)
-	require.True(t, sharedPayloadStore.Add(3, 3, firstHash, firstBidRoot, first))
-	require.True(t, sharedPayloadStore.Add(3, 3, firstHash, secondBidRoot, first))
-	_, ok = sharedPayloadStore.Get(3, 3, firstHash, firstBidRoot)
+	headAwareStore := newPendingBuilderPayloadStore(2)
+	firstBid.ParentBlockRoot = common.Hash{1}
+	secondBid.ParentBlockRoot = common.Hash{2}
+	_, ok = headAwareStore.Add(3, firstBid, first)
 	require.True(t, ok)
-	_, ok = sharedPayloadStore.Get(3, 3, firstHash, secondBidRoot)
+	differentHead, ok := headAwareStore.Add(3, secondBid, second)
 	require.True(t, ok)
+	require.Equal(t, common.Hash{2}, differentHead.ParentBlockRoot)
+	_, firstStillAvailable := headAwareStore.Get(3, firstBid)
+	require.True(t, firstStillAvailable)
 }
 
 func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {

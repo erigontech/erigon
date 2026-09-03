@@ -266,7 +266,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		highestSlotProcessed, err := processDownloadedBlockBatches(ctx, logger, cfg, initialHighestSlotProcessed, shouldInsert, blocks, envelopes)
 		if err != nil {
 			logger.Warn("[Caplin] Failed to process block batch", "err", err)
-			return initialHighestSlotProcessed, err
+			return highestSlotProcessed, err
 		}
 		currentSlot.Store(highestSlotProcessed)
 		// Update advertised status so peers don't disconnect us for being too far behind.

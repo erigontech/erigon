@@ -67,6 +67,7 @@ type ForwardBeaconDownloader struct {
 
 	mu                 sync.Mutex
 	gloasLookahead     *cltypes.SignedBeaconBlock
+	gloasLookaheadPeer string
 	gloasNextUnscanned uint64
 }
 
@@ -216,7 +217,9 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				f.httpPreferred.Store(false)
 			}
 		case httpErr == nil && hadGloasPending:
-			f.recordEmptyRange(httpStart, completedHTTPCount, true, "http-fallback")
+			if completedHTTPCount > 0 {
+				f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount))
+			}
 			return
 		default:
 			// HTTP failed — fall back to P2P probing.
@@ -333,7 +336,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				if httpErr == nil && hadGloasPending && completedHTTPCount > 0 {
 					emptyResponse = &emptyRangeResult{
 						lastSlot: lastSlotInRange(httpStart, completedHTTPCount),
-						apply:    func() { f.recordEmptyRange(httpStart, completedHTTPCount, true, "http-fallback") },
+						apply:    func() { f.advanceGloasScanPast(lastSlotInRange(httpStart, completedHTTPCount)) },
 					}
 					return
 				}
@@ -443,7 +446,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						if hadGloasPending && completedReqCount > 0 {
 							emptyResponse = &emptyRangeResult{
 								lastSlot: lastSlotInRange(reqSlot, completedReqCount),
-								apply:    func() { f.recordEmptyRange(reqSlot, completedReqCount, true, peerId) },
+								apply:    func() { f.advanceGloasScanPast(lastSlotInRange(reqSlot, completedReqCount)) },
 							}
 							return
 						}
@@ -510,6 +513,7 @@ Process:
 	}
 	f.mu.Lock()
 	lookahead := f.gloasLookahead
+	lookaheadPeer := f.gloasLookaheadPeer
 	f.mu.Unlock()
 	if lookahead != nil {
 		processBlocks = mergeGloasLookahead(processBlocks, lookahead)
@@ -518,6 +522,7 @@ Process:
 	slices.SortFunc(processBlocks, func(a, b *cltypes.SignedBeaconBlock) int {
 		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
+	missingEnvelopeSlot := uint64(0)
 	hasGloasBlocks := anyGloasBlock(processBlocks)
 	if hasGloasBlocks && !connectedGloasBlocks(processBlocks) {
 		f.mu.Lock()
@@ -577,6 +582,7 @@ Process:
 					"retainedBlocks", len(retained), "batchBlocks", len(processBlocks))
 				nextGloasLookahead = processBlocks[len(retained)]
 				nextGloasCursor = saturatingIncrement(nextGloasLookahead.Block.Slot)
+				missingEnvelopeSlot = nextGloasLookahead.Block.Slot
 				processBlocks = retained
 			}
 		}
@@ -604,12 +610,16 @@ Process:
 		if lookahead != nil && f.gloasLookahead == lookahead {
 			f.clearGloasScan()
 		}
-		if lookahead == nil && shouldBanProcessPeer(pid, err) && f.banPeer != nil {
-			f.banPeer(pid)
+		processPeer := pid
+		if lookahead != nil && highestSlotProcessed < lookahead.Block.Slot {
+			processPeer = lookaheadPeer
+		}
+		if processPeer != "" && shouldBanProcessPeer(processPeer, err) && f.banPeer != nil {
+			f.banPeer(processPeer)
 		}
 		return
 	}
-	attemptedNewSlot := slices.ContainsFunc(processBlocks, func(block *cltypes.SignedBeaconBlock) bool {
+	attemptedNewSlot := missingEnvelopeSlot > f.highestSlotProcessed || slices.ContainsFunc(processBlocks, func(block *cltypes.SignedBeaconBlock) bool {
 		return block.Block.Slot > f.highestSlotProcessed
 	})
 	if attemptedNewSlot && nextGloasLookahead != nil && highestSlotProcessed <= f.highestSlotProcessed {
@@ -639,6 +649,10 @@ Process:
 	}
 	if nextGloasLookahead != nil && nextGloasLookahead.Block.Slot > f.highestSlotProcessed {
 		f.gloasLookahead = nextGloasLookahead
+		f.gloasLookaheadPeer = pid
+		if nextGloasLookahead == lookahead {
+			f.gloasLookaheadPeer = lookaheadPeer
+		}
 		f.gloasNextUnscanned = max(f.gloasNextUnscanned, nextGloasCursor, saturatingIncrement(nextGloasLookahead.Block.Slot))
 	} else {
 		f.clearGloasScan()
@@ -706,28 +720,17 @@ func (f *ForwardBeaconDownloader) restartGloasScanAtHead() {
 	}
 }
 
-func (f *ForwardBeaconDownloader) recordEmptyRange(start, count uint64, hadGloasPending bool, peerID string) {
-	if count == 0 {
-		return
-	}
-	lastSlot := lastSlotInRange(start, count)
+func (f *ForwardBeaconDownloader) advanceGloasScanPast(lastSlot uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if hadGloasPending || f.gloasLookahead != nil {
-		if f.gloasLookahead != nil {
-			f.gloasNextUnscanned = max(f.gloasNextUnscanned, saturatingIncrement(lastSlot))
-		}
-		return
-	}
-	if lastSlot > f.highestSlotProcessed {
-		log.Debug("Empty block range response, advancing past gap", "from", f.highestSlotProcessed, "to", lastSlot, "peer", peerID)
-		f.highestSlotProcessed = lastSlot
-		f.highestSlotUpdateTime = time.Now()
+	if f.gloasLookahead != nil {
+		f.gloasNextUnscanned = max(f.gloasNextUnscanned, saturatingIncrement(lastSlot))
 	}
 }
 
 func (f *ForwardBeaconDownloader) clearGloasScan() {
 	f.gloasLookahead = nil
+	f.gloasLookaheadPeer = ""
 	f.gloasNextUnscanned = 0
 }
 

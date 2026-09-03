@@ -325,6 +325,11 @@ func TestNewForkGraphDiskKeepsAnchorHeaderVisibleAcrossSkippedSlots(t *testing.T
 	_, ok := graph.GetHeader(anchorRoot)
 	require.True(t, ok)
 	require.Equal(t, uint64(64), graph.LowestAvailableSlot())
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	require.NoError(t, graph.DumpEnvelopeOnDisk(anchorRoot, envelope))
+	require.True(t, graph.HasEnvelope(anchorRoot))
+	_, err = graph.ReadEnvelopeFromDisk(anchorRoot)
+	require.NoError(t, err)
 }
 
 // A prune for an already-covered slot (e.g. from a concurrent lock-free drain)

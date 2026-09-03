@@ -257,25 +257,35 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 
 func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) error {
 	var validationErr error
-	emitter.WithHeadEventLock(func() {
+	current := func() bool {
 		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
 		if err != nil {
 			validationErr = fmt.Errorf("failed to revalidate head event: %w", err)
-			return
+			return false
 		}
-		if currentRoot != headRoot || currentSlot != headSlot || executionOptimistic != headEvent.Data.ExecutionOptimistic || payloadStatus != headEvent.Data.PayloadStatus {
-			return
+		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
+	}
+	shouldEmit := false
+	emitter.WithHeadEventLock(func() {
+		shouldEmit = current()
+	})
+	if !shouldEmit {
+		return validationErr
+	}
+
+	emitter.State().SendHead(&beaconevents.HeadData{
+		Slot:                      headSlot,
+		Block:                     headRoot,
+		State:                     stateRoot,
+		EpochTransition:           headEvent.Data.EpochTransition,
+		PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+		CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+		ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
+	})
+	emitter.WithHeadEventLock(func() {
+		if current() {
+			emitter.State().SendHeadV2(headEvent)
 		}
-		emitter.State().SendHead(&beaconevents.HeadData{
-			Slot:                      headSlot,
-			Block:                     headRoot,
-			State:                     stateRoot,
-			EpochTransition:           headEvent.Data.EpochTransition,
-			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
-			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
-			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
-		})
-		emitter.State().SendHeadV2(headEvent)
 	})
 	return validationErr
 }

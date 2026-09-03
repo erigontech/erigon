@@ -756,13 +756,13 @@ func TestPayloadStatusGetterUsesDurableAuthorityAfterEviction(t *testing.T) {
 	}
 }
 
-func TestStoreAnchorEnvelopePersistsWithoutMarkingVerified(t *testing.T) {
+func TestStoreAnchorEnvelopeMarksPayloadOptimisticWithoutEngine(t *testing.T) {
 	root := common.HexToHash("0x5678")
 	execHash := common.HexToHash("0xabcd")
 	dumpedEnvelope := common.Hash{}
 
 	f := newPayloadVoteTestStore(t, root, true, false)
-	f.forkGraph = payloadVoteForkGraph{dumpedEnvelope: &dumpedEnvelope}
+	f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, dumpedEnvelope: &dumpedEnvelope}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			BeaconBlockRoot: root,
@@ -773,9 +773,30 @@ func TestStoreAnchorEnvelopePersistsWithoutMarkingVerified(t *testing.T) {
 	require.NoError(t, f.StoreAnchorEnvelope(root, envelope))
 	require.False(t, f.IsPayloadVerified(root))
 	status, ok := f.GetRecentExecutionPayloadStatus(execHash)
-	require.False(t, ok)
-	require.Equal(t, execution_client.PayloadStatus(0), status)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+	require.True(t, f.isPayloadAvailable(root))
 	require.Equal(t, root, dumpedEnvelope)
+}
+
+func TestStoreAnchorEnvelopeDoesNotRestorePrunedPayloadStatus(t *testing.T) {
+	root := common.HexToHash("0x5678")
+	execHash := common.HexToHash("0xabcd")
+	retained := false
+
+	f := newPayloadVoteTestStore(t, root, true, false)
+	f.forkGraph = payloadVoteForkGraph{hasEnvelope: true, retained: &retained}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: root,
+			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
+		},
+	}
+
+	err := f.StoreAnchorEnvelope(root, envelope)
+	require.ErrorIs(t, err, ErrIgnore)
+	_, ok := f.GetRecentExecutionPayloadStatus(execHash)
+	require.False(t, ok)
 }
 
 func TestStoreAnchorEnvelopeRejectsRootMismatch(t *testing.T) {

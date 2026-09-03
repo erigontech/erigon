@@ -86,49 +86,91 @@ type blobBundleCache interface {
 }
 
 type pendingBuilderPayload struct {
-	slot      uint64
-	blockHash common.Hash
-	payload   *selfBuildPayload
+	bid     *cltypes.ExecutionPayloadBid
+	payload *selfBuildPayload
+}
+
+type pendingBuilderPayloadRequest struct {
+	slot            uint64
+	parentBlockHash common.Hash
+	parentBlockRoot common.Hash
+	prevRandao      common.Hash
+	feeRecipient    common.Address
+	gasLimit        uint64
 }
 
 type pendingBuilderPayloadStore struct {
 	mu       sync.Mutex
 	capacity int
-	entries  map[common.Hash]pendingBuilderPayload
+	entries  map[pendingBuilderPayloadRequest]pendingBuilderPayload
 }
 
 func newPendingBuilderPayloadStore(capacity int) *pendingBuilderPayloadStore {
-	return &pendingBuilderPayloadStore{capacity: capacity, entries: make(map[common.Hash]pendingBuilderPayload, capacity)}
+	return &pendingBuilderPayloadStore{
+		capacity: capacity,
+		entries:  make(map[pendingBuilderPayloadRequest]pendingBuilderPayload, capacity),
+	}
 }
 
-func (s *pendingBuilderPayloadStore) Add(currentSlot, slot uint64, hash, bidRoot common.Hash, payload *selfBuildPayload) bool {
+func (s *pendingBuilderPayloadStore) Add(currentSlot uint64, bid *cltypes.ExecutionPayloadBid, payload *selfBuildPayload) (*cltypes.ExecutionPayloadBid, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key, entry := range s.entries {
-		if entry.slot < currentSlot {
-			delete(s.entries, key)
-		}
+	s.prune(currentSlot)
+	if bid == nil {
+		return nil, false
 	}
-	if entry, ok := s.entries[bidRoot]; ok {
-		return entry.slot == slot && entry.blockHash == hash
+	request := pendingBuilderPayloadRequestFromBid(bid)
+	if entry, ok := s.entries[request]; ok {
+		coalescedBid := entry.bid.Copy()
+		coalescedBid.BuilderIndex = bid.BuilderIndex
+		return coalescedBid, true
 	}
 	if len(s.entries) >= s.capacity {
-		return false
+		return nil, false
 	}
-	s.entries[bidRoot] = pendingBuilderPayload{slot: slot, blockHash: hash, payload: payload}
-	return true
+	storedBid := bid.Copy()
+	s.entries[request] = pendingBuilderPayload{bid: storedBid, payload: payload}
+	return storedBid.Copy(), true
 }
 
-func (s *pendingBuilderPayloadStore) Get(currentSlot, slot uint64, hash, bidRoot common.Hash) (*selfBuildPayload, bool) {
+func (s *pendingBuilderPayloadStore) Get(currentSlot uint64, bid *cltypes.ExecutionPayloadBid) (*selfBuildPayload, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for key, entry := range s.entries {
-		if entry.slot < currentSlot {
-			delete(s.entries, key)
+	s.prune(currentSlot)
+	if bid == nil {
+		return nil, false
+	}
+	entry, ok := s.entries[pendingBuilderPayloadRequestFromBid(bid)]
+	if !ok {
+		return nil, false
+	}
+	expectedBid := entry.bid.Copy()
+	expectedBid.BuilderIndex = bid.BuilderIndex
+	expectedRoot, err := expectedBid.HashSSZ()
+	if err != nil {
+		return nil, false
+	}
+	actualRoot, err := bid.HashSSZ()
+	return entry.payload, err == nil && expectedRoot == actualRoot
+}
+
+func (s *pendingBuilderPayloadStore) prune(currentSlot uint64) {
+	for request := range s.entries {
+		if request.slot < currentSlot {
+			delete(s.entries, request)
 		}
 	}
-	entry, ok := s.entries[bidRoot]
-	return entry.payload, ok && entry.slot == slot && entry.blockHash == hash
+}
+
+func pendingBuilderPayloadRequestFromBid(bid *cltypes.ExecutionPayloadBid) pendingBuilderPayloadRequest {
+	return pendingBuilderPayloadRequest{
+		slot:            bid.Slot,
+		parentBlockHash: bid.ParentBlockHash,
+		parentBlockRoot: bid.ParentBlockRoot,
+		prevRandao:      bid.PrevRandao,
+		feeRecipient:    bid.FeeRecipient,
+		gasLimit:        bid.GasLimit,
+	}
 }
 
 type selfBuildEnvelopeKey struct {

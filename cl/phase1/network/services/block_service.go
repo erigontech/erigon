@@ -488,21 +488,6 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 			return errors.New("missing signed_execution_payload_bid in GLOAS block")
 		}
 		gloasBid = signedBid.Message
-		parentBlock, ok := b.forkchoiceStore.GetBlock(msg.Block.ParentRoot)
-		if !ok || parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil {
-			return errors.New("parent block not found")
-		}
-		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-		parentIsFull = parentBid != nil && parentBid.Message != nil && gloasBid.ParentBlockHash == parentBid.Message.BlockHash
-		if parentIsFull {
-			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
-			if !seen || status != execution_client.PayloadStatusValidated {
-				if schedule != nil {
-					schedule()
-				}
-				return fmt.Errorf("%w: parent payload is not verified", ErrIgnore)
-			}
-		}
 	}
 	finalizedSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, b.beaconCfg.SlotsPerEpoch)
 	if !ok {
@@ -526,6 +511,30 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 			schedule()
 		}
 		return fmt.Errorf("%w: parent block state not found", ErrIgnore)
+	}
+	if blockVersion >= clparams.GloasVersion {
+		var parentBid *cltypes.SignedExecutionPayloadBid
+		parentBlock, ok := b.forkchoiceStore.GetBlock(msg.Block.ParentRoot)
+		switch {
+		case ok && parentBlock != nil && parentBlock.Block != nil && parentBlock.Block.Body != nil:
+			parentBid = parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+		case msg.Block.ParentRoot == b.forkchoiceStore.AnchorRoot():
+			if bid := parentState.GetLatestExecutionPayloadBid(); bid != nil {
+				parentBid = &cltypes.SignedExecutionPayloadBid{Message: bid}
+			}
+		default:
+			return errors.New("parent block not found")
+		}
+		parentIsFull = parentBid != nil && parentBid.Message != nil && gloasBid.ParentBlockHash == parentBid.Message.BlockHash
+		if parentIsFull {
+			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
+			if !seen || status != execution_client.PayloadStatusValidated {
+				if schedule != nil {
+					schedule()
+				}
+				return fmt.Errorf("%w: parent payload is not verified", ErrIgnore)
+			}
+		}
 	}
 	if err := transition.DefaultMachine.ProcessSlots(parentState, msg.Block.Slot); err != nil {
 		if schedule != nil {

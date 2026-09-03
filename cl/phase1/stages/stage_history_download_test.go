@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -36,20 +35,16 @@ type failingHistoryDownloader struct {
 	finished bool
 }
 
-func (d *failingHistoryDownloader) Finished() bool { return d.finished }
-func (*failingHistoryDownloader) Progress() uint64 { return 1 }
-func (*failingHistoryDownloader) RecoverSkippedEnvelopes(context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
-	return nil
-}
-func (d *failingHistoryDownloader) RequestMore(context.Context) error           { return d.err }
-func (*failingHistoryDownloader) SetBlockChecker(network.BlockChecker)          {}
-func (*failingHistoryDownloader) SetBlockReader(network.BeaconBlockBodyReader)  {}
-func (*failingHistoryDownloader) SetExpectedRoot(common.Hash)                   {}
-func (*failingHistoryDownloader) SetNeverSkip(bool)                             {}
-func (*failingHistoryDownloader) SetOnNewBlock(network.OnNewBlock)              {}
-func (*failingHistoryDownloader) SetSlotToDownload(uint64)                      {}
-func (*failingHistoryDownloader) SetThrottle(time.Duration)                     {}
-func (*failingHistoryDownloader) SkippedFullBlocks() []network.SkippedFullBlock { return nil }
+func (d *failingHistoryDownloader) Finished() bool                             { return d.finished }
+func (*failingHistoryDownloader) Progress() uint64                             { return 1 }
+func (d *failingHistoryDownloader) RequestMore(context.Context) error          { return d.err }
+func (*failingHistoryDownloader) SetBlockChecker(network.BlockChecker)         {}
+func (*failingHistoryDownloader) SetBlockReader(network.BeaconBlockBodyReader) {}
+func (*failingHistoryDownloader) SetExpectedRoot(common.Hash)                  {}
+func (*failingHistoryDownloader) SetNeverSkip(bool)                            {}
+func (*failingHistoryDownloader) SetOnNewBlock(network.OnNewBlock)             {}
+func (*failingHistoryDownloader) SetSlotToDownload(uint64)                     {}
+func (*failingHistoryDownloader) SetThrottle(time.Duration)                    {}
 
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.
@@ -139,15 +134,4 @@ func TestWaitForHistoryDownloadJoinsFinishedWorker(t *testing.T) {
 		downloader: &failingHistoryDownloader{finished: true},
 	}, 0, historyDone)
 	require.ErrorIs(t, err, wantErr)
-}
-
-func TestRecoverSkippedEnvelopesWithRetriesReturnsCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
-
-	err := recoverSkippedEnvelopesWithRetries(ctx, StageHistoryReconstructionCfg{
-		downloader: &failingHistoryDownloader{},
-	}, []network.SkippedFullBlock{{Block: block}})
-	require.ErrorIs(t, err, context.Canceled)
 }

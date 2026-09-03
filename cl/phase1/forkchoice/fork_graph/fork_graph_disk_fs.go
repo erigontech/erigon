@@ -280,7 +280,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	if !ok || header == nil {
 		return fmt.Errorf("cannot dump envelope for unknown block root %x", blockRoot)
 	}
-	if isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+	if blockRoot != f.anchorRoot && isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
 		return fmt.Errorf("cannot dump envelope for pruned block root %x at slot %d", blockRoot, header.Slot)
 	}
 	f.stateDumpLock.Lock()

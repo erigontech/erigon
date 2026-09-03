@@ -716,6 +716,9 @@ func (f *forkGraphDisk) retainedBlock(blockRoot common.Hash) bool {
 	if !ok {
 		return false
 	}
+	if blockRoot == f.anchorRoot {
+		return true
+	}
 	return !isBelowPrunedBoundary(header.(*cltypes.BeaconBlockHeader).Slot, f.lowestAvailableBlock.Load())
 }
 

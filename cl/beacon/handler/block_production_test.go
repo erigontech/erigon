@@ -3409,6 +3409,45 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	}, withdrawals)
 }
 
+func TestProduceBeaconBodyComputesWithdrawalsAtGloasTransition(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	require.NoError(t, postState.SetSlot(handler.beaconChainCfg.SlotsPerEpoch))
+
+	pending := solid.NewDynamicListSSZ[*cltypes.BuilderPendingWithdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload))
+	pending.Append(&cltypes.BuilderPendingWithdrawal{FeeRecipient: common.Address{0xbb}, Amount: 12, BuilderIndex: 3})
+	postState.SetBuilderPendingWithdrawals(pending)
+	expected, err := state.GetExpectedWithdrawals(postState, 1)
+	require.NoError(t, err)
+	expectedWithdrawals := cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(expected.Withdrawals)
+
+	baseRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadSlotVal = handler.beaconChainCfg.SlotsPerEpoch - 1
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+
+	var gotWithdrawals []*types.Withdrawal
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			gotWithdrawals = attrs.Withdrawals
+			return nil, errors.New("stop after capturing payload attributes")
+		})
+	handler.engine = engine
+
+	_, _, err = handler.produceBeaconBody(
+		t.Context(), 3, handler.beaconChainCfg.SlotsPerEpoch-1, baseRoot, postState,
+		handler.beaconChainCfg.SlotsPerEpoch, common.Bytes96{0xc0}, common.Hash{},
+	)
+	require.ErrorContains(t, err, "stop after capturing payload attributes")
+	require.Equal(t, expectedWithdrawals, gotWithdrawals)
+}
+
 func TestPayloadAttributesOmitFieldsTheChosenVersionCannotCarry(t *testing.T) {
 	root := common.Hash{0xaa}
 	withdrawals := []*types.Withdrawal{{Index: 1}}

@@ -779,6 +779,21 @@ func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
 
+func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
+		return parentExecutionHead
+	})
+	parent := fcu.Blocks[parentRoot]
+	fcu.StateAtBlockRootVal[parentRoot].SetLatestExecutionPayloadBid(parent.Block.Body.GetSignedExecutionPayloadBid().Message)
+	delete(fcu.Blocks, parentRoot)
+	fcu.AnchorRootVal = parentRoot
+	fcu.AnchorSlotVal = parent.Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: parent.Block.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch, Root: parentRoot}
+	fcu.Ancestors[parent.Block.Slot] = forkchoice.ForkChoiceNode{Root: parentRoot}
+
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
 func newGloasGossipValidationFixture(t *testing.T, childParentHash func(parentExecutionHead, parentBlockHash common.Hash) common.Hash) (BlockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, common.Hash) {
 	t.Helper()
 	ctrl := gomock.NewController(t)

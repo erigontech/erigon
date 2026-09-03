@@ -992,8 +992,6 @@ func TestBackwardBeaconDownloaderMissingRequiredEnvelopeSurvivesRestart(t *testi
 	require.False(t, downloader.Finished())
 	require.Equal(t, common.Hash(targetRoot), downloader.expectedRoot)
 	require.Equal(t, target.Block.Slot, downloader.Progress())
-	require.Empty(t, downloader.SkippedFullBlocks())
-
 	recovered = true
 	restarted := &BackwardBeaconDownloader{
 		expectedRoot:                targetRoot,
@@ -1791,6 +1789,36 @@ func TestBackwardBeaconDownloaderDoesNotSkipUnknownGloasPayload(t *testing.T) {
 		require.False(t, withEngine.canSkipSlot(t.Context(), tx, 0, 0, 10))
 		return nil
 	}))
+}
+
+func TestBackwardBeaconDownloaderSkipsGloasPayloadProvenEmptyBySuccessor(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	stored := makeGloasBlock(11, hash(0xbb), hash(0xaa))
+	successor := makeGloasBlock(12, hash(0xcc), hash(0xaa))
+	linkBeaconBlocks(t, stored, successor)
+	storedRoot, err := stored.Block.HashSSZ()
+	require.NoError(t, err)
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	t.Cleanup(db.Close)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, stored, false)
+	}))
+	downloader := &BackwardBeaconDownloader{
+		ctx:               t.Context(),
+		expectedRoot:      storedRoot,
+		prevBatchTopBlock: successor,
+		beaconCfg:         cfg,
+		db:                db,
+		blockReader: beaconBlockBodyReaderFunc(func(context.Context, kv.Tx, common.Hash) (*cltypes.SignedBeaconBlock, error) {
+			return stored, nil
+		}),
+	}
+	downloader.slotToDownload.Store(stored.Block.Slot)
+
+	require.NoError(t, downloader.trySkipToExistingBlock(t.Context()))
+	require.Equal(t, stored.Block.ParentRoot, downloader.expectedRoot)
+	require.Equal(t, stored.Block.Slot-1, downloader.Progress())
 }
 
 func TestBackwardBeaconDownloaderSkipRetainsDirectGloasSuccessor(t *testing.T) {
