@@ -88,6 +88,10 @@ var Defaults = Config{
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
+		// Receipts served from disk instead of re-executing the block. The
+		// window follows --prune.receipts.distance, so a pruned node keeps only
+		// the recent steps rather than the whole chain.
+		PersistReceiptsCacheV2: true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
