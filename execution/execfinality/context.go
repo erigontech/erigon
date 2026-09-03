@@ -94,7 +94,7 @@ func (c FinalityContext) MaxReorgDepth() uint64 {
 
 func (c FinalityContext) ReadyForCollation(ctx context.Context, db kv.TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	finalisedBlockNum = c.finalisedBlockNum
-	err = db.View(ctx, func(tx kv.Tx) error {
+	err = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		lastBlockInStep, ok, err = c.txNumsReader.FindBlockNum(ctx, tx, stepLastTxNum)
 		if err != nil {
 			return err
