@@ -790,6 +790,11 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
+	// A custom reader whose clones keep their own source hands every worker the
+	// same transaction; only the worker's own view is per-worker.
+	sharedSource := sdc.stateReader != nil && !sdc.stateReader.BindsWorkerTx()
+	caller := resolveCallerView(tx)
+
 	// Workers that cannot read on their own view fall back to this one reader
 	// over the caller's tx, taken in turns. It is built here and not in the
 	// factory because the factory runs inside each worker goroutine, and
@@ -797,7 +802,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	var pinnedMu sync.Mutex
 	var pinnedMetrics *kvmetrics.DomainMetrics
 	var pinned *syncStateReader
-	if tx != nil {
+	if tx != nil && (sharedSource || !caller.writer) {
 		pinnedMetrics = kvmetrics.NewDomainMetrics()
 		src := sdc.stateReader
 		if src != nil {
@@ -807,15 +812,16 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		}
 		pinned = newSyncStateReader(&pinnedMu, src)
 	}
-	// A custom reader whose clones keep their own source hands every worker the
-	// same transaction; only the worker's own view is per-worker.
-	sharedSource := sdc.stateReader != nil && !sdc.stateReader.BindsWorkerTx()
-	caller := resolveCallerView(tx)
+	pinnedOnly := pinned != nil && sharedSource
 
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
-		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
-		if err != nil {
-			return &errorTrieContext{err: err}, func() {}
+		var roTx kv.TemporalTx
+		if !pinnedOnly {
+			var err error
+			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
+			if err != nil {
+				return &errorTrieContext{err: err}, func() {}
+			}
 		}
 
 		collector := etl.NewCollector("[concurrent_branch]", sdc.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/16), log.Root()) //nolint:gocritic
@@ -851,7 +857,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
-			roTx.Rollback()
+			if roTx != nil {
+				roTx.Rollback()
+			}
 		}
 		return warmupCtx, cleanup
 	}

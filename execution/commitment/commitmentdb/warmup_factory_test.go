@@ -152,9 +152,11 @@ type snapshotDB struct {
 	kv.TemporalRoDB
 	viewID uint64
 	val    []byte
+	opens  atomic.Int64
 }
 
 func (db *snapshotDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	db.opens.Add(1)
 	return &snapshotTx{viewID: db.viewID, val: db.val}, nil
 }
 
@@ -362,6 +364,54 @@ func TestConcurrentTrieContextSerializesSharedCustomReader(t *testing.T) {
 		require.Equal(t, []byte("caller-snapshot"), vals[i])
 	}
 }
+
+func TestConcurrentTrieContextSkipsWorkerTxForSharedReader(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 7, val: []byte("worker-view")}
+	sdc, _ := newSnapshotSdc(t)
+	sdc.SetStateReader(&sharedSourceReader{tx: caller})
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	for range 8 {
+		trieCtx, cleanup := factory(t.Context())
+		enc, _, err := trieCtx.Branch([]byte("prefix"))
+		require.NoError(t, err)
+		require.Equal(t, []byte("caller-snapshot"), enc)
+		cleanup()
+	}
+
+	require.Zero(t, db.opens.Load(), "a shared-source worker must not open a read view it never reads through")
+}
+
+func TestConcurrentTrieContextSkipsPinnedReaderForWriteCaller(t *testing.T) {
+	t.Parallel()
+	caller := &rwCallerTx{viewID: 7}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc, shared := newSnapshotSdc(t)
+
+	_, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	require.Zero(t, shared.getters.Load(), "the pinned reader must not be built when no worker can select it")
+}
+
+type rwCallerTx struct {
+	kv.TemporalRwTx
+	viewID uint64
+}
+
+func (t *rwCallerTx) ViewID() uint64 { return t.viewID }
 
 // A custom reader that rebinds to the worker's tx keeps the parallel path: this
 // is what exec3's as-of reader does, and serializing it would cost the fold its
