@@ -72,7 +72,6 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 
 	b.ResetPreviousEpochAttestations()
 	// Process sync committees
-	var err error
 	currentSyncCommittee, err := b.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
