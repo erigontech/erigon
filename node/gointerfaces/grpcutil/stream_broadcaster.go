@@ -85,9 +85,9 @@ func (s *StreamBroadcaster[T]) Subscribe(ctx context.Context, stream grpc.Server
 // across non-blocking queue writes, so an unresponsive subscriber can stall
 // neither the caller nor the other subscribers.
 //
-// A subscriber whose queue is full is dropped, and its queued messages are
-// released rather than delivered: a wedged Send would otherwise keep all of them
-// reachable. Its Subscribe returns whatever ended that Send.
+// A subscriber whose queue is full is dropped and its queue emptied, so a Send
+// that stays wedged cannot keep the queued messages reachable. Its Subscribe
+// returns whatever ended that Send.
 func (s *StreamBroadcaster[T]) Broadcast(reply *T, logger log.Logger) {
 	var dropped int
 	s.mu.Lock()

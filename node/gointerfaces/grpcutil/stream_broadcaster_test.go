@@ -38,19 +38,22 @@ type testMsg struct{ n int }
 // SendMsg does when it runs out of flow control.
 type fakeStream struct {
 	grpc.ServerStream
-	ctx     context.Context
-	gate    chan struct{}
-	sent    chan *testMsg
-	sendErr error
+	ctx      context.Context
+	gate     chan struct{}
+	sent     chan *testMsg
+	sendErr  error
+	entered  chan struct{} // closed once Send has been entered
+	enterOne sync.Once
 }
 
 func newFakeStream(ctx context.Context) *fakeStream {
-	return &fakeStream{ctx: ctx, sent: make(chan *testMsg, 1024)}
+	return &fakeStream{ctx: ctx, sent: make(chan *testMsg, 1024), entered: make(chan struct{})}
 }
 
 func (f *fakeStream) Context() context.Context { return f.ctx }
 
 func (f *fakeStream) Send(m *testMsg) error {
+	f.enterOne.Do(func() { close(f.entered) })
 	if f.gate != nil {
 		select {
 		case <-f.gate:
@@ -298,7 +301,11 @@ func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
 			stalled.sendErr = tc.sendErr
 			errs := subscribe(t, &b, ctx, stalled)
 
-			for i := range subscriberQueueLen + 2 {
+			// Wedge it inside Send first, so the rest have to queue behind it.
+			// Registration alone does not mean it has reached its select yet.
+			broadcastNow(t, &b, &testMsg{n: 0})
+			<-stalled.entered
+			for i := 1; i < subscriberQueueLen+2; i++ {
 				broadcastNow(t, &b, &testMsg{n: i})
 			}
 			require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")
@@ -314,7 +321,7 @@ func TestSubscriberThatFallsBehindIsDropped(t *testing.T) {
 			case <-time.After(testTimeout):
 				t.Fatal("Subscribe did not return after the subscriber fell behind")
 			}
-			require.LessOrEqual(t, len(stalled.sent), 1, "queued messages must be released, not delivered")
+			require.LessOrEqual(t, len(stalled.sent), 1, "only the message already inside Send may be delivered")
 		})
 	}
 }
