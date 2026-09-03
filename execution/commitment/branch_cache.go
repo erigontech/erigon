@@ -105,6 +105,9 @@ const keyedEntryBytes = 128
 func newBranchCacheEntry(entry branchCacheEntry) *branchCacheEntry { return &entry }
 
 func newKeyedBranchCacheEntry(prefix []byte, entry branchCacheEntry) *keyedBranchCacheEntry {
+	if len(prefix) > maxCompactKeyLen {
+		panic(fmt.Sprintf("branch cache prefix %d bytes exceeds maxCompactKeyLen %d", len(prefix), maxCompactKeyLen))
+	}
 	k := &keyedBranchCacheEntry{branchCacheEntry: entry}
 	k.prefixLen = uint8(copy(k.prefix[:], prefix))
 	return k
@@ -128,6 +131,7 @@ type trunk struct {
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*keyedBranchCacheEntry]
 
+	acctHash [32]byte
 	maxDepth uint8
 }
 
@@ -177,8 +181,8 @@ func newAccountTrunk(maxDepth uint8) *trunk {
 	return &trunk{maxDepth: maxDepth}
 }
 
-func newStorageTrunk(maxDepth uint8) *trunk {
-	return &trunk{maxDepth: maxDepth, deep: maphash.NewMap[*keyedBranchCacheEntry]()}
+func newStorageTrunk(acctHash [32]byte, maxDepth uint8) *trunk {
+	return &trunk{acctHash: acctHash, maxDepth: maxDepth, deep: maphash.NewMap[*keyedBranchCacheEntry]()}
 }
 
 const (
@@ -349,14 +353,17 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 	}
 	packed := acctHash[:]
 	if p != nil {
-		if st, found := p.Get(packed); found {
+		if st, found := p.Get(packed); found && st.acctHash == acctHash {
 			return st, storageNibbles(prefix, nibBuf), true
 		}
 	}
 	if !create {
 		return nil, 0, false
 	}
-	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
+	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(acctHash, c.maxDepth))
+	if st.acctHash != acctHash {
+		return nil, 0, false
+	}
 	return st, storageNibbles(prefix, nibBuf), true
 }
 

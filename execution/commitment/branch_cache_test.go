@@ -537,6 +537,78 @@ func TestBranchCache_TailCollisionServesMiss(t *testing.T) {
 	require.Equal(t, []byte("B-data"), ke.data)
 }
 
+func TestBranchCache_PinnedTrunkCollisionServesMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	mk := func(seed byte) []byte {
+		p := make([]byte, 34)
+		p[0] = 0x00
+		for i := 1; i < len(p); i++ {
+			p[i] = seed
+		}
+		return p
+	}
+	prefixA, prefixB := mk(0xAA), mk(0xBB)
+	prefixB[33] = prefixA[33]
+
+	c.PinEntry(prefixB, []byte("B-account-branch"), 0, 0)
+
+	hashA, ok := ContractHashFromPrefix(prefixA)
+	require.True(t, ok)
+	hashB, ok := ContractHashFromPrefix(prefixB)
+	require.True(t, ok)
+
+	stB, found := c.pinned.Load().Get(hashB[:])
+	require.True(t, found)
+	c.pinnedForWrite().Set(hashA[:], stB)
+
+	_, _, hit := c.Get(prefixA)
+	require.False(t, hit, "a pinned-map collision must not serve account B's branch bytes for account A")
+
+	dataB, _, hitB := c.Get(prefixB)
+	require.True(t, hitB, "the guard must discriminate, not simply always-miss: B still owns the trunk")
+	require.Equal(t, []byte("B-account-branch"), dataB)
+}
+
+func TestBranchCache_PinnedTrunkCollisionDoesNotCorruptOnWrite(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	mk := func(seed byte) []byte {
+		p := make([]byte, 34)
+		p[0] = 0x00
+		for i := 1; i < len(p); i++ {
+			p[i] = seed
+		}
+		return p
+	}
+	prefixA, prefixB := mk(0xAA), mk(0xBB)
+	prefixB[33] = prefixA[33]
+
+	c.PinEntry(prefixB, []byte("B-account-branch"), 0, 0)
+
+	hashA, ok := ContractHashFromPrefix(prefixA)
+	require.True(t, ok)
+	hashB, ok := ContractHashFromPrefix(prefixB)
+	require.True(t, ok)
+
+	stB, found := c.pinned.Load().Get(hashB[:])
+	require.True(t, found)
+	c.pinnedForWrite().Set(hashA[:], stB)
+
+	c.PinEntry(prefixA, []byte("A-account-branch"), 0, 0)
+
+	dataB, _, hitB := c.Get(prefixB)
+	require.True(t, hitB, "B's own pin must survive a colliding write")
+	require.Equal(t, []byte("B-account-branch"), dataB,
+		"a pinned-map collision must not let account A's write land in account B's trunk")
+
+	dataA, _, hitA := c.Get(prefixA)
+	require.True(t, hitA, "A's write must still be readable, from the keyed tail")
+	require.Equal(t, []byte("A-account-branch"), dataA)
+}
+
 // TestBranchCache_DeepTierPrefixMismatchServesMiss covers the other
 // maphash-addressed tier (trunk.deep). maphash.Map only exposes byte-keyed
 // Get/Set, so a real collision can't be forced without adding a raw-hash
