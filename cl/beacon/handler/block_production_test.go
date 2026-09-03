@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -109,6 +110,24 @@ type replayableBlockService struct {
 
 type completedPublishedBlockJob struct {
 	err error
+}
+
+type evictingSelfBuildPayloadCache struct{}
+
+func (evictingSelfBuildPayloadCache) Add(common.Hash, *selfBuildPayload) bool {
+	return true
+}
+
+func (evictingSelfBuildPayloadCache) Get(common.Hash) (*selfBuildPayload, bool) {
+	return nil, false
+}
+
+type evictingBlobBundleCache struct{}
+
+func (evictingBlobBundleCache) Add(common.Bytes48, BlobBundle) bool { return true }
+
+func (evictingBlobBundleCache) Get(common.Bytes48) (BlobBundle, bool) {
+	return BlobBundle{}, false
 }
 
 func (j completedPublishedBlockJob) Wait(context.Context) error { return j.err }
@@ -2162,6 +2181,79 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, big.NewInt(123), big.NewInt(456))
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.NumberOfColumns = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+
+	parentHash := common.HexToHash("0x1111")
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	require.NoError(t, err)
+	postState.SetLatestBlockHash(parentHash)
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:             parentHash,
+		ParentBlockHash:       parentHash,
+		GasLimit:              30_000_000,
+		ExecutionRequestsRoot: common.Hash(emptyRequestsRoot),
+	})
+	require.NoError(t, handler.syncedData.OnHeadState(postState))
+	targetSlot := postState.Slot() + 1
+	baseRoot, err := postState.BlockRoot()
+	require.NoError(t, err)
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadSlotVal = postState.Slot()
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentHash] = 30_000_000
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now()).AnyTimes()
+	handler.ethClock = clock
+
+	payloadHash := common.HexToHash("0x2222")
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = parentHash
+	payload.BlockHash = payloadHash
+	payload.PrevRandao = postState.GetRandaoMixes(targetSlot / handler.beaconChainCfg.SlotsPerEpoch)
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), parentHash, gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil)
+	blob := make(hexutil.Bytes, cltypes.BYTES_PER_BLOB)
+	commitment := make(hexutil.Bytes, length.Bytes48)
+	proof := make(hexutil.Bytes, length.Bytes48)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{
+			Blobs: []hexutil.Bytes{blob}, Commitments: []hexutil.Bytes{commitment}, Proofs: []hexutil.Bytes{proof},
+		}, nil, big.NewInt(1_000_000_000), nil)
+	handler.engine = engine
+	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
+	handler.blobBundles = evictingBlobBundleCache{}
+
+	body := strings.NewReader(`{"min_bid":"0","builder_boost_factor":"0","builders":[]}`)
+	url := fmt.Sprintf("/eth/v4/validator/blocks/%d?randao_reveal=0x%s&graffiti=0x%s&skip_randao_verification=true&include_payload=true", targetSlot, strings.Repeat("00", 96), strings.Repeat("00", 32))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, url, body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "true", recorder.Header().Get("Eth-Execution-Payload-Included"))
+	require.Contains(t, recorder.Body.String(), `"execution_payload_envelope"`)
+	require.Contains(t, recorder.Body.String(), `"blobs":["0x`)
+	require.Contains(t, recorder.Body.String(), `"kzg_proofs":["0x`)
 }
 
 func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {

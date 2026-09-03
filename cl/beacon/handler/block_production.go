@@ -740,9 +740,14 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			if err != nil {
 				log.Warn("Failed to compute beacon block root for self-build envelope", "err", err)
 			} else {
-				// Look up the cached execution payload for this block hash.
-				cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
-				if ok {
+				options := gloasBlockOptionsFromContext(ctx)
+				var cached *selfBuildPayload
+				if options != nil {
+					cached = options.selfBuildPayload
+				} else {
+					cached, _ = a.selfBuildPayloads.Get(bid.Message.BlockHash)
+				}
+				if cached != nil {
 					cachedReqs := cached.ExecutionRequests
 					if cachedReqs == nil {
 						cachedReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
@@ -759,7 +764,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 					a.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: targetSlot, BeaconBlockRoot: beaconBlockRoot}, envelope)
 					// SSZ encoding only serializes Data, not Extra — only include
 					// the envelope in JSON responses to keep the header truthful.
-					options := gloasBlockOptionsFromContext(ctx)
 					switch {
 					case options != nil && options.includePayload:
 						contents := cltypes.NewGloasBlockContents(a.beaconChainCfg, targetSlot)
@@ -845,6 +849,13 @@ func (a *ApiHandler) produceBlock(
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
+			if options := gloasBlockOptionsFromContext(ctx); options != nil && options.selfBuildPayload != nil {
+				for _, bundle := range options.selfBuildPayload.BlobBundles {
+					blobs = append(blobs, bundle.Blob)
+					kzgProofs = append(kzgProofs, bundle.KzgProofs...)
+				}
+				return
+			}
 			commitments := beaconBody.GetBlobKzgCommitments()
 			if commitments == nil {
 				commitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48)
@@ -1526,6 +1537,7 @@ func (a *ApiHandler) produceBeaconBody(
 	var executionPayload *cltypes.Eth1Block
 	// Keep the produced block's value independent from the engine-owned value.
 	executionValue := new(big.Int)
+	var gloasBlobBundles []BlobBundle
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever
 	// two steps fail together.
 	var executionErr, syncAggregateErr error
@@ -1546,6 +1558,9 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 		retryTime := 10 * time.Millisecond
 		feeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
+		if options := gloasBlockOptionsFromContext(ctx); options != nil && options.payloadFeeRecipient != nil {
+			feeRecipient = *options.payloadFeeRecipient
+		}
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", err)
@@ -1630,25 +1645,29 @@ func (a *ApiHandler) produceBeaconBody(
 				return
 			}
 
+			var blobBundle BlobBundle
 			// TODO: after the hard fork, remove this legacy code
 			if stateVersion.Before(clparams.FuluVersion) {
-				// add the bundle to recently produced blobs
-				a.blobBundles.Add(common.Bytes48(bundles.Commitments[i]), BlobBundle{
+				blobBundle = BlobBundle{
 					Blob:       (*cltypes.Blob)(bundles.Blobs[i]),
 					KzgProofs:  []common.Bytes48{common.Bytes48(bundles.Proofs[i])},
 					Commitment: common.Bytes48(bundles.Commitments[i]),
-				})
+				}
 			} else {
 				kzgProofs := make([]common.Bytes48, a.beaconChainCfg.NumberOfColumns)
 				for j := uint64(0); j < a.beaconChainCfg.NumberOfColumns; j++ {
 					kzgProofs[j] = common.Bytes48(bundles.Proofs[i*int(a.beaconChainCfg.NumberOfColumns)+int(j)])
 				}
-				// add the bundle to recently produced blobs
-				a.blobBundles.Add(common.Bytes48(bundles.Commitments[i]), BlobBundle{
+				blobBundle = BlobBundle{
 					Blob:       (*cltypes.Blob)(bundles.Blobs[i]),
 					KzgProofs:  kzgProofs,
 					Commitment: common.Bytes48(bundles.Commitments[i]),
-				})
+				}
+			}
+			// add the bundle to recently produced blobs
+			a.blobBundles.Add(blobBundle.Commitment, blobBundle)
+			if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+				gloasBlobBundles = append(gloasBlobBundles, blobBundle)
 			}
 
 			// Assemble the KZG commitments list
@@ -1818,10 +1837,18 @@ func (a *ApiHandler) produceBeaconBody(
 		if cachedExecReqs == nil {
 			cachedExecReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
 		}
-		a.selfBuildPayloads.Add(executionPayload.BlockHash, &selfBuildPayload{
+		cachedPayload := &selfBuildPayload{
 			Payload:           executionPayload,
 			ExecutionRequests: cachedExecReqs,
-		})
+			BlobBundles:       gloasBlobBundles,
+		}
+		options := gloasBlockOptionsFromContext(ctx)
+		if options != nil {
+			options.selfBuildPayload = cachedPayload
+		}
+		if options == nil || !options.deferPayloadCache {
+			a.selfBuildPayloads.Add(executionPayload.BlockHash, cachedPayload)
+		}
 
 		return beaconBody, executionValue, nil
 	}
