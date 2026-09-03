@@ -1778,7 +1778,7 @@ func TestBackwardBeaconDownloaderDoesNotSkipUnknownGloasPayload(t *testing.T) {
 			beaconCfg:    gloasFromGenesisConfig(),
 			expectedRoot: common.Hash{0xaa},
 		}
-		require.False(t, withoutEngine.canSkipSlot(t.Context(), tx, 0, 0, 10))
+		require.False(t, withoutEngine.canSkipRoot(t.Context(), tx, 0, 0, 10, withoutEngine.expectedRoot))
 
 		engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
 		withEngine := &BackwardBeaconDownloader{
@@ -1786,7 +1786,7 @@ func TestBackwardBeaconDownloaderDoesNotSkipUnknownGloasPayload(t *testing.T) {
 			beaconCfg:    gloasFromGenesisConfig(),
 			expectedRoot: common.Hash{0xaa},
 		}
-		require.False(t, withEngine.canSkipSlot(t.Context(), tx, 0, 0, 10))
+		require.False(t, withEngine.canSkipRoot(t.Context(), tx, 0, 0, 10, withEngine.expectedRoot))
 		return nil
 	}))
 }

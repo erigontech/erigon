@@ -51,6 +51,8 @@ var ErrPublishedBlockJobStopped = errors.New("block service stopped")
 
 var publishedBlockJobSequence atomic.Uint64
 
+const maxConcurrentBlockValidationContexts = 4
+
 type proposerIndexAndSlot struct {
 	proposerIndex uint64
 	slot          uint64
@@ -139,6 +141,24 @@ type seenBlock struct {
 	replayAllowed bool
 }
 
+type blockValidationContextKey struct {
+	parentRoot common.Hash
+	slot       uint64
+}
+
+type blockValidationContextCall struct {
+	done    chan struct{}
+	context *blockValidationContext
+	err     error
+}
+
+type blockValidationContext struct {
+	expectedProposer                   uint64
+	latestBlockHash                    common.Hash
+	latestExecutionPayloadBidBlockHash common.Hash
+	hasLatestExecutionPayloadBid       bool
+}
+
 type blockService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	syncedData      *synced_data.SyncedDataManager
@@ -149,6 +169,10 @@ type blockService struct {
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, seenBlock]
 	reservations    map[proposerIndexAndSlot]*blockReservation
 	seenBlocksMu    sync.Mutex
+	validationMu    sync.Mutex
+	validationCache *lru.Cache[blockValidationContextKey, *blockValidationContext]
+	validationCalls map[blockValidationContextKey]*blockValidationContextCall
+	validationSlots chan struct{}
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
@@ -173,6 +197,10 @@ func NewBlockService(
 	if err != nil {
 		panic(err)
 	}
+	validationCache, err := lru.New[blockValidationContextKey, *blockValidationContext]("block_validation_contexts", seenBlockCacheSize)
+	if err != nil {
+		panic(err)
+	}
 	b := &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
@@ -180,6 +208,9 @@ func NewBlockService(
 		beaconCfg:       beaconCfg,
 		seenBlocksCache: seenBlocksCache,
 		reservations:    make(map[proposerIndexAndSlot]*blockReservation),
+		validationCache: validationCache,
+		validationCalls: make(map[blockValidationContextKey]*blockValidationContextCall),
+		validationSlots: make(chan struct{}, maxConcurrentBlockValidationContexts),
 		emitter:         emitter,
 		db:              db,
 	}
@@ -423,7 +454,7 @@ func blockGossipKey(msg *cltypes.SignedBeaconBlock) proposerIndexAndSlot {
 	return proposerIndexAndSlot{proposerIndex: msg.Block.ProposerIndex, slot: msg.Block.Slot}
 }
 
-func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
+func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
 	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
 		return errors.New("missing beacon block")
 	}
@@ -499,33 +530,31 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	if b.forkchoiceStore.Ancestor(msg.Block.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of block")
 	}
-	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(msg.Block.ParentRoot, true)
+	validationContext, err := b.blockValidationContext(ctx, msg.Block.ParentRoot, msg.Block.Slot)
 	if err != nil {
 		if schedule != nil {
 			schedule()
 		}
-		return fmt.Errorf("%w: get parent block state: %w", ErrIgnore, err)
-	}
-	if parentState == nil {
-		if schedule != nil {
-			schedule()
-		}
-		return fmt.Errorf("%w: parent block state not found", ErrIgnore)
+		return err
 	}
 	if blockVersion >= clparams.GloasVersion {
-		var parentBid *cltypes.SignedExecutionPayloadBid
+		var parentBidBlockHash common.Hash
+		var hasParentBid bool
 		parentBlock, ok := b.forkchoiceStore.GetBlock(msg.Block.ParentRoot)
 		switch {
 		case ok && parentBlock != nil && parentBlock.Block != nil && parentBlock.Block.Body != nil:
-			parentBid = parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-		case msg.Block.ParentRoot == b.forkchoiceStore.AnchorRoot():
-			if bid := parentState.GetLatestExecutionPayloadBid(); bid != nil {
-				parentBid = &cltypes.SignedExecutionPayloadBid{Message: bid}
+			parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+			if parentBid != nil && parentBid.Message != nil {
+				parentBidBlockHash = parentBid.Message.BlockHash
+				hasParentBid = true
 			}
+		case msg.Block.ParentRoot == b.forkchoiceStore.AnchorRoot():
+			parentBidBlockHash = validationContext.latestExecutionPayloadBidBlockHash
+			hasParentBid = validationContext.hasLatestExecutionPayloadBid
 		default:
 			return errors.New("parent block not found")
 		}
-		parentIsFull = parentBid != nil && parentBid.Message != nil && gloasBid.ParentBlockHash == parentBid.Message.BlockHash
+		parentIsFull = hasParentBid && gloasBid.ParentBlockHash == parentBidBlockHash
 		if parentIsFull {
 			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
 			if !seen || status != execution_client.PayloadStatusValidated {
@@ -536,21 +565,8 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 			}
 		}
 	}
-	if err := transition.DefaultMachine.ProcessSlots(parentState, msg.Block.Slot); err != nil {
-		if schedule != nil {
-			schedule()
-		}
-		return fmt.Errorf("%w: process parent state to block slot: %w", ErrIgnore, err)
-	}
-	expectedProposer, err := parentState.GetBeaconProposerIndexForSlot(msg.Block.Slot)
-	if err != nil {
-		if schedule != nil {
-			schedule()
-		}
-		return fmt.Errorf("%w: get expected proposer: %w", ErrIgnore, err)
-	}
-	if msg.Block.ProposerIndex != expectedProposer {
-		return fmt.Errorf("block proposer index %d does not match expected proposer %d", msg.Block.ProposerIndex, expectedProposer)
+	if msg.Block.ProposerIndex != validationContext.expectedProposer {
+		return fmt.Errorf("block proposer index %d does not match expected proposer %d", msg.Block.ProposerIndex, validationContext.expectedProposer)
 	}
 
 	var maxBlobsPerBlock uint64
@@ -574,7 +590,7 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 			return errors.New("bid.parent_block_root does not match block.parent_root")
 		}
 
-		if !parentIsFull && gloasBid.ParentBlockHash != parentState.GetLatestBlockHash() {
+		if !parentIsFull && gloasBid.ParentBlockHash != validationContext.latestBlockHash {
 			return errors.New("bid does not build on the parent's execution head")
 		}
 	} else if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
@@ -583,6 +599,101 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		return ErrInvalidCommitmentsCount
 	}
 	return nil
+}
+
+func (b *blockService) blockValidationContext(ctx context.Context, parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {
+	key := blockValidationContextKey{parentRoot: parentRoot, slot: slot}
+	b.validationMu.Lock()
+	if validationContext, ok := b.validationCache.Get(key); ok {
+		b.validationMu.Unlock()
+		return validationContext, nil
+	}
+	call := b.validationCalls[key]
+	b.validationMu.Unlock()
+	if call != nil {
+		return waitForBlockValidationContext(ctx, call)
+	}
+
+	select {
+	case b.validationSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: block validation canceled: %w", ErrIgnore, ctx.Err())
+	}
+
+	b.validationMu.Lock()
+	if validationContext, ok := b.validationCache.Get(key); ok {
+		b.validationMu.Unlock()
+		<-b.validationSlots
+		return validationContext, nil
+	}
+	if call = b.validationCalls[key]; call != nil {
+		b.validationMu.Unlock()
+		<-b.validationSlots
+		return waitForBlockValidationContext(ctx, call)
+	}
+	call = &blockValidationContextCall{done: make(chan struct{})}
+	b.validationCalls[key] = call
+	b.validationMu.Unlock()
+
+	finished := false
+	defer func() {
+		if !finished {
+			b.finishBlockValidationContext(key, call, nil, fmt.Errorf("%w: parent state validation panicked", ErrIgnore))
+		}
+		<-b.validationSlots
+	}()
+	validationContext, err := b.computeBlockValidationContext(parentRoot, slot)
+	b.finishBlockValidationContext(key, call, validationContext, err)
+	finished = true
+	return validationContext, err
+}
+
+func waitForBlockValidationContext(ctx context.Context, call *blockValidationContextCall) (*blockValidationContext, error) {
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: block validation canceled: %w", ErrIgnore, ctx.Err())
+	case <-call.done:
+		return call.context, call.err
+	}
+}
+
+func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {
+	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(parentRoot, true)
+	if err != nil {
+		return nil, fmt.Errorf("%w: get parent block state: %w", ErrIgnore, err)
+	}
+	if parentState == nil {
+		return nil, fmt.Errorf("%w: parent block state not found", ErrIgnore)
+	}
+	validationContext := &blockValidationContext{}
+	if bid := parentState.GetLatestExecutionPayloadBid(); bid != nil {
+		validationContext.latestExecutionPayloadBidBlockHash = bid.BlockHash
+		validationContext.hasLatestExecutionPayloadBid = true
+	}
+	if err := transition.DefaultMachine.ProcessSlots(parentState, slot); err != nil {
+		return nil, fmt.Errorf("%w: process parent state to block slot: %w", ErrIgnore, err)
+	}
+	validationContext.latestBlockHash = parentState.GetLatestBlockHash()
+	validationContext.expectedProposer, err = parentState.GetBeaconProposerIndexForSlot(slot)
+	if err != nil {
+		return nil, fmt.Errorf("%w: get expected proposer: %w", ErrIgnore, err)
+	}
+	return validationContext, nil
+}
+
+func (b *blockService) finishBlockValidationContext(key blockValidationContextKey, call *blockValidationContextCall, validationContext *blockValidationContext, err error) {
+	b.validationMu.Lock()
+	defer b.validationMu.Unlock()
+	if b.validationCalls[key] != call {
+		return
+	}
+	call.context = validationContext
+	call.err = err
+	delete(b.validationCalls, key)
+	if err == nil {
+		b.validationCache.Add(key, validationContext)
+	}
+	close(call.done)
 }
 
 func validateGloasBlockBodyLimits(cfg *clparams.BeaconChainConfig, body *cltypes.BeaconBody) error {

@@ -1875,6 +1875,10 @@ func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailure
 			if preference.Message.ProposalSlot == 32 {
 				return errors.New("invalid first preference")
 			}
+			handler.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
+				Slot:          preference.Message.ProposalSlot,
+				DependentRoot: preference.Message.DependentRoot,
+			}, preference)
 			return nil
 		},
 	).Times(2)

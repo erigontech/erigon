@@ -995,11 +995,6 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 	return nil
 }
 
-// canSkipSlot checks if we can skip to an existing block at the given slot.
-func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64) bool {
-	return b.canSkipRoot(ctx, tx, elFrozenBlocks, clFrozenBlocks, slot, b.expectedRoot)
-}
-
 func (b *BackwardBeaconDownloader) canSkipRoot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64, blockRoot common.Hash) bool {
 	if slot <= clFrozenBlocks {
 		return false
