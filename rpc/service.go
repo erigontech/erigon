@@ -133,8 +133,7 @@ func (r *serviceRegistry) subscription(service, name string) *callback {
 func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*callback {
 	typ := receiver.Type()
 	callbacks := make(map[string]*callback)
-	for m := 0; m < typ.NumMethod(); m++ {
-		method := typ.Method(m)
+	for method := range typ.Methods() {
 		if method.PkgPath != "" {
 			continue // method not exported
 		}
