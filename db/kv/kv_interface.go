@@ -610,6 +610,9 @@ type FlushConfig struct {
 	// DomainCallbacks, if set for a domain, is invoked per (key,value,step,txNum)
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
+	//
+	// k belongs to the callback; v is the batch's own storage, which is never
+	// rewritten in place, so a consumer may retain it.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
@@ -696,9 +699,18 @@ type TemporalPutDel interface {
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 
+type FinalityContext interface {
+	PruneToBlockNum() uint64
+	RetireToBlockNum() uint64
+	MaxReorgDepth() uint64
+	ReadyForCollation(ctx context.Context, db RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+}
+
 type TemporalRoDB interface {
 	RoDB
 	SnapshotNotifier
+	MaxPrunableStepsBacklog() uint64
+	StepSize() uint64
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 	Debug() TemporalDebugDB
@@ -709,6 +721,11 @@ type TemporalRwDB interface {
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
+	OpenStateSnapshots(ctx context.Context) error
+	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
+	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
+	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error
+	CollateAndPrune(ctx context.Context, pruneFn func(tx TemporalRwTx) (FinalityContext, error)) (bool, <-chan struct{}, error)
 }
 
 // ---- non-important utilities

@@ -170,13 +170,6 @@ func TestToECDSAErrors(t *testing.T) {
 	}
 }
 
-func BenchmarkSha3(b *testing.B) {
-	a := []byte("hello world")
-	for b.Loop() {
-		Keccak256(a)
-	}
-}
-
 func TestUnmarshalPubkey(t *testing.T) {
 	key, err := UnmarshalPubkey(nil)
 	if !errors.Is(err, errInvalidPubkey) || key != nil {
@@ -307,7 +300,10 @@ func TestLoadECDSA(t *testing.T) {
 			t.Fatal(err)
 		}
 		filename := f.Name()
-		f.WriteString(test.input)
+		if _, err := f.WriteString(test.input); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
 		f.Close()
 
 		_, err = LoadECDSA(filename)
@@ -413,62 +409,5 @@ func TestPythonIntegration(t *testing.T) {
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg1, kh, sig1)
 }
 
-var benchPayload = make([]byte, 500)
-var benchPayload1 = make([]byte, 1)
-
 var sinkHash common.Hash
 var sinkBytes []byte
-
-func BenchmarkKeccak256Hash(b *testing.B) {
-	b.Run("1", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkHash = Keccak256Hash(benchPayload1)
-		}
-	})
-	b.Run("500", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkHash = Keccak256Hash(benchPayload)
-		}
-	})
-	// A caller-local buffer: it must not escape to the heap.
-	b.Run("local32", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var buf [32]byte
-			sinkHash = Keccak256Hash(buf[:])
-		}
-	})
-}
-
-func BenchmarkKeccak256(b *testing.B) {
-	b.Run("500", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkBytes = Keccak256(benchPayload)
-		}
-	})
-	// The rlpx shape: two 32-byte inputs joined on the stack.
-	b.Run("two32", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var x, y [32]byte
-			sinkBytes = Keccak256(x[:], y[:])
-		}
-	})
-	// A join too large for the stack buffer.
-	b.Run("joined", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkBytes = Keccak256(benchPayload, benchPayload)
-		}
-	})
-	b.Run("local32", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var buf [32]byte
-			sinkBytes = Keccak256(buf[:])
-		}
-	})
-}
