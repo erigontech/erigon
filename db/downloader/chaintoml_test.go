@@ -587,3 +587,65 @@ func TestMergeBootstrapPreverified_DifferentTypeIndependent(t *testing.T) {
 	assert.NotContains(t, gotStr, "v1.1-003400-003500-bodies.seg",
 		"preverified bodies covered by same-range local bodies must be dropped")
 }
+
+// TestMergeBootstrapPreverified_DropsEntriesAboveLocalTip pins the
+// publish-side half of the local-tip rule. The consume side already
+// rejects peer entries above our tip (filterDiscoveredByLocalTip):
+// blocks we haven't advanced past are ours to produce via forward exec
+// + retire, from anyone's manifest. Preverified is another external
+// manifest and gets the same treatment — otherwise a deep unwind drops
+// our tip, the block-side sweep deletes the files, and the next
+// publish re-injects their names from the registry, advertising files
+// no longer on disk.
+func TestMergeBootstrapPreverified_DropsEntriesAboveLocalTip(t *testing.T) {
+	snapDir := t.TempDir()
+	// Local holds all three block types through 3430000 — a complete
+	// set, so a tip is derivable (deriveBlockTipFromMap needs all
+	// three). Post-unwind state: everything above was swept.
+	for _, typ := range []string{"headers", "bodies", "transactions"} {
+		createTestTorrent(t, snapDir, "v1.1-003420-003430-"+typ+".seg")
+	}
+	local := []byte(`"v1.1-003420-003430-headers.seg" = "1111111111111111111111111111111111111111"
+"v1.1-003420-003430-bodies.seg" = "2222222222222222222222222222222222222222"
+"v1.1-003420-003430-transactions.seg" = "3333333333333333333333333333333333333333"
+`)
+
+	// Registry still lists the ranges the unwind swept.
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-003400-003500-headers.seg", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Name: "v1.1-003500-003501-headers.seg", Hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		{Name: "v1.1-003501-003502-headers.seg", Hash: "cccccccccccccccccccccccccccccccccccccccc"},
+	}
+
+	got := mergeBootstrapPreverified(local, items, nil, snapDir)
+	gotStr := string(got)
+
+	assert.NotContains(t, gotStr, "v1.1-003400-003500-headers.seg",
+		"preverified range extending past local tip must not be advertised — the file is not on disk")
+	assert.NotContains(t, gotStr, "v1.1-003500-003501-headers.seg",
+		"preverified range entirely past local tip must not be advertised")
+	assert.NotContains(t, gotStr, "v1.1-003501-003502-headers.seg", "same")
+	assert.Contains(t, gotStr, "v1.1-003420-003430-headers.seg",
+		"local entry at-or-below the tip must survive")
+}
+
+// TestMergeBootstrapPreverified_ColdStartIgnoresTip pins the
+// bootstrap escape: with no complete local block set there is no
+// derivable tip, so the gate is a pass-through and the registry seeds
+// the published manifest as before. Without this a fresh node would
+// advertise nothing and never seed peers.
+func TestMergeBootstrapPreverified_ColdStartIgnoresTip(t *testing.T) {
+	snapDir := t.TempDir()
+
+	items := snapcfg.PreverifiedItems{
+		{Name: "v1.1-003400-003500-headers.seg", Hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		{Name: "v1.1-003500-003501-headers.seg", Hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+	}
+
+	got := mergeBootstrapPreverified(nil, items, nil, snapDir)
+	gotStr := string(got)
+
+	assert.Contains(t, gotStr, "v1.1-003400-003500-headers.seg",
+		"cold start (no derivable tip) must pass preverified through")
+	assert.Contains(t, gotStr, "v1.1-003500-003501-headers.seg", "same")
+}

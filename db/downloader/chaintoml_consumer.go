@@ -426,46 +426,50 @@ func filterDiscoveredByLocalTip(discovered map[string]string, localTip uint64) m
 	}
 	out := make(map[string]string, len(discovered))
 	for name, hash := range discovered {
-		if isCLDataName(name) {
-			out[name] = hash
-			continue
-		}
-		// State-domain entries (under domain/, history/, idx/,
-		// accessor/) are addressed by the state-tip filter at a
-		// different layer; pass through here.
-		if strings.HasPrefix(name, "domain/") ||
-			strings.HasPrefix(name, "history/") ||
-			strings.HasPrefix(name, "idx/") ||
-			strings.HasPrefix(name, "accessor/") {
-			out[name] = hash
-			continue
-		}
-		// Meta / salt / config entries — keep.
-		if !strings.HasSuffix(name, ".seg") && !strings.HasSuffix(name, ".idx") {
-			out[name] = hash
-			continue
-		}
-		// Block file: derive range. Block types aren't registered in
-		// downloader's process so ParseRange is the right helper.
-		_, _, to, ok := snaptype.ParseRange(name)
-		if !ok {
-			// Unknown shape — pass through rather than silently drop.
-			out[name] = hash
-			continue
-		}
-		// Keep only entries whose upper bound is at or below our
-		// local processed tip. Entries with To > localTip describe
-		// blocks WE HAVEN'T LOCALLY ADVANCED PAST yet — either we
-		// haven't reached them (cold-start partway), or we just
-		// unwound past them (mode-B). In both cases our own forward
-		// exec + retire will produce those snapshots; accepting peer
-		// files for the same blocks creates overlapping-file state
-		// that violates the maximality invariant.
-		if to > 0 && to <= localTip+1 {
+		if entryWithinLocalTip(name, localTip) {
 			out[name] = hash
 		}
 	}
 	return out
+}
+
+// entryWithinLocalTip reports whether an external manifest entry
+// describes blocks at or below our local processed tip. Entries above
+// it describe blocks WE HAVEN'T LOCALLY ADVANCED PAST — either we
+// haven't reached them (cold-start partway), or we just unwound past
+// them. In both cases our own forward exec + retire will produce those
+// snapshots, so taking an external file for the same blocks creates
+// overlapping-file state that violates the maximality invariant, and
+// re-advertising its name claims a file that is not on disk.
+//
+// Callers must treat localTip == 0 as a pass-through: with no complete
+// local block set there is no tip to compare against, and gating on it
+// would leave a fresh node unable to bootstrap.
+//
+// Only block files are gated. CL data, state-domain entries (addressed
+// by the state-tip filter at a different layer), and meta/salt/config
+// entries pass through, as does any name whose range cannot be parsed —
+// an unknown shape is passed rather than silently dropped.
+func entryWithinLocalTip(name string, localTip uint64) bool {
+	if isCLDataName(name) {
+		return true
+	}
+	if strings.HasPrefix(name, "domain/") ||
+		strings.HasPrefix(name, "history/") ||
+		strings.HasPrefix(name, "idx/") ||
+		strings.HasPrefix(name, "accessor/") {
+		return true
+	}
+	if !strings.HasSuffix(name, ".seg") && !strings.HasSuffix(name, ".idx") {
+		return true
+	}
+	// Block types aren't registered in downloader's process so
+	// ParseRange is the right helper.
+	_, _, to, ok := snaptype.ParseRange(name)
+	if !ok {
+		return true
+	}
+	return to > 0 && to <= localTip+1
 }
 
 // ApplyDiscoveredChainToml integrates discovered chain.toml entries into

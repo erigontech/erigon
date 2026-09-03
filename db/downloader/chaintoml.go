@@ -201,26 +201,46 @@ func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorr
 type PreverifiedFilter func(snapcfg.PreverifiedItems) snapcfg.PreverifiedItems
 
 // mergeBootstrapPreverified folds preverified into a local chain.toml.
-// filter is applied to items first when non-nil. Preverified entries
-// whose block range is subsumed by a locally-held wider file of the
-// same class are then dropped via snaptype.LocalCoverageIndex — the
-// shared "local-overrides-external" invariant. Without this, retire's
-// wider merged output (e.g. v1.1-003500-003510-headers.seg) would
-// coexist in chain.toml with the ten preverified 1k chunks it
-// subsumes, and peers reading the manifest would request files the
-// local torrent client cannot serve.
+// filter is applied to items first when non-nil. Two further gates then
+// drop preverified entries we cannot actually serve, both expressions of
+// the "local-overrides-external" invariant:
 //
-// snapDir == "" makes the local-coverage filter a pass-through
-// (test-only callers that don't have a real snap directory).
+// Coverage — entries whose block range is subsumed by locally-held files
+// of the same class (snaptype.LocalCoverageIndex). Without this, retire's
+// wider merged output (e.g. v1.1-003500-003510-headers.seg) would coexist
+// in chain.toml with the ten preverified 1k chunks it subsumes.
+//
+// Local tip — entries describing blocks past our own processed tip
+// (entryWithinLocalTip, the same rule the consume side applies to
+// peer-discovered manifests). A deep unwind lowers the tip and the
+// block-side sweep deletes the files; without this gate the next publish
+// re-injects their names straight from the registry.
+//
+// Both gates exist because a published manifest is a claim about what
+// this node can serve. localTomlBytes is the local-files-only manifest,
+// so it is the disk truth the tip is derived from — deriving it from the
+// published chain.toml instead would read back the stale entries this
+// gate exists to remove.
+//
+// snapDir == "" makes the coverage filter a pass-through (test-only
+// callers that don't have a real snap directory).
 func mergeBootstrapPreverified(localTomlBytes []byte, items snapcfg.PreverifiedItems, filter PreverifiedFilter, snapDir string) []byte {
 	if filter != nil {
 		items = filter(items)
 	}
-	if snapDir != "" && len(items) > 0 {
-		cov := snaptype.BuildLocalCoverageIndex(snapDir)
+	localMap, _ := ParseChainToml(localTomlBytes)
+	if len(items) > 0 {
+		cov := snaptype.LocalCoverageIndex{}
+		if snapDir != "" {
+			cov = snaptype.BuildLocalCoverageIndex(snapDir)
+		}
+		localTip := deriveBlockTipFromMap(localMap)
 		out := items[:0]
 		for _, p := range items {
 			if cov.Covers(p.Name) {
+				continue
+			}
+			if localTip > 0 && !entryWithinLocalTip(p.Name, localTip) {
 				continue
 			}
 			out = append(out, p)
@@ -230,7 +250,6 @@ func mergeBootstrapPreverified(localTomlBytes []byte, items snapcfg.PreverifiedI
 	if len(items) == 0 {
 		return localTomlBytes
 	}
-	localMap, _ := ParseChainToml(localTomlBytes)
 	preverified := make(map[string]string, len(items))
 	for _, item := range items {
 		preverified[item.Name] = item.Hash
