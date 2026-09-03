@@ -45,16 +45,23 @@ type ExecutionHeaderMessage struct {
 }
 
 func (h ExecutionHeader) BlockValue() *big.Int {
-	if h.Data.Message.Value == "" {
+	value := h.Data.Message.Value
+	if value == "" {
 		return nil
 	}
-	blockValue, ok := new(big.Int).SetString(h.Data.Message.Value, 10)
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			log.Warn("cannot parse block value", "value", value)
+			return nil
+		}
+	}
+	blockValue, ok := new(big.Int).SetString(value, 10)
 	if !ok {
-		log.Warn("cannot parse block value", "value", h.Data.Message.Value)
+		log.Warn("cannot parse block value", "value", value)
 		return nil
 	}
 	if blockValue.Sign() < 0 || blockValue.BitLen() > 256 {
-		log.Warn("builder block value outside uint256 range", "value", h.Data.Message.Value)
+		log.Warn("builder block value outside uint256 range", "value", value)
 		return nil
 	}
 	return blockValue

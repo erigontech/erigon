@@ -774,6 +774,7 @@ func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
 	}{
 		{name: "empty"},
 		{name: "not_a_number", value: "not-a-number"},
+		{name: "leading_plus", value: "+1"},
 		{name: "negative", value: "-1"},
 		{name: "over_uint256", value: new(big.Int).Lsh(big.NewInt(1), 256).String()},
 	} {
