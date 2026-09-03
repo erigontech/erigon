@@ -61,11 +61,13 @@ const (
 )
 
 var stateSizes = []struct {
-	n    int
-	name string
+	n      int
+	name   string
+	blocks int
 }{
-	{100_000, "100kaccounts"},
-	{1_000_000, "1Maccounts"},
+	{10_000, "10kaccounts", 1},
+	{100_000, "100kaccounts", 8},
+	{1_000_000, "1Maccounts", 8},
 }
 
 var windowProfile = flag.String("windowprofile", "",
@@ -81,7 +83,7 @@ func BenchmarkValidatePayload(b *testing.B) {
 	for _, w := range []workload{warmAccounts, coldAccounts, hotAccount} {
 		for _, size := range sizes {
 			b.Run(fmt.Sprintf("%s/%s", w, size.name), func(b *testing.B) {
-				benchmarkValidatePayload(b, w, size.n)
+				benchmarkValidatePayload(b, w, size.n, size.blocks)
 			})
 		}
 	}
@@ -93,12 +95,10 @@ func BenchmarkValidatePayload(b *testing.B) {
 // of the other points.
 const stateBudget = 0.1
 
-const benchBlocksPerOp = 8
-
-func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
-	if used := float64(benchBlocksPerOp*benchTxsPerBlock) / float64(stateSize); used > stateBudget {
+func benchmarkValidatePayload(b *testing.B, w workload, stateSize, blocksPerOp int) {
+	if used := float64(blocksPerOp*benchTxsPerBlock) / float64(stateSize); used > stateBudget {
 		b.Fatalf("%s consumes %.2f× the %d-account pre-state over %d blocks (budget %.2f); "+
-			"lower benchBlocksPerOp or raise the state size", w, used, stateSize, benchBlocksPerOp, stateBudget)
+			"lower the blocks for this size or raise the state size", w, used, stateSize, blocksPerOp, stateBudget)
 	}
 
 	senders := benchSenders(b)
@@ -114,7 +114,7 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	for range b.N {
 		func() {
 			b.StopTimer()
-			m, blocks := benchFixture(b, w, stateSize, senders)
+			m, blocks := benchFixture(b, w, stateSize, blocksPerOp, senders)
 			defer m.Close()
 			runtime.GC()
 			stopWindowProfile := startWindowProfile(b)
@@ -153,10 +153,10 @@ func benchmarkValidatePayload(b *testing.B, w workload, stateSize int) {
 	}
 	b.ReportMetric(boolMetric(dbg.Exec3Parallel), "parallelExec")
 	b.ReportMetric(gogcPercent(), "gogc")
-	b.ReportMetric(float64(benchBlocksPerOp*benchTxsPerBlock)/float64(stateSize), "txPerAccount")
+	b.ReportMetric(float64(blocksPerOp*benchTxsPerBlock)/float64(stateSize), "txPerAccount")
 }
 
-func benchFixture(b *testing.B, w workload, stateSize int, senders []*ecdsa.PrivateKey) (*execmoduletester.ExecModuleTester, []*types.Block) {
+func benchFixture(b *testing.B, w workload, stateSize, blocksPerOp int, senders []*ecdsa.PrivateKey) (*execmoduletester.ExecModuleTester, []*types.Block) {
 	alloc := make(types.GenesisAlloc, stateSize+benchTxsPerBlock)
 	senderBalance := new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)
 	for _, key := range senders {
@@ -184,7 +184,7 @@ func benchFixture(b *testing.B, w workload, stateSize int, senders []*ecdsa.Priv
 
 	signer := *types.LatestSignerForChainID(nil)
 	var coldSeq uint64
-	chainResult, err := m.GenerateChain(benchBlocksPerOp, func(blockIdx int, bg *blockgen.BlockGen) {
+	chainResult, err := m.GenerateChain(blocksPerOp, func(blockIdx int, bg *blockgen.BlockGen) {
 		bg.SetCoinbase(benchCoinbase)
 		gasPrice := bg.GetHeader().BaseFee
 		for i := range benchTxsPerBlock {
