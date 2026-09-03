@@ -1115,6 +1115,22 @@ var BlockCompressCfg = seg.Cfg{
 	Workers:              1,
 }
 
+// oneEntryPerBlock reports whether a block snapshot type emits exactly
+// one entry per block, making a dump's word count comparable against the
+// file's block range. Transactions emit one entry per transaction and so
+// carry no such relation.
+func oneEntryPerBlock(t snaptype.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Enum() {
+	case snaptype2.Enums.Headers, snaptype2.Enums.Bodies:
+		return true
+	default:
+		return false
+	}
+}
+
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (uint64, error) {
 	// Claim this (type, range) so a concurrent OpenFolder doesn't pick up the
 	// .seg before its index is built and race our BuildIndexes below.
@@ -1140,7 +1156,9 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	//  - merge can be slow and expensive
 	noCompress := (f.To - f.From) < (snaptype.Erigon2MergeLimit - 1)
 
+	var emitted uint64
 	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
+		emitted++
 		if noCompress {
 			return sn.AddUncompressedWord(v)
 		}
@@ -1157,6 +1175,20 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 		sn.Close()
 		_ = dir2.RemoveFile(f.Path)
 		return lastKeyValue, fmt.Errorf("dump %s: %w", f.Name(), err)
+	}
+
+	// The file is named from the requested range, so for the types that
+	// emit one entry per block the two must agree. kv.BigChunks skips
+	// missing canonical-hash entries silently, so a sparse range (typical
+	// below pruneMarkerBlockThreshold under --prune.mode=minimal) yields a
+	// short stream under a full-range name. Checked here rather than in
+	// each dumper because this is where the name and the content meet —
+	// the dumpers themselves keep their "return what exists" contract.
+	if oneEntryPerBlock(f.Type) && emitted != (f.To-f.From) {
+		sn.Close()
+		_ = dir2.RemoveFile(f.Path)
+		return lastKeyValue, fmt.Errorf("%s sparse in requested range: got %d entries for [%d, %d) (expected %d)",
+			f.Type.Name(), emitted, f.From, f.To, f.To-f.From)
 	}
 
 	ext := filepath.Ext(f.Name())
@@ -1432,7 +1464,6 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 
 	key := make([]byte, 8+32)
 	from := hexutil.EncodeTs(blockFrom)
-	var emitted uint64
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -1463,7 +1494,6 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 		if err := collect(value); err != nil {
 			return false, err
 		}
-		emitted++
 
 		select {
 		case <-ctx.Done():
@@ -1481,15 +1511,6 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 		return true, nil
 	}); err != nil {
 		return 0, err
-	}
-
-	// kv.BigChunks silently skips missing canonical-hash entries, so a
-	// sparse kv.HeaderCanonical (below pruneMarkerBlockThreshold under
-	// --prune.mode=minimal) yields fewer entries than the file's
-	// advertised range and later reads/rebuilds hit "source ran out at
-	// entry N (wanted M)".
-	if !test && emitted != (blockTo-blockFrom) {
-		return 0, fmt.Errorf("canonical hashes sparse in requested range: got %d entries for [%d, %d) (expected %d)", emitted, blockFrom, blockTo, blockTo-blockFrom)
 	}
 
 	// Make sure the canonical chain is not broken.
@@ -1523,7 +1544,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	from := hexutil.EncodeTs(blockFrom)
 
 	lastTxNum := firstTxNum(ctx)
-	var emitted uint64
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -1556,7 +1576,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		if err := collect(dataRLP); err != nil {
 			return false, err
 		}
-		emitted++
 
 		select {
 		case <-ctx.Done():
@@ -1574,14 +1593,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		return true, nil
 	}); err != nil {
 		return lastTxNum, err
-	}
-
-	// A short bodies.seg pairs with a full-length transactions.seg that
-	// reads back the last body at index N-1, decodes a zero-valued
-	// BodyForStorage, and produces the "negative txs count" indexer
-	// error. Fail loudly here so retire retries the range cleanly.
-	if emitted != (blockTo - blockFrom) {
-		return lastTxNum, fmt.Errorf("bodies sparse in requested range: got %d entries for [%d, %d) (expected %d)", emitted, blockFrom, blockTo, blockTo-blockFrom)
 	}
 
 	return lastTxNum, nil

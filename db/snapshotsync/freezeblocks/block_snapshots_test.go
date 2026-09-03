@@ -200,6 +200,83 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	require.False(t, dumperCalled)
 }
 
+// TestDumpRangeRejectsShortDump pins the filename-vs-content contract
+// for the one-entry-per-block types. A .seg is named from the requested
+// range, so a dump that emits fewer entries than the range advertises
+// lands a partial file under a full-range name — later reads trust the
+// name and fail with "source ran out at entry N". The file must not
+// survive, so retire can retry the range once the DB catches up.
+func TestDumpRangeRejectsShortDump(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fi   snaptype.FileInfo
+	}{
+		{"headers", snaptype2.Headers.FileInfo(t.TempDir(), 0, 1000)},
+		{"bodies", snaptype2.Bodies.FileInfo(t.TempDir(), 0, 1000)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tc.fi
+			// Emit 999 words for a 1000-block range — one short.
+			dumper := func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collector func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+				for i := uint64(0); i < blockTo-blockFrom-1; i++ {
+					if err := collector([]byte{byte(i)}); err != nil {
+						return 0, err
+					}
+				}
+				return 0, nil
+			}
+
+			_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, filepath.Dir(f.Path), 1, log.LvlInfo, log.New(), nil)
+			require.Error(t, err, "a short dump must not be accepted under a full-range filename")
+			require.Contains(t, err.Error(), "sparse in requested range")
+
+			_, statErr := os.Stat(f.Path)
+			require.True(t, os.IsNotExist(statErr),
+				"partial file must be removed so retire can retry the range, got err=%v", statErr)
+		})
+	}
+}
+
+// TestDumpRangePassesCompleteDumpToIndexing pins the complement of
+// TestDumpRangeRejectsShortDump: a dump emitting exactly one entry per
+// block clears the count gate. It then fails in index-building, which
+// needs a salt this bare-tempdir fixture has no reason to provide — so
+// the assertion is that the gate specifically did not reject it.
+func TestDumpRangePassesCompleteDumpToIndexing(t *testing.T) {
+	f := snaptype2.Headers.FileInfo(t.TempDir(), 0, 1000)
+	dumper := func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collector func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		for i := uint64(0); i < blockTo-blockFrom; i++ {
+			if err := collector([]byte{byte(i)}); err != nil {
+				return 0, err
+			}
+		}
+		return 0, nil
+	}
+
+	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, filepath.Dir(f.Path), 1, log.LvlInfo, log.New(), nil)
+	if err != nil {
+		require.NotContains(t, err.Error(), "sparse in requested range",
+			"a complete dump must clear the count gate")
+	}
+}
+
+// TestDumpRangeAllowsShortTransactions pins that the per-block count
+// rule does not apply to transactions: entries there are one per
+// transaction, not one per block, so any count is legitimate. Same
+// index-building caveat as above.
+func TestDumpRangeAllowsShortTransactions(t *testing.T) {
+	f := snaptype2.Transactions.FileInfo(t.TempDir(), 0, 1000)
+	dumper := func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collector func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+		return 0, collector([]byte{1})
+	}
+
+	_, err := dumpRange(t.Context(), f, dumper, nil, nil, nil, filepath.Dir(f.Path), 1, log.LvlInfo, log.New(), nil)
+	if err != nil {
+		require.NotContains(t, err.Error(), "sparse in requested range",
+			"transactions emit one entry per txn, not per block — the count rule must not apply")
+	}
+}
+
 // TestChooseRetireTailStart_NoV4OneReturnsChunkFrom pins the baseline:
 // an empty snapDir (no v4 #1 present) returns chunkFrom unchanged so
 // retire emits the standard chunk output.
