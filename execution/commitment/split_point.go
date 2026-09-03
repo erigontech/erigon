@@ -105,6 +105,7 @@ func foldSplitRow(ctx context.Context, base *HexPatriciaHashed, to foldTo) (cell
 	}
 	out := base.root
 	out.extLen = 0
+	out.hashedExtLen = 0
 	return out, nil
 }
 

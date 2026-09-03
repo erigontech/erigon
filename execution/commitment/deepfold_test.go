@@ -589,12 +589,28 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 }
 
 func storageLocsForNibble(nibble byte, n, seed int) []string {
+	return slotLocsForHexPrefix([]byte{nibble}, n, seed)
+}
+func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
 	out := make([]string, 0, n)
 	var s [32]byte
 	for i := seed; len(out) < n; i++ {
 		binary.BigEndian.PutUint64(s[24:], uint64(i))
 		h := keccak.Sum256(s[:])
-		if (h[0]>>4)&0xf == nibble {
+		match := true
+		for j, nb := range nibblePrefix {
+			var hn byte
+			if j%2 == 0 {
+				hn = h[j/2] >> 4
+			} else {
+				hn = h[j/2] & 0xf
+			}
+			if hn != nb {
+				match = false
+				break
+			}
+		}
+		if match {
 			out = append(out, common.Bytes2Hex(s[:]))
 		}
 	}

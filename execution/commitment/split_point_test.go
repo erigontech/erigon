@@ -19,13 +19,11 @@ package commitment
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"math/rand"
 	"slices"
 	"testing"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -220,32 +218,6 @@ func withoutKeys(keys, drop []splitKV) []splitKV {
 	return out
 }
 
-func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
-	out := make([]string, 0, n)
-	var s [32]byte
-	for i := seed; len(out) < n; i++ {
-		binary.BigEndian.PutUint64(s[24:], uint64(i))
-		h := keccak.Sum256(s[:])
-		match := true
-		for j, nb := range nibblePrefix {
-			var hn byte
-			if j%2 == 0 {
-				hn = h[j/2] >> 4
-			} else {
-				hn = h[j/2] & 0xf
-			}
-			if hn != nb {
-				match = false
-				break
-			}
-		}
-		if match {
-			out = append(out, common.Bytes2Hex(s[:]))
-		}
-	}
-	return out
-}
-
 func (r *splitRound) foldRoot(keys []splitKV) ([]byte, error) {
 	ctx := context.Background()
 	base := r.newTrie()
@@ -419,7 +391,7 @@ func TestSplitPoint_AccountPlaneInteriorSplit(t *testing.T) {
 	requireBranchParity(t, msSeq, msSplit)
 }
 
-func splitCollapseCorpus() (survivors, doomed [][]byte, pk [][]byte, upds []Update) {
+func splitCollapseCorpus() (doomed [][]byte, pk [][]byte, upds []Update) {
 	rnd := rand.New(rand.NewSource(9090))
 	ub := NewUpdateBuilder()
 	for _, tail := range []byte{0x0, 0x5, 0xa} {
@@ -429,18 +401,17 @@ func splitCollapseCorpus() (survivors, doomed [][]byte, pk [][]byte, upds []Upda
 	}
 	for seed := range 6 {
 		a := findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, 0xf}, seed+77)
-		survivors = append(survivors, a)
 		ub.Balance(hex.EncodeToString(a), uint64(seed)+31)
 	}
 	for range 400 {
 		addRandomAccount(ub, rnd, 0)
 	}
 	pk, upds = ub.Build()
-	return survivors, doomed, pk, upds
+	return doomed, pk, upds
 }
 
 func TestSplitPoint_InteriorSingleSurvivorCollapse(t *testing.T) {
-	_, doomed, pk1, u1 := splitCollapseCorpus()
+	doomed, pk1, u1 := splitCollapseCorpus()
 
 	ms := NewMockState(t)
 	seq := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
@@ -816,4 +787,90 @@ func TestSplitPoint_KeyedSurvivorCollapse(t *testing.T) {
 			requireBranchParity(t, msSeq, msSplit)
 		})
 	}
+}
+
+func splitMultiChildReentryCorpus() (splitTouch []byte, later []byte, touch [][]byte, pk [][]byte, upds []Update) {
+	rnd := rand.New(rand.NewSource(818181))
+	ub := NewUpdateBuilder()
+	for seed := range 2 {
+		a := findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, 0x0}, seed*23+601)
+		ub.Balance(hex.EncodeToString(a), uint64(seed)+11)
+		if seed == 0 {
+			splitTouch = a
+		}
+	}
+	later = findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, 0x1}, 631)
+	ub.Balance(hex.EncodeToString(later), 71)
+
+	for _, p := range [][]byte{{0x1, 0x2, 0x7}, {0x1, 0x2, 0xc}, {0x1, 0x7}, {0x1, 0xc}} {
+		for seed := range 2 {
+			a := findAddressForHexPrefix(p, seed*29+661)
+			ub.Balance(hex.EncodeToString(a), uint64(seed)+37)
+			if seed == 0 && (len(p) == 2 || p[2] == 0x7) {
+				touch = append(touch, a)
+			}
+		}
+	}
+	for range 400 {
+		addRandomAccount(ub, rnd, 0)
+	}
+	pk, upds = ub.Build()
+	return splitTouch, later, touch, pk, upds
+}
+
+func TestSplitPoint_MultiChildSplitCellReUnfolded(t *testing.T) {
+	splitTouch, later, touch, pk1, u1 := splitMultiChildReentryCorpus()
+
+	msSeq := NewMockState(t)
+	seq := NewHexPatriciaHashed(length.Addr, msSeq, DefaultTrieConfig())
+	defer seq.Release()
+	processBatch(t, msSeq, seq, pk1, u1)
+
+	prefix := []byte{0x1, 0x2, 0x3}
+	for _, p := range [][]byte{prefix[:1], prefix[:2], prefix} {
+		require.Truef(t, hasBranchAt(msSeq, p), "corpus must produce an on-disk branch at %x", p)
+	}
+	laterHK := KeyToHexNibbleHash(later)
+	require.EqualValues(t, prefix[0], laterHK[len(prefix)],
+		"the later key's continuation must share a nibble with the split prefix so a stale hashed extension misroutes it")
+
+	msSplit := cloneMockState(t, msSeq)
+
+	ub := NewUpdateBuilder()
+	ub.Balance(hex.EncodeToString(splitTouch), 8001)
+	ub.Balance(hex.EncodeToString(later), 8002)
+	for i, a := range touch {
+		ub.Balance(hex.EncodeToString(a), uint64(i)+8100)
+	}
+	pk2, u2 := ub.Build()
+	seqRoot := processBatch(t, msSeq, seq, pk2, u2)
+	require.NoError(t, msSplit.applyPlainUpdates(pk2, u2))
+
+	all := splitKVs(pk2, u2)
+	var reUnfold []splitKV
+	for _, k := range all {
+		if bytes.Equal(k.hk, laterHK) {
+			reUnfold = append(reUnfold, k)
+		}
+	}
+	require.Len(t, reUnfold, 1, "the later key must be touched so the base descends through the split cell")
+
+	r := newSplitRound(msSplit)
+	r.splits[string(prefix[:1])] = true
+	r.splits[string(prefix[:2])] = true
+	r.splits[string(prefix)] = true
+	r.replay[string(prefix[:2])] = reUnfold
+	splitRoot, err := r.foldRoot(all)
+	require.NoError(t, err)
+	r.flush(t)
+
+	split, ok := r.captured[string(prefix)]
+	require.True(t, ok, "the interior split at 123 did not run")
+	require.Zero(t, split.extLen, "a multi-child split returns a bare branch cell")
+
+	require.Equalf(t, seqRoot, splitRoot, "root with a re-entry into the multi-child split cell at %x != sequential", prefix)
+	requireBranchParity(t, msSeq, msSplit)
+
+	require.Zerof(t, split.hashedExtLen,
+		"a multi-child split cell must not carry the absolute split prefix as a hashed extension; got %x", split.hashedExtension[:split.hashedExtLen])
 }

@@ -246,7 +246,7 @@ func requireBranchParity(t *testing.T, seq, got *MockState) {
 		branchDiff(t, seq, got)
 	}
 	require.Equal(t, len(seq.cm), len(got.cm), "branch count must match")
-	require.Zero(t, mism, "stored branch metadata differs between streaming and sequential")
+	require.Zero(t, mism, "stored branch metadata differs from sequential")
 }
 
 func branchDiff(t *testing.T, seq, par *MockState) {
