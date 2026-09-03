@@ -22,9 +22,15 @@ package gasprice_test
 import (
 	"container/heap"
 	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"math/rand"
+	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -43,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
@@ -95,7 +102,7 @@ func TestSuggestPrice(t *testing.T) {
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, tx, baseApi), config, cache, nil, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, rpchelper.PinToOverlay(tx, nil), baseApi), config, cache, nil, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
@@ -225,11 +232,26 @@ func TestKthAlgorithmCorrectness(t *testing.T) {
 // through fetchBlockPricesParallel.
 type mockOracleBackend struct {
 	head           *types.Header
+	frozen         uint64
+	canonicalErr   error
+	headerCalls    atomic.Int32
 	safeBlock      uint64
 	finalizedBlock uint64
+
+	canonicalMu     sync.Mutex
+	canonicalRanges [][2]uint64
+}
+
+// mockHeightHash derives a distinct hash per height, honoring the "one hash
+// per block" contract the fee-history cache keys rely on.
+func mockHeightHash(number uint64) common.Hash {
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[:8], number+1)
+	return h
 }
 
 func (m *mockOracleBackend) HeaderByNumber(_ context.Context, number rpc.BlockNumber) (*types.Header, error) {
+	m.headerCalls.Add(1)
 	header := types.CopyHeader(m.head)
 	switch number {
 	case rpc.SafeBlockNumber:
@@ -247,6 +269,8 @@ func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber
 	return types.NewBlock(m.head, nil, nil, nil, nil, nil), nil
 }
 
+func (m *mockOracleBackend) PrepareFork(context.Context) error { return nil }
+
 func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.AllProtocolChanges }
 
 func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {
@@ -261,8 +285,156 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
+func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	m.canonicalMu.Lock()
+	m.canonicalRanges = append(m.canonicalRanges, [2]uint64{from, to})
+	m.canonicalMu.Unlock()
+	if m.canonicalErr != nil {
+		return nil, m.canonicalErr
+	}
+	hashes := make([]common.Hash, to-from+1)
+	for number := from; number <= min(to, m.head.Number.Uint64()); number++ {
+		hashes[number-from] = mockHeightHash(number)
+	}
+	return hashes, nil
+}
+
+func (m *mockOracleBackend) resolvedRanges() [][2]uint64 {
+	m.canonicalMu.Lock()
+	defer m.canonicalMu.Unlock()
+	return slices.Clone(m.canonicalRanges)
+}
+
+func (m *mockOracleBackend) FrozenBlocks() (uint64, error) {
+	return m.frozen, nil
+}
+
+// The by-pair fetchers reject a (hash, number) pair that does not match
+// mockHeightHash, so any test going through them asserts the fetched block is
+// the one the cache key names.
+func (m *mockOracleBackend) HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+	if hash != mockHeightHash(number) {
+		return nil, fmt.Errorf("mismatched pair: hash %x is not the canonical hash of height %d", hash, number)
+	}
+	return m.HeaderByNumber(ctx, rpc.BlockNumber(number))
+}
+
+func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
+	if hash != mockHeightHash(number) {
+		return nil, fmt.Errorf("mismatched pair: hash %x is not the canonical hash of height %d", hash, number)
+	}
+	return m.BlockByNumber(ctx, rpc.BlockNumber(number))
+}
+
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
 	return nil, nil, nil // sequential mode
+}
+
+// TestFeeHistory_CanonicalHashErrorDegradesToUncached pins that a transient
+// error on the auxiliary cache-key resolution degrades the block to uncached
+// instead of failing the whole request — the number-keyed hit path had no
+// failure mode at all.
+func TestFeeHistory_CanonicalHashErrorDegradesToUncached(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, canonicalErr: errors.New("transient lookup failure")}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 3, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err, "a cache-key resolution error must degrade to uncached, not fail the request")
+	require.Len(t, baseFee, 4)
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, baseFee, _, _, _, err = oracle.FeeHistory(context.Background(), 3, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 4)
+	require.Greater(t, backend.headerCalls.Load(), fetchesAfterFirst,
+		"blocks with unresolved hashes must not be memoized: falling back to a number key would keep serving a reorged sibling")
+}
+
+// TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution pins that at or
+// below the frozen boundary — where the number-to-hash mapping is immutable —
+// no per-block hash resolution happens and repeat requests hit the cache.
+func TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 10}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Empty(t, backend.resolvedRanges(),
+		"the frozen range must not resolve hashes: the mapping is immutable")
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Empty(t, backend.resolvedRanges())
+	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
+		"the second request must be served from number-keyed cache entries")
+}
+
+// TestFeeHistory_WindowStraddlingFrozenBoundary pins the mixed regime: one
+// request whose window spans the frozen boundary keys the frozen part by
+// number and the hot part by hash, with the hash scan covering only the hot
+// part. The block-slot index and the hot-hash index run on different bases
+// there, and the mock rejects a mismatched (hash, number) pair — an off-by-one
+// between the two would pair a height with its neighbour's hash and cache one
+// block's fees under another's key.
+func TestFeeHistory_WindowStraddlingFrozenBoundary(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 5}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 9)
+	require.Equal(t, [][2]uint64{{6, 10}}, backend.resolvedRanges(),
+		"only the part of the window above the frozen boundary must be resolved to hashes")
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, baseFee, _, _, _, err = oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 9)
+	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
+		"the second request must be served from the cache in both regimes")
+}
+
+// TestFeeHistory_HotRangeResolvedInOneScan pins the cost of the cache-key
+// resolution above the frozen boundary: one range resolution per request,
+// whatever the window size. Per-block resolution would turn a memoized
+// eth_feeHistory into one remote round trip per block in rpcdaemon mode.
+func TestFeeHistory_HotRangeResolvedInOneScan(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(20)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, [][2]uint64{{13, 20}}, backend.resolvedRanges(),
+		"the whole hot window must be resolved by a single scan")
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, [][2]uint64{{13, 20}, {13, 20}}, backend.resolvedRanges(),
+		"a warm request must not cost more than its one scan")
+	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
+		"the second request must be served from hash-keyed cache entries")
 }
 
 func TestFeeHistoryResolvesSafeAndFinalizedBlocks(t *testing.T) {
@@ -419,7 +591,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 	defer dbTx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, dbTx, baseApi), cfg, cache, nil, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, rpchelper.PinToOverlay(dbTx, nil), baseApi), cfg, cache, nil, log.New())
 
 	got, err := oracle.SuggestTipCap(context.Background())
 	require.NoError(t, err)
@@ -456,7 +628,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 	defer dbTx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, dbTx, baseApi), cfg, cache, nil, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, rpchelper.PinToOverlay(dbTx, nil), baseApi), cfg, cache, nil, log.New())
 
 	// With no transactions anywhere, the oracle returns (nil, nil): no price, no error.
 	_, err = oracle.SuggestTipCap(context.Background())

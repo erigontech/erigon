@@ -688,7 +688,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 
