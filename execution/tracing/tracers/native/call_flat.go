@@ -297,11 +297,6 @@ func toHexUint64Ptr(v uint64) *hexutil.Uint64 {
 }
 
 func newFlatCreate(input *callFrame) *flatCallFrame {
-	var (
-		actionInit = input.Input
-		resultCode = input.Output
-	)
-
 	return &flatCallFrame{
 		Type: strings.ToLower(vm.CREATE.String()),
 		Action: flatCallAction{
@@ -309,22 +304,17 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 			From:           &input.From,
 			Gas:            toHexUint64Ptr(uint64(input.Gas)),
 			Value:          input.Value,
-			Init:           &actionInit,
+			Init:           &input.Input,
 		},
 		Result: &flatCallResult{
 			GasUsed: toHexUint64Ptr(uint64(input.GasUsed)),
 			Address: input.To,
-			Code:    &resultCode,
+			Code:    &input.Output,
 		},
 	}
 }
 
 func newFlatCall(input *callFrame) *flatCallFrame {
-	var (
-		actionInput  = input.Input
-		resultOutput = input.Output
-	)
-
 	return &flatCallFrame{
 		Type: strings.ToLower(vm.CALL.String()),
 		Action: flatCallAction{
@@ -333,11 +323,11 @@ func newFlatCall(input *callFrame) *flatCallFrame {
 			Gas:      toHexUint64Ptr(uint64(input.Gas)),
 			Value:    input.Value,
 			CallType: strings.ToLower(input.Type.String()),
-			Input:    &actionInput,
+			Input:    &input.Input,
 		},
 		Result: &flatCallResult{
 			GasUsed: toHexUint64Ptr(uint64(input.GasUsed)),
-			Output:  &resultOutput,
+			Output:  &input.Output,
 		},
 	}
 }
