@@ -786,6 +786,9 @@ func (a *ApiHandler) updateSelfBuildEnvelopeCache(
 	selfBuildBlockRoot *common.Hash,
 	selfBuildEnvelope *cltypes.ExecutionPayloadEnvelope,
 ) {
+	a.selfBuildEnvelopeUpdatesMu.Lock()
+	defer a.selfBuildEnvelopeUpdatesMu.Unlock()
+
 	if selfBuildEnvelope == nil {
 		if selfBuildBlockRoot != nil {
 			// Reuse is safe only when the cached envelope commits to the same block.
@@ -1049,12 +1052,15 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 
 	// Candidate processing includes work unrelated to the bid. Evict only errors
 	// marked as deterministic bid-validation failures.
-	removed := errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) &&
-		a.epbsPool.RemoveHighestBid(bidKey, externalBid)
+	bidEvicted := false
+	if errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
+		bidEvicted = a.epbsPool.RemoveHighestBid(bidKey, externalBid)
+	}
 	selfBuildMachine, selfBuildErr := processBlock(baseState, block)
 	if selfBuildErr != nil {
 		return baseState, selfBuildMachine, fmt.Errorf(
-			"external builder transition failed: %w; self-build fallback failed: %w",
+			"external builder transition failed (bid evicted: %t): %w; self-build fallback failed: %w",
+			bidEvicted,
 			candidateErr,
 			selfBuildErr,
 		)
@@ -1064,7 +1070,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		"slot", block.Slot,
 		"builderIndex", externalBid.Message.BuilderIndex,
 		"bidValueGwei", externalBid.Message.Value,
-		"evicted", removed,
+		"evicted", bidEvicted,
 		"err", candidateErr)
 	return baseState, selfBuildMachine, nil
 }

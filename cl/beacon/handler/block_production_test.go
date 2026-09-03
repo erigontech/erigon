@@ -883,6 +883,7 @@ func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
 
 	require.ErrorIs(t, err, invalidBidErr)
 	require.ErrorIs(t, err, selfBuildErr)
+	require.ErrorContains(t, err, "bid evicted: true")
 	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
 	require.False(t, found)
 }
@@ -1035,6 +1036,77 @@ func TestUpdateSelfBuildEnvelopeCacheRemovesMismatchedEnvelope(t *testing.T) {
 
 	_, found := handler.selfBuildEnvelopes.Get(slot)
 	require.False(t, found)
+}
+
+type coordinatedSelfBuildEnvelopeStore struct {
+	mu               sync.Mutex
+	envelope         *cltypes.ExecutionPayloadEnvelope
+	removeStarted    chan struct{}
+	replacementAdded chan struct{}
+	releaseRemoval   chan struct{}
+}
+
+func (s *coordinatedSelfBuildEnvelopeStore) Add(_ uint64, envelope *cltypes.ExecutionPayloadEnvelope) bool {
+	s.mu.Lock()
+	s.envelope = envelope
+	s.mu.Unlock()
+	close(s.replacementAdded)
+	return false
+}
+
+func (s *coordinatedSelfBuildEnvelopeStore) Get(_ uint64) (*cltypes.ExecutionPayloadEnvelope, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.envelope, s.envelope != nil
+}
+
+func (s *coordinatedSelfBuildEnvelopeStore) Remove(_ uint64) bool {
+	close(s.removeStarted)
+	select {
+	case <-s.replacementAdded:
+	case <-s.releaseRemoval:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := s.envelope != nil
+	s.envelope = nil
+	return found
+}
+
+func TestUpdateSelfBuildEnvelopeCacheSerializesReplacementWithRemoval(t *testing.T) {
+	existing := &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{0x01}}
+	replacement := &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{0x02}}
+	store := &coordinatedSelfBuildEnvelopeStore{
+		envelope:         existing,
+		removeStarted:    make(chan struct{}),
+		replacementAdded: make(chan struct{}),
+		releaseRemoval:   make(chan struct{}),
+	}
+	handler := &ApiHandler{selfBuildEnvelopes: store}
+	producedBlockRoot := common.Hash{0x03}
+	removalDone := make(chan struct{})
+	go func() {
+		handler.updateSelfBuildEnvelopeCache(1, &producedBlockRoot, nil)
+		close(removalDone)
+	}()
+	<-store.removeStarted
+
+	replacementDone := make(chan struct{})
+	go func() {
+		handler.updateSelfBuildEnvelopeCache(1, nil, replacement)
+		close(replacementDone)
+	}()
+	select {
+	case <-replacementDone:
+	case <-time.After(250 * time.Millisecond):
+		close(store.releaseRemoval)
+	}
+	<-removalDone
+	<-replacementDone
+
+	got, found := store.Get(1)
+	require.True(t, found)
+	require.Same(t, replacement, got)
 }
 
 func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {

@@ -19,12 +19,15 @@ package builder
 import (
 	"encoding/json"
 	"math/big"
+	"strings"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+const maxUint256DecimalDigits = 78
 
 type ExecutionHeader struct {
 	Version string              `json:"version"`
@@ -45,23 +48,29 @@ type ExecutionHeaderMessage struct {
 }
 
 func (h ExecutionHeader) BlockValue() *big.Int {
-	value := h.Data.Message.Value
-	if value == "" {
+	rawValue := h.Data.Message.Value
+	if rawValue == "" {
 		return nil
 	}
-	for i := 0; i < len(value); i++ {
-		if value[i] < '0' || value[i] > '9' {
-			log.Warn("cannot parse block value", "value", value)
-			return nil
-		}
+	value := strings.TrimLeft(rawValue, "0")
+	if value == "" {
+		return new(big.Int)
+	}
+	if len(value) > maxUint256DecimalDigits {
+		log.Warn("builder block value outside uint256 range", "length", len(rawValue))
+		return nil
+	}
+	if value[0] < '0' || value[0] > '9' {
+		log.Warn("invalid builder block value syntax", "length", len(rawValue))
+		return nil
 	}
 	blockValue, ok := new(big.Int).SetString(value, 10)
 	if !ok {
-		log.Warn("cannot parse block value", "value", value)
+		log.Warn("invalid builder block value syntax", "length", len(rawValue))
 		return nil
 	}
-	if blockValue.Sign() < 0 || blockValue.BitLen() > 256 {
-		log.Warn("builder block value outside uint256 range", "value", value)
+	if blockValue.BitLen() > 256 {
+		log.Warn("builder block value outside uint256 range", "length", len(rawValue))
 		return nil
 	}
 	return blockValue
