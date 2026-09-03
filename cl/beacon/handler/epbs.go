@@ -1220,7 +1220,7 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 		bundles = append(bundles, bundle)
 		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
 	}
-	columns, err := peerdasutils.GetDataColumnSidecarsGloas(block.Block.Slot, envelope.BeaconBlockRoot, cellsAndProofs)
+	columns, err := peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, envelope.BeaconBlockRoot, cellsAndProofs)
 	if err != nil {
 		return err
 	}

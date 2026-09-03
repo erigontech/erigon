@@ -70,7 +70,7 @@ func TestEth1BlockTransactionLimitsChangeAtGloas(t *testing.T) {
 		wantError bool
 	}{
 		{version: clparams.DenebVersion, wantError: true},
-		{version: clparams.GloasVersion},
+		{version: clparams.GloasVersion, wantError: true},
 	} {
 		t.Run(test.version.String(), func(t *testing.T) {
 			block := NewEth1Block(test.version, &clparams.MainnetBeaconConfig)

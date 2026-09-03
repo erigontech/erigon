@@ -144,6 +144,27 @@ func TestTransactionsSSZ_DecodeSSZ_CustomMaxTransactionsPerPayload(t *testing.T)
 	}
 }
 
+func TestProgressiveTransactionsSSZDecodeRejectsResourceCountLimit(t *testing.T) {
+	tooMany := clparams.MaxTransactionsPerPayloadDefault + 1
+	firstOffset := uint32(tooMany * transactionOffsetSize)
+	buf := make([]byte, firstOffset)
+	ssz.EncodeOffset(buf[:transactionOffsetSize], firstOffset)
+
+	err := NewProgressiveTransactionsSSZ().DecodeSSZ(buf, 0)
+	require.ErrorIs(t, err, ssz.ErrTooBigList)
+}
+
+func TestProgressiveTransactionsSSZValidationUsesResourceCountLimit(t *testing.T) {
+	transactions := &TransactionsSSZ{
+		underlying:                [][]byte{{1}, {2}, {3}},
+		maxTransactionsPerPayload: 2,
+		maxBytesPerTransaction:    clparams.MaxChunkSize,
+		maxEncodedBytes:           clparams.MaxChunkSize,
+	}
+
+	require.ErrorContains(t, transactions.ValidateProgressiveBounds(2), "too many transactions")
+}
+
 func TestTransactionsSSZ_DecodeSSZ_CustomMaxBytesPerTransaction(t *testing.T) {
 	buf := []byte{0x04, 0x00, 0x00, 0x00, 0xAA, 0xBB, 0xCC}
 
