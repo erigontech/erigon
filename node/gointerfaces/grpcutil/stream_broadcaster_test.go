@@ -250,7 +250,12 @@ func TestLateTeardownDoesNotUnregisterALaterSubscriber(t *testing.T) {
 	dropped := newFakeStream(ctx)
 	dropped.gate = make(chan struct{})
 	errs := subscribe(t, &b, ctx, dropped)
-	for i := range subscriberQueueLen + 2 {
+
+	// Wedge it inside Send before overflowing, otherwise it can tear down before
+	// fresh registers and the interleaving this test is named for never happens.
+	broadcastNow(t, &b, &testMsg{n: 0})
+	<-dropped.entered
+	for i := 1; i < subscriberQueueLen+2; i++ {
 		broadcastNow(t, &b, &testMsg{n: i})
 	}
 	require.Equal(t, 0, subCount(&b), "the queue did not fill, so nothing was dropped")

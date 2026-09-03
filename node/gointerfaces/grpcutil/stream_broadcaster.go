@@ -32,8 +32,8 @@ import (
 // durability buffer.
 const subscriberQueueLen = 64
 
-// errSubscriberTooSlow ends a subscription that fell behind. IsRetryLater
-// recognises the code, so clients back off and resubscribe.
+// errSubscriberTooSlow reports that a subscription was dropped after it fell
+// behind. IsRetryLater recognises the code, so clients back off and resubscribe.
 var errSubscriberTooSlow = status.Error(codes.ResourceExhausted, "stream subscriber fell behind")
 
 // StreamBroadcaster fans a message out to a set of gRPC server-streaming
