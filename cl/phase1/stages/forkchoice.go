@@ -227,7 +227,11 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	if currentHeadRoot != headRoot || currentHeadSlot != headSlot {
 		return nil
 	}
-	payloadStatus := beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+	isGloas := headState.Version() >= clparams.GloasVersion
+	payloadStatus := "full"
+	if isGloas {
+		payloadStatus = beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+	}
 	executionOptimistic := cfg.forkChoice.IsRootOptimistic(headRoot)
 	headEvent, err := beaconevents.BuildHeadV2Data(
 		cfg.beaconCfg,
@@ -243,7 +247,11 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	}
 	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
 		root, slot, err := cfg.forkChoice.GetHead(nil)
-		return root, slot, beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus()), cfg.forkChoice.IsRootOptimistic(root), err
+		currentPayloadStatus := "full"
+		if isGloas {
+			currentPayloadStatus = beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+		}
+		return root, slot, currentPayloadStatus, cfg.forkChoice.IsRootOptimistic(root), err
 	})
 }
 
@@ -255,7 +263,7 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 			validationErr = fmt.Errorf("failed to revalidate head event: %w", err)
 			return
 		}
-		if currentRoot != headRoot || currentSlot != headSlot || payloadStatus != headEvent.Data.PayloadStatus || executionOptimistic != headEvent.Data.ExecutionOptimistic {
+		if currentRoot != headRoot || currentSlot != headSlot || executionOptimistic != headEvent.Data.ExecutionOptimistic || payloadStatus != headEvent.Data.PayloadStatus {
 			return
 		}
 		emitter.State().SendHead(&beaconevents.HeadData{

@@ -397,26 +397,17 @@ func (s *executionPayloadBidService) validateBidAuthentication(msg *cltypes.Sign
 		validationStateEntry.mu.Unlock()
 		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
 	}
-	validationState, err := validationStateEntry.state.Copy()
-	validationStateEntry.mu.Unlock()
+	builder, err := s.validateBuilderAvailability(bid, validationStateEntry.state)
 	if err != nil {
-		return fmt.Errorf("bid validation failed: failed to copy parent state: %w", err)
-	}
-	if validationState.Slot() != bid.Slot {
-		if err := transition.DefaultMachine.ProcessSlots(validationState, bid.Slot); err != nil {
-			return fmt.Errorf("bid validation failed: failed to advance parent state: %w", err)
-		}
-	}
-
-	builder, err := s.validateBuilderAvailability(bid, validationState)
-	if err != nil {
+		validationStateEntry.mu.Unlock()
 		return fmt.Errorf("bid validation failed: %w", err)
 	}
 	builderPubkey := builder.Pubkey
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
-	domain, err := validationState.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
+	domain, err := validationStateEntry.state.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
+	validationStateEntry.mu.Unlock()
 	if err != nil {
-		return fmt.Errorf("bid validation failed: failed to get domain: %w", err)
+		return fmt.Errorf("%w: bid validation failed: failed to get domain: %w", ErrIgnore, err)
 	}
 	if err := validateBuilderBidSignature(msg, domain, builderPubkey); err != nil {
 		return fmt.Errorf("bid validation failed: %w", err)
@@ -550,6 +541,12 @@ func (s *executionPayloadBidService) bidValidationState(parentBlockRoot common.H
 	if proposalEpoch > state.Epoch(parentState)+s.beaconCfg.MinSeedLookahead {
 		s.removeBidValidationState(cacheKey, entry)
 		return nil, fmt.Errorf("%w: bid slot is past the parent's proposer lookahead", ErrIgnore)
+	}
+	if parentState.Slot() != bidSlot {
+		if err := transition.DefaultMachine.ProcessSlots(parentState, bidSlot); err != nil {
+			s.removeBidValidationState(cacheKey, entry)
+			return nil, fmt.Errorf("%w: advance bid validation state: %w", errBidDependencyUnavailable, err)
+		}
 	}
 	entry.state = parentState
 	return entry, nil

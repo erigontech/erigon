@@ -752,6 +752,19 @@ func TestBlockServiceGossipIgnoresInvalidatedFullParentPayload(t *testing.T) {
 	require.True(t, scheduled)
 }
 
+func TestBlockServiceGossipIgnoresUnavailableParentState(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		return nil, errors.New("state storage unavailable")
+	}
+	scheduled := false
+
+	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, false)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.True(t, scheduled)
+}
+
 func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {
 	service, child, _, _, _ := newGloasGossipValidationFixture(t, func(common.Hash, common.Hash) common.Hash {
 		return common.Hash{0x99}
@@ -987,7 +1000,7 @@ func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing
 	require.Equal(t, 1, secondCalls)
 }
 
-func TestPublishedBlockJobTransientFailureReturnsToWaiterAndRemainsRetryable(t *testing.T) {
+func TestPublishedBlockJobTransientFailureKeepsWaiterUntilRetrySucceeds(t *testing.T) {
 	service := &blockService{}
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
@@ -1001,23 +1014,17 @@ func TestPublishedBlockJobTransientFailureReturnsToWaiterAndRemainsRetryable(t *
 		}
 		return nil
 	})
-	firstWaitDone := make(chan error, 1)
-	go func() { firstWaitDone <- handle.Wait(t.Context()) }()
-	waiter := handle.(*publishedBlockJobHandle)
-	require.Eventually(t, func() bool {
-		if waiter.mu.TryLock() {
-			waiter.mu.Unlock()
-			return false
-		}
-		return true
-	}, time.Second, time.Millisecond)
-	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
-	require.ErrorIs(t, <-firstWaitDone, transient)
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- handle.Wait(t.Context()) }()
+	waitStarted := make(chan struct{})
+	go func() {
+		close(waitStarted)
+		waitDone <- handle.Wait(t.Context())
+	}()
+	<-waitStarted
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
 	select {
 	case err := <-waitDone:
-		t.Fatalf("waiter replayed a previously observed transient failure: %v", err)
+		t.Fatalf("waiter completed for a retryable failure: %v", err)
 	default:
 	}
 	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
@@ -1035,8 +1042,6 @@ func TestPublishedBlockJobWaitConsumesAttemptCompletedWhileWaiting(t *testing.T)
 	attempt.err = transient
 	attempt.generation = job.storeGeneration
 	close(attempt.done)
-	require.ErrorIs(t, handle.Wait(t.Context()), transient)
-
 	job.mu.Lock()
 	job.lastAttempt = attempt
 	job.attempt = &blockJobAttempt{done: make(chan struct{})}
@@ -1044,6 +1049,32 @@ func TestPublishedBlockJobWaitConsumesAttemptCompletedWhileWaiting(t *testing.T)
 	waitCtx, cancel := context.WithCancel(t.Context())
 	cancel()
 	require.ErrorIs(t, handle.Wait(waitCtx), context.Canceled)
+}
+
+func TestPublishedBlockJobWaitersObserveCancellationIndependently(t *testing.T) {
+	job := newBlockJob(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version), nil)
+	handle := &publishedBlockJobHandle{job: job}
+	firstCtx, cancelFirst := context.WithCancel(t.Context())
+	firstDone := make(chan error, 1)
+	firstStarted := make(chan struct{})
+	go func() {
+		close(firstStarted)
+		firstDone <- handle.Wait(firstCtx)
+	}()
+	<-firstStarted
+
+	secondCtx, cancelSecond := context.WithCancel(t.Context())
+	cancelSecond()
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- handle.Wait(secondCtx) }()
+	select {
+	case err := <-secondDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("canceled waiter blocked behind another waiter")
+	}
+	cancelFirst()
+	require.ErrorIs(t, <-firstDone, context.Canceled)
 }
 
 func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing.T) {

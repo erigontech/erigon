@@ -94,7 +94,11 @@ func decodeGloasBlockProductionOptions(w http.ResponseWriter, r *http.Request, t
 		if entry == nil || entry.Validate() != nil || entry.Auth.Message.Slot != targetSlot {
 			continue
 		}
-		key := entry.URL + "\x00" + string(entry.Auth.Message.Data)
+		encoded, err := entry.EncodeSSZ(nil)
+		if err != nil {
+			continue
+		}
+		key := string(encoded)
 		if _, ok := seen[key]; ok {
 			continue
 		}

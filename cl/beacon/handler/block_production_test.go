@@ -689,6 +689,47 @@ func TestDecodeGloasBlockProductionOptionsIsolatesDuplicateEntriesJSON(t *testin
 	require.Equal(t, []byte("auth-two"), []byte(options.builderConfig.Builders[1].Auth.Message.Data))
 }
 
+func TestDecodeGloasBlockProductionOptionsKeepsDistinctPoliciesForOneRequest(t *testing.T) {
+	base := &cltypes.BuilderEntry{
+		URL: "https://builder.example",
+		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+			Data: []byte("auth-one"), Slot: 10,
+		}},
+		BuilderPubkeys:      []common.Bytes48{{1}},
+		MaxExecutionPayment: 1,
+		MinBid:              2,
+		BuilderBoostFactor:  100,
+	}
+	tests := []struct {
+		name   string
+		mutate func(*cltypes.BuilderEntry)
+	}{
+		{name: "builder pubkeys", mutate: func(entry *cltypes.BuilderEntry) { entry.BuilderPubkeys = []common.Bytes48{{2}} }},
+		{name: "maximum payment", mutate: func(entry *cltypes.BuilderEntry) { entry.MaxExecutionPayment++ }},
+		{name: "minimum bid", mutate: func(entry *cltypes.BuilderEntry) { entry.MinBid++ }},
+		{name: "boost factor", mutate: func(entry *cltypes.BuilderEntry) { entry.BuilderBoostFactor++ }},
+		{name: "auth signature", mutate: func(entry *cltypes.BuilderEntry) { entry.Auth.Signature[0] = 1 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			variant := base.Clone().(*cltypes.BuilderEntry)
+			test.mutate(variant)
+			first, err := json.Marshal(base)
+			require.NoError(t, err)
+			second, err := json.Marshal(variant)
+			require.NoError(t, err)
+			body := fmt.Sprintf(`{"min_bid":"0","builder_boost_factor":"100","builders":[%s,%s]}`, first, second)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", "gloas")
+
+			options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+			require.NoError(t, err)
+			require.Len(t, options.builderConfig.Builders, 2)
+		})
+	}
+}
+
 func TestDecodeGloasBlockProductionOptionsIsolatesInvalidAndDuplicateEntriesSSZ(t *testing.T) {
 	makeEntry := func(url, auth string, slot uint64) *cltypes.BuilderEntry {
 		return &cltypes.BuilderEntry{

@@ -159,7 +159,7 @@ func TestFeedTrySendDoesNotWaitForBlockedSend(t *testing.T) {
 	slow := make(chan int)
 	slowSub := feed.Subscribe(slow)
 	defer slowSub.Unsubscribe()
-	ready := make(chan int)
+	ready := make(chan int, 1)
 	readySub := feed.Subscribe(ready)
 	defer readySub.Unsubscribe()
 
@@ -176,11 +176,14 @@ func TestFeedTrySendDoesNotWaitForBlockedSend(t *testing.T) {
 	go func() { completed <- feed.TrySend(2) }()
 	select {
 	case delivered := <-completed:
-		if delivered != 0 {
-			t.Fatalf("TrySend delivered %d times, want 0", delivered)
+		if delivered != 1 {
+			t.Fatalf("TrySend delivered %d times, want 1", delivered)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("TrySend waited for a blocked Send")
+	}
+	if value := <-ready; value != 2 {
+		t.Fatalf("received %d, want 2", value)
 	}
 
 	slowSub.Unsubscribe()
@@ -193,7 +196,8 @@ func TestFeedTrySendDoesNotWaitForBlockedSend(t *testing.T) {
 
 func TestFeedTrySendDoesNotWaitForSubscriptionLock(t *testing.T) {
 	var feed Feed
-	sub := feed.Subscribe(make(chan int, 1))
+	ready := make(chan int, 1)
+	sub := feed.Subscribe(ready)
 	defer sub.Unsubscribe()
 	feed.mu.Lock()
 	defer feed.mu.Unlock()
@@ -202,11 +206,62 @@ func TestFeedTrySendDoesNotWaitForSubscriptionLock(t *testing.T) {
 	go func() { completed <- feed.TrySend(1) }()
 	select {
 	case delivered := <-completed:
-		if delivered != 0 {
-			t.Fatalf("TrySend delivered %d times, want 0", delivered)
+		if delivered != 1 {
+			t.Fatalf("TrySend delivered %d times, want 1", delivered)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("TrySend waited for the subscription lock")
+	}
+	if value := <-ready; value != 1 {
+		t.Fatalf("received %d, want 1", value)
+	}
+}
+
+func TestFeedTrySendStaleSubscriptionDoesNotSendAfterUnsubscribe(t *testing.T) {
+	var feed Feed
+	ch := make(chan int, 1)
+	sub := feed.Subscribe(ch).(*feedSub)
+
+	sub.Unsubscribe()
+	close(ch)
+	if sent := feed.TrySend(1); sent != 0 {
+		t.Fatalf("TrySend delivered %d times after unsubscribe", sent)
+	}
+}
+
+func TestFeedConcurrentTrySendPreservesSubscriberOrder(t *testing.T) {
+	const subscribers = 20_000
+	var feed Feed
+	channels := make([]chan int, subscribers)
+	for i := range channels {
+		channels[i] = make(chan int, 2)
+		feed.Subscribe(channels[i])
+	}
+	start := make(chan struct{})
+	done := make(chan struct{}, 2)
+	for value := 1; value <= 2; value++ {
+		go func() {
+			<-start
+			feed.TrySend(value)
+			done <- struct{}{}
+		}()
+	}
+	close(start)
+	<-done
+	<-done
+
+	var first int
+	for _, ch := range channels {
+		if len(ch) == 0 {
+			continue
+		}
+		value := <-ch
+		if first == 0 {
+			first = value
+		}
+		if value != first {
+			t.Fatalf("subscribers observed different event orders: %d then %d", first, value)
+		}
 	}
 }
 

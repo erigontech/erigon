@@ -404,9 +404,13 @@ func (b *BuilderConfig) validate() error {
 		if err := entry.validate(); err != nil {
 			return fmt.Errorf("builder %d: %w", i, err)
 		}
-		key := entry.URL + "\x00" + string(entry.Auth.Message.Data)
+		encoded, err := entry.EncodeSSZ(nil)
+		if err != nil {
+			return fmt.Errorf("builder %d: %w", i, err)
+		}
+		key := string(encoded)
 		if _, ok := seen[key]; ok {
-			return fmt.Errorf("builder %d duplicates URL and auth data", i)
+			return fmt.Errorf("builder %d duplicates an earlier entry", i)
 		}
 		seen[key] = struct{}{}
 	}

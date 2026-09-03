@@ -433,7 +433,7 @@ func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHe
 		return nil, false
 	}
 	header := obj.(*cltypes.BeaconBlockHeader)
-	if isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+	if blockRoot != f.anchorRoot && isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
 		return nil, false
 	}
 	return header, true

@@ -78,23 +78,13 @@ type blockJobAttempt struct {
 }
 
 type publishedBlockJobHandle struct {
-	mu         sync.Mutex
 	job        *blockJob
 	generation uint64
-	observed   *blockJobAttempt
 }
 
 func (h *publishedBlockJobHandle) Wait(ctx context.Context) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	for {
 		h.job.mu.Lock()
-		if last := h.job.lastAttempt; last != nil && last != h.observed && last.generation >= h.generation {
-			h.observed = last
-			err := last.err
-			h.job.mu.Unlock()
-			return err
-		}
 		if h.job.terminal && h.job.completedGeneration >= h.generation {
 			err := h.job.lastAttempt.err
 			h.job.mu.Unlock()
@@ -107,12 +97,6 @@ func (h *publishedBlockJobHandle) Wait(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-attempt.done:
-			if attempt.generation >= h.generation {
-				h.observed = attempt
-				if attempt.err != nil {
-					return attempt.err
-				}
-			}
 		}
 	}
 }
@@ -532,17 +516,29 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	}
 	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(msg.Block.ParentRoot, true)
 	if err != nil {
-		return fmt.Errorf("get parent block state: %w", err)
+		if schedule != nil {
+			schedule()
+		}
+		return fmt.Errorf("%w: get parent block state: %w", ErrIgnore, err)
 	}
 	if parentState == nil {
-		return errors.New("parent block state not found")
+		if schedule != nil {
+			schedule()
+		}
+		return fmt.Errorf("%w: parent block state not found", ErrIgnore)
 	}
 	if err := transition.DefaultMachine.ProcessSlots(parentState, msg.Block.Slot); err != nil {
-		return fmt.Errorf("process parent state to block slot: %w", err)
+		if schedule != nil {
+			schedule()
+		}
+		return fmt.Errorf("%w: process parent state to block slot: %w", ErrIgnore, err)
 	}
 	expectedProposer, err := parentState.GetBeaconProposerIndexForSlot(msg.Block.Slot)
 	if err != nil {
-		return fmt.Errorf("get expected proposer: %w", err)
+		if schedule != nil {
+			schedule()
+		}
+		return fmt.Errorf("%w: get expected proposer: %w", ErrIgnore, err)
 	}
 	if msg.Block.ProposerIndex != expectedProposer {
 		return fmt.Errorf("block proposer index %d does not match expected proposer %d", msg.Block.ProposerIndex, expectedProposer)

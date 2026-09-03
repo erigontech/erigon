@@ -168,6 +168,20 @@ func TestExecutionPayloadBidServiceNames(t *testing.T) {
 	require.Equal(t, "execution_payload_bid", names[0])
 }
 
+func TestBidValidationStateCachesTargetSlotState(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	parentRoot := common.HexToHash("0xbbbb")
+
+	entry, err := service.bidValidationState(parentRoot, 100)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), entry.state.Slot())
+	second, err := service.bidValidationState(parentRoot, 100)
+	require.NoError(t, err)
+	require.Same(t, entry, second)
+}
+
 func TestExecutionPayloadBidServiceNilMessage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

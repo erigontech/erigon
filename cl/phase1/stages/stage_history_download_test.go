@@ -17,9 +17,39 @@
 package stages
 
 import (
+	"context"
+	"errors"
 	"math"
 	"testing"
+	"time"
+
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/stretchr/testify/require"
 )
+
+type failingHistoryDownloader struct {
+	err      error
+	finished bool
+}
+
+func (d *failingHistoryDownloader) Finished() bool { return d.finished }
+func (*failingHistoryDownloader) Progress() uint64 { return 1 }
+func (*failingHistoryDownloader) RecoverSkippedEnvelopes(context.Context) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	return nil
+}
+func (d *failingHistoryDownloader) RequestMore(context.Context) error           { return d.err }
+func (*failingHistoryDownloader) SetBlockChecker(network.BlockChecker)          {}
+func (*failingHistoryDownloader) SetBlockReader(network.BeaconBlockBodyReader)  {}
+func (*failingHistoryDownloader) SetExpectedRoot(common.Hash)                   {}
+func (*failingHistoryDownloader) SetNeverSkip(bool)                             {}
+func (*failingHistoryDownloader) SetOnNewBlock(network.OnNewBlock)              {}
+func (*failingHistoryDownloader) SetSlotToDownload(uint64)                      {}
+func (*failingHistoryDownloader) SetThrottle(time.Duration)                     {}
+func (*failingHistoryDownloader) SkippedFullBlocks() []network.SkippedFullBlock { return nil }
 
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.
@@ -85,4 +115,39 @@ func TestELBackfillFinished_NoGapUsesSlotFloor(t *testing.T) {
 	if !elBackfillFinished(bellatrixSlot, 20_000_000, bellatrixSlot, noBlockFloor) {
 		t.Fatal("backfill must finish once the beacon-slot floor is reached")
 	}
+}
+
+func TestSpawnStageHistoryDownloadReturnsDownloaderFailure(t *testing.T) {
+	wantErr := errors.New("canonical successor unavailable")
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	err := SpawnStageHistoryDownload(StageHistoryReconstructionCfg{
+		beaconCfg:    &clparams.MainnetBeaconConfig,
+		downloader:   &failingHistoryDownloader{err: wantErr},
+		startingSlot: 1,
+	}, ctx, log.Root())
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestWaitForHistoryDownloadJoinsFinishedWorker(t *testing.T) {
+	wantErr := errors.New("commit history progress")
+	historyDone := make(chan error, 1)
+	historyDone <- wantErr
+
+	err := waitForHistoryDownload(t.Context(), StageHistoryReconstructionCfg{
+		downloader: &failingHistoryDownloader{finished: true},
+	}, 0, historyDone)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestRecoverSkippedEnvelopesWithRetriesReturnsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+
+	err := recoverSkippedEnvelopesWithRetries(ctx, StageHistoryReconstructionCfg{
+		downloader: &failingHistoryDownloader{},
+	}, []network.SkippedFullBlock{{Block: block}})
+	require.ErrorIs(t, err, context.Canceled)
 }
