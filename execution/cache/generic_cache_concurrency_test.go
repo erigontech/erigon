@@ -731,3 +731,131 @@ func TestGenericCache_UsageReportCountsAllocatedSlots(t *testing.T) {
 	require.InDelta(t, 100.0, c.slotsPct(), 5.0,
 		"a cache evicting at its allocated %d slots reports %.2f%%", allocated, c.slotsPct())
 }
+
+// cacheBudgets covers the production ceilings and the small budgets the
+// exported constructor allows, where the shard count is large against the
+// budget and the per-slot estimate has the least room.
+var cacheBudgets = []datasize.ByteSize{
+	1 * datasize.MB, 16 * datasize.MB, 64 * datasize.MB,
+	150 * datasize.MB, 1 * datasize.GB, 4 * datasize.GB,
+}
+
+// The slot ceiling is derived from a per-slot estimate that carries neither the
+// per-shard structs nor the gap between a fitted table and the 5/4 ratio it is
+// charged at. Both scale with the shard count, so the exact cost of the ceiling
+// generation has to be checked against the budget across the shard counts a
+// host can produce, not at the one GOMAXPROCS the point tests happen to run on.
+func TestGenericCache_CeilingFitsItsBudget(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(0)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prevProcs) })
+
+	check := func(t *testing.T, procs int, payload uint32, budget datasize.ByteSize, elemBytes int64) {
+		t.Helper()
+		maxCap, shards := budgetedSlots(budget, payload, elemBytes)
+		require.Positive(t, maxCap)
+		require.LessOrEqual(t, generationBytesFor(maxCap, shards, int64(payload), elemBytes), int64(budget),
+			"procs=%d payload=%d budget=%s: a full %d slots over %d shards costs more than the budget it came from",
+			procs, payload, budget, maxCap, shards)
+	}
+
+	for _, procs := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
+		runtime.GOMAXPROCS(procs)
+		for _, payload := range []uint32{8, avgStoragePayloadBytes, avgAccountPayloadBytes, avgBytesPerEntry} {
+			for _, budget := range cacheBudgets {
+				// The value type sets the element size, which every term scales with.
+				check(t, procs, payload, budget, elemBytesFor[entry[[]byte]]())
+				check(t, procs, payload, budget, elemBytesFor[entry[[128]byte]]())
+				check(t, procs, payload, budget, elemBytesFor[codeSizeEntry]())
+			}
+		}
+	}
+}
+
+// Every reservation path has to be paired: the birth generation, each funded
+// grow step and Clear's rebuild all move Global.Used, and a difference applied
+// in one direction only strands or over-releases bytes no later Close settles.
+func TestGenericCache_BudgetSettlesAcrossTheLifecycle(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(0)
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prevProcs)
+		cachebudget.Global = prevBudget
+	})
+
+	key := make([]byte, 32)
+	for _, procs := range []int{1, 8, 64} {
+		for _, budget := range cacheBudgets {
+			cachebudget.Global = cachebudget.New(math.MaxInt64)
+			runtime.GOMAXPROCS(procs)
+			c := NewGenericCacheWithAvg(budget, avgStoragePayloadBytes,
+				func(v []byte) int { return len(v) }, ModeEvictLRU)
+			at := func(step string) {
+				require.Equal(t, c.reservedBytes.Load(), cachebudget.Global.Used(),
+					"procs=%d budget=%s after %s", procs, budget, step)
+			}
+			at("construction")
+
+			// Enough puts to fund several grow steps on the same shard.
+			for i := range 32 * int(c.startCap) {
+				binary.BigEndian.PutUint64(key, uint64(i))
+				c.Put(key, key[:8], 1)
+			}
+			at("grow")
+
+			c.Clear()
+			at("clear")
+
+			c.Close()
+			require.Zero(t, cachebudget.Global.Used(),
+				"procs=%d budget=%s: Close left %d B charged", procs, budget, cachebudget.Global.Used())
+		}
+	}
+}
+
+// growLRU derives its shard count from GOMAXPROCS at every generation, so a
+// rebuild can be dearer or cheaper than the generation it replaces. Reserve
+// ignores a non-positive argument and Release a negative one, so each path has
+// to branch on the sign; a walk that changes GOMAXPROCS between generations is
+// what makes both signs occur.
+func TestGrowLRU_BudgetSettlesAcrossShardCountChanges(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(0)
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prevProcs)
+		cachebudget.Global = prevBudget
+	})
+
+	for _, procs := range [][2]int{{1, 64}, {64, 1}, {8, 64}, {64, 8}} {
+		cachebudget.Global = cachebudget.New(math.MaxInt64)
+		runtime.GOMAXPROCS(procs[0])
+		g := newGrowLRUEntries[codeSizeEntry](100_000, 8, nil)
+		at := func(step string) {
+			t.Helper()
+			require.Equal(t, g.reserved, cachebudget.Global.Used(), "procs %v after %s", procs, step)
+		}
+		at("construction")
+
+		fill := func(upTo int) {
+			for i := range upTo {
+				g.Add(uint64(i), codeSizeEntry{})
+			}
+		}
+		fill(4 * genericCacheStartCapacity)
+		at("grow")
+
+		runtime.GOMAXPROCS(procs[1])
+		fill(int(g.maxCap))
+		at("grow at the changed shard count")
+
+		g.Purge()
+		at("purge at the changed shard count")
+
+		runtime.GOMAXPROCS(procs[0])
+		g.Purge()
+		at("purge back at the original shard count")
+
+		g.Close()
+		require.Zero(t, cachebudget.Global.Used(),
+			"procs %v: Close left %d B charged", procs, cachebudget.Global.Used())
+	}
+}

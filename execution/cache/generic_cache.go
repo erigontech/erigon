@@ -126,11 +126,16 @@ func fitTableSlots(perShard uint32) uint32 {
 func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32, elemBytes int64) (maxCap, shards uint32) {
 	perSlot := uint64(payloadBytes) + uint64(slotChargeBytes(elemBytes))
 	approx := uint32(min(uint64(capacityBytes)/perSlot, maxCacheSlots))
-	shards = initialShardCount(approx, shardCeil())
-	if shards == 0 {
-		shards = 1
+	shards = max(initialShardCount(approx, shardCeil()), 1)
+	// perSlot is an estimate: it carries neither the per-shard structs nor the
+	// gap between a fitted table and the 5/4 ratio it is charged at, so the
+	// quotient alone can buy a generation larger than the budget. Step the
+	// ceiling down until the exact cost fits.
+	fitted := fitTableSlots(approx / shards)
+	for fitted > minShardStart && generationBytesFor(fitted*shards, shards, int64(payloadBytes), elemBytes) > int64(capacityBytes) {
+		fitted = fitTableSlots(fitted - 1)
 	}
-	return fitTableSlots(approx/shards) * shards, shards
+	return fitted * shards, shards
 }
 
 // minShardStart keeps a shard's initial table off a handful of slots, which a
@@ -329,8 +334,13 @@ func (c *GenericCache[T]) growBytes(oldCap, newCap uint32) int64 {
 }
 
 func (c *GenericCache[T]) generationBytes(totalCap uint32) int64 {
-	shards := max(c.shardCount, 1)
-	return int64(totalCap)*c.payloadBytes + shardArrayBytes(totalCap, shards, c.elemBytes)
+	return generationBytesFor(totalCap, max(c.shardCount, 1), c.payloadBytes, c.elemBytes)
+}
+
+// generationBytesFor is what a generation of totalCap slots costs: the payload
+// estimate plus the exact shard arrays.
+func generationBytesFor(totalCap, shards uint32, payloadBytes, elemBytes int64) int64 {
+	return int64(totalCap)*payloadBytes + shardArrayBytes(totalCap, shards, elemBytes)
 }
 
 // newShards builds the shard array with this cache's evict callback wired.
