@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -60,10 +59,5 @@ func TestSlowBlockThresholdFlag(t *testing.T) {
 	t.Run("duration reaches the sync config", func(t *testing.T) {
 		cfg := buildEthCfg(t, []string{"--debug.slow-block-threshold", "250ms"})
 		require.Equal(t, 250*time.Millisecond, cfg.Sync.SlowBlockThreshold)
-	})
-
-	t.Run("threshold enables the read counters", func(t *testing.T) {
-		buildEthCfg(t, []string{"--debug.slow-block-threshold", "250ms"})
-		require.True(t, dbg.KVReadLevelledMetrics)
 	})
 }

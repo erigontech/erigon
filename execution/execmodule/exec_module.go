@@ -275,6 +275,9 @@ func NewExecModule(
 	if dbg.UseCodeStore {
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
 	}
+	if syncCfg.SlowBlockThreshold >= 0 {
+		dbg.EnableKVReadLevelledMetrics()
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, syncCfg.SlowBlockThreshold)
 
 	em := &ExecModule{

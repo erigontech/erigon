@@ -1167,7 +1167,7 @@ var (
 	}
 	SlowBlockThresholdFlag = cli.DurationFlag{
 		Name:  "debug.slow-block-threshold",
-		Usage: "Log per-block execution metrics as JSON for blocks at or over this duration (0 logs every block, negative disables)",
+		Usage: "Log per-block execution metrics as JSON for blocks at or over this duration (0 logs every block, negative disables). Enabling it also times every state domain read process-wide, RPC included",
 		Value: blockmetrics.Disabled,
 	}
 	MCPDisableFlag = cli.BoolFlag{

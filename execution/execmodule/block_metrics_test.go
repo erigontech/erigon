@@ -93,7 +93,7 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	}
 	prevReadMetrics := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
-	dbg.EnableKVReadLevelledMetrics()
+	dbg.KVReadLevelledMetrics = false
 
 	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
