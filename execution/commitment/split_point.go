@@ -126,7 +126,7 @@ func splitCellFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 		copy(out.extension[1:], child.extension[:child.extLen])
 		out.hashLen = child.hashLen
 		copy(out.hash[:], child.hash[:child.hashLen])
-		if base.currentKeyLen < 64 {
+		if base.depths[0] != 64 {
 			out.hashedExtLen = out.extLen
 			copy(out.hashedExtension[:], out.extension[:out.extLen])
 		}

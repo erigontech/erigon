@@ -19,13 +19,16 @@ package commitment
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"math/rand"
 	"slices"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -66,13 +69,20 @@ type splitRound struct {
 	ms       *MockState
 	splits   map[string]bool
 	seams    map[string]cell
+	replay   map[string][]splitKV
 	captured map[string]cell
 	deferred []*DeferredBranchUpdate
 	workers  int
 }
 
 func newSplitRound(ms *MockState) *splitRound {
-	return &splitRound{ms: ms, splits: map[string]bool{}, seams: map[string]cell{}, captured: map[string]cell{}}
+	return &splitRound{
+		ms:       ms,
+		splits:   map[string]bool{},
+		seams:    map[string]cell{},
+		replay:   map[string][]splitKV{},
+		captured: map[string]cell{},
+	}
 }
 
 func (r *splitRound) newTrie() *HexPatriciaHashed {
@@ -161,17 +171,72 @@ func (r *splitRound) foldAt(prefix []byte, keys []splitKV) (cell, error) {
 	if err := unfoldSplitBase(base, prefix); err != nil {
 		return cell{}, err
 	}
-	cells, bitmap, err := r.foldChildren(base, prefix, keys)
+	later := r.replay[string(prefix)]
+	cells, bitmap, err := r.foldChildren(base, prefix, withoutKeys(keys, later))
 	if err != nil {
 		return cell{}, err
 	}
 	stitchSplitCells(base, &cells, bitmap)
+	for i := range later {
+		if err := base.followAndUpdate(later[i].hk, later[i].pk, later[i].upd); err != nil {
+			return cell{}, err
+		}
+	}
+	for base.activeRows > 1 {
+		if err := base.fold(); err != nil {
+			return cell{}, err
+		}
+	}
 	out, err := foldSplitRow(context.Background(), base, foldToCell)
 	if err != nil {
 		return cell{}, err
 	}
 	r.captured[string(prefix)] = out
 	return out, nil
+}
+
+func withoutKeys(keys, drop []splitKV) []splitKV {
+	if len(drop) == 0 {
+		return keys
+	}
+	skip := make(map[string]struct{}, len(drop))
+	for _, k := range drop {
+		skip[string(k.hk)] = struct{}{}
+	}
+	out := make([]splitKV, 0, len(keys))
+	for _, k := range keys {
+		if _, ok := skip[string(k.hk)]; ok {
+			continue
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
+	out := make([]string, 0, n)
+	var s [32]byte
+	for i := seed; len(out) < n; i++ {
+		binary.BigEndian.PutUint64(s[24:], uint64(i))
+		h := keccak.Sum256(s[:])
+		match := true
+		for j, nb := range nibblePrefix {
+			var hn byte
+			if j%2 == 0 {
+				hn = h[j/2] >> 4
+			} else {
+				hn = h[j/2] & 0xf
+			}
+			if hn != nb {
+				match = false
+				break
+			}
+		}
+		if match {
+			out = append(out, common.Bytes2Hex(s[:]))
+		}
+	}
+	return out
 }
 
 func (r *splitRound) foldRoot(keys []splitKV) ([]byte, error) {
@@ -533,4 +598,107 @@ func TestSplitPoint_CollapsedCellFoldsInParentSplit(t *testing.T) {
 	require.Equalf(t, collapsed.extension[:collapsed.extLen], collapsed.hashedExtension[:collapsed.hashedExtLen],
 		"a collapsed account-plane cell must carry a hashed extension matching its extension; extLen=%d hashedExtLen=%d",
 		collapsed.extLen, collapsed.hashedExtLen)
+}
+
+func splitStorageCollapseCorpus() (addr []byte, doomed []string, survivors []string, pk [][]byte, upds []Update) {
+	rnd := rand.New(rand.NewSource(70707))
+	addr = make([]byte, length.Addr)
+	rnd.Read(addr)
+	a := hex.EncodeToString(addr)
+
+	ub := NewUpdateBuilder()
+	ub.Balance(a, 1234)
+	for i, tail := range []byte{0x0, 0x4, 0x8} {
+		loc := slotLocsForHexPrefix([]byte{0x1, 0x2, tail}, 1, 5000*(i+1))[0]
+		doomed = append(doomed, loc)
+		ub.Storage(a, loc, "11")
+	}
+	survivors = slotLocsForHexPrefix([]byte{0x1, 0x2, 0xf}, 4, 900_000)
+	for _, loc := range survivors {
+		ub.Storage(a, loc, "22")
+	}
+	for _, tail := range []byte{0x5, 0x9} {
+		for _, loc := range slotLocsForHexPrefix([]byte{0x1, tail}, 2, 31_000) {
+			ub.Storage(a, loc, "33")
+		}
+	}
+	for _, nib := range []byte{0x3, 0x7, 0xb} {
+		for _, loc := range storageLocsForNibble(nib, 2, 77_000) {
+			ub.Storage(a, loc, "44")
+		}
+	}
+	for range 2_000 {
+		addRandomAccount(ub, rnd, 0)
+	}
+	pk, upds = ub.Build()
+	return addr, doomed, survivors, pk, upds
+}
+
+func TestSplitPoint_CollapsedStorageCellReUnfolded(t *testing.T) {
+	addr, doomed, survivors, pk1, u1 := splitStorageCollapseCorpus()
+	require.Len(t, survivors, 4, "the survivor nibble must hold a sub-branch, not a single slot")
+
+	msSeq := NewMockState(t)
+	seq := NewHexPatriciaHashed(length.Addr, msSeq, DefaultTrieConfig())
+	defer seq.Release()
+	processBatch(t, msSeq, seq, pk1, u1)
+
+	accHash := KeyToHexNibbleHash(addr)
+	accPrefix := accHash[:64]
+	prefix65 := append(bytes.Clone(accPrefix), 0x1)
+	prefix66 := append(bytes.Clone(prefix65), 0x2)
+	for _, p := range [][]byte{accPrefix, prefix65, prefix66} {
+		require.Truef(t, hasBranchAt(msSeq, p), "corpus must produce an on-disk branch at %x", p)
+	}
+
+	msSplit := cloneMockState(t, msSeq)
+
+	a := hex.EncodeToString(addr)
+	ub := NewUpdateBuilder()
+	ub.Balance(a, 5678)
+	for _, loc := range doomed {
+		ub.DeleteStorage(a, loc)
+	}
+	ub.Storage(a, survivors[0], "99")
+	pk2, u2 := ub.Build()
+	seqRoot := processBatch(t, msSeq, seq, pk2, u2)
+	require.NoError(t, msSplit.applyPlainUpdates(pk2, u2))
+
+	all := splitKVs(pk2, u2)
+	var storage []splitKV
+	var reUnfold []splitKV
+	laterHK := KeyToHexNibbleHash(storageKey(addr, common.Hex2Bytes(survivors[0])))
+	for _, k := range all {
+		if len(k.hk) != 128 || !bytes.HasPrefix(k.hk, accPrefix) {
+			continue
+		}
+		storage = append(storage, k)
+		if bytes.Equal(k.hk, laterHK) {
+			reUnfold = append(reUnfold, k)
+		}
+	}
+	require.Len(t, reUnfold, 1, "the surviving slot must be touched so the base descends through the collapsed cell")
+
+	r := newSplitRound(msSplit)
+	r.splits[string(prefix65)] = true
+	r.splits[string(prefix66)] = true
+	r.replay[string(prefix65)] = reUnfold
+
+	sr, err := r.foldAt(accPrefix, storage)
+	require.NoError(t, err)
+
+	collapsed, ok := r.captured[string(prefix66)]
+	require.True(t, ok, "the interior split at depth 66 did not run")
+	require.Positive(t, collapsed.extLen, "the split at depth 66 must collapse to a single survivor")
+	require.EqualValues(t, 0xf, collapsed.extension[0], "the survivor nibble must lead the extension")
+	require.Zero(t, collapsed.accountAddrLen+collapsed.storageAddrLen, "the survivor must be keyless, not a single-slot leaf")
+
+	r.seams[string(accHash)] = sr
+	splitRoot, err := r.foldRoot(all)
+	require.NoError(t, err)
+	r.flush(t)
+
+	require.Equalf(t, seqRoot, splitRoot,
+		"a collapsed cell at %x re-unfolded by a later key in the same round != sequential root", prefix66)
+	requireBranchParity(t, msSeq, msSplit)
 }

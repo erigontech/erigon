@@ -222,6 +222,7 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 		branchDiff(t, seqMs, parMs)
 	}
 	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
+	requireBranchParity(t, seqMs, parMs)
 }
 
 func requireBranchParity(t *testing.T, seq, got *MockState) {
