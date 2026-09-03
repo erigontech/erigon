@@ -32,12 +32,6 @@ type Stream interface {
 	// — any unencoded string — must go through WriteString.
 	WriteRawBytes(content []byte)
 	WriteRaw(content string)
-	// WriteJSONValue encodes a Go value into the stream, matching json.Marshal.
-	WriteJSONValue(v any) error
-	// Mark and Rewind bracket a message so a failure part-way through can discard
-	// it and write a different one. Valid only while the bytes are still buffered.
-	Mark() (buffered, depth int)
-	Rewind(buffered, depth int)
 	// Flush is where a delivery failure surfaces: value writers cannot fail and
 	// the automatic flush drops the error, so a handler that has to notice the
 	// client leaving checks this one.
