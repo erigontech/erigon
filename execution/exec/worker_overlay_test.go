@@ -58,9 +58,9 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
@@ -124,9 +124,9 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 		MustOpen()
 	t.Cleanup(rawDB.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), rawDB)
+	agg := dbstate.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(rawDB))
 
 	db, err := temporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
