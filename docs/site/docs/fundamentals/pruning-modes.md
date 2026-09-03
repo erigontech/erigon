@@ -23,9 +23,8 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
-default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
-`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+They are enabled by default in every pruning mode on **fresh datadirs**; turn them off with
+`--prune.include-receipts=false` (the former `--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
 flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
 datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
 working within the node's state-history window, just with higher latency.
