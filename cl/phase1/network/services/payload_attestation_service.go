@@ -292,8 +292,8 @@ func (s *payloadAttestationService) validatePayloadAttestation(ctx context.Conte
 	case <-ctx.Done():
 		return fmt.Errorf("%w: %w: payload attestation validation canceled: %v", ErrIgnore, ErrAttestationRetryable, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
 	}
+	defer func() { <-s.validationAdmission }()
 	err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false)
-	<-s.validationAdmission
 	if err == nil {
 		return nil
 	}

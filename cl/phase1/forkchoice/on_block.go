@@ -127,10 +127,19 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 			f.mu.RUnlock()
 			return invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
 		}
+		if block.Version() >= clparams.GloasVersion {
+			if err := f.validateParentPayloadPath(block.Block, true); err != nil {
+				f.mu.RUnlock()
+				if errors.Is(err, ErrParentEnvelopePending) {
+					return err
+				}
+				return invalidBlockError(err)
+			}
+		}
 		f.mu.RUnlock()
 		return nil
 	}
-	blockRoot, _, err := f.validateBlockAdmissionLocked(block, rejectEquivocation)
+	blockRoot, _, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, true)
 	if err != nil {
 		f.mu.RUnlock()
 		if errors.Is(err, errBlockAtFinalizedHorizon) {
@@ -156,7 +165,7 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
-func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) (common.Hash, clparams.StateVersion, error) {
+func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return common.Hash{}, 0, invalidBlockError(err)
@@ -184,7 +193,7 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 	}
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(block.Block.Slot))
 	if blockVersion >= clparams.GloasVersion {
-		if err := f.validateParentPayloadPath(block.Block); err != nil {
+		if err := f.validateParentPayloadPath(block.Block, requireEngineAcceptance); err != nil {
 			if errors.Is(err, ErrParentEnvelopePending) {
 				return common.Hash{}, 0, err
 			}
@@ -216,10 +225,18 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, knownRoot) {
 				return invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
 			}
+			if newPayload {
+				if err := f.validateParentPayloadPath(block.Block, true); err != nil {
+					if errors.Is(err, ErrParentEnvelopePending) {
+						return err
+					}
+					return invalidBlockError(err)
+				}
+			}
 			return nil
 		}
 	}
-	blockRoot, blockVersion, err := f.validateBlockAdmissionLocked(block, rejectEquivocation)
+	blockRoot, blockVersion, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
 	if errors.Is(err, errBlockAtFinalizedHorizon) {
 		return nil
 	}

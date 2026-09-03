@@ -70,14 +70,11 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 
 		cached, ok := ptcCache[blockRoot]
 		if !ok {
-			blockState, err := f.forkGraph.GetState(blockRoot, false)
-			if err != nil || blockState == nil {
+			header, ok := f.forkGraph.GetHeader(blockRoot)
+			if !ok || header == nil || data.Slot != header.Slot {
 				continue
 			}
-			if data.Slot != blockState.Slot() {
-				continue
-			}
-			ptc, err := blockState.GetPTCFromWindow(data.Slot)
+			ptc, err := s.GetPTCFromWindow(data.Slot)
 			if err != nil {
 				continue
 			}
@@ -423,20 +420,18 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 }
 
 func (f *ForkChoiceStore) isPayloadAvailable(root common.Hash) bool {
-	if !f.HasEnvelope(root) {
-		return false
-	}
-	if f.forkGraph.IsBlockInvalid(root) {
-		return false
-	}
-	if f.forkGraph.IsPayloadUnavailable(root) {
+	if !f.isPayloadLocallyAvailable(root) {
 		return false
 	}
 	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
 	if !ok {
 		return false
 	}
-	return status == execution_client.PayloadStatusValidated
+	return status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+}
+
+func (f *ForkChoiceStore) isPayloadLocallyAvailable(root common.Hash) bool {
+	return f.HasEnvelope(root) && !f.forkGraph.IsBlockInvalid(root) && !f.forkGraph.IsPayloadUnavailable(root)
 }
 
 // validateParentPayloadPath validates that the block builds on the correct parent payload path.
@@ -444,7 +439,7 @@ func (f *ForkChoiceStore) isPayloadAvailable(root common.Hash) bool {
 // If parent is EMPTY, the block's parent_block_hash must match the parent's parent_block_hash.
 // Also validates that the parent execution payload is not invalidated.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) error {
+func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock, requireEngineAcceptance bool) error {
 	currentBid := block.Body.GetSignedExecutionPayloadBid()
 	if currentBid == nil || currentBid.Message == nil {
 		return errors.New("current block missing execution payload bid")
@@ -464,7 +459,7 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 		// missing.  During forward sync the envelope may not yet be persisted (it
 		// arrives in the same batch or in a later batch), so a hard error would
 		// permanently reject the block and ban the peer.
-		if !f.isPayloadAvailable(block.ParentRoot) {
+		if !f.isPayloadLocallyAvailable(block.ParentRoot) || requireEngineAcceptance && !f.isPayloadAvailable(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}
 	} else {
