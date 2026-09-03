@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -66,7 +65,7 @@ type callFrame struct {
 	Logs     []callLog       `json:"logs,omitempty" rlp:"optional"`
 	// Placed at end on purpose. The RLP will be decoded to 0 instead of
 	// nil if there are non-empty elements after in the struct.
-	Value *big.Int `json:"value,omitempty" rlp:"optional"`
+	Value *uint256.Int `json:"value,omitempty" rlp:"optional"`
 }
 
 func (f *callFrame) TypeString() string {
@@ -103,7 +102,7 @@ type callFrameMarshaling struct {
 	TypeString string `json:"type"`
 	Gas        hexutil.Uint64
 	GasUsed    hexutil.Uint64
-	Value      *hexutil.Big
+	Value      *hexutil.U256
 	Input      hexutil.Bytes
 	Output     hexutil.Bytes
 }
@@ -176,7 +175,8 @@ func (t *callTracer) CaptureStart(env *vm.EVM, from accounts.Address, to account
 		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
-		t.callstack[0].Value = value.ToBig()
+		v := *value
+		t.callstack[0].Value = &v
 	}
 	if create {
 		t.callstack[0].Type = vm.CREATE
@@ -224,7 +224,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 	}
 
 	if call.Type != vm.STATICCALL {
-		call.Value = value.ToBig()
+		call.Value = &value
 	}
 
 	if depth == 0 {

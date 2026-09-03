@@ -4,11 +4,11 @@ package native
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/holiman/uint256"
 )
 
 var _ = (*callFrameMarshaling)(nil)
@@ -27,7 +27,7 @@ func (c callFrame) MarshalJSON() ([]byte, error) {
 		Revertal   string          `json:"revertReason,omitempty"`
 		Calls      []callFrame     `json:"calls,omitempty" rlp:"optional"`
 		Logs       []callLog       `json:"logs,omitempty" rlp:"optional"`
-		Value      *hexutil.Big    `json:"value,omitempty" rlp:"optional"`
+		Value      *hexutil.U256   `json:"value,omitempty" rlp:"optional"`
 		TypeString string          `json:"type"`
 	}
 	var enc callFrame0
@@ -42,7 +42,7 @@ func (c callFrame) MarshalJSON() ([]byte, error) {
 	enc.Revertal = c.Revertal
 	enc.Calls = c.Calls
 	enc.Logs = c.Logs
-	enc.Value = (*hexutil.Big)(c.Value)
+	enc.Value = (*hexutil.U256)(c.Value)
 	enc.TypeString = c.TypeString()
 	return json.Marshal(&enc)
 }
@@ -61,7 +61,7 @@ func (c *callFrame) UnmarshalJSON(input []byte) error {
 		Revertal *string         `json:"revertReason,omitempty"`
 		Calls    []callFrame     `json:"calls,omitempty" rlp:"optional"`
 		Logs     []callLog       `json:"logs,omitempty" rlp:"optional"`
-		Value    *hexutil.Big    `json:"value,omitempty" rlp:"optional"`
+		Value    *hexutil.U256   `json:"value,omitempty" rlp:"optional"`
 	}
 	var dec callFrame0
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -101,7 +101,7 @@ func (c *callFrame) UnmarshalJSON(input []byte) error {
 		c.Logs = dec.Logs
 	}
 	if dec.Value != nil {
-		c.Value = (*big.Int)(dec.Value)
+		c.Value = (*uint256.Int)(dec.Value)
 	}
 	return nil
 }

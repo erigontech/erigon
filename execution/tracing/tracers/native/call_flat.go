@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -82,7 +81,7 @@ type flatCallAction struct {
 	Author         *common.Address `json:"author,omitempty"`
 	RewardType     string          `json:"rewardType,omitempty"`
 	SelfDestructed *common.Address `json:"address,omitempty"`
-	Balance        *big.Int        `json:"balance,omitempty"`
+	Balance        *uint256.Int    `json:"balance,omitempty"`
 	CallType       string          `json:"callType,omitempty"`
 	CreationMethod string          `json:"creationMethod,omitempty"`
 	From           *common.Address `json:"from,omitempty"`
@@ -91,15 +90,15 @@ type flatCallAction struct {
 	Input          *[]byte         `json:"input,omitempty"`
 	RefundAddress  *common.Address `json:"refundAddress,omitempty"`
 	To             *common.Address `json:"to,omitempty"`
-	Value          *big.Int        `json:"value,omitempty"`
+	Value          *uint256.Int    `json:"value,omitempty"`
 }
 
 type flatCallActionMarshaling struct {
-	Balance *hexutil.Big
+	Balance *hexutil.U256
 	Gas     *hexutil.Uint64
 	Init    *hexutil.Bytes
 	Input   *hexutil.Bytes
-	Value   *hexutil.Big
+	Value   *hexutil.U256
 }
 
 type flatCallResult struct {
@@ -180,7 +179,7 @@ func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to 
 	// Child calls must have a value, even if it's zero.
 	// Practically speaking, only STATICCALL has nil value. Set it to zero.
 	if t.tracer.callstack[len(t.tracer.callstack)-1].Value == nil && value.IsZero() {
-		t.tracer.callstack[len(t.tracer.callstack)-1].Value = big.NewInt(0)
+		t.tracer.callstack[len(t.tracer.callstack)-1].Value = new(uint256.Int)
 	}
 }
 
