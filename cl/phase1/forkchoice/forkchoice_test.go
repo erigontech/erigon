@@ -75,7 +75,7 @@ func TestOnBlockFromForwardSyncExpandsEmbeddedPtcVotesForDuplicateValidator(t *t
 		selectedPositions[i] = i
 	}
 
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true)
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
 	require.False(t, store.ShouldBuildOnFull(ForkChoiceNode{Root: anchorRoot, PayloadStatus: cltypes.PayloadStatusFull}, 2))
@@ -96,7 +96,7 @@ func TestOnBlockFromForwardSyncAppliesEmbeddedPtcVotesForUniqueValidators(t *tes
 		selectedPositions[i] = i
 	}
 
-	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions)
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, committee, selectedPositions, true)
 	require.True(t, store.payloadTimeliness(anchorRoot, false))
 	require.True(t, store.payloadDataAvailability(anchorRoot, false))
 	head, err := store.GetHeadNode()
@@ -112,10 +112,27 @@ func TestOnBlockFromForwardSyncUsesMaxPtcSizeForZeroConfig(t *testing.T) {
 		committee[i] = uint64(i + 1)
 	}
 
-	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)})
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, 0, committee, []int{int(clparams.MaxPtcSize - 1)}, true)
 	votes := store.payloadTimelinessVoteValue(anchorRoot)
 	require.Equal(t, int8(-1), votes[clparams.MaxPtcSize-1])
 	require.Equal(t, int8(1), votes[clparams.MaxPtcSize-2])
+}
+
+func TestOnBlockFromForwardSyncAcceptsPersistedParentEnvelopeWithoutEngineStatus(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+
+	require.True(t, store.HasEnvelope(anchorRoot))
+}
+
+func TestKnownForwardSyncBlockRequiresValidatedParentForLiveIngress(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+
+	require.ErrorIs(t, store.ValidateBlockForPublishing(child, false), ErrParentEnvelopePending)
+	require.ErrorIs(t, store.OnBlock(t.Context(), child, true, true, false), ErrParentEnvelopePending)
+
+	store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
+	require.NoError(t, store.ValidateBlockForPublishing(child, false))
+	require.NoError(t, store.OnBlock(t.Context(), child, true, true, false))
 }
 
 func runEmbeddedPtcVoteBlock(
@@ -123,6 +140,7 @@ func runEmbeddedPtcVoteBlock(
 	configuredPtcSize uint64,
 	committee []uint64,
 	selectedPositions []int,
+	payloadValidated bool,
 ) (*ForkChoiceStore, common.Hash, *cltypes.SignedBeaconBlock) {
 	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
@@ -155,11 +173,13 @@ func runEmbeddedPtcVoteBlock(
 	postState, err := anchor.Copy()
 	require.NoError(t, err)
 	require.NoError(t, postState.SetSlot(2))
+	parent := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	parent.Block.Slot = anchor.Slot()
 	graph := &embeddedPtcVoteForkGraph{
 		getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
-			blocks:     make(map[common.Hash]*cltypes.SignedBeaconBlock),
+			blocks:     map[common.Hash]*cltypes.SignedBeaconBlock{anchorRoot: parent},
 			headers:    map[common.Hash]*cltypes.BeaconBlockHeader{anchorRoot: {Slot: 1}},
-			states:     map[common.Hash]*state.CachingBeaconState{anchorRoot: anchor},
+			states:     make(map[common.Hash]*state.CachingBeaconState),
 			anchorRoot: anchorRoot,
 			anchorSlot: 1,
 		},
@@ -183,7 +203,9 @@ func runEmbeddedPtcVoteBlock(
 	)
 	require.NoError(t, err)
 	store.OnTick(2 * cfg.SecondsPerSlot)
-	store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
+	if payloadValidated {
+		store.payloadStatusByRoot.Add(anchorRoot, execution_client.PayloadStatusValidated)
+	}
 
 	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
 	child.Block.Slot = 2
@@ -610,7 +632,7 @@ func TestOnBlockWithEquivocationCheckRejectsKnownGloasConflict(t *testing.T) {
 
 	err = store.OnBlockWithEquivocationCheck(t.Context(), block, true, true, false)
 	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
-	require.NoError(t, store.OnBlock(t.Context(), block, true, true, false))
+	require.NoError(t, store.OnBlock(t.Context(), block, false, true, false))
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {

@@ -98,6 +98,8 @@ var (
 	errCanonicalGloasSuccessorUnavailable = errors.New("canonical GLOAS successor source is not configured")
 )
 
+const maxConsecutiveEnvelopeFailures = 3
+
 // SkippedFullBlock records a GLOAS FULL block whose envelope was unavailable during backward download.
 type SkippedFullBlock struct {
 	Block *cltypes.SignedBeaconBlock
@@ -250,6 +252,13 @@ func (b *BackwardBeaconDownloader) SetGloasSuccessorValidator(validate func(*clt
 func (b *BackwardBeaconDownloader) SetExpectedRoot(root common.Hash) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.setExpectedRoot(root)
+}
+
+func (b *BackwardBeaconDownloader) setExpectedRoot(root common.Hash) {
+	if b.expectedRoot != root {
+		b.consecutiveEnvelopeFailures = 0
+	}
 	b.expectedRoot = root
 }
 
@@ -496,7 +505,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			b.httpPreferred.Store(false)
 			log.Warn("[BackwardBeaconDownloader] GLOAS FULL block envelope missing, will retry",
 				"slot", block.Block.Slot, "consecutiveFailures", b.consecutiveEnvelopeFailures)
-			return nil
+			return b.requiredEnvelopeRetryError(block.Block.Slot, blockRoot)
 		}
 
 		finished, err := b.onNewBlock(block, envelope)
@@ -505,7 +514,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			log.Warn("Error processing block", "err", err)
 			return nil
 		}
-		b.expectedRoot = block.Block.ParentRoot
+		b.setExpectedRoot(block.Block.ParentRoot)
 		b.prevBatchTopBlock = block
 		if block.Block.Slot == 0 {
 			b.finished.Store(true)
@@ -551,10 +560,11 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					if len(determineGloasFullRoots([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock)) > 0 {
 						env, fetchErr := b.fetchSingleEnvelope(ctx, block)
 						if fetchErr != nil {
+							b.consecutiveEnvelopeFailures++
 							b.httpPreferred.Store(false)
 							log.Warn("[BackwardBeaconDownloader] GLOAS envelope fetch failed for root-fetched block, will retry",
-								"slot", block.Block.Slot, "err", fetchErr)
-							return nil
+								"slot", block.Block.Slot, "consecutiveFailures", b.consecutiveEnvelopeFailures, "err", fetchErr)
+							return b.requiredEnvelopeRetryError(block.Block.Slot, blockRoot)
 						}
 						envelope = env
 					}
@@ -567,7 +577,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					log.Warn("Error processing root-fetched block", "err", err)
 					return nil
 				}
-				b.expectedRoot = block.Block.ParentRoot
+				b.setExpectedRoot(block.Block.ParentRoot)
 				b.prevBatchTopBlock = block
 				if block.Block.Slot == 0 {
 					b.finished.Store(true)
@@ -831,6 +841,14 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 	return envelopes, fullRootSet
 }
 
+func (b *BackwardBeaconDownloader) requiredEnvelopeRetryError(slot uint64, root common.Hash) error {
+	if b.consecutiveEnvelopeFailures < maxConsecutiveEnvelopeFailures {
+		return nil
+	}
+	return fmt.Errorf("required GLOAS envelope unavailable after %d attempts: slot %d root %x",
+		b.consecutiveEnvelopeFailures, slot, root)
+}
+
 func (b *BackwardBeaconDownloader) discardInvalidGloasEnvelopes(blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) {
 	if b.validateGloasEnvelope == nil {
 		return
@@ -1020,7 +1038,7 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 		return err
 	}
 	if didSkip {
-		b.expectedRoot = expectedRoot
+		b.setExpectedRoot(expectedRoot)
 		b.slotToDownload.Store(slotToDownload)
 		b.prevBatchTopBlock = prevBatchTopBlock
 		b.gloasSuccessorRoot = common.Hash{}

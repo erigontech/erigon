@@ -583,6 +583,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
+	gloasOptions := gloasBlockOptionsFromContext(ctx)
+	defer func() {
+		if gloasOptions != nil && gloasOptions.builderRouteReserved && a.builderRoutes != nil {
+			a.builderRoutes.ReleaseReservation()
+			gloasOptions.builderRouteReserved = false
+		}
+	}()
 	// Cover the whole request so preparation cannot enter the execution layer while production is
 	// still deriving or collecting the block.
 	finishProduction := a.payloadPreparationGate.beginProduction()
@@ -803,6 +810,12 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		if err != nil {
 			return nil, err
 		}
+		if options.builderRouteReserved {
+			if a.builderRoutes == nil || !a.builderRoutes.CommitReservation(root, options.selectedBuilderURL) {
+				return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("builder handoff reservation unavailable"))
+			}
+			options.builderRouteReserved = false
+		}
 		if err := a.setBuilderRouteHeader(w, root, options.selectedBuilderURL); err != nil {
 			return nil, err
 		}
@@ -962,6 +975,14 @@ func (a *ApiHandler) produceBlock(
 				}
 			}
 			selected := selectGloasBid(localExecValue, candidates)
+			if selected != nil && selected.builderURL != "" {
+				if options == nil || a.builderRoutes == nil || !a.builderRoutes.Reserve() {
+					log.Warn("GLOAS: builder handoff capacity unavailable, using self-build", "slot", targetSlot)
+					selected = nil
+				} else {
+					options.builderRouteReserved = true
+				}
+			}
 			if selected != nil {
 				log.Info("GLOAS: selected external builder bid over self-build",
 					"slot", targetSlot,

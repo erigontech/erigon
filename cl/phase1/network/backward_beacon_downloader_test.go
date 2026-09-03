@@ -884,6 +884,57 @@ func TestBackwardBeaconDownloaderRootFallbackAdvancesOnlyForEnvelope(t *testing.
 	}
 }
 
+func TestBackwardBeaconDownloaderRootFallbackFailsAfterEnvelopeRetryLimit(t *testing.T) {
+	cfg := gloasFromGenesisConfig()
+	target := makeGloasBlock(10, hash(0xaa), common.Hash{0x42})
+	child := makeGloasBlock(11, hash(0xbb), hash(0xaa))
+	linkBeaconBlocks(t, target, child)
+	targetRoot, err := target.Block.HashSSZ()
+	require.NoError(t, err)
+	encodedBlock, err := target.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/eth/v2/beacon/blocks/") {
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(encodedBlock)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot:      targetRoot,
+		httpFallbackURL:   server.URL,
+		beaconCfg:         cfg,
+		prevBatchTopBlock: child,
+	}
+	downloader.slotToDownload.Store(target.Block.Slot)
+	downloader.SetOnNewBlock(func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		t.Fatal("block must not advance without its required envelope")
+		return false, nil
+	})
+
+	for range 2 {
+		require.NoError(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{makeDenebBlock(11)}))
+	}
+	require.ErrorContains(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{makeDenebBlock(11)}), "required GLOAS envelope unavailable")
+	require.Equal(t, maxConsecutiveEnvelopeFailures, downloader.consecutiveEnvelopeFailures)
+	require.Equal(t, common.Hash(targetRoot), downloader.expectedRoot)
+	require.Equal(t, target.Block.Slot, downloader.Progress())
+}
+
+func TestBackwardBeaconDownloaderSetExpectedRootResetsEnvelopeFailureRun(t *testing.T) {
+	downloader := &BackwardBeaconDownloader{
+		expectedRoot:                common.Hash{1},
+		consecutiveEnvelopeFailures: maxConsecutiveEnvelopeFailures - 1,
+	}
+
+	downloader.SetExpectedRoot(common.Hash{2})
+
+	require.Zero(t, downloader.consecutiveEnvelopeFailures)
+}
+
 func TestBackwardBeaconDownloaderMissingRequiredEnvelopeSurvivesRestart(t *testing.T) {
 	cfg := gloasFromGenesisConfig()
 	target := makeGloasBlock(10, hash(0xaa), common.Hash{0x42})
@@ -930,10 +981,12 @@ func TestBackwardBeaconDownloaderMissingRequiredEnvelopeSurvivesRestart(t *testi
 		return false, nil
 	})
 
-	for range 3 {
+	for range 2 {
 		downloader.httpPreferred.Store(true)
 		require.NoError(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{target, lookahead}))
 	}
+	downloader.httpPreferred.Store(true)
+	require.ErrorContains(t, downloader.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{target, lookahead}), "required GLOAS envelope unavailable")
 	require.Equal(t, 3, downloader.consecutiveEnvelopeFailures)
 	require.Zero(t, processed)
 	require.False(t, downloader.Finished())

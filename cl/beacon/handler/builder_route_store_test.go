@@ -57,6 +57,21 @@ func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
 	require.Empty(t, recorder.Header().Get("Eth-Builder-Url"))
 }
 
+func TestBuilderRouteStoreReservationPreventsLateCapacityFailure(t *testing.T) {
+	routes := newBuilderRouteStore(1, time.Minute, time.Now)
+	require.True(t, routes.Reserve())
+	require.False(t, routes.Add(common.Hash{1}, "https://other.example"))
+	require.True(t, routes.CommitReservation(common.Hash{2}, "https://reserved.example"))
+	require.True(t, routes.Claim(common.Hash{2}, "https://reserved.example"))
+}
+
+func TestBuilderRouteStoreReleasedReservationFreesCapacity(t *testing.T) {
+	routes := newBuilderRouteStore(1, time.Minute, time.Now)
+	require.True(t, routes.Reserve())
+	routes.ReleaseReservation()
+	require.True(t, routes.Add(common.Hash{1}, "https://builder.example"))
+}
+
 func TestBuilderRouteStoreAllowsAliasesForSameRoot(t *testing.T) {
 	routes := newBuilderRouteStore(2, time.Minute, time.Now)
 	root := common.Hash{1}
@@ -79,6 +94,16 @@ func TestBuilderRouteStoreClaimOrAddIsBoundedAndSingleflight(t *testing.T) {
 	require.True(t, routes.ClaimOrAdd(root, url))
 	routes.Complete(root, url, true)
 	require.False(t, routes.ClaimOrAdd(root, url))
+}
+
+func TestBuilderRouteStoreClaimOrAddDoesNotEvictTrustedIdleRoute(t *testing.T) {
+	routes := newBuilderRouteStore(1, time.Minute, time.Now)
+	trustedRoot := common.Hash{1}
+	trustedURL := "https://trusted.example"
+
+	require.True(t, routes.Add(trustedRoot, trustedURL))
+	require.False(t, routes.ClaimOrAdd(common.Hash{2}, "https://untrusted.example"))
+	require.True(t, routes.Claim(trustedRoot, trustedURL))
 }
 
 func TestBuilderRouteStoreCapacityPreservesAcceptedRoutes(t *testing.T) {

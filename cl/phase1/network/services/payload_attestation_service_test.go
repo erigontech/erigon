@@ -47,6 +47,14 @@ type blockingPayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
+type panickingPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+}
+
+func (*panickingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+	panic("validation panic")
+}
+
 func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ bool) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
@@ -168,6 +176,29 @@ func TestPayloadAttestationServiceBoundsKnownBlockValidation(t *testing.T) {
 	require.ErrorIs(t, err, ErrIgnore)
 	close(blockingForkchoice.release)
 	require.NoError(t, <-firstDone)
+}
+
+func TestPayloadAttestationServiceReleasesAdmissionAfterValidationPanic(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	service.validationAdmission = make(chan struct{}, 1)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = &panickingPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_ = service.ProcessMessage(context.Background(), nil, msg)
+	}()
+
+	require.Equal(t, "validation panic", recovered)
+	require.Empty(t, service.validationAdmission)
+	service.forkchoiceStore = fcu
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
 }
 
 func TestPayloadAttestationServiceBackpressuresInsteadOfDroppingValidCandidate(t *testing.T) {

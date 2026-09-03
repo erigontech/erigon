@@ -36,12 +36,13 @@ import (
 const maxBuilderConfigRequestSize = 2 << 20
 
 type gloasBlockProductionOptions struct {
-	builderConfig       *cltypes.BuilderConfig
-	includePayload      bool
-	selectedBuilderURL  string
-	selfBuildPayload    *selfBuildPayload
-	payloadFeeRecipient *common.Address
-	deferPayloadCache   bool
+	builderConfig        *cltypes.BuilderConfig
+	includePayload       bool
+	selectedBuilderURL   string
+	builderRouteReserved bool
+	selfBuildPayload     *selfBuildPayload
+	payloadFeeRecipient  *common.Address
+	deferPayloadCache    bool
 }
 
 type gloasBlockProductionOptionsKey struct{}

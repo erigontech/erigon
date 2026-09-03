@@ -406,10 +406,10 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 			wantFullChild: false,
 		},
 		{
-			name:          "optimistic EL status remains EMPTY only",
+			name:          "optimistic EL status produces FULL child",
 			hasEnvelope:   true,
 			optimistic:    true,
-			wantFullChild: false,
+			wantFullChild: true,
 		},
 		{
 			name:          "envelope present and verified produces FULL child",
@@ -561,7 +561,7 @@ func TestPayloadAvailabilityByEngineStatus(t *testing.T) {
 		want   bool
 	}{
 		{name: "engine error", status: execution_client.PayloadStatusNone},
-		{name: "optimistic", status: execution_client.PayloadStatusNotValidated},
+		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, root, true, false)
@@ -590,7 +590,7 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 		wantErr    bool
 	}{
 		{name: "engine error", status: execution_client.PayloadStatusNone, withStatus: true, wantErr: true},
-		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, withStatus: true, wantErr: true},
+		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, withStatus: true},
 		{name: "status absent", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -603,7 +603,7 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 				f.payloadStatusByRoot.Add(parentRoot, test.status)
 			}
 
-			err := f.validateParentPayloadPath(child)
+			err := f.validateParentPayloadPath(child, true)
 			if test.wantErr {
 				require.ErrorIs(t, err, ErrParentEnvelopePending)
 			} else {
@@ -622,7 +622,7 @@ func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {
 		available bool
 	}{
 		{name: "engine error", status: execution_client.PayloadStatusNone, wantErr: errELBehind},
-		{name: "optimistic", status: execution_client.PayloadStatusNotValidated},
+		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, available: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, root, true, false)
@@ -679,10 +679,10 @@ func TestPayloadStatusTransitionsUpdateDurableAvailability(t *testing.T) {
 		changed   bool
 		effective execution_client.PayloadStatus
 	}{
-		{name: "none to optimistic", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusNotValidated, changed: true, effective: execution_client.PayloadStatusNotValidated},
+		{name: "none to optimistic", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusNotValidated, available: true, changed: true, effective: execution_client.PayloadStatusNotValidated},
 		{name: "none to validated", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusValidated, available: true, verified: true, changed: true, effective: execution_client.PayloadStatusValidated},
 		{name: "none to invalidated", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusInvalidated, changed: true, effective: execution_client.PayloadStatusInvalidated},
-		{name: "optimistic to none", initial: execution_client.PayloadStatusNotValidated, next: execution_client.PayloadStatusNone, effective: execution_client.PayloadStatusNotValidated},
+		{name: "optimistic to none", initial: execution_client.PayloadStatusNotValidated, next: execution_client.PayloadStatusNone, available: true, effective: execution_client.PayloadStatusNotValidated},
 		{name: "validated to none", initial: execution_client.PayloadStatusValidated, next: execution_client.PayloadStatusNone, available: true, verified: true, effective: execution_client.PayloadStatusValidated},
 		{name: "validated to optimistic", initial: execution_client.PayloadStatusValidated, next: execution_client.PayloadStatusNotValidated, available: true, verified: true, effective: execution_client.PayloadStatusValidated},
 		{name: "invalidated to none", initial: execution_client.PayloadStatusInvalidated, next: execution_client.PayloadStatusNone, effective: execution_client.PayloadStatusInvalidated},
