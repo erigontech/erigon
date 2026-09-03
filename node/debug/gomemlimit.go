@@ -53,16 +53,14 @@ func SetGoMemLimit(logger log.Logger) {
 		return
 	}
 
-	// Compare against physical memory, not TotalMemory: the latter already folds
-	// the cgroup in, so it can never show the cgroup as the smaller of the two.
 	cgroup, system := estimate.CgroupsMemoryLimit(), estimate.SystemMemory()
-	if cgroup == 0 || (system > 0 && cgroup >= system) {
+	limit := derivedGoMemLimit(cgroup, system)
+	if limit == 0 {
 		logger.Info("[mem] GOMEMLIMIT unset and no cgroup limit constrains this process",
 			"system", datasize.ByteSize(system).HR())
 		return
 	}
 
-	limit := int64(float64(cgroup) * goMemLimitShare)
 	debug.SetMemoryLimit(limit)
 	logger.Info("[mem] GOMEMLIMIT derived from cgroup limit",
 		"cgroup", datasize.ByteSize(cgroup).HR(),
@@ -70,6 +68,13 @@ func SetGoMemLimit(logger log.Logger) {
 		"share", goMemLimitShare)
 }
 
-// cgroupLimitForTest exposes the detected limit so a test can assert the branch
-// it actually took on the machine it runs on.
-func cgroupLimitForTest() uint64 { return estimate.CgroupsMemoryLimit() }
+// derivedGoMemLimit returns the heap ceiling for a cgroup limit, or 0 when the
+// cgroup does not constrain this process. system is physical memory, not
+// TotalMemory: the latter already folds the cgroup in, so it can never show the
+// cgroup as the smaller of the two.
+func derivedGoMemLimit(cgroup, system uint64) int64 {
+	if cgroup == 0 || (system > 0 && cgroup >= system) {
+		return 0
+	}
+	return int64(float64(cgroup) * goMemLimitShare)
+}
