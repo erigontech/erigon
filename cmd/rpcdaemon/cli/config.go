@@ -429,7 +429,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, rawDB)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("create aggregator: %w", err)
 		}
@@ -468,7 +468,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.OptimisticalyOpenFolder()
 
 			allSnapshots.LogStat("remote")
-			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
+			_ = agg.OpenFolder(db)
 
 			logSnapshotStats()
 		} else {
@@ -487,7 +487,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 					allSnapshots.LogStat("reopen")
 				}
 
-				if err = agg.OpenFolder(); err != nil {
+				if err = agg.OpenFolder(db); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
 					logSnapshotStats()

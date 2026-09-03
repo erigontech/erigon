@@ -3514,7 +3514,8 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
-	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false)
+	finalityCtx := execfinality.NewContext(to, finalisedBlockNum, ethconfig.Defaults.MaxReorgDepth, false,
+		execfinality.WithTxNumsReader(res.TemporalDB, blockReader.TxnumReader()))
 	if err := br.BuildFiles(ctx, blocksInSnapshots, finalityCtx, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
 	}
@@ -3569,7 +3570,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	logger.Info("Build state history snapshots")
-	if err := agg.BuildFiles(lastTxNum, finalityCtx); err != nil {
+	if err := agg.BuildFiles(temporalDb, lastTxNum, finalityCtx); err != nil {
 		return err
 	}
 
@@ -3699,11 +3700,11 @@ func tryOpenAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger 
 	if err != nil {
 		return nil, err
 	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err = agg.OpenFolder(chainDB); err != nil {
 		agg.Close()
 		return nil, err
 	}
