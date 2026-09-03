@@ -789,7 +789,7 @@ func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
 			}, nil)
 			handler.builderClient = builderClient
 
-			_, err := handler.getBuilderPayload(t.Context(), postState, postState.Slot()+1)
+			_, _, err := handler.getBuilderPayload(t.Context(), postState, postState.Slot()+1)
 
 			require.ErrorContains(t, err, "invalid builder block value")
 		})

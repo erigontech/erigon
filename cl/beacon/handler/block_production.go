@@ -841,6 +841,7 @@ func (a *ApiHandler) produceBlock(
 	// get the builder payload
 	var (
 		builderHeader *builder.ExecutionHeader
+		builderValue  *big.Int
 		builderErr    error
 	)
 	wg.Go(func() {
@@ -849,7 +850,7 @@ func (a *ApiHandler) produceBlock(
 			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
 		}()
 		if shouldRequestBuilderHeader(stateVersion) {
-			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
+			builderHeader, builderValue, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
 			if builderErr != nil && !errors.Is(builderErr, errBuilderNotEnabled) {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
@@ -891,7 +892,6 @@ func (a *ApiHandler) produceBlock(
 	// determine whether to use local execution node or builder
 	// if exec_node_payload_value >= builder_boost_factor * (builder_payload_value // 100), then return a full (unblinded) block containing the execution node payload.
 	// otherwise, return a blinded block containing the builder payload header.
-	builderValue := builderHeader.BlockValue()
 	useLocalExec := preferLocalExecutionValue(localExecValue, builderValue, legacyBuilderBoostFactor)
 	log.Info("Check mev bid", "useLocalExec", useLocalExec, "execValue", localExecValue, "builderValue", builderValue, "boostFactor", legacyBuilderBoostFactor, "targetSlot", targetSlot)
 
@@ -1070,19 +1070,19 @@ func (a *ApiHandler) getBuilderPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
-) (*builder.ExecutionHeader, error) {
+) (*builder.ExecutionHeader, *big.Int, error) {
 	if !a.routerCfg.Builder || a.builderClient == nil {
-		return nil, errBuilderNotEnabled
+		return nil, nil, errBuilderNotEnabled
 	}
 
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// pub key of the proposer
 	pubKey, err := baseState.ValidatorPublicKey(int(proposerIndex))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// get the parent hash of base execution block
 	// [Modified in Gloas:EIP7732] LatestExecutionPayloadHeader is stale in GLOAS;
@@ -1095,18 +1095,19 @@ func (a *ApiHandler) getBuilderPayload(
 	}
 	header, err := a.builderClient.GetHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	} else if header == nil {
-		return nil, errors.New("no error but nil header")
+		return nil, nil, errors.New("no error but nil header")
 	}
 
 	// check the version
 	curVersion := baseState.Version().String()
 	if !strings.EqualFold(header.Version, curVersion) {
-		return nil, fmt.Errorf("invalid version %s, expected %s", header.Version, curVersion)
+		return nil, nil, fmt.Errorf("invalid version %s, expected %s", header.Version, curVersion)
 	}
-	if header.BlockValue() == nil {
-		return nil, fmt.Errorf("invalid builder block value %q", header.Data.Message.Value)
+	blockValue := header.BlockValue()
+	if blockValue == nil {
+		return nil, nil, fmt.Errorf("invalid builder block value %q", header.Data.Message.Value)
 	}
 	if ethHeader := header.Data.Message.Header; ethHeader != nil {
 		ethHeader.SetVersion(baseState.Version())
@@ -1114,15 +1115,15 @@ func (a *ApiHandler) getBuilderPayload(
 	// check kzg commitments
 	if baseState.Version() >= clparams.DenebVersion && header.Data.Message.BlobKzgCommitments != nil {
 		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
-			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
+			return nil, nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
 		}
 		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
 			c := header.Data.Message.BlobKzgCommitments.Get(i)
 			if c == nil {
-				return nil, errors.New("nil blob kzg commitment")
+				return nil, nil, errors.New("nil blob kzg commitment")
 			}
 			if len(c) != length.Bytes48 {
-				return nil, errors.New("invalid blob kzg commitment length")
+				return nil, nil, errors.New("invalid blob kzg commitment length")
 			}
 		}
 	}
@@ -1130,17 +1131,17 @@ func (a *ApiHandler) getBuilderPayload(
 		// check execution requests
 		r := header.Data.Message.ExecutionRequests
 		if r.Deposits != nil && r.Deposits.Len() > int(a.beaconChainCfg.MaxDepositRequestsPerPayload) {
-			return nil, fmt.Errorf("too many deposit requests: %d", r.Deposits.Len())
+			return nil, nil, fmt.Errorf("too many deposit requests: %d", r.Deposits.Len())
 		}
 		if r.Withdrawals != nil && r.Withdrawals.Len() > int(a.beaconChainCfg.MaxWithdrawalRequestsPerPayload) {
-			return nil, fmt.Errorf("too many withdrawal requests: %d", r.Withdrawals.Len())
+			return nil, nil, fmt.Errorf("too many withdrawal requests: %d", r.Withdrawals.Len())
 		}
 		if r.Consolidations != nil && r.Consolidations.Len() > int(a.beaconChainCfg.MaxConsolidationRequestsPerPayload) {
-			return nil, fmt.Errorf("too many consolidation requests: %d", r.Consolidations.Len())
+			return nil, nil, fmt.Errorf("too many consolidation requests: %d", r.Consolidations.Len())
 		}
 	}
 
-	return header, nil
+	return header, blockValue, nil
 }
 
 func (a *ApiHandler) produceBeaconBody(
