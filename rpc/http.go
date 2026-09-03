@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang-jwt/jwt/v4"
 
 	"github.com/erigontech/erigon/common"
@@ -45,8 +46,12 @@ import (
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
-	contentType             = "application/json"
-	jwtTokenExpiry          = 60 * time.Second
+	// maxBodySizeHint bounds the buffer sized from Content-Length, so a request
+	// that declares a large body and sends none cannot make the server allocate
+	// it up front. A body above this just grows into.
+	maxBodySizeHint = int64(1 * datasize.MB)
+	contentType     = "application/json"
+	jwtTokenExpiry  = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -227,8 +232,8 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 	// The body holds one message, so it can be read in one go and checked once.
 	readFrame := func() ([]byte, error) {
 		hint := 0
-		if r.ContentLength > 0 && r.ContentLength <= maxRequestContentLength {
-			hint = int(r.ContentLength)
+		if r.ContentLength > 0 {
+			hint = int(min(r.ContentLength, maxBodySizeHint))
 		}
 		frame, err := readAllBody(conn, hint)
 		if err != nil {

@@ -447,7 +447,8 @@ func TestReadAllBody(t *testing.T) {
 		for i := range want {
 			want[i] = byte(i)
 		}
-		for _, hint := range []int{0, size, size * 2, 1} {
+		// an oversized hint is what a lying Content-Length produces
+		for _, hint := range []int{0, size, size * 2, 1, int(maxBodySizeHint)} {
 			got, err := readAllBody(bytes.NewReader(want), hint)
 			require.NoError(t, err)
 			require.Equal(t, want, got, "size %d hint %d", size, hint)

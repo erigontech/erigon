@@ -198,8 +198,9 @@ type jsonCodec struct {
 	closer  sync.Once         // close closed channel once
 	closeCh chan any          // closed on Close
 	decode  func(v any) error // decoder to allow multiple transports
-	// readFrame is set only by transports that delimit messages themselves. The
-	// returned bytes must stay valid until the next call, messages point into them.
+	// readFrame is set only by transports that delimit messages themselves. Each
+	// call must return bytes it does not reuse: parsed messages point into them
+	// and are handled asynchronously, so they outlive the call that read them.
 	readFrame func() ([]byte, error)
 	encMu     sync.Mutex        // guards the encoder
 	encode    func(v any) error // encoder to allow multiple transports
