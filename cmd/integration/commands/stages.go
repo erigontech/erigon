@@ -835,7 +835,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	collateAndPrune := func() error {
 		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, execfinality.WithoutFinalisedBlock())
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle,
+				execfinality.WithoutFinalisedBlock(), execfinality.WithTxNumsReader(db, br.TxnumReader()))
 			if err != nil {
 				return nil, err
 			}
@@ -1196,7 +1197,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		if reset {
 			aggOpts = aggOpts.SkipFilesDBGapCheck()
 		}
-		_aggSingleton = aggOpts.MustOpen(ctx, db)
+		_aggSingleton = aggOpts.MustOpen(ctx)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
@@ -1206,7 +1207,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			return nil
 		})
 		g.Go(func() error {
-			err := _aggSingleton.OpenFolder()
+			err := _aggSingleton.OpenFolder(db)
 			if err != nil {
 				return fmt.Errorf("aggregator opening: %w", err)
 			}

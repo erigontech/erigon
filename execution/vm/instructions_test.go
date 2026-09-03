@@ -994,8 +994,7 @@ func TestEIP8024_Execution(t *testing.T) {
 						}
 					}
 				case errors.As(tc.wantErr, &stackUnderflow):
-					var want *ErrStackUnderflow
-					if !errors.As(err, &want) {
+					if _, ok := errors.AsType[*ErrStackUnderflow](err); !ok {
 						t.Fatalf("expected ErrStackUnderflow, got %v", err)
 					}
 				default:
