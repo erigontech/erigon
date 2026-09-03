@@ -216,6 +216,24 @@ func TestCallFrameHasNoJSONMarshaler(t *testing.T) {
 	require.False(t, bad, "callFrame must not implement json.Marshaler")
 }
 
+// The flat frames are encoded as a slice, so a MarshalJSON on any of them sends
+// the whole slice down marshalerEncoder and re-scans each frame's bytes. The
+// output tests below pass either way, so the absence is asserted here.
+func TestFlatCallTypesHaveNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		v    any
+	}{
+		{"flatCallFrame", &flatCallFrame{}},
+		{"flatCallAction", &flatCallAction{}},
+		{"flatCallResult", &flatCallResult{}},
+	} {
+		_, bad := tc.v.(json.Marshaler)
+		require.False(t, bad, "%s must not implement json.Marshaler", tc.name)
+	}
+}
+
 // A zero value and a call to the zero address are both real, so only a nil
 // pointer may be omitted. The flat tracer depends on this: it fills in a zero
 // value for child calls precisely so the key is present.

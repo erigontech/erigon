@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1019,7 +1018,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, finalityCtx dbfinality.Context) error {
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, finalityCtx kv.FinalityContext) error {
 	// Pin worker counts for the duration of buildFiles. The collate/build phases
 	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
 	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
@@ -1155,7 +1154,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, f
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, db kv.RoDB, step kv.Step, finalityCtx dbfinality.Context) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+func (a *Aggregator) readyForCollation(ctx context.Context, db kv.RoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 	return finalityCtx.ReadyForCollation(ctx, db, step.LastTxNum(a.stepSize.Load()))
@@ -1190,7 +1189,7 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, db kv.RoDB, maxR
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
-func (a *Aggregator) BuildFiles(db kv.RoDB, toTxNum uint64, finalityCtx dbfinality.Context) error {
+func (a *Aggregator) BuildFiles(db kv.RoDB, toTxNum uint64, finalityCtx kv.FinalityContext) error {
 	finished, _ := a.buildFilesInBackground(db, toTxNum, true, finalityCtx)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
@@ -1219,7 +1218,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toStep kv.Step, finalityCtx dbfinality.Context, doMerge bool) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -1773,8 +1772,8 @@ func (a *Aggregator) UnlockCollation() { a.commitGate.Unlock() }
 func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
 
 // CollateAndPrune commits a prune pass before starting bounded file building.
-func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) (dbfinality.Context, error), logger log.Logger) (bool, <-chan struct{}, error) {
-	var finalityCtx dbfinality.Context
+func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+	var finalityCtx kv.FinalityContext
 	a.commitGate.Lock()
 	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		var err error
@@ -2218,13 +2217,13 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum uint64, finalityCtx dbfinality.Context) chan struct{} {
+func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum uint64, finalityCtx kv.FinalityContext) chan struct{} {
 	finished, _ := a.buildFilesInBackground(db, txNum, true, finalityCtx)
 	return finished
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
-func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, finalityCtx dbfinality.Context) (chan struct{}, bool) {
+func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, finalityCtx kv.FinalityContext) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
