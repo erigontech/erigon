@@ -284,6 +284,7 @@ func TestSplitPoint_StoragePlaneInteriorSplit(t *testing.T) {
 	r.seams[string(accHash)] = sr
 	splitRoot, err := r.foldRoot(all)
 	require.NoError(t, err)
+	r.flush(t)
 
 	rc := newSplitRound(msCell)
 	base := rc.newTrie()
@@ -297,6 +298,7 @@ func TestSplitPoint_StoragePlaneInteriorSplit(t *testing.T) {
 	require.Equalf(t, c64.extension[:c64.extLen], c65.extension[:c65.extLen],
 		"interior split at depth 65 (prefix %x) must yield the same cell extension as the depth-64 path", prefix65)
 	require.Equal(t, seqRoot, splitRoot, "round root through a depth-65 split != sequential root")
+	requireBranchParity(t, msSeq, msSplit)
 }
 
 func TestSplitPoint_AccountPlaneInteriorSplit(t *testing.T) {
@@ -456,4 +458,79 @@ func TestSplitPoint_RefusesPrefixWithoutBranch(t *testing.T) {
 	_, err := r.foldAt(absent, under)
 	require.ErrorIs(t, err, errSplitNotBranch)
 	require.Zero(t, r.workers, "positioning must refuse before any worker is created")
+}
+
+func splitCollapseParentCorpus() (doomed [][]byte, keep [][]byte, pk [][]byte, upds []Update) {
+	rnd := rand.New(rand.NewSource(4242))
+	ub := NewUpdateBuilder()
+	for _, tail := range []byte{0x0, 0x5, 0xa} {
+		a := findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, tail}, int(tail)+11)
+		doomed = append(doomed, a)
+		ub.Balance(hex.EncodeToString(a), uint64(tail)+7)
+	}
+	for seed := range 6 {
+		a := findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, 0xf}, seed+77)
+		ub.Balance(hex.EncodeToString(a), uint64(seed)+31)
+	}
+	for _, p := range [][]byte{{0x1, 0x2, 0x7}, {0x1, 0x2, 0xc}, {0x1, 0x7}, {0x1, 0xc}} {
+		for seed := range 2 {
+			a := findAddressForHexPrefix(p, seed*13+101)
+			ub.Balance(hex.EncodeToString(a), uint64(seed)+53)
+			if seed == 0 && (p[len(p)-1] == 0x7) {
+				keep = append(keep, a)
+			}
+		}
+	}
+	for range 400 {
+		addRandomAccount(ub, rnd, 0)
+	}
+	pk, upds = ub.Build()
+	return doomed, keep, pk, upds
+}
+
+func TestSplitPoint_CollapsedCellFoldsInParentSplit(t *testing.T) {
+	doomed, keep, pk1, u1 := splitCollapseParentCorpus()
+	require.Len(t, keep, 2, "corpus must keep one touchable account under 127 and one under 17")
+
+	msSeq := NewMockState(t)
+	seq := NewHexPatriciaHashed(length.Addr, msSeq, DefaultTrieConfig())
+	defer seq.Release()
+	processBatch(t, msSeq, seq, pk1, u1)
+
+	prefix := []byte{0x1, 0x2, 0x3}
+	for _, p := range [][]byte{prefix[:1], prefix[:2], prefix} {
+		require.Truef(t, hasBranchAt(msSeq, p), "corpus must produce an on-disk branch at %x", p)
+	}
+
+	msSplit := cloneMockState(t, msSeq)
+
+	ub := NewUpdateBuilder()
+	for _, a := range doomed {
+		ub.Delete(hex.EncodeToString(a))
+	}
+	for i, a := range keep {
+		ub.Balance(hex.EncodeToString(a), uint64(i)+9001)
+	}
+	pk2, u2 := ub.Build()
+	seqRoot := processBatch(t, msSeq, seq, pk2, u2)
+	require.NoError(t, msSplit.applyPlainUpdates(pk2, u2))
+
+	r := newSplitRound(msSplit)
+	r.splits[string(prefix[:1])] = true
+	r.splits[string(prefix[:2])] = true
+	r.splits[string(prefix)] = true
+	splitRoot, err := r.foldRoot(splitKVs(pk2, u2))
+	require.NoError(t, err)
+	r.flush(t)
+
+	collapsed, ok := r.captured[string(prefix)]
+	require.True(t, ok, "the interior split at 123 did not run")
+	require.Positive(t, collapsed.extLen, "the split at 123 must collapse to a single survivor")
+	require.EqualValues(t, 0xf, collapsed.extension[0], "the survivor nibble must lead the extension")
+	require.Equalf(t, seqRoot, splitRoot, "root with a collapse at %x folded through parent splits at %x and %x != sequential", prefix, prefix[:2], prefix[:1])
+	requireBranchParity(t, msSeq, msSplit)
+
+	require.Equalf(t, collapsed.extension[:collapsed.extLen], collapsed.hashedExtension[:collapsed.hashedExtLen],
+		"a collapsed account-plane cell must carry a hashed extension matching its extension; extLen=%d hashedExtLen=%d",
+		collapsed.extLen, collapsed.hashedExtLen)
 }
