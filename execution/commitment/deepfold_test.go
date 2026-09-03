@@ -347,7 +347,7 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
 }
 
-// Single-nibble on-disk storage has no branch record at the account prefix; unfoldStorageBase
+// Single-nibble on-disk storage has no branch record at the account prefix; unfoldSplitBase
 // must still recover it rather than seeding an empty base.
 func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 	onDisk := nibs(0)
@@ -392,7 +392,7 @@ func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 }
 
 // A streaming collapse leaves an afterMap==0 tombstone at the account prefix, distinct from
-// the deep fold's outright branch-key delete; unfoldStorageBase must not seed an empty base
+// the deep fold's outright branch-key delete; unfoldSplitBase must not seed an empty base
 // from it, or a later re-expansion drops the untouched survivor.
 func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	t.Parallel()

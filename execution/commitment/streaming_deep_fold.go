@@ -26,8 +26,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
-
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // hk is copied off the walk path; pk and upd still reference the caller's storage.
@@ -41,37 +39,6 @@ type touchedKey struct {
 func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
 
 func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFoldConcurrency())) }
-
-var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
-
-func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
-	d := int16(len(accPrefix))
-	copy(base.currentKey[:], accPrefix)
-	base.currentKeyLen = d
-	base.depths[0] = d + 1
-	base.activeRows = 1
-	for i := range base.grid[0] {
-		base.grid[0][i].reset()
-	}
-	base.touchMap[0], base.afterMap[0], base.branchBefore[0] = 0, 0, false
-
-	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
-	if err != nil {
-		return err
-	}
-	if len(branch) == 0 {
-		return errStorageBaseNotBranch
-	}
-	if len(branch) < 4 {
-		// A stored branch always carries touchMap+afterMap (4 bytes); shorter means corrupt, not missing.
-		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
-	}
-	if BranchData(branch).ChildCount() == 0 {
-		return errStorageBaseNotBranch
-	}
-	base.branchBefore[0] = true
-	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
-}
 
 func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
 	w.mountTo(base, nib)
@@ -108,7 +75,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 			setAccountStorageRoot(w, path, sr)
 			return nil
 		}
-		if !errors.Is(err, errStorageBaseNotBranch) {
+		if !errors.Is(err, errSplitNotBranch) {
 			return fmt.Errorf("storageRoot: %w", err)
 		}
 	}
@@ -145,8 +112,8 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		accTag = fmt.Sprintf("[%x] ", accID)
 		base.SetTraceWriter(tracePrefix(base.traceW, accTag))
 	}
-	if err := unfoldStorageBase(base, accPrefix); err != nil {
-		if !accountFresh || !errors.Is(err, errStorageBaseNotBranch) {
+	if err := unfoldSplitBase(base, accPrefix); err != nil {
+		if !accountFresh || !errors.Is(err, errSplitNotBranch) {
 			return cell{}, fmt.Errorf("unfold storage root: %w", err)
 		}
 	}
@@ -192,7 +159,8 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		return cell{}, err
 	}
 
-	sr, err := aggregateMountedStorageRoot(base, &children, node.bitmap)
+	stitchSplitCells(base, &children, node.bitmap)
+	sr, err := foldSplitRow(ctx, base, foldToCell)
 	if err != nil {
 		return cell{}, fmt.Errorf("storage branch fold: %w", err)
 	}
@@ -203,59 +171,6 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		return cell{}, nil
 	}
 	return sr, nil
-}
-
-func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bitmap uint16) (cell, error) {
-	for bm := bitmap; bm != 0; {
-		bit := bm & -bm
-		x := bits.TrailingZeros16(bit)
-		base.touchMap[0] |= bit
-		if children[x].IsEmpty() {
-			base.afterMap[0] &^= bit
-			base.grid[0][x].reset()
-		} else {
-			base.afterMap[0] |= bit
-			base.grid[0][x] = children[x]
-		}
-		bm ^= bit
-	}
-	if base.afterMap[0] == 0 && !base.branchBefore[0] {
-		base.activeRows = 0
-		return cell{}, nil
-	}
-	if kind, _ := afterMapUpdateKind(base.afterMap[0]); kind == updateKindPropagate {
-		return storageRootFromSingleChild(base)
-	}
-	if err := base.fold(); err != nil {
-		return cell{}, err
-	}
-	out := base.root
-	out.extLen = 0
-	return out, nil
-}
-
-func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
-	survNib := bits.TrailingZeros16(base.afterMap[0])
-	child := base.grid[0][survNib]
-
-	if base.branchBefore[0] {
-		if err := base.collectDeleteUpdate(nibbles.HexToCompactInto(base.compactKeyBuf[:], base.currentKey[:base.currentKeyLen]), 0); err != nil {
-			return cell{}, err
-		}
-	}
-	base.activeRows = 0
-
-	var root cell
-	if child.hashLen > 0 {
-		root.extLen = child.extLen + 1
-		root.extension[0] = byte(survNib)
-		copy(root.extension[1:], child.extension[:child.extLen])
-		root.hashLen = child.hashLen
-		copy(root.hash[:], child.hash[:child.hashLen])
-	} else {
-		root = child
-	}
-	return root, nil
 }
 
 func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg TrieConfig, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {

@@ -158,16 +158,15 @@ func (r *splitRound) foldAt(prefix []byte, keys []splitKV) (cell, error) {
 		r.take(base)
 		base.Release()
 	}()
-	if err := unfoldStorageBase(base, prefix); err != nil {
+	if err := unfoldSplitBase(base, prefix); err != nil {
 		return cell{}, err
 	}
 	cells, bitmap, err := r.foldChildren(base, prefix, keys)
 	if err != nil {
 		return cell{}, err
 	}
-	present := presentFlags(bitmap)
-	stitchSplitCells(base, &cells, &present)
-	out, err := aggregateMountedStorageRoot(base, &cells, bitmap)
+	stitchSplitCells(base, &cells, bitmap)
+	out, err := foldSplitRow(context.Background(), base, foldToCell)
 	if err != nil {
 		return cell{}, err
 	}
@@ -190,25 +189,11 @@ func (r *splitRound) foldRoot(keys []splitKV) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	present := presentFlags(bitmap)
-	stitchSplitCells(base, &cells, &present)
-	if base.activeRows == 0 {
-		base.activeRows = 1
-	}
-	for base.activeRows > 0 {
-		if err := base.fold(); err != nil {
-			return nil, err
-		}
+	stitchSplitCells(base, &cells, bitmap)
+	if _, err := foldSplitRow(ctx, base, foldToRoot); err != nil {
+		return nil, err
 	}
 	return base.RootHash()
-}
-
-func presentFlags(bitmap uint16) [16]bool {
-	var present [16]bool
-	for nib := range 16 {
-		present[nib] = bitmap&(uint16(1)<<nib) != 0
-	}
-	return present
 }
 
 func splitWhaleCorpus(slots, background int) (addr []byte, pk [][]byte, upds []Update) {
@@ -303,7 +288,7 @@ func TestSplitPoint_StoragePlaneInteriorSplit(t *testing.T) {
 	rc := newSplitRound(msCell)
 	base := rc.newTrie()
 	defer base.Release()
-	require.NoError(t, unfoldStorageBase(base, accPrefix))
+	require.NoError(t, unfoldSplitBase(base, accPrefix))
 	c64, err := rc.foldLeaf(base, splitNib, byNib[byte(splitNib)])
 	require.NoError(t, err)
 
@@ -402,7 +387,7 @@ func TestSplitPoint_InteriorSingleSurvivorCollapse(t *testing.T) {
 	r := newSplitRound(ms)
 	base := r.newTrie()
 	defer base.Release()
-	require.NoError(t, unfoldStorageBase(base, prefix))
+	require.NoError(t, unfoldSplitBase(base, prefix))
 
 	survNib := byte(0xf)
 	child := base.grid[0][survNib]
@@ -412,9 +397,8 @@ func TestSplitPoint_InteriorSingleSurvivorCollapse(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, bitmap&(uint16(1)<<survNib), "the survivor must not be touched")
 
-	present := presentFlags(bitmap)
-	stitchSplitCells(base, &cells, &present)
-	got, err := aggregateMountedStorageRoot(base, &cells, bitmap)
+	stitchSplitCells(base, &cells, bitmap)
+	got, err := foldSplitRow(context.Background(), base, foldToCell)
 	require.NoError(t, err)
 
 	want := append([]byte{survNib}, child.extension[:child.extLen]...)
@@ -470,6 +454,6 @@ func TestSplitPoint_RefusesPrefixWithoutBranch(t *testing.T) {
 		}
 	}
 	_, err := r.foldAt(absent, under)
-	require.ErrorIs(t, err, errStorageBaseNotBranch)
+	require.ErrorIs(t, err, errSplitNotBranch)
 	require.Zero(t, r.workers, "positioning must refuse before any worker is created")
 }
