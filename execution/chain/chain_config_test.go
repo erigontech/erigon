@@ -331,8 +331,7 @@ func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
 	}
 
 	cfg := reflect.TypeFor[Config]()
-	for i := range cfg.NumField() {
-		field := cfg.Field(i)
+	for field := range cfg.Fields() {
 		if field.Type != reflect.TypeFor[*uint64]() {
 			continue
 		}
