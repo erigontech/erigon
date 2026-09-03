@@ -177,6 +177,13 @@ func (r *splitRound) foldAt(prefix []byte, keys []splitKV) (cell, error) {
 		return cell{}, err
 	}
 	stitchSplitCells(base, &cells, bitmap)
+	if len(later) > 0 {
+		r.take(base)
+		if _, err := ApplyDeferredBranchUpdates(r.deferred, 1, r.ms.PutBranch, nil); err != nil {
+			return cell{}, err
+		}
+		r.deferred = nil
+	}
 	for i := range later {
 		if err := base.followAndUpdate(later[i].hk, later[i].pk, later[i].upd); err != nil {
 			return cell{}, err
@@ -459,6 +466,7 @@ func TestSplitPoint_InteriorSingleSurvivorCollapse(t *testing.T) {
 	survNib := byte(0xf)
 	child := base.grid[0][survNib]
 	require.Positive(t, child.hashLen, "the survivor child must be a branch reference")
+	require.Zero(t, child.accountAddrLen+child.storageAddrLen, "this case pins the keyless survivor; the keyed one has its own test")
 
 	cells, bitmap, err := r.foldChildren(base, prefix, splitKVs(pk2, u2))
 	require.NoError(t, err)
@@ -701,4 +709,111 @@ func TestSplitPoint_CollapsedStorageCellReUnfolded(t *testing.T) {
 	require.Equalf(t, seqRoot, splitRoot,
 		"a collapsed cell at %x re-unfolded by a later key in the same round != sequential root", prefix66)
 	requireBranchParity(t, msSeq, msSplit)
+}
+
+func decodedRowCell(t *testing.T, ms *MockState, prefix []byte, nib byte) cell {
+	t.Helper()
+	base := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer base.Release()
+	require.NoError(t, unfoldSplitBase(base, prefix))
+	return base.grid[0][nib]
+}
+
+func splitKeyedSurvivorCorpus(sharedSlotPrefix bool) (doomed [][]byte, touch [][]byte, pk [][]byte, upds []Update) {
+	rnd := rand.New(rand.NewSource(515151))
+	ub := NewUpdateBuilder()
+	for _, tail := range []byte{0x0, 0x4, 0x8} {
+		a := findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, tail}, int(tail)+301)
+		doomed = append(doomed, a)
+		ub.Balance(hex.EncodeToString(a), uint64(tail)+7)
+	}
+
+	surv := findAddressForHexPrefix([]byte{0x1, 0x2, 0x3, 0xf}, 359)
+	sa := hex.EncodeToString(surv)
+	ub.Balance(sa, 4242)
+	locs := append(slotLocsForHexPrefix([]byte{0x2}, 1, 12_000), slotLocsForHexPrefix([]byte{0x9}, 1, 12_000)...)
+	if sharedSlotPrefix {
+		locs = slotLocsForHexPrefix([]byte{0xa, 0xb}, 2, 640_000)
+	}
+	for i, loc := range locs {
+		ub.Storage(sa, loc, hex.EncodeToString([]byte{byte(i) + 1}))
+	}
+
+	for _, p := range [][]byte{{0x1, 0x2, 0x7}, {0x1, 0x2, 0xc}, {0x1, 0x7}, {0x1, 0xc}} {
+		for seed := range 2 {
+			a := findAddressForHexPrefix(p, seed*17+401)
+			ub.Balance(hex.EncodeToString(a), uint64(seed)+53)
+			if seed == 0 && (len(p) == 2 || p[2] == 0x7) {
+				touch = append(touch, a)
+			}
+		}
+	}
+	for range 400 {
+		addRandomAccount(ub, rnd, 0)
+	}
+	pk, upds = ub.Build()
+	return doomed, touch, pk, upds
+}
+
+func TestSplitPoint_KeyedSurvivorCollapse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		shared bool
+	}{
+		{"storage-root-hash", false},
+		{"storage-root-extension", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doomed, touch, pk1, u1 := splitKeyedSurvivorCorpus(tc.shared)
+
+			msSeq := NewMockState(t)
+			seq := NewHexPatriciaHashed(length.Addr, msSeq, DefaultTrieConfig())
+			defer seq.Release()
+			processBatch(t, msSeq, seq, pk1, u1)
+
+			prefix := []byte{0x1, 0x2, 0x3}
+			for _, p := range [][]byte{prefix[:1], prefix[:2], prefix} {
+				require.Truef(t, hasBranchAt(msSeq, p), "corpus must produce an on-disk branch at %x", p)
+			}
+
+			msSplit := cloneMockState(t, msSeq)
+
+			survCell := decodedRowCell(t, msSplit, prefix, 0xf)
+			require.Positivef(t, survCell.accountAddrLen, "the survivor decoded from the record at %x must be an account", prefix)
+			require.Positive(t, survCell.hashLen, "the survivor account must carry a storage root hash")
+			if tc.shared {
+				require.Positive(t, survCell.extLen, "the survivor's storage root must be an extension")
+			} else {
+				require.Zero(t, survCell.extLen, "the survivor's storage root must be a bare branch hash")
+			}
+
+			ub := NewUpdateBuilder()
+			for _, a := range doomed {
+				ub.Delete(hex.EncodeToString(a))
+			}
+			for i, a := range touch {
+				ub.Balance(hex.EncodeToString(a), uint64(i)+7001)
+			}
+			pk2, u2 := ub.Build()
+			seqRoot := processBatch(t, msSeq, seq, pk2, u2)
+			require.NoError(t, msSplit.applyPlainUpdates(pk2, u2))
+
+			r := newSplitRound(msSplit)
+			r.splits[string(prefix[:1])] = true
+			r.splits[string(prefix[:2])] = true
+			r.splits[string(prefix)] = true
+			splitRoot, err := r.foldRoot(splitKVs(pk2, u2))
+			require.NoError(t, err)
+			r.flush(t)
+
+			collapsed, ok := r.captured[string(prefix)]
+			require.True(t, ok, "the interior split at 123 did not run")
+			require.Equalf(t, survCell.accountAddrLen, collapsed.accountAddrLen,
+				"a collapse onto a keyed survivor must promote the account, not wrap its storage root in an extension cell; got accountAddrLen=%d extLen=%d",
+				collapsed.accountAddrLen, collapsed.extLen)
+
+			require.Equalf(t, seqRoot, splitRoot, "root with a keyed survivor collapse at %x != sequential", prefix)
+			requireBranchParity(t, msSeq, msSplit)
+		})
+	}
 }
