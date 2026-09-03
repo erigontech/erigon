@@ -37,6 +37,12 @@ func (s stubPrecompile) RequiredGas([]byte) uint64        { return 0 }
 func (s stubPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
 func (s stubPrecompile) Name() string                     { return s.name }
 
+type ptrPrecompile struct{ name string }
+
+func (p *ptrPrecompile) RequiredGas([]byte) uint64        { return uint64(len(p.name)) }
+func (p *ptrPrecompile) Run(input []byte) ([]byte, error) { return input, nil }
+func (p *ptrPrecompile) Name() string                     { return p.name }
+
 func rulesForChain(chainID, l2Version uint64) *chain.Rules {
 	return &chain.Rules{
 		ChainID:     uint256.NewInt(chainID),
@@ -286,6 +292,20 @@ func TestProviderNilContractPanics(t *testing.T) {
 
 	require.PanicsWithValue(t,
 		"vm: precompile provider for chain 900504 returned a nil contract at 0000000000000000000000000000000000000046",
+		func() { Precompiles(rulesForChain(chainID, 0)) })
+}
+
+func TestProviderTypedNilContractPanics(t *testing.T) {
+	const chainID = 900505
+	badAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x47}))
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{badAddr: (*ptrPrecompile)(nil)}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	require.PanicsWithValue(t,
+		"vm: precompile provider for chain 900505 returned a nil contract at 0000000000000000000000000000000000000047",
 		func() { Precompiles(rulesForChain(chainID, 0)) })
 }
 
