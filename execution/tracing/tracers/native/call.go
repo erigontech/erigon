@@ -54,16 +54,18 @@ type callFrame struct {
 	From     common.Address  `json:"from"`
 	Gas      hexutil.Uint64  `json:"gas"`
 	GasUsed  hexutil.Uint64  `json:"gasUsed"`
-	To       *common.Address `json:"to,omitempty"`
-	Input    hexutil.Bytes   `json:"input"`
-	Output   hexutil.Bytes   `json:"output,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	To       *common.Address `json:"to,omitempty" rlp:"optional"`
+	Input    hexutil.Bytes   `json:"input" rlp:"optional"`
+	Output   hexutil.Bytes   `json:"output,omitempty" rlp:"optional"`
+	Error    string          `json:"error,omitempty" rlp:"optional"`
 	Revertal string          `json:"revertReason,omitempty"`
-	Calls    []callFrame     `json:"calls,omitempty"`
-	Logs     []callLog       `json:"logs,omitempty"`
-	Value    *hexutil.U256   `json:"value,omitempty"`
-	// Last, to match the field order the generated marshaler used.
-	TypeStr string `json:"type"`
+	Calls    []callFrame     `json:"calls,omitempty" rlp:"optional"`
+	Logs     []callLog       `json:"logs,omitempty" rlp:"optional"`
+	// Placed at end on purpose. The RLP will be decoded to 0 instead of
+	// nil if there are non-empty elements after in the struct.
+	Value *hexutil.U256 `json:"value,omitempty" rlp:"optional"`
+	// Hidden from RLP so Value stays its last field; JSON wants this one last.
+	TypeStr string `json:"type" rlp:"-"`
 }
 
 // setType keeps the opcode and its wire spelling in step.
