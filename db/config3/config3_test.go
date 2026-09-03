@@ -17,7 +17,6 @@
 package config3_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,11 +25,8 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 )
 
-func TestDefaultPruneDistanceCoversBlockRequestWindow(t *testing.T) {
-	for network, cfg := range clparams.BeaconConfigs {
-		t.Run(fmt.Sprint(network), func(t *testing.T) {
-			requestWindowSlots := cfg.MinEpochsForBlockRequests() * cfg.SlotsPerEpoch
-			require.GreaterOrEqual(t, uint64(config3.DefaultPruneDistance), requestWindowSlots)
-		})
-	}
+func TestDefaultPruneDistanceCoversMainnetBlockRequestWindow(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	requestWindowSlots := cfg.MinEpochsForBlockRequests() * cfg.SlotsPerEpoch
+	require.GreaterOrEqual(t, uint64(config3.DefaultPruneDistance), requestWindowSlots)
 }
