@@ -240,3 +240,89 @@ func TestOnlyNilPointersAreOmitted(t *testing.T) {
 	require.NotContains(t, string(b), `"to"`)
 	require.Contains(t, string(b), `"input":"0x"`, "input carries no omitempty")
 }
+
+// The flat tracer's output is the public parity/OE trace shape. These cases pin
+// it exactly — field names, ordering, omissions and quantity encoding — because
+// the wire types on the frame are all that produce it now.
+func TestFlatCallFrameJSON(t *testing.T) {
+	t.Parallel()
+
+	from := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	zero := hexutil.U256(*uint256.NewInt(0))
+	maxU256 := hexutil.U256(*new(uint256.Int).SetAllOne())
+
+	call := func(f *callFrame) *flatCallFrame { return newFlatCall(f) }
+
+	for _, tc := range []struct {
+		name  string
+		build func() *flatCallFrame
+		want  string
+	}{
+		{
+			name: "call",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
+					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero}
+				f.setType(vm.CALL)
+				return call(f)
+			},
+			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x1234","input":"0xaabb","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x100","output":"0xcc"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+		{
+			name: "delegatecall keeps its callType and a max value",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Gas: 1, GasUsed: 2, Value: &maxU256}
+				f.setType(vm.DELEGATECALL)
+				return call(f)
+			},
+			want: `{"action":{"callType":"delegatecall","from":"0x1111111111111111111111111111111111111111","gas":"0x1","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x2","output":"0x"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+		{
+			name: "create2 reports the deployed code and address",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Gas: 0x10, GasUsed: 0x8,
+					Input: hexutil.Bytes{0x60, 0x80}, Output: hexutil.Bytes{0xfe}, Value: &zero}
+				f.setType(vm.CREATE2)
+				return newFlatCreate(f)
+			},
+			want: `{"action":{"creationMethod":"create2","from":"0x1111111111111111111111111111111111111111","gas":"0x10","init":"0x6080","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"address":"0x2222222222222222222222222222222222222222","code":"0xfe","gasUsed":"0x8"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"create"}`,
+		},
+		{
+			name: "selfdestruct carries no result",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Value: &zero}
+				f.setType(vm.SELFDESTRUCT)
+				return newFlatSelfdestruct(f)
+			},
+			want: `{"action":{"address":"0x1111111111111111111111111111111111111111","balance":"0x0","refundAddress":"0x2222222222222222222222222222222222222222"},"blockHash":null,"blockNumber":0,"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"suicide"}`,
+		},
+		{
+			name: "nil and empty byte fields both encode as 0x",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Input: nil, Output: hexutil.Bytes{}, Value: &zero}
+				f.setType(vm.CALL)
+				return call(f)
+			},
+			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x0","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"result":{"gasUsed":"0x0","output":"0x"},"subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+		{
+			name: "a failed call reports error and drops the result",
+			build: func() *flatCallFrame {
+				f := &callFrame{From: from, To: &to, Value: &zero}
+				f.setType(vm.CALL)
+				fc := call(f)
+				fc.Error, fc.Result = "Reverted", nil
+				return fc
+			},
+			want: `{"action":{"callType":"call","from":"0x1111111111111111111111111111111111111111","gas":"0x0","input":"0x","to":"0x2222222222222222222222222222222222222222","value":"0x0"},"blockHash":null,"blockNumber":0,"error":"Reverted","subtraces":0,"traceAddress":null,"transactionHash":null,"transactionPosition":0,"type":"call"}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, err := json.Marshal(tc.build())
+			require.NoError(t, err)
+			require.Equal(t, tc.want, string(b))
+		})
+	}
+}
