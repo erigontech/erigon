@@ -568,10 +568,12 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	if criticalError != nil {
 		return
 	}
-	// The parent may not be CANONICAL yet — it may be a still-live block on the EXTENDING chain (the
-	// frontier this block chains to). That is a valid base: its state is in the SD we chain to, so stop
-	// the side-fork assembly here rather than re-executing it.
-	if !foundCanonical && fv.isPreExecutedLive(currentHash, unwindPoint) {
+	// A live in-memory frontier ancestor takes PRECEDENCE over a canonical marking. The seal re-keys a
+	// sealed frontier block as canonical so it can be FOUND, but its STATE still lives only in the frontier
+	// SD (FCU lags). Chain to that live SD rather than treating it as a committed-canonical base — the
+	// latter reads a lagging/absent DB base and makes the commitment root diverge. A genuinely committed
+	// (non-live) canonical ancestor is unaffected: isPreExecutedLive is false there.
+	if fv.isPreExecutedLive(currentHash, unwindPoint) {
 		foundCanonical = true
 		baseIsPreExecLive = true
 	}
@@ -614,8 +616,9 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		}
 		// Stop at any pre-executed LIVE ancestor on the extending chain (FCU may canonicalise several
 		// blocks at once, so a run of extending blocks can still be un-canonicalised here). Its state is
-		// already in memory on the frontier stack — do not re-execute it.
-		if !foundCanonical && fv.isPreExecutedLive(currentHash, unwindPoint) {
+		// already in memory on the frontier stack — do not re-execute it. Takes PRECEDENCE over a canonical
+		// marking (a re-keyed-canonical-but-still-live frontier block must chain to its live SD, not the DB).
+		if fv.isPreExecutedLive(currentHash, unwindPoint) {
 			foundCanonical = true
 			baseIsPreExecLive = true
 		}
