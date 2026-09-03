@@ -710,7 +710,6 @@ type TemporalRoDB interface {
 	RoDB
 	SnapshotNotifier
 	MaxPrunableStepsBacklog() uint64
-	OpenStateSnapshots(ctx context.Context) error
 	StepSize() uint64
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
@@ -722,6 +721,7 @@ type TemporalRwDB interface {
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
+	OpenStateSnapshots(ctx context.Context) error
 	BuildFiles2(ctx context.Context, fromStep, toStep Step, finalityCtx FinalityContext, doMerge bool) error
 	BuildFilesInBackground(finalityCtx FinalityContext) chan struct{}
 	BuildMissedAccessors(ctx context.Context, workers int, opts ...BuildAccessorsOption) error

@@ -2484,13 +2484,12 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\tDirection\x12\v\n" +
 	"\aFORWARD\x10\x00\x12\n" +
 	"\n" +
-	"\x06UNWIND\x10\x012\xaf\b\n" +
+	"\x06UNWIND\x10\x012\xe9\a\n" +
 	"\x02KV\x126\n" +
 	"\aVersion\x12\x16.google.protobuf.Empty\x1a\x13.types.VersionReply\x12&\n" +
 	"\x02Tx\x12\x0e.remote.Cursor\x1a\f.remote.Pair(\x010\x01\x12F\n" +
 	"\fStateChanges\x12\x1a.remote.StateChangeRequest\x1a\x18.remote.StateChangeBatch0\x01\x12=\n" +
-	"\tSnapshots\x12\x18.remote.SnapshotsRequest\x1a\x16.remote.SnapshotsReply\x12D\n" +
-	"\x12OpenStateSnapshots\x12\x16.google.protobuf.Empty\x1a\x16.google.protobuf.Empty\x12(\n" +
+	"\tSnapshots\x12\x18.remote.SnapshotsRequest\x1a\x16.remote.SnapshotsReply\x12(\n" +
 	"\x05Range\x12\x10.remote.RangeReq\x1a\r.remote.Pairs\x126\n" +
 	"\bSequence\x12\x13.remote.SequenceReq\x1a\x15.remote.SequenceReply\x129\n" +
 	"\tGetLatest\x12\x14.remote.GetLatestReq\x1a\x16.remote.GetLatestReply\x12?\n" +
@@ -2574,38 +2573,36 @@ var file_remote_kv_proto_depIdxs = []int32{
 	3,  // 10: remote.KV.Tx:input_type -> remote.Cursor
 	9,  // 11: remote.KV.StateChanges:input_type -> remote.StateChangeRequest
 	10, // 12: remote.KV.Snapshots:input_type -> remote.SnapshotsRequest
-	37, // 13: remote.KV.OpenStateSnapshots:input_type -> google.protobuf.Empty
-	12, // 14: remote.KV.Range:input_type -> remote.RangeReq
-	13, // 15: remote.KV.Sequence:input_type -> remote.SequenceReq
-	15, // 16: remote.KV.GetLatest:input_type -> remote.GetLatestReq
-	17, // 17: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
-	19, // 18: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
-	21, // 19: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
-	22, // 20: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
-	26, // 21: remote.KV.HasPrefix:input_type -> remote.HasPrefixReq
-	28, // 22: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
-	30, // 23: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
-	32, // 24: remote.KV.StepSize:input_type -> remote.StepSizeReq
-	37, // 25: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
-	38, // 26: remote.KV.Version:output_type -> types.VersionReply
-	4,  // 27: remote.KV.Tx:output_type -> remote.Pair
-	7,  // 28: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
-	11, // 29: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
-	37, // 30: remote.KV.OpenStateSnapshots:output_type -> google.protobuf.Empty
-	23, // 31: remote.KV.Range:output_type -> remote.Pairs
-	14, // 32: remote.KV.Sequence:output_type -> remote.SequenceReply
-	16, // 33: remote.KV.GetLatest:output_type -> remote.GetLatestReply
-	18, // 34: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
-	20, // 35: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
-	23, // 36: remote.KV.HistoryRange:output_type -> remote.Pairs
-	23, // 37: remote.KV.RangeAsOf:output_type -> remote.Pairs
-	27, // 38: remote.KV.HasPrefix:output_type -> remote.HasPrefixReply
-	29, // 39: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
-	31, // 40: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
-	33, // 41: remote.KV.StepSize:output_type -> remote.StepSizeReply
-	34, // 42: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
-	26, // [26:43] is the sub-list for method output_type
-	9,  // [9:26] is the sub-list for method input_type
+	12, // 13: remote.KV.Range:input_type -> remote.RangeReq
+	13, // 14: remote.KV.Sequence:input_type -> remote.SequenceReq
+	15, // 15: remote.KV.GetLatest:input_type -> remote.GetLatestReq
+	17, // 16: remote.KV.HistorySeek:input_type -> remote.HistorySeekReq
+	19, // 17: remote.KV.IndexRange:input_type -> remote.IndexRangeReq
+	21, // 18: remote.KV.HistoryRange:input_type -> remote.HistoryRangeReq
+	22, // 19: remote.KV.RangeAsOf:input_type -> remote.RangeAsOfReq
+	26, // 20: remote.KV.HasPrefix:input_type -> remote.HasPrefixReq
+	28, // 21: remote.KV.HistoryStartFrom:input_type -> remote.HistoryStartFromReq
+	30, // 22: remote.KV.CurrentDomainVersion:input_type -> remote.CurrentDomainVersionReq
+	32, // 23: remote.KV.StepSize:input_type -> remote.StepSizeReq
+	37, // 24: remote.KV.MaxPrunableStepsBacklog:input_type -> google.protobuf.Empty
+	38, // 25: remote.KV.Version:output_type -> types.VersionReply
+	4,  // 26: remote.KV.Tx:output_type -> remote.Pair
+	7,  // 27: remote.KV.StateChanges:output_type -> remote.StateChangeBatch
+	11, // 28: remote.KV.Snapshots:output_type -> remote.SnapshotsReply
+	23, // 29: remote.KV.Range:output_type -> remote.Pairs
+	14, // 30: remote.KV.Sequence:output_type -> remote.SequenceReply
+	16, // 31: remote.KV.GetLatest:output_type -> remote.GetLatestReply
+	18, // 32: remote.KV.HistorySeek:output_type -> remote.HistorySeekReply
+	20, // 33: remote.KV.IndexRange:output_type -> remote.IndexRangeReply
+	23, // 34: remote.KV.HistoryRange:output_type -> remote.Pairs
+	23, // 35: remote.KV.RangeAsOf:output_type -> remote.Pairs
+	27, // 36: remote.KV.HasPrefix:output_type -> remote.HasPrefixReply
+	29, // 37: remote.KV.HistoryStartFrom:output_type -> remote.HistoryStartFromReply
+	31, // 38: remote.KV.CurrentDomainVersion:output_type -> remote.CurrentDomainVersionReply
+	33, // 39: remote.KV.StepSize:output_type -> remote.StepSizeReply
+	34, // 40: remote.KV.MaxPrunableStepsBacklog:output_type -> remote.MaxPrunableStepsBacklogReply
+	25, // [25:41] is the sub-list for method output_type
+	9,  // [9:25] is the sub-list for method input_type
 	9,  // [9:9] is the sub-list for extension type_name
 	9,  // [9:9] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name

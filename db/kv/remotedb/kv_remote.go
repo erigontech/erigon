@@ -363,11 +363,6 @@ func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	panic("not implemented")
 }
 
-func (db *DB) OpenStateSnapshots(ctx context.Context) error {
-	_, err := db.remoteKV.OpenStateSnapshots(ctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-	return err
-}
-
 func (db *DB) StepSize() uint64 {
 	var stepSize uint64
 	_ = db.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {

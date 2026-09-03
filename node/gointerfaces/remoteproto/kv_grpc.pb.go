@@ -25,7 +25,6 @@ const (
 	KV_Tx_FullMethodName                      = "/remote.KV/Tx"
 	KV_StateChanges_FullMethodName            = "/remote.KV/StateChanges"
 	KV_Snapshots_FullMethodName               = "/remote.KV/Snapshots"
-	KV_OpenStateSnapshots_FullMethodName      = "/remote.KV/OpenStateSnapshots"
 	KV_Range_FullMethodName                   = "/remote.KV/Range"
 	KV_Sequence_FullMethodName                = "/remote.KV/Sequence"
 	KV_GetLatest_FullMethodName               = "/remote.KV/GetLatest"
@@ -57,7 +56,6 @@ type KVClient interface {
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[StateChangeBatch], error)
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
-	OpenStateSnapshots(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
@@ -131,16 +129,6 @@ func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SnapshotsReply)
 	err := c.cc.Invoke(ctx, KV_Snapshots_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *kVClient) OpenStateSnapshots(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, KV_OpenStateSnapshots_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +272,6 @@ type KVServer interface {
 	StateChanges(*StateChangeRequest, grpc.ServerStreamingServer[StateChangeBatch]) error
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error)
-	OpenStateSnapshots(context.Context, *emptypb.Empty) (*emptypb.Empty, error)
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
@@ -323,9 +310,6 @@ func (UnimplementedKVServer) StateChanges(*StateChangeRequest, grpc.ServerStream
 }
 func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Snapshots not implemented")
-}
-func (UnimplementedKVServer) OpenStateSnapshots(context.Context, *emptypb.Empty) (*emptypb.Empty, error) {
-	return nil, status.Error(codes.Unimplemented, "method OpenStateSnapshots not implemented")
 }
 func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
 	return nil, status.Error(codes.Unimplemented, "method Range not implemented")
@@ -434,24 +418,6 @@ func _KV_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interf
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(KVServer).Snapshots(ctx, req.(*SnapshotsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _KV_OpenStateSnapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(emptypb.Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(KVServer).OpenStateSnapshots(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: KV_OpenStateSnapshots_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KVServer).OpenStateSnapshots(ctx, req.(*emptypb.Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -686,10 +652,6 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Snapshots",
 			Handler:    _KV_Snapshots_Handler,
-		},
-		{
-			MethodName: "OpenStateSnapshots",
-			Handler:    _KV_OpenStateSnapshots_Handler,
 		},
 		{
 			MethodName: "Range",
