@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -23,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()

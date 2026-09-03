@@ -703,7 +703,7 @@ type FinalityContext interface {
 	PruneToBlockNum() uint64
 	RetireToBlockNum() uint64
 	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+	ReadyForCollation(ctx context.Context, db TemporalRoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
 }
 
 type TemporalRoDB interface {

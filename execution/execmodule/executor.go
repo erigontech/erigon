@@ -112,8 +112,7 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 
 // RunPrune executes pruning on the main pipeline.
 func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
-	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle,
-		execfinality.WithTxNumsReader(pe.db, pe.blockReader.TxnumReader()))
+	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
 	if err != nil {
 		return nil, err
 	}
