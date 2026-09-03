@@ -92,10 +92,10 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	}
 	defer clean()
 	agg.PresetOfflineMerge()
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(res.TemporalDB); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, res.TemporalDB, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	ac := agg.BeginFilesRo()
@@ -107,7 +107,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	if err := agg.ReloadFiles(); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, res.TemporalDB, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	return nil
@@ -131,10 +131,10 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 		return err
 	}
 
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(res.TemporalDB); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, res.TemporalDB, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	ac := agg.BeginFilesRo()
@@ -144,19 +144,19 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err != nil {
 		panic(err)
 	}
-	aggOld, err := state.New(dirsOld).Logger(logger).WithErigonDBSettings(erigonDBSettingsOld).Open(ctx, db)
+	aggOld, err := state.New(dirsOld).Logger(logger).WithErigonDBSettings(erigonDBSettingsOld).Open(ctx)
 	if err != nil {
 		panic(err)
 	}
 	defer aggOld.Close()
-	if err = aggOld.OpenFolder(); err != nil {
+	if err = aggOld.OpenFolder(db); err != nil {
 		panic(err)
 	}
 	aggOld.PresetOfflineMerge()
-	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := aggOld.BuildMissedAccessors(ctx, db, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, res.TemporalDB, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 
@@ -168,11 +168,11 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	}
 	acOld.Close()
 	ac.Close()
-	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, res.TemporalDB, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	// TODO: aggOld.reload files?
-	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := aggOld.BuildMissedAccessors(ctx, db, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	agg.Close()
@@ -190,7 +190,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	if err != nil {
 		return err
 	}
-	agg := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
+	agg := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx)
 	defer agg.Close()
 	agg.PresetOfflineMerge()
 
@@ -198,10 +198,10 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
 		return err
 	}
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(db); err != nil {
 		return err
 	}
-	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
+	if err := agg.BuildMissedAccessors(ctx, db, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
 	return nil
