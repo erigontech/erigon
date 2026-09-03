@@ -787,9 +787,6 @@ func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 }
 
 func (db *DB) OpenStateSnapshots(_ context.Context) error {
-	if db.RwDB == nil {
-		return db.stateFiles.OpenFolder(nil)
-	}
 	return db.stateFiles.OpenFolder(db)
 }
 
