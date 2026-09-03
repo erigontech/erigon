@@ -10,6 +10,6 @@ package vm
 // measurement. math/big's Montgomery assembly has no dual carry chain outside
 // amd64, so evmone stays ahead until the modulus is very wide.
 const (
-	modexpBigIntMinModLenWideExp   = 256
-	modexpBigIntMinModLenNarrowExp = 256
+	modexpBigIntMinModLenWideExp   uint64 = 256
+	modexpBigIntMinModLenNarrowExp uint64 = 256
 )
