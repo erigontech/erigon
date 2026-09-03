@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -384,9 +385,21 @@ func (s *StackStream) popCommaOrField() {
 
 // streamBuf appends to the stream's own buffer, so encoding/json writes into the
 // pooled buffer instead of returning a freshly allocated one.
-type streamBuf struct{ s *StackStream }
+// errValueTooLarge aborts a deferred encode rather than letting the value grow
+// the stream buffer past what the pool keeps. The caller re-encodes and writes
+// it as raw bytes, which streams it instead.
+var errValueTooLarge = errors.New("jsonstream: deferred value too large to buffer")
 
-func (w streamBuf) Write(p []byte) (int, error) {
+// streamBuf appends an encoder's output into the stream buffer.
+type streamBuf struct {
+	s     *StackStream
+	start int
+}
+
+func (w *streamBuf) Write(p []byte) (int, error) {
+	if len(w.s.stream.Buffer())-w.start+len(p) > FlushThreshold {
+		return 0, errValueTooLarge
+	}
 	w.s.stream.SetBuffer(append(w.s.stream.Buffer(), p...))
 	return len(p), nil
 }
@@ -396,7 +409,7 @@ func (w streamBuf) Write(p []byte) (int, error) {
 // stream's buffer rather than in a per-response allocation.
 func (s *StackStream) WriteJSONValue(v any) error {
 	start := len(s.stream.Buffer())
-	if err := json.NewEncoder(streamBuf{s}).Encode(v); err != nil {
+	if err := json.NewEncoder(&streamBuf{s: s, start: start}).Encode(v); err != nil {
 		s.stream.SetBuffer(s.stream.Buffer()[:start]) // leave no partial value behind
 		return err
 	}

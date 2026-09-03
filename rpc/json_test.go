@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -264,4 +265,81 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 		require.NoError(t, s.Flush())
 		assertErrorResponse(t, out.Bytes())
 	})
+}
+
+// A result too large to buffer must still reach the client byte-for-byte, and
+// must not grow the stream buffer past what the pool keeps: the deferred encode
+// gives up and the value is streamed as raw bytes instead.
+func TestLargeDeferredResultStreamsAndStaysPoolable(t *testing.T) {
+	res := blockResultFixture(4000)
+	enc, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(enc) <= jsonstream.FlushThreshold {
+		t.Fatalf("fixture is only %d bytes, too small to exercise the bound", len(enc))
+	}
+	id := json.RawMessage(`1`)
+
+	var want, got bytes.Buffer
+	s1 := jsonstream.Get(&want)
+	(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s1)
+	_ = s1.Flush()
+
+	s2 := jsonstream.Get(&got)
+	(&jsonrpcMessage{Version: vsn, ID: id, resultValue: res}).writeTo(s2)
+	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+		"deferred encode grew the buffer past the pool limit")
+	_ = s2.Flush()
+
+	require.Equal(t, want.String(), got.String())
+	jsonstream.Put(s1)
+	jsonstream.Put(s2)
+}
+
+// A request id big enough to be written straight to the writer would sit outside
+// anything Rewind can take back, so such a response must not use the rewindable
+// path at all. It must still be valid JSON carrying that id.
+func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
+	id := json.RawMessage(`"` + strings.Repeat("i", jsonstream.FlushThreshold) + `"`)
+
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	(&jsonrpcMessage{Version: vsn, ID: id, resultValue: map[string]int{"n": 1}}).writeTo(s)
+	_ = s.Flush()
+	jsonstream.Put(s)
+
+	var back map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(out.Bytes(), &back), "response was not valid JSON")
+	require.Equal(t, string(id), string(back["id"]))
+	require.Equal(t, `{"n":1}`, string(back["result"]))
+
+	// The corruption only shows when the result fails after the id is already
+	// gone: a success prefix on the wire, then an error object appended to it.
+	out.Reset()
+	s = jsonstream.Get(&out)
+	(&jsonrpcMessage{Version: vsn, ID: id, resultValue: make(chan int)}).writeTo(s)
+	_ = s.Flush()
+	jsonstream.Put(s)
+
+	back = nil
+	require.NoError(t, json.Unmarshal(out.Bytes(), &back), "response was not valid JSON")
+	require.Contains(t, back, "error")
+	require.NotContains(t, back, "result")
+}
+
+// A result that only fails to encode inside writeTo used to be counted as a
+// success, because the accounting in handleCall runs before the response is
+// written. writeTo must report it so the caller can correct that.
+func TestEncodeFailureIsReportedToCaller(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`), resultValue: make(chan int)}).writeTo(s)
+	require.Error(t, err, "an unencodable result must be reported, not swallowed")
+
+	// A result that merely had to take the marshal route is not a failure.
+	res := blockResultFixture(4000)
+	require.NoError(t, (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`), resultValue: res}).writeTo(s))
 }

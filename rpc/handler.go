@@ -224,7 +224,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				stream := jsonstream.Get(buf)
 				defer jsonstream.Put(stream)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
-					res.writeTo(stream)
+					if err := res.writeTo(stream); err != nil {
+						h.reportEncodeFailure(calls[i], err)
+					}
 				}
 				_ = stream.Flush()
 				if buf.Len() > 0 {
@@ -282,8 +284,17 @@ func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 	answer := h.handleCallMsg(cp, msg, stream)
 	h.addSubscriptions(cp.notifiers)
 	if answer != nil {
-		answer.writeTo(stream)
+		if err := answer.writeTo(stream); err != nil {
+			h.reportEncodeFailure(msg, err)
+		}
 	}
+}
+
+// reportEncodeFailure accounts for a call whose result only failed to encode
+// after the call itself was already recorded as a success.
+func (h *handler) reportEncodeFailure(msg *jsonrpcMessage, err error) {
+	failedReqeustGauge.Inc()
+	h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", err)
 }
 
 func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
@@ -697,16 +708,12 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
 // Nothing here may reach the underlying writer: the response must stay in the stream buffer
 // until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
-func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	if msg.Error != nil || (msg.Result == nil && msg.resultValue == nil) || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, err := json.Marshal(msg)
-		if err != nil {
-			buf, err = json.Marshal(msg.errorResponse(err))
-		}
-		if err == nil {
-			stream.WriteRawBytes(buf)
-		}
-		return
+func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) error {
+	// A large id would be written straight to the writer, past anything Rewind
+	// can take back, so it goes the marshal route with the other odd shapes.
+	if msg.Error != nil || (msg.Result == nil && msg.resultValue == nil) || msg.ID == nil || msg.Version == "" ||
+		msg.Method != "" || msg.Params != nil || len(msg.ID) >= jsonstream.FlushThreshold {
+		return msg.marshalTo(stream)
 	}
 	// Encoding a deferred result can fail once this envelope is already open, so
 	// mark the start and rewind to it rather than shipping a partial success.
@@ -722,11 +729,41 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Result != nil {
 		stream.WriteRawBytes(msg.Result)
 	} else if err := stream.WriteJSONValue(msg.resultValue); err != nil {
+		// Either the value does not fit the buffer or it cannot be encoded at
+		// all; marshalTo streams the first and reports the second.
 		stream.Rewind(buffered, depth)
-		msg.errorResponse(err).writeTo(stream)
-		return
+		return msg.marshalTo(stream)
 	}
 	stream.WriteObjectEnd()
+	return nil
+}
+
+// marshalTo encodes the whole message up front, so a large result reaches the
+// writer as raw bytes rather than growing the stream buffer.
+// It returns the error only when the result itself could not be encoded, not
+// when a perfectly good result merely had to take this path.
+func (msg *jsonrpcMessage) marshalTo(stream jsonstream.Stream) error {
+	if msg.resultValue != nil {
+		// The message is not a complete JSON value while the result is deferred,
+		// so encode the result before marshalling the envelope around it.
+		enc, err := json.Marshal(msg.resultValue)
+		if err != nil {
+			_ = msg.errorResponse(err).marshalTo(stream)
+			return err
+		}
+		cp := *msg
+		cp.Result, cp.resultValue = enc, nil
+		msg = &cp
+	}
+	buf, marshalErr := json.Marshal(msg)
+	if marshalErr != nil {
+		var err error
+		if buf, err = json.Marshal(msg.errorResponse(marshalErr)); err != nil {
+			return marshalErr
+		}
+	}
+	stream.WriteRawBytes(buf)
+	return marshalErr
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.
