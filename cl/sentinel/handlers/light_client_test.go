@@ -393,28 +393,3 @@ func TestLightClientUpdates(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 }
-
-// BenchmarkLightClientPrefixConstruction benchmarks the prefix construction
-// for light client responses, comparing the optimized version (stack allocation)
-// against the old version (heap allocation with append).
-func BenchmarkLightClientPrefixConstruction(b *testing.B) {
-	forkDigest := common.Bytes4{0xAA, 0xBB, 0xCC, 0xDD}
-
-	b.Run("Optimized", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var prefix [5]byte
-			prefix[0] = SuccessfulResponsePrefix
-			copy(prefix[1:], forkDigest[:])
-			_ = prefix
-		}
-	})
-
-	b.Run("Old", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
-			_ = prefix
-		}
-	})
-}
