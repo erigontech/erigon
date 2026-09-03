@@ -36,6 +36,23 @@ type getLatestOptionsTx struct {
 	opts kv.GetLatestOptions
 }
 
+type prunableStepsDB struct {
+	kv.TemporalRoDB
+	steps uint64
+}
+
+func (db *prunableStepsDB) MaxPrunableStepsBacklog() uint64 {
+	return db.steps
+}
+
+func TestMaxPrunableStepsBacklog(t *testing.T) {
+	db := &prunableStepsDB{steps: 123}
+	s := NewKvServer(t.Context(), db, nil, nil, log.New())
+	reply, err := s.MaxPrunableStepsBacklog(t.Context(), nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), reply.Steps)
+}
+
 func (tx *getLatestOptionsTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	tx.opts = opts
 	return nil, 0, nil
