@@ -312,3 +312,22 @@ func TestEmittedLineMatchesTheHarnessContract(t *testing.T) {
 	assert.Equal(t, "Slow block", probe.Msg)
 	assert.NotEmpty(t, probe.Block.Hash)
 }
+
+func TestEmitRoundsRatesToTwoDecimals(t *testing.T) {
+	t.Parallel()
+	logger, h := captureLogger()
+
+	rec := sampleRecord()
+	rec.GasUsed = 12_000
+	rec.Execution = 829174 * time.Nanosecond
+	rec.CountersValid = true
+	rec.Accounts = DomainCounts{CacheHits: 44, CacheMiss: 9}
+
+	Emit(logger, 0, rec)
+	require.Len(t, h.msgs, 1)
+
+	assert.Contains(t, h.msgs[0], `"mgas_per_sec":14.47`)
+	assert.NotContains(t, h.msgs[0], "14.472233")
+	assert.Contains(t, h.msgs[0], `"hit_rate":83.02`,
+		"besu reports 44 hits / 9 misses as 83.02; full float64 precision breaks the cross-client contract")
+}

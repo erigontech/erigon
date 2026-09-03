@@ -21,6 +21,7 @@ package blockmetrics
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -122,13 +123,15 @@ func (r *Record) mgasPerSec() float64 {
 	if r.Execution <= 0 {
 		return 0
 	}
-	return (float64(r.GasUsed) / 1e6) / r.Execution.Seconds()
+	return round2((float64(r.GasUsed) / 1e6) / r.Execution.Seconds())
 }
+
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 func (d DomainCounts) entry() cacheEntry {
 	e := cacheEntry{Hits: d.CacheHits, Misses: d.CacheMiss}
 	if total := d.CacheHits + d.CacheMiss; total > 0 {
-		e.HitRate = 100 * float64(d.CacheHits) / float64(total)
+		e.HitRate = round2(100 * float64(d.CacheHits) / float64(total))
 	}
 	return e
 }
