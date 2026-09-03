@@ -174,49 +174,17 @@ report per-domain on-disk sizes), `sync-prof.sh` (synchronized 90s cpu + alloc c
   (`openDB`'s third arg is `applyMigrations`, not readonly), so the node must be stopped.
   `integration` is not built on either host yet.
 
-## Run 6 at 1M blocks (2026-09-03)
-
-Both arms reached the 1M target: v2 in 22389 s, v3 in 20609 s, **v3 8.0% faster end to end** and
-ahead in every 100k range. Full tables in the research log, section "Run 6 at 1M blocks". Every
-non-commitment file is byte-identical across arms.
-
-| commitment on disk         |      v2 |      v3 | v3/v2 |
-|----------------------------|---------|---------|-------|
-| `.kv` (4 files)            | 9.61 GB | 7.54 GB | 0.78  |
-| `.v` history               | 28.70 GB | 17.59 GB | 0.61 |
-| `.vi` + `.ef` + `.efi`     | 3.93 GB | 7.64 GB | 1.94  |
-| `.bt` + `.kvei`            | 89 MB   | 267 MB  | 3.0   |
-| all commitment files       | 42.34 GB | 33.02 GB | 0.78 |
-| chaindata high-water mark (set in the first 15 min, file builds lagging execution) | 36.67 GB | 19.86 GB | 0.54 |
-
-The history ratio depends on the merge state. Step files are unpaged; merged files zstd 64-entry
-pages. A v2 history entry is the previous bundled row, 482 B raw, 58-76 B merged, because
-consecutive versions of one branch share most child hashes. A v3 entry is the previous edge
-record, 34 B raw and 35-36 B merged, nothing for the codec to find. Raw step 44 is 5.49 GB on v2
-against 0.50 GB on v3; merged, v3 is 0.62-0.78x per range. v3 writes 2.14x the domain keys at step
-44 (down from 3.03x at step 0) and 1.30x the history entries.
-
-Time: in-cycle execution 19342 vs 19101 s; the between-cycle flush 2748 vs 1209 s (mdbx sync 984
-vs 159 s) is where v2 loses; commitment compute 785 vs 1512 s is where v3 pays. v2 wrote 1133 GB
-to storage against v3's 502 GB, took 1.25M major page faults to v3's 40k, and peaked at 80.8 GB
-RSS to v3's 66.4 GB. Process CPU 49687 vs 51447 s. On the warmup path v3 reads 17.6x the file
-records (439M vs 25.0M) for that +3.5% CPU.
-
 ## Decisions still open
 
-1. Resolved by run 6: v3 holds parity past the heavy range and leads by 8%; its cycles are 3.1x
-   longer in blocks (234 vs 731 cycles) and the flush cost per block is 0.44x.
-2. Whether the record multiplier is acceptable at all. At step 44 it is 2.14x in keys and 1.30x in
-   history entries, and the bytes now favour v3 in every data file. What still scales with it is
-   every per-key index: `.bt`/`.kvei`/`.ef`/`.efi` are 5.35 GB on v3 vs 2.07 GB on v2, and `.vi`
-   2.55 vs 1.95 GB, 3.9 GB of index against 13.2 GB of data saved, 9.3 GB net. If that is still no, the design fork worth considering is
-   bundled rows for the trunk and edge records only in storage subtrees.
+1. Whether run 6 holds parity with v2 past the heavy range and what the v3 cycle length does to
+   flush cost: read `parallel done` (blocks per cycle, `in=`) on both arms once they pass 100k.
+2. Whether the 3.03x record multiplier is acceptable at all. Every per-key structure scales with
+   it, and the read-side lever turned out to be worth ~1%. If the answer is no, the design fork
+   worth considering is bundled rows for the trunk and edge records only in storage subtrees.
 3. `#6` from the earlier review: eight `*ForFormat` parse-guard wrappers whose `edgeRecords=true`
    argument has no production caller. Deliberately skipped as a wider refactor than the finding
    warrants.
-4. Resolved by run 6: the chaindata delta is `CommitmentHistoryVals`, 6.23 GB on v2 vs 1.35 GB on
-   v3 at the pre-prune peak (bundled rows land on overflow pages); `CommitmentHistoryKeys` is the
-   per-key table and stays 1.34x on v3. The 1.56x the other way was a step-0 reading.
+4. Per-table breakdown of the 1.56x chaindata delta — never measured.
 5. Whether the child mask must always travel with the parent. A node read without a mask wants
    all 16 children, absent nibbles never resolve, so `readCommitmentRecords` walks every v3 file
    and probes each file's existence filter for every absent nibble. Invisible at from-0 with 1-2
@@ -225,12 +193,9 @@ records (439M vs 25.0M) for that +3.5% CPU.
 
 ## State at handoff
 
-Run 6: both arms finished (v2 blk 1,000,117 at 16:42Z, v3 blk 1,002,609 at 16:12Z on 2026-09-02),
-nodes stopped, datadirs kept (118.6G / 93.1G). They ran from 0 on `3.7.0-dev-d7a9d63f` (md5
-`d7ac02c70c`), started together at 10:29:35Z (v3) / 10:29:36Z (v2) with `--prune.mode=full
---prune.include-commitment-history`, `KV_READ_METRICS=true`, on wiped chaindata and no state
-snapshot files (checked on disk). `integration` is now built on snap-arb1 at the rig commit and
-copied to edev as `/tmp/integration-new`; `print_table_sizes` needs the node stopped. A first
+Run 6: both arms running from 0 on `3.7.0-dev-d7a9d63f` (md5 `d7ac02c70c`), started together at
+10:29:35Z (v3) / 10:29:36Z (v2) with `--prune.mode=full --prune.include-commitment-history`,
+`KV_READ_METRICS=true`, on wiped chaindata and no state snapshot files (checked on disk). A first
 10:14Z start had a 26 s offset between the arms and was replaced; its records are in
 `~/hoodi-runs/{v2,v3}-20260902T1029*`, run 5's in `-20260902T1014*`. To start the arms together,
 stop both, then run each host's `restart-arm.sh` behind `sleep $((T - $(date +%s)))` with one
