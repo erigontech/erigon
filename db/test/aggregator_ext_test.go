@@ -130,7 +130,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -143,9 +143,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx, newDb)
+	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx)
 	t.Cleanup(newAgg.Close)
-	require.NoError(t, newAgg.OpenFolder())
+	require.NoError(t, newAgg.OpenFolder(newDb))
 
 	db, _ = temporal.New(newDb, newAgg, nil)
 
@@ -409,7 +409,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		}
 	})
 
-	err = agg.BuildFiles(txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 	require.Equal(t, 6, onChangeCalls)
 	require.Equal(t, 7, onDelCalls)
@@ -511,7 +511,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(maxTx, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, maxTx, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	buildTx, err := db.BeginTemporalRw(t.Context())
@@ -623,7 +623,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	//t.Logf("expected hash: %x", expectedHash)
-	err = agg.BuildFiles(stepSize*16, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, stepSize*16, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -714,7 +714,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs, unboundedFinalityCtx)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	rwTx, err = db.BeginTemporalRw(t.Context())
@@ -749,9 +749,9 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	dirs := datadir.New(t.TempDir())
 	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := state.NewTest(dirs).StepSize(2).Logger(logger).MustOpen(ctx, db)
+	agg := state.NewTest(dirs).StepSize(2).Logger(logger).MustOpen(ctx)
 	t.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(t, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
@@ -777,10 +777,10 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	require.NoError(t, err)
 	finalityCtx := execfinality.NewContext(blocks, 0, 5, true)
 	if buildFiles2 {
-		err = agg.BuildFiles2(ctx, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
+		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
 		agg.WaitForFiles()
 	} else {
-		err = agg.BuildFiles(txnNums, finalityCtx)
+		err = agg.BuildFiles(tdb, txnNums, finalityCtx)
 	}
 	require.NoError(t, err)
 	require.Equal(t, uint64(12), agg.EndTxNumMinimax())
