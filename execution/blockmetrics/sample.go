@@ -81,17 +81,10 @@ func readTime(m kvmetrics.DomainIOMetrics) time.Duration {
 
 func diff(before, after kvmetrics.DomainIOMetrics) DomainCounts {
 	return DomainCounts{
-		Reads:     nonNeg(reads(after) - reads(before)),
-		Writes:    nonNeg(after.CachePutCount - before.CachePutCount),
-		CacheHits: nonNeg(after.StateCacheHitCount - before.StateCacheHitCount),
-		CacheMiss: nonNeg(after.StateCacheMissCount - before.StateCacheMissCount),
+		Reads:     max(reads(after)-reads(before), 0),
+		Writes:    max(after.CachePutCount-before.CachePutCount, 0),
+		CacheHits: max(after.StateCacheHitCount-before.StateCacheHitCount, 0),
+		CacheMiss: max(after.StateCacheMissCount-before.StateCacheMissCount, 0),
 		ReadTime:  readTime(after) - readTime(before),
 	}
-}
-
-func nonNeg(v int64) int64 {
-	if v < 0 {
-		return 0
-	}
-	return v
 }

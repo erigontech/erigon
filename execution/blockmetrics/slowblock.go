@@ -31,14 +31,14 @@ import (
 const Disabled = time.Duration(-1)
 
 type slowBlockLog struct {
-	Level      string          `json:"level"`
-	Msg        string          `json:"msg"`
-	Block      blockInfo       `json:"block"`
-	Timing     timing          `json:"timing"`
-	Throughput throughput      `json:"throughput"`
-	StateReads *stateReads     `json:"state_reads,omitempty"`
-	StateWrite *stateWrites    `json:"state_writes,omitempty"`
-	Cache      *cacheSummaries `json:"cache,omitempty"`
+	Level       string          `json:"level"`
+	Msg         string          `json:"msg"`
+	Block       blockInfo       `json:"block"`
+	Timing      timing          `json:"timing"`
+	Throughput  throughput      `json:"throughput"`
+	StateReads  *stateCounts    `json:"state_reads,omitempty"`
+	StateWrites *stateCounts    `json:"state_writes,omitempty"`
+	Cache       *cacheSummaries `json:"cache,omitempty"`
 }
 
 type blockInfo struct {
@@ -60,13 +60,7 @@ type throughput struct {
 	MgasPerSec float64 `json:"mgas_per_sec"`
 }
 
-type stateReads struct {
-	Accounts     int64 `json:"accounts"`
-	StorageSlots int64 `json:"storage_slots"`
-	Code         int64 `json:"code"`
-}
-
-type stateWrites struct {
+type stateCounts struct {
 	Accounts     int64 `json:"accounts"`
 	StorageSlots int64 `json:"storage_slots"`
 	Code         int64 `json:"code"`
@@ -166,12 +160,12 @@ func Emit(logger log.Logger, threshold time.Duration, r *Record) {
 	}
 
 	if r.CountersValid {
-		entry.StateReads = &stateReads{
+		entry.StateReads = &stateCounts{
 			Accounts:     r.Accounts.Reads,
 			StorageSlots: r.Storage.Reads,
 			Code:         r.Code.Reads,
 		}
-		entry.StateWrite = &stateWrites{
+		entry.StateWrites = &stateCounts{
 			Accounts:     r.Accounts.Writes,
 			StorageSlots: r.Storage.Writes,
 			Code:         r.Code.Writes,
