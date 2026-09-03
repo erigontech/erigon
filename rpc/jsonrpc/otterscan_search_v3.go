@@ -79,9 +79,6 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		}
 
 		if mustReadBlock {
-			if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
-				return nil, nil, false, err
-			}
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
 			if err != nil {
 				return nil, nil, false, err

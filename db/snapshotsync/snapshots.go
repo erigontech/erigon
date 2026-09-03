@@ -557,7 +557,6 @@ func (s *BaseRoSnapshots) isInProgress(enum snaptype.Enum, from, to uint64) bool
 type snapshotVisible struct {
 	segments    []VisibleSegments // ordered map `type.Enum()` -> VisibleSegments
 	segmentsMax uint64            // max visible (indexed, non-subsumed, gap-free) segment height across all types
-	generation  uint64            // identity of this published immutable view
 
 	refcnt  atomic.Int32     // live readers pinning this generation
 	retired retiredSegments  // segments this generation is the last to reference; unlinked on head-drain
@@ -599,7 +598,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for _, snapType := range types {
 		s.dirty[snapType.Enum()] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	}
-	empty := &snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum), generation: 1}
+	empty := &snapshotVisible{segments: make([]VisibleSegments, snaptype.MaxEnum)}
 	s.visible.Store(empty)
 	s.oldestVisible = empty
 
@@ -939,8 +938,8 @@ func (s *BaseRoSnapshots) recalcVisibleFiles(alignMin bool, retired retiredSegme
 		}
 	}
 
+	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax}
 	old := s.visible.Load()
-	next := &snapshotVisible{segments: visible, segmentsMax: segmentsMax, generation: old.generation + 1}
 	old.retired = retired
 	old.next = next
 	s.visible.Store(next)
@@ -1965,14 +1964,6 @@ func (v *View) BlocksAvailable() uint64 {
 	}
 
 	return v.s.idxAvailabilityOf(v.snapshotVisible)
-}
-
-// Generation identifies the immutable view pinned by v within its snapshot manager.
-func (v *View) Generation() uint64 {
-	if v == nil || v.snapshotVisible == nil {
-		return 0
-	}
-	return v.generation
 }
 
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*VisibleSegment, bool) {

@@ -689,18 +689,11 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.las
 // Temporal Methods
 
 func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
-	start, _ := tx.HistoryStartFromWithError(name)
-	return start
-}
-
-// HistoryStartFromWithError preserves remote lookup failures for callers that
-// must distinguish them from a zero history floor.
-func (tx *tx) HistoryStartFromWithError(name kv.Domain) (uint64, error) {
 	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remoteproto.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
 	if err != nil {
-		return 0, err
+		return 0
 	}
-	return reply.StartFrom, nil
+	return reply.StartFrom
 }
 
 func (tx *tx) StepSize() uint64 {

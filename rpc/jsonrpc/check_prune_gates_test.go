@@ -18,14 +18,10 @@ package jsonrpc
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -33,12 +29,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -94,8 +88,8 @@ func TestPruneGateBoundary(t *testing.T) {
 	}
 }
 
-// TestPruneGateArchive pins that an archive node with complete on-disk history
-// accepts genesis even though physical-floor checks apply to every mode.
+// TestPruneGateArchive pins that an archive node never gates, including at
+// genesis: its distances are sentinels that report themselves as disabled.
 func TestPruneGateArchive(t *testing.T) {
 	t.Parallel()
 
@@ -108,403 +102,6 @@ func TestPruneGateArchive(t *testing.T) {
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0))
 	require.NoError(t, apis.eth.checkPruneHistory(ctx, tx, 0))
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
-}
-
-func TestBlocksGateIncludesGenesisWithoutSnapshots(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	oldest, err := apis.eth._blockReader.MinimumBlockAvailable(ctx, tx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), oldest, "the MDBX convention reports the first block after genesis")
-	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0))
-}
-
-func TestPruneGatesUsePhysicalFloorsForUnboundedModes(t *testing.T) {
-	t.Parallel()
-
-	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, 8)
-	require.NoError(t, err)
-	view := historyFloorTx{TemporalTx: tx, startTxNum: startTxNum}
-	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: 9}
-
-	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, view, 7), state.PrunedError)
-	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, view, 8), state.PrunedError)
-}
-
-func TestBlocksGateUsesPhysicalFloorWithChainHistoryPolicy(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: prune.KeepPostMergeBlocksPruneMode},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: 9}
-
-	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, tx, 8), state.PrunedError)
-}
-
-func TestHistoryGateUsesOnDiskFloor(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const floorBlock = uint64(8)
-	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, floorBlock)
-	require.NoError(t, err)
-	view := historyFloorTx{TemporalTx: tx, startTxNum: startTxNum}
-
-	err = apis.eth.checkPruneHistory(ctx, view, floorBlock-1)
-	require.ErrorIs(t, err, state.PrunedError)
-	require.Contains(t, err.Error(), fmt.Sprintf("history is available from block %d", floorBlock))
-	require.NoError(t, apis.eth.checkPruneHistory(ctx, view, floorBlock))
-}
-
-func TestHistoryGateStartsAfterPartiallyRetainedBlock(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const partialBlock = uint64(8)
-	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, partialBlock)
-	require.NoError(t, err)
-	view := historyFloorTx{TemporalTx: tx, startTxNum: startTxNum + 1}
-
-	err = apis.eth.checkPruneHistory(ctx, view, partialBlock)
-	require.ErrorIs(t, err, state.PrunedError)
-	require.Contains(t, err.Error(), fmt.Sprintf("history is available from block %d", partialBlock+1))
-	require.NoError(t, apis.eth.checkPruneHistory(ctx, view, partialBlock+1))
-}
-
-func TestHistoryGateUsesEarliestDomainFloor(t *testing.T) {
-	t.Parallel()
-
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	starts := make(map[kv.Domain]uint64)
-	for domain, block := range map[kv.Domain]uint64{
-		kv.AccountsDomain: 7,
-		kv.StorageDomain:  8,
-		kv.CodeDomain:     9,
-	} {
-		starts[domain], err = apis.eth._txNumReader.Min(ctx, tx, block)
-		require.NoError(t, err)
-	}
-	view := domainHistoryFloorTx{TemporalTx: tx, starts: starts}
-
-	floor, err := apis.eth.readStateHistoryStartBlock(ctx, view, chainInfo.head)
-	require.NoError(t, err)
-	require.Equal(t, uint64(7), floor)
-}
-
-func TestHistoryGatePropagatesBackendError(t *testing.T) {
-	t.Parallel()
-
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	wantErr := errors.New("history floor unavailable")
-	view := domainHistoryFloorTx{TemporalTx: tx, err: wantErr}
-	_, err = apis.eth.readStateHistoryStartBlock(ctx, view, chainInfo.head)
-	require.ErrorIs(t, err, wantErr)
-}
-
-func TestHistoryGateKeepsLatestWithoutHistoricalState(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	view := historyFloorTx{TemporalTx: tx, startTxNum: math.MaxUint64}
-
-	require.NoError(t, apis.eth.checkPruneHistory(ctx, view, chainInfo.head))
-	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, view, chainInfo.head-1), state.PrunedError)
-}
-
-func TestHistoryEndpointsUseOnDiskFloor(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, chainInfo.old.num+1)
-	require.NoError(t, err)
-	tx.Rollback()
-	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: startTxNum}
-
-	_, err = apis.eth.GetLogs(ctx, addressFilter(chainInfo.old.num))
-	require.ErrorIs(t, err, state.PrunedError)
-	_, err = apis.eth.GetBlockReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)))
-	require.ErrorIs(t, err, state.PrunedError)
-}
-
-func TestBlocksGateUsesOnDiskFloor(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	const floorBlock = uint64(9)
-	dropBodies(t, apis.rwDB, 1, floorBlock)
-
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	err = apis.eth.checkPruneBlocks(ctx, tx, floorBlock-1)
-	require.ErrorIs(t, err, state.PrunedError)
-	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", floorBlock))
-	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, floorBlock))
-
-	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(floorBlock-1), false)
-	require.ErrorIs(t, err, state.PrunedError)
-}
-
-func TestBlockTransactionCountsNeedBodiesButNotTransactions(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: prune.Distance(2)},
-	})
-	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: chainInfo.old.num + 1}
-	ctx := t.Context()
-
-	byNumber, err := apis.eth.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(chainInfo.old.num))
-	require.NoError(t, err)
-	require.NotNil(t, byNumber)
-	byHash, err := apis.eth.GetBlockTransactionCountByHash(ctx, chainInfo.old.hash)
-	require.NoError(t, err)
-	require.NotNil(t, byHash)
-
-	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(chainInfo.old.num), false)
-	require.ErrorIs(t, err, state.PrunedError, "reading the transactions must still use their physical floor")
-}
-
-func TestTransactionEndpointsUsePhysicalTransactionFloor(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	reader := &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: chainInfo.old.num + 1}
-	apis.eth._blockReader = reader
-	apis.debug._blockReader = reader
-	apis.erigon._blockReader = reader
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	header, err := reader.HeaderByNumber(ctx, tx, chainInfo.old.num)
-	require.NoError(t, err)
-	require.NotNil(t, header)
-	tx.Rollback()
-
-	for _, tc := range []struct {
-		name string
-		call func() error
-	}{
-		{"debug_getRawBlock", func() error {
-			_, err := apis.debug.GetRawBlock(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)))
-			return err
-		}},
-		{"debug_getRawTransaction", func() error {
-			_, err := apis.debug.GetRawTransaction(ctx, chainInfo.old.txHash)
-			return err
-		}},
-		{"eth_callBundle", func() error {
-			_, err := apis.eth.CallBundle(ctx, []common.Hash{chainInfo.old.txHash}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), nil)
-			return err
-		}},
-		{"eth_feeHistory_rewards", func() error {
-			_, err := apis.eth.FeeHistory(ctx, 1, rpc.BlockNumber(chainInfo.old.num), []float64{50})
-			return err
-		}},
-		{"erigon_getBlockByTimestamp", func() error {
-			_, err := apis.erigon.GetBlockByTimestamp(ctx, rpc.Timestamp(header.Time), false)
-			return err
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			require.ErrorIs(t, tc.call(), state.PrunedError)
-		})
-	}
-}
-
-func TestPruneGatesSkipPhysicalFloorsAtHead(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	var historyCalls atomic.Int64
-	historyTx := countingHistoryFloorTx{TemporalTx: tx, calls: &historyCalls}
-	blocks := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
-	apis.eth._blockReader = blocks
-
-	require.NoError(t, apis.eth.checkPruneHistory(ctx, historyTx, chainInfo.head))
-	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head))
-	require.Zero(t, historyCalls.Load())
-	require.Zero(t, blocks.calls.Load())
-}
-
-func TestPruneGatesSkipPhysicalFloorsBelowConfiguredCutoff(t *testing.T) {
-	t.Parallel()
-
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	var historyCalls atomic.Int64
-	historyTx := countingHistoryFloorTx{TemporalTx: tx, calls: &historyCalls}
-	blocks := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
-	apis.eth._blockReader = blocks
-	configuredFloor := pruneGatingDistance.PruneTo(chainInfo.head)
-
-	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, historyTx, configuredFloor-1), state.PrunedError)
-	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, tx, configuredFloor-1), state.PrunedError)
-	require.Zero(t, historyCalls.Load())
-	require.Zero(t, blocks.calls.Load())
-}
-
-func TestPruneGatesReusePhysicalFloorsAtSameHead(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	apis.eth._historyPruneFloor.ttl = time.Hour
-	apis.eth._blocksPruneFloor.ttl = time.Hour
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	var historyCalls atomic.Int64
-	historyTx := countingHistoryFloorTx{TemporalTx: tx, calls: &historyCalls}
-	blocks := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
-	apis.eth._blockReader = blocks
-
-	for range 2 {
-		require.NoError(t, apis.eth.checkPruneHistory(ctx, historyTx, chainInfo.head-1))
-		require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head-1))
-	}
-	require.Equal(t, int64(3), historyCalls.Load())
-	require.Equal(t, int64(1), blocks.calls.Load())
-}
-
-func TestCapabilitiesUseOnDiskFloors(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, _ := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: wide},
-	})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	const stateFloor = uint64(8)
-	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, stateFloor)
-	require.NoError(t, err)
-	tx.Rollback()
-
-	const blocksFloor = uint64(9)
-	dropBodies(t, apis.rwDB, 1, blocksFloor)
-	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: startTxNum}
-
-	caps, err := apis.eth.Capabilities(ctx)
-	require.NoError(t, err)
-	require.Equal(t, stateFloor, uint64(*caps.State.OldestBlock))
-	require.Equal(t, blocksFloor, uint64(*caps.Logs.OldestBlock))
-	require.Equal(t, blocksFloor, uint64(*caps.Blocks.OldestBlock))
-	require.Equal(t, blocksFloor, uint64(*caps.Tx.OldestBlock))
-	require.Equal(t, blocksFloor, uint64(*caps.Receipts.OldestBlock))
-}
-
-func TestCapabilitiesUsePhysicalFloorsForUnboundedMode(t *testing.T) {
-	t.Parallel()
-
-	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	startTxNum, err := apis.eth._txNumReader.Min(ctx, tx, 8)
-	require.NoError(t, err)
-	tx.Rollback()
-	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: startTxNum}
-	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: 9}
-
-	caps, err := apis.eth.Capabilities(ctx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(8), uint64(*caps.State.OldestBlock))
-	require.Equal(t, uint64(9), uint64(*caps.Blocks.OldestBlock))
-	require.Nil(t, caps.State.DeleteStrategy)
-	require.Nil(t, caps.Blocks.DeleteStrategy)
 }
 
 // TestReceiptsGateFollowsRetention pins checkReceiptsAvailable against the
@@ -1505,7 +1102,7 @@ func TestCapabilitiesFollowTheResolvedBlocksBoundary(t *testing.T) {
 
 		caps, err := apis.eth.Capabilities(ctx)
 		require.NoError(t, err)
-		require.Zero(t, uint64(*caps.Blocks.OldestBlock), "every block transaction is on disk")
+		require.Zero(t, uint64(*caps.Blocks.OldestBlock), "every body is on disk")
 		require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0))
 	})
 
@@ -1975,72 +1572,6 @@ type prunedHistoryDebugTx struct {
 }
 
 func (prunedHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return math.MaxUint64 }
-
-type countingHistoryFloorTx struct {
-	kv.TemporalTx
-	calls *atomic.Int64
-}
-
-func (tx countingHistoryFloorTx) Debug() kv.TemporalDebugTx {
-	return countingHistoryFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), calls: tx.calls}
-}
-
-type countingHistoryFloorDebugTx struct {
-	kv.TemporalDebugTx
-	calls *atomic.Int64
-}
-
-func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) uint64 {
-	tx.calls.Add(1)
-	return tx.TemporalDebugTx.HistoryStartFrom(domain)
-}
-
-type domainHistoryFloorTx struct {
-	kv.TemporalTx
-	starts map[kv.Domain]uint64
-	err    error
-}
-
-func (tx domainHistoryFloorTx) BlockFilesRoTx() *blocksnapshots.View {
-	return tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }).BlockFilesRoTx()
-}
-
-func (tx domainHistoryFloorTx) Debug() kv.TemporalDebugTx {
-	return domainHistoryFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), starts: tx.starts, err: tx.err}
-}
-
-type domainHistoryFloorDebugTx struct {
-	kv.TemporalDebugTx
-	starts map[kv.Domain]uint64
-	err    error
-}
-
-func (tx domainHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) uint64 {
-	return tx.starts[domain]
-}
-
-func (tx domainHistoryFloorDebugTx) HistoryStartFromWithError(domain kv.Domain) (uint64, error) {
-	return tx.starts[domain], tx.err
-}
-
-type countingMinimumBlockReader struct {
-	dbservices.FullBlockReader
-	calls atomic.Int64
-}
-
-type fixedMinimumBlockReader struct {
-	dbservices.FullBlockReader
-	floor uint64
-}
-
-func (r *fixedMinimumBlockReader) MinimumBlockAvailable(context.Context, kv.Tx) (uint64, error) {
-	return r.floor, nil
-}
-
-func (r *countingMinimumBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
-	r.calls.Add(1)
-	return r.FullBlockReader.MinimumBlockAvailable(ctx, tx)
-}
 
 // TestEmptyBlockReceiptsNeedNoStateHistory pins that a block without transactions is
 // answered from its body: there is nothing to derive, so no execution environment is

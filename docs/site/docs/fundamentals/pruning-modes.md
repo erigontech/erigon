@@ -85,9 +85,8 @@ within that same window.
 `keep-all` does **not** extend filtered `eth_getLogs` back to genesis. It retains the receipt-cache domain only; the
 log address and topic indexes that a filtered query needs are standalone inverted indexes, retired against the general
 state-history cutoff (`AggregatorRoTx.Retire` applies `RetireCutoffs.Default` to them, and only `RCacheDomain` carries
-the `keep-all` override). An address- or topic-filtered `eth_getLogs` is therefore unavailable outside the retained
-state-history window, even with the cache retained; Erigon rejects such queries as pruned rather than returning an
-incomplete result. Note that dropping the filters does not merely widen the query — it changes the
+the `keep-all` override). An address- or topic-filtered `eth_getLogs` is therefore limited to the retained state-history
+window, even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
 read path: with neither `address` nor `topics` set, `applyFiltersV3` consults no bitmap and falls back to a plain
 `stream.Range` over the retained cache, so an unfiltered range query is unaffected. For those older ranges, either query
 by block with `eth_getBlockReceipts` and filter client-side, or use an [Archive node](#archive-node), whose unbounded

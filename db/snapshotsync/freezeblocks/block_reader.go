@@ -496,22 +496,20 @@ func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
 // must ask the same generation it reads from, not the live set that may be ahead of it.
 func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
-// MinimumBlockAvailable returns the first block covered by every block-snapshot
-// type in tx's pinned view, falling back to MDBX when no snapshots are visible.
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
-	view := r.view(tx)
-	if view.BlocksAvailable() > 0 {
-		snapshotTypes := []snaptype.Type{
-			snaptype2.Headers,
-			snaptype2.Bodies,
-			snaptype2.Transactions,
+	if r.FrozenBlocks() > 0 {
+		snapshotTypes := []snaptype.Enum{
+			snaptype2.Enums.Headers,
+			snaptype2.Enums.Bodies,
+			snaptype2.Enums.Transactions,
 		}
 
 		snapshotMin := uint64(0)
 		for _, snapType := range snapshotTypes {
-			segments := view.Segments(snapType)
-			if len(segments) > 0 && segments[0].From() > snapshotMin {
-				snapshotMin = segments[0].From()
+			if minBlock, ok := r.sn.SegmentsMinByType(snapType); ok {
+				if minBlock > snapshotMin {
+					snapshotMin = minBlock
+				}
 			}
 		}
 		return snapshotMin, nil
