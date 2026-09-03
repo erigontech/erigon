@@ -787,7 +787,7 @@ func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.Be
 	payload := s.Message.Payload
 	var transactionsErr error
 	if payload.Version() >= clparams.GloasVersion {
-		transactionsErr = payload.Transactions.ValidateProgressiveBounds(cfg.MaxTransactionsPerPayload)
+		transactionsErr = payload.Transactions.ValidateProgressiveBounds()
 	} else {
 		transactionsErr = payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
 	}

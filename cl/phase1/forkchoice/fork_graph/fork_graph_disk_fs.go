@@ -309,7 +309,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		ownedTransactions[i] = bytes.Clone(transaction)
 	}
 	// TransactionsSSZ decode aliases its input, so detach it before reusing the shared buffer.
-	envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactionsWithLimit(ownedTransactions, f.beaconCfg.MaxTransactionsPerPayload)
+	envelope.Message.Payload.Transactions = solid.NewProgressiveTransactionsSSZFromTransactions(ownedTransactions)
 	f.envelopeExists.Store(blockRoot, struct{}{})
 	f.invalidEnvelopes.Delete(blockRoot)
 

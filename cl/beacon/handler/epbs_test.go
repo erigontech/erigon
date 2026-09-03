@@ -1398,7 +1398,7 @@ func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "consensus version")
 }
 
-func TestPostExecutionPayloadEnvelopeAppliesConfiguredJSONTransactionLimit(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.MaxTransactionsPerPayload = 2
 	fcu.OnExecutionPayloadErr = errors.New("reached forkchoice")
@@ -1417,9 +1417,8 @@ func TestPostExecutionPayloadEnvelopeAppliesConfiguredJSONTransactionLimit(t *te
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-	require.Contains(t, recorder.Body.String(), "transactions exceed decoder resource limit 2")
-	require.False(t, fcu.OnExecutionPayloadCalled)
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.OnExecutionPayloadCalled)
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *testing.T) {

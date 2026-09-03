@@ -248,32 +248,24 @@ func NewTransactionsSSZWithLimits(maxTransactionsPerPayload, maxBytesPerTransact
 }
 
 func NewProgressiveTransactionsSSZ() *TransactionsSSZ {
-	return NewProgressiveTransactionsSSZWithLimit(clparams.MaxTransactionsPerPayloadDefault)
-}
-
-func NewProgressiveTransactionsSSZWithLimit(maxTransactionsPerPayload uint64) *TransactionsSSZ {
 	return &TransactionsSSZ{
-		maxTransactionsPerPayload: maxTransactionsPerPayload,
+		maxTransactionsPerPayload: clparams.MaxTransactionsPerPayloadDefault,
 		maxBytesPerTransaction:    clparams.MaxChunkSize,
 		maxEncodedBytes:           clparams.MaxChunkSize,
 	}
 }
 
 func NewProgressiveTransactionsSSZFromTransactions(txs [][]byte) *TransactionsSSZ {
-	return NewProgressiveTransactionsSSZFromTransactionsWithLimit(txs, clparams.MaxTransactionsPerPayloadDefault)
-}
-
-func NewProgressiveTransactionsSSZFromTransactionsWithLimit(txs [][]byte, maxTransactionsPerPayload uint64) *TransactionsSSZ {
-	transactions := NewProgressiveTransactionsSSZWithLimit(maxTransactionsPerPayload)
+	transactions := NewProgressiveTransactionsSSZ()
 	transactions.underlying = txs
 	return transactions
 }
 
-func (t *TransactionsSSZ) ValidateProgressiveBounds(maxTransactionsPerPayload uint64) error {
+func (t *TransactionsSSZ) ValidateProgressiveBounds() error {
 	if size := uint64(t.EncodingSizeSSZ()); size > clparams.MaxChunkSize {
 		return fmt.Errorf("transactions encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
 	}
-	return t.ValidateBounds(maxTransactionsPerPayload, clparams.MaxChunkSize)
+	return t.ValidateBounds(t.maxTransactions(), clparams.MaxChunkSize)
 }
 
 func (t *TransactionsSSZ) maxTransactions() uint64 {

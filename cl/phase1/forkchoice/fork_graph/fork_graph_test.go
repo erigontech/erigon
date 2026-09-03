@@ -867,7 +867,7 @@ func TestDumpEnvelopeAcceptsProtocolValidProgressiveDepositCount(t *testing.T) {
 	require.Equal(t, 16_385, decoded.Message.ExecutionRequests.Deposits.Len())
 }
 
-func TestDumpEnvelopeAcceptsProtocolValidProgressiveTransactionCount(t *testing.T) {
+func TestDumpEnvelopeRejectsProgressiveTransactionResourceCount(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
@@ -877,17 +877,8 @@ func TestDumpEnvelopeAcceptsProtocolValidProgressiveTransactionCount(t *testing.
 	envelope.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(make([][]byte, transactionCount))
 	require.LessOrEqual(t, uint64(envelope.EncodingSizeSSZ()), clparams.MaxChunkSize)
 	require.NoError(t, envelope.ValidateForConfig(&clparams.MainnetBeaconConfig))
-	require.NoError(t, envelope.ValidateForPersistence(&clparams.MainnetBeaconConfig))
-	wantRoot, err := envelope.HashSSZ()
-	require.NoError(t, err)
-
-	require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
-	decoded, err := f.ReadEnvelopeFromDisk(root)
-	require.NoError(t, err)
-	require.Len(t, decoded.Message.Payload.Transactions.UnderlyngReference(), transactionCount)
-	gotRoot, err := decoded.HashSSZ()
-	require.NoError(t, err)
-	require.Equal(t, wantRoot, gotRoot)
+	require.ErrorContains(t, envelope.ValidateForPersistence(&clparams.MainnetBeaconConfig), "too many transactions")
+	require.ErrorContains(t, f.DumpEnvelopeOnDisk(root, envelope), "too many transactions")
 }
 
 func TestDumpEnvelopeRejectsRequestsPastConsensusLimitWithinDecoderGuard(t *testing.T) {

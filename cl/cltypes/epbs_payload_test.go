@@ -200,7 +200,7 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 	progressiveTransactions := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
 	progressiveTransactions.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
 	require.NoError(t, progressiveTransactions.ValidateForConfig(&cfg))
-	require.Error(t, progressiveTransactions.ValidateForPersistence(&cfg))
+	require.NoError(t, progressiveTransactions.ValidateForPersistence(&cfg))
 
 	for _, test := range []struct {
 		name   string
