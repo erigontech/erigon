@@ -37,16 +37,16 @@ import (
 
 // testDbAndAggregatorSmallFrozen is like testDbAndAggregatorv3 but with a
 // configurable stepsInFrozenFile, so "frozen" files can use small step ranges.
-func testDbAndAggregatorSmallFrozen(t *testing.T, stepSize, stepsInFrozenFile uint64) *Aggregator {
+func testDbAndAggregatorSmallFrozen(t *testing.T, stepSize, stepsInFrozenFile uint64) (kv.RwDB, *Aggregator) {
 	t.Helper()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := NewTest(dirs).StepSize(stepSize).StepsInFrozenFile(stepsInFrozenFile).Logger(logger).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).StepSize(stepSize).StepsInFrozenFile(stepsInFrozenFile).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
-	return agg
+	require.NoError(t, agg.OpenFolder(db))
+	return db, agg
 }
 
 // aggRetire runs Retire on a fresh RoTx (Retire is an AggregatorRoTx method). Tests that must
@@ -87,7 +87,7 @@ func generateStandaloneIIFile(t *testing.T, name kv.InvertedIdx, dirs datadir.Di
 // drain), while one still at/after cutoff is kept.
 func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	// {0,2}: frozen (2 steps == stepsInFrozenFile). {2,3}: recent, kept.
 	// Storage/Code need matching files too, or dirtyFilesEndTxNumMinimax
@@ -96,7 +96,7 @@ func TestRetire_RetiresFrozenFileEntirelyBelowCutoff(t *testing.T) {
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	oldHistory := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-2.v")
 	oldIdx := filepath.Join(agg.Dirs().SnapIdx, "v1.0-accounts.0-2.ef")
@@ -159,7 +159,7 @@ func enableCommitmentHistory(agg *Aggregator) {
 // at its own cutoff, independent of Default (0 here).
 func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	// State domains lead the visible ceiling (dirtyFilesEndTxNumMinimax). Without them
 	// commitment history is clamped out of the visible set that Retire reads.
@@ -167,7 +167,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 	enableCommitmentHistory(agg)
 
 	commitmentHist := agg.d[kv.CommitmentDomain].History
@@ -186,7 +186,7 @@ func TestRetire_RetiresCommitmentAtOwnCutoff(t *testing.T) {
 // commitment keep-all and the RCacheDomain skip are expressed).
 func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	// State domains lead the visible ceiling (dirtyFilesEndTxNumMinimax). Without them
 	// commitment history is clamped out of the visible set that Retire reads.
@@ -194,7 +194,7 @@ func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 2}, {2, 3}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 	enableCommitmentHistory(agg)
 
 	commitmentHist := agg.d[kv.CommitmentDomain].History
@@ -212,12 +212,12 @@ func TestRetire_KeepsDomainWhenCutoffZero(t *testing.T) {
 // txNum→step floor).
 func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 2}})
 	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 2}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	n, err := aggRetire(t, agg, kv.RetireCutoffs{Default: stepSize - 1})
 	require.NoError(t, err)
@@ -229,7 +229,7 @@ func TestRetire_SubStepTxNumKeepsFiles(t *testing.T) {
 // (LogAddrIdx et al.), separate from the per-domain loop.
 func TestRetire_StandaloneII(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	ranges := []testFileRange{{0, 2}, {2, 3}}
 	// State domains lead the visible ceiling that Retire reads (see dirtyFilesEndTxNumMinimax).
@@ -237,7 +237,7 @@ func TestRetire_StandaloneII(t *testing.T) {
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
 	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	oldIdx := filepath.Join(agg.Dirs().SnapIdx, "v1.0-logaddrs.0-2.ef")
 	recentIdx := filepath.Join(agg.Dirs().SnapIdx, "v1.0-logaddrs.2-3.ef")
@@ -258,13 +258,13 @@ func TestRetire_StandaloneII(t *testing.T) {
 // against concurrent retirement under the race detector.
 func TestRetire_ReclaimConcurrent(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	ranges := []testFileRange{{0, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
@@ -295,13 +295,13 @@ func TestRetire_ReclaimConcurrent(t *testing.T) {
 // would be rebuilt back into visible by the next recalcVisibleFiles.
 func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	ranges := []testFileRange{{0, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	accountsHist := agg.d[kv.AccountsDomain].History
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
@@ -324,13 +324,13 @@ func TestRetire_DetachesFromDirtyFiles(t *testing.T) {
 // cutoff is covered garbage left to the merge clean-up, not retired here.
 func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	ranges := []testFileRange{{0, 2}, {0, 4}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	accountsHist := agg.d[kv.AccountsDomain].History
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
@@ -354,13 +354,13 @@ func TestRetire_SkipsDirtyButNotVisibleFile(t *testing.T) {
 // retries once the tip advances — it must not error and poison retirement of the healthy ones.
 func TestRetire_SkipsWindowTooSmall(t *testing.T) {
 	stepSize, stepsInFrozenFile := uint64(10), uint64(2)
-	agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
+	db, agg := testDbAndAggregatorSmallFrozen(t, stepSize, stepsInFrozenFile)
 
 	ranges := []testFileRange{{0, 2}, {2, 3}}
 	generateAccountsFile(t, agg.Dirs(), ranges)
 	generateCodeFile(t, agg.Dirs(), ranges)
 	generateStorageFile(t, agg.Dirs(), ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	accountsHist := agg.d[kv.AccountsDomain].History
 	require.Equal(t, 2, accountsHist.dirtyFiles.Len())
