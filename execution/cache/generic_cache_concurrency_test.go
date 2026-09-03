@@ -758,6 +758,18 @@ func TestGenericCache_CeilingFitsItsBudget(t *testing.T) {
 			procs, payload, budget, maxCap, shards)
 	}
 
+	// growLRU derives its ceiling from the same estimate against its own
+	// generation cost, which counts the shard structs separately.
+	checkGrow := func(t *testing.T, procs int, payload uint32, budget datasize.ByteSize) {
+		t.Helper()
+		g := newGrowLRU[codeSizeEntry](budget, payload, nil)
+		t.Cleanup(g.Close)
+		_, shards := growLRUGeneration(g.maxCap)
+		require.LessOrEqual(t, growLRUBytes(g.maxCap, shards, int64(payload), g.elemBytes), int64(budget),
+			"procs=%d payload=%d budget=%s: a full %d slots over %d shards costs more than the budget it came from",
+			procs, payload, budget, g.maxCap, shards)
+	}
+
 	for _, procs := range []int{1, 2, 4, 8, 16, 32, 64, 128} {
 		runtime.GOMAXPROCS(procs)
 		for _, payload := range []uint32{8, avgStoragePayloadBytes, avgAccountPayloadBytes, avgBytesPerEntry} {
@@ -766,6 +778,7 @@ func TestGenericCache_CeilingFitsItsBudget(t *testing.T) {
 				check(t, procs, payload, budget, elemBytesFor[entry[[]byte]]())
 				check(t, procs, payload, budget, elemBytesFor[entry[[128]byte]]())
 				check(t, procs, payload, budget, elemBytesFor[codeSizeEntry]())
+				checkGrow(t, procs, payload, budget)
 			}
 		}
 	}

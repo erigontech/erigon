@@ -127,15 +127,22 @@ func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32, elemByt
 	perSlot := uint64(payloadBytes) + uint64(slotChargeBytes(elemBytes))
 	approx := uint32(min(uint64(capacityBytes)/perSlot, maxCacheSlots))
 	shards = max(initialShardCount(approx, shardCeil()), 1)
-	// perSlot is an estimate: it carries neither the per-shard structs nor the
-	// gap between a fitted table and the 5/4 ratio it is charged at, so the
-	// quotient alone can buy a generation larger than the budget. Step the
-	// ceiling down until the exact cost fits.
-	fitted := fitTableSlots(approx / shards)
-	for fitted > minShardStart && generationBytesFor(fitted*shards, shards, int64(payloadBytes), elemBytes) > int64(capacityBytes) {
-		fitted = fitTableSlots(fitted - 1)
+	perShardCap := fitCeiling(fitTableSlots(approx/shards), capacityBytes, func(c uint32) int64 {
+		return generationBytesFor(c*shards, shards, int64(payloadBytes), elemBytes)
+	})
+	return perShardCap * shards, shards
+}
+
+// fitCeiling steps a fitted ceiling down until cost reports it inside the
+// budget. A ceiling derived by dividing a budget by the per-slot charge is an
+// estimate: it carries neither the per-shard structs nor the gap between a
+// fitted table and the 5/4 ratio it is charged at, both of which scale with the
+// shard count, so the quotient alone can buy a generation larger than itself.
+func fitCeiling(fitted uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
+	for fitted > 1 && cost(fitted) > int64(budget) {
+		fitted = max(fitTableSlots(fitted-1), 1)
 	}
-	return fitted * shards, shards
+	return fitted
 }
 
 // minShardStart keeps a shard's initial table off a handful of slots, which a

@@ -73,8 +73,13 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	perSlot := int64(avgBytes) + slotChargeBytes(elemBytesFor[V]())
-	maxCap := max(fitTableSlots(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots))), 1)
+	elemBytes := elemBytesFor[V]()
+	perSlot := int64(avgBytes) + slotChargeBytes(elemBytes)
+	approx := max(fitTableSlots(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots))), 1)
+	maxCap := fitCeiling(approx, maxBytes, func(c uint32) int64 {
+		_, shards := growLRUGeneration(c)
+		return growLRUBytes(c, shards, int64(avgBytes), elemBytes)
+	})
 	return newGrowLRUWith(maxCap, int64(avgBytes), onEvict)
 }
 
