@@ -37,6 +37,8 @@ func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFo
 
 var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
 
+const maxHashedKeyNibbles = len(cell{}.hashedExtension)
+
 func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	d := int16(len(accPrefix))
 	copy(base.currentKey[:], accPrefix)
@@ -68,9 +70,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 
 func foldStorageChild(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, child *prefixNode, childPrefix []byte) (cell, error) {
 	w.mountTo(base, nib)
-	path := make([]byte, 0, 144)
-	path = append(path, childPrefix...)
-	if err := dfsSubtree(child, path, func(hk, pk []byte, upd *Update) error {
+	if err := dfsSubtree(child, childPrefix, func(hk, pk []byte, upd *Update) error {
 		return w.followAndUpdate(hk, pk, upd)
 	}); err != nil {
 		return cell{}, err
@@ -153,7 +153,7 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 		nib := int(bits.TrailingZeros16(bm))
 		child := node.children[childIdx]
 		ni, ch := nib, child
-		childPrefix := make([]byte, len(accPrefix), len(accPrefix)+1+len(ch.ext))
+		childPrefix := make([]byte, len(accPrefix), max(maxHashedKeyNibbles, len(accPrefix)+1+len(ch.ext)))
 		copy(childPrefix, accPrefix)
 		childPrefix = append(childPrefix, byte(ni))
 		childPrefix = append(childPrefix, ch.ext...)

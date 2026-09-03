@@ -170,7 +170,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				tb = time.Now()
 				keyCnt[ni] = ch.subtreeCount
 			}
-			path := make([]byte, 0, 144)
+			path := make([]byte, 0, maxHashedKeyNibbles)
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
 			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
