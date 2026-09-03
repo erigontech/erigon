@@ -2424,7 +2424,7 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizedBoundary(t *t
 	f := &ForkChoiceStore{beaconCfg: &cfg}
 	f.finalizedCheckpoint.Store(solid.Checkpoint{})
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		Payload: &cltypes.Eth1Block{SlotNumber: cfg.SlotsPerEpoch * 8},
+		Payload: &cltypes.Eth1Block{SlotNumber: cfg.SlotsPerEpoch*8 - 1},
 	}}
 
 	err := f.validateExecutionPayloadEnvelopeForGossipAtFinalizedBoundary(envelope, func() error {
@@ -2433,6 +2433,20 @@ func TestValidateExecutionPayloadEnvelopeForGossipRechecksFinalizedBoundary(t *t
 	})
 
 	require.ErrorContains(t, err, "before finalized slot")
+}
+
+func TestValidateExecutionPayloadEnvelopeForGossipAllowsFinalizedEpochStart(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	f := &ForkChoiceStore{beaconCfg: &cfg}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 8})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		Payload: &cltypes.Eth1Block{SlotNumber: cfg.SlotsPerEpoch * 8},
+	}}
+
+	err := f.validateExecutionPayloadEnvelopeForGossipAtFinalizedBoundary(envelope, func() error { return nil })
+
+	require.NoError(t, err)
 }
 
 func TestExecutionPayloadRetryUsesBlockRefreshedAfterELYield(t *testing.T) {
@@ -2556,12 +2570,25 @@ func TestExecutionPayloadCommitmentYieldStillValidatesPersistedEnvelopeWithEL(t 
 }
 
 func TestPersistedExecutionPayloadIsValidatedWhenELBecomesRequired(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	ctrl := gomock.NewController(t)
+	cfg, blockState, block, envelope := validAdmissionCancellationFixtureWithBlob(t)
+	root := common.Hash(envelope.Message.BeaconBlockRoot)
 	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	engine.EXPECT().
-		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(execution_client.PayloadStatusValidated, nil)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	gomock.InOrder(
+		engine.EXPECT().
+			NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(execution_client.PayloadStatusNotValidated, nil),
+		engine.EXPECT().
+			NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(execution_client.PayloadStatusValidated, nil),
+	)
+	peerDas := das_mock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil)
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	sub := emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
 	verified, err := lru.New[common.Hash, struct{}](1)
 	require.NoError(t, err)
 	statuses, err := lru.New[common.Hash, execution_client.PayloadStatus](1)
@@ -2584,6 +2611,8 @@ func TestPersistedExecutionPayloadIsValidatedWhenELBecomesRequired(t *testing.T)
 		beaconCfg:                      cfg,
 		engine:                         engine,
 		forkGraph:                      graph,
+		peerDas:                        peerDas,
+		syncedDataManager:              synced_data.NewSyncedDataManager(cfg, true),
 		optimisticStore:                optimistic.NewOptimisticStore(),
 		verifiedExecutionPayload:       verified,
 		executionPayloadStatus:         statuses,
@@ -2594,6 +2623,7 @@ func TestPersistedExecutionPayloadIsValidatedWhenELBecomesRequired(t *testing.T)
 		pendingLocalSelfBuildEnvelopes: pendingLocal,
 		pendingPayloadAvailability:     pendingAvailability,
 		pendingPayloadValidation:       pendingValidation,
+		emitters:                       emitters,
 	}
 	f.finalizedCheckpoint.Store(solid.Checkpoint{})
 
@@ -2601,10 +2631,38 @@ func TestPersistedExecutionPayloadIsValidatedWhenELBecomesRequired(t *testing.T)
 	require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 	require.True(t, pendingValidation.Contains(envelope.Message.BeaconBlockRoot))
 	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+	require.False(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
+	require.True(t, pendingValidation.Contains(envelope.Message.BeaconBlockRoot))
+	require.False(t, pendingAvailability.Contains(root))
+	select {
+	case event := <-events:
+		require.Equal(t, beaconevents.OpExecutionPayloadAvailable, event.Event)
+	case <-time.After(time.Second):
+		t.Fatal("execution payload availability event was not emitted")
+	}
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
 	require.True(t, f.IsPayloadVerified(envelope.Message.BeaconBlockRoot))
 	require.False(t, pendingValidation.Contains(envelope.Message.BeaconBlockRoot))
 	require.Same(t, envelope, graph.envelope)
 	require.EqualValues(t, 1, graph.dumps.Load())
+}
+
+func TestCompletePendingPayloadAvailabilityIgnoresStaleCompletion(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	root := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	pending.Add(root, envelope)
+	f := &ForkChoiceStore{
+		emitters:                   beaconevents.NewEventEmitter(),
+		pendingPayloadAvailability: pending,
+	}
+
+	f.completePendingPayloadAvailability(root, envelope)
+	f.completePendingPayloadAvailability(root, envelope)
+
+	require.Len(t, f.queuedEmits, 1)
+	require.False(t, pending.Contains(root))
 }
 
 func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {

@@ -595,7 +595,8 @@ func (f *ForkChoiceStore) retryPendingPayloadValidation(ctx context.Context, roo
 	if !ok || pending == nil {
 		return
 	}
-	_, err := f.applyEnvelope(ctx, pending, false, true, false, retryQueuedEnvelope)
+	checkBlobData := f.pendingPayloadAvailability != nil && f.pendingPayloadAvailability.Contains(root)
+	_, err := f.applyEnvelope(ctx, pending, checkBlobData, true, false, retryQueuedEnvelope)
 	if err != nil {
 		log.Warn("Failed to complete execution payload validation", "blockRoot", root, "err", err)
 		if !f.retryPendingEnvelopeError(err, pending) {
@@ -603,6 +604,9 @@ func (f *ForkChoiceStore) retryPendingPayloadValidation(ctx context.Context, roo
 				f.pendingPayloadValidation.Remove(root)
 			}
 		}
+		return
+	}
+	if !f.IsPayloadVerified(root) {
 		return
 	}
 	if current, ok := f.pendingPayloadValidation.Peek(root); ok && current == pending {

@@ -954,9 +954,13 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		var ok bool
 		block, ok = a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 		if !ok || block == nil {
-			_ = a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, true, true)
+			applyErr := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, true, true)
 			block, ok = a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
 			if !ok || block == nil {
+				if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
+					beaconhttp.NewEndpointError(http.StatusBadRequest, applyErr).WriteTo(w)
+					return
+				}
 				beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
 					errors.New("beacon block is unavailable; execution payload envelope queued for retry")).WriteTo(w)
 				return

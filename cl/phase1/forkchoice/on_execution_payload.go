@@ -155,9 +155,9 @@ func (f *ForkChoiceStore) completePendingPayloadAvailability(root common.Hash, p
 	if pending == nil || pending.Message == nil {
 		return
 	}
-	f.queueExecutionPayloadAvailable(root, pending.Message)
 	if current, ok := f.pendingPayloadAvailability.Peek(root); ok && current == pending {
 		f.pendingPayloadAvailability.Remove(root)
+		f.queueExecutionPayloadAvailable(root, pending.Message)
 	}
 }
 
@@ -769,14 +769,14 @@ func (f *ForkChoiceStore) validateExecutionPayloadEnvelopeForGossipAtFinalizedBo
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
 	validate func() error,
 ) error {
-	finalizedSlot := f.FinalizedSlot()
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	if err := validate(); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
-	finalizedSlot = f.FinalizedSlot()
+	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
 		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
@@ -828,7 +828,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 		return fmt.Errorf("beacon block state %v is unavailable", root)
 	}
 	block, ok := f.forkGraph.GetBlock(root)
-	finalizedSlot := f.FinalizedSlot()
+	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
 	f.mu.RUnlock()
 	if !ok || block == nil || block.Block == nil {
 		return fmt.Errorf("beacon block %v is unavailable", root)

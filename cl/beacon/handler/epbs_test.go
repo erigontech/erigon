@@ -278,6 +278,27 @@ func TestPostExecutionPayloadEnvelopeQueuesAndReturnsUnavailableWhileRemoteBlock
 	require.True(t, fcu.OnExecutionPayloadCalled)
 }
 
+func TestPostExecutionPayloadEnvelopeRejectsInvalidEnvelopeWhileRemoteBlockIsUnknown(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
+	envelope := contents.SignedExecutionPayloadEnvelope
+	delete(fcu.Blocks, envelope.Message.BeaconBlockRoot)
+	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload envelope")
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.True(t, fcu.OnExecutionPayloadCalled)
+	require.False(t, fcu.HasEnvelope(envelope.Message.BeaconBlockRoot))
+}
+
 func TestPostExecutionPayloadEnvelopeContinuesWhenBlockAppearsDuringQueueAttempt(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	contents := emptyExecutionPayloadEnvelopeContents(t, handler, fcu)
