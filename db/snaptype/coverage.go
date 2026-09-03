@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -97,10 +98,20 @@ func BuildLocalCoverageIndex(snapDir string) LocalCoverageIndex {
 	return cov
 }
 
-// Covers reports whether some local file of the same class fully
-// contains the candidate entry's [From, To). entryName is a path
+// Covers reports whether the union of local files of the same class
+// fully covers the candidate entry's [From, To). entryName is a path
 // relative to the snapDir the index was built from — e.g.
 // "domain/v2.0-accounts.0-256.kv" or "v1.1-000000-000500-headers.seg".
+//
+// Union coverage (not single-file subsumption) is what "local
+// overrides external" means for chain.toml: if we hold multiple
+// smaller files that tile the preverified entry's range, we shouldn't
+// advertise the preverified name (we don't have that specific file,
+// so peers who fetch it from us would fail). Live-caught 2026-09-02
+// on hoodi cycle 23 mode-D: preverified `v1.1-003400-003500-headers.seg`
+// [3400000, 3500000) survived the old single-file check because the
+// post-unwind local layout was v4 pair [3400000, 3440000) + retire's
+// 10k chunks — no single local file wider than the preverified.
 func (cov LocalCoverageIndex) Covers(entryName string) bool {
 	base := filepath.Base(entryName)
 	fi, _, ok := ParseFileName("", base)
@@ -116,8 +127,24 @@ func (cov LocalCoverageIndex) Covers(entryName string) bool {
 		TypeStr: fi.TypeString,
 		Ext:     fi.Ext,
 	}
-	for _, lr := range cov[k] {
-		if lr.From <= fi.From && lr.To >= fi.To {
+	ranges := cov[k]
+	if len(ranges) == 0 {
+		return false
+	}
+	// Sort by From, then walk to accumulate coverage of [fi.From, fi.To).
+	sorted := append([]StepRange(nil), ranges...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].From < sorted[j].From })
+	cur := fi.From
+	for _, lr := range sorted {
+		if lr.From > cur {
+			// Gap before this range — union can't cover fi.From..fi.To
+			// unless a later range starts at cur (impossible after sort).
+			return false
+		}
+		if lr.To > cur {
+			cur = lr.To
+		}
+		if cur >= fi.To {
 			return true
 		}
 	}

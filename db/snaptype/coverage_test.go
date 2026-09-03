@@ -17,6 +17,7 @@
 package snaptype
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,4 +144,46 @@ func TestLocalCoverageIndex_SubdirPartition(t *testing.T) {
 	// that the subdir alone is a partition key.
 	assert.False(t, cov.Covers("history/v2.0-accounts.0-256.v"),
 		"different subdir = different class; must not cover")
+}
+
+// TestLocalCoverageIndex_UnionOfLocalCoversPreverified pins the
+// cycle-23 mode-D case: preverified `v1.1-003400-003500-headers.seg`
+// covers [3400000, 3500000). Post-mode-D-unwind, local has multiple
+// smaller files that TOGETHER tile the preverified range but no
+// single one subsumes it. Under union coverage the preverified must
+// be dropped — we can serve the range via the smaller files, so we
+// shouldn't lie about holding a 100k file we don't have.
+func TestLocalCoverageIndex_UnionOfLocalCoversPreverified(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// v4 pair from mode-D emit covers [3400000, 3440000) — as two
+	// files together.
+	writeStub(t, dir, "v1.1-3400000-3439877-headers.seg")
+	writeStub(t, dir, "v1.1-3439877-3440000-headers.seg")
+	// Retire's 10k chunks fill [3440000, 3500000).
+	for from := 3440; from < 3500; from += 10 {
+		writeStub(t, dir, fmt.Sprintf("v1.1-00%d-00%d-headers.seg", from, from+10))
+	}
+
+	cov := BuildLocalCoverageIndex(dir)
+
+	assert.True(t, cov.Covers("v1.1-003400-003500-headers.seg"),
+		"preverified 100k range must be reported covered by union of v4 pair + 10k chunks — drops from chain.toml so we don't advertise a file we can't serve")
+}
+
+// TestLocalCoverageIndex_UnionWithGapReturnsFalse pins that a gap in
+// local coverage means the preverified entry is NOT covered — it's a
+// genuine gap-fill and must survive the filter.
+func TestLocalCoverageIndex_UnionWithGapReturnsFalse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Local has [3400000, 3440000) and [3460000, 3500000) — gap
+	// [3440000, 3460000) uncovered.
+	writeStub(t, dir, "v1.1-3400000-3440000-headers.seg")
+	writeStub(t, dir, "v1.1-3460000-3500000-headers.seg")
+
+	cov := BuildLocalCoverageIndex(dir)
+
+	assert.False(t, cov.Covers("v1.1-003400-003500-headers.seg"),
+		"gap [3440000, 3460000) in local coverage — preverified survives as gap-fill")
 }
