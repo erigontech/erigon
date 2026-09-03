@@ -65,6 +65,10 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
+    modernize:
+      # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
+      disable:
+        - newexpr
     staticcheck:
       # The only place staticcheck checks are turned off. A text: exclusion runs
       # the check and drops its output, which is how the SA/S1 gap this list
