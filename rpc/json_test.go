@@ -332,15 +332,6 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 
 }
 
-// Only buffers within the bound may be admitted to the result pool.
-func TestPoolableResultBound(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, poolableResult(make([]byte, 0, maxPooledResultSize-1)))
-	require.True(t, poolableResult(make([]byte, 0, maxPooledResultSize)))
-	require.False(t, poolableResult(make([]byte, 0, maxPooledResultSize+1)))
-}
-
 // encodeResult must match json.Marshal on a fresh buffer and on a reused one,
 // and releaseResult must leave nothing on the message.
 func TestEncodeResultRoundTripAndRelease(t *testing.T) {

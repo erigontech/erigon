@@ -123,11 +123,6 @@ func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
 		}
 		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
 	}
-	if result == nil {
-		// JSON-RPC requires the member on a success response, and an untyped nil
-		// cannot be told apart from "no deferred value" once it is in the message.
-		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: json.RawMessage("null")}
-	}
 	// Encoded here rather than at write time: the result must be known good
 	// before the response envelope is committed, and before the caller records
 	// the call as a success.
@@ -426,10 +421,8 @@ var encPool = sync.Pool{New: func() any { b := make([]byte, 0, 1024); return &b 
 // oversized response must not pin its backing array there.
 const maxPooledResultSize = 16 * jsonstream.FlushThreshold
 
-func poolableResult(b []byte) bool { return cap(b) <= maxPooledResultSize }
-
 func putEnc(p *[]byte) {
-	if !poolableResult(*p) {
+	if cap(*p) > maxPooledResultSize {
 		return
 	}
 	*p = (*p)[:0]
@@ -441,14 +434,13 @@ func putEnc(p *[]byte) {
 func encodeResult(result any) ([]byte, *[]byte, error) {
 	p := encPool.Get().(*[]byte)
 	buf := bytes.NewBuffer((*p)[:0])
-	if err := json.NewEncoder(buf).Encode(result); err != nil {
-		*p = buf.Bytes()
+	err := json.NewEncoder(buf).Encode(result)
+	*p = buf.Bytes()
+	if err != nil {
 		putEnc(p)
 		return nil, nil, err
 	}
-	*p = buf.Bytes()
-	b := *p
-	return b[:len(b)-1], p, nil // Encode terminates with a newline the envelope must not carry
+	return (*p)[:len(*p)-1], p, nil // Encode terminates with a newline the envelope must not carry
 }
 
 // releaseResult returns a pooled result buffer once its bytes have been written.
