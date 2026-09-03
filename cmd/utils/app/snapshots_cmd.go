@@ -3860,8 +3860,17 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	fullPruneDistance := uint64(config3.DefaultPruneDistance)
 	minimalPruneDistance := uint64(config3.MinimalPruneDistance)
 
-	fullStepPruneDistance := duStepDistance(fullPruneDistance, maxBlock, maxStep)
-	minimalStepPruneDistance := duStepDistance(minimalPruneDistance, maxBlock, maxStep)
+	// State files use step ranges, not block ranges. Convert each block-based
+	// prune distance to step units using the observed blocks-per-step ratio.
+	// Single division avoids compounding integer truncation.
+	stepDistance := func(blockDistance uint64) uint64 {
+		if maxStep == 0 || maxBlock == 0 {
+			return 0
+		}
+		return blockDistance * maxStep / maxBlock
+	}
+	fullStepPruneDistance := stepDistance(fullPruneDistance)
+	minimalStepPruneDistance := stepDistance(minimalPruneDistance)
 
 	// isStateHistoryPruned returns true when a state-history file's range is
 	// entirely below the step cutoff implied by `windowSteps`.
@@ -3966,18 +3975,6 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	}
 }
 
-func duStepDistance(blockDistance, maxBlock, maxStep uint64) uint64 {
-	if maxStep == 0 || maxBlock == 0 {
-		return 0
-	}
-	scaled := blockDistance * maxStep
-	steps := scaled / maxBlock
-	if scaled%maxBlock != 0 {
-		steps++
-	}
-	return steps
-}
-
 // duDetectNodeType infers the current node mode from which files are present.
 // Archive nodes retain all state history from step 0; non-archive modes have
 // pruned it, so old state history files are absent. Among non-archive modes:
@@ -3989,8 +3986,9 @@ func duStepDistance(blockDistance, maxBlock, maxStep uint64) uint64 {
 //   - Minimal does the same but at the smaller MinimalPruneDistance, so it
 //     keeps a narrower recent window than full.
 //
-// Young archive and pruned layouts can be identical before the full window
-// matures; the detector reports those layouts as unknown.
+// On chains between MinimalPruneDistance and DefaultPruneDistance, full and
+// blocks look identical on disk (full has not yet pruned tx); the detector
+// defaults the ambiguous case to full, the more common mode.
 func duDetectNodeType(files []duFileInfo) string {
 	hasOldStateHistory := false
 	hasGenesisTxSegment := false
@@ -4022,12 +4020,12 @@ func duDetectNodeType(files []duFileInfo) string {
 	// Archive: keeps all state history from step 0. Use the LARGER (full's)
 	// step prune distance as the maturity threshold — a chain too young for
 	// full to have pruned isn't evidence of archive mode.
-	fullStepPruneDistance := duStepDistance(fullPruneDistance, maxBlock, maxStep)
-	if hasOldStateHistory {
-		if fullStepPruneDistance == 0 || maxStep > fullStepPruneDistance {
-			return "archive"
-		}
-		return "unknown"
+	var fullStepPruneDistance uint64
+	if maxStep > 0 && maxBlock > 0 {
+		fullStepPruneDistance = fullPruneDistance * maxStep / maxBlock
+	}
+	if hasOldStateHistory && (fullStepPruneDistance == 0 || maxStep > fullStepPruneDistance) {
+		return "archive"
 	}
 
 	// Blocks mode: tx segments from genesis are present and the chain is past

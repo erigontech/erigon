@@ -58,13 +58,6 @@ var (
 		CommitmentHistory: KeepAllBlocksPruneMode,
 		Receipts:          KeepAllBlocksPruneMode,
 	}
-	previousFullMode = Mode{
-		Initialised:       true,
-		Blocks:            previousDefaultPruneDistance,
-		History:           previousDefaultPruneDistance,
-		CommitmentHistory: KeepAllBlocksPruneMode,
-		Receipts:          KeepAllBlocksPruneMode,
-	}
 
 	DefaultMode = ArchiveMode
 	MockMode    = Mode{
@@ -79,11 +72,10 @@ var (
 )
 
 const (
-	archiveModeStr               = "archive"
-	blockModeStr                 = "blocks"
-	fullModeStr                  = "full"
-	minimalModeStr               = "minimal"
-	previousDefaultPruneDistance = Distance(262_144)
+	archiveModeStr = "archive"
+	blockModeStr   = "blocks"
+	fullModeStr    = "full"
+	minimalModeStr = "minimal"
 )
 
 type Mode struct {
@@ -94,7 +86,17 @@ type Mode struct {
 	Receipts          BlockAmount
 }
 
-// String describes m as a CLI mode followed by any required distance overrides.
+// String renders m in the shape an operator would type on the CLI: the named
+// mode if m matches one exactly, otherwise a recognized legacy shape
+// ("full(legacy)" / "blocks --prune.distance=N"), otherwise an "archive
+// --prune.distance=...  --prune.distance.blocks=..." fallback that mirrors
+// the FromCli input the operator presumably supplied. The string is
+// informational (used in error messages, warning logs, and seg du output)
+// and reflects the configured shape, not necessarily the named mode's usual
+// retention behaviour — e.g. a mode constructed by `--prune.mode=archive
+// --prune.distance=N --prune.distance.blocks=M` still renders with the
+// "archive" prefix even though the finite distances cause distance-based
+// pruning.
 func (m Mode) String() string {
 	if !m.Initialised {
 		return archiveModeStr
@@ -111,21 +113,19 @@ func (m Mode) String() string {
 		return archiveModeStr
 	}
 
-	if m.History.toValue() == previousDefaultPruneDistance.toValue() && m.Blocks.toValue() == previousDefaultPruneDistance.toValue() {
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "%s --prune.distance=%d --prune.distance.blocks=%d", fullModeStr, previousDefaultPruneDistance, previousDefaultPruneDistance)
-		appendCommitmentHistory(&sb, m)
-		appendReceipts(&sb, m)
-		return sb.String()
-	}
-
+	// Recognise legacy shapes that don't match any current named mode but
+	// would otherwise produce a misleading "archive ..." rendering. These
+	// surface on first start of a pre-EIP-8252 datadir under the new binary
+	// (the compat shim in EnsureNotChanged rewrites the persisted value, so
+	// the legacy label only appears briefly in the upgrade-time warning).
 	if m.Blocks == KeepPostMergeBlocksPruneMode && m.History.Enabled() {
+		// Pre-EIP-8252 full mode: chain-history-expiry for blocks + finite
+		// state history. Render as "full(legacy)" + the finite history.
 		var sb strings.Builder
-		sb.WriteString(fullModeStr)
+		sb.WriteString(fullModeStr + "(legacy)")
 		if m.History.toValue() != FullMode.History.toValue() {
 			fmt.Fprintf(&sb, " --prune.distance=%s", stateHistoryDistanceCLIValue(m.History.toValue(), KeepPostMergeBlocksPruneMode))
 		}
-		fmt.Fprintf(&sb, " --prune.distance.blocks=%s", blocksDistanceCLIValue(m.Blocks.toValue()))
 		appendCommitmentHistory(&sb, m)
 		appendReceipts(&sb, m)
 		return sb.String()
@@ -143,7 +143,10 @@ func (m Mode) String() string {
 		return sb.String()
 	}
 
-	// Preserve the archive-based rendering for custom shapes.
+	// Fallback: archive + overrides. Preserves the historical rendering for
+	// "archive with custom distances" and for any shape we don't special-case
+	// above (e.g., legacy archive {KeepPostMergeBlocksPruneMode, KeepPostMergeBlocksPruneMode}
+	// before the archive-default-bump compat rewrites it).
 	var sb strings.Builder
 	sb.WriteString(archiveModeStr)
 	if m.History.toValue() != DefaultMode.History.toValue() {

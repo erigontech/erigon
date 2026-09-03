@@ -895,16 +895,6 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
 }
 
-func TestDUComputeEstimatesRoundsStepWindowUp(t *testing.T) {
-	files := []duFileInfo{
-		{Name: "accounts.1-2.v", Size: 10, Category: duCatHistory, IsState: true, From: 1, To: 2},
-	}
-
-	estimates := duComputeEstimates(files, 2_000_000, 3)
-	require.Equal(t, int64(10), estimates[1].TotalBytes)
-	require.Equal(t, int64(10), estimates[2].TotalBytes)
-}
-
 func TestDUComputeEstimatesCoversExpandedDefaultWindow(t *testing.T) {
 	const (
 		maxBlock        = uint64(20_000_000)
@@ -913,8 +903,8 @@ func TestDUComputeEstimatesCoversExpandedDefaultWindow(t *testing.T) {
 	)
 	currentBlockCutoff := maxBlock - uint64(config3.DefaultPruneDistance)
 	previousBlockCutoff := maxBlock - previousDefault
-	currentStepWindow := (uint64(config3.DefaultPruneDistance)*maxStep + maxBlock - 1) / maxBlock
-	previousStepWindow := (previousDefault*maxStep + maxBlock - 1) / maxBlock
+	currentStepWindow := uint64(config3.DefaultPruneDistance) * maxStep / maxBlock
+	previousStepWindow := previousDefault * maxStep / maxBlock
 	currentStepCutoff := maxStep - currentStepWindow
 	previousStepCutoff := maxStep - previousStepWindow
 
@@ -1049,7 +1039,9 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 5},
 			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
 		}
-		require.Equal(t, "unknown", duDetectNodeType(files))
+		// The chain is too young for archive classification, so the detector
+		// falls through to its existing minimal-mode default.
+		require.Equal(t, "minimal", duDetectNodeType(files))
 	})
 
 	t.Run("genesis tx in [MinimalPruneDistance, DefaultPruneDistance] band not classified as blocks", func(t *testing.T) {

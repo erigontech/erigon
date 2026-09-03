@@ -86,30 +86,26 @@ func TestModeString_CommitmentHistory(t *testing.T) {
 }
 
 func TestModeString_LegacyShapes(t *testing.T) {
-	// Older datadirs may pair finite state history with sentinel block policies.
-	// String must render every shape as valid CLI input because errors and upgrade
-	// warnings expose it to operators.
+	// Pre-EIP-8252 full mode persisted as {Blocks: KeepPostMergeBlocksPruneMode,
+	// History: Distance(100_000)}. Before the recognition logic, this rendered
+	// as "archive --prune.distance=100000 --prune.distance.blocks=18446744073709551615"
+	// — accurate but misleading. It now renders as "full(legacy)".
 	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
-	assert.Equal(t, "full --prune.distance=100000 --prune.distance.blocks=keep-post-merge", legacyFull.String())
+	assert.Equal(t, "full(legacy) --prune.distance=100000", legacyFull.String())
 
+	// Pre-EIP-8252 full with the current default history distance — label it as
+	// plain "full(legacy)" with no override clause.
 	legacyFullCurrentHistory := Mode{Initialised: true, History: FullMode.History, Blocks: KeepPostMergeBlocksPruneMode}
-	assert.Equal(t, "full --prune.distance.blocks=keep-post-merge", legacyFullCurrentHistory.String())
+	assert.Equal(t, "full(legacy)", legacyFullCurrentHistory.String())
 
+	// Pre-EIP-8252 blocks mode persisted as {Blocks: KeepAllBlocksPruneMode,
+	// History: Distance(100_000)}. Render as "blocks --prune.distance=100000".
 	legacyBlocks := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode}
 	assert.Equal(t, "blocks --prune.distance=100000", legacyBlocks.String())
 
+	// Archive with explicit distance overrides stays on the "archive" base.
 	archiveOverride := Mode{Initialised: true, History: Distance(400500), Blocks: Distance(100500)}
 	assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", archiveOverride.String())
-}
-
-func TestModeString_PreviousFullDefault(t *testing.T) {
-	assert.Equal(t, "full --prune.distance=262144 --prune.distance.blocks=262144", previousFullMode.String())
-
-	// Recognizing the previous default must preserve receipt and commitment-history overrides.
-	withOverrides := previousFullMode
-	withOverrides.CommitmentHistory = Distance(200_000)
-	withOverrides.Receipts = Distance(180_000)
-	assert.Equal(t, "full --prune.distance=262144 --prune.distance.blocks=262144 --prune.commitment-history.distance=200000 --prune.receipts.distance=180000", withOverrides.String())
 }
 
 func TestParseCLIMode(t *testing.T) {
@@ -514,9 +510,16 @@ func TestEnsureNotChanged_LegacyMinimalNoOp(t *testing.T) {
 }
 
 func TestEnsureNotChanged_DefaultMigrations(t *testing.T) {
+	previousFull := Mode{
+		Initialised:       true,
+		History:           Distance(262_144),
+		Blocks:            Distance(262_144),
+		CommitmentHistory: KeepAllBlocksPruneMode,
+		Receipts:          KeepAllBlocksPruneMode,
+	}
 	previousBlocks := Mode{
 		Initialised:       true,
-		History:           previousDefaultPruneDistance,
+		History:           Distance(262_144),
 		Blocks:            KeepAllBlocksPruneMode,
 		CommitmentHistory: KeepAllBlocksPruneMode,
 		Receipts:          KeepAllBlocksPruneMode,
@@ -536,7 +539,7 @@ func TestEnsureNotChanged_DefaultMigrations(t *testing.T) {
 			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode},
 			requested: FullMode,
 		},
-		{name: "full 262k default", persisted: previousFullMode, requested: FullMode},
+		{name: "full 262k default", persisted: previousFull, requested: FullMode},
 		{name: "blocks 262k default", persisted: previousBlocks, requested: BlocksMode},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

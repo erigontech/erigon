@@ -2130,7 +2130,7 @@ Run `seg du` while the node is **stopped**. If Erigon is running and holds the d
 
 ## Snapshot Types (Pruning Modes)
 
-The snapshot set on disk reflects the node's **pruning mode**, and `seg du` detects which mode your current files correspond to when the layout is distinguishable. Young chains that have not crossed a pruning boundary can report `unknown`. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
+The snapshot set on disk reflects the node's **pruning mode**, and `seg du` automatically detects which mode your current files correspond to. For what each mode retains and how to choose one, see [Pruning Modes](pruning-modes).
 
 The `seg du` estimates table shows the projected disk footprint for each mode given the files currently present, so you can evaluate a mode change before committing to a resync.
 
