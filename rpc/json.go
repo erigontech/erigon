@@ -61,8 +61,7 @@ type jsonrpcMessage struct {
 	Error   *jsonError      `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 
-	// pooled is Result's backing array when it came from encPool, so writeTo can
-	// hand it back once the bytes are out.
+	// pooled is Result's backing array, returned to encPool once writeTo is done.
 	pooled *[]byte
 }
 
@@ -115,22 +114,21 @@ type fastJSONResult interface {
 }
 
 func (msg *jsonrpcMessage) response(result any) *jsonrpcMessage {
+	var (
+		enc    []byte
+		pooled *[]byte
+		err    error
+	)
 	if fm, ok := result.(fastJSONResult); ok {
-		enc, err := fm.MarshalFastJSON()
-		if err != nil {
-			// TODO: wrap with 'internal server error'
-			return msg.errorResponse(err)
-		}
-		return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc}
+		enc, err = fm.MarshalFastJSON()
+	} else {
+		enc, pooled, err = encodeResult(result)
 	}
-	// Encoded here rather than at write time: the result must be known good
-	// before the response envelope is committed, and before the caller records
-	// the call as a success.
-	buf, pooled, err := encodeResult(result)
 	if err != nil {
+		// TODO: wrap with 'internal server error'
 		return msg.errorResponse(err)
 	}
-	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: buf, pooled: pooled}
+	return &jsonrpcMessage{Version: vsn, ID: msg.ID, Result: enc, pooled: pooled}
 }
 
 func errorMessage(err error) *jsonrpcMessage {
@@ -413,12 +411,10 @@ func parseSubscriptionName(rawArgs json.RawMessage) (string, error) {
 	return method, nil
 }
 
-// encPool reuses result buffers across responses. json.Marshal would allocate a
-// fresh one per call. The pointer is what goes in and out, so Put does not box.
+// Pooling the pointer keeps Put off the allocating path.
 var encPool = sync.Pool{New: func() any { b := make([]byte, 0, 1024); return &b }}
 
-// maxPooledResultSize bounds what a result buffer carries back into encPool. One
-// oversized response must not pin its backing array there.
+// One oversized response must not pin its backing array in encPool.
 const maxPooledResultSize = 16 * jsonstream.FlushThreshold
 
 func putEnc(p *[]byte) {
@@ -429,8 +425,7 @@ func putEnc(p *[]byte) {
 	encPool.Put(p)
 }
 
-// encodeResult encodes result the way json.Marshal would, straight into a
-// pooled buffer, so a response costs no allocation for its own bytes.
+// encodeResult matches json.Marshal, but into a pooled buffer.
 func encodeResult(result any) ([]byte, *[]byte, error) {
 	p := encPool.Get().(*[]byte)
 	buf := bytes.NewBuffer((*p)[:0])
@@ -443,7 +438,6 @@ func encodeResult(result any) ([]byte, *[]byte, error) {
 	return (*p)[:len(*p)-1], p, nil // Encode terminates with a newline the envelope must not carry
 }
 
-// releaseResult returns a pooled result buffer once its bytes have been written.
 func releaseResult(msg *jsonrpcMessage) {
 	if msg.pooled != nil {
 		putEnc(msg.pooled)
