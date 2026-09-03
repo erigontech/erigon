@@ -24,6 +24,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
@@ -202,6 +206,46 @@ func TestPersistReceiptsDefaultByMode(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := buildEthConfig(t, tt.args)
 			require.Equal(t, tt.want, cfg.Sync.PersistReceiptsCacheV2)
+		})
+	}
+}
+
+// A datadir created before the default flipped keeps the value it was built
+// with: the stored flag wins over the config, in both directions.
+func TestPersistReceiptsStoredValueOverridesDefault(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		stored     bool
+		fromConfig bool
+		want       bool
+	}{
+		{"receipts-off datadir ignores the new default", false, true, false},
+		{"receipts-on datadir ignores an explicit opt-out", true, false, true},
+		{"agreement leaves the value alone", true, true, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+			require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+				return kvcfg.PersistReceipts.ForceWrite(tx, tt.stored)
+			}))
+
+			var notChanged, got bool
+			require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+				var err error
+				notChanged, got, err = kvcfg.PersistReceipts.EnsureNotChanged(tx, tt.fromConfig)
+				return err
+			}))
+
+			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.stored == tt.fromConfig, notChanged)
+
+			var after bool
+			require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+				var err error
+				after, err = kvcfg.PersistReceipts.Enabled(tx)
+				return err
+			}))
+			require.Equal(t, tt.stored, after, "the stored flag must survive the check")
 		})
 	}
 }
