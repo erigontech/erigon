@@ -351,7 +351,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			f, err := storage.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+			var f *FilesItem
+			f, err = storage.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
 			if err != nil {
 				return nil, fmt.Errorf("storage file not found in visible files: %w", err)
 			}
@@ -359,12 +360,13 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
-		if _, ok := accountFileMap[keyFromTxNum]; !ok {
+		if _, ok = accountFileMap[keyFromTxNum]; !ok {
 			accountFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			f, err := accounts.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+			var f *FilesItem
+			f, err = accounts.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
 			if err != nil {
 				return nil, fmt.Errorf("account file not found in visible files: %w", err)
 			}

@@ -221,7 +221,7 @@ func (idx *Index) init() (err error) {
 		offset += 8
 	}
 	features := Features(idx.data[offset])
-	if err := onlyKnownFeatures(features); err != nil {
+	if err = onlyKnownFeatures(features); err != nil {
 		return fmt.Errorf("file %s %w", idx.fileName, err)
 	}
 

@@ -78,13 +78,13 @@ func TestLookupStorage(t *testing.T) {
 				}
 			}
 			// Insert all the transactions into the database, and verify contents
-			if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
+			if err = rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
 				t.Fatal(err)
 			}
-			if err := rawdb.WriteBlock(tx, block); err != nil {
+			if err = rawdb.WriteBlock(tx, block); err != nil {
 				t.Fatal(err)
 			}
-			if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
+			if err = rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 				t.Fatal(err)
 			}
 			txNumMin, err := rawdbv3.TxNums.Min(t.Context(), tx, block.NumberU64())

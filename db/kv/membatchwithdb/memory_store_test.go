@@ -352,7 +352,8 @@ func TestMemStore_Range(t *testing.T) {
 
 	var keys []string
 	for iter.HasNext() {
-		k, _, err := iter.Next()
+		var k []byte
+		k, _, err = iter.Next()
 		require.NoError(t, err)
 		keys = append(keys, string(k))
 	}
@@ -365,7 +366,8 @@ func TestMemStore_Range(t *testing.T) {
 
 	keys = nil
 	for iter2.HasNext() {
-		k, _, err := iter2.Next()
+		var k []byte
+		k, _, err = iter2.Next()
 		require.NoError(t, err)
 		keys = append(keys, string(k))
 	}

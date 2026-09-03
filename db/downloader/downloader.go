@@ -726,7 +726,8 @@ func (d *Downloader) VerifyData(
 
 	if failFast {
 		var completedBytes atomic.Uint64
-		g, ctx := errgroup.WithContext(ctx)
+		var g *errgroup.Group
+		g, ctx = errgroup.WithContext(ctx)
 
 		{
 			logEvery := time.NewTicker(10 * time.Second)
@@ -766,7 +767,8 @@ func (d *Downloader) VerifyData(
 	{
 		logEvery := time.NewTicker(20 * time.Second)
 		// Make sure this routine stops after we return from this function.
-		ctx, cancel := context.WithCancel(ctx)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
 		defer cancel()
 		defer logEvery.Stop()
 		d.spawn(func() {

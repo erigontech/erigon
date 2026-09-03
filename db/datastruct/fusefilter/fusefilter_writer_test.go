@@ -28,7 +28,7 @@ func TestBasicFunctionality(t *testing.T) {
 
 	// Add keys
 	for _, key := range testKeys {
-		err := writer.AddHash(key)
+		err = writer.AddHash(key)
 		require.NoError(err, "Failed to add hash")
 	}
 

@@ -29,7 +29,8 @@ func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block fu
 		if !strings.HasSuffix(item.Fullpath(), ".kv") {
 			continue
 		}
-		bn, err := tx2block(item.EndRootNum())
+		var bn uint64
+		bn, err = tx2block(item.EndRootNum())
 		if err != nil {
 			logger.Warn("[snapshots:history] Stat", "err", err)
 			return

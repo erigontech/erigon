@@ -338,7 +338,7 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 		}
 		blobSize := filterSize(&filter)
 		binary.BigEndian.PutUint64(sizeBuf[:], uint64(blobSize))
-		if _, err := fw.Write(sizeBuf[:]); err != nil {
+		if _, err = fw.Write(sizeBuf[:]); err != nil {
 			return 0, err
 		}
 		n, err := writeFilter(w.features, &filter, fw)

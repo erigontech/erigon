@@ -351,7 +351,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	if l == r {
 		// l can be Count() when seeking past the last key (insertion point);
 		// Reset then reports out-of-bounds and Seek's contract is (nil, nil).
-		if err := cur.Reset(l, g); err != nil {
+		if err = cur.Reset(l, g); err != nil {
 			return nil, err
 		}
 		return cur, nil
@@ -415,7 +415,9 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 // If no exact match found, returns nil values
 func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
 	if len(key) == 0 && b.offt.Count() > 0 {
-		k0, v0, _, err := b.dataLookupFunc(0, g)
+		var k0 []byte
+		var v0 []byte
+		k0, v0, _, err = b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
@@ -431,7 +433,9 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 
 func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err error) {
 	if len(key) == 0 && b.offt.Count() > 0 {
-		k0, v0, _, err := b.dataLookupFunc(0, g)
+		var k0 []byte
+		var v0 []byte
+		k0, v0, _, err = b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return 0, false, err
 		}

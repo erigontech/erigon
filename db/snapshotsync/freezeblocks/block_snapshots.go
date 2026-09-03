@@ -510,7 +510,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	defer logEvery.Stop()
 
 	if blockFrom > 0 && firstTxNum == 0 {
-		err := fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
+		err = fmt.Errorf("firstTxNum is 0 (blocks=%d-%d); must be a mistake, aborting files build", blockFrom, blockTo)
 		logger.Error("DumpBodies", "err", err)
 		return lastTxNum, err
 	}
@@ -648,7 +648,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return err
 		}
 		if tv == nil {
-			if err := collect(nil); err != nil {
+			if err = collect(nil); err != nil {
 				return err
 			}
 			return nil

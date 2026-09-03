@@ -274,7 +274,8 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
-		bounds, _, err := kv.DistributeBounds(srcTx, table)
+		var bounds [][]byte
+		bounds, _, err = kv.DistributeBounds(srcTx, table)
 		if err != nil {
 			logger.Warn("[db-copy] read-ahead disabled", "table", table, "err", err)
 		} else {
@@ -283,7 +284,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}
 	defer ra.Close()
 
-	if err := dst.Update(ctx, func(tx kv.RwTx) error {
+	if err = dst.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ClearTable(table)
 	}); err != nil {
 		return 0, err

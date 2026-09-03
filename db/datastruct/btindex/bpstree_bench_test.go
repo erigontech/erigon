@@ -140,7 +140,8 @@ func BenchmarkBpsTreeGetReal(t *testing.B) {
 	var bestSize int64
 	for key, kv := range kvFiles {
 		if bt, ok := btFiles[key]; ok {
-			fi, err := os.Stat(kv)
+			var fi os.FileInfo
+			fi, err = os.Stat(kv)
 			if err != nil {
 				continue
 			}

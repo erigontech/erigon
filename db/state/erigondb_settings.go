@@ -73,7 +73,8 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 	// Read from erigondb.toml.
 	if settingsExists {
 		logger.Info("Reading DB settings from existing erigondb.toml")
-		settings, err := readErigonDBSettings(settingsPath)
+		var settings *ErigonDBSettings
+		settings, err = readErigonDBSettings(settingsPath)
 		if err != nil {
 			return nil, err
 		}

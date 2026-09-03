@@ -94,7 +94,8 @@ func recomputeRootFromState(t *testing.T, db kv.TemporalRwDB) []byte {
 	defer acit.Close()
 	trieCtx := domains.GetCommitmentContext()
 	for acit.HasNext() {
-		k, _, err := acit.Next()
+		var k []byte
+		k, _, err = acit.Next()
 		require.NoError(t, err)
 		trieCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}

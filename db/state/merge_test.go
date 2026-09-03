@@ -1116,7 +1116,7 @@ func TestMergeFiles(t *testing.T) {
 	prev := []byte{}
 	for key, upd := range data {
 		for _, v := range upd {
-			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev)
+			err = w.PutWithPrev([]byte(key), v.value, v.txNum, prev)
 
 			prev = v.value
 			require.NoError(t, err)

@@ -884,7 +884,7 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 			rs.offsetEf = nil
 		}
 	}()
-	if err := rs.offsetWriter.Flush(); err != nil {
+	if err = rs.offsetWriter.Flush(); err != nil {
 		return fmt.Errorf("flush offset writer: %w", err)
 	}
 
@@ -981,15 +981,15 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	if rs.workers > 1 {
-		if err := rs.buildWithWorkers(ctx); err != nil {
+		if err = rs.buildWithWorkers(ctx); err != nil {
 			return err
 		}
 	} else {
-		if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		if err = rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 		if len(rs.currentBucket) > 0 {
-			if err := rs.recsplitCurrentBucket(); err != nil {
+			if err = rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
 		}
@@ -999,7 +999,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		if err := rs.buildOffsetEf(); err != nil {
+		if err = rs.buildOffsetEf(); err != nil {
 			return err
 		}
 		defer func() {
@@ -1016,29 +1016,29 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 
 	// Write out bucket count, bucketSize, leafSize
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.bucketCount)
-	if _, err := rs.indexW.Write(rs.numBuf[:8]); err != nil {
+	if _, err = rs.indexW.Write(rs.numBuf[:8]); err != nil {
 		return fmt.Errorf("writing bucketCount: %w", err)
 	}
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(rs.bucketSize))
-	if _, err := rs.indexW.Write(rs.numBuf[:2]); err != nil {
+	if _, err = rs.indexW.Write(rs.numBuf[:2]); err != nil {
 		return fmt.Errorf("writing bucketSize: %w", err)
 	}
 	binary.BigEndian.PutUint16(rs.numBuf[:], rs.scratch.leafSize)
-	if _, err := rs.indexW.Write(rs.numBuf[:2]); err != nil {
+	if _, err = rs.indexW.Write(rs.numBuf[:2]); err != nil {
 		return fmt.Errorf("writing leafSize: %w", err)
 	}
 	// Write out salt
 	binary.BigEndian.PutUint32(rs.numBuf[:], rs.salt)
-	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
+	if _, err = rs.indexW.Write(rs.numBuf[:4]); err != nil {
 		return fmt.Errorf("writing salt: %w", err)
 	}
 	// Write out start seeds
-	if err := rs.indexW.WriteByte(byte(len(rs.scratch.startSeed))); err != nil {
+	if err = rs.indexW.WriteByte(byte(len(rs.scratch.startSeed))); err != nil {
 		return fmt.Errorf("writing len of start seeds: %w", err)
 	}
 	for _, s := range rs.scratch.startSeed {
 		binary.BigEndian.PutUint64(rs.numBuf[:], s)
-		if _, err := rs.indexW.Write(rs.numBuf[:8]); err != nil {
+		if _, err = rs.indexW.Write(rs.numBuf[:8]); err != nil {
 			return fmt.Errorf("writing start seed: %w", err)
 		}
 	}
@@ -1050,41 +1050,41 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lessFalsePositives {
 		features |= LessFalsePositives
 	}
-	if err := rs.indexW.WriteByte(byte(features)); err != nil {
+	if err = rs.indexW.WriteByte(byte(features)); err != nil {
 		return fmt.Errorf("writing enums = true: %w", err)
 	}
 	if rs.enums && rs.keysAdded > 0 {
 		// Write out elias fano for offsets
-		if err := rs.offsetEf.Write(rs.indexW); err != nil {
+		if err = rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 		rs.offsetEf.Close()
 		rs.offsetEf = nil
 	}
-	if err := rs.flushExistenceFilter(); err != nil {
+	if err = rs.flushExistenceFilter(); err != nil {
 		return err
 	}
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.scratch.golombRice)))
-	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
+	if _, err = rs.indexW.Write(rs.numBuf[:4]); err != nil {
 		return fmt.Errorf("writing golomb rice param size: %w", err)
 	}
 	// Write out golomb rice
-	if err := rs.gr.Write(rs.indexW); err != nil {
+	if err = rs.gr.Write(rs.indexW); err != nil {
 		return fmt.Errorf("writing golomb rice: %w", err)
 	}
 	// Write out elias fano
-	if err := rs.ef.Write(rs.indexW); err != nil {
+	if err = rs.ef.Write(rs.indexW); err != nil {
 		return fmt.Errorf("writing elias fano: %w", err)
 	}
 
-	if err := rs.indexW.Flush(); err != nil {
+	if err = rs.indexW.Flush(); err != nil {
 		return err
 	}
-	if err := rs.fsync(); err != nil {
+	if err = rs.fsync(); err != nil {
 		return err
 	}
-	if err := rs.indexF.Close(); err != nil {
+	if err = rs.indexF.Close(); err != nil {
 		return err
 	}
 

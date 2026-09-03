@@ -531,7 +531,7 @@ func TestBlockStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
+	if err = rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
@@ -540,7 +540,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
+	if err = rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -877,10 +877,12 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
+		var sd *execctx.SharedDomains
+		sd, err = execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithParaTrieDB(m.DB))
 		require.NoError(err)
 		defer sd.Close()
-		base, err := txNumReader.Min(t.Context(), tx, 1)
+		var base uint64
+		base, err = txNumReader.Min(t.Context(), tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base
@@ -1073,10 +1075,10 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 
 	// Write withdrawals to block
 	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals, nil)
-	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
+	if err = rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
-	if err := rawdb.WriteBody(tx, wBlock.Hash(), wBlock.NumberU64(), wBlock.Body()); err != nil {
+	if err = rawdb.WriteBody(tx, wBlock.Hash(), wBlock.NumberU64(), wBlock.Body()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
 
@@ -1095,7 +1097,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
+	if err = rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
@@ -1127,7 +1129,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(1001), rw2.Amount)
 
 	// Delete the block and verify the execution
-	if err := rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
+	if err = rawdb.TruncateBlocks(t.Context(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -1139,12 +1141,12 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 
 	// write again and delete it as old one
-	if err := rawdb.WriteBlock(tx, block); err != nil {
+	if err = rawdb.WriteBlock(tx, block); err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
 	// prune: [1: N)

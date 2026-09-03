@@ -793,7 +793,7 @@ func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 			if err != nil {
 				return err
 			}
-			if err := dstCursor.AppendDup(k, v); err != nil {
+			if err = dstCursor.AppendDup(k, v); err != nil {
 				return err
 			}
 		}

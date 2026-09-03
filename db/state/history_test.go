@@ -449,7 +449,9 @@ func TestHistoryRangeWithPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	for it.HasNext() {
-		k, v, err := it.Next()
+		var k []byte
+		var v []byte
+		k, v, err = it.Next()
 		require.NoError(t, err)
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))
@@ -505,7 +507,9 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	for it.HasNext() {
-		k, v, err := it.Next()
+		var k []byte
+		var v []byte
+		k, v, err = it.Next()
 		require.NoError(t, err)
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))
@@ -852,7 +856,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		defer writer.close()
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
-		var flusher flusher
+		var fl flusher
 		var keyFlushCount = 0
 		for key, upds := range values {
 			for i := range upds {
@@ -861,17 +865,17 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 			}
 			keyFlushCount++
 			if keyFlushCount%10 == 0 {
-				if flusher != nil {
-					err := flusher.Flush(ctx, tx)
+				if fl != nil {
+					err := fl.Flush(ctx, tx)
 					require.NoError(tb, err)
-					flusher = nil //nolint
+					fl = nil //nolint
 				}
-				flusher = writer
+				fl = writer
 				writer = hc.NewWriter()
 			}
 		}
-		if flusher != nil {
-			err := flusher.Flush(ctx, tx)
+		if fl != nil {
+			err := fl.Flush(ctx, tx)
 			require.NoError(tb, err)
 		}
 		return writer.Flush(ctx, tx)
@@ -897,7 +901,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	var prevVal [32][]byte
-	var flusher flusher
+	var fl flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			if txNum%keyNum == 0 {
@@ -913,18 +917,18 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				prevVal[keyNum] = v[:]
 			}
 		}
-		if flusher != nil {
-			err = flusher.Flush(ctx, tx)
+		if fl != nil {
+			err = fl.Flush(ctx, tx)
 			require.NoError(tb, err)
-			flusher = nil
+			fl = nil
 		}
 		if txNum%10 == 0 {
-			flusher = writer
+			fl = writer
 			writer = hc.NewWriter()
 		}
 	}
-	if flusher != nil {
-		err = flusher.Flush(ctx, tx)
+	if fl != nil {
+		err = fl.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
 	err = writer.Flush(ctx, tx)
@@ -1383,7 +1387,9 @@ func TestHistoryRange1(t *testing.T) {
 		require.NoError(err)
 		defer it.Close()
 		for it.HasNext() {
-			k, v, err := it.Next()
+			var k []byte
+			var v []byte
+			k, v, err = it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
@@ -1433,7 +1439,9 @@ func TestHistoryRange1(t *testing.T) {
 		require.NoError(err)
 		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			var k []byte
+			var v []byte
+			k, v, err = it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
@@ -1467,7 +1475,9 @@ func TestHistoryRange1(t *testing.T) {
 		require.NoError(err)
 		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			var k []byte
+			var v []byte
+			k, v, err = it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
@@ -1481,7 +1491,9 @@ func TestHistoryRange1(t *testing.T) {
 		require.NoError(err)
 		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			var k []byte
+			var v []byte
+			k, v, err = it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
@@ -1576,7 +1588,9 @@ func TestHistoryRange2(t *testing.T) {
 			require.NoError(err)
 			defer it.Close()
 			for it.HasNext() {
-				k, v, err := it.Next()
+				var k []byte
+				var v []byte
+				k, v, err = it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
@@ -1627,7 +1641,9 @@ func TestHistoryRange2(t *testing.T) {
 			it, err = hc.HistoryRange(995, 1000, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, v, err := it.Next()
+				var k []byte
+				var v []byte
+				k, v, err = it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
@@ -1685,7 +1701,8 @@ func TestHistoryRange2(t *testing.T) {
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, _, err := it.Next()
+				var k []byte
+				k, _, err = it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 			}
@@ -1791,7 +1808,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 
 	txs := uint64(1000)
 	var prevVal [7][]byte
-	var flusher flusher
+	var fl flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		for ik, k := range keys {
 			var v [8]byte
@@ -1810,18 +1827,18 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			require.NoError(tb, err)
 		}
 
-		if flusher != nil {
-			err = flusher.Flush(ctx, tx)
+		if fl != nil {
+			err = fl.Flush(ctx, tx)
 			require.NoError(tb, err)
-			flusher = nil
+			fl = nil
 		}
 		if txNum%10 == 0 {
-			flusher = writer
+			fl = writer
 			writer = hc.NewWriter()
 		}
 	}
-	if flusher != nil {
-		err = flusher.Flush(ctx, tx)
+	if fl != nil {
+		err = fl.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
 	err = writer.Flush(ctx, tx)
@@ -2051,11 +2068,15 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 
 		count := 0
 		for it.HasNext() {
-			k, v, err := it.Next()
+			var k []byte
+			var v []byte
+			k, v, err = it.Next()
 			require.NoError(err)
 
 			// Oracle: HistorySeek for the same key and txNum.
-			want, ok, err := hc.HistorySeek(k, checkTxNum, roTx)
+			var want []byte
+			var ok bool
+			want, ok, err = hc.HistorySeek(k, checkTxNum, roTx)
 			require.NoError(err)
 			require.True(ok, "HistorySeek returned not-found for key %x at txNum %d", k, checkTxNum)
 			require.Equal(

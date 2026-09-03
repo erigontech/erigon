@@ -454,7 +454,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	for _, item := range domainFiles {
 		var g *seg.Reader
 		if seqReadahead {
-			view, err := item.decompressor.OpenSequentialView()
+			var view *seg.SequentialView
+			view, err = item.decompressor.OpenSequentialView()
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -510,7 +511,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if keyBuf != nil {
 			if vt != nil {
 				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					var valBufRet []byte
+					valBufRet, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
@@ -532,7 +534,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if keyBuf != nil {
 		if vt != nil {
 			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+				var valBufRet []byte
+				valBufRet, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
@@ -547,7 +550,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
-	if err := kvWriter.Compress(); err != nil {
+	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
 	kvWriter.Close()
@@ -646,7 +649,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var views seg.SequentialViews
 	defer func() { views.Close() }()
 	for _, item := range files {
-		view, err := item.decompressor.OpenSequentialView()
+		var view *seg.SequentialView
+		view, err = item.decompressor.OpenSequentialView()
 		if err != nil {
 			return nil, err
 		}
@@ -698,7 +702,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 
 		// Merge all sequences for this key in a single pass (O(N·C), one EF allocation).
-		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
+		if err = builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
 			return nil, err
 		}
 		for i := range mergeSeqs { // allow for GC
@@ -727,7 +731,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			p.Processed.Store(i)
 		}
 	}
-	if err := write.Compress(); err != nil {
+	if err = write.Compress(); err != nil {
 		return nil, err
 	}
 	comp.Close()
@@ -739,7 +743,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	}
 	ps.Delete(p)
 
-	if err := iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
+	if err = iit.ii.buildMapAccessor(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
 		return nil, fmt.Errorf("merge %s buildHashMapAccessor [%d-%d]: %w", iit.ii.FilenameBase, startTxNum, endTxNum, err)
 	}
 	if outItem.index, err = iit.ii.openHashMapAccessor(iit.ii.efAccessorNewFilePath(fromStep, toStep)); err != nil {
@@ -817,7 +821,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var views seg.SequentialViews
 		defer func() { views.Close() }()
 		for _, item := range indexFiles {
-			idxView, err := item.decompressor.OpenSequentialView()
+			var idxView *seg.SequentialView
+			idxView, err = item.decompressor.OpenSequentialView()
 			if err != nil {
 				return nil, nil, err
 			}
@@ -834,7 +839,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 						}
 
-						histView, err := hi.decompressor.OpenSequentialView()
+						var histView *seg.SequentialView
+						histView, err = hi.decompressor.OpenSequentialView()
 						if err != nil {
 							return nil, nil, err
 						}
@@ -878,7 +884,8 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				ss.Reset(&seq, 0)
 
 				for ss.HasNext() {
-					txNum, err := ss.Next()
+					var txNum uint64
+					txNum, err = ss.Next()
 					if err != nil {
 						panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.kvReader.FileName(), ci1.key))
 					}
@@ -892,7 +899,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
 
-					if err := pagedWr.Add(histKeyBuf, v); err != nil {
+					if err = pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
@@ -906,7 +913,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
-		if err := pagedWr.Compress(); err != nil {
+		if err = pagedWr.Compress(); err != nil {
 			return nil, nil, err
 		}
 		comp.Close()
@@ -916,7 +923,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err := ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

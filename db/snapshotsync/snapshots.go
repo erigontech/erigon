@@ -1575,7 +1575,8 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone
 	// (kill between deletes): those have no DirtySegment, so reclamation can't reach them.
 	if onDelete != nil {
-		idxList, err := snaptype.IdxFiles(s.dir)
+		var idxList []snaptype.FileInfo
+		idxList, err = snaptype.IdxFiles(s.dir)
 		if err != nil {
 			return err
 		}
@@ -1587,11 +1588,12 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		for i := range accessorsToRemove {
 			toRemove = append(toRemove, accessorsToRemove[i].Path)
 		}
-		relativePaths, err := toRelativePaths(s.dir, toRemove)
+		var relativePaths []string
+		relativePaths, err = toRelativePaths(s.dir, toRemove)
 		if err != nil {
 			return err
 		}
-		if err := onDelete(relativePaths); err != nil {
+		if err = onDelete(relativePaths); err != nil {
 			return fmt.Errorf("onDelete: %w", err)
 		}
 	}

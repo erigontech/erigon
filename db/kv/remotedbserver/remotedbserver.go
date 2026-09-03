@@ -468,7 +468,7 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 
 func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
 	reply = &remoteproto.SequenceReply{}
-	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+	if err = s.with(req.TxId, func(tx kv.TemporalTx) error {
 		reply.Value, err = tx.ReadSequence(req.Table)
 		return nil
 	}); err != nil {
@@ -535,7 +535,7 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 		return nil, err
 	}
 	reply = &remoteproto.GetLatestReply{}
-	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+	if err = s.with(req.TxId, func(tx kv.TemporalTx) error {
 		if req.Latest {
 			opts := kv.GetLatestOptions{}
 			if req.MaxStep != nil {

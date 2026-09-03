@@ -118,7 +118,8 @@ func (d *DefaultTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum u
 
 	{
 		// check genesis block
-		firstMaxTxNum, ok, err := d.MaxTxNum(ctx, tx, c, 0)
+		var firstMaxTxNum uint64
+		firstMaxTxNum, ok, err = d.MaxTxNum(ctx, tx, c, 0)
 		if err != nil {
 			return 0, false, fmt.Errorf("DefaultReadTxNumFunc first maxtxnum error: %w", err)
 		}

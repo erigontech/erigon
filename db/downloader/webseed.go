@@ -222,7 +222,8 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	// allow: host.com/v2/manifest.txt
 	u := webSeedProviderUrl.JoinPath("manifest.txt")
 	{ //do HEAD request with small timeout first
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		request, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
 		if err != nil {

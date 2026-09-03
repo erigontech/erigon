@@ -302,12 +302,13 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			seq.Reset(efBaseTxNum, valBuf)
 			it.Reset(&seq, 0)
 			for it.HasNext() {
-				txNum, err := it.Next()
+				var txNum uint64
+				txNum, err = it.Next()
 				if err != nil {
 					return err
 				}
 				histKey = historyKey(txNum, keyBuf, histKey[:0])
-				if err := rs.AddKey(histKey, valOffset); err != nil {
+				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
 
@@ -718,7 +719,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		return HistoryCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
 	}
@@ -828,7 +829,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
+		if err = h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.FilenameBase, err)
 		}
 		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {

@@ -505,7 +505,7 @@ func convertCommitmentFile(
 	}
 
 	// vt was applied per-pair above; pass nil so collateETL doesn't double-transform.
-	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir, false); err != nil {
+	if err = commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir, false); err != nil {
 		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
 	}
 
@@ -640,7 +640,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return err
 	}
 
-	if err := os.MkdirAll(rebuildDir, 0o755); err != nil {
+	if err = os.MkdirAll(rebuildDir, 0o755); err != nil {
 		return fmt.Errorf("[commitment_convert] mkdir rebuild dir %s: %w", rebuildDir, err)
 	}
 

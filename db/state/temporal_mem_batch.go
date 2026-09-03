@@ -302,8 +302,8 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 		if !ok {
 			return unwoundLatest(domain, keyS)
 		}
-		dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-		return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+		last := dataWithTxNums[len(dataWithTxNums)-1]
+		return last.data, kv.Step(last.txNum / sd.stepSize), ok
 
 	}
 
@@ -311,8 +311,8 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 	if !ok {
 		return unwoundLatest(domain, keyS)
 	}
-	dataWithTxNum := dataWithTxNums[len(dataWithTxNums)-1]
-	return dataWithTxNum.data, kv.Step(dataWithTxNum.txNum / sd.stepSize), ok
+	last := dataWithTxNums[len(dataWithTxNums)-1]
+	return last.data, kv.Step(last.txNum / sd.stepSize), ok
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {

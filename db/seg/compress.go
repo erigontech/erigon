@@ -327,12 +327,12 @@ func (c *Compressor) Compress() error {
 	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
-		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
+		if _, err = cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
 			return err
 		}
 
 		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
-			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
+			if _, err = cf.Write([]byte{c.compPageValuesCount}); err != nil {
 				return err
 			}
 		}
@@ -342,10 +342,10 @@ func (c *Compressor) Compress() error {
 		dataLen := uint32(len(c.metadata))
 		var dataLenB [4]byte
 		binary.BigEndian.PutUint32(dataLenB[:], dataLen)
-		if _, err := cf.Write(dataLenB[:]); err != nil {
+		if _, err = cf.Write(dataLenB[:]); err != nil {
 			return err
 		}
-		if _, err := cf.Write(c.metadata); err != nil {
+		if _, err = cf.Write(c.metadata); err != nil {
 			return err
 		}
 	}
@@ -358,7 +358,7 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
-		if err := compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
 			return err
 		}
 	} else {
@@ -372,21 +372,21 @@ func (c *Compressor) Compress() error {
 		}
 		if c.trace {
 			_, fileName := filepath.Split(c.outputFile)
-			if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+			if err = PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
 				return err
 			}
 		}
-		if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
 			return err
 		}
 	}
-	if err := c.fsync(cf); err != nil {
+	if err = c.fsync(cf); err != nil {
 		return err
 	}
-	if err := cf.Close(); err != nil {
+	if err = cf.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpFileName, c.outputFile); err != nil {
+	if err = os.Rename(tmpFileName, c.outputFile); err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
 

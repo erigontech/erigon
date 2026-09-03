@@ -1314,7 +1314,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 		// Reset positions at the start of each iteration to handle collision retries correctly
 		var keyPos, valPos uint64
 		word := make([]byte, 0, 256)
-		if err := ctx.Err(); err != nil {
+		if err = ctx.Err(); err != nil {
 			return err
 		}
 		g.Reset(0)
@@ -2103,7 +2103,8 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	var mode prune.StorageMode
 	if dt.d.LargeValues {
 		mode = prune.StepKeyStorageMode
-		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
+		var valsRwCursor kv.RwCursor
+		valsRwCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}

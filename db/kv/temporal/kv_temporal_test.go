@@ -56,7 +56,10 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 
 	// --- check 1: non-existing storage ---
 	{
-		firstKey, firstVal, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1[:])
+		var firstKey []byte
+		var firstVal []byte
+		var ok bool
+		firstKey, firstVal, ok, err = rwTtx1.HasPrefix(kv.StorageDomain, acc1[:])
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)

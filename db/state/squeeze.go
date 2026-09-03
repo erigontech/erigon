@@ -282,7 +282,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				}
 			}
 
-			if err := writer.Compress(); err != nil {
+			if err = writer.Compress(); err != nil {
 				return err
 			}
 			writer.Close()
@@ -570,11 +570,13 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	{
-		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		var startFromTxNum uint64
+		startFromTxNum, err = txNumsReader.Min(ctx, rwTx, blockFrom)
 		if err != nil {
 			return nil, err
 		}
-		endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
+		var endToTxNum uint64
+		endToTxNum, err = txNumsReader.Max(ctx, rwTx, blockTo)
 		if err != nil {
 			return nil, err
 		}
@@ -627,7 +629,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				return fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", pruneErr)
 			}
 		}
-		if err := pruneRwTx.Commit(); err != nil {
+		if err = pruneRwTx.Commit(); err != nil {
 			return err
 		}
 
@@ -710,7 +712,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	for blockFrom <= blockTo {
 		// Find the end of the current step: the last block whose max txNum < nextStepTxNum.
-		fromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		var fromTxNum uint64
+		fromTxNum, err = txNumsReader.Min(ctx, rwTx, blockFrom)
 		if err != nil {
 			return nil, err
 		}
@@ -718,7 +721,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		nextStepTxNum := (currentStep + 1) * stepSize // first txNum of next step
 
 		// Find the last block that fits within this step.
-		batchEnd, ok, err := txNumsReader.FindBlockNum(ctx, rwTx, nextStepTxNum-1)
+		var batchEnd uint64
+		var ok bool
+		batchEnd, ok, err = txNumsReader.FindBlockNum(ctx, rwTx, nextStepTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("FindBlockNum for step %d boundary: %w", currentStep, err)
 		}
@@ -730,18 +735,20 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			"step", currentStep, "blockFrom", blockFrom, "blockTo", batchEnd)
 
 		//nolint:gocritic
-		roTx, err := rwDb.BeginTemporalRo(ctx)
+		var roTx kv.TemporalTx
+		roTx, err = rwDb.BeginTemporalRo(ctx)
 		if err != nil {
 			return nil, err
 		}
-		batch, err := collectHistoryBatch(ctx, roTx, txNumsReader, blockFrom, batchEnd, a.dirs.Tmp, logger)
+		var batch *historyBatch
+		batch, err = collectHistoryBatch(ctx, roTx, txNumsReader, blockFrom, batchEnd, a.dirs.Tmp, logger)
 		roTx.Rollback()
 		if err != nil {
 			return nil, err
 		}
 
 		curBlock := ^uint64(0) // sentinel: no block started yet
-		if err := batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
+		if err = batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
 			if blockNum != curBlock {
 				// Finalize the previous keyed block (or, on first key, start from blockFrom).
 				prevEnd := blockFrom
@@ -783,14 +790,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		// Finalize the last block that received keys (if any), then remaining empty blocks.
 		firstUnfinalized := blockFrom
 		if curBlock != ^uint64(0) {
-			if err := finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
+			if err = finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
 				batch.Close()
 				return nil, err
 			}
 			firstUnfinalized = curBlock + 1
 		}
 		for b := firstUnfinalized; b <= batchEnd; b++ {
-			if err := finalizeBlock(b, batch.TxNum(b)); err != nil {
+			if err = finalizeBlock(b, batch.TxNum(b)); err != nil {
 				batch.Close()
 				return nil, err
 			}
@@ -799,7 +806,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		blockFrom = batchEnd + 1
 
-		if err := flushDomainsAndRebuild(); err != nil {
+		if err = flushDomainsAndRebuild(); err != nil {
 			return nil, err
 		}
 	}
@@ -823,7 +830,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	logger.Info("[rebuild_commitment_history] merging built files")
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, lastToTxNum)
+		var somethingMerged bool
+		somethingMerged, err = a.mergeLoopStep(ctx, lastToTxNum)
 		if err != nil {
 			return nil, fmt.Errorf("[rebuild_commitment_history] merge: %w", err)
 		}
@@ -960,7 +968,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			continue
 		}
 
-		roTx, err := rwDb.BeginRo(ctx)
+		var roTx kv.Tx
+		roTx, err = rwDb.BeginRo(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -998,17 +1007,21 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		var rebuiltCommit *rebuiltCommitment
 		var processed uint64
 
-		streamAcc, err := acRo.FileStream(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
+		var streamAcc stream.KV
+		streamAcc, err = acRo.FileStream(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
 		if err != nil {
 			return nil, err
 		}
-		streamSto, err := acRo.FileStream(kv.StorageDomain, rangeFromTxNum, rangeToTxNum)
+		var streamSto stream.KV
+		streamSto, err = acRo.FileStream(kv.StorageDomain, rangeFromTxNum, rangeToTxNum)
 		if err != nil {
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
 		// blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
-		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		var blockNum uint64
+		var ok bool
+		blockNum, ok, err = txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
@@ -1043,7 +1056,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return true, k
 			}
 
-			rwTx, err := rwDb.BeginTemporalRw(ctx)
+			var rwTx kv.TemporalRwTx
+			rwTx, err = rwDb.BeginTemporalRw(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -1051,7 +1065,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			iterTrieCfg := rebuildTrieCfg
 			iterTrieCfg.Variant = trieVariant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
+			var domains *execctx.SharedDomains
+			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
 			if err != nil {
 				return nil, err
 			}
@@ -1120,7 +1135,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			"block", blockNum, "totalKeysProcessed", common.PrettyCounter(totalKeysCommitted), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 		for {
-			smthDone, err := a.mergeLoopStep(ctx, rangeToTxNum)
+			var smthDone bool
+			smthDone, err = a.mergeLoopStep(ctx, rangeToTxNum)
 			if err != nil {
 				return nil, err
 			}

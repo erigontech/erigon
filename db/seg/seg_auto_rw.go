@@ -280,7 +280,7 @@ func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFun
 				continue
 			}
 		}
-		if _, err := w.Write(word); err != nil {
+		if _, err = w.Write(word); err != nil {
 			return err
 		}
 	}

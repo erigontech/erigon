@@ -257,7 +257,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
 			}
 		}
@@ -371,7 +371,8 @@ func tableScanningPrune(
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
-			dups, err := valDelCursor.CountDuplicates()
+			var dups uint64
+			dups, err = valDelCursor.CountDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("count dups %s: %w", filenameBase, err)
 			}

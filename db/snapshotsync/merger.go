@@ -362,7 +362,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		if err := func() error {
+		if err = func() error {
 			view, err := d.OpenSequentialView()
 			if err != nil {
 				return err
@@ -383,7 +383,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	if f.Count() != expectedTotal {
 		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
-	if err := f.Compress(); err != nil {
+	if err = f.Compress(); err != nil {
 		return nil, err
 	}
 	sn := &DirtySegment{

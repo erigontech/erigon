@@ -40,7 +40,8 @@ func generateVarLenKV(tb testing.TB, tmp string, keyCount int, logger log.Logger
 			continue
 		}
 		seen[string(key)] = struct{}{}
-		n, err := rnd.Read(val[:rnd.IntN(16)+1])
+		var n int
+		n, err = rnd.Read(val[:rnd.IntN(16)+1])
 		require.NoError(tb, err)
 		require.NoError(tb, collector.Collect(key, val[:n]))
 	}

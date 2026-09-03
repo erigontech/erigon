@@ -240,7 +240,8 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		}
 	} else {
 		// Find canonical block
-		canonicalBlockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+		var canonicalBlockRoot common.Hash
+		canonicalBlockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
@@ -300,7 +301,8 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 	}
 
 	if *slot > r.sn.BlocksAvailable() {
-		h, _, err := beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
+		var h *cltypes.SignedBeaconBlockHeader
+		h, _, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, root)
 		return h, err
 	}
 	// Find canonical block

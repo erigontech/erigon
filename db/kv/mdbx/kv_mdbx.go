@@ -198,7 +198,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {
-			exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			var exists bool
+			exists, err = dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
 			if err != nil {
 				return nil, err
 			}
@@ -232,13 +233,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			return nil, fmt.Errorf("db verbosity set: %w", err)
 		}
 	}
-	if err := env.SetOption(mdbx.OptMaxDB, 200); err != nil {
+	if err = env.SetOption(mdbx.OptMaxDB, 200); err != nil {
 		return nil, err
 	}
-	if err := env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
+	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	if err := env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
 		return nil, err
 	}
 
@@ -248,14 +249,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if !opts.HasFlag(mdbx.Accede) && !exists {
-		if err := env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
 	} else if exists {
-		if err := env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
+		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
 			return nil, err
 		}
 	}
@@ -276,19 +277,21 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		//	return nil, err
 		//}
 
-		txnDpInitial, err := env.GetOption(mdbx.OptTxnDpInitial)
+		var txnDpInitial uint64
+		txnDpInitial, err = env.GetOption(mdbx.OptTxnDpInitial)
 		if err != nil {
 			return nil, err
 		}
 		if opts.label == dbcfg.ChainDB {
-			if err := env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
+			if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
 				return nil, err
 			}
-			dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
+			var dpReserveLimit uint64
+			dpReserveLimit, err = env.GetOption(mdbx.OptDpReverseLimit)
 			if err != nil {
 				return nil, err
 			}
-			if err := env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+			if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
 				return nil, err
 			}
 		}
@@ -311,13 +314,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/requestedPageSize.Bytes()); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/requestedPageSize.Bytes()); err != nil {
 			return nil, err
 		}
 
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
 		// which corresponds to the range from 8192 and to 32768 in units respectively
-		if err := env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
+		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
 			return nil, err
 		}
 	}
@@ -340,7 +343,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	// an existing db, so a stale limit would scale the dirty-page memory by the size ratio.
 	// Accede must stay lock-free here - SetOption after Open takes the rwtx-lock.
 	if dirtySpace > 0 && opts.pageSize != requestedPageSize && !opts.HasFlag(mdbx.Accede) {
-		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize.Bytes()); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize.Bytes()); err != nil {
 			return nil, fmt.Errorf("%w, label: %s", err, opts.label)
 		}
 	}
@@ -934,7 +937,8 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	wrappers := make([]kv.Cursor, n)
 	cursors := make([]*mdbx.Cursor, n)
 	for i := range wrappers {
-		cw, err := tx.Cursor(table)
+		var cw kv.Cursor
+		cw, err = tx.Cursor(table)
 		if err != nil {
 			return nil, err
 		}
