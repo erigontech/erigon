@@ -1580,3 +1580,63 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	t.Cleanup(c2.Close)
 	require.True(t, c2.FillsEnabled())
 }
+
+func TestPublishUsesProducerCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(7)
+	code := bytes.Repeat([]byte{0xab}, 96)
+	var sentinel [32]byte
+	sentinel[0] = 0xc0
+	sentinel[31] = 0xde
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: sentinel[:],
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
+	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.False(t, ok, "the cache must not re-derive a hash of its own")
+
+	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+}
+
+// A malformed producer hash must be re-derived, not used: it would file the entry
+// under a content address no reader queries, since lookups pass a 32-byte keccak.
+func TestPublishDerivesMalformedCodeHash(t *testing.T) {
+	t.Parallel()
+
+	c := closeOnCleanup(t, NewDefaultStateCache())
+	c.Applier().Initialize(1)
+
+	addr := makeAddr(9)
+	code := bytes.Repeat([]byte{0xcd}, 64)
+	short := []byte{0x01, 0x02, 0x03}
+
+	c.Applier().Publish(1, 2, []StateUpdate{{
+		Domain:   kv.CodeDomain,
+		Key:      addr,
+		Value:    code,
+		CodeHash: short,
+		TxNum:    20,
+	}})
+
+	got, ok := c.View(nil).GetCodeByHash(crypto.Keccak256(code))
+	require.True(t, ok, "a short producer hash must be replaced by the derived one")
+	require.Equal(t, code, got)
+
+	_, ok = c.View(nil).GetCodeByHash(short)
+	require.False(t, ok, "the short hash must not key the entry")
+}
