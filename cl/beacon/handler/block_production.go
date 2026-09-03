@@ -848,7 +848,7 @@ func (a *ApiHandler) produceBlock(
 		defer func() {
 			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		if shouldRequestBuilderHeader(stateVersion, a.routerCfg.Builder, a.builderClient != nil) {
+		if shouldRequestBuilderHeader(stateVersion) {
 			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
 			if builderErr != nil && !errors.Is(builderErr, errBuilderNotEnabled) {
 				log.Warn("Failed to get builder payload", "err", builderErr)
@@ -924,9 +924,9 @@ func (a *ApiHandler) produceBlock(
 	return block, nil
 }
 
-func shouldRequestBuilderHeader(stateVersion clparams.StateVersion, builderEnabled, clientAvailable bool) bool {
+func shouldRequestBuilderHeader(stateVersion clparams.StateVersion) bool {
 	// Gloas receives external builder bids through ePBS gossip instead of the legacy Builder API.
-	return stateVersion.Before(clparams.GloasVersion) && builderEnabled && clientAvailable
+	return stateVersion.Before(clparams.GloasVersion)
 }
 
 func preferLocalExecutionValue(localValueWei, builderValueWei *big.Int, boostFactor uint64) bool {

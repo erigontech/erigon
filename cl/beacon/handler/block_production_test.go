@@ -763,10 +763,8 @@ func TestPreferLocalExecutionValueRejectsNilBuilderValue(t *testing.T) {
 }
 
 func TestShouldRequestBuilderHeader(t *testing.T) {
-	require.True(t, shouldRequestBuilderHeader(clparams.FuluVersion, true, true))
-	require.False(t, shouldRequestBuilderHeader(clparams.GloasVersion, true, true))
-	require.False(t, shouldRequestBuilderHeader(clparams.FuluVersion, false, true))
-	require.False(t, shouldRequestBuilderHeader(clparams.FuluVersion, true, false))
+	require.True(t, shouldRequestBuilderHeader(clparams.FuluVersion))
+	require.False(t, shouldRequestBuilderHeader(clparams.GloasVersion))
 }
 
 func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
