@@ -132,6 +132,9 @@ func splitCellFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 		copy(out.hashedExtension[:], out.extension[:out.extLen])
 	} else {
 		out = child
+		copy(out.hashedExtension[1:], child.hashedExtension[:child.hashedExtLen])
+		out.hashedExtension[0] = byte(survNib)
+		out.hashedExtLen = min(child.hashedExtLen+1, int16(len(out.hashedExtension)))
 	}
 	return out, nil
 }
