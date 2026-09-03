@@ -80,7 +80,9 @@ Real numbers from Erigon 3.6 archive nodes (`--prune.mode=archive`, default prun
 
 Block segments — headers, bodies and transactions — sit directly in `snapshots/` rather than in a sub-folder, and on mainnet they are the single largest item.
 
-Data that is off by default is excluded above. On the same mainnet node it would add 441 GB for the receipts cache (`--prune.include-receipts`), 4.4 TB for commitment history (`--prune.include-commitment-history`), and 2.5 TB for the Caplin block, blob and state archive.
+The receipts cache was still off by default when these nodes were measured, so the table excludes it. It is on by default from 3.7 and adds about 441 GB on a mainnet archive, which keeps receipts for every block. Minimal and full nodes keep receipts only for their history window, so they pay a few GB.
+
+Data that is off by default is excluded above. On the same mainnet node it would add 4.4 TB for commitment history (`--prune.include-commitment-history`) and 2.5 TB for the Caplin block, blob and state archive.
 
 Each column is one node, so totals differ slightly from the headline figures on [Hardware Requirements](../get-started/hardware-requirements), which are measured on freshly synced nodes.
 

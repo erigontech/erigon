@@ -1832,9 +1832,9 @@ Snapshots are organised into several subdirectories. The main ones are:
 - You can replay a single historical transaction without re-executing its block.
 - If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
 - Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a
-  **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in
-  every prune mode (opt in with `--prune.include-receipts`). When a full receipt isn't cached, it is reconstructed on
-  demand, re-deriving logs by re-execution.
+  **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **on by default** in
+  every prune mode (opt out with `--prune.include-receipts=false`). When a full receipt isn't cached, it is
+  reconstructed on demand, re-deriving logs by re-execution.
 
 ## What does it cost on disk?
 
@@ -1852,7 +1852,9 @@ Real numbers from Erigon 3.6 archive nodes (`--prune.mode=archive`, default prun
 
 Block segments — headers, bodies and transactions — sit directly in `snapshots/` rather than in a sub-folder, and on mainnet they are the single largest item.
 
-Data that is off by default is excluded above. On the same mainnet node it would add 441 GB for the receipts cache (`--prune.include-receipts`), 4.4 TB for commitment history (`--prune.include-commitment-history`), and 2.5 TB for the Caplin block, blob and state archive.
+The receipts cache was still off by default when these nodes were measured, so the table excludes it. It is on by default from 3.7 and adds about 441 GB on a mainnet archive, which keeps receipts for every block. Minimal and full nodes keep receipts only for their history window, so they pay a few GB.
+
+Data that is off by default is excluded above. On the same mainnet node it would add 4.4 TB for commitment history (`--prune.include-commitment-history`) and 2.5 TB for the Caplin block, blob and state archive.
 
 Each column is one node, so totals differ slightly from the headline figures on [Hardware Requirements](../get-started/hardware-requirements), which are measured on freshly synced nodes.
 
@@ -1938,9 +1940,8 @@ In order to switch type of node, you must first delete the `/chaindata` folder i
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-As of v3.6 they are disabled by default in every pruning mode on **fresh datadirs** (previously they were enabled by
-default for all modes except Archive); enable them with the flag `--prune.include-receipts` (the former
-`--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
+They are enabled by default in every pruning mode on **fresh datadirs**; turn them off with
+`--prune.include-receipts=false` (the former `--persist.receipts` still works as an alias). An **existing datadir keeps the setting it was created with**: if the
 flag disagrees with the stored value, Erigon logs a warning and uses the stored value — changing it requires a fresh
 datadir. Without the cache, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
 working within the node's state-history window, just with higher latency.
@@ -2265,7 +2266,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--ethstats value`: The reporting URL for an ethstats service.
 * `--trusted-setup-file value`: Absolute path to a `trusted_setup.json` file.
 * `--prune.include-receipts, --persist.receipts, --experiment.persist.receipts.v2`: Downloads and caches historical receipts. Without it, receipts and logs are re-derived on demand from state history, so the related RPC calls still work, just with higher latency.
-  * Default: `false` (disabled) in every prune mode
+  * Default: `true` (enabled) in every prune mode, on fresh datadirs
 * `--keep.stored.chain.config`: Avoids overriding the chain configuration already stored in the database.
   * Default: `false`
 

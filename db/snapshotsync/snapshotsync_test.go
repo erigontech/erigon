@@ -22,11 +22,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/db/config3"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/stretchr/testify/assert"
-
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
