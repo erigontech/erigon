@@ -179,6 +179,9 @@ type GenericCache[T any] struct {
 
 	shardCount uint32
 
+	// currentSize is the logical payload held, a statistic — it is well under
+	// capacityB, which reservedBytes (payload plus slot arrays) is measured
+	// against instead.
 	currentSize atomic.Int64
 
 	// enveloped is set only when the cache draws from the shared envelope (via
@@ -480,18 +483,11 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		}
 	}
 
-	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
-	// not a separate currentSize check: capacityEntries is derived from
-	// capacityB (capacityB/avgBytesPerEntry, see NewGenericCache /
-	// newDomainCacheBytes), so once the slot cap is reached the per-shard LRU
-	// evicts the oldest entry inside freelru.Add and currentSize settles at
-	// ≈ maxCap × avg, which is capacityB less what the slot arrays take. For the
-	// near-fixed-size domains this
-	// caches (account ~96 B, storage ~88 B) the variance against avg is small, so
-	// currentSize tracks capacityB closely rather than running away — freelru
-	// exposes no evict-until-bytes-fit primitive to enforce it more tightly.
-	// Eviction is per-shard, not globally-LRU — same trade-off code_cache.go /
-	// balcache.go / db/state/cache.go accept.
+	// ModeEvictLRU has no currentSize check: the budget is enforced by maxCap,
+	// which budgetedSlots derives from capacityB counting both the payload and
+	// the slot arrays. freelru exposes no evict-until-bytes-fit primitive, and
+	// eviction is per-shard rather than globally-LRU — the same trade-off
+	// code_cache.go / balcache.go / db/state/cache.go accept.
 
 	// hasExisting here means a 64-bit maphash collision (different key, same
 	// hash): the colliding entry has to be displaced through Replace so its
