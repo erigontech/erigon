@@ -173,8 +173,18 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	defer UpdateForkChoiceDuration(time.Now())
 	// The next semaphore acquirer must observe settled state, so the bg-commit/
 	// bg-prune paths run this eagerly before handing the semaphore to their goroutine.
+	// Do NOT clear a RUN-AHEAD extending fork. In the frontier flow the atomic marker opens N+1 the instant
+	// N is sealed, so by the time N's FCU lands the ACTIVE extending fork is N+1 while this FCU canonicalises
+	// N from a PARKED gen (see PromoteBlock below). Clearing here closes N+1's live SharedDomains — the
+	// successor PromoteBlock deliberately kept alive — so the next assemble finds no extending fork and, since
+	// that bail returns before SealBlock's open-N+1 step, no successor is ever opened again. InsertBlocks
+	// guards the same state via frontierExtension; this is the FCU's equivalent.
+	var fcuNumber uint64
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
 		e.currentContext.ResetPendingUpdates()
+		if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && e.forkValidator.FrontierMode() && extNum > fcuNumber {
+			return
+		}
 		e.forkValidator.ClearWithUnwind()
 	})
 	defer cleanupBeforeSemaRelease()
@@ -270,6 +280,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
+	fcuNumber = fcuHeader.Number.Uint64()              // read by cleanupBeforeSemaRelease (run-ahead fork guard)
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {

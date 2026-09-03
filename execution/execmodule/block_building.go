@@ -179,10 +179,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, bool, error) {
 	oldHash, number, sd := e.forkValidator.ExtendingFork()
 	if sd == nil || oldHash == (common.Hash{}) {
-		e.logger.Debug("assemblePreconfirmed: no extending fork — from-scratch builder", "reqParent", params.ParentHash)
+		e.logger.Warn("[ATTRS-SEAL] bail: no extending fork", "reqParent", params.ParentHash, "sdNil", sd == nil, "oldHash", oldHash)
 		return nil, false, nil // no preconfirmed flashblock → from-scratch builder
 	}
 	if e.currentContext == nil || e.currentContext.BlockOverlay() == nil {
+		e.logger.Warn("[ATTRS-SEAL] bail: no currentContext/overlay", "reqParent", params.ParentHash)
 		return nil, false, nil
 	}
 
@@ -203,6 +204,8 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 		return nil, false, herr
 	}
 	if inHdr == nil || body == nil {
+		e.logger.Warn("[ATTRS-SEAL] bail: nil in-progress header/body", "extForkNum", number, "oldHash", oldHash,
+			"hdrNil", inHdr == nil, "bodyNil", body == nil)
 		return nil, false, nil
 	}
 	// The preconfirmed block must be for THIS build (same parent) and must have accumulated under the same
@@ -211,8 +214,26 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	if inHdr.ParentHash != params.ParentHash || !preconfirmAttrsMatch(inHdr, params) {
 		// The accumulated flashblock's attributes diverge from the FCU params — fall back to the
 		// from-scratch builder rather than seal a header inconsistent with the requested block.
-		e.logger.Debug("assemblePreconfirmed: preconfirmed block parent/attrs mismatch — from-scratch builder",
-			"extForkNum", number, "reqParent", params.ParentHash)
+		var pbbrReq common.Hash
+		if params.ParentBeaconBlockRoot != nil {
+			pbbrReq = *params.ParentBeaconBlockRoot
+		}
+		var pbbrHdr common.Hash
+		if inHdr.ParentBeaconBlockRoot != nil {
+			pbbrHdr = *inHdr.ParentBeaconBlockRoot
+		}
+		whReq := types.DeriveSha(types.Withdrawals(params.Withdrawals))
+		var whHdr common.Hash
+		if inHdr.WithdrawalsHash != nil {
+			whHdr = *inHdr.WithdrawalsHash
+		}
+		e.logger.Warn("[ATTRS-SEAL] preconfirmed parent/attrs mismatch — from-scratch builder",
+			"extForkNum", number, "parentOK", inHdr.ParentHash == params.ParentHash,
+			"hdrParent", inHdr.ParentHash, "reqParent", params.ParentHash,
+			"tsOK", inHdr.Time == params.Timestamp, "hdrTs", inHdr.Time, "reqTs", params.Timestamp,
+			"randaoOK", inHdr.MixDigest == params.PrevRandao,
+			"coinbaseOK", inHdr.Coinbase == params.SuggestedFeeRecipient,
+			"beaconRootOK", pbbrHdr == pbbrReq, "wdOK", whHdr == whReq)
 		return nil, false, nil
 	}
 
@@ -311,7 +332,19 @@ func (e *ExecModule) SealBlock(ctx context.Context, params *builder.Parameters, 
 // (so block-start re-runs under the CL attrs and the sealed root matches a follower's re-execution). Caller MUST
 // hold e.semaphore.
 func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *builder.Parameters, forceEmpty bool) error {
+	// The fork validator — not e.flash — is the authority on whether a block is actually open: it holds the
+	// in-progress SharedDomains that assemblePreconfirmed seals from. The two can disagree, because a clear on
+	// the fork validator (FCU cleanup, InsertBlocks) does NOT touch e.flash. Trusting e.flash alone then leaves
+	// this reconcile believing a block is still open while its SD is gone, so nothing re-opens, the seal bails
+	// "no extending fork", and — since that bail returns before SealBlock's open-N+1 step — every later assemble
+	// bails the same way. Treat "no SD" as "not open" and re-open fresh (resetting the stale body, which
+	// preExecuteFlashblockLocked would otherwise keep: it only auto-resets on a NEW block number).
+	_, _, extSD := e.forkValidator.ExtendingFork()
+
 	e.flash.mu.Lock()
+	if extSD == nil {
+		e.flash.resetLocked(0)
+	}
 	recorded := e.flash.valid
 	empty := len(e.flash.body) == 0
 	built := e.flash.built

@@ -702,6 +702,10 @@ func (fv *ForkValidator) InFlashblock(blockNumber uint64) bool {
 func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	if fv.extendingForkNumber != 0 || fv.sharedDom != nil {
+		log.Warn("[FORK-CLEAR] wiping extending fork", "num", fv.extendingForkNumber,
+			"flashTxs", len(fv.flashblockTxHashes), "frontierMode", fv.frontierMode, "sdNil", fv.sharedDom == nil)
+	}
 	fv.clear()
 }
 
