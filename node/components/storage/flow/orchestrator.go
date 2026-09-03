@@ -956,13 +956,15 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		return
 	}
 
-	// Drop peer block entries whose range starts at or below our local
-	// block tip. Mirrors filterDiscoveredByLocalTip on the discovery-merge
-	// path: a peer's manifest may still list pre-unwind wide files we
+	// Drop peer block entries that overlap what we already hold: a
+	// peer's manifest may still list pre-unwind wide files we
 	// deliberately trimmed, and re-fetching them re-materialises the
 	// visible-set drift that InsertBlocks's frozen-skip check depends on
-	// staying stable. Pass-through when we have no block files yet
-	// (bootstrap) so peer-driven catch-up still works.
+	// staying stable. Entries above our tip are kept — that is the
+	// peer-driven catch-up this path exists to serve, and it is why this
+	// filter is not the publish-side filterDiscoveredByLocalTip rule
+	// inverted: one decides what we can advertise, this one what we
+	// still need to fetch.
 	if domain == "" {
 		peerEntries = filterPeerBlockEntriesByLocalTip(peerEntries, o.storage.Inventory())
 	}
@@ -1667,11 +1669,19 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	o.maybeFireInitialDownloadsComplete()
 }
 
-// filterPeerBlockEntriesByLocalTip drops peer block-file entries whose
-// FromBlock falls at or below our local block tip — overlap with what
-// mode-B unwind trimmed and would re-materialise into the aggregator's
-// visible set. Cold-start pass-through (no local block files) so first-
-// time bootstrap can still fetch every peer-advertised block file.
+// filterPeerBlockEntriesByLocalTip drops peer block-file entries that
+// overlap what we already hold — pre-unwind wide files a peer still
+// lists, which would re-materialise into the aggregator's visible set.
+// Ranges are half-open, so an entry starting exactly at the tip is the
+// next range we lack and is kept; only FromBlock strictly below the tip
+// overlaps. Cold-start pass-through (no local block files) so first-time
+// bootstrap can still fetch every peer-advertised block file.
+//
+// Both sides are read on the block axis. Block files carry no step range
+// (snapshot.FileEntry documents FromStep/ToStep as zero for them until a
+// commitment binding establishes one), so comparing FromStep against a
+// ToBlock-derived tip reads every entry as 0 and drops the whole
+// manifest the moment a node holds any block file.
 func filterPeerBlockEntriesByLocalTip(peerEntries []*snapshot.FileEntry, inv *snapshot.Inventory) []*snapshot.FileEntry {
 	if inv == nil {
 		return peerEntries
@@ -1693,7 +1703,7 @@ func filterPeerBlockEntriesByLocalTip(peerEntries []*snapshot.FileEntry, inv *sn
 		if e == nil {
 			continue
 		}
-		if e.FromStep <= localTip {
+		if e.FromBlock < localTip {
 			continue
 		}
 		out = append(out, e)
