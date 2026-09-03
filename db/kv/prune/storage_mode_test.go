@@ -399,13 +399,6 @@ func TestIsCommitmentHistoryRetentionPolicy(t *testing.T) {
 	assert.False(t, isCommitmentHistoryRetentionPolicy(KeepPostMergeBlocksPruneMode))
 }
 
-func TestIsFiniteDistanceRejectsSentinels(t *testing.T) {
-	assert.True(t, isFiniteDistance(Distance(100_000)))
-	assert.False(t, isFiniteDistance(KeepPostMergeBlocksPruneMode))
-	assert.False(t, isFiniteDistance(KeepAllBlocksPruneMode))
-	assert.False(t, isFiniteDistance(KeepAllReceiptsPruneMode))
-}
-
 func TestIsRetentionWindowChange_CommitmentHistory(t *testing.T) {
 	base := func(ch BlockAmount) Mode {
 		return Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144), CommitmentHistory: ch}

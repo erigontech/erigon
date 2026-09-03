@@ -913,8 +913,8 @@ func TestDUComputeEstimatesCoversExpandedDefaultWindow(t *testing.T) {
 	)
 	currentBlockCutoff := maxBlock - uint64(config3.DefaultPruneDistance)
 	previousBlockCutoff := maxBlock - previousDefault
-	currentStepWindow := duStepDistance(uint64(config3.DefaultPruneDistance), maxBlock, maxStep)
-	previousStepWindow := duStepDistance(previousDefault, maxBlock, maxStep)
+	currentStepWindow := (uint64(config3.DefaultPruneDistance)*maxStep + maxBlock - 1) / maxBlock
+	previousStepWindow := (previousDefault*maxStep + maxBlock - 1) / maxBlock
 	currentStepCutoff := maxStep - currentStepWindow
 	previousStepCutoff := maxStep - previousStepWindow
 
