@@ -124,7 +124,7 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
 
-	tr.pre[deletedAddr] = &account{Balance: big.NewInt(0)}
+	tr.pre[deletedAddr] = &account{Balance: (*hexutil.Big)(big.NewInt(0))}
 
 	tr.env = &tracing.VMContext{
 		IntraBlockState: &postTxIBS{deletedAddr: deletedAddr},
@@ -167,7 +167,7 @@ func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {
 
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
 
-	tr.pre[addr] = &account{Balance: big.NewInt(0)}
+	tr.pre[addr] = &account{Balance: (*hexutil.Big)(big.NewInt(0))}
 
 	tr.env = &tracing.VMContext{
 		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
@@ -189,7 +189,7 @@ func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true})
 
 	tr.pre[addr] = &account{
-		Balance: big.NewInt(0),
+		Balance: (*hexutil.Big)(big.NewInt(0)),
 		Storage: map[common.Hash]common.Hash{
 			common.HexToHash("0x01"): {},
 		},
@@ -239,4 +239,13 @@ func TestOnlyNilPointersAreOmitted(t *testing.T) {
 	require.NotContains(t, string(b), `"value"`)
 	require.NotContains(t, string(b), `"to"`)
 	require.Contains(t, string(b), `"input":"0x"`, "input carries no omitempty")
+}
+
+// A MarshalJSON on account makes encoding/json re-parse every account's bytes
+// while encoding the map that holds them. Reflection over the wire types does
+// not.
+func TestAccountHasNoJSONMarshaler(t *testing.T) {
+	t.Parallel()
+	_, bad := any(&account{}).(json.Marshaler)
+	require.False(t, bad, "account must not implement json.Marshaler")
 }
