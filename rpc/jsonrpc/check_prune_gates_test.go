@@ -104,6 +104,65 @@ func TestPruneGateArchive(t *testing.T) {
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
 }
 
+func TestTransactionEndpointsUseBlocksPruneGate(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: prune.Distance(2)},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header, err := apis.eth._blockReader.HeaderByNumber(ctx, tx, chainInfo.old.num)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	tx.Rollback()
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"debug_getRawBlock", func() error {
+			_, err := apis.debug.GetRawBlock(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)))
+			return err
+		}},
+		{"debug_getRawTransaction", func() error {
+			_, err := apis.debug.GetRawTransaction(ctx, chainInfo.old.txHash)
+			return err
+		}},
+		{"eth_callBundle", func() error {
+			_, err := apis.eth.CallBundle(ctx, []common.Hash{chainInfo.old.txHash}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), nil)
+			return err
+		}},
+		{"erigon_getBlockByTimestamp", func() error {
+			_, err := apis.erigon.GetBlockByTimestamp(ctx, rpc.Timestamp(header.Time), false)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.ErrorIs(t, tc.call(), state.PrunedError)
+		})
+	}
+}
+
+func TestBlockTransactionCountsDoNotNeedTransactions(t *testing.T) {
+	t.Parallel()
+
+	wide := prune.Distance(pruneGatingChainLen * 3)
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: wide, Blocks: prune.Distance(2)},
+	})
+
+	byNumber, err := apis.eth.GetBlockTransactionCountByNumber(t.Context(), rpc.BlockNumber(chainInfo.old.num))
+	require.NoError(t, err)
+	require.NotNil(t, byNumber)
+	byHash, err := apis.eth.GetBlockTransactionCountByHash(t.Context(), chainInfo.old.hash)
+	require.NoError(t, err)
+	require.NotNil(t, byHash)
+}
+
 // TestReceiptsGateFollowsRetention pins checkReceiptsAvailable against the
 // retention actually applied to the receipt cache. Enabling the cache says
 // only that it exists on disk, not how much of it is kept: RCacheDomain is
