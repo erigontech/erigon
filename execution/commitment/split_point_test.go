@@ -790,7 +790,7 @@ func TestSplitPoint_KeyedSurvivorCollapse(t *testing.T) {
 
 			survHK := KeyToHexNibbleHash(surv)
 			var later []byte
-			for x := byte(0); x < 16; x++ {
+			for x := range byte(16) {
 				if x == 0xf || x == survHK[len(prefix)+1] {
 					continue
 				}

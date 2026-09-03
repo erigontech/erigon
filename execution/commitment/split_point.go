@@ -122,7 +122,7 @@ func splitCellFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 
 	var out cell
 	d := base.depths[0]
-	if child.hashLen > 0 && ((child.accountAddrLen == 0 && d < 64) || (child.storageAddrLen == 0 && d > 64)) {
+	if child.hashLen > 0 && child.keylessInPlane(d) {
 		out.extLen = child.extLen + 1
 		out.extension[0] = byte(survNib)
 		copy(out.extension[1:], child.extension[:child.extLen])
