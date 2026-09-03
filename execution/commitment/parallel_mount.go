@@ -18,10 +18,12 @@ var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 // above this touched-slot count, storage subtree folds concurrently instead of streaming through one worker
 const deepStorageThreshold = 128
 
+const topNibbles = 16
+
 const deepStorageShareDivisor = 4
 
 func deepStorageThresholdFor(roundKeys uint32) int {
-	return max(deepStorageThreshold, int(roundKeys)/(16*deepStorageShareDivisor))
+	return max(deepStorageThreshold, int(roundKeys)/topNibbles/deepStorageShareDivisor)
 }
 
 func parallelMountConcurrency(numWorkers int) int {
