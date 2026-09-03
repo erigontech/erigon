@@ -994,7 +994,7 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		return baseState, blockMachine, err
 	}
 
-	// ProcessBlock mutates state, so keep baseState untouched for a possible self-build fallback.
+	// Process the external candidate on copies so the self-build remains available as a fallback.
 	candidateState, err := baseState.Copy()
 	if err != nil {
 		log.Warn("GLOAS: failed to copy state for external bid; using self-build",
@@ -1006,15 +1006,17 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		return baseState, blockMachine, processErr
 	}
 
-	selfBlobs := block.Blobs
-	selfKzgProofs := block.KzgProofs
-	block.BeaconBody.SignedExecutionPayloadBid = externalBid
-	block.Blobs = nil
-	block.KzgProofs = nil
-	block.ExecutionValue = selectedValueWei
+	candidateBlock := *block
+	candidateBody := *block.BeaconBody
+	candidateBlock.BeaconBody = &candidateBody
+	candidateBlock.BeaconBody.SignedExecutionPayloadBid = externalBid
+	candidateBlock.Blobs = nil
+	candidateBlock.KzgProofs = nil
+	candidateBlock.ExecutionValue = selectedValueWei
 
-	candidateMachine, candidateErr := processBlock(candidateState, block)
+	candidateMachine, candidateErr := processBlock(candidateState, &candidateBlock)
 	if candidateErr == nil {
+		*block = candidateBlock
 		log.Info("GLOAS: selected external builder bid over self-build",
 			"slot", block.Slot,
 			"builderIndex", externalBid.Message.BuilderIndex,
@@ -1023,10 +1025,6 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		return candidateState, candidateMachine, nil
 	}
 
-	block.BeaconBody.SignedExecutionPayloadBid = selfBid
-	block.Blobs = selfBlobs
-	block.KzgProofs = selfKzgProofs
-	block.ExecutionValue = selfExecutionValue
 	selfBuildMachine, selfBuildErr := processBlock(baseState, block)
 	if selfBuildErr != nil {
 		return baseState, selfBuildMachine, fmt.Errorf(
