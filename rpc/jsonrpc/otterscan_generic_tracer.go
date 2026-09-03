@@ -34,6 +34,9 @@ type GenericTracer interface {
 }
 
 func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return err
+	}
 	executor := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
 	defer executor.Close()
 

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -497,15 +498,41 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 	if err != nil {
 		return err
 	}
-	if expiry {
-		if mergeHeight == nil || block >= *mergeHeight {
-			return nil
-		}
+	if expiry && mergeHeight != nil && block < *mergeHeight {
 		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
+	}
+	if tx == nil {
+		return nil
 	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
 		return api.minimumBlockAvailable(ctx, tx, head)
 	})
+}
+
+// blocksAvailableFrom combines the configured policy, any chain-history expiry,
+// and the physical block-data floor into the effective block boundary.
+func (api *BaseAPI) blocksAvailableFrom(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
+	p, err := api.pruneMode(tx)
+	if err != nil {
+		return 0, err
+	}
+	floor := uint64(0)
+	if p != nil {
+		floor = p.Blocks.PruneTo(head)
+	}
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if expiry && mergeHeight != nil {
+		floor = max(floor, *mergeHeight)
+	}
+	onDiskFloor, err := api.minimumBlockAvailable(ctx, tx, head)
+	if err != nil {
+		return 0, err
+	}
+	floor = max(floor, onDiskFloor)
+	return floor, nil
 }
 
 func (api *BaseAPI) stateHistoryStartBlock(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
@@ -519,7 +546,10 @@ func (api *BaseAPI) readStateHistoryStartBlock(ctx context.Context, tx kv.Tx, he
 	if !ok {
 		return 0, nil
 	}
-	startTxNum := state.StateHistoryStartTxNum(ttx)
+	startTxNum, err := stateHistoryStartTxNum(ttx.Debug())
+	if err != nil {
+		return 0, err
+	}
 	if startTxNum == 0 {
 		return 0, nil
 	}
@@ -528,15 +558,75 @@ func (api *BaseAPI) readStateHistoryStartBlock(ctx context.Context, tx kv.Tx, he
 		return 0, err
 	}
 	if ok {
+		blockStartTxNum, err := api._txNumReader.Min(ctx, tx, block)
+		if err != nil {
+			return 0, err
+		}
+		if startTxNum > blockStartTxNum {
+			return min(block+1, head), nil
+		}
 		return block, nil
 	}
+	// No historical block can be proven available; the current state remains readable.
 	return head, nil
 }
 
+// historyStartFromWithError distinguishes an empty history from a backend failure.
+type historyStartFromWithError interface {
+	HistoryStartFromWithError(kv.Domain) (uint64, error)
+}
+
+func stateHistoryStartTxNum(tx kv.TemporalDebugTx) (uint64, error) {
+	var start uint64
+	// A later first entry can mean that a domain had no earlier changes, rather
+	// than that its history was pruned. Sparse domains must not move the common
+	// history floor forward.
+	for i, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		var domainStart uint64
+		if withErr, ok := tx.(historyStartFromWithError); ok {
+			var err error
+			domainStart, err = withErr.HistoryStartFromWithError(domain)
+			if err != nil {
+				return 0, err
+			}
+		} else {
+			domainStart = tx.HistoryStartFrom(domain)
+		}
+		if i == 0 || domainStart < start {
+			start = domainStart
+		}
+	}
+	return start, nil
+}
+
 func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
-	return api._blocksPruneFloor.get(ctx, head, func() (uint64, error) {
-		return api._blockReader.MinimumBlockAvailable(ctx, tx)
+	key := pruneFloorCacheKey{head: head, snapshotGeneration: blockFilesGeneration(tx)}
+	return api._blocksPruneFloor.getForKey(ctx, key, func() (uint64, error) {
+		floor, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
+		if err != nil {
+			return 0, err
+		}
+		// The MDBX scan intentionally starts after genesis. A result of one means
+		// genesis is also available, not that it was pruned.
+		if floor == 1 {
+			return 0, nil
+		}
+		return floor, nil
 	})
+}
+
+// blockFilesGeneration returns zero when tx has no local pinned snapshot view;
+// those callers rely on the cache TTL to refresh their physical floor.
+func blockFilesGeneration(tx kv.Tx) uint64 {
+	provider, ok := tx.(interface{ BlockFilesRoTx() *blocksnapshots.View })
+	if !ok {
+		return 0
+	}
+	view := provider.BlockFilesRoTx()
+	if view == nil {
+		return 0
+	}
+	return view.Generation()
 }
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
@@ -769,9 +859,6 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return nil
 	}
 	amount := field(p)
-	if !amount.Enabled() {
-		return nil
-	}
 	latest, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return err

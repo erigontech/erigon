@@ -18,36 +18,39 @@ package jsonrpc
 
 import (
 	"context"
-	"sync/atomic"
+	"sync"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 )
 
-type pruneFloorAtHead struct {
-	head      uint64
+type pruneFloorValue struct {
 	floor     uint64
 	expiresAt time.Time
 }
 
-const defaultPruneFloorCacheTTL = time.Second
-
-// pruneFloorCache briefly caches successful floor reads for an exact chain head
-// and coalesces concurrent requests. The lifetime also bounds staleness when the
-// available files change without moving the head.
-type pruneFloorCache struct {
-	value atomic.Pointer[pruneFloorAtHead]
-	load  singleflight.Group
-	ttl   time.Duration
-	now   func() time.Time
+type pruneFloorLoad struct {
+	done  chan struct{}
+	floor uint64
+	err   error
 }
 
-func (c *pruneFloorCache) cached(head uint64) (uint64, bool) {
-	cached := c.value.Load()
-	if cached == nil || cached.head != head || !c.timeNow().Before(cached.expiresAt) {
-		return 0, false
-	}
-	return cached.floor, true
+type pruneFloorCacheKey struct {
+	head               uint64
+	snapshotGeneration uint64
+}
+
+const defaultPruneFloorCacheTTL = time.Second
+
+// pruneFloorCache caches successful floor reads and coalesces concurrent loads
+// by key. Every key contains the exact chain head; local block-floor keys also
+// contain the pinned snapshot generation because visible files can change
+// without a new head. The TTL bounds staleness from physical changes the key
+// cannot identify.
+type pruneFloorCache struct {
+	mu     sync.Mutex
+	values map[pruneFloorCacheKey]pruneFloorValue
+	loads  map[pruneFloorCacheKey]*pruneFloorLoad
+	ttl    time.Duration
+	now    func() time.Time
 }
 
 func (c *pruneFloorCache) timeNow() time.Time {
@@ -65,34 +68,83 @@ func (c *pruneFloorCache) cacheTTL() time.Duration {
 }
 
 func (c *pruneFloorCache) get(ctx context.Context, head uint64, read func() (uint64, error)) (uint64, error) {
+	return c.getForKey(ctx, pruneFloorCacheKey{head: head}, read)
+}
+
+func (c *pruneFloorCache) getForKey(ctx context.Context, key pruneFloorCacheKey, read func() (uint64, error)) (uint64, error) {
 	for {
-		if floor, ok := c.cached(head); ok {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+
+		floor, cached, load, leader := c.join(key)
+		if cached {
+			return floor, nil
+		}
+		if leader {
+			floor, err := read()
+			c.finish(key, load, floor, err)
+			if err != nil {
+				return 0, err
+			}
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
 			return floor, nil
 		}
 
-		if err := ctx.Err(); err != nil {
-			return 0, err
-		}
-		_, err, _ := c.load.Do("floor", func() (any, error) {
-			if floor, ok := c.cached(head); ok {
-				return floor, nil
+		select {
+		case <-load.done:
+			if err := ctx.Err(); err != nil {
+				return 0, err
 			}
-			floor, err := read()
-			if err != nil {
-				return nil, err
+			if load.err != nil {
+				// The leader's failure may be specific to its context. Retry this
+				// caller's read instead of inheriting that failure.
+				continue
 			}
-			c.value.Store(&pruneFloorAtHead{
-				head:      head,
-				floor:     floor,
-				expiresAt: c.timeNow().Add(c.cacheTTL()),
-			})
-			return floor, nil
-		})
-		if err != nil {
-			return 0, err
-		}
-		if err := ctx.Err(); err != nil {
-			return 0, err
+			return load.floor, nil
+		case <-ctx.Done():
+			return 0, ctx.Err()
 		}
 	}
+}
+
+func (c *pruneFloorCache) join(key pruneFloorCacheKey) (floor uint64, cached bool, load *pruneFloorLoad, leader bool) {
+	now := c.timeNow()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if value, ok := c.values[key]; ok && now.Before(value.expiresAt) {
+		return value.floor, true, nil, false
+	}
+	if load := c.loads[key]; load != nil {
+		return 0, false, load, false
+	}
+	if c.loads == nil {
+		c.loads = make(map[pruneFloorCacheKey]*pruneFloorLoad)
+	}
+	load = &pruneFloorLoad{done: make(chan struct{})}
+	c.loads[key] = load
+	return 0, false, load, true
+}
+
+func (c *pruneFloorCache) finish(key pruneFloorCacheKey, load *pruneFloorLoad, floor uint64, err error) {
+	now := c.timeNow()
+	c.mu.Lock()
+	load.floor, load.err = floor, err
+	delete(c.loads, key)
+	if err == nil {
+		if c.values == nil {
+			c.values = make(map[pruneFloorCacheKey]pruneFloorValue)
+		}
+		for cachedKey, value := range c.values {
+			if !now.Before(value.expiresAt) {
+				delete(c.values, cachedKey)
+			}
+		}
+		c.values[key] = pruneFloorValue{floor: floor, expiresAt: now.Add(c.cacheTTL())}
+	}
+	c.mu.Unlock()
+	close(load.done)
 }

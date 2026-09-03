@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,6 +45,28 @@ func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), floor)
 	floor, err = cache.get(t.Context(), 11, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), floor)
+	require.Equal(t, uint64(2), reads.Load())
+}
+
+func TestPruneFloorCacheSeparatesFileViewsAtSameHead(t *testing.T) {
+	t.Parallel()
+
+	var reads atomic.Uint64
+	cache := pruneFloorCache{ttl: time.Hour}
+	read := func() (uint64, error) { return reads.Add(1), nil }
+
+	first := pruneFloorCacheKey{head: 10, snapshotGeneration: 1}
+	floor, err := cache.getForKey(t.Context(), first, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), floor)
+	floor, err = cache.getForKey(t.Context(), first, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), floor)
+
+	second := pruneFloorCacheKey{head: 10, snapshotGeneration: 2}
+	floor, err = cache.getForKey(t.Context(), second, read)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), floor)
 	require.Equal(t, uint64(2), reads.Load())
@@ -116,7 +139,7 @@ func TestPruneFloorCacheCoalescesConcurrentReadsAtSameHead(t *testing.T) {
 	require.Equal(t, uint64(1), reads.Load())
 }
 
-func TestPruneFloorCacheRefreshesDifferentHeadAfterConcurrentRead(t *testing.T) {
+func TestPruneFloorCacheLoadsDifferentHeadsConcurrently(t *testing.T) {
 	t.Parallel()
 
 	firstStarted := make(chan struct{})
@@ -145,23 +168,87 @@ func TestPruneFloorCacheRefreshesDifferentHeadAfterConcurrentRead(t *testing.T) 
 
 	select {
 	case <-secondReadStarted:
-		close(releaseFirst)
-		require.Fail(t, "different-head read did not wait for the in-flight read")
-	case <-time.After(50 * time.Millisecond):
-	}
-	close(releaseFirst)
-	first := <-firstResult
-	require.NoError(t, first.err)
-	require.Equal(t, uint64(7), first.floor)
-
-	select {
-	case <-secondReadStarted:
 	case <-time.After(time.Second):
-		require.Fail(t, "different-head read did not refresh")
+		close(releaseFirst)
+		require.Fail(t, "different-head read was blocked by the in-flight read")
 	}
 	second := <-secondResult
 	require.NoError(t, second.err)
 	require.Equal(t, uint64(8), second.floor)
+
+	close(releaseFirst)
+	first := <-firstResult
+	require.NoError(t, first.err)
+	require.Equal(t, uint64(7), first.floor)
+}
+
+func TestPruneFloorCacheWaiterHonorsContext(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cache := pruneFloorCache{ttl: time.Hour}
+	leaderResult := make(chan pruneFloorCacheResult, 1)
+	go func() {
+		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
+			close(started)
+			<-release
+			return 7, nil
+		})
+		leaderResult <- pruneFloorCacheResult{floor: floor, err: err}
+	}()
+	<-started
+
+	ctx, cancel := context.WithCancel(t.Context())
+	waiterResult := make(chan error, 1)
+	go func() {
+		_, err := cache.get(ctx, 10, func() (uint64, error) {
+			return 8, nil
+		})
+		waiterResult <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-waiterResult:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		close(release)
+		require.Fail(t, "waiter did not honor its context")
+	}
+	close(release)
+	require.NoError(t, (<-leaderResult).err)
+}
+
+func TestPruneFloorCacheWaiterRetriesAfterLeaderError(t *testing.T) {
+	wantErr := errors.New("leader read failed")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	cache := pruneFloorCache{ttl: time.Hour}
+	leaderResult := make(chan pruneFloorCacheResult, 1)
+	go func() {
+		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
+			close(started)
+			<-release
+			return 0, wantErr
+		})
+		leaderResult <- pruneFloorCacheResult{floor: floor, err: err}
+	}()
+	<-started
+
+	waiterResult := make(chan pruneFloorCacheResult, 1)
+	go func() {
+		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
+			return 8, nil
+		})
+		waiterResult <- pruneFloorCacheResult{floor: floor, err: err}
+	}()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	require.ErrorIs(t, (<-leaderResult).err, wantErr)
+	waiter := <-waiterResult
+	require.NoError(t, waiter.err)
+	require.Equal(t, uint64(8), waiter.floor)
 }
 
 func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
@@ -190,20 +277,4 @@ func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
 		close(release)
 	}
 	require.ErrorIs(t, <-returned, context.Canceled)
-}
-
-func BenchmarkPruneFloorCacheHit(b *testing.B) {
-	cache := pruneFloorCache{ttl: time.Hour}
-	read := func() (uint64, error) { return 1, nil }
-	_, err := cache.get(context.Background(), 1, read)
-	require.NoError(b, err)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := cache.get(context.Background(), 1, read)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
 }

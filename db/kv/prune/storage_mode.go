@@ -93,9 +93,7 @@ type Mode struct {
 	Receipts          BlockAmount
 }
 
-// String describes m in operator-facing output. Current named modes use their
-// CLI names, older known shapes use diagnostic labels such as "full(previous)"
-// and "full(legacy)", and custom shapes include CLI-style distance overrides.
+// String describes m as a CLI mode followed by any required distance overrides.
 func (m Mode) String() string {
 	if !m.Initialised {
 		return archiveModeStr
@@ -110,18 +108,23 @@ func (m Mode) String() string {
 		return blockModeStr
 	case modeEquals(m, ArchiveMode):
 		return archiveModeStr
-	case modeEquals(m, previousFullMode):
-		return fullModeStr + "(previous)"
 	}
 
-	// Recognise legacy shapes before rendering generic custom distances.
-	if m.Blocks == KeepPostMergeBlocksPruneMode && m.History.Enabled() {
-		// Legacy full mode used chain history expiry for blocks and finite state history.
+	if m.History.toValue() == previousDefaultPruneDistance.toValue() && m.Blocks.toValue() == previousDefaultPruneDistance.toValue() {
 		var sb strings.Builder
-		sb.WriteString(fullModeStr + "(legacy)")
+		fmt.Fprintf(&sb, "%s --prune.distance=%d --prune.distance.blocks=%d", fullModeStr, previousDefaultPruneDistance, previousDefaultPruneDistance)
+		appendCommitmentHistory(&sb, m)
+		appendReceipts(&sb, m)
+		return sb.String()
+	}
+
+	if m.Blocks == KeepPostMergeBlocksPruneMode && m.History.Enabled() {
+		var sb strings.Builder
+		sb.WriteString(fullModeStr)
 		if m.History.toValue() != FullMode.History.toValue() {
 			fmt.Fprintf(&sb, " --prune.distance=%s", stateHistoryDistanceCLIValue(m.History.toValue(), KeepPostMergeBlocksPruneMode))
 		}
+		fmt.Fprintf(&sb, " --prune.distance.blocks=%s", blocksDistanceCLIValue(m.Blocks.toValue()))
 		appendCommitmentHistory(&sb, m)
 		appendReceipts(&sb, m)
 		return sb.String()

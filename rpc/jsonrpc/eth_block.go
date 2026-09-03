@@ -68,7 +68,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, nil
 		}
 
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -409,11 +409,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(overlayTx)
 	if err != nil {
 		return nil, err
@@ -450,11 +445,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
 		return nil, nil
-	}
-
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
 	}
 
 	body, txCount, err := api._blockReader.Body(ctx, overlayTx, blockHash, blockNum)

@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -116,7 +115,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	firstHeaderTime := firstHeader.Time
 
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, overlayTx, highestNumber, fullTx)
+		blockResponse, err := api.buildBlockResponse(ctx, overlayTx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +124,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, overlayTx, 0, fullTx)
+		blockResponse, err := api.buildBlockResponse(ctx, overlayTx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +172,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	if err != nil {
 		return nil, err
 	}
-	response, err := buildBlockResponse(ctx, api._blockReader, overlayTx, uint64(blockNum), fullTx)
+	response, err := api.buildBlockResponse(ctx, overlayTx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +180,11 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
-	header, err := br.HeaderByNumber(ctx, db, blockNum)
+func (api *ErigonImpl) buildBlockResponse(ctx context.Context, tx kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return nil, err
+	}
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +192,7 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 		return nil, nil
 	}
 
-	block, _, err := br.BlockWithSenders(ctx, db, header.Hash(), blockNum)
+	block, err := api.blockWithSenders(ctx, tx, header.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}

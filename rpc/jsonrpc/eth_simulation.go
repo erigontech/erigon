@@ -135,6 +135,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
 	}
+	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNumber); err != nil {
+		return nil, err
+	}
 
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
 	if err != nil {
