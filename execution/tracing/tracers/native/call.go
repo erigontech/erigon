@@ -151,8 +151,9 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 			OnExit:    t.OnExit,
 			OnLog:     t.OnLog,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:    t.GetResult,
+		GetResultRef: t.GetResultRef,
+		Stop:         t.Stop,
 	}, nil
 }
 
@@ -339,6 +340,22 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 		return res, *p
 	}
 	return res, nil
+}
+
+// GetResultRef returns the top-level frame unencoded, so the caller can have it
+// written straight into a stream. A nil ref means there is nothing to write,
+// matching GetResult returning nil bytes.
+func (t *callTracer) GetResultRef() (tracers.ResultRef, error) {
+	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
+		return nil, nil
+	}
+	if len(t.callstack) != 1 {
+		return nil, errors.New("incorrect number of top-level calls")
+	}
+	if p := t.reason.Load(); p != nil {
+		return &t.callstack[0], *p
+	}
+	return &t.callstack[0], nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.

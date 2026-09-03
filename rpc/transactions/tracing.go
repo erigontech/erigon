@@ -258,12 +258,23 @@ func ExecuteTraceTx(
 		stream.WriteString("0x" + returnVal)
 		stream.WriteObjectEnd()
 	} else {
-		r, err := tracer.GetResult()
-		if err != nil {
-			return err
+		if tracer.GetResultRef != nil {
+			ref, err := tracer.GetResultRef()
+			if err != nil {
+				return err
+			}
+			if ref == nil {
+				stream.WriteRawBytes(nil) // GetResult returns nil bytes here too
+			} else {
+				ref.AppendJSON(stream)
+			}
+		} else {
+			r, err := tracer.GetResult()
+			if err != nil {
+				return err
+			}
+			stream.WriteRawBytes(r)
 		}
-
-		stream.WriteRawBytes(r)
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}

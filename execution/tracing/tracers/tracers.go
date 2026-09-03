@@ -50,8 +50,17 @@ type Context struct {
 type Tracer struct {
 	*tracing.Hooks
 	GetResult func() (json.RawMessage, error)
+	// GetResultRef returns the same result as GetResult, still as an object, so
+	// the caller can have it written straight into a stream instead of into a
+	// buffer. Nil for tracers that only build bytes.
+	GetResultRef func() (ResultRef, error)
 	// Stop terminates execution of the tracer at the first opportune moment.
 	Stop func(err error)
+}
+
+// ResultRef is a trace result that has not been encoded yet.
+type ResultRef interface {
+	AppendJSON(w RawWriter)
 }
 
 type lookupFunc func(string, *Context, json.RawMessage) (*Tracer, error)
