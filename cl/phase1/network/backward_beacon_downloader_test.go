@@ -832,6 +832,69 @@ func TestInvalidP2PEnvelopeDoesNotSuppressHealthyHTTPFallback(t *testing.T) {
 	require.Equal(t, valid.Message.Payload.BlockHash, envelopes[root].Message.Payload.BlockHash)
 }
 
+func TestRecoverSkippedEnvelopesLeavesBudgetForHTTPFallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 600*time.Millisecond)
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	block := makeGloasBlock(9, hash(1), hash(2))
+	envelope, root := makeGloasEnvelopeForBlock(t, block)
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	requested := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.Context().Err())
+		requested <- struct{}{}
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	downloader := &BackwardBeaconDownloader{
+		beaconCfg:       cfg,
+		rpc:             rpcClient,
+		httpFallbackURL: server.URL,
+	}
+	recovered := downloader.RecoverSkippedEnvelopes(ctx, []SkippedFullBlock{{Block: block, Root: root}})
+
+	require.Contains(t, recovered, common.Hash(root))
+	select {
+	case <-requested:
+	default:
+		t.Fatal("HTTP fallback was not attempted")
+	}
+	require.NoError(t, ctx.Err())
+}
+
+func TestRecoverSkippedEnvelopesLeavesBudgetAfterSlowHTTPFallback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 600*time.Millisecond)
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	block := makeGloasBlock(9, hash(1), hash(2))
+	_, root := makeGloasEnvelopeForBlock(t, block)
+	started := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	downloader := &BackwardBeaconDownloader{
+		beaconCfg:       cfg,
+		rpc:             rpcClient,
+		httpFallbackURL: server.URL,
+	}
+
+	recovered := downloader.RecoverSkippedEnvelopes(ctx, []SkippedFullBlock{{Block: block, Root: root}})
+
+	require.Empty(t, recovered)
+	select {
+	case <-started:
+	default:
+		t.Fatal("HTTP fallback was not attempted")
+	}
+	require.NoError(t, ctx.Err())
+}
+
 func TestBackwardBeaconDownloaderRetriesInvalidP2PEnvelopeWithinBatch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0

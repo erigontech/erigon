@@ -63,7 +63,7 @@ type Eth1Block struct {
 
 func newExecutionPayloadTransactions(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *solid.TransactionsSSZ {
 	if version >= clparams.GloasVersion {
-		return solid.NewProgressiveTransactionsSSZ()
+		return solid.NewProgressiveTransactionsSSZWithLimit(cfg.MaxTransactionsPerPayload)
 	}
 	return solid.NewTransactionsSSZWithLimits(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
 }

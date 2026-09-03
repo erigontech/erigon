@@ -48,6 +48,18 @@ func TestValidateExecutionPayloadEnvelopeVersion(t *testing.T) {
 	require.Error(t, ValidateExecutionPayloadEnvelopeVersion(clparams.StateVersion(255)))
 }
 
+func TestValidateExecutionPayloadEnvelopeBuilderIndex(t *testing.T) {
+	block := NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	envelope := &SignedExecutionPayloadEnvelope{Message: NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BuilderIndex = 7
+	envelope.Message.BuilderIndex = 8
+
+	require.ErrorContains(t, ValidateExecutionPayloadEnvelopeBuilderIndex(block, envelope), "does not match")
+	envelope.Message.BuilderIndex = 7
+	require.NoError(t, ValidateExecutionPayloadEnvelopeBuilderIndex(block, envelope))
+	require.Error(t, ValidateExecutionPayloadEnvelopeBuilderIndex(nil, envelope))
+}
+
 func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 	makePair := func(t *testing.T) (*SignedBeaconBlock, *SignedExecutionPayloadEnvelope) {
 		t.Helper()
@@ -188,7 +200,7 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 	progressiveTransactions := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
 	progressiveTransactions.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
 	require.NoError(t, progressiveTransactions.ValidateForConfig(&cfg))
-	require.NoError(t, progressiveTransactions.ValidateForPersistence(&cfg))
+	require.Error(t, progressiveTransactions.ValidateForPersistence(&cfg))
 
 	for _, test := range []struct {
 		name   string

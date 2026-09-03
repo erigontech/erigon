@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -57,6 +59,17 @@ import (
 
 type nonNilSentinelClient struct {
 	sentinelproto.SentinelClient
+}
+
+type signalingContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *signalingContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
 }
 
 func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
@@ -188,15 +201,21 @@ func TestPostExecutionPayloadEnvelopeReturnsAcceptedAfterIntegrationError(t *tes
 	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
 }
 
-func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastedIntegrationFailure(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
-	fcu.OnExecutionPayloadErr = errors.New("integration unavailable")
+	var integrations atomic.Int32
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		if integrations.Add(1) == 1 {
+			return errors.New("integration unavailable")
+		}
+		return nil
+	}
 	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
 		gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
-	).Return(nil)
+	).Return(nil).Times(2)
 
 	post := func() *httptest.ResponseRecorder {
 		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
@@ -211,8 +230,82 @@ func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T
 	first := post()
 	require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
 	second := post()
-	require.Equal(t, http.StatusBadRequest, second.Code, second.Body.String())
-	require.Contains(t, second.Body.String(), "already seen")
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	require.EqualValues(t, 2, integrations.Load())
+}
+
+func TestPostExecutionPayloadEnvelopeWaitsForLocalBlockIntegration(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	integration := handler.startLocalBlockIntegration(common.Hash{})
+	requestCtx := &signalingContext{Context: t.Context(), entered: make(chan struct{})}
+	request := httptest.NewRequestWithContext(requestCtx, http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	firstResponse := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		firstResponse <- recorder
+	}()
+	<-requestCtx.entered
+
+	handler.finishLocalBlockIntegration(common.Hash{}, integration, nil)
+	firstRecorder := <-firstResponse
+	require.Equal(t, http.StatusOK, firstRecorder.Code, firstRecorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeAdmissionBoundsLocalIntegrationWait(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	integration := handler.startLocalBlockIntegration(common.Hash{})
+	defer handler.finishLocalBlockIntegration(common.Hash{}, integration, nil)
+	tokens := make([]forkchoice.ExecutionPayloadEnvelopeAdmissionToken, 0, 1024)
+	for i := range 1024 {
+		token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), common.BigToHash(new(big.Int).SetUint64(uint64(i+1))), 0)
+		require.NoError(t, err)
+		tokens = append(tokens, token)
+	}
+	defer func() {
+		for _, token := range tokens {
+			fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+		}
+	}()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopeRejectsKnownBuilderMismatchBeforeAdmission(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BuilderIndex = 7
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Blocks[root] = block
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.BuilderIndex = 8
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	token, err := fcu.ClaimExecutionPayloadEnvelopeForGossip(t.Context(), root, envelope.Message.BuilderIndex)
+	require.NoError(t, err)
+	defer fcu.FinishExecutionPayloadEnvelopeForGossip(token, false)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "does not match")
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsEnvelopeAlreadyStoredByP2P(t *testing.T) {
@@ -664,7 +757,8 @@ func TestPostExecutionPayloadEnvelopeRejectsBlobContentsCardinalityMismatch(t *t
 
 func TestPostExecutionPayloadEnvelopeRejectsBlobContentsAboveConfiguredBound(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	proofs := make([]*cltypes.KZGProof, int(handler.beaconChainCfg.MaxBlobsPerBlockUpperBound())+1)
+	maxProofs := int(handler.beaconChainCfg.MaxBlobsPerBlockUpperBound() * handler.beaconChainCfg.NumberOfColumns)
+	proofs := make([]*cltypes.KZGProof, maxProofs+1)
 	for i := range proofs {
 		proofs[i] = new(cltypes.KZGProof)
 	}
@@ -721,14 +815,17 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 	blob := new(cltypes.Blob)
 	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
 	require.NoError(t, err)
-	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
-	require.NoError(t, err)
 	commitmentValue := cltypes.KZGCommitment(commitment)
 	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
 	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
 	root := contents.SignedExecutionPayloadEnvelope.Message.BeaconBlockRoot
-	proofValue := cltypes.KZGProof(proof)
-	contents.KZGProofs.Append(&proofValue)
+	_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
+	require.NoError(t, err)
+	require.Len(t, proofs, int(handler.beaconChainCfg.NumberOfColumns))
+	for i := range proofs {
+		proof := cltypes.KZGProof(proofs[i])
+		contents.KZGProofs.Append(&proof)
+	}
 	contents.Blobs.Append(blob)
 	body, err := json.Marshal(contents)
 	require.NoError(t, err)
@@ -768,6 +865,61 @@ func TestPostExecutionPayloadEnvelopePersistsVerifiedBlobColumnsBeforeDataAvaila
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columnPublishes)
 	require.Equal(t, 1, envelopePublishes)
+}
+
+func TestEnvelopeBlobCellProofsRejectMutation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blob := new(cltypes.Blob)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
+	require.NoError(t, err)
+	commitmentValue := cltypes.KZGCommitment(commitment)
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
+	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+	_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
+	require.NoError(t, err)
+	proofs[0][0] ^= 1
+	for i := range proofs {
+		proof := cltypes.KZGProof(proofs[i])
+		contents.KZGProofs.Append(&proof)
+	}
+	contents.Blobs.Append(blob)
+
+	_, err = handler.dataColumnSidecarsFromEnvelopeBlobs(contents.SignedExecutionPayloadEnvelope, contents.KZGProofs, contents.Blobs)
+	require.ErrorContains(t, err, "invalid cell KZG proofs")
+}
+
+func TestEnvelopeBlobCellProofsUseBlobMajorOrdering(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blobs := []*cltypes.Blob{new(cltypes.Blob), new(cltypes.Blob)}
+	blobs[1][0] = 1
+	allProofs := make([][]cltypes.KZGProof, len(blobs))
+	for i, blob := range blobs {
+		commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
+		require.NoError(t, err)
+		commitmentValue := cltypes.KZGCommitment(commitment)
+		block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
+		_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
+		require.NoError(t, err)
+		allProofs[i] = proofs
+	}
+	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
+	for i, blob := range blobs {
+		for j := range allProofs[i] {
+			proof := cltypes.KZGProof(allProofs[i][j])
+			contents.KZGProofs.Append(&proof)
+		}
+		contents.Blobs.Append(blob)
+	}
+
+	sidecars, err := handler.dataColumnSidecarsFromEnvelopeBlobs(contents.SignedExecutionPayloadEnvelope, contents.KZGProofs, contents.Blobs)
+	require.NoError(t, err)
+	require.Len(t, sidecars, int(handler.beaconChainCfg.NumberOfColumns))
+	require.Equal(t, 2, sidecars[0].Column.Len())
 }
 
 func TestPostExecutionPayloadEnvelopeUsesCachedBlobsWhenBodyOmitsBlobData(t *testing.T) {
@@ -898,7 +1050,7 @@ func TestPostExecutionPayloadEnvelopeRejectsUnpersistableEnvelopeBeforeBlobColum
 	blob := new(cltypes.Blob)
 	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
 	require.NoError(t, err)
-	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
+	_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
 	require.NoError(t, err)
 	commitmentValue := cltypes.KZGCommitment(commitment)
 	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
@@ -914,8 +1066,10 @@ func TestPostExecutionPayloadEnvelopeRejectsUnpersistableEnvelopeBeforeBlobColum
 	require.NoError(t, err)
 	envelope.BeaconBlockRoot = root
 	fcu.Blocks[root] = block
-	proofValue := cltypes.KZGProof(proof)
-	contents.KZGProofs.Append(&proofValue)
+	for i := range proofs {
+		proof := cltypes.KZGProof(proofs[i])
+		contents.KZGProofs.Append(&proof)
+	}
 	contents.Blobs.Append(blob)
 	require.Greater(t, contents.SignedExecutionPayloadEnvelope.EncodingSizeSSZ(), int(clparams.MaxChunkSize))
 	body, err := json.Marshal(contents)
@@ -932,27 +1086,6 @@ func TestPostExecutionPayloadEnvelopeRejectsUnpersistableEnvelopeBeforeBlobColum
 	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "encoding size")
 	require.False(t, fcu.OnExecutionPayloadCheckBlobData)
-}
-
-func TestDataColumnSidecarsGloasUseProgressiveColumnLists(t *testing.T) {
-	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
-	}
-	cfg := clparams.MainnetBeaconConfig
-	cfg.NumberOfColumns = 1
-	cfg.MaxBlobCommittmentsPerBlock = 4
-	cell := cltypes.Cell{1}
-	proof := cltypes.KZGProof{2}
-
-	sidecars, err := dataColumnSidecarsGloas(&cfg, 3, common.HexToHash("0x1234"), []peerdasutils.CellsAndKZGProofs{{Blobs: []cltypes.Cell{cell}, Proofs: []cltypes.KZGProof{proof}}})
-	require.NoError(t, err)
-	expected := solid.NewStaticProgressiveListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
-	expected.Append(&cell)
-	wantRoot, err := expected.HashSSZ()
-	require.NoError(t, err)
-	gotRoot, err := sidecars[0].Column.HashSSZ()
-	require.NoError(t, err)
-	require.Equal(t, wantRoot, gotRoot)
 }
 
 func TestPostExecutionPayloadEnvelopeChecksDataAvailability(t *testing.T) {
@@ -1012,14 +1145,16 @@ func TestPostExecutionPayloadEnvelopeWithBlobsDefersDerivedHashFailureUntilAfter
 	blob := new(cltypes.Blob)
 	commitment, err := kzg.Ctx().BlobToKZGCommitment((*goethkzg.Blob)(blob), 0)
 	require.NoError(t, err)
-	proof, err := kzg.Ctx().ComputeBlobKZGProof((*goethkzg.Blob)(blob), commitment, 0)
+	_, proofs, err := peerdasutils.ComputeCellsAndKZGProofs(blob[:])
 	require.NoError(t, err)
 	commitmentValue := cltypes.KZGCommitment(commitment)
 	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&commitmentValue)
 	contents := executionPayloadEnvelopeContentsForBlock(t, handler, fcu, block)
 	contents.SignedExecutionPayloadEnvelope.Message.Payload.GasLimit++
-	proofValue := cltypes.KZGProof(proof)
-	contents.KZGProofs.Append(&proofValue)
+	for i := range proofs {
+		proof := cltypes.KZGProof(proofs[i])
+		contents.KZGProofs.Append(&proof)
+	}
 	contents.Blobs.Append(blob)
 	body, err := json.Marshal(contents)
 	require.NoError(t, err)
@@ -1205,12 +1340,16 @@ func TestPostExecutionPayloadEnvelopeReturnsGossipPublishFailure(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), injected.Error())
 }
 
-func TestPostExecutionPayloadEnvelopeGossipsWhenIndicesAreQueued(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeDoesNotDuplicateAvailabilityWhenIndicesAreQueued(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
 	fcu.OnExecutionPayloadErr = fmt.Errorf("index write unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopeIndicesPending)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	sub := handler.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
@@ -1233,6 +1372,11 @@ func TestPostExecutionPayloadEnvelopeGossipsWhenIndicesAreQueued(t *testing.T) {
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected duplicate execution payload availability event: %v", event)
+	default:
+	}
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
@@ -1254,7 +1398,7 @@ func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "consensus version")
 }
 
-func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeAppliesConfiguredJSONTransactionLimit(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.MaxTransactionsPerPayload = 2
 	fcu.OnExecutionPayloadErr = errors.New("reached forkchoice")
@@ -1273,8 +1417,9 @@ func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *t
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
-	require.True(t, fcu.OnExecutionPayloadCalled)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "transactions exceed decoder resource limit 2")
+	require.False(t, fcu.OnExecutionPayloadCalled)
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *testing.T) {

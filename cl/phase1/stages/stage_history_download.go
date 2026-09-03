@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sync/atomic"
 	"time"
 
@@ -463,12 +464,22 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 }
 
 func startBlobHistoryDownload(blockHistoryFinished bool, downloader blobHistoryDownloader, headSlot uint64, notify func(bool)) {
-	if !blockHistoryFinished || downloader == nil {
+	if !blockHistoryFinished || interfaceIsNil(downloader) {
 		return
 	}
 	downloader.SetHeadSlot(headSlot)
 	downloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(notify))
 	downloader.Start()
+}
+
+func interfaceIsNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	kind := reflected.Kind()
+	canBeNil := kind == reflect.Chan || kind == reflect.Func || kind == reflect.Interface || kind == reflect.Map || kind == reflect.Pointer || kind == reflect.Slice
+	return canBeNil && reflected.IsNil()
 }
 
 func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, waitForAllRoutines bool) error {

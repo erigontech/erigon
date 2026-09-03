@@ -2607,3 +2607,98 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	// separate matter and not what this measures.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
 }
+
+func TestLocalBlockIntegrationWaitsForMatchingBlock(t *testing.T) {
+	handler := &ApiHandler{}
+	root := common.HexToHash("0x1234")
+	integration := handler.startLocalBlockIntegration(root)
+	waited := make(chan error, 1)
+	go func() {
+		waited <- handler.waitForLocalBlockIntegration(t.Context(), root)
+	}()
+
+	select {
+	case err := <-waited:
+		require.Failf(t, "wait returned early", "error: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	handler.finishLocalBlockIntegration(root, integration, nil)
+	require.NoError(t, <-waited)
+	require.NoError(t, handler.waitForLocalBlockIntegration(t.Context(), common.HexToHash("0x5678")))
+}
+
+func TestLocalBlockIntegrationPropagatesFailure(t *testing.T) {
+	handler := &ApiHandler{}
+	root := common.HexToHash("0x1234")
+	integration := handler.startLocalBlockIntegration(root)
+	want := errors.New("block integration failed")
+	waitCtx := &signalingContext{Context: t.Context(), entered: make(chan struct{})}
+	waited := make(chan error, 1)
+	go func() { waited <- handler.waitForLocalBlockIntegration(waitCtx, root) }()
+	<-waitCtx.entered
+	source := make(chan error, 1)
+	destination := make(chan error, 1)
+	go handler.relayLocalBlockIntegration(root, integration, source, destination)
+	source <- want
+
+	require.ErrorIs(t, <-waited, want)
+	require.ErrorIs(t, <-destination, want)
+}
+
+func TestLocalBlockIntegrationCompletesBeforeStorageSuffix(t *testing.T) {
+	handler := &ApiHandler{}
+	root := common.HexToHash("0x1234")
+	integration := handler.startLocalBlockIntegration(root)
+	storageIntegrated := make(chan error, 1)
+	blockIntegrated := make(chan error, 1)
+	go handler.relayLocalBlockIntegration(root, integration, storageIntegrated, blockIntegrated)
+	finishRelease := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		finished <- runBlockStoragePhases(storageIntegrated, func() error { return nil }, func() error {
+			<-finishRelease
+			return errors.New("storage suffix failed")
+		})
+	}()
+
+	require.NoError(t, handler.waitForLocalBlockIntegration(t.Context(), root))
+	require.NoError(t, <-blockIntegrated)
+	close(finishRelease)
+	require.ErrorContains(t, <-finished, "storage suffix failed")
+}
+
+func TestBroadcastBlockRegistersLocalIntegrationBeforeReturning(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	integrationEntered := make(chan struct{})
+	releaseIntegration := make(chan struct{})
+	fcu.OnTickFunc = func(uint64) {}
+	fcu.OnBlockFunc = func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+		close(integrationEntered)
+		<-releaseIntegration
+		return nil
+	}
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(), gossip_topic.TopicNameBeaconBlock, gomock.Any(),
+	).Return(nil)
+
+	require.NoError(t, handler.broadcastBlock(t.Context(), block))
+	<-integrationEntered
+	waitCtx := &signalingContext{Context: t.Context(), entered: make(chan struct{})}
+	waited := make(chan error, 1)
+	go func() { waited <- handler.waitForLocalBlockIntegration(waitCtx, root) }()
+	<-waitCtx.entered
+	select {
+	case err := <-waited:
+		require.Failf(t, "wait returned before block integration", "error: %v", err)
+	default:
+	}
+
+	close(releaseIntegration)
+	require.NoError(t, <-waited)
+}

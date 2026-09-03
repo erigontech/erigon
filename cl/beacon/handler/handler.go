@@ -80,6 +80,11 @@ type selfBuildEnvelopeStore interface {
 	Remove(uint64) bool
 }
 
+type localBlockIntegration struct {
+	done chan struct{}
+	err  error
+}
+
 type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
@@ -152,7 +157,8 @@ type ApiHandler struct {
 	// When the validator publishes the signed block, broadcastBlock retrieves the
 	// cached data, wraps it into a SignedExecutionPayloadEnvelope, and broadcasts
 	// it on the execution_payload gossip topic so the block can reach FULL status.
-	selfBuildPayloads *lru.Cache[common.Hash, *selfBuildPayload]
+	selfBuildPayloads      *lru.Cache[common.Hash, *selfBuildPayload]
+	localBlockIntegrations sync.Map
 	// selfBuildEnvelopes caches the unsigned ExecutionPayloadEnvelope by slot so
 	// the validator client can retrieve it via
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.

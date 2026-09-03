@@ -71,6 +71,13 @@ func TestBlobHistoryDownloadStartsOnlyAfterBlockHistoryFinishes(t *testing.T) {
 	require.NotNil(t, downloader.notify)
 }
 
+func TestBlobHistoryDownloadIgnoresTypedNilDownloader(t *testing.T) {
+	var downloader *recordingBlobHistoryDownloader
+	require.NotPanics(t, func() {
+		startBlobHistoryDownload(true, downloader, 99, func(bool) {})
+	})
+}
+
 // clampProgress must never report a total below processed nor underflow, even
 // when the floor and current counters drift past the frozen highestBlockSeen.
 // The last case mirrors the field report where the live EL head advanced past

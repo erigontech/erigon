@@ -607,9 +607,11 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 	for i, skippedBlock := range skipped {
 		blocks[i] = skippedBlock.Block
 	}
+	p2pCtx, cancelP2P := recoveryPhaseContext(ctx, 3)
 	envelopes, err := requestEnvelopesFranticallyWithValidator(
-		ctx, b.rpc, roots, newEnvelopeCommitmentValidator(b.beaconCfg, blocks), blocks...,
+		p2pCtx, b.rpc, roots, newEnvelopeCommitmentValidator(b.beaconCfg, blocks), blocks...,
 	)
+	cancelP2P()
 	if err != nil {
 		log.Debug("[BackwardBeaconDownloader] envelope recovery: P2P failed", "err", err)
 	}
@@ -618,9 +620,23 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 	}
 	// HTTP fallback for roots still missing after P2P.
 	if b.httpFallbackURL != "" && len(envelopes) < len(skipped) {
-		fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, blocks, roots, envelopes, b.beaconCfg)
+		httpCtx, cancelHTTP := recoveryPhaseContext(ctx, 2)
+		fetchEnvelopesFromBeaconAPI(httpCtx, b.httpFallbackURL, blocks, roots, envelopes, b.beaconCfg)
+		cancelHTTP()
 	}
 	return envelopes
+}
+
+func recoveryPhaseContext(ctx context.Context, remainingPhases int) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, remaining/time.Duration(remainingPhases))
 }
 
 // trySkipToExistingBlock attempts to skip ahead if the expected block already exists in the database.

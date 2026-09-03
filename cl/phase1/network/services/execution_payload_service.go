@@ -158,6 +158,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 			"builderIndex", builderIndex)
 		return ErrIgnore
 	}
+	if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
+	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
 	// for this block root from this builder.
@@ -186,24 +189,23 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) || errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
-			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
+			log.Debug("Execution payload envelope indices queued", "beaconBlockRoot", beaconBlockRoot, "err", err)
+		} else {
+			if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+				errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) ||
+				errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull) ||
+				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
+			}
+			return fmt.Errorf("failed to process execution payload: %w", err)
 		}
-		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
 	seen = true
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
-
-	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
-	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
-		Slot:      block.Block.Slot,
-		BlockRoot: beaconBlockRoot,
-	})
 
 	log.Trace("Processed execution payload via gossip",
 		"slot", block.Block.Slot,

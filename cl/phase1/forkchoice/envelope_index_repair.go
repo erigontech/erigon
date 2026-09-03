@@ -30,6 +30,8 @@ type envelopeIndexRepairEntry struct {
 	blockHash   common.Hash
 }
 
+const envelopeIndexRepairCapacity = queueCacheSize * 2
+
 type envelopeIndexRepairToken struct {
 	root        common.Hash
 	generation  uint64
@@ -45,21 +47,29 @@ type envelopeIndexRepairTracker struct {
 	nextGeneration uint64
 }
 
-func (t *envelopeIndexRepairTracker) reserve(root common.Hash) (envelopeIndexRepairToken, bool) {
-	return t.add(root, false)
-}
-
 func (t *envelopeIndexRepairTracker) claim(root common.Hash) (envelopeIndexRepairToken, bool) {
-	return t.add(root, true)
+	return t.add(root, envelopeIndexRepairCapacity, true)
 }
 
-func (t *envelopeIndexRepairTracker) add(root common.Hash, durable bool) (envelopeIndexRepairToken, bool) {
+func (t *envelopeIndexRepairTracker) claimAnchor(root common.Hash) (envelopeIndexRepairToken, bool) {
+	return t.add(root, envelopeIndexRepairCapacity+1, true)
+}
+
+func (t *envelopeIndexRepairTracker) reserve(root common.Hash) (envelopeIndexRepairToken, bool) {
+	return t.add(root, envelopeIndexRepairCapacity, false)
+}
+
+func (t *envelopeIndexRepairTracker) reserveAnchor(root common.Hash) (envelopeIndexRepairToken, bool) {
+	return t.add(root, envelopeIndexRepairCapacity+1, false)
+}
+
+func (t *envelopeIndexRepairTracker) add(root common.Hash, capacity int, durable bool) (envelopeIndexRepairToken, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if entry, ok := t.entries[root]; ok {
 		return tokenForEnvelopeIndexRepair(root, entry), true
 	}
-	if len(t.entries) >= queueCacheSize {
+	if len(t.entries) >= capacity {
 		return envelopeIndexRepairToken{}, false
 	}
 	if t.entries == nil {
@@ -74,27 +84,14 @@ func (t *envelopeIndexRepairTracker) add(root common.Hash, durable bool) (envelo
 	return tokenForEnvelopeIndexRepair(root, t.entries[root]), true
 }
 
-func (t *envelopeIndexRepairTracker) persisted(token envelopeIndexRepairToken, blockNumber uint64, blockHash common.Hash) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	entry, ok := t.entries[token.root]
-	if !ok || entry.generation != token.generation {
-		return
-	}
-	entry.durable = true
-	entry.valuesKnown = true
-	entry.blockNumber = blockNumber
-	entry.blockHash = blockHash
-	t.entries[token.root] = entry
-}
-
-func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, blockNumber uint64, blockHash common.Hash) envelopeIndexRepairToken {
+func (t *envelopeIndexRepairTracker) persisted(token envelopeIndexRepairToken, blockNumber uint64, blockHash common.Hash) envelopeIndexRepairToken {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	entry, ok := t.entries[token.root]
 	if !ok || entry.generation != token.generation {
 		return envelopeIndexRepairToken{}
 	}
+	entry.durable = true
 	entry.valuesKnown = true
 	entry.blockNumber = blockNumber
 	entry.blockHash = blockHash
@@ -110,6 +107,20 @@ func (t *envelopeIndexRepairTracker) release(token envelopeIndexRepairToken) {
 		return
 	}
 	t.remove(token.root)
+}
+
+func (t *envelopeIndexRepairTracker) setValues(token envelopeIndexRepairToken, blockNumber uint64, blockHash common.Hash) envelopeIndexRepairToken {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, ok := t.entries[token.root]
+	if !ok || entry.generation != token.generation {
+		return envelopeIndexRepairToken{}
+	}
+	entry.valuesKnown = true
+	entry.blockNumber = blockNumber
+	entry.blockHash = blockHash
+	t.entries[token.root] = entry
+	return tokenForEnvelopeIndexRepair(token.root, entry)
 }
 
 func (t *envelopeIndexRepairTracker) complete(token envelopeIndexRepairToken) {

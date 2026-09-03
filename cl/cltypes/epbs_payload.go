@@ -527,6 +527,24 @@ func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) erro
 	return nil
 }
 
+// ValidateExecutionPayloadEnvelopeBuilderIndex checks the envelope admission key against its block bid.
+func ValidateExecutionPayloadEnvelopeBuilderIndex(block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("beacon block is incomplete")
+	}
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("execution payload envelope is incomplete")
+	}
+	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("beacon block has no execution payload bid")
+	}
+	if signedEnvelope.Message.BuilderIndex != signedBid.Message.BuilderIndex {
+		return fmt.Errorf("envelope builder index %d does not match bid builder index %d", signedEnvelope.Message.BuilderIndex, signedBid.Message.BuilderIndex)
+	}
+	return nil
+}
+
 // ValidateExecutionPayloadEnvelopeCommitments verifies the envelope fields committed by a beacon block's execution payload bid.
 func ValidateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
 	return validateExecutionPayloadEnvelopeCommitments(beaconCfg, block, signedEnvelope, true)
@@ -769,7 +787,7 @@ func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.Be
 	payload := s.Message.Payload
 	var transactionsErr error
 	if payload.Version() >= clparams.GloasVersion {
-		transactionsErr = payload.Transactions.ValidateProgressiveBounds()
+		transactionsErr = payload.Transactions.ValidateProgressiveBounds(cfg.MaxTransactionsPerPayload)
 	} else {
 		transactionsErr = payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
 	}

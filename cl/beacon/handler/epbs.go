@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,14 +89,13 @@ type executionPayloadEnvelopeContents struct {
 
 func newExecutionPayloadEnvelopeContents(cfg *clparams.BeaconChainConfig) *executionPayloadEnvelopeContents {
 	maxBlobs := int(cfg.MaxBlobsPerBlockUpperBound())
+	maxProofs := maxBlobs * int(cfg.NumberOfColumns)
 	return &executionPayloadEnvelopeContents{
 		SignedExecutionPayloadEnvelope: &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)},
-		KZGProofs:                      solid.NewStaticListSSZ[*cltypes.KZGProof](maxBlobs, cltypes.BYTES_KZG_PROOF),
+		KZGProofs:                      solid.NewStaticListSSZ[*cltypes.KZGProof](maxProofs, cltypes.BYTES_KZG_PROOF),
 		Blobs:                          solid.NewStaticListSSZ[*cltypes.Blob](maxBlobs, int(cltypes.BYTES_PER_BLOB)),
 	}
 }
-
-func (c *executionPayloadEnvelopeContents) Static() bool { return false }
 
 func (c *executionPayloadEnvelopeContents) EncodingSizeSSZ() int {
 	return 3*4 + c.SignedExecutionPayloadEnvelope.EncodingSizeSSZ() + c.KZGProofs.EncodingSizeSSZ() + c.Blobs.EncodingSizeSSZ()
@@ -103,10 +103,6 @@ func (c *executionPayloadEnvelopeContents) EncodingSizeSSZ() int {
 
 func (c *executionPayloadEnvelopeContents) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, c.SignedExecutionPayloadEnvelope, c.KZGProofs, c.Blobs)
-}
-
-func (c *executionPayloadEnvelopeContents) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, c.SignedExecutionPayloadEnvelope, c.KZGProofs, c.Blobs)
 }
 
 func (c *executionPayloadEnvelopeContents) DecodeSSZStrict(buf []byte, version int) error {
@@ -922,6 +918,13 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
 	}
+	block, blockKnown := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+	if blockKnown {
+		if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+	}
 	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(
 		r.Context(),
 		signedEnvelope.Message.BeaconBlockRoot,
@@ -939,6 +942,22 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	defer func() {
 		a.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, accepted)
 	}()
+	if !blockKnown {
+		if err := a.waitForLocalBlockIntegration(r.Context(), signedEnvelope.Message.BeaconBlockRoot); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				status = http.StatusRequestTimeout
+			}
+			beaconhttp.NewEndpointError(status, fmt.Errorf("local beacon block integration failed: %w", err)).WriteTo(w)
+			return
+		}
+		if block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot); ok {
+			if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
+		}
+	}
 	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForGossip(signedEnvelope); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
@@ -969,20 +988,16 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := a.persistDataColumnSidecars(r.Context(), signedEnvelope.Message.BeaconBlockRoot, columnSidecars); err != nil {
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-			return
-		}
 	} else {
 		columnSidecars, err = a.dataColumnSidecarsFromCachedEnvelopeBlobs(signedEnvelope)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := a.persistDataColumnSidecars(r.Context(), signedEnvelope.Message.BeaconBlockRoot, columnSidecars); err != nil {
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-			return
-		}
+	}
+	if err := a.persistDataColumnSidecars(r.Context(), signedEnvelope.Message.BeaconBlockRoot, columnSidecars); err != nil {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+		return
 	}
 	if validation != BlockPublishingValidationGossip {
 		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelopeForConsensus(r.Context(), signedEnvelope); err != nil {
@@ -1006,23 +1021,17 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("failed to publish execution payload envelope: %w", err)).WriteTo(w)
 			return
 		}
-		accepted = true
 	}
 
-	var integrationErr error
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, true, true); err != nil {
 		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
 			a.logger.Debug("[Beacon REST] execution payload envelope indices queued", "err", err)
 		} else {
-			integrationErr = err
+			a.logger.Debug("[Beacon REST] execution payload envelope broadcast before integration completed", "err", err)
+			w.WriteHeader(http.StatusAccepted)
+			return
 		}
 	}
-	if integrationErr != nil {
-		a.logger.Debug("[Beacon REST] execution payload envelope broadcast before integration completed", "err", integrationErr)
-		w.WriteHeader(http.StatusAccepted)
-		return
-	}
-
 	accepted = true
 	w.WriteHeader(http.StatusOK)
 }
@@ -1046,38 +1055,52 @@ func (a *ApiHandler) dataColumnSidecarsFromEnvelopeBlobs(
 	if blobs.Len() > maxBlobs {
 		return nil, fmt.Errorf("blob list has %d elements, max %d", blobs.Len(), maxBlobs)
 	}
-	if proofs.Len() != blobs.Len() || commitments.Len() != blobs.Len() {
+	expectedProofs := blobs.Len() * int(a.beaconChainCfg.NumberOfColumns)
+	if proofs.Len() != expectedProofs || commitments.Len() != blobs.Len() {
 		return nil, fmt.Errorf("blob contents cardinality mismatch: commitments=%d proofs=%d blobs=%d", commitments.Len(), proofs.Len(), blobs.Len())
 	}
 	if blobs.Len() == 0 {
 		return nil, nil
 	}
-	kzgBlobs := make([]*goethkzg.Blob, blobs.Len())
+	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, blobs.Len())
+	kzgCells := make([]goethkzg.Cell, 0, expectedProofs)
 	kzgCommitments := make([]goethkzg.KZGCommitment, commitments.Len())
 	kzgProofs := make([]goethkzg.KZGProof, proofs.Len())
 	for i := 0; i < blobs.Len(); i++ {
 		blob := blobs.Get(i)
 		commitment := commitments.Get(i)
-		proof := proofs.Get(i)
-		if blob == nil || commitment == nil || proof == nil {
+		if blob == nil || commitment == nil {
 			return nil, fmt.Errorf("blob contents contain nil element at index %d", i)
 		}
-		kzgBlobs[i] = (*goethkzg.Blob)(blob)
 		kzgCommitments[i] = goethkzg.KZGCommitment(*commitment)
-		kzgProofs[i] = goethkzg.KZGProof(*proof)
-	}
-	if err := kzg.Ctx().VerifyBlobKZGProofBatch(kzgBlobs, kzgCommitments, kzgProofs); err != nil {
-		return nil, fmt.Errorf("invalid blob KZG proofs: %w", err)
-	}
-	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, blobs.Len())
-	for i := 0; i < blobs.Len(); i++ {
-		cells, cellProofs, err := peerdasutils.ComputeCellsAndKZGProofs(blobs.Get(i)[:])
+		cells, err := das.ComputeCells(blob)
 		if err != nil {
 			return nil, err
 		}
-		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: cellProofs}
+		if len(cells) < int(a.beaconChainCfg.NumberOfColumns) {
+			return nil, fmt.Errorf("blob %d produced %d cells, expected at least %d", i, len(cells), a.beaconChainCfg.NumberOfColumns)
+		}
+		cellProofs := make([]cltypes.KZGProof, a.beaconChainCfg.NumberOfColumns)
+		for column := range a.beaconChainCfg.NumberOfColumns {
+			proofIndex := i*int(a.beaconChainCfg.NumberOfColumns) + int(column)
+			proof := proofs.Get(proofIndex)
+			if proof == nil {
+				return nil, fmt.Errorf("blob contents contain nil proof at index %d", proofIndex)
+			}
+			cellProofs[column] = *proof
+			kzgCells = append(kzgCells, goethkzg.Cell(cells[column]))
+			kzgProofs[proofIndex] = goethkzg.KZGProof(*proof)
+		}
+		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells[:a.beaconChainCfg.NumberOfColumns], Proofs: cellProofs}
 	}
-	return dataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, blockRoot, cellsAndProofs)
+	cellIndices := make([]uint64, a.beaconChainCfg.NumberOfColumns)
+	for i := range cellIndices {
+		cellIndices[i] = uint64(i)
+	}
+	if err := kzg.VerifyCells(kzgCells, kzgCommitments, kzgProofs, cellIndices); err != nil {
+		return nil, fmt.Errorf("invalid cell KZG proofs: %w", err)
+	}
+	return peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, blockRoot, cellsAndProofs)
 }
 
 func (a *ApiHandler) dataColumnSidecarsFromCachedEnvelopeBlobs(
@@ -1125,37 +1148,7 @@ func (a *ApiHandler) dataColumnSidecarsFromCachedEnvelopeBlobs(
 		}
 		cellsAndProofs[i] = peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs}
 	}
-	return dataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, blockRoot, cellsAndProofs)
-}
-
-func dataColumnSidecarsGloas(
-	cfg *clparams.BeaconChainConfig,
-	slot uint64,
-	blockRoot common.Hash,
-	cellsAndProofs []peerdasutils.CellsAndKZGProofs,
-) ([]*cltypes.DataColumnSidecar, error) {
-	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
-	for columnIndex := uint64(0); columnIndex < cfg.NumberOfColumns; columnIndex++ {
-		columnCells := solid.NewStaticProgressiveListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
-		columnProofs := solid.NewStaticProgressiveListSSZ[*cltypes.KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BYTES_KZG_PROOF)
-		for blobIndex := range cellsAndProofs {
-			if int(columnIndex) >= len(cellsAndProofs[blobIndex].Blobs) || int(columnIndex) >= len(cellsAndProofs[blobIndex].Proofs) {
-				return nil, fmt.Errorf("incomplete cell data for blob %d column %d", blobIndex, columnIndex)
-			}
-			cell := cltypes.Cell(cellsAndProofs[blobIndex].Blobs[columnIndex])
-			proof := cltypes.KZGProof(cellsAndProofs[blobIndex].Proofs[columnIndex])
-			columnCells.Append(&cell)
-			columnProofs.Append(&proof)
-		}
-		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
-		sidecar.Index = columnIndex
-		sidecar.Column = columnCells
-		sidecar.KzgProofs = columnProofs
-		sidecar.Slot = slot
-		sidecar.BeaconBlockRoot = blockRoot
-		sidecars[columnIndex] = sidecar
-	}
-	return sidecars, nil
+	return peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, block.Block.Slot, blockRoot, cellsAndProofs)
 }
 
 // ---- Execution Payload Bid ----

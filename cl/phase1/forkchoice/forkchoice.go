@@ -853,9 +853,6 @@ func (f *ForkChoiceStore) payloadExecutionHashInvalidated(blockRoot common.Hash)
 	if f.verifiedExecutionPayloadHashes != nil {
 		executionBlockHash, ok = f.verifiedExecutionPayloadHashes.Get(blockRoot)
 	}
-	if !ok && f.eth2Roots != nil {
-		executionBlockHash, ok = f.eth2Roots.Get(blockRoot)
-	}
 	if !ok {
 		return false
 	}
@@ -896,9 +893,6 @@ func (f *ForkChoiceStore) trackExecutionPayloadRootLocked(blockRoot, executionBl
 	if f.verifiedExecutionPayloadHashes != nil {
 		f.verifiedExecutionPayloadHashes.Add(blockRoot, executionBlockHash)
 	}
-	if f.eth2Roots != nil {
-		f.eth2Roots.Add(blockRoot, executionBlockHash)
-	}
 }
 
 func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash) {
@@ -924,6 +918,9 @@ func (f *ForkChoiceStore) markPayloadVerifiedLocked(blockRoot common.Hash, execu
 		}
 	}
 	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
+	if f.eth2Roots != nil {
+		f.eth2Roots.Add(blockRoot, executionBlockHash)
+	}
 	f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 	if f.executionPayloadStatus != nil {
 		f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusValidated)

@@ -2178,7 +2178,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				if err != nil {
 					return fmt.Errorf("failed to compute block root: %w", err)
 				}
-				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
 				if err != nil {
 					return fmt.Errorf("failed to get data column sidecars: %w", err)
 				}
@@ -2201,9 +2201,20 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	storageIntegrated := make(chan error, 1)
 	blockIntegrated := make(chan error, 1)
+	var localIntegration *localBlockIntegration
+	var localBlockRoot common.Hash
+	if blk.Version() >= clparams.GloasVersion {
+		localBlockRoot, err = blk.Block.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("failed to compute block root: %w", err)
+		}
+		localIntegration = a.startLocalBlockIntegration(localBlockRoot)
+	}
+	go a.relayLocalBlockIntegration(localBlockRoot, localIntegration, storageIntegrated, blockIntegrated)
 	go func() {
-		err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars, blockIntegrated)
+		err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars, storageIntegrated)
 		if err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
@@ -2236,6 +2247,40 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	}
 
 	return nil
+}
+
+func (a *ApiHandler) startLocalBlockIntegration(root common.Hash) *localBlockIntegration {
+	integration := &localBlockIntegration{done: make(chan struct{})}
+	a.localBlockIntegrations.Store(root, integration)
+	return integration
+}
+
+func (a *ApiHandler) finishLocalBlockIntegration(root common.Hash, integration *localBlockIntegration, err error) {
+	integration.err = err
+	close(integration.done)
+	a.localBlockIntegrations.CompareAndDelete(root, integration)
+}
+
+func (a *ApiHandler) relayLocalBlockIntegration(root common.Hash, integration *localBlockIntegration, source <-chan error, destination chan<- error) {
+	err := <-source
+	if integration != nil {
+		a.finishLocalBlockIntegration(root, integration, err)
+	}
+	destination <- err
+}
+
+func (a *ApiHandler) waitForLocalBlockIntegration(ctx context.Context, root common.Hash) error {
+	pending, ok := a.localBlockIntegrations.Load(root)
+	if !ok {
+		return nil
+	}
+	integration := pending.(*localBlockIntegration)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-integration.done:
+		return integration.err
+	}
 }
 
 func (a *ApiHandler) publishBlockAndSidecars(

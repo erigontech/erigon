@@ -502,6 +502,12 @@ func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, 
 	if !found {
 		return
 	}
+	if f.forkGraph.HasEnvelope(blockRoot) {
+		if err := f.claimEnvelopeIndexRepairOwner(blockRoot); err != nil {
+			log.Warn("OnBlock: execution payload index repair backlog is full", "blockRoot", blockRoot, "local", local, "err", err)
+			return
+		}
+	}
 	appliedEnvelope := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
 	if appliedEnvelope != nil {
 		f.writePendingEnvelopeIndices(ctx, blockRoot, pending, appliedEnvelope, local)
@@ -531,6 +537,7 @@ func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, block
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) {
+	defer f.drainQueuedWork()
 	if limit <= 0 || f.pendingLocalSelfBuildEnvelopes == nil || f.pendingEnvelopes == nil {
 		return
 	}
