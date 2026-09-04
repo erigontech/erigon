@@ -828,18 +828,12 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
-
-						if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-						}
-
 						histView, err := hi.decompressor.OpenSequentialView()
 						if err != nil {
 							return nil, nil, err
 						}
 						views = append(views, histView)
-						g2 = seg.NewPagedReader(seg.NewReader(histView.MakeGetter(), ht.h.Compression), compressedPageValuesCount, true)
+						g2 = seg.NewPagedReader(seg.NewReader(histView.MakeGetter(), ht.h.Compression), true)
 						break
 					}
 				}
