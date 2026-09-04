@@ -18,6 +18,7 @@ package debug
 
 import (
 	"math"
+	"os"
 	"runtime/debug"
 
 	"github.com/c2h5oh/datasize"
@@ -32,24 +33,24 @@ import (
 // to kill us instead.
 const goMemLimitShare = 0.7
 
-// noGoMemLimit is what the runtime reports when no limit is in force.
-const noGoMemLimit = int64(math.MaxInt64)
+// goMemLimitInForce reports whether the heap ceiling is already decided, so the
+// derived one must stand aside. The runtime reports GOMEMLIMIT=off exactly like
+// an unset variable, so only the environment tells that choice apart.
+func goMemLimitInForce(current int64) bool {
+	if _, fromEnv := os.LookupEnv("GOMEMLIMIT"); fromEnv {
+		return true
+	}
+	return current != math.MaxInt64
+}
 
 // SetGoMemLimit gives the Go heap a ceiling derived from the cgroup this process
-// runs in, unless a limit is already in force.
-//
-// Without one, GOGC alone decides when to collect: at the default 100 the runtime
-// aims for twice the live heap, so a process whose live heap is over half the
-// cgroup limit targets a number it is not allowed to reach and is killed before
-// the collection that would have saved it. A ceiling turns that into extra GC
-// work instead of a kill.
-//
-// Only a cgroup below total system memory counts: an unconfined process should
-// keep the default behaviour, and TotalMemory already folds in every source.
+// runs in, unless a limit is already in force. Without one the process targets a
+// heap it is not allowed to reach, and the kernel kills it before the collection
+// that would have saved it.
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
-	if current != noGoMemLimit {
-		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(current).HR())
+	if goMemLimitInForce(current) {
+		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
 		return
 	}
 
@@ -61,6 +62,10 @@ func SetGoMemLimit(logger log.Logger) {
 		return
 	}
 
+	// Cache sizing must see the cgroup, not the heap ceiling below it: MDBX's
+	// dirty pages live outside the Go heap, so TotalMemory has to settle first.
+	estimate.TotalMemory()
+
 	debug.SetMemoryLimit(limit)
 	logger.Info("[mem] GOMEMLIMIT derived from cgroup limit",
 		"cgroup", datasize.ByteSize(cgroup).HR(),
@@ -69,11 +74,14 @@ func SetGoMemLimit(logger log.Logger) {
 }
 
 // derivedGoMemLimit returns the heap ceiling for a cgroup limit, or 0 when the
-// cgroup does not constrain this process. system is physical memory, not
-// TotalMemory: the latter already folds the cgroup in, so it can never show the
-// cgroup as the smaller of the two.
+// cgroup does not constrain this process. An unconfined cgroup reports a
+// saturated limit. system is physical memory, not TotalMemory: the latter folds
+// the cgroup in, so it can never show the cgroup as the smaller of the two.
 func derivedGoMemLimit(cgroup, system uint64) int64 {
-	if cgroup == 0 || (system > 0 && cgroup >= system) {
+	if cgroup == 0 || cgroup >= math.MaxInt64 {
+		return 0
+	}
+	if system > 0 && cgroup >= system {
 		return 0
 	}
 	return int64(float64(cgroup) * goMemLimitShare)

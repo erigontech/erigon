@@ -143,6 +143,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	flags := cmd.Flags()
 
 	logger := logging.SetupLoggerCmd(filePrefix, cmd)
+	SetGoMemLimit(logger)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
