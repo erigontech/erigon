@@ -375,6 +375,15 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 	switch {
 	case !recorded:
 		return openUnderParams(nil)
+	case executionAttrsMatchParams(built, params):
+		// Only the WITHDRAWALS differ. Alone among the payload attributes they do not affect transaction
+		// execution: they credit accounts at block-end, after every transaction has run, and the flashblock
+		// rounds skip block-end entirely (SetFlashblockAccumulating) so the close is the first and only place
+		// they are applied. So the correct answer is to RE-STAMP the open block with the new list — not to
+		// abandon its generation and re-execute a body whose execution is unaffected. Re-opening here cost a
+		// full re-execution at every epoch boundary (measured: 146 transactions re-executed on one block),
+		// which is exactly what the DAG-L2 seal exists to avoid.
+		return e.restampWithdrawalsLocked(ctx, params)
 	case !builtAttrsMatchParams(built, params):
 		// The block is open under attributes that are no longer the ones being asked for — the CL missed a
 		// slot, so the next slot's attributes describe this same block. They cannot be patched onto the
@@ -643,4 +652,56 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		Block:      blockWithReceipts,
 		BlockValue: value,
 	}, nil
+}
+
+// executionAttrsMatchParams reports whether every EXECUTION-AFFECTING attribute of the open block already
+// matches params, so the only possible difference is the withdrawals list. Timestamp gates fork activation
+// and keys the EIP-4788 ring buffer, PrevRandao and Coinbase are opcodes, and the parent beacon root is
+// written to state at block-start — all of them invalidate accumulated execution. Withdrawals do not.
+func executionAttrsMatchParams(built FlashblockInputs, params *builder.Parameters) bool {
+	if built.Timestamp != params.Timestamp || built.PrevRandao != params.PrevRandao || built.FeeRecipient != params.SuggestedFeeRecipient {
+		return false
+	}
+	var pbbr common.Hash
+	if params.ParentBeaconBlockRoot != nil {
+		pbbr = *params.ParentBeaconBlockRoot
+	}
+	if built.ParentBeaconBlockRoot != pbbr {
+		return false
+	}
+	// Execution-affecting attributes agree; report a difference only when the withdrawals actually differ,
+	// so an unchanged block is left alone.
+	return types.DeriveSha(types.Withdrawals(built.Withdrawals)) != types.DeriveSha(types.Withdrawals(params.Withdrawals))
+}
+
+// restampWithdrawalsLocked replaces the open block's withdrawals list and re-inserts it under the header that
+// implies, WITHOUT touching its accumulated state. Nothing is re-executed: the SharedDomains, its txNum and
+// its receipts are all untouched, and the close credits the new list at block-end. The generation is re-keyed
+// to the new header hash so the seal reads the block it just wrote. Caller MUST hold e.semaphore.
+func (e *ExecModule) restampWithdrawalsLocked(ctx context.Context, params *builder.Parameters) error {
+	e.flash.mu.Lock()
+	in := e.flash.built
+	in.Withdrawals = params.Withdrawals
+	body := append([][]byte(nil), e.flash.body...)
+	num := e.flash.num
+	e.flash.mu.Unlock()
+
+	header := BuildFlashHeader(in, body, FlashblockOutputs{})
+	hash := header.Hash()
+	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body, Withdrawals: in.Withdrawals}}
+	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
+	if err != nil || status != ExecutionStatusSuccess {
+		return fmt.Errorf("restampWithdrawals: insert num=%d status=%v: %w", num, status, err)
+	}
+	e.preExec.SetActiveHead(hash, num)
+
+	e.flash.mu.Lock()
+	if e.flash.num == num {
+		e.flash.built = in
+		e.flash.hash = hash
+	}
+	e.flash.mu.Unlock()
+	e.logger.Info("[execmodule] withdrawals re-stamped on the open block (no re-execution)",
+		"block", num, "txs", len(body), "withdrawals", len(in.Withdrawals))
+	return nil
 }
