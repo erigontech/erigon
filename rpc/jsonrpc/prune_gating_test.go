@@ -602,24 +602,19 @@ func archiveBlocksWindowMode() prune.Mode {
 	return prune.Mode{Initialised: true, History: prune.ArchiveMode.History, Blocks: pruneGatingDistance}
 }
 
-// TestSearchTransactionsBeforeNewestPage pins that the newest-page sentinel is not
-// read as a request for genesis: the page it answers with lies above the blocks cutoff.
-func TestSearchTransactionsBeforeNewestPage(t *testing.T) {
-	t.Parallel()
-
-	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: archiveBlocksWindowMode()})
-	res, err := apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 3)
-	require.NoError(t, err)
-	require.NotEmpty(t, res.Txs)
-}
-
-// TestSearchTransactionsBeforeGatesScannedBlocks pins that a page whose backward scan
-// crosses the blocks cutoff is rejected instead of served from bodies the prune mode
-// claims are gone.
+// TestSearchTransactionsBeforeGatesScannedBlocks pins the newest-page sentinel against
+// the blocks cutoff: it is not read as a request for genesis, so a page that stays above
+// the cutoff is served, while one whose backward scan crosses it is rejected instead of
+// answered from bodies the prune mode claims are gone.
 func TestSearchTransactionsBeforeGatesScannedBlocks(t *testing.T) {
 	t.Parallel()
 
 	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: archiveBlocksWindowMode()})
-	_, err := apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 25)
+
+	res, err := apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 3)
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Txs)
+
+	_, err = apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 25)
 	require.ErrorIs(t, err, state.PrunedError)
 }

@@ -250,8 +250,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	// blockNum 0 is the sentinel for the oldest page, which starts wherever the
-	// indices still reach rather than at genesis.
+	// blockNum 0 is the oldest-page sentinel; see SearchTransactionsBefore.
 	if blockNum != 0 {
 		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
 		if err != nil {
