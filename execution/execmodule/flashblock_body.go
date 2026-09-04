@@ -228,7 +228,7 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 
 	header := BuildFlashHeader(inputs, body, FlashblockOutputs{})
 	hash := header.Hash()
-	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body}}
+	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}}
 	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
 	if err != nil || status != ExecutionStatusSuccess {
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("PreExecuteFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(body), status, err)
@@ -260,7 +260,7 @@ func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs Flas
 		e.flash.receipts = vr.FlashblockReceiptCount
 	}
 	e.flash.mu.Unlock()
-	return &types.RawBody{Transactions: body}, hash, vr, nil
+	return &types.RawBody{Transactions: body, Withdrawals: inputs.Withdrawals}, hash, vr, nil
 }
 
 // reopenFlashblockLocked re-opens the CURRENT block under corrected attributes, restoring a body that was
@@ -302,7 +302,7 @@ func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs Flashblo
 
 	header := BuildFlashHeader(inputs, restored, FlashblockOutputs{})
 	hash := header.Hash()
-	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: restored}}
+	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: restored, Withdrawals: inputs.Withdrawals}}
 	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
 	if err != nil || status != ExecutionStatusSuccess {
 		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("reopenFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(restored), status, err)
@@ -322,7 +322,7 @@ func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs Flashblo
 		e.flash.receipts = vr.FlashblockReceiptCount
 	}
 	e.flash.mu.Unlock()
-	return &types.RawBody{Transactions: restored}, hash, vr, nil
+	return &types.RawBody{Transactions: restored, Withdrawals: inputs.Withdrawals}, hash, vr, nil
 }
 
 // filterStreamLocked filters newTxRLPs against the frontier SD account nonces (sequencing per sender across the

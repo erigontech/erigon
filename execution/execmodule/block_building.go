@@ -214,7 +214,8 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 			"num", number, "parentOK", inHdr.ParentHash == params.ParentHash,
 			"tsOK", inHdr.Time == params.Timestamp, "hdrTs", inHdr.Time, "reqTs", params.Timestamp,
 			"randaoOK", inHdr.MixDigest == params.PrevRandao,
-			"coinbaseOK", inHdr.Coinbase == params.SuggestedFeeRecipient)
+			"coinbaseOK", inHdr.Coinbase == params.SuggestedFeeRecipient,
+			"hdrWdHash", inHdr.WithdrawalsHash, "reqWdHash", types.DeriveSha(types.Withdrawals(params.Withdrawals)))
 		return nil, false, nil
 	}
 
@@ -459,7 +460,16 @@ func builtAttrsMatchParams(built FlashblockInputs, params *builder.Parameters) b
 	if params.ParentBeaconBlockRoot != nil {
 		pbbr = *params.ParentBeaconBlockRoot
 	}
-	return built.ParentBeaconBlockRoot == pbbr
+	if built.ParentBeaconBlockRoot != pbbr {
+		return false
+	}
+	// Withdrawals too, because the SEAL requires them to match (preconfirmAttrsMatch). Omitting them here
+	// meant the reconcile saw nothing to correct and left the block open under the old list, and then the
+	// seal rejected it and fell through to the from-scratch builder — which on a DAG-L2 has no body to build.
+	// The payload was never produced and the slot was MISSED, on a single node with one proposer: one slot
+	// every epoch, plus the next one, burnt by the retries. Two predicates deciding "do the attributes
+	// match?" must decide it the same way.
+	return types.DeriveSha(types.Withdrawals(built.Withdrawals)) == types.DeriveSha(types.Withdrawals(params.Withdrawals))
 }
 
 // FrontierHeader returns the exec-owned run-ahead frontier head — the last sealed block a newly-opening
