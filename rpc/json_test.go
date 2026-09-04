@@ -270,7 +270,8 @@ func sameMessage(got, want *jsonrpcMessage) error {
 	if (got.Error == nil) != (want.Error == nil) {
 		return fmt.Errorf("Error nil = %v, want %v", got.Error == nil, want.Error == nil)
 	}
-	if got.Error != nil && *got.Error != *want.Error {
+	// jsonError.Data holds a decoded value, so it can be a slice or a map that == would panic on.
+	if got.Error != nil && !reflect.DeepEqual(*got.Error, *want.Error) {
 		return fmt.Errorf("Error = %+v, want %+v", *got.Error, *want.Error)
 	}
 	return nil
@@ -416,20 +417,21 @@ func FuzzFillMessage(f *testing.F) {
 		var want jsonrpcMessage
 		var obj map[string]json.RawMessage
 		if err := json.Unmarshal(data, &obj); err == nil {
-			if v, ok := obj["jsonrpc"]; ok {
-				_ = json.Unmarshal(v, &want.Version)
+			// A field that does not decode counts as absent, same as fillMessage.
+			if v, ok := obj["jsonrpc"]; ok && json.Unmarshal(v, &want.Version) != nil {
+				want.Version = ""
 			}
 			if v, ok := obj["id"]; ok {
 				want.ID = v
 			}
-			if v, ok := obj["method"]; ok {
-				_ = json.Unmarshal(v, &want.Method)
+			if v, ok := obj["method"]; ok && json.Unmarshal(v, &want.Method) != nil {
+				want.Method = ""
 			}
 			if v, ok := obj["params"]; ok {
 				want.Params = v
 			}
-			if v, ok := obj["error"]; ok {
-				_ = json.Unmarshal(v, &want.Error)
+			if v, ok := obj["error"]; ok && json.Unmarshal(v, &want.Error) != nil {
+				want.Error = nil
 			}
 			if v, ok := obj["result"]; ok {
 				want.Result = v
