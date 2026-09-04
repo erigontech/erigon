@@ -409,3 +409,20 @@ func TestGetExecutionBlockUnknownNumber(t *testing.T) {
 		t.Errorf("got %v, want rpc.BlockNotFoundErr", err)
 	}
 }
+
+// parent_hash is a 32-byte field, so its SSZ leaf is the value itself.
+func TestResolvePathParentHash(t *testing.T) {
+	parent := common.HexToHash("0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+	block := types.NewBlockWithHeader(&types.Header{ParentHash: parent}, nil)
+
+	got, err := resolvePath("/parent_hash", "execution_block", block)
+	if err != nil {
+		t.Fatalf("resolvePath: %v", err)
+	}
+	if got.Value != Result(parent.Hex()) {
+		t.Errorf("value: got %q, want %q", got.Value, parent.Hex())
+	}
+	if got.Leaf != Leaf(parent.Hex()) {
+		t.Errorf("leaf: got %q, want %q", got.Leaf, parent.Hex())
+	}
+}

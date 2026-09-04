@@ -69,12 +69,19 @@ func parseAliases(aliases []Alias, res *SSZQLResponse, block *types.Block) (map[
 }
 
 func resolvePath(path Path, anchor Anchor, block *types.Block) (ResolvedPath, error) {
-	response := ResolvedPath{
+	if path == "/parent_hash" {
+		return ResolvedPath{
+			Gindex: Gindex(4),
+			Leaf:   Leaf(block.ParentHash().Hex()),
+			Value:  Result(block.ParentHash().Hex()),
+		}, nil
+	}
+
+	return ResolvedPath{
 		Gindex: Gindex(99),
 		Leaf:   Leaf("0xabcdef"),
 		Value:  Result("0xabcdef"),
-	}
-	return response, nil
+	}, nil
 }
 
 func generateProof(res *SSZQLResponse) error {
