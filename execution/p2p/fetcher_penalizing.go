@@ -38,7 +38,7 @@ func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer *Pee
 
 	fetchBodiesPenalizeErrs := []error{
 		&ErrTooManyBodies{},
-		&ErrBodyDoesNotMatchHeader{},
+		&ErrMissingBodies{},
 	}
 
 	fetchBlocksBackwardsByHashPenalizeErrs := append([]error{}, fetchHeadersPenalizeErrs...)

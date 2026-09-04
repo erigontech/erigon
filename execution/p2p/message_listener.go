@@ -38,7 +38,7 @@ type DecodedInboundMessage[TPacket any] struct {
 	PeerId  *PeerId
 }
 
-// RawBlockBodiesInboundMessage carries a decoded request ID and the RLP payload of the body list.
+// RawBlockBodiesInboundMessage carries a decoded request ID and the encoded body list.
 type RawBlockBodiesInboundMessage struct {
 	*sentryproto.InboundMessage
 	RequestId     uint64

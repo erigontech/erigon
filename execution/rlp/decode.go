@@ -69,8 +69,7 @@ var (
 
 // IsInvalidRLPError reports whether err is an RLP decoding error.
 func IsInvalidRLPError(err error) bool {
-	return errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, ErrExpectedString) ||
+	return errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
 		errors.Is(err, ErrCanonSize) ||
@@ -1110,7 +1109,8 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 		s.remaining = inputLimit
 		s.limited = true
 	} else {
-		// Discover the number of bytes remaining in common in-memory readers.
+		// Attempt to automatically discover
+		// the limit when reading from a byte slice.
 		switch br := r.(type) {
 		case *bytes.Reader:
 			s.remaining = uint64(br.Len())
@@ -1120,9 +1120,6 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 			s.limited = true
 		case *strings.Reader:
 			s.remaining = uint64(br.Len())
-			s.limited = true
-		case *sliceReader:
-			s.remaining = uint64(len(*br))
 			s.limited = true
 		default:
 			s.limited = false

@@ -155,25 +155,6 @@ func (e ErrTooManyBodies) Is(err error) bool {
 	return errors.As(err, &errTooManyBodies)
 }
 
-type ErrBodyDoesNotMatchHeader struct {
-	blockNum  uint64
-	blockHash common.Hash
-	err       error
-}
-
-func (e ErrBodyDoesNotMatchHeader) Error() string {
-	return fmt.Sprintf("body does not match header: blockNum=%d, blockHash=%s: %v", e.blockNum, e.blockHash, e.err)
-}
-
-func (e ErrBodyDoesNotMatchHeader) Unwrap() error {
-	return e.err
-}
-
-func (e ErrBodyDoesNotMatchHeader) Is(err error) bool {
-	_, ok := errors.AsType[*ErrBodyDoesNotMatchHeader](err)
-	return ok
-}
-
 func NewErrMissingBodies(headers []*types.Header) *ErrMissingBodies {
 	return &ErrMissingBodies{
 		headers: headers,

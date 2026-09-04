@@ -36,162 +36,47 @@ type DerivableList interface {
 }
 
 func DeriveSha(list DerivableList) common.Hash {
-	count := list.Len()
-	if count < 1 {
+	if list.Len() < 1 {
 		return trie.EmptyRoot
 	}
 
+	var curr bytes.Buffer
+	var succ bytes.Buffer
 	var value bytes.Buffer
-	index := firstDerivationIndex(count)
-	builder := newDeriveShaBuilder(index)
-	for index >= 0 {
-		value.Reset()
-		list.EncodeIndex(index, &value)
-		nextIndex := nextDerivationIndex(index, count)
-		builder.addValue(value.Bytes(), nextIndex)
-		index = nextIndex
-	}
 
-	return builder.root()
-}
+	hb := trie.NewHashBuilder(false)
 
-// DeriveShaRawTransactions derives a transaction root from the RLP payload of a transaction list.
-func DeriveShaRawTransactions(encoded []byte) (common.Hash, error) {
-	return deriveShaRawValues(encoded, true)
-}
+	hb.Reset()
+	curr.Reset()
+	succ.Reset()
 
-// DeriveShaRawValues derives an indexed trie root from an RLP list payload without materializing its values.
-func DeriveShaRawValues(encoded []byte) (common.Hash, error) {
-	return deriveShaRawValues(encoded, false)
-}
+	hexWriter := &hexWriter{&succ}
 
-func deriveShaRawValues(encoded []byte, unwrapStringValues bool) (common.Hash, error) {
-	count, err := rlp.CountValues(encoded)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if count == 0 {
-		return trie.EmptyRoot, nil
-	}
+	var groups, branches, hashes []uint16
+	var leafData trie.GenStructStepLeafData
 
-	builder := newDeriveShaBuilder(firstDerivationIndex(count))
-	indexAfterZero := nextDerivationIndex(0, count)
+	traverseInLexOrder(list, func(i int, next int) {
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
 
-	// Raw values arrive in numeric order. Hold index 0 so the builder receives
-	// RLP-encoded keys in lexicographic order: 1 through 127, then 0, then 128 onward.
-	var zeroValue []byte
-	for i := 0; len(encoded) > 0; i++ {
-		kind, content, rest, err := rlp.Split(encoded)
-		if err != nil {
-			return common.Hash{}, err
-		}
-		value := encoded[:len(encoded)-len(rest)]
-		if unwrapStringValues && kind != rlp.List {
-			// Typed transactions are RLP strings in block bodies, but their trie
-			// values exclude the string wrapper. Legacy transactions remain lists.
-			value = content
-		}
-
-		if i == 0 {
-			zeroValue = value
-		} else {
-			if i == indexAfterZero {
-				builder.addValue(zeroValue, indexAfterZero)
+		if next >= 0 {
+			encodeUint(uint(next), hexWriter)
+			if err := hexWriter.Commit(); err != nil {
+				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
 			}
-			builder.addValue(value, nextDerivationIndex(i, count))
 		}
-		encoded = rest
-	}
-	if indexAfterZero < 0 {
-		builder.addValue(zeroValue, indexAfterZero)
-	}
 
-	return builder.root(), nil
-}
+		value.Reset()
 
-// RLP-encoded trie indices sort as 1 through 127, then 0, then 128 and above.
-func firstDerivationIndex(count int) int {
-	if count <= 0 {
-		return -1
-	}
-	if count == 1 {
-		return 0
-	}
-	return 1
-}
+		if curr.Len() > 0 {
+			list.EncodeIndex(i, &value)
+			leafData.Value = rlp.RlpEncodedBytes(value.Bytes())
+			groups, branches, hashes, _ = trie.GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &leafData, groups, branches, hashes, false)
+		}
+	})
 
-func nextDerivationIndex(index, count int) int {
-	switch {
-	case index == 0 && count > 128:
-		return 128
-	case index == 0:
-		return -1
-	case index < 127 && index < count-1:
-		return index + 1
-	case index <= 127:
-		return 0
-	case index < count-1:
-		return index + 1
-	}
-	return -1
-}
-
-type deriveShaBuilder struct {
-	currentKey  bytes.Buffer
-	nextKey     bytes.Buffer
-	hashBuilder *trie.HashBuilder
-	keyWriter   hexWriter
-	groups      []uint16
-	branches    []uint16
-	hashes      []uint16
-	leafData    trie.GenStructStepLeafData
-}
-
-func newDeriveShaBuilder(firstIndex int) *deriveShaBuilder {
-	builder := &deriveShaBuilder{hashBuilder: trie.NewHashBuilder(false)}
-	builder.keyWriter.w = &builder.nextKey
-	builder.hashBuilder.Reset()
-	builder.prepareNextKey(firstIndex)
-	return builder
-}
-
-// addValue inserts value under the prepared key and prepares nextIndex as its successor.
-func (b *deriveShaBuilder) addValue(value []byte, nextIndex int) {
-	b.currentKey.Reset()
-	b.currentKey.Write(b.nextKey.Bytes())
-	b.nextKey.Reset()
-	b.prepareNextKey(nextIndex)
-	if b.currentKey.Len() == 0 {
-		return
-	}
-
-	b.leafData.Value = rlp.RlpEncodedBytes(value)
-	b.groups, b.branches, b.hashes, _ = trie.GenStructStep(
-		retain,
-		b.currentKey.Bytes(),
-		b.nextKey.Bytes(),
-		b.hashBuilder,
-		nil,
-		&b.leafData,
-		b.groups,
-		b.branches,
-		b.hashes,
-		false,
-	)
-}
-
-func (b *deriveShaBuilder) prepareNextKey(index int) {
-	if index < 0 {
-		return
-	}
-	encodeUint(uint(index), &b.keyWriter)
-	if err := b.keyWriter.Commit(); err != nil {
-		panic(fmt.Errorf("fatal in DeriveSha: %w", err))
-	}
-}
-
-func (b *deriveShaBuilder) root() common.Hash {
-	hash, _ := b.hashBuilder.RootHash()
+	hash, _ := hb.RootHash()
 	return hash
 }
 
@@ -199,7 +84,7 @@ type bytesWriter interface {
 	WriteByte(byte) error
 }
 
-// hexWriter writes bytes as trie-key nibbles; Commit appends the leaf terminator.
+// hexTapeWriter hex-encodes data and writes it directly to a tape.
 type hexWriter struct {
 	w io.ByteWriter
 }
@@ -213,6 +98,33 @@ func (w *hexWriter) WriteByte(b byte) error {
 
 func (w *hexWriter) Commit() error {
 	return w.w.WriteByte(16)
+}
+
+func adjustIndex(i int, l int) int {
+	if i >= 0 && i < 127 && i < l-1 {
+		return i + 1
+	} else if i == 127 || (i < 127 && i >= l-1) {
+		return 0
+	}
+	return i
+}
+
+// traverseInLexOrder traverses the list indices in the order suitable for HashBuilder.
+// HashBuilder requires keys to be in the lexicographical order. Our keys are unit indices in RLP encoding in hex.
+// In RLP encoding 0 is 0080 where 1 is 000110, 2 is 000210, etc up until 128 which is 0801080010.
+// So, knowing that we can order indices in the right order even w/o really sorting them. Only 0 is misplaced, and should take the position after 127.
+// So, in the end we transform [0,...,127,128,...n] to [1,...,127,0,128,...,n] which will be [000110....070f10, 080010, 0801080010....] in hex encoding.
+func traverseInLexOrder(list DerivableList, traverser func(int, int)) {
+	for i := -1; i < list.Len(); i++ {
+		adjustedIndex := adjustIndex(i, list.Len())
+		nextIndex := i + 1
+		if nextIndex >= list.Len() {
+			nextIndex = -1
+		}
+		nextIndex = adjustIndex(nextIndex, list.Len())
+
+		traverser(adjustedIndex, nextIndex)
+	}
 }
 
 func retain(_ []byte) bool {

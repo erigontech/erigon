@@ -165,7 +165,6 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
-	header := newMockBlockHeaders(1)[0]
 	test := newMessageListenerTest(t)
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
@@ -173,7 +172,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 		observer := func(message *RawBlockBodiesInboundMessage) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(23), message.RequestId)
-			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, []*types.Header{header})
+			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, 1)
 			require.NoError(t, err)
 			require.Len(t, bodies, 1)
 			done.Store(true)
@@ -194,7 +193,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	})
 }
 
-func TestMessageListenerShouldPenalizePeerWhenRlpIsTruncated(t *testing.T) {
+func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	t.Parallel()
 
 	peerId1 := PeerIdFromUint64(1)
@@ -214,9 +213,9 @@ func TestMessageListenerShouldPenalizePeerWhenRlpIsTruncated(t *testing.T) {
 
 		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
 			message: &sentryproto.InboundMessage{
-				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 				PeerId: peerId1.H512(),
-				Data:   []byte{0xc2, 0x01, 0xf8},
+				Data:   []byte{'i', 'n', 'v', 'a', 'l', 'i', 'd', '.', 'r', 'l', 'p'},
 			},
 		}
 
@@ -414,26 +413,15 @@ func newMockBlockHeaders(numHeaders int) []*types.Header {
 			parentHash = parentHeader.Hash()
 		}
 
-		headers[i] = newMockHeaderForBody(uint64(i)+1, &types.Body{})
-		headers[i].ParentHash = parentHash
+		headers[i] = &types.Header{
+			Number:     *uint256.NewInt(uint64(i) + 1),
+			ParentHash: parentHash,
+		}
 
 		parentHeader = headers[i]
 	}
 
 	return headers
-}
-
-func newMockHeaderForBody(number uint64, body *types.Body) *types.Header {
-	header := &types.Header{
-		Number:    *uint256.NewInt(number),
-		TxHash:    types.DeriveSha(types.Transactions(body.Transactions)),
-		UncleHash: types.CalcUncleHash(body.Uncles),
-	}
-	if body.Withdrawals != nil {
-		withdrawalsHash := types.DeriveSha(types.Withdrawals(body.Withdrawals))
-		header.WithdrawalsHash = &withdrawalsHash
-	}
-	return header
 }
 
 func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.Header) []byte {
