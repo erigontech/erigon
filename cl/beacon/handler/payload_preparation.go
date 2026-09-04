@@ -200,7 +200,7 @@ func (g *payloadPreparationGate) clearProducedBlock(slot uint64) {
 	delete(g.producedBlockEnds, slot)
 }
 
-func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64, now time.Time) bool {
+func (g *payloadPreparationGate) producedBlockPending(referenceSlot, selectedSlot uint64, now time.Time) bool {
 	g.producedBlockMu.Lock()
 	defer g.producedBlockMu.Unlock()
 	for slot, expiry := range g.producedBlockEnds {
@@ -208,7 +208,7 @@ func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot 
 			delete(g.producedBlockEnds, slot)
 			continue
 		}
-		if selectedSlot < slot && slotsWithinOne(currentSlot, slot) {
+		if selectedSlot < slot && slotsWithinOne(referenceSlot, slot) {
 			return true
 		}
 	}
@@ -679,6 +679,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 	if !ok {
 		return nil, execution_client.ErrNotSupported
 	}
+	preparationSlot := targetSlot - 1
 	for {
 		if cause := context.Cause(ctx); cause != nil {
 			return nil, cause
@@ -687,7 +688,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 		if !selected || selectedRoot != baseBlockRoot {
 			return nil, errPreparationHeadChanged
 		}
-		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, targetSlot-1, selectedSlot, head, attrs)
+		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, preparationSlot, selectedSlot, head, attrs)
 		if err == nil {
 			return payloadID, nil
 		}
@@ -708,7 +709,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 func (a *ApiHandler) startPayloadBuildAttempt(
 	ctx context.Context,
 	payloadBuilder execution_client.PayloadBuilder,
-	currentSlot uint64,
+	preparationSlot uint64,
 	selectedSlot uint64,
 	head common.Hash,
 	attrs *engine_types.PayloadAttributes,
@@ -720,7 +721,7 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 	defer finishAttempt()
 	// Production records its marker while holding the shared side of this gate. Checking after
 	// taking the exclusive side closes the handoff race between production and signing.
-	if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot, time.Now()) {
+	if a.payloadPreparationGate.producedBlockPending(preparationSlot, selectedSlot, time.Now()) {
 		return nil, errBlockWorkInFlight
 	}
 	return payloadBuilder.StartPayloadBuild(ctx, head, attrs)
