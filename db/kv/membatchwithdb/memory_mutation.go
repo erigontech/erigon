@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -60,6 +61,7 @@ type MemoryMutation struct {
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 	DomainReader     DomainReader
+	overlay          *MemoryMutation // non-nil marks a read view, pointing at the overlay it was created from
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -1095,10 +1097,37 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
 
-// IsOverlayReadView reports whether this is a non-owning view that already pins
-// an overlay generation.
-func (m *MemoryMutation) IsOverlayReadView() bool {
-	return m != nil && m.memDb == nil
+// OverlayViewCarrier is implemented by txs that are pinned overlay views.
+// A wrapper that embeds a concrete view type keeps the marker through method
+// promotion; one that embeds the bare tx interface must forward OverlayView
+// explicitly, or the wrap points will treat it as unpinned.
+type OverlayViewCarrier interface {
+	// OverlayView returns the overlay the tx was pinned to and whether the
+	// tx is a pinned view at all. A pinned view with a nil overlay resolved
+	// "no overlay published" and must keep reading committed data only.
+	OverlayView() (overlay *MemoryMutation, pinned bool)
+}
+
+// CarriesOverlayView reports whether tx is already a pinned overlay view, so
+// wrap points leave it alone (rationale on rpchelper.PinToOverlay).
+func CarriesOverlayView(tx kv.Tx) bool {
+	_, ok := ViewOverlay(tx)
+	return ok
+}
+
+// ViewOverlay returns the overlay tx was pinned to, and whether tx is a
+// pinned view at all.
+func ViewOverlay(tx kv.Tx) (*MemoryMutation, bool) {
+	if c, ok := tx.(OverlayViewCarrier); ok {
+		return c.OverlayView()
+	}
+	return nil, false
+}
+
+// OverlayView implements OverlayViewCarrier for read views; a MemoryMutation
+// that owns its overlay data is not a view and carries no pin.
+func (m *MemoryMutation) OverlayView() (*MemoryMutation, bool) {
+	return m.overlay, m.overlay != nil
 }
 
 // newReadViewMut is the internal constructor that returns the full
@@ -1118,6 +1147,7 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 		readTx:         tx,
 		db:             dbTx,
 		DomainReader:   m.DomainReader,
+		overlay:        m,
 	}
 }
 
@@ -1332,6 +1362,38 @@ func (td temporaldb) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRw
 }
 
 func (td temporaldb) OnFilesChange(onChange kv.OnFilesChange, onDelete kv.OnFilesChange) {}
+
+func (td temporaldb) OpenStateSnapshots(context.Context) error {
+	return nil
+}
+
+func (td temporaldb) StepSize() uint64 {
+	return td.memoryMutation.Debug().StepSize()
+}
+
+func (td temporaldb) MaxPrunableStepsBacklog() uint64 {
+	return 0
+}
+
+func (td temporaldb) BuildFiles2(context.Context, kv.Step, kv.Step, kv.FinalityContext, bool) error {
+	return errors.New("memory temporal db does not support state file maintenance")
+}
+
+func (td temporaldb) BuildFilesInBackground(kv.FinalityContext) chan struct{} {
+	finished := make(chan struct{})
+	close(finished)
+	return finished
+}
+
+func (td temporaldb) BuildMissedAccessors(context.Context, int, ...kv.BuildAccessorsOption) error {
+	return errors.New("memory temporal db does not support state file maintenance")
+}
+
+func (td temporaldb) CollateAndPrune(context.Context, func(kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
+	finished := make(chan struct{})
+	close(finished)
+	return false, finished, nil
+}
 
 func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	return f(td.memoryMutation)

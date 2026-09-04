@@ -130,10 +130,21 @@ func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remoteproto.K
 	return remoteOpts{bucketsCfg: kv.ChaindataTablesCfg, version: v, log: logger, remoteKV: remoteKV}
 }
 
-func (db *DB) PageSize() datasize.ByteSize { panic("not implemented") }
-func (db *DB) Path() string                { panic("not implemented") }
-func (db *DB) ReadOnly() bool              { return true }
-func (db *DB) AllTables() kv.TableCfg      { return db.buckets }
+func (db *DB) PageSize() datasize.ByteSize {
+	panic("not implemented")
+}
+
+func (db *DB) Path() string {
+	panic("not implemented")
+}
+
+func (db *DB) ReadOnly() bool {
+	return true
+}
+
+func (db *DB) AllTables() kv.TableCfg {
+	return db.buckets
+}
 
 func (db *DB) EnsureVersionCompatibility() bool {
 	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
@@ -151,7 +162,8 @@ func (db *DB) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func (db *DB) Close() {}
+func (db *DB) Close() {
+}
 
 func (db *DB) CHandle() unsafe.Pointer {
 	panic("CHandle not implemented")
@@ -188,18 +200,47 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
-func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
-func (db *DB) NewMemBatch(ioMetrics any) kv.TemporalMemBatch       { panic("not implemented") }
-func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
-func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
-func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
+
+func (db *DB) Debug() kv.TemporalDebugDB {
+	return kv.TemporalDebugDB(db)
+}
+
+func (db *DB) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	panic("not implemented")
+}
+
+func (db *DB) DomainTables(domain ...kv.Domain) []string {
+	panic("not implemented")
+}
+
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
+	panic("not implemented")
+}
+
+func (db *DB) ReloadFiles() error {
+	panic("not implemented")
+}
+
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int, _ ...kv.BuildAccessorsOption) error {
 	panic("not implemented")
 }
-func (db *DB) EnableReadAhead() kv.TemporalDebugDB { panic("not implemented") }
-func (db *DB) DisableReadAhead()                   { panic("not implemented") }
-func (db *DB) Files() []string                     { panic("not implemented") }
-func (db *DB) MergeLoop(ctx context.Context) error { panic("not implemented") }
+
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
+	panic("not implemented")
+}
+
+func (db *DB) DisableReadAhead() {
+	panic("not implemented")
+}
+
+func (db *DB) Files() []string {
+	panic("not implemented")
+}
+
+func (db *DB) MergeLoop(ctx context.Context) error {
+	panic("not implemented")
+}
+
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
@@ -207,15 +248,19 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	return t.(kv.TemporalTx), nil
 }
+
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return nil, errors.New("remote db provider doesn't support .BeginRw method")
 }
+
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return nil, errors.New("remote db provider doesn't support .BeginRw method")
 }
+
 func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	return nil, errors.New("remote db provider doesn't support .BeginTemporalRw method")
 }
+
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return nil, errors.New("remote db provider doesn't support .BeginTemporalRwNosync method")
 }
@@ -228,6 +273,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	defer tx.Rollback()
 	return f(tx)
 }
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) (err error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -240,50 +286,111 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .Update method")
 }
+
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch { panic("not implemented") }
+func (tx *tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	panic("not implemented")
+}
 
-func (tx *tx) AggTx() any                                  { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx                   { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemented") }
-func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
+func (tx *tx) AggTx() any {
+	panic("not implemented")
+}
+
+func (tx *tx) Debug() kv.TemporalDebugTx {
+	return kv.TemporalDebugTx(tx)
+}
+
+func (tx *tx) FreezeInfo() kv.FreezeInfo {
+	panic("not implemented")
+}
+
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+	panic("not implemented")
+}
+
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
 	return 0, errors.New("remote db provider doesn't support .Retire method")
 }
-func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
-func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
+
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles {
+	panic("not implemented")
+}
+
+func (tx *tx) DomainProgress(domain kv.Domain) uint64 {
+	panic("not implemented")
+}
+
 func (tx *tx) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return 0, false
 }
+
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
+
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	panic("not implemented")
 }
+
 func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
 	panic("not implemented")
 }
+
 func (tx *tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
 	panic("not implemented")
 }
-func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
+
+func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 {
+	panic("not implemented")
+}
+
 func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	panic("not implemented")
 }
-func (tx *tx) Dirs() datadir.Dirs                                   { panic("not implemented") }
-func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
-func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) { panic("not implemented") }
+func (tx *tx) Dirs() datadir.Dirs {
+	panic("not implemented")
+}
 
-func (tx *tx) ViewID() uint64  { return tx.viewID }
-func (tx *tx) CollectMetrics() {}
+func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) {
+	panic("not implemented")
+}
+
+func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
+	panic("not implemented")
+}
+
+func (db *DB) StepSize() uint64 {
+	var stepSize uint64
+	_ = db.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		stepSize = tx.Debug().StepSize()
+		return nil
+	})
+	return stepSize
+}
+
+func (db *DB) MaxPrunableStepsBacklog() uint64 {
+	reply, err := db.remoteKV.MaxPrunableStepsBacklog(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
+	if err != nil {
+		return 0
+	}
+	return reply.Steps
+}
+
+func (tx *tx) ViewID() uint64 {
+	return tx.viewID
+}
+
+func (tx *tx) CollectMetrics() {
+}
+
 func (tx *tx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
 }
+
 func (tx *tx) ReadSequence(table string) (uint64, error) {
 	reply, err := tx.db.remoteKV.Sequence(tx.ctx, &remoteproto.SequenceReq{TxId: tx.id, Table: table})
 	if err != nil {
@@ -291,8 +398,14 @@ func (tx *tx) ReadSequence(table string) (uint64, error) {
 	}
 	return reply.Value, nil
 }
-func (tx *tx) Append(bucket string, k, v []byte) error    { panic("no write methods") }
-func (tx *tx) AppendDup(bucket string, k, v []byte) error { panic("no write methods") }
+
+func (tx *tx) Append(bucket string, k, v []byte) error {
+	panic("no write methods")
+}
+
+func (tx *tx) AppendDup(bucket string, k, v []byte) error {
+	panic("no write methods")
+}
 
 func (tx *tx) Commit() error {
 	panic("remote db is read-only")
@@ -311,7 +424,9 @@ func (tx *tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (tx *tx) DBSize() (uint64, error) { panic("not implemented") }
+func (tx *tx) DBSize() (uint64, error) {
+	panic("not implemented")
+}
 
 func (tx *tx) statelessCursor(bucket string) (kv.Cursor, error) {
 	if tx.statelessCursors == nil {
@@ -333,7 +448,9 @@ func (tx *tx) Count(bucket string) (uint64, error) {
 	panic("not implemented")
 }
 
-func (tx *tx) BucketSize(name string) (uint64, error) { panic("not implemented") }
+func (tx *tx) BucketSize(name string) (uint64, error) {
+	panic("not implemented")
+}
 
 func (tx *tx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	it, err := tx.Range(bucket, fromPrefix, nil, order.Asc, kv.Unlim)
@@ -451,6 +568,7 @@ func (c *remoteCursor) next() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) nextDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_NEXT_DUP}); err != nil {
 		return []byte{}, nil, err
@@ -461,6 +579,7 @@ func (c *remoteCursor) nextDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) nextNoDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_NEXT_NO_DUP}); err != nil {
 		return []byte{}, nil, err
@@ -471,6 +590,7 @@ func (c *remoteCursor) nextNoDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) prev() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_PREV}); err != nil {
 		return []byte{}, nil, err
@@ -481,6 +601,7 @@ func (c *remoteCursor) prev() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) prevDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_PREV_DUP}); err != nil {
 		return []byte{}, nil, err
@@ -491,6 +612,7 @@ func (c *remoteCursor) prevDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) prevNoDup() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_PREV_NO_DUP}); err != nil {
 		return []byte{}, nil, err
@@ -501,6 +623,7 @@ func (c *remoteCursor) prevNoDup() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) last() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_LAST}); err != nil {
 		return []byte{}, nil, err
@@ -511,6 +634,7 @@ func (c *remoteCursor) last() ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) setRange(k []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK, K: k}); err != nil {
 		return []byte{}, nil, err
@@ -521,6 +645,7 @@ func (c *remoteCursor) setRange(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK_EXACT, K: k}); err != nil {
 		return []byte{}, nil, err
@@ -531,6 +656,7 @@ func (c *remoteCursor) seekExact(k []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK_BOTH, K: k, V: v}); err != nil {
 		return nil, err
@@ -541,6 +667,7 @@ func (c *remoteCursor) getBothRange(k, v []byte) ([]byte, error) {
 	}
 	return pair.V, nil
 }
+
 func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_SEEK_BOTH_EXACT, K: k, V: v}); err != nil {
 		return []byte{}, nil, err
@@ -551,6 +678,7 @@ func (c *remoteCursor) seekBothExact(k, v []byte) ([]byte, []byte, error) {
 	}
 	return pair.K, pair.V, nil
 }
+
 func (c *remoteCursor) firstDup() ([]byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_FIRST_DUP}); err != nil {
 		return nil, err
@@ -561,6 +689,7 @@ func (c *remoteCursor) firstDup() ([]byte, error) {
 	}
 	return pair.V, nil
 }
+
 func (c *remoteCursor) lastDup() ([]byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_LAST_DUP}); err != nil {
 		return nil, err
@@ -571,6 +700,7 @@ func (c *remoteCursor) lastDup() ([]byte, error) {
 	}
 	return pair.V, nil
 }
+
 func (c *remoteCursor) getCurrent() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remoteproto.Cursor{Cursor: c.id, Op: remoteproto.Op_CURRENT}); err != nil {
 		return []byte{}, nil, err
@@ -672,19 +802,53 @@ func (c *remoteCursorDupSort) SeekBothRange(k, v []byte) ([]byte, error) {
 	return c.getBothRange(k, v)
 }
 
-func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error    { panic("not supported") }
-func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error { panic("not supported") }
-func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error     { panic("not supported") }
-func (c *remoteCursorDupSort) PutCurrent(k, v []byte) error       { panic("not supported") }
-func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error     { panic("not supported") }
-func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)   { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error {
+	panic("not supported")
+}
 
-func (c *remoteCursorDupSort) FirstDup() ([]byte, error)          { return c.firstDup() }
-func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error)   { return c.nextDup() }
-func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) { return c.nextNoDup() }
-func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error)   { return c.prevDup() }
-func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return c.prevNoDup() }
-func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.lastDup() }
+func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error {
+	panic("not supported")
+}
+
+func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error {
+	panic("not supported")
+}
+
+func (c *remoteCursorDupSort) PutCurrent(k, v []byte) error {
+	panic("not supported")
+}
+
+func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error {
+	panic("not supported")
+}
+
+func (c *remoteCursorDupSort) CountDuplicates() (uint64, error) {
+	panic("not supported")
+}
+
+func (c *remoteCursorDupSort) FirstDup() ([]byte, error) {
+	return c.firstDup()
+}
+
+func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error) {
+	return c.nextDup()
+}
+
+func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) {
+	return c.nextNoDup()
+}
+
+func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error) {
+	return c.prevDup()
+}
+
+func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
+	return c.prevNoDup()
+}
+
+func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
+	return c.lastDup()
+}
 
 // Temporal Methods
 
@@ -750,6 +914,7 @@ func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc or
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
+
 func (tx *tx) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	reply, err := tx.db.remoteKV.HistorySeek(tx.ctx, &remoteproto.HistorySeekReq{TxId: tx.id, Table: name.String(), K: k, Ts: ts})
 	if err != nil {
@@ -757,6 +922,7 @@ func (tx *tx) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok boo
 	}
 	return reply.V, reply.Ok, nil
 }
+
 func (tx *tx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	return stream.PaginateKV(func(pageToken string) (keys, vals [][]byte, nextPageToken string, err error) {
 		reply, err := tx.db.remoteKV.HistoryRange(tx.ctx, &remoteproto.HistoryRangeReq{TxId: tx.id, Table: name.String(), FromTs: int64(fromTs), ToTs: int64(toTs), OrderAscend: bool(asc), Limit: int64(limit), PageToken: pageToken})
@@ -796,9 +962,11 @@ func (tx *tx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc ord
 		return reply.Keys, reply.Values, reply.NextPageToken, nil
 	}), nil
 }
+
 func (tx *tx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, asc, limit)
 }
+
 func (tx *tx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	panic("not implemented yet")
 }
