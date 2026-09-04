@@ -45,8 +45,6 @@ func goMemLimitInForce(current int64) bool {
 // killed before the collection that would have saved it.
 //
 // TotalMemory is the budget: system RAM, or the cgroup limit when that is lower.
-// It has to be read before the limit is installed, or it would fold our own
-// ceiling back into the number that sizes the caches.
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
 	if goMemLimitInForce(current) {
