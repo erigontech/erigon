@@ -21,10 +21,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestParsePositionalArgumentsRejectsNull(t *testing.T) {
@@ -436,4 +439,187 @@ func FuzzFillMessage(f *testing.F) {
 		fillMessage(data, got)
 		require.NoError(t, sameMessage(got, &want), "input %s", input)
 	})
+}
+
+func blockResultFixture(n int) map[string]any {
+	txs := make([]any, n)
+	for i := range txs {
+		txs[i] = map[string]any{
+			"blockHash": "0x1122334455667788990011223344556677889900112233445566778899001122",
+			"from":      "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+			"gas":       "0x5208", "gasPrice": "0x3b9aca00", "nonce": "0x1",
+			"to": "0xdAC17F958D2ee523a2206206994597C13D831ec7", "value": "0xde0b6b3a7640000",
+			"input": "0xa9059cbb0000000000000000000000001111111111111111111111111111111111111111",
+			"v":     "0x1", "r": "0x2", "s": "0x3", "type": "0x2",
+		}
+	}
+	return map[string]any{
+		"number": "0x18ae5c0", "hash": "0xaabb", "parentHash": "0xccdd",
+		"gasLimit": "0x1c9c380", "gasUsed": "0xd59f80", "timestamp": "0x65000000",
+		"transactions": txs,
+	}
+}
+
+// the two paths must be byte-identical
+func TestResponsePathsIdentical(t *testing.T) {
+	for _, n := range []int{0, 1, 150} {
+		res := blockResultFixture(n)
+		id := json.RawMessage(`1`)
+
+		enc, err := json.Marshal(res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var oldBuf bytes.Buffer
+		s1 := jsonstream.Get(&oldBuf)
+		(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s1)
+		_ = s1.Flush()
+
+		var newBuf bytes.Buffer
+		s2 := jsonstream.Get(&newBuf)
+		(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
+		_ = s2.Flush()
+
+		if oldBuf.String() != newBuf.String() {
+			t.Fatalf("n=%d differ:\n old: %.200s\n new: %.200s", n, oldBuf.String(), newBuf.String())
+		}
+	}
+	t.Log("byte-identical across 0/1/150 transactions")
+}
+
+// An unencodable result must come back as an error carrying the request id,
+// never as a success with a null result and never as a dropped reply.
+func TestResponseUnmarshalableResultBecomesError(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	// a channel has no JSON representation
+	msg := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
+	msg.writeTo(s)
+	require.NoError(t, s.Flush())
+
+	var got jsonrpcMessage
+	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	require.NotNil(t, got.Error, "must be an error response, got %s", out.String())
+	require.Equal(t, `7`, string(got.ID), "the error must carry the request id")
+	require.Nil(t, got.Result, "must not also claim a result")
+}
+
+// A nil result is still a success carrying an explicit null, as JSON-RPC requires.
+func TestResponseNilResultEmitsNull(t *testing.T) {
+	var out bytes.Buffer
+	s := jsonstream.Get(&out)
+	defer jsonstream.Put(s)
+
+	req := &jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}
+	req.response(nil).writeTo(s)
+	require.NoError(t, s.Flush())
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
+}
+
+// WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
+// signalled only through Flush would be invisible there.
+func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
+	bad := func() *jsonrpcMessage {
+		return (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
+	}
+	assertErrorResponse := func(t *testing.T, raw []byte) {
+		t.Helper()
+		var got jsonrpcMessage
+		require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
+		require.NotNil(t, got.Error, "must be an error response, got %s", raw)
+		require.Equal(t, `7`, string(got.ID))
+	}
+
+	t.Run("ws-ipc", func(t *testing.T) {
+		// answerBuffered: no writer, the caller reads Buffer() directly
+		s := jsonstream.Get(nil)
+		defer jsonstream.Put(s)
+		bad().writeTo(s)
+		require.NotEmpty(t, s.Buffer(), "a dropped reply leaves the client waiting forever")
+		assertErrorResponse(t, s.Buffer())
+	})
+
+	t.Run("batch-item", func(t *testing.T) {
+		// one stream per batch entry; an empty buffer means the entry is dropped
+		var buf bytes.Buffer
+		s := jsonstream.Get(&buf)
+		defer jsonstream.Put(s)
+		bad().writeTo(s)
+		require.NoError(t, s.Flush())
+		require.NotZero(t, buf.Len(), "an empty buffer drops this entry from the batch array")
+		assertErrorResponse(t, buf.Bytes())
+	})
+
+	t.Run("http-streaming", func(t *testing.T) {
+		var out bytes.Buffer
+		s := jsonstream.Get(&out)
+		defer jsonstream.Put(s)
+		bad().writeTo(s)
+		require.NoError(t, s.Flush())
+		assertErrorResponse(t, out.Bytes())
+	})
+}
+
+// A result too large to buffer must still reach the client byte-for-byte,
+// without growing the stream buffer past what the stream pool keeps.
+func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
+	res := blockResultFixture(4000)
+	enc, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(enc) <= jsonstream.FlushThreshold {
+		t.Fatalf("fixture is only %d bytes, too small to exercise the bound", len(enc))
+	}
+	id := json.RawMessage(`1`)
+
+	var want, got bytes.Buffer
+	s1 := jsonstream.Get(&want)
+	(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s1)
+	_ = s1.Flush()
+
+	s2 := jsonstream.Get(&got)
+	(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
+	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+		"the result grew the stream buffer past the pool limit")
+	_ = s2.Flush()
+
+	require.Equal(t, want.String(), got.String())
+	jsonstream.Put(s1)
+	jsonstream.Put(s2)
+}
+
+// The result is encoded before any of the envelope, so an id of any size is
+// safe. Sizes straddle prefix+id == FlushThreshold.
+func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
+	const prefix = len(`{"jsonrpc":"2.0","id":`)
+	for _, n := range []int{jsonstream.FlushThreshold - prefix - 1, jsonstream.FlushThreshold - prefix, jsonstream.FlushThreshold} {
+		id := json.RawMessage(`"` + strings.Repeat("i", n-2) + `"`)
+
+		var out bytes.Buffer
+		s := jsonstream.Get(&out)
+		(&jsonrpcMessage{Version: vsn, ID: id}).response(map[string]int{"n": 1}).writeTo(s)
+		_ = s.Flush()
+		jsonstream.Put(s)
+
+		var back map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(out.Bytes(), &back), "id of %d bytes produced invalid JSON", n)
+		require.Equal(t, string(id), string(back["id"]))
+		require.Equal(t, `{"n":1}`, string(back["result"]))
+
+		// The same id with a result that cannot encode must yield one error object.
+		out.Reset()
+		s = jsonstream.Get(&out)
+		(&jsonrpcMessage{Version: vsn, ID: id}).response(make(chan int)).writeTo(s)
+		_ = s.Flush()
+		jsonstream.Put(s)
+
+		back = nil
+		require.NoError(t, json.Unmarshal(out.Bytes(), &back), "id of %d bytes produced invalid JSON on failure", n)
+		require.Contains(t, back, "error")
+		require.NotContains(t, back, "result")
+	}
+
 }

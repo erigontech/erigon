@@ -1018,7 +1018,7 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 
 var errStepNotReady = errors.New("step not ready")
 
-func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, finalityCtx kv.FinalityContext) error {
+func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) error {
 	// Pin worker counts for the duration of buildFiles. The collate/build phases
 	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
 	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
@@ -1154,7 +1154,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.RoDB, step kv.Step, f
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, db kv.RoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 	return finalityCtx.ReadyForCollation(ctx, db, step.LastTxNum(a.stepSize.Load()))
@@ -1189,7 +1189,7 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, db kv.RoDB, maxR
 	return reorgSafeBlock, reorgSafeStep, ok
 }
 
-func (a *Aggregator) BuildFiles(db kv.RoDB, toTxNum uint64, finalityCtx kv.FinalityContext) error {
+func (a *Aggregator) BuildFiles(db kv.TemporalRoDB, toTxNum uint64, finalityCtx kv.FinalityContext) error {
 	finished, _ := a.buildFilesInBackground(db, toTxNum, true, finalityCtx)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
@@ -1218,7 +1218,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.RoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, db kv.TemporalRoDB, fromStep, toStep kv.Step, finalityCtx kv.FinalityContext, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -2217,13 +2217,13 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-func (a *Aggregator) BuildFilesInBackground(db kv.RoDB, txNum uint64, finalityCtx kv.FinalityContext) chan struct{} {
+func (a *Aggregator) BuildFilesInBackground(db kv.TemporalRoDB, txNum uint64, finalityCtx kv.FinalityContext) chan struct{} {
 	finished, _ := a.buildFilesInBackground(db, txNum, true, finalityCtx)
 	return finished
 }
 
 // Returns a channel which is closed when aggregation is done and whether it started.
-func (a *Aggregator) buildFilesInBackground(db kv.RoDB, txNum uint64, doMerge bool, finalityCtx kv.FinalityContext) (chan struct{}, bool) {
+func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, doMerge bool, finalityCtx kv.FinalityContext) (chan struct{}, bool) {
 	fin := make(chan struct{})
 
 	if dbg.NoBackgroundMaintenance() {
