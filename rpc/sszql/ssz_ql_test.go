@@ -1,11 +1,18 @@
 package sszql
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 const validQueryBody = `{"queries":[{"anchor":"execution_block","path":".transactions[0].to"}]}`
@@ -22,14 +29,23 @@ const (
 	queryTrailingSlashPattern = queryPattern + "/{$}"
 )
 
+// stubAPI answers every block lookup, so the routing tests exercise the HTTP
+// layer without a database behind them.
+type stubAPI struct{}
+
+func (stubAPI) GetExecutionBlock(context.Context, rpc.BlockNumberOrHash) (*types.Block, error) {
+	return types.NewBlockWithHeader(&types.Header{}, nil), nil
+}
+
 func newTestMux() *http.ServeMux {
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(fallbackStatus)
 	})
+	handler := SSZQueryHandler([]rpc.API{{Service: stubAPI{}}})
 	mux := http.NewServeMux()
 	mux.Handle("/", fallback)
-	mux.Handle(queryPattern, SSZQueryHandler())
-	mux.Handle(queryTrailingSlashPattern, SSZQueryHandler())
+	mux.Handle(queryPattern, handler)
+	mux.Handle(queryTrailingSlashPattern, handler)
 	return mux
 }
 
@@ -78,7 +94,6 @@ func TestRouteMatchesQueryEndpoint(t *testing.T) {
 		"/eth/v1/execution/earliest/query",
 		"/eth/v1/execution/safe/query",
 		"/eth/v1/execution/finalized/query",
-		"/eth/v1/execution/pending/query",
 		"/eth/v1/execution/" + validHash + "/query",
 		"/eth/v1/execution/123/query/",
 	} {
@@ -173,6 +188,7 @@ func TestRouteRejectsBogusBlockID(t *testing.T) {
 		"head",           // beacon vocabulary, not ours
 		"genesis",        // beacon vocabulary, not ours
 		"latestExecuted", // Erigon-internal tag, not exposed
+		"pending",        // no pending block source is wired up
 		"01",             // non-canonical decimal
 		"+1",
 		"-1",
@@ -352,5 +368,44 @@ func TestGindexMarshalsAsDecimalString(t *testing.T) {
 		if round != g {
 			t.Errorf("round trip: got %d, want %d", uint64(round), uint64(g))
 		}
+	}
+}
+
+func TestGetExecutionBlock(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewSSZQLAPI(m.DB, m.BlockReader)
+	head := chain.Blocks[len(chain.Blocks)-1]
+
+	for _, tc := range []struct {
+		name    string
+		blockID string
+		want    common.Hash
+	}{
+		{"number", "2", chain.Blocks[1].Hash()},
+		{"hash", chain.Blocks[1].Hash().Hex(), chain.Blocks[1].Hash()},
+		{"latest", "latest", head.Hash()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			block, err := parseBlockIDs(t.Context(), api, tc.blockID)
+			if err != nil {
+				t.Fatalf("parseBlockIDs(%q): %v", tc.blockID, err)
+			}
+			if block == nil {
+				t.Fatal("got nil block")
+			}
+			if block.Hash() != tc.want {
+				t.Errorf("hash: got %s, want %s", block.Hash(), tc.want)
+			}
+		})
+	}
+}
+
+func TestGetExecutionBlockUnknownNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewSSZQLAPI(m.DB, m.BlockReader)
+
+	var notFound rpc.BlockNotFoundErr
+	if _, err := parseBlockIDs(t.Context(), api, "999999"); !errors.As(err, &notFound) {
+		t.Errorf("got %v, want rpc.BlockNotFoundErr", err)
 	}
 }

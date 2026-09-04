@@ -1,14 +1,18 @@
 package sszql
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // note: derived types of Proof and Leaf can change later
 
 type SSZQLAPI interface {
-	// GetBlock(ctx context.Context, bnh rpc.BlockNumberOrHash) (types.Block, error)
+	GetExecutionBlock(ctx context.Context, bnh rpc.BlockNumberOrHash) (*types.Block, error)
 }
 
 type Path string
