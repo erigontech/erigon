@@ -538,7 +538,12 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		}
 		return
 	}
-	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
+	stored, inserted := st.deep.StoreUnlessTaken(prefix, entry, func(e *branchCacheEntry) bool { return e.verify != entry.verify })
+	if !stored {
+		c.tailForWrite().Add(maphash.Hash(prefix), entry)
+		return
+	}
+	if inserted {
 		c.pinnedEntries.Add(1)
 	}
 }
@@ -601,12 +606,15 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 			if slot.Swap(nil) != nil {
 				c.pinnedEntries.Add(-1)
 			}
-		} else if _, loaded := st.deep.LoadAndDelete(prefix); loaded {
+		} else if st.deep.DeleteIf(prefix, func(e *branchCacheEntry) bool { return e.verify == maphash.Verify(prefix) }) {
 			c.pinnedEntries.Add(-1)
 		}
 	}
 	if tail := c.tail.Load(); tail != nil {
-		tail.Remove(maphash.Hash(prefix))
+		bucket := maphash.Hash(prefix)
+		if e, ok := tail.Peek(bucket); ok && e.verify == maphash.Verify(prefix) {
+			tail.Remove(bucket)
+		}
 	}
 }
 

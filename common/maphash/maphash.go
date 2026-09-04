@@ -72,6 +72,30 @@ func (m *Map[V]) ReplaceIfPresent(key []byte, value V) bool {
 	return ok
 }
 
+func (m *Map[V]) DeleteIf(key []byte, pred func(V) bool) (deleted bool) {
+	h := Hash(key)
+	m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if !loaded || !pred(old) {
+			return old, xsync.CancelOp
+		}
+		deleted = true
+		return old, xsync.DeleteOp
+	})
+	return deleted
+}
+
+func (m *Map[V]) StoreUnlessTaken(key []byte, value V, taken func(V) bool) (stored, inserted bool) {
+	h := Hash(key)
+	m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if loaded && taken(old) {
+			return old, xsync.CancelOp
+		}
+		stored, inserted = true, !loaded
+		return value, xsync.UpdateOp
+	})
+	return stored, inserted
+}
+
 // LoadAndStore stores value and returns the previous one, loaded reporting
 // prior presence. Probing with a separate Get first races a concurrent delete,
 // so external counters must key off loaded.
