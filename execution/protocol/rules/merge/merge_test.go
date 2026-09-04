@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type readerMock struct {
@@ -224,4 +225,55 @@ func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
 
 	require.ErrorIs(t, err, boom)
 	require.Contains(t, err.Error(), "withdrawal 7")
+}
+
+type versionLadderL2 struct{ version uint64 }
+
+func (versionLadderL2) Name() string { return "versionladder" }
+
+func (l versionLadderL2) ResolveRules(_, _, _ uint64, rules *chain.Rules) {
+	rules.L2Version = l.version
+}
+
+func TestInitializeCarriesResolvedL2VersionToSystemCallTracer(t *testing.T) {
+	const l2Version = 30
+	cancunTime := uint64(0)
+	chainConfig := chain.Config{
+		ChainID:    uint256.NewInt(1337),
+		CancunTime: &cancunTime,
+		L2:         versionLadderL2{version: l2Version},
+	}
+
+	beaconRoot := common.HexToHash("0xbeac07")
+	header := &types.Header{
+		Difficulty:            *ProofOfStakeDifficulty,
+		Number:                *uint256.NewInt(21_000_000),
+		Time:                  1,
+		ParentBeaconBlockRoot: &beaconRoot,
+	}
+
+	var seen *tracing.VMContext
+	tracer := tracing.Hooks{
+		OnSystemCallStartV2: func(env *tracing.VMContext) { seen = env },
+	}
+
+	logger := log.New()
+	chainReader := consensuschain.NewReader(&chainConfig, nil, nil, logger)
+	systemCallCustom := func(accounts.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
+		return nil, nil
+	}
+	var intraBlockState state.IntraBlockState
+	var eth1Engine rules.Engine
+
+	require.NoError(t, New(eth1Engine).Initialize(&chainConfig, chainReader, header,
+		&intraBlockState, systemCallCustom, logger, &tracer))
+
+	require.NotNil(t, seen, "the Cancun system call must reach OnSystemCallStartV2")
+
+	execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
+	executed := execCtx.Rules(&chainConfig)
+	require.NotNil(t, seen.Rules, "the traced context must carry the rules the system call resolves")
+	require.Equal(t, executed.L2Version, seen.Rules.L2Version,
+		"the traced rules must be the ones the system call itself resolves")
+	require.Equal(t, uint64(l2Version), seen.Rules.L2Version)
 }

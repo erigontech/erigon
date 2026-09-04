@@ -951,8 +951,9 @@ func TestRuntimeStartsTracerWithFullVMContext(t *testing.T) {
 		t.Helper()
 		require.NotNil(t, got.IntraBlockState, "the tracer must be started at all")
 		require.NotNil(t, got.ChainConfig, "a nil ChainConfig panics the 4byte and flat tracers")
-		require.Equal(t, uint64(activeAt), got.L2Version,
-			"a dropped L2Version evaluates version-gated providers at 0")
+		require.NotNil(t, got.Rules, "a dropped rule set evaluates version-gated providers at 0")
+		require.Equal(t, uint64(activeAt), got.Rules.L2Version,
+			"the traced rules must be the ones the EVM resolved")
 	}
 
 	t.Run("Call", func(t *testing.T) {

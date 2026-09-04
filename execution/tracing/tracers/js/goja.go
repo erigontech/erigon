@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 var assetTracers = make(map[string]string)
@@ -239,13 +238,7 @@ func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: env.BlockNumber,
-		Time:        env.Time,
-		L2Version:   env.L2Version,
-	}
-	rules := blockContext.Rules(env.ChainConfig)
-	t.activePrecompiles = vm.ActivePrecompiles(rules)
+	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
 	t.ctx["gas"] = t.vm.ToValue(gasLimit)
 	gasPriceBig, err := t.toBig(t.vm, env.GasPrice.String())

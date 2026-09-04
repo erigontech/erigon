@@ -111,6 +111,9 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 // any provider registered for chainRules.ChainID. With no registered provider
 // it is the built-in set itself.
 func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
+	if chainRules == nil {
+		chainRules = &chain.Rules{}
+	}
 	fork := forkTierFor(chainRules)
 	chainID := rulesChainID(chainRules)
 	provider, ok := lookupProvider(chainID)

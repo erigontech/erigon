@@ -388,3 +388,10 @@ func TestRefundStateRejectsUnrepresentableAmounts(t *testing.T) {
 		})
 	}
 }
+
+func TestActivePrecompilesToleratesNilRules(t *testing.T) {
+	require.NotPanics(t, func() {
+		require.Equal(t, ActivePrecompiles(&chain.Rules{}), ActivePrecompiles(nil),
+			"a tracer handed a context without rules must not crash the node")
+	})
+}
