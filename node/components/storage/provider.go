@@ -365,6 +365,15 @@ type Deps struct {
 	// Step 3). nil → no-op (tests / tools that don't need MDBX seeding).
 	PostIndexedSeed func(ctx context.Context) error
 
+	// SnapshotSeedExtend, when set, runs whenever the on-disk file set
+	// changes, to seed MDBX rows for frozen blocks that arrived since
+	// the last seed. PostIndexedSeed covers FrozenBlocks() as of the one
+	// moment it fires; downloads keep extending coverage afterwards and
+	// those blocks never pass through InsertBlocks, so without this they
+	// keep no TD at all. Cheap to call: a no-op when coverage has not
+	// grown. nil → no-op.
+	SnapshotSeedExtend func(ctx context.Context) error
+
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger
 }
@@ -465,6 +474,14 @@ func (p *Provider) Initialize(deps Deps) error {
 		func(frozenFileNames []string) {
 			p.logger.Debug("files changed...sending notification")
 			notifications.OnNewSnapshot()
+
+			// Frozen coverage may have grown; seed MDBX for whatever
+			// arrived since the last seed. No-op when unchanged.
+			if seedExtend := deps.SnapshotSeedExtend; seedExtend != nil {
+				if err := seedExtend(ctx); err != nil {
+					p.logger.Warn("[storage] snapshot seed extend failed — will retry on next file change", "err", err)
+				}
+			}
 
 			// Reflect the post-build / post-recalc state into Inventory:
 			// OnFilesChange fires AFTER recalcVisibleFiles, so by the time

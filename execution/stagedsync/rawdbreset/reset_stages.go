@@ -415,6 +415,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 		}
 	}
+
+	// Record how far snapshot-derived seeding has reached so
+	// ExtendTDFromSnapshots can pick up the blocks that arrive after
+	// this fill without rescanning from genesis.
+	if err := SaveSnapshotSeedProgress(tx, blocksAvailable); err != nil {
+		return fmt.Errorf("record snapshot seed progress: %w", err)
+	}
 	return nil
 }
 
@@ -436,4 +443,105 @@ func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 
 		return 0
 	}
 	return snapProgress - pruneMarkerSafeThreshold
+}
+
+// snapshotSeedStage records how far snapshot-derived MDBX seeding has
+// reached. Deliberately its own key rather than the Headers/Bodies or
+// OtterSync progress: live sync advances those past the frozen tip, so
+// reusing one would let the watermark run ahead of what has actually
+// been seeded and re-open the gap this exists to close.
+const snapshotSeedStage = stages.SyncStage("SnapshotsSeed")
+
+// SnapshotSeedProgress returns the highest block whose snapshot-derived
+// MDBX rows have been seeded.
+func SnapshotSeedProgress(tx kv.Getter) (uint64, error) {
+	return stages.GetStageProgress(tx, snapshotSeedStage)
+}
+
+// SaveSnapshotSeedProgress records the snapshot-seed watermark.
+func SaveSnapshotSeedProgress(tx kv.Putter, blockNum uint64) error {
+	return stages.SaveStageProgress(tx, snapshotSeedStage, blockNum)
+}
+
+// ExtendTDFromSnapshots seeds TD for frozen blocks that arrived since the
+// last seed, and advances the watermark.
+//
+// FillDBFromSnapshots covers FrozenBlocks() as of the moment it runs. In
+// the storage-owned pipeline it runs once, latched behind phase-1
+// indexing completing, while downloads keep extending frozen coverage
+// afterwards. Those later blocks are in snapshots but never pass through
+// InsertBlocks (live sync starts at the then-current tip), so nothing
+// writes their TD and the gap is permanent — an unwind targeting into it
+// wedges on "parent's total difficulty not found".
+//
+// Walks only (watermark, FrozenBlocks()], continuing the chain sum from
+// the watermark's own TD, so repeated calls on coverage growth cost the
+// new blocks rather than a rescan from genesis. Blocks that already have
+// a row keep it: TD is hash-keyed and idempotent, and rewriting a value
+// the chain agreed on would be a silent mutation.
+func ExtendTDFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, blockReader dbservices.FullBlockReader, logger log.Logger) error {
+	blocksAvailable := blockReader.FrozenBlocks()
+	seeded, err := SnapshotSeedProgress(tx)
+	if err != nil {
+		return fmt.Errorf("snapshot seed progress: %w", err)
+	}
+	if blocksAvailable <= seeded {
+		return nil
+	}
+
+	anchorHash, ok, err := blockReader.CanonicalHash(ctx, tx, seeded)
+	if err != nil {
+		return fmt.Errorf("canonical hash at seed watermark %d: %w", seeded, err)
+	}
+	if !ok {
+		return nil
+	}
+	td, err := rawdb.ReadTd(tx, anchorHash, seeded)
+	if err != nil {
+		return fmt.Errorf("read TD at seed watermark %d: %w", seeded, err)
+	}
+	if td == nil {
+		// Nothing to continue the sum from. Leave the watermark be so a
+		// later full fill can establish the baseline.
+		return nil
+	}
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	running := td.Clone()
+	for blockNum := seeded + 1; blockNum <= blocksAvailable; blockNum++ {
+		header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
+		if err != nil {
+			return fmt.Errorf("header %d during snapshot TD seed: %w", blockNum, err)
+		}
+		if header == nil {
+			// FrozenBlocks() is SegmentIdMax(), not the last .seg, so the
+			// tail can be short. Seed what exists and record it.
+			blocksAvailable = blockNum - 1
+			break
+		}
+		if _, overflow := running.AddOverflow(running, &header.Difficulty); overflow {
+			return fmt.Errorf("TD overflows uint256 at block %d", blockNum)
+		}
+		hash := header.Hash()
+		existing, err := rawdb.ReadTd(tx, hash, blockNum)
+		if err != nil {
+			return fmt.Errorf("read TD at %d: %w", blockNum, err)
+		}
+		if existing == nil {
+			if err := rawdb.WriteTd(tx, hash, blockNum, *running); err != nil {
+				return fmt.Errorf("write TD at %d: %w", blockNum, err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			logger.Info(fmt.Sprintf("[%s] snapshot TD seed: %s/%s", logPrefix,
+				common.PrettyExact(blockNum), common.PrettyExact(blocksAvailable)))
+		default:
+		}
+	}
+	return SaveSnapshotSeedProgress(tx, blocksAvailable)
 }

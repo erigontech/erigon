@@ -20,17 +20,21 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers
@@ -132,4 +136,120 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+// stubFrozenHeaders serves a synthetic frozen header range for the
+// incremental TD seed. Only the two methods the seed uses are real.
+type stubFrozenHeaders struct {
+	dbservices.FullBlockReader
+	frozen     uint64
+	difficulty uint64
+}
+
+func (s stubFrozenHeaders) FrozenBlocks() uint64 { return s.frozen }
+
+// hashAt returns the hash the seed will actually key TD under: the
+// header's own hash, so CanonicalHash and HeaderByNumber agree the way
+// they do in production.
+func (s stubFrozenHeaders) hashAt(n uint64) common.Hash {
+	h, _ := s.HeaderByNumber(context.Background(), nil, n)
+	if h == nil {
+		return common.Hash{}
+	}
+	return h.Hash()
+}
+
+func (s stubFrozenHeaders) CanonicalHash(_ context.Context, _ kv.Getter, n uint64) (common.Hash, bool, error) {
+	if n > s.frozen {
+		return common.Hash{}, false, nil
+	}
+	return s.hashAt(n), true, nil
+}
+
+func (s stubFrozenHeaders) HeaderByNumber(_ context.Context, _ kv.Getter, n uint64) (*types.Header, error) {
+	if n > s.frozen {
+		return nil, nil
+	}
+	return &types.Header{Number: *uint256.NewInt(n), Difficulty: *uint256.NewInt(s.difficulty)}, nil
+}
+
+// TestExtendTDFromSnapshots_SeedsBlocksArrivingAfterFirstFill pins the
+// hole cycles 25 and 26 both produced. The one-shot postIndexed seed
+// covers FrozenBlocks() as of the instant it fires; snapshot files that
+// land afterwards extend frozen coverage and were never seeded, leaving
+// a permanent TD gap that wedges any unwind targeting into it.
+//
+// Both cycles' gap started at exactly 3351998 — the frozen tip when
+// phase-1 indexing completed — which is what makes this deterministic
+// rather than a race.
+func TestExtendTDFromSnapshots_SeedsBlocksArrivingAfterFirstFill(t *testing.T) {
+	t.Parallel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubFrozenHeaders{frozen: 100, difficulty: 2}
+	// First seed covered [0, 100] and recorded its watermark.
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(100), 100, *uint256.NewInt(200)))
+	require.NoError(t, rawdbreset.SaveSnapshotSeedProgress(tx, 100))
+
+	// More files arrive: frozen coverage now reaches 150.
+	br.frozen = 150
+	require.NoError(t, rawdbreset.ExtendTDFromSnapshots("test", ctx, tx, br, log.New()))
+
+	for _, b := range []uint64{101, 125, 150} {
+		td, err := rawdb.ReadTd(tx, br.hashAt(b), b)
+		require.NoError(t, err)
+		require.NotNil(t, td, "block %d arrived after the first seed and must still get a TD row", b)
+		require.Equal(t, uint256.NewInt(200+2*(b-100)).String(), td.String(), "TD must continue the chain sum at block %d", b)
+	}
+
+	got, err := rawdbreset.SnapshotSeedProgress(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(150), got, "watermark must advance to the new frozen tip")
+}
+
+// TestExtendTDFromSnapshots_NoOpWhenCoverageUnchanged pins that a
+// re-invocation with no new frozen blocks does nothing — the seed is
+// driven off coverage growth and must be cheap to call repeatedly.
+func TestExtendTDFromSnapshots_NoOpWhenCoverageUnchanged(t *testing.T) {
+	t.Parallel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubFrozenHeaders{frozen: 100, difficulty: 1}
+	require.NoError(t, rawdbreset.SaveSnapshotSeedProgress(tx, 100))
+	require.NoError(t, rawdbreset.ExtendTDFromSnapshots("test", ctx, tx, br, log.New()))
+
+	td, err := rawdb.ReadTd(tx, br.hashAt(100), 100)
+	require.NoError(t, err)
+	require.Nil(t, td, "coverage unchanged — the seed must not walk or write anything")
+}
+
+// TestExtendTDFromSnapshots_SkipsBlocksAlreadySeeded pins idempotency:
+// a block that already has a TD row keeps its existing value rather
+// than being rewritten from a recomputed sum.
+func TestExtendTDFromSnapshots_SkipsBlocksAlreadySeeded(t *testing.T) {
+	t.Parallel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubFrozenHeaders{frozen: 10, difficulty: 5}
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(5), 5, *uint256.NewInt(1)))
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(7), 7, *uint256.NewInt(4242)))
+	require.NoError(t, rawdbreset.SaveSnapshotSeedProgress(tx, 5))
+
+	require.NoError(t, rawdbreset.ExtendTDFromSnapshots("test", ctx, tx, br, log.New()))
+
+	td, err := rawdb.ReadTd(tx, br.hashAt(7), 7)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(4242).String(), td.String(), "an existing TD row must not be rewritten")
 }

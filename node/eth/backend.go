@@ -619,6 +619,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return rawdbreset.FillDBFromSnapshots("storage.postIndexed", seedCtx, tx, dirs, blockReader, logger)
 			})
 		},
+		// PostIndexedSeed fires once, latched behind phase-1 indexing.
+		// Downloads keep extending frozen coverage after that, and those
+		// blocks never reach InsertBlocks, so their TD would stay absent
+		// permanently. Seed the delta on every file-set change instead.
+		SnapshotSeedExtend: func(seedCtx context.Context) error {
+			return temporalDb.Update(seedCtx, func(tx kv.RwTx) error {
+				return rawdbreset.ExtendTDFromSnapshots("storage.seedExtend", seedCtx, tx, blockReader, logger)
+			})
+		},
 		SegmentsBuildLimiter: segmentsBuildLimiter,
 		Logger:               logger,
 	}); err != nil {
