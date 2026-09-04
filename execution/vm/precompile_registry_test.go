@@ -309,6 +309,79 @@ func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
 	}
 }
 
+func TestChargeStateRejectsUnrepresentableAmounts(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining mdgas.MdGas
+		used      mdgas.MdGasUsage
+		amount    uint64
+		accepted  bool
+		want      mdgas.MdGas
+		wantUsed  mdgas.MdGasUsage
+	}{
+		{
+			name:      "amount above MaxInt64 cannot reach the signed usage",
+			remaining: mdgas.MdGas{Execution: 1_000, State: math.MaxUint64},
+			amount:    math.MaxInt64 + 1,
+		},
+		{
+			name:      "MaxUint64 charge would read as minus one",
+			remaining: mdgas.MdGas{Execution: 1_000, State: math.MaxUint64},
+			amount:    math.MaxUint64,
+		},
+		{
+			name:      "signed usage would overflow",
+			remaining: mdgas.MdGas{Execution: 1_000, State: math.MaxUint64},
+			used:      mdgas.MdGasUsage{State: 2},
+			amount:    math.MaxInt64,
+		},
+		{
+			name:      "spill accumulation would wrap",
+			remaining: mdgas.MdGas{Execution: math.MaxUint64, State: 0},
+			used:      mdgas.MdGasUsage{StateSpill: math.MaxUint64 - 5},
+			amount:    10,
+		},
+		{
+			name:      "the exact signed boundary is representable",
+			remaining: mdgas.MdGas{Execution: 1_000, State: math.MaxUint64},
+			amount:    math.MaxInt64,
+			accepted:  true,
+			want:      mdgas.MdGas{Execution: 1_000, State: math.MaxInt64 + 1},
+			wantUsed:  mdgas.MdGasUsage{State: math.MaxInt64},
+		},
+		{
+			name:      "an ordinary charge takes reservoir gas",
+			remaining: mdgas.MdGas{Execution: 1_000, State: 50},
+			amount:    10,
+			accepted:  true,
+			want:      mdgas.MdGas{Execution: 1_000, State: 40},
+			wantUsed:  mdgas.MdGasUsage{State: 10},
+		},
+		{
+			name:      "a charge past the reservoir spills into execution gas",
+			remaining: mdgas.MdGas{Execution: 1_000, State: 10},
+			amount:    40,
+			accepted:  true,
+			want:      mdgas.MdGas{Execution: 970, State: 0},
+			wantUsed:  mdgas.MdGasUsage{State: 40, StateSpill: 30},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			remaining, used := tc.remaining, tc.used
+			g := &PrecompileGas{remaining: &remaining, used: &used, amsterdam: true}
+
+			require.Equal(t, tc.accepted, g.ChargeState(tc.amount))
+			if !tc.accepted {
+				require.Equal(t, tc.remaining, remaining, "a rejected charge must leave the reservoir alone")
+				require.Equal(t, tc.used, used, "a rejected charge must leave usage alone")
+				return
+			}
+			require.Equal(t, tc.want, remaining)
+			require.Equal(t, tc.wantUsed, used)
+		})
+	}
+}
+
 func TestRefundStateRejectsUnrepresentableAmounts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

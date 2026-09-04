@@ -278,6 +278,9 @@ func (g *PrecompileGas) ChargeState(amount uint64) bool {
 	if !g.amsterdam {
 		return g.ChargeExecution(amount)
 	}
+	if !g.stateChargeFits(amount) {
+		return false
+	}
 	before, spilledBefore := *g.remaining, g.used.StateSpill
 	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.StateGas) {
 		return false
@@ -327,6 +330,14 @@ func (g *PrecompileGas) RefundState(amount uint64) bool {
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.StateGas)
 	g.onGasChange(before, spilledBefore-g.used.StateSpill, mdgas.StateGas, tracing.GasChangeCallLeftOverRefunded)
 	return true
+}
+
+func (g *PrecompileGas) stateChargeFits(amount uint64) bool {
+	if amount > math.MaxInt64 || g.used.State > math.MaxInt64-int64(amount) {
+		return false
+	}
+	spill := amount - min(amount, g.remaining.State)
+	return spill <= math.MaxUint64-g.used.StateSpill
 }
 
 func (g *PrecompileGas) stateRefundFits(amount uint64) bool {
