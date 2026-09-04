@@ -974,7 +974,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	}
 
 	bufOffset := len(buf)
-	if len(buf)+int(wordLen) < 0 {
+	if int(wordLen) < 0 || len(buf)+int(wordLen) < 0 {
 		log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
 		return nil, 0
 	}
