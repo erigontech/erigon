@@ -503,7 +503,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 			// Get is lock-free; ReplaceIfPresent locks the bucket even on a
 			// miss, and a miss is the common case here.
 		} else if e, present := st.deep.Get(prefix); present && e.verify == entry.verify &&
-			st.deep.ReplaceIfPresent(prefix, entry) {
+			st.deep.ReplaceIf(prefix, entry, func(cur *branchCacheEntry) bool { return cur.verify == entry.verify }) {
 			return
 		}
 	}

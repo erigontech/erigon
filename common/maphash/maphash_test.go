@@ -205,23 +205,31 @@ func TestMapOverwrite(t *testing.T) {
 }
 
 // The bool reports presence, not insertion; callers count entries off it.
-func TestMapReplaceIfPresent(t *testing.T) {
+func TestMapReplaceIf(t *testing.T) {
 	SetSeed(42)
 	m := NewMap[string]()
+	any := func(string) bool { return true }
 
-	if m.ReplaceIfPresent([]byte("absent"), "v") {
-		t.Error("ReplaceIfPresent on an absent key must report false")
+	if m.ReplaceIf([]byte("absent"), "v", any) {
+		t.Error("ReplaceIf on an absent key must report false")
 	}
 	if _, ok := m.Get([]byte("absent")); ok {
-		t.Error("ReplaceIfPresent must not insert")
+		t.Error("ReplaceIf must not insert")
 	}
 	if m.Len() != 0 {
 		t.Errorf("expected len 0, got %d", m.Len())
 	}
 
 	m.Set([]byte("key"), "first")
-	if !m.ReplaceIfPresent([]byte("key"), "second") {
-		t.Error("ReplaceIfPresent on a present key must report true")
+	if m.ReplaceIf([]byte("key"), "second", func(cur string) bool { return cur == "other" }) {
+		t.Error("ReplaceIf must report false when pred rejects the value it found")
+	}
+	if v, _ := m.Get([]byte("key")); v != "first" {
+		t.Errorf("a rejected replace must leave the value alone, got %s", v)
+	}
+
+	if !m.ReplaceIf([]byte("key"), "second", func(cur string) bool { return cur == "first" }) {
+		t.Error("ReplaceIf on a present key pred accepts must report true")
 	}
 	if v, ok := m.Get([]byte("key")); !ok || v != "second" {
 		t.Errorf("expected (second, true), got (%s, %v)", v, ok)
