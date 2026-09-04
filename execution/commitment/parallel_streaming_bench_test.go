@@ -178,7 +178,10 @@ func Benchmark_Commitment_HotContractStraggler(b *testing.B) {
 	} {
 		pk, updates := buildStragglerCorpus(int64(c.accounts)*7+int64(c.stragglerSlots), c.accounts, c.stragglerSlots)
 		b.Run(c.name+"/ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
-		for _, w := range []int{4, runtime.NumCPU()} {
+		workers := []int{4, runtime.NumCPU()}
+		slices.Sort(workers)
+		workers = slices.Compact(workers)
+		for _, w := range workers {
 			b.Run(fmt.Sprintf("%s/ModeParallel-w%d", c.name, w), func(b *testing.B) {
 				runParallelBench(b, pk, updates, w)
 			})

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"math/bits"
 	"math/rand"
 	"testing"
 
@@ -1071,4 +1072,54 @@ func TestDeepFold_StorageOnlyWhaleFoldsParallel(t *testing.T) {
 	require.Equal(t, seqRoot, parRoot)
 	require.Equal(t, uint64(1), deepFolds,
 		"an account whose record is not in the round must still deep-fold its storage")
+}
+
+func buildStorageSubtree(t *testing.T, withAccount bool, slots int) *prefixNode {
+	t.Helper()
+	tr := newPrefixTrie()
+	acct := make([]byte, 20)
+	acct[19] = 0xAB
+	addrNibbles := make([]byte, 64)
+	for i := range addrNibbles {
+		addrNibbles[i] = byte(i % 16)
+	}
+	if withAccount {
+		tr.Insert(addrNibbles, acct, nil)
+	}
+	for i := range slots {
+		slot := make([]byte, 64)
+		slot[0] = byte(i % 16)
+		slot[1] = byte((i / 16) % 16)
+		slot[2] = byte((i / 256) % 16)
+		key := append(append([]byte{}, addrNibbles...), slot...)
+		tr.Insert(key, append(append([]byte{}, acct...), byte(i)), nil)
+	}
+	node, depth := tr.root, 0
+	for node != nil && depth < 64 {
+		depth += len(node.ext)
+		if depth >= 64 {
+			break
+		}
+		nib := addrNibbles[depth]
+		if node.bitmap&(1<<nib) == 0 {
+			return nil
+		}
+		idx := bits.OnesCount16(node.bitmap & ((1 << nib) - 1))
+		node = node.children[idx]
+		depth++
+	}
+	require.NotNil(t, node)
+	return node
+}
+
+func TestDeepFold_ThresholdCountsStorageSlotsOnly(t *testing.T) {
+	const threshold = 8
+	for _, slots := range []int{threshold, threshold + 1} {
+		withAcct := buildStorageSubtree(t, true, slots)
+		without := buildStorageSubtree(t, false, slots)
+		require.Equal(t,
+			isDeepStorageSubtree(without, 64, threshold),
+			isDeepStorageSubtree(withAcct, 64, threshold),
+			"%d touched slots must pick the same path whether or not the account record is touched", slots)
+	}
 }

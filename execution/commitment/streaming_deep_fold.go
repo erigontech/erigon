@@ -84,7 +84,14 @@ func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatrici
 }
 
 func isDeepStorageSubtree(node *prefixNode, depth int, threshold int) bool {
-	return depth == 64 && bits.OnesCount16(node.bitmap) >= 2 && int(node.subtreeCount) > threshold
+	if depth != 64 || bits.OnesCount16(node.bitmap) < 2 {
+		return false
+	}
+	slots := int(node.subtreeCount)
+	if node.plainKey != nil {
+		slots--
+	}
+	return slots > threshold
 }
 
 func storageSubtreeAccountKey(node *prefixNode, accountKeyLen int16) []byte {
