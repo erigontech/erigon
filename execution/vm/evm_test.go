@@ -20,6 +20,8 @@ import (
 	"math"
 	"testing"
 	"unsafe"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
@@ -126,4 +128,47 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
 			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
 	}
+}
+
+func TestEnterFrameSetsReadOnlyAndExitFrameRestoresIt(t *testing.T) {
+	evm := &EVM{}
+
+	restore := evm.enterFrame(true)
+	require.True(t, restore)
+	require.True(t, evm.readOnly)
+	require.Equal(t, 1, evm.depth)
+
+	evm.exitFrame(restore)
+	require.False(t, evm.readOnly)
+	require.Equal(t, 0, evm.depth)
+}
+
+func TestExitFrameKeepsReadOnlyForChildOfReadOnlyFrame(t *testing.T) {
+	evm := &EVM{}
+
+	outer := evm.enterFrame(true)
+	inner := evm.enterFrame(true)
+	require.False(t, inner, "a read-only frame inside a read-only frame must not claim the restore")
+	require.Equal(t, 2, evm.depth)
+
+	evm.exitFrame(inner)
+	require.True(t, evm.readOnly, "the child must not clear the parent's read-only flag")
+	require.Equal(t, 1, evm.depth)
+
+	evm.exitFrame(outer)
+	require.False(t, evm.readOnly)
+	require.Equal(t, 0, evm.depth)
+}
+
+func TestEnterFrameLeavesReadOnlyAloneForWritableFrame(t *testing.T) {
+	evm := &EVM{}
+
+	restore := evm.enterFrame(false)
+	require.False(t, restore)
+	require.False(t, evm.readOnly)
+	require.Equal(t, 1, evm.depth)
+
+	evm.exitFrame(restore)
+	require.False(t, evm.readOnly)
+	require.Equal(t, 0, evm.depth)
 }

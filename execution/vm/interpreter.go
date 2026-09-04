@@ -413,7 +413,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
 
-	exitFrame := evm.enterFrame(readOnly)
+	restoreReadonly := evm.enterFrame(readOnly)
 	defer func() {
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
@@ -425,7 +425,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
 		callContext.put()
-		exitFrame()
+		evm.exitFrame(restoreReadonly)
 	}()
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs

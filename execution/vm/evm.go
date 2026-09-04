@@ -55,18 +55,20 @@ func frameIdentity(typ OpCode, caller, callerAddress, addr accounts.Address) (se
 // enterFrame applies the per-frame depth and read-only protocol shared by
 // the interpreter and the stateful-precompile dispatch, so nested calls
 // inherit static protection either way.
-func (evm *EVM) enterFrame(readOnly bool) (exitFrame func()) {
-	restoreReadonly := readOnly && !evm.readOnly
+func (evm *EVM) enterFrame(readOnly bool) (restoreReadonly bool) {
+	restoreReadonly = readOnly && !evm.readOnly
 	if restoreReadonly {
 		evm.readOnly = true
 	}
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
-	return func() {
-		evm.depth--
-		if restoreReadonly {
-			evm.readOnly = false
-		}
+	return restoreReadonly
+}
+
+func (evm *EVM) exitFrame(restoreReadonly bool) {
+	evm.depth--
+	if restoreReadonly {
+		evm.readOnly = false
 	}
 }
 
@@ -509,7 +511,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				// Released here, not after the call: a recovered panic out of
 				// RunStateful would otherwise leave a stashed handle live.
 				defer pgas.release()
-				defer evm.enterFrame(ctx.ReadOnly)()
+				defer evm.exitFrame(evm.enterFrame(ctx.ReadOnly))
 				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
 			if pgas.aborted != nil {
