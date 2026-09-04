@@ -681,6 +681,8 @@ func TestForwardRequestMoreRejectsStalePreferredHTTPFallback(t *testing.T) {
 	fallbackStarted := make(chan struct{})
 	releaseFallback := make(chan struct{})
 	var fallbackOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFallback) }) }
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fallbackOnce.Do(func() { close(fallbackStarted) })
 		<-releaseFallback
@@ -691,7 +693,10 @@ func TestForwardRequestMoreRejectsStalePreferredHTTPFallback(t *testing.T) {
 		w.Header().Set("Eth-Consensus-Version", "phase0")
 		_, _ = w.Write(encodedBlock)
 	}))
-	t.Cleanup(server.Close)
+	t.Cleanup(func() {
+		release()
+		server.Close()
+	})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -718,7 +723,7 @@ func TestForwardRequestMoreRejectsStalePreferredHTTPFallback(t *testing.T) {
 		t.Fatal("preferred HTTP fallback did not start")
 	}
 	downloader.SetHighestProcessedSlot(20)
-	close(releaseFallback)
+	release()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
@@ -828,6 +833,8 @@ func TestForwardRequestMoreDropsHTTPPreferenceWhenFrontierAdvancesDuringEnvelope
 	envelopeStarted := make(chan struct{})
 	releaseEnvelope := make(chan struct{})
 	var envelopeOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseEnvelope) }) }
 	var blockSecondHTTP atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -849,7 +856,10 @@ func TestForwardRequestMoreDropsHTTPPreferenceWhenFrontierAdvancesDuringEnvelope
 			http.NotFound(w, r)
 		}
 	}))
-	t.Cleanup(server.Close)
+	t.Cleanup(func() {
+		release()
+		server.Close()
+	})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -871,7 +881,7 @@ func TestForwardRequestMoreDropsHTTPPreferenceWhenFrontierAdvancesDuringEnvelope
 		t.Fatal("preferred HTTP response did not start envelope fetch")
 	}
 	downloader.SetHighestProcessedSlot(20)
-	close(releaseEnvelope)
+	release()
 	select {
 	case <-firstDone:
 	case <-time.After(testTimeout):

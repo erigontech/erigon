@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -148,7 +149,9 @@ type ForkChoiceStore struct {
 
 	proposerLookahead *lru.Cache[uint64, solid.Uint64VectorSSZ]
 
-	mu sync.RWMutex
+	mu                             sync.RWMutex
+	executionPayloadValidationOnce sync.Once
+	executionPayloadValidation     chan struct{}
 
 	// EL
 	engine execution_client.ExecutionEngine
@@ -630,6 +633,19 @@ func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy 
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
+}
+
+func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state2.CachingBeaconState) error) error {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if err != nil {
+		return err
+	}
+	if blockState == nil {
+		return fmt.Errorf("block state not found for root %v", blockRoot)
+	}
+	return fn(blockState)
 }
 
 func (f *ForkChoiceStore) PreverifiedValidator(blockRoot common.Hash) uint64 {

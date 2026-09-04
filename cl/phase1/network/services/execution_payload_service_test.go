@@ -120,6 +120,30 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestExecutionPayloadServiceIgnoresMalformedEnvelopeForUnknownBlockWithoutQueueing(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)
+	envelope.Message.Payload.Withdrawals = nil
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+	require.ErrorIs(t, err, ErrIgnore)
+	impl := service.(*executionPayloadService)
+	require.Zero(t, impl.pending.count.Load())
+	require.Zero(t, impl.pendingBytes.Load())
+}
+
+func TestExecutionPayloadServiceRejectsMalformedEnvelopeForKnownBlock(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelope.Message.Payload.Withdrawals = nil
+
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+	require.ErrorContains(t, err, "missing payload withdrawals")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
 func TestExecutionPayloadServiceEmitsGossipAndImportedEvents(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
@@ -140,10 +164,14 @@ func TestExecutionPayloadServiceEmitsGossipAndImportedEvents(t *testing.T) {
 	require.NoError(t, headState.SetSlot(100))
 	require.NoError(t, headState.SetBlockRootAt(63, common.Hash{3}))
 	require.NoError(t, headState.SetBlockRootAt(95, common.Hash{4}))
-	forkchoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	var stateCopies atomic.Int32
+	forkchoiceMock.ViewStateAtBlockRootFn = func(root common.Hash, fn func(*state.CachingBeaconState) error) error {
 		require.Equal(t, blockRoot, root)
-		require.True(t, alwaysCopy)
-		return headState, nil
+		return fn(headState)
+	}
+	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		stateCopies.Add(1)
+		return nil, errors.New("unexpected state copy")
 	}
 	forkchoiceMock.HeadVal = blockRoot
 	forkchoiceMock.HeadSlotVal = 100
@@ -157,6 +185,7 @@ func TestExecutionPayloadServiceEmitsGossipAndImportedEvents(t *testing.T) {
 	require.Equal(t, beaconevents.StateHeadV2, headEvent.Event)
 	require.Equal(t, "full", headEvent.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
 	require.Equal(t, blockRoot, headEvent.Data.(*beaconevents.HeadV2Data).Data.Block)
+	require.Zero(t, stateCopies.Load())
 }
 
 func TestExecutionPayloadServiceEmitsGossipWhenValidatedEnvelopeWaitsForColumns(t *testing.T) {
@@ -200,11 +229,10 @@ func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	require.NoError(t, headState.SetSlot(100))
 	require.NoError(t, headState.SetBlockRootAt(63, common.Hash{3}))
 	require.NoError(t, headState.SetBlockRootAt(95, common.Hash{4}))
-	forkchoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-		require.Equal(t, blockRoot, root)
-		require.True(t, alwaysCopy)
+	forkchoiceMock.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		err := fn(headState)
 		forkchoiceMock.HeadVal = reorgRoot
-		return headState, nil
+		return err
 	}
 	forkchoiceMock.HeadVal = blockRoot
 	forkchoiceMock.HeadSlotVal = 100
@@ -233,9 +261,10 @@ func TestExecutionPayloadServiceDoesNotEmitFullHeadV2AfterStatusChanges(t *testi
 	require.NoError(t, headState.SetSlot(100))
 	require.NoError(t, headState.SetBlockRootAt(63, common.Hash{3}))
 	require.NoError(t, headState.SetBlockRootAt(95, common.Hash{4}))
-	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	forkchoiceMock.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		err := fn(headState)
 		forkchoiceMock.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
-		return headState, nil
+		return err
 	}
 	forkchoiceMock.HeadVal = blockRoot
 	forkchoiceMock.HeadSlotVal = 100

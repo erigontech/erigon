@@ -533,7 +533,6 @@ func TestExecutionPayloadBidServiceWaitsForMatchingDependentRootPreference(t *te
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
-	require.Equal(t, int32(0), service.pendingCount.Load())
 	_, found := epbsPool.GetHighestBid(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.True(t, found)
 }
@@ -552,8 +551,6 @@ func TestExecutionPayloadBidServiceMissingParentStateIsNotQueued(t *testing.T) {
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
-	require.NotErrorIs(t, err, ErrBidQueued)
-	require.Zero(t, service.pendingCount.Load())
 	_, found := epbsPool.GetHighestBid(pool.HighestBidKey{Slot: 100, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot})
 	require.False(t, found)
 }

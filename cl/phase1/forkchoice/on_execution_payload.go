@@ -613,23 +613,32 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	return nil
 }
 
-func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
+	f.executionPayloadValidationOnce.Do(func() {
+		f.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	select {
+	case f.executionPayloadValidation <- struct{}{}:
+		defer func() { <-f.executionPayloadValidation }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	blockRoot := common.Hash(signedEnvelope.Message.BeaconBlockRoot)
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	block, ok := f.forkGraph.GetBlock(blockRoot)
+	if !ok || block == nil {
+		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
+	}
 	blockState, err := f.forkGraph.GetState(blockRoot, false)
 	if err != nil {
 		return fmt.Errorf("failed to get block state: %w", err)
 	}
 	if blockState == nil {
 		return fmt.Errorf("block state not found for beacon_block_root %v", blockRoot)
-	}
-	block, ok := f.forkGraph.GetBlock(blockRoot)
-	if !ok || block == nil {
-		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
 	}
 	return f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState)
 }

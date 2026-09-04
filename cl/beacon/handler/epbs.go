@@ -881,7 +881,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		}
 	}
 	if validation == BlockPublishingValidationGossip {
-		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(signedEnvelope); err != nil {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(r.Context(), signedEnvelope); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
@@ -1015,12 +1015,12 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 		return
 	}
 	optimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
-	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil || headState == nil {
-		return
-	}
-	event, err := beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, headRoot, block.Block.StateRoot, "full", optimistic)
-	if err != nil {
+	var event *beaconevents.HeadV2Data
+	err = a.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
+		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, headRoot, block.Block.StateRoot, "full", optimistic)
+		return err
+	})
+	if err != nil || event == nil {
 		return
 	}
 	a.emitters.WithHeadEventLock(func() {
@@ -1134,7 +1134,7 @@ func (a *ApiHandler) validateAndStoreExecutionPayloadEnvelopeContents(ctx contex
 	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil {
 		return errors.New("execution payload envelope contents has nil envelope")
 	}
-	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(contents.SignedExecutionPayloadEnvelope); err != nil {
+	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(ctx, contents.SignedExecutionPayloadEnvelope); err != nil {
 		return err
 	}
 	return a.storeExecutionPayloadEnvelopeContents(ctx, contents)

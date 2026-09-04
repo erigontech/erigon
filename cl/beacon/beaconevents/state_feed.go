@@ -25,6 +25,13 @@ func (f *stateFeed) SendHead(value *HeadData) int {
 	})
 }
 
+func (f *stateFeed) TrySendHead(value *HeadData) int {
+	return f.feed.TrySend(&EventStream{
+		Event: StateHead,
+		Data:  value,
+	})
+}
+
 func (f *stateFeed) SendHeadV2(value *HeadV2Data) int {
 	return f.feed.TrySend(&EventStream{Event: StateHeadV2, Data: value})
 }

@@ -144,7 +144,7 @@ func (s *payloadAttestationService) DecodeGossipMessage(_ peer.ID, data []byte, 
 // Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/epbs/p2p-interface.md#payload_attestation_message
 // [New in Gloas:EIP7732]
 func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.PayloadAttestationMessage) error {
-	return s.processMessage(ctx, msg, true, nil)
+	return s.processMessage(ctx, msg, false, nil)
 }
 
 func (s *payloadAttestationService) ProcessRESTMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, publish func() error) error {

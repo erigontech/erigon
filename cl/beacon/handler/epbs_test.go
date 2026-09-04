@@ -1034,6 +1034,36 @@ func TestPostExecutionPayloadEnvelopeMissingBlockRequiresRetry(t *testing.T) {
 	require.Equal(t, http.StatusOK, post().Code)
 }
 
+func TestEmitFullHeadV2DoesNotCopyState(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := handler.emitters.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	root := common.HexToHash("0x1234")
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1, StateRoot: common.Hash{2}, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}}
+	headState := state.New(handler.beaconChainCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(1))
+	require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+	fcu.HeadVal = root
+	fcu.HeadSlotVal = 1
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	fcu.StateAtBlockRootVal[root] = headState
+	var stateCopies atomic.Int32
+	fcu.GetStateAtBlockRootFn = func(_ common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		if alwaysCopy {
+			stateCopies.Add(1)
+		}
+		return headState, nil
+	}
+
+	handler.emitFullHeadV2(block, root)
+
+	require.Equal(t, beaconevents.StateHeadV2, (<-events).Event)
+	require.Zero(t, stateCopies.Load())
+}
+
 func TestEmitFullHeadV2DropsChangedPayloadSnapshot(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
@@ -1045,13 +1075,14 @@ func TestEmitFullHeadV2DropsChangedPayloadSnapshot(t *testing.T) {
 	fcu.HeadVal = root
 	fcu.HeadSlotVal = 1
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	headState := state.New(handler.beaconChainCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(1))
+	require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+	fcu.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		err := fn(headState)
 		fcu.HeadPayloadStatusVal = cltypes.PayloadStatusPending
-		headState := state.New(handler.beaconChainCfg)
-		headState.SetVersion(clparams.GloasVersion)
-		require.NoError(t, headState.SetSlot(1))
-		require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
-		return headState, nil
+		return err
 	}
 
 	handler.emitFullHeadV2(block, root)
@@ -1074,13 +1105,14 @@ func TestEmitFullHeadV2DropsChangedOptimismSnapshot(t *testing.T) {
 	fcu.HeadVal = root
 	fcu.HeadSlotVal = 1
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
-	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+	headState := state.New(handler.beaconChainCfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(1))
+	require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
+	fcu.ViewStateAtBlockRootFn = func(_ common.Hash, fn func(*state.CachingBeaconState) error) error {
+		err := fn(headState)
 		fcu.IsRootOptimisticVal = true
-		headState := state.New(handler.beaconChainCfg)
-		headState.SetVersion(clparams.GloasVersion)
-		require.NoError(t, headState.SetSlot(1))
-		require.NoError(t, headState.SetBlockRootAt(0, common.Hash{1}))
-		return headState, nil
+		return err
 	}
 
 	handler.emitFullHeadV2(block, root)
