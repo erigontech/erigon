@@ -143,10 +143,16 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 type stubFrozenHeaders struct {
 	dbservices.FullBlockReader
 	frozen     uint64
+	visibleTo  uint64
 	difficulty uint64
 }
 
 func (s stubFrozenHeaders) FrozenBlocks() uint64 { return s.frozen }
+
+// GetPruneMarkerSafeThreshold consults these; the embedded interface is
+// nil so they must be real.
+func (s stubFrozenHeaders) FrozenBorBlocks(bool) uint64             { return s.frozen }
+func (s stubFrozenHeaders) BorSnapshots() dbservices.BlockSnapshots { return nil }
 
 // hashAt returns the hash the seed will actually key TD under: the
 // header's own hash, so CanonicalHash and HeaderByNumber agree the way
@@ -252,4 +258,58 @@ func TestExtendTDFromSnapshots_SkipsBlocksAlreadySeeded(t *testing.T) {
 	td, err := rawdb.ReadTd(tx, br.hashAt(7), 7)
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(4242).String(), td.String(), "an existing TD row must not be rewritten")
+}
+
+// headersRange makes stubFrozenHeaders yield only the headers whose
+// files are "visible", which can stop short of FrozenBlocks(). Real
+// ForEachHeader walks the visible segment set, and that set ends at the
+// first coverage gap, while FrozenBlocks() reports segmentsMax and
+// ignores gaps.
+func (s stubFrozenHeaders) HeadersRange(ctx context.Context, walker func(*types.Header) error) error {
+	for n := uint64(0); n <= s.visibleTo; n++ {
+		h, _ := s.HeaderByNumber(ctx, nil, n)
+		if h == nil {
+			return nil
+		}
+		if err := walker(h); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TestFillDBFromSnapshots_WatermarkRecordsWhatWasWritten pins that the
+// seed watermark reports the highest block actually seeded, not the
+// frozen tip the fill aimed at.
+//
+// The two disagree whenever the visible header set ends before
+// segmentsMax. Recording the intent strands everything between: the
+// incremental pass resumes above the unwritten range and never looks
+// down, so the gap becomes permanent. Cycle 27 showed exactly that — a
+// watermark of 3555999 sitting above an unfilled TD gap of
+// (3351998, 3405999).
+func TestFillDBFromSnapshots_WatermarkRecordsWhatWasWritten(t *testing.T) {
+	t.Parallel()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Frozen coverage claims 200; only 100 headers are actually visible.
+	br := stubFrozenHeaders{frozen: 200, visibleTo: 100, difficulty: 1}
+
+	// Let only the Headers stage run; the others short-circuit on their
+	// own progress guard.
+	for _, st := range []stages.SyncStage{stages.Bodies, stages.BlockHashes, stages.Senders} {
+		require.NoError(t, stages.SaveStageProgress(tx, st, 200))
+	}
+
+	require.NoError(t, rawdbreset.FillDBFromSnapshots("test", ctx, tx, dirs, br, log.New()))
+
+	got, err := rawdbreset.SnapshotSeedProgress(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), got,
+		"watermark must be the highest block seeded, not FrozenBlocks() — otherwise the unwritten remainder is stranded")
 }

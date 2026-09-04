@@ -285,6 +285,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 	defer logEvery.Stop()
 	pruneMarkerBlockThreshold := GetPruneMarkerSafeThreshold(blockReader)
 
+	// Highest block for which TD was actually written below. Distinct
+	// from blocksAvailable: HeadersRange yields only the headers whose
+	// .seg files are open, which can lag FrozenBlocks(). Recording the
+	// intent rather than the outcome leaves the unseeded remainder
+	// permanently invisible to ExtendTDFromSnapshots.
+	var tdSeededTo uint64
+
 	// updating the progress of further stages (but only forward) that are contained inside of snapshots
 	for _, stage := range []stages.SyncStage{stages.Headers, stages.Bodies, stages.BlockHashes, stages.Senders} {
 		progress, err := stages.GetStageProgress(tx, stage)
@@ -330,6 +337,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				// chain — cheap next to the snapshots themselves.
 				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 					return err
+				}
+				if blockNum > tdSeededTo {
+					tdSeededTo = blockNum
 				}
 
 				// Canonical hash still gated by pruneMarkerBlockThreshold: the
@@ -416,11 +426,14 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		}
 	}
 
-	// Record how far snapshot-derived seeding has reached so
-	// ExtendTDFromSnapshots can pick up the blocks that arrive after
-	// this fill without rescanning from genesis.
-	if err := SaveSnapshotSeedProgress(tx, blocksAvailable); err != nil {
-		return fmt.Errorf("record snapshot seed progress: %w", err)
+	// Record how far seeding actually reached so ExtendTDFromSnapshots
+	// picks up from there. Skipped when this call wrote nothing (the
+	// stage-progress guard above short-circuited every stage), leaving
+	// any earlier watermark intact.
+	if tdSeededTo > 0 {
+		if err := SaveSnapshotSeedProgress(tx, tdSeededTo); err != nil {
+			return fmt.Errorf("record snapshot seed progress: %w", err)
+		}
 	}
 	return nil
 }
