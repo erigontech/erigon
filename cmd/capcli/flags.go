@@ -38,8 +38,12 @@ func (c *chainCfg) fromCmd(cmd *cli.Command) { c.Chain = cmd.String(cliutils.Cha
 // every command here reads an existing datadir, none creates one.
 func (o *outputFolder) fromCmd(cmd *cli.Command) error {
 	o.Datadir = cmd.String(cliutils.DataDirFlag.Name)
-	if _, err := os.Stat(o.Datadir); err != nil {
+	st, err := os.Stat(o.Datadir)
+	if err != nil {
 		return fmt.Errorf("--datadir: %w", err)
+	}
+	if !st.IsDir() {
+		return fmt.Errorf("--datadir: %q exists but is not a directory", o.Datadir)
 	}
 	return nil
 }
