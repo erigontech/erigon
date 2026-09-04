@@ -679,7 +679,7 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 // dumpCaplinStateIfDue freezes a new state range once enough slots have accumulated past the
 // safety margin. It reports the slot dumped to, or 0 when snapgen is off or nothing was due.
 func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
-	if !s.snapgen {
+	if !s.snapgen || s.stateSn == nil {
 		return 0, nil
 	}
 	blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)

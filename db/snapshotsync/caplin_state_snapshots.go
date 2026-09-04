@@ -561,6 +561,9 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 	return jobs
 }
 
+// DumpCaplinState must not run concurrently with RemoveOverlaps: the compressor writes .tmp
+// output into the same directory RemoveOverlaps sweeps unconditionally (#23470). Both run on
+// the single loopStates goroutine; parallelising the per-type dump unlinks in-flight output.
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
 	for name := range s.snapshotTypes.KeyValueGetters {
