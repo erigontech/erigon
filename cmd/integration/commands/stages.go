@@ -44,13 +44,13 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -250,22 +250,13 @@ var cmdRunMigrations = &cobra.Command{
 	Use:   "run_migrations",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
-		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		logger := debug.SetupCobra(cmd, "integration")
 		migrateDB := func(label kv.Label, path string) {
-			logger.Info("Opening DB", "label", label, "path", path)
-			// Non-accede and exclusive mode - to apply creation of new tables if needed.
-			cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
-			db, err := openDB(ctx, cfg, true, chain, logger)
-			if err != nil {
+			if err := runMigrationsForDB(label, path, logger); err != nil {
 				logger.Error("Opening DB", "error", err)
-				return
 			}
-			defer db.Close()
-			// Nothing to do, migrations will be applied automatically
 		}
 
-		// Chaindata DB *must* be the first one because guaranteed to contain data in Config table
-		// (see openSnapshotOnce in allSnapshots below).
 		migrateDB(dbcfg.ChainDB, chaindata)
 
 		// Migrations must be applied also to the consensus DB because ConsensusTables contain also ChaindataTables
@@ -275,6 +266,17 @@ var cmdRunMigrations = &cobra.Command{
 			migrateDB(dbcfg.ConsensusDB, consensus)
 		}
 	},
+}
+
+func runMigrationsForDB(label kv.Label, path string, logger log.Logger) error {
+	logger.Info("Opening DB", "label", label, "path", path)
+	cfg := dbCfg(label, path).RemoveFlags(mdbx.Accede).Exclusive(true)
+	db, err := openRawDB(cfg, true, logger)
+	if err != nil {
+		return err
+	}
+	db.Close()
+	return nil
 }
 
 func init() {
@@ -816,7 +818,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+	temporalDB := db.(*temporal.DB)
+	agg := temporalDB.Agg().(*dbstate.Aggregator)
 
 	// Both modes run each batch in its own rwtx + SharedDomains (execBlocksBatch),
 	// then collate+prune (which also kicks background file building). Release the
@@ -834,9 +837,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	collateAndPrune := func() error {
-		_, _, err := agg.CollateAndPrune(ctx, db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle,
-				execfinality.WithoutFinalisedBlock(), execfinality.WithTxNumsReader(db, br.TxnumReader()))
+		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, br.TxnumReader(), execfinality.WithoutFinalisedBlock())
 			if err != nil {
 				return nil, err
 			}
@@ -846,7 +848,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			pruneStage.FinalityCtx = finalityCtx
 			return finalityCtx, stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger)
-		}, logger)
+		})
 		return err
 	}
 
@@ -1141,7 +1143,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 }
 
 func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	sn, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
+	sn, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
 	defer sn.Close()
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) })
 }
@@ -1173,43 +1175,43 @@ func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
 var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *blocksnapshots.RoSnapshots
 var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
-var _aggSingleton *dbstate.Aggregator
 
-func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *dbstate.Aggregator, *freezeblocks.CaplinSnapshots, error) {
+func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.TemporalRwDB, error) {
 	var err error
+	if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
+		return nil, err
+	}
+	dirs := datadir.New(datadirCli)
+	chainConfig := fromdb.ChainConfig(db)
+	snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
+	_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, err
+	}
+	aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+	if reset {
+		aggOpts = aggOpts.SkipFilesDBGapCheck()
+	}
+	agg := aggOpts.MustOpen(ctx)
+	agg.SetProduceMod(snapCfg.ProduceE3)
+	return temporal.New(db, agg, _allSnapshotsSingleton)
+}
 
+func allSnapshots(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *freezeblocks.CaplinSnapshots, error) {
+	var err error
 	openSnapshotOnce.Do(func() {
-		if syncCfg, err = features.EnableSyncCfg(db, syncCfg); err != nil {
-			return
-		}
-
 		dirs := datadir.New(datadirCli)
-
 		chainConfig := fromdb.ChainConfig(db)
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
-
-		_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
-		var erigonDBSettings *dbstate.ErigonDBSettings
-		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
-			return
-		}
-		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
-		if reset {
-			aggOpts = aggOpts.SkipFilesDBGapCheck()
-		}
-		_aggSingleton = aggOpts.MustOpen(ctx)
-
-		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
-
 		g := &errgroup.Group{}
 		g.Go(func() error {
 			_allSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error {
-			err := _aggSingleton.OpenFolder(db)
-			if err != nil {
-				return fmt.Errorf("aggregator opening: %w", err)
+			if err := db.OpenStateSnapshots(ctx); err != nil {
+				return fmt.Errorf("state snapshots: %w", err)
 			}
 			return nil
 		})
@@ -1226,19 +1228,16 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			}
 			return nil
 		})
-
 		if err = g.Wait(); err != nil {
 			return
 		}
-
 		_allSnapshotsSingleton.LogStat("blocks")
 	})
-
 	if err != nil {
 		log.Error("[snapshots] failed to open", "err", err)
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return _allSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, nil
+	return _allSnapshotsSingleton, _allCaplinSnapshotsSingleton, nil
 }
 
 // logSnapshotStats needs a temporal tx: resolving txNum to block reads block files,
@@ -1261,9 +1260,9 @@ var openBlockReaderOnce sync.Once
 var _blockReaderSingleton dbservices.FullBlockReader
 var _blockWriterSingleton *blockio.BlockWriter
 
-func blocksIO(db kv.RoDB, logger log.Logger) (dbservices.FullBlockReader, *blockio.BlockWriter) {
+func blocksIO(db kv.TemporalRwDB, logger log.Logger) (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
-		sn, _, _, err := allSnapshots(context.Background(), db, logger)
+		sn, _, err := allSnapshots(context.Background(), db, logger)
 		if err != nil {
 			panic(err)
 		}
