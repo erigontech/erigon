@@ -35,24 +35,20 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// Fractions of those, because the run's array never shrinks below the budget:
-	// the whole ceiling would park 7MB of entries per arena, while a tenth still
-	// holds the p99 block of 1706 logs that a caller resetting per block keeps.
+	// Fractions of those: the array never shrinks below the budget, so the whole
+	// ceiling would park 7MB of entries per arena.
 	maxRetainedLogSlots = maxLogsPerTxn / 10
 	maxRetainedLogBytes = maxLogBytesPerTxn / 2
 
-	// One large log must not take the whole budget and starve the small entries
-	// real traffic is made of, and a cap much lower would throw away the reuse
-	// that makes a block of large logs cheap.
+	// One large log must not take the whole budget and starve the small entries.
 	maxRetainedLogDataCap = maxRetainedLogBytes / 8
 )
 
 // logArena owns a block's log entries and recycles them in place, so what it
 // holds follows the largest transaction rather than the widest block.
 type logArena struct {
-	// The block so far, in order — one transaction, for a caller that resets per
-	// transaction. Past the run, the array keeps the slots reset took back, Topics
-	// and Data included, for any later transaction to grow into.
+	// Past len(entries) the array keeps the slots reset took back, Topics and Data
+	// included, for a later transaction to grow into.
 	entries      types.Logs
 	retainedData int // Data those slots hold, admitted against maxRetainedLogBytes
 	indexInBlock uint
@@ -88,8 +84,7 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 }
 
 // keepData admits a slot's Data for reuse, dropping what the arena may not hold.
-// Every slot passes through here on its way out of the run, reset and revert
-// alike, so what lies past the run is always within budget.
+// Every slot passes through here, so what lies past the run stays within budget.
 func (a *logArena) keepData(lp *types.Log) {
 	if d := cap(lp.Data); d > maxRetainedLogDataCap || a.retainedData > maxRetainedLogBytes {
 		a.retainedData -= d
@@ -97,9 +92,8 @@ func (a *logArena) keepData(lp *types.Log) {
 	}
 }
 
-// reset takes back what was written: the run goes empty and its slots stay for
-// the next transaction. It walks only what the caller wrote, not the block's
-// width.
+// reset empties the run, keeping its slots for the next transaction. It walks
+// only what the caller wrote, not the block's width.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
 	entries := a.entries
