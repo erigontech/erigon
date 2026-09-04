@@ -234,6 +234,7 @@ type mockOracleBackend struct {
 	head           *types.Header
 	frozen         uint64
 	canonicalErr   error
+	prepareForkErr error
 	headerCalls    atomic.Int32
 	safeBlock      uint64
 	finalizedBlock uint64
@@ -269,7 +270,7 @@ func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber
 	return types.NewBlock(m.head, nil, nil, nil, nil, nil), nil
 }
 
-func (m *mockOracleBackend) PrepareFork(context.Context) error { return nil }
+func (m *mockOracleBackend) PrepareFork(context.Context) error { return m.prepareForkErr }
 
 func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.AllProtocolChanges }
 
@@ -309,8 +310,8 @@ func (m *mockOracleBackend) resolvedRanges() [][2]uint64 {
 	return slices.Clone(m.canonicalRanges)
 }
 
-func (m *mockOracleBackend) FrozenBlocks() (uint64, error) {
-	return m.frozen, nil
+func (m *mockOracleBackend) FrozenBlocks() uint64 {
+	return m.frozen
 }
 
 // The by-pair fetchers reject a (hash, number) pair that does not match
@@ -357,6 +358,39 @@ func TestFeeHistory_CanonicalHashErrorDegradesToUncached(t *testing.T) {
 	require.Len(t, baseFee, 4)
 	require.Greater(t, backend.headerCalls.Load(), fetchesAfterFirst,
 		"blocks with unresolved hashes must not be memoized: falling back to a number key would keep serving a reorged sibling")
+}
+
+// TestFeeHistory_PrepareForkErrorServesSequentially pins that a fork-setup
+// failure costs the parallel fan-out, not the request: the parent backend still
+// answers every block on its own transaction.
+func TestFeeHistory_PrepareForkErrorServesSequentially(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, prepareForkErr: errors.New("transient read failure")}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 3, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err, "an unresolved fork identity must not fail the request")
+	require.Len(t, baseFee, 4)
+}
+
+// TestSuggestTipCap_PrepareForkErrorServesSequentially pins the same stance on
+// the other caller of the fan-out.
+func TestSuggestTipCap_PrepareForkErrorServesSequentially(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, prepareForkErr: errors.New("transient read failure")}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	got, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err, "an unresolved fork identity must not fail the request")
+	require.NotNil(t, got)
 }
 
 // TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution pins that at or

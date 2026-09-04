@@ -60,7 +60,7 @@ type OracleBackend interface {
 
 	// FrozenBlocks returns the frozen (snapshot) boundary: the canonical
 	// number-to-hash mapping at or below it is immutable.
-	FrozenBlocks() (uint64, error)
+	FrozenBlocks() uint64
 
 	// HeaderByHashNumber and BlockByHashNumber fetch by an already-resolved
 	// canonical (hash, number) pair, so a cached entry can never name a
@@ -71,7 +71,9 @@ type OracleBackend interface {
 	// PrepareFork resolves, on the caller's goroutine, whatever identity Fork
 	// validates a forked snapshot against. It must be called before the first
 	// Fork and is a no-op afterwards: Fork runs on the fan-out goroutines,
-	// which must never read the parent transaction.
+	// which must never read the parent transaction. Its error reports what
+	// stays unresolved; it does not decide the request's fate, and Fork then
+	// answers nil.
 	PrepareFork(ctx context.Context) error
 
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
@@ -255,7 +257,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 // The returned slice has length count: entry i corresponds to block head-i.
 func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64, count int) ([][]*uint256.Int, error) {
 	if err := oracle.backend.PrepareFork(ctx); err != nil {
-		return nil, err
+		oracle.log.Debug("gas price: parent identity unresolved, serving sequentially", "err", err)
 	}
 	results := make([][]*uint256.Int, count)
 	var (
