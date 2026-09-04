@@ -191,7 +191,7 @@ func (c *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hook
 	}
 	c.stateGas -= misplaced
 	before := c.gas
-	c.refillStateGas(misplaced) // LIFO: gas_left first
+	c.refillStateGas(misplaced) // capped by the spill, so LIFO returns all to gas_left
 	if tracer != nil && tracer.OnGasChange != nil {
 		tracer.OnGasChange(before, c.gas, tracing.GasChangeCallStateGasReturned)
 	}
