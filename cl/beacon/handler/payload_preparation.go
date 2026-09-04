@@ -415,8 +415,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		cancel()
 		outcome := current
 		outcome.headRoot = result.headRoot
-		// State derivation can overlap the PTC decision and preference updates. Memoize the inputs
-		// this attempt actually used, rather than the values sampled before state work.
+		// Memoize the build inputs the attempt used, not values sampled before state work.
 		if result.buildInputsResolved {
 			outcome.gloasPath = result.gloasPath
 			outcome.proposerPreferencesGeneration = result.preferenceGeneration
@@ -591,6 +590,8 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, targetSlot, proposerIndex, stateVersion,
 	)
 	result.preferenceGeneration = preferenceGeneration
+	// The loop-level path is an early filter. Resolve it again after state work because the Gloas
+	// decision can change without changing the beacon head root.
 	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	result.gloasPath = payloadSource.gloasPath
 	result.buildInputsResolved = true
