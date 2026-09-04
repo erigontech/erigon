@@ -495,12 +495,8 @@ func requireNoCommitmentStepAbove(t *testing.T, rwTx kv.TemporalRwTx, maxStep ui
 	t.Helper()
 	require := require.New(t)
 
-	var c kv.Cursor
-	{
-		var err error
-		c, err = rwTx.Cursor(kv.TblCommitmentVals)
-		require.NoError(err)
-	}
+	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	require.NoError(err)
 	defer c.Close()
 
 	offending := 0

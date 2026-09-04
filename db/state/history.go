@@ -285,9 +285,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 		defer rs.Close()
 		rs.LogLvl(log.LvlTrace)
-	}
-	if h._testBuildVIHook != nil {
-		h._testBuildVIHook(rs)
+		if h._testBuildVIHook != nil {
+			h._testBuildVIHook(rs)
+		}
 	}
 
 	var seq multiencseq.SequenceReader
