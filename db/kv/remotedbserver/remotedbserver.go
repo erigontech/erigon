@@ -545,6 +545,7 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	}
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		if req.Latest {
 			opts := kv.GetLatestOptions{}
 			if req.MaxStep != nil {
