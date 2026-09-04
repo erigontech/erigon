@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -80,6 +81,21 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 
 	// Create the parent state database
 	statedb := state.New(reader)
+
+	// The state comes from history at txIndex rather than from replaying the
+	// block, so the log arena starts empty - see IntraBlockState.SetFirstLogIndex.
+	// The block's first transaction starts at 0, so there is nothing to read.
+	if txIndex > 0 {
+		minTxNum, err := txNumsReader.Min(ctx, dbtx, header.Number.Uint64())
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+		}
+		firstLogIndex, err := rawtemporaldb.FirstLogIndexOfTxn(dbtx, minTxNum+uint64(txIndex)+1)
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
+		}
+		statedb.SetFirstLogIndex(firstLogIndex)
+	}
 
 	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)
