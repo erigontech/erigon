@@ -547,11 +547,20 @@ func (br *BlockRetire) buildFiles(
 		// in future we will do it in background
 		producedFiles, err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg, &snapshots.BaseRoSnapshots)
 		if err != nil {
-			return ok, fmt.Errorf("DumpBlocks: %w", err)
+			return false, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
+		// Progress is what was produced, not what CanRetire offered. A
+		// chunk already covered by a mode-C/D v4 emit is skipped by
+		// DumpBlocks and yields nothing, leaving FrozenBlocks() — and so
+		// the next pass's blockFrom — unchanged. Reporting "did work"
+		// there makes RetireBlocks' loop re-select the same range with
+		// no exit condition it can ever reach, and the resulting spin
+		// holds buildingFiles=true against any later quiescence wait.
+		ok = len(producedFiles) > 0
+
 		if err := snapshots.OpenFolder(); err != nil {
-			return ok, fmt.Errorf("open: %w", err)
+			return false, fmt.Errorf("open: %w", err)
 		}
 		snapshots.LogStat("blocks:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size

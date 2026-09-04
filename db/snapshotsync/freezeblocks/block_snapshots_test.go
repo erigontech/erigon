@@ -27,6 +27,9 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -34,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -367,4 +371,45 @@ func TestChooseRetireTailStart_V4OneFullCoverageReturnsChunkEnd(t *testing.T) {
 	// maxCut is 3_492_000 which >= chunkEnd, retire skips.
 	got := chooseRetireTailStart(dir, 3_491_000, 3_492_000)
 	require.Equal(t, uint64(3_492_000), got, "v4 #1 covers whole chunk — retire has nothing to emit")
+}
+
+// TestDumpBlocks_FullyCoveredChunkProducesNothing pins the precondition
+// of the retire spin: when a v4 #1 already covers the whole chunk,
+// DumpBlocks emits no files. Paired with buildFiles reporting progress
+// from produced files rather than from CanRetire, this is what lets the
+// RetireBlocks loop terminate.
+//
+// Cycle 26 span: retire logged 1,630,704 identical
+// "[snapshots:blocks:retire] Stat blocks=3.411.513" lines at ~445/s for a
+// full hour after a mode-D unwind. FrozenBlocks() never advanced, so
+// minBlockNum was recomputed identically each pass and CanRetire kept
+// answering true — an exit condition that could never be reached. It
+// also held buildingFiles=true throughout, which is what timed out the
+// next setHead's quiescence wait.
+func TestDumpBlocks_FullyCoveredChunkProducesNothing(t *testing.T) {
+	logger := log.New()
+	dir := t.TempDir()
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, dir, logger)
+	defer snapshots.Close()
+	require.NoError(t, snapshots.OpenFolder())
+
+	// A v4 #1 covering the whole chunk — the post-mode-D-emit shape.
+	name := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_491_000, 3_492_000, "headers") + ".seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644))
+
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		// Past the chunk end so DumpBlocks' head-bound guard passes.
+		return stages.SaveStageProgress(tx, stages.Bodies, 3_500_000)
+	}))
+
+	snCfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	require.True(t, ok)
+	produced, err := DumpBlocks(t.Context(), 3_491_000, 3_492_000, nil, dir, dir, db, 1,
+		log.LvlInfo, logger, NewBlockReader(snapshots, nil), snCfg, &snapshots.BaseRoSnapshots)
+	require.NoError(t, err)
+	require.Empty(t, produced,
+		"chunk already covered by a v4 #1 must produce no files — retire has nothing to emit here")
 }
