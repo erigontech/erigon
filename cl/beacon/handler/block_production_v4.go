@@ -40,6 +40,7 @@ type gloasBlockProductionOptions struct {
 	includePayload       bool
 	selectedBuilderURL   string
 	builderRouteReserved bool
+	selectedP2PBid       *gloasBidCandidate
 	selfBuildPayload     *selfBuildPayload
 	payloadFeeRecipient  *common.Address
 	deferPayloadCache    bool

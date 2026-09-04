@@ -691,7 +691,13 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	startConsensusProcessing := time.Now()
 
-	postState, blockBuildingMachine, err := a.processProducedBlock(baseState, block)
+	var postState *state.CachingBeaconState
+	var blockBuildingMachine *eth2.Impl
+	if gloasOptions != nil {
+		postState, blockBuildingMachine, err = a.processProducedBlock(baseState, block, gloasOptions.selectedP2PBid)
+	} else {
+		postState, blockBuildingMachine, err = a.processProducedBlock(baseState, block)
+	}
 	if err != nil {
 		log.Warn("Failed to process execution block", "err", err, "slot", targetSlot)
 		return nil, err
@@ -953,7 +959,7 @@ func (a *ApiHandler) produceBlock(
 				p2pMinBid = options.builderConfig.MinBid
 			}
 			candidates := make([]gloasBidCandidate, 0, 1)
-			if a.epbsPool != nil {
+			if options != nil && options.builderConfig != nil && a.epbsPool != nil {
 				bidKey := pool.HighestBidKey{
 					Slot:            targetSlot,
 					ParentBlockHash: selfBid.ParentBlockHash,
@@ -962,7 +968,7 @@ func (a *ApiHandler) produceBlock(
 				if externalBid, found := a.epbsPool.HighestBids.Get(bidKey); found {
 					candidates = append(candidates, gloasBidCandidate{
 						bid:                 externalBid,
-						boostFactor:         boostFactor,
+						boostFactor:         options.builderConfig.BuilderBoostFactor,
 						maxExecutionPayment: math.MaxUint64,
 						minBid:              p2pMinBid,
 					})
@@ -982,6 +988,18 @@ func (a *ApiHandler) produceBlock(
 				} else {
 					options.builderRouteReserved = true
 				}
+			}
+			if selected != nil && selected.builderURL == "" {
+				selected.selfBuildErr = localErr
+				options.selectedP2PBid = selected
+				block.BeaconBody = beaconBody
+				block.Blobs = blobs
+				block.KzgProofs = kzgProofs
+				block.ExecutionValue = new(big.Int)
+				if localExecValue != nil {
+					block.ExecutionValue.Set(localExecValue)
+				}
+				return block, nil
 			}
 			if selected != nil {
 				log.Info("GLOAS: selected external builder bid over self-build",
@@ -1077,14 +1095,16 @@ func selectHigherGloasP2PBidValue(
 func (a *ApiHandler) processProducedBlock(
 	baseState *state.CachingBeaconState,
 	block *cltypes.BlindOrExecutionBeaconBlock,
+	selectedCandidates ...*gloasBidCandidate,
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
-	return a.processProducedBlockWithProcessor(baseState, block, processBlockForProduction)
+	return a.processProducedBlockWithProcessor(baseState, block, processBlockForProduction, selectedCandidates...)
 }
 
 func (a *ApiHandler) processProducedBlockWithProcessor(
 	baseState *state.CachingBeaconState,
 	block *cltypes.BlindOrExecutionBeaconBlock,
 	processBlock func(*state.CachingBeaconState, *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error),
+	selectedCandidates ...*gloasBidCandidate,
 ) (*state.CachingBeaconState, *eth2.Impl, error) {
 	if block == nil {
 		return baseState, nil, errors.New("cannot process nil block")
@@ -1106,15 +1126,34 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
+	hasSelectedCandidate := len(selectedCandidates) > 0 && selectedCandidates[0] != nil
+	if !hasSelectedCandidate && selfBid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+		blockMachine, err := processBlock(baseState, block)
+		return baseState, blockMachine, err
+	}
 	bidKey := pool.HighestBidKey{
 		Slot:            block.Slot,
 		ParentBlockHash: selfBid.Message.ParentBlockHash,
 		ParentBlockRoot: selfBid.Message.ParentBlockRoot,
 	}
-	externalBid, found := a.epbsPool.GetHighestBid(bidKey)
 	selfExecutionValue := block.GetExecutionValue()
-	selectedValueWei, selected := selectHigherGloasP2PBidValue(selfExecutionValue, externalBid)
-	if !found || !selected {
+	var externalBid *cltypes.SignedExecutionPayloadBid
+	var selectedValueWei *big.Int
+	var selected bool
+	var selfBuildErr error
+	if len(selectedCandidates) > 0 {
+		candidate := selectedCandidates[0]
+		if candidate != nil {
+			externalBid = candidate.bid
+			selectedValueWei = candidate.executionValueWei
+			selected = externalBid != nil && externalBid.Message != nil && selectedValueWei != nil
+			selfBuildErr = candidate.selfBuildErr
+		}
+	} else {
+		externalBid, _ = a.epbsPool.GetHighestBid(bidKey)
+		selectedValueWei, selected = selectHigherGloasP2PBidValue(selfExecutionValue, externalBid)
+	}
+	if !selected {
 		blockMachine, err := processBlock(baseState, block)
 		return baseState, blockMachine, err
 	}
@@ -1122,6 +1161,9 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	// Process the external candidate on copies so the self-build remains available as a fallback.
 	candidateState, err := baseState.Copy()
 	if err != nil {
+		if selfBuildErr != nil {
+			return baseState, nil, fmt.Errorf("external builder state copy failed: %w; self-build unavailable: %w", err, selfBuildErr)
+		}
 		log.Warn("GLOAS: failed to copy state for external bid; using self-build",
 			"slot", block.Slot,
 			"builderIndex", externalBid.Message.BuilderIndex,
@@ -1156,13 +1198,21 @@ func (a *ApiHandler) processProducedBlockWithProcessor(
 	if errors.Is(candidateErr, eth2.ErrInvalidExecutionPayloadBid) {
 		bidEvicted = a.epbsPool.RemoveHighestBid(bidKey, externalBid)
 	}
-	selfBuildMachine, selfBuildErr := processBlock(baseState, block)
 	if selfBuildErr != nil {
+		return baseState, nil, fmt.Errorf(
+			"external builder transition failed (bid evicted: %t): %w; self-build unavailable: %w",
+			bidEvicted,
+			candidateErr,
+			selfBuildErr,
+		)
+	}
+	selfBuildMachine, fallbackErr := processBlock(baseState, block)
+	if fallbackErr != nil {
 		return baseState, selfBuildMachine, fmt.Errorf(
 			"external builder transition failed (bid evicted: %t): %w; self-build fallback failed: %w",
 			bidEvicted,
 			candidateErr,
-			selfBuildErr,
+			fallbackErr,
 		)
 	}
 
@@ -1199,6 +1249,7 @@ type gloasBidCandidate struct {
 	minBid              uint64
 	builderURL          string
 	executionValueWei   *big.Int
+	selfBuildErr        error
 }
 
 type executionPayloadBidValidator interface {
@@ -1686,7 +1737,6 @@ func (a *ApiHandler) produceBeaconBody(
 					Commitment: common.Bytes48(bundles.Commitments[i]),
 				}
 			}
-			// add the bundle to recently produced blobs
 			a.blobBundles.Add(blobBundle.Commitment, blobBundle)
 			if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 				gloasBlobBundles = append(gloasBlobBundles, blobBundle)
@@ -2554,11 +2604,6 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk 
 	store := func(ctx context.Context) error {
 		return a.storeBlockAndBlobs(ctx, blk, blobsSidecars, columnsSidecars, validation)
 	}
-	if validation != BlockPublishingValidationGossip {
-		if err := store(ctx); err != nil {
-			return err
-		}
-	}
 	lenBlobs := 0
 	if blk.Version() >= clparams.DenebVersion {
 		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
@@ -2680,10 +2725,10 @@ func collectPublishedPayloadData(
 func (a *ApiHandler) validateSelfBuildPayloadAvailable(blk *cltypes.SignedBeaconBlock) error {
 	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
-		return nil // no bid in block, nothing to do
+		return nil
 	}
 	if bid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
-		return nil // not a self-build block; builder will broadcast the envelope
+		return nil
 	}
 
 	_, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)

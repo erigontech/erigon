@@ -466,6 +466,65 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
 }
 
+func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+
+	baseRoot := common.Hash{0x41}
+	targetSlot := postState.Slot() + 1
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("local execution unavailable"))
+	handler.engine = engine
+
+	parentBid := postState.GetLatestExecutionPayloadBid()
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = parentBid.GasLimit
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
+	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
+	externalBid.Message.ParentBlockRoot = baseRoot
+	externalBid.Message.FeeRecipient = common.Address{}
+	externalBid.Message.GasLimit = parentBid.GasLimit
+	handler.epbsPool = pool.NewEpbsPool()
+	handler.epbsPool.StoreHighestBid(pool.HighestBidKey{
+		Slot:            targetSlot,
+		ParentBlockHash: parentBid.ParentBlockHash,
+		ParentBlockRoot: baseRoot,
+	}, externalBid)
+	options := &gloasBlockProductionOptions{builderConfig: &cltypes.BuilderConfig{BuilderBoostFactor: 100}}
+	ctx := context.WithValue(t.Context(), gloasBlockProductionOptionsKey{}, options)
+
+	block, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
+	require.NoError(t, err)
+	require.NotNil(t, block.ExecutionValue)
+	require.Zero(t, block.ExecutionValue.Sign())
+	require.Same(t, externalBid, options.selectedP2PBid.bid)
+
+	candidateErr := errors.New("candidate transition unavailable")
+	processedSelfBuild := false
+	_, _, err = handler.processProducedBlockWithProcessor(
+		postState,
+		block,
+		func(_ *state.CachingBeaconState, candidate *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			if candidate.BeaconBody.SignedExecutionPayloadBid == externalBid {
+				return nil, candidateErr
+			}
+			processedSelfBuild = true
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+		options.selectedP2PBid,
+	)
+	require.ErrorIs(t, err, candidateErr)
+	require.False(t, processedSelfBuild)
+}
+
 func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -2576,6 +2635,79 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 	require.Same(t, fixture.externalBid, storedBid)
 }
 
+func TestProcessProducedBlockDoesNotReplacePreselectedConfiguredBid(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	configuredBid := fixture.externalBid
+	configuredBid.Message.Value = 2
+	fixture.block.BeaconBody.SignedExecutionPayloadBid = configuredBid
+	fixture.block.ExecutionValue = gweiToWei(big.NewInt(2))
+	p2pBid := &cltypes.SignedExecutionPayloadBid{Message: fixture.externalBid.Message.Clone().(*cltypes.ExecutionPayloadBid)}
+	p2pBid.Message.Value = 3
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, p2pBid)
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		func(_ *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			require.Same(t, configuredBid, block.BeaconBody.SignedExecutionPayloadBid)
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+	)
+
+	require.NoError(t, err)
+	require.Same(t, configuredBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+}
+
+func TestProcessProducedBlockUsesAuthoritativeP2PSelection(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	selectedBid := fixture.externalBid
+	selectedBid.Message.Value = 2
+	higherBid := &cltypes.SignedExecutionPayloadBid{Message: selectedBid.Message.Clone().(*cltypes.ExecutionPayloadBid)}
+	higherBid.Message.Value = 3
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, higherBid)
+	candidate := &gloasBidCandidate{bid: selectedBid, executionValueWei: gweiToWei(big.NewInt(2))}
+	processed := 0
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		func(_ *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			processed++
+			require.Same(t, selectedBid, block.BeaconBody.SignedExecutionPayloadBid)
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+		candidate,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	require.NotSame(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Same(t, selectedBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+}
+
+func TestProcessProducedBlockHonorsAuthoritativeNoP2PSelection(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		func(_ *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			require.Same(t, selfBid, block.BeaconBody.SignedExecutionPayloadBid)
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+}
+
 func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
@@ -3073,7 +3205,8 @@ func TestProduceBlockUsesLocalPayloadWithoutBuilderClient(t *testing.T) {
 
 func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	logs := captureAllProductionLogs(t)
-	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	_, _, _, _, _, h, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	forkchoiceStore.OnTickFn = func(uint64) {}
 	h.indiciesDB = updateFailingDB{RwDB: h.indiciesDB}
 	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
@@ -3082,12 +3215,8 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	bid.Message.BuilderIndex = 1
 	bid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0x01})
 
-	require.NoError(t, h.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip))
-
-	// The persistence error is logged at the end of the background store goroutine.
-	require.Eventually(t, func() bool {
-		return strings.Contains(logs(), "stop after persistence")
-	}, 5*time.Second, 10*time.Millisecond)
+	err := h.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "stop after persistence")
 	require.Contains(t, logs(), "blobSidecars=0")
 	require.Contains(t, logs(), "columnSidecars=0")
 }

@@ -179,6 +179,7 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 	}
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
 	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// A checkpoint-sync anchor can be newer than the store's finalized checkpoint and defines the earliest admissible block.
 	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
 		finalizedSlot = anchorSlot
 	}

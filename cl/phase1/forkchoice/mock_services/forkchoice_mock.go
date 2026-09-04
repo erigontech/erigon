@@ -53,6 +53,7 @@ type ForkChoiceStorageMock struct {
 	HeadPayloadStatusVal   cltypes.PayloadStatus
 	GetHeadNodeFn          func() (forkchoice.ForkChoiceNode, error)
 	GetStateAtBlockRootFn  func(common.Hash, bool) (*state.CachingBeaconState, error)
+	ViewStateAtBlockRootFn func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal         uint64
 	JustifiedCheckpointVal solid.Checkpoint
 	JustifiedSlotVal       uint64
@@ -308,6 +309,20 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 	return st.Copy()
 }
 
+func (f *ForkChoiceStorageMock) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
+	if f.ViewStateAtBlockRootFn != nil {
+		return f.ViewStateAtBlockRootFn(blockRoot, fn)
+	}
+	blockState, err := f.GetStateAtBlockRoot(blockRoot, false)
+	if err != nil {
+		return err
+	}
+	if blockState == nil {
+		return errors.New("block state not found")
+	}
+	return fn(blockState)
+}
+
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
 	blockRoot common.Hash,
 ) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool) {
@@ -410,7 +425,7 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 	return f.OnExecutionPayloadErr
 }
 
-func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(_ context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	return f.ValidateExecutionPayloadEnvelopeErr
 }
 

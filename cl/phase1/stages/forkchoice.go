@@ -265,27 +265,20 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 		}
 		return currentRoot == headRoot && currentSlot == headSlot && executionOptimistic == headEvent.Data.ExecutionOptimistic && payloadStatus == headEvent.Data.PayloadStatus
 	}
-	shouldEmit := false
 	emitter.WithHeadEventLock(func() {
-		shouldEmit = current()
-	})
-	if !shouldEmit {
-		return validationErr
-	}
-
-	emitter.State().SendHead(&beaconevents.HeadData{
-		Slot:                      headSlot,
-		Block:                     headRoot,
-		State:                     stateRoot,
-		EpochTransition:           headEvent.Data.EpochTransition,
-		PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
-		CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
-		ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
-	})
-	emitter.WithHeadEventLock(func() {
-		if current() {
-			emitter.State().SendHeadV2(headEvent)
+		if !current() {
+			return
 		}
+		emitter.State().TrySendHead(&beaconevents.HeadData{
+			Slot:                      headSlot,
+			Block:                     headRoot,
+			State:                     stateRoot,
+			EpochTransition:           headEvent.Data.EpochTransition,
+			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
+		})
+		emitter.State().SendHeadV2(headEvent)
 	})
 	return validationErr
 }

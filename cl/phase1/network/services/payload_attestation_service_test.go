@@ -537,69 +537,12 @@ func TestPayloadAttestationServiceBlockNotFound(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234")
 	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
 
-	// Block not in forkchoice - should queue and report queued.
+	// Block not in forkchoice - should ignore without retaining unauthenticated input.
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
-	require.True(t, errors.Is(err, ErrAttestationQueued))
-
-	// Verify attestation was queued
-	require.Equal(t, int32(1), service.pending.count.Load())
-
-	// Verify the pending key
-	key := pendingPayloadAttestationKeyFor(blockRoot, msg)
-	_, exists := service.pending.jobs.Load(key)
-	require.True(t, exists)
-}
-
-func TestPayloadAttestationServiceReportsCapacityWhenMissingBlockQueueIsFull(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _ := setupPayloadAttestationService(t, ctrl)
-	for i := range maxPendingAttestations {
-		key := pendingPayloadAttestationKey{
-			blockRoot:      common.Hash{byte(i), byte(i >> 8)},
-			validatorIndex: uint64(i),
-			messageRoot:    common.Hash{byte(i >> 8), byte(i)},
-		}
-		service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{})
-	}
-	service.pending.count.Store(maxPendingAttestations)
-
-	blockRoot := common.HexToHash("0x1234")
-	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
-	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.ErrorIs(t, err, ErrIgnore)
-	require.ErrorIs(t, err, ErrAttestationCapacity)
 	require.NotErrorIs(t, err, ErrAttestationQueued)
-	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
-	_, exists := service.pending.jobs.Load(pendingPayloadAttestationKeyFor(blockRoot, msg))
-	require.False(t, exists)
-}
-
-func TestPayloadAttestationServiceReportsQueuedWhenExactWorkExistsAtCapacity(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _ := setupPayloadAttestationService(t, ctrl)
-	blockRoot := common.HexToHash("0x1234")
-	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
-	service.pending.jobs.Store(pendingPayloadAttestationKeyFor(blockRoot, msg), &pendingJob[*cltypes.PayloadAttestationMessage]{msg: msg})
-	for i := range maxPendingAttestations - 1 {
-		key := pendingPayloadAttestationKey{
-			blockRoot:      common.Hash{byte(i), byte(i >> 8)},
-			validatorIndex: uint64(i + 2),
-			messageRoot:    common.Hash{byte(i >> 8), byte(i)},
-		}
-		service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{})
-	}
-	service.pending.count.Store(maxPendingAttestations)
-	err := service.ProcessMessage(context.Background(), nil, msg)
-	require.ErrorIs(t, err, ErrIgnore)
-	require.ErrorIs(t, err, ErrAttestationQueued)
-	require.NotErrorIs(t, err, ErrAttestationCapacity)
-	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
+	require.Zero(t, service.pending.count.Load())
 }
 
 func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t *testing.T) {

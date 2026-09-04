@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
@@ -137,15 +138,19 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 
 	envelope := signedEnvelope.Message
-	if err := validateEnvelopeLimits(s.beaconCfg, envelope); err != nil {
-		return err
-	}
 	beaconBlockRoot := envelope.BeaconBlockRoot
 	builderIndex := envelope.BuilderIndex
 
 	log.Trace("Received execution payload via gossip",
 		"beaconBlockRoot", beaconBlockRoot,
 		"builderIndex", builderIndex)
+	block, blockKnown := s.forkchoiceStore.GetBlock(beaconBlockRoot)
+	if err := validateEnvelopeLimits(s.beaconCfg, envelope); err != nil {
+		if !blockKnown || block == nil {
+			return fmt.Errorf("%w: invalid execution payload envelope for unknown block: %w", ErrIgnore, err)
+		}
+		return err
+	}
 	if envelope.Payload == nil {
 		return errors.New("nil execution payload")
 	}
@@ -156,8 +161,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 	// [IGNORE] The envelope's block root has been seen (via gossip or non-gossip sources)
 	// A client MAY queue payload for processing once the block is retrieved.
-	block, ok := s.forkchoiceStore.GetBlock(beaconBlockRoot)
-	if !ok || block == nil {
+	if !blockKnown || block == nil {
 		queued, err := s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
@@ -249,20 +253,20 @@ func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeacon
 	if err != nil || headRoot != blockRoot || s.beaconCfg.SlotsPerEpoch == 0 {
 		return
 	}
-	headState, err := s.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil || headState == nil {
-		return
-	}
-	headEvent, err := beaconevents.BuildHeadV2Data(
-		s.beaconCfg,
-		headState,
-		headSlot,
-		headRoot,
-		block.Block.StateRoot,
-		"full",
-		s.forkchoiceStore.IsRootOptimistic(blockRoot),
-	)
-	if err != nil {
+	var headEvent *beaconevents.HeadV2Data
+	err = s.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
+		headEvent, err = beaconevents.BuildHeadV2Data(
+			s.beaconCfg,
+			headState,
+			headSlot,
+			headRoot,
+			block.Block.StateRoot,
+			"full",
+			s.forkchoiceStore.IsRootOptimistic(blockRoot),
+		)
+		return err
+	})
+	if err != nil || headEvent == nil {
 		return
 	}
 	s.emitters.WithHeadEventLock(func() {
