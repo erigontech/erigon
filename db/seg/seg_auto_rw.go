@@ -145,7 +145,10 @@ type Writer struct {
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 	// Upgrade to V2: NewWriter is the only path that sets word-level compression
 	// flags, so V2 files are only created here — never by direct Compressor use.
+	// The bits are replaced rather than OR-ed: the header has to describe this
+	// Writer's compression, not that of an earlier one over the same Compressor.
 	kv.version = FileCompressionFormatV2
+	kv.featureFlagBitmask &^= FeatureFlagBitmask(WordLevelKeyCompressionEnabled | WordLevelValCompressionEnabled)
 	if compress.Has(CompressKeys) {
 		kv.featureFlagBitmask.Set(WordLevelKeyCompressionEnabled)
 	}

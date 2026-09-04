@@ -129,3 +129,19 @@ func TestNewReaderUsesHeaderForV2(t *testing.T) {
 		require.False(t, r.HasNext(), "no more words expected")
 	})
 }
+
+// A Compressor carrying word-level flags from an earlier Writer must not leak
+// them into the next Writer's header: the bitmask describes one file's layout,
+// and a stale bit routes every read of that file through the wrong path.
+func TestNewWriterReplacesWordLevelFlags(t *testing.T) {
+	c, err := NewCompressor(context.Background(), "test", filepath.Join(t.TempDir(), "test.seg"),
+		t.TempDir(), DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	defer c.Close()
+
+	NewWriter(c, CompressKeys|CompressVals)
+	NewWriter(c, CompressNone)
+
+	require.False(t, c.featureFlagBitmask.Has(WordLevelKeyCompressionEnabled))
+	require.False(t, c.featureFlagBitmask.Has(WordLevelValCompressionEnabled))
+}

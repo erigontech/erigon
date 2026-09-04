@@ -58,13 +58,13 @@ func UpgradeSegHeadersV2(dirs datadir.Dirs, logger log.Logger) error {
 	return nil
 }
 
-// walkSegDir invokes fn for each file under dir, treating a missing dir and
-// transient not-exist errors as a no-op.
-func walkSegDir(dir string, fn func(path string) error) error {
-	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+// walkSegDir invokes fn for each file under root, treating a missing directory
+// and transient not-exist errors as a no-op.
+func walkSegDir(root string, fn func(path string) error) error {
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
