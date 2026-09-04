@@ -974,7 +974,23 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	if err := rawdb.WriteTd(ov, newHash, number, *td); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: write TD: %w", err)
 	}
-	if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
+	// RE-KEY the body, do not write a second copy. The sealed block carries EXACTLY the transactions of the
+	// in-progress block it closes — only the header hash changes — so its transactions are already in kv.EthTx,
+	// written there by the accumulation rounds under oldHash. WriteRawBody would allocate a FRESH BaseTxnID
+	// range from the kv.EthTx sequence and write every transaction again; that allocation is not durable from
+	// here, because the sequence the NEXT block is seeded from comes from the committed DB and does not carry
+	// it. The successor was therefore handed this block's ids and OVERWROTE its transactions: the sealed block
+	// read back a mixture of its own body and its successor's, so it could not be re-executed ("nonce too
+	// high" on receipt derivation) even though its state was correct. Re-keying reuses the range the rounds
+	// already wrote — one record write instead of a full body rewrite per block.
+	if bfs, rerr := rawdb.ReadBodyForStorageByKey(ov, dbutils.BlockBodyKey(number, oldHash)); rerr == nil && bfs != nil &&
+		bfs.TxCount == types.TxCountToTxAmount(len(body.Transactions)) {
+		if err := rawdb.WriteBodyForStorage(ov, newHash, number, bfs); err != nil {
+			return fmt.Errorf("IngestSealedFlashblock: re-key body: %w", err)
+		}
+	} else if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
+		// No in-progress record to re-key (or it disagrees with the sealed body) — write one. This is the
+		// allocating path above, so it is the fallback, not the norm.
 		return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
 	}
 	// Remove the DEFERRED (zero-output) in-progress block so the post-newPayload state is IDENTICAL to a

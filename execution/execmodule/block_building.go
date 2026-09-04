@@ -250,6 +250,8 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 		receipts = sealedSD.FlashblockReceipts()
 	}
 
+	e.auditSealedBody(ctx, number, body.Transactions)
+
 	block := types.NewBlockForAsembling(sealed, body.Transactions, nil, receipts, params.Withdrawals)
 
 	// newPayload ingest: re-key the extending fork to the sealed header so a subsequent FCU canonicalises it.

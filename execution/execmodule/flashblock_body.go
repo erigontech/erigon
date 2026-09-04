@@ -96,8 +96,13 @@ type flashBodyState struct {
 	// ib* under ibMu; the OUTPUT root/receipts are the last pre-exec's computed values (the final sealed
 	// values come from the CLOSE — SealBlock's returned block). Set on a successful PreExecute, cleared on
 	// reset. This is what removes the driver-data-lock-vs-exec-semaphore deadlock class.
-	valid    bool             // a PreExecute has validated for this in-progress block
-	built    FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
+	// bodyNonce is the last nonce this body already holds per sender — the body's OWN record, so the filter
+	// can tell whether a tx it is about to keep actually continues the body it is appending to. The frontier
+	// SD answers "what nonce comes next in STATE"; the two must agree, and this is what catches them
+	// disagreeing at the moment the gap is created rather than at replay time.
+	bodyNonce map[accounts.Address]uint64
+	valid     bool             // a PreExecute has validated for this in-progress block
+	built     FlashblockInputs // the header inputs the current in-progress header was built under (attrs compare)
 	hash     common.Hash      // the current in-progress header hash
 	root     common.Hash      // last pre-exec computed state root (per-round; seal recomputes the final)
 	receipts int              // receipts accumulated across rounds (== body txs)
@@ -167,6 +172,7 @@ func (f *flashBodyState) resetLocked(num uint64) {
 	f.num = num
 	f.body = nil
 	f.seen = make(map[snKeyExec]bool)
+	f.bodyNonce = make(map[accounts.Address]uint64)
 	f.valid = false
 	f.built = FlashblockInputs{}
 	f.hash = common.Hash{}
@@ -276,10 +282,12 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		return 0
 	}
 
+	var nStale, nFuture, nSeen, nBad int
 	survivors := make([][]byte, 0, len(newTxRLPs))
 	for _, rlp := range newTxRLPs {
 		tx, derr := types.DecodeTransaction(rlp)
 		if derr != nil {
+			nBad++
 			continue // undecodable — drop
 		}
 		s, ok := tx.GetSender()
@@ -289,26 +297,113 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 			}
 		}
 		if !ok {
+			nBad++
 			continue // unrecoverable sender — drop
 		}
 		k := snKeyExec{addr: s, nonce: tx.GetNonce()}
 		if e.flash.seen[k] {
+			nSeen++
 			continue // already decided (kept or dropped) — never reconsider
 		}
 		e.flash.seen[k] = true
 		exp := nextNonce(s)
 		if tx.GetNonce() < exp {
+			nStale++
 			continue // stale: already sealed on the frontier — dropped (and now remembered)
 		}
 		if tx.GetNonce() > exp {
 			// Future/gap: leave it for a later drain (do NOT mark advanced). Remembered as seen so the exact
 			// (sender,nonce) is not re-decided this block; a genuine gap-fill arrives under a different nonce.
+			nFuture++
 			continue
 		}
+		// The tx passes against STATE (nonce == the frontier SD's next). Check it also continues the BODY it
+		// is being appended to: if the body already holds a lower, non-adjacent nonce for this sender, state
+		// and body have diverged — the SD applied transactions this body does not record — and appending here
+		// is what mints a body that cannot be re-executed. Log where it happens; do not silently paper over it.
+		if prev, have := e.flash.bodyNonce[s]; have && tx.GetNonce() != prev+1 {
+			e.logger.Error("[BODY-AUDIT] filter kept a tx that does not continue the body",
+				"block", e.flash.num, "sender", s, "lastInBody", prev, "keeping", tx.GetNonce(),
+				"stateNext", exp, "bodyLen", len(e.flash.body))
+		}
+		e.flash.bodyNonce[s] = tx.GetNonce()
 		survivors = append(survivors, rlp)
 		next[s] = exp + 1
 	}
+	if nStale+nFuture+nSeen+nBad > 0 {
+		e.logger.Info("[TRACE-filter] round", "block", e.flash.num, "in", len(newTxRLPs),
+			"kept", len(survivors), "stale", nStale, "future", nFuture, "seen", nSeen, "undecodable", nBad)
+	}
 	return survivors, nil
+}
+
+// auditSealedBody checks that the block just sealed can actually be RE-EXECUTED from its parent state, which
+// is what a follower, a resync, and receipt derivation all do. Two things must hold: each sender's nonces are
+// contiguous in body order, and the post-seal account nonce equals that sender's last body nonce + 1. A
+// violation means the state advanced by transactions the body does not record — the block seals, but replaying
+// it fails with "nonce too high". Cheap (one pass over the body plus one account read per distinct sender) and
+// it names the block and sender, so the failure is reported where it is created rather than at replay.
+func (e *ExecModule) auditSealedBody(ctx context.Context, number uint64, txs types.Transactions) {
+	if len(txs) == 0 {
+		return
+	}
+	signer := types.LatestSignerForChainID(e.config.ChainID)
+	type span struct {
+		first, last uint64
+		count       int
+	}
+	seq := make(map[accounts.Address]*span)
+	for i, tx := range txs {
+		s, ok := tx.GetSender()
+		if !ok {
+			if rec, serr := signer.Sender(tx); serr == nil {
+				s, ok = rec, true
+			}
+		}
+		if !ok {
+			continue
+		}
+		n := tx.GetNonce()
+		sp, have := seq[s]
+		if !have {
+			seq[s] = &span{first: n, last: n, count: 1}
+			continue
+		}
+		if n != sp.last+1 {
+			e.logger.Error("[BODY-AUDIT] nonce gap inside the sealed body",
+				"block", number, "sender", s, "prev", sp.last, "got", n, "idx", i, "bodyTxs", len(txs))
+		}
+		sp.last = n
+		sp.count++
+	}
+
+	_, _, sd := e.preExec.Active()
+	if sd == nil {
+		return
+	}
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return
+	}
+	defer roTx.Rollback()
+	var reader state.StateReader
+	if ov := sd.BlockOverlay(); ov != nil {
+		ov.UpdateTxn(roTx)
+		reader = state.NewReaderV3(sd.AsGetter(ov))
+	} else {
+		reader = state.NewReaderV3(sd.AsGetter(roTx))
+	}
+	for addr, sp := range seq {
+		acc, aerr := reader.ReadAccountData(addr)
+		if aerr != nil || acc == nil {
+			continue
+		}
+		if acc.Nonce != sp.last+1 {
+			e.logger.Error("[BODY-AUDIT] state nonce disagrees with the sealed body",
+				"block", number, "sender", addr, "stateNonce", acc.Nonce,
+				"bodyFirst", sp.first, "bodyLast", sp.last, "bodyCount", sp.count, "bodyTxs", len(txs))
+		}
+	}
 }
 
 // frontierStateReader opens a StateReader over the current frontier (the in-progress extending-fork SD when
