@@ -2,6 +2,7 @@ package debug
 
 import (
 	"math"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,6 +12,8 @@ import (
 // an unset variable, so only the environment can tell the two apart.
 func TestGoMemLimitInForce(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
+		t.Setenv("GOMEMLIMIT", "") // registers the restore; the unset below is the real setup
+		os.Unsetenv("GOMEMLIMIT")
 		require.False(t, goMemLimitInForce(math.MaxInt64))
 	})
 	t.Run("off", func(t *testing.T) {
