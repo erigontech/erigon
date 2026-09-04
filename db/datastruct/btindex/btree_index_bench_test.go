@@ -46,7 +46,7 @@ func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
 	b.Run("Get", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
-			_, _, _, _, err := index.Get(keys[i%len(keys)], getter)
+			_, _, _, _, err := index.Get(keys[i%len(keys)], nil, getter)
 			if err != nil {
 				b.Fatal(err)
 			}
