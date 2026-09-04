@@ -95,6 +95,7 @@ type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view     cache.ReadView
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
+	codeBuf  []byte // one per warm worker; prefetched code is copied by the fill and then dropped
 }
 
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
@@ -128,9 +129,15 @@ func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, 
 	if code, ok := cpg.view.GetCodeByAddressHash(addr); ok {
 		return code, true, nil
 	}
-	code, _, err := cpg.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{})
+	// Prefetch only: warmBody and warmTxns drop the bytes, and the cache fill
+	// below copies them, so one buffer per worker serves every code read here
+	// instead of a fresh 64KB per contract.
+	code, _, err := cpg.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{}.WithBuf(cpg.codeBuf))
 	if err != nil {
 		return nil, false, err
+	}
+	if cap(code) > cap(cpg.codeBuf) {
+		cpg.codeBuf = code[:0]
 	}
 	return code, len(code) > 0, nil
 }
