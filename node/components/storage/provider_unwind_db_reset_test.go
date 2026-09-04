@@ -356,3 +356,154 @@ func TestUnwindDBPastBlock_PreservesHeaderTDForCaplinParentLookup(t *testing.T) 
 			"kv.HeaderTD value at block %d must match the seeded difficulty", n)
 	}
 }
+
+// stubHeaderReader serves a synthetic linear chain: canonical hash of
+// block N is keccak-free deterministic (byte N), difficulty is fixed.
+type stubHeaderReader struct {
+	difficulty uint64
+	maxBlock   uint64
+}
+
+func (s stubHeaderReader) hashAt(n uint64) common.Hash {
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[:8], n)
+	return h
+}
+
+func (s stubHeaderReader) CanonicalHash(_ context.Context, _ kv.Getter, n uint64) (common.Hash, bool, error) {
+	if n > s.maxBlock {
+		return common.Hash{}, false, nil
+	}
+	return s.hashAt(n), true, nil
+}
+
+func (s stubHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, n uint64) (*types.Header, error) {
+	if n > s.maxBlock {
+		return nil, nil
+	}
+	return &types.Header{
+		Number:     *uint256.NewInt(n),
+		Difficulty: *uint256.NewInt(s.difficulty),
+	}, nil
+}
+
+// TestEnsureTDAtBlock_BackfillsAcrossGap pins the wedge cycle 25 hit.
+// The unwind target must carry a TD row: Caplin's BlockCollector reads
+// parent.TD when inserting the first block after the target, and a miss
+// there is unrecoverable by FCU nudging — the node sits at the target
+// forever ("parent's total difficulty not found").
+//
+// TD is not stored in snapshots, so a target landing in a DB-side TD gap
+// has none. Cycle 25 unwound to 3400418 inside a 49000-block hole and
+// wedged for the full recovery window.
+func TestEnsureTDAtBlock_BackfillsAcrossGap(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubHeaderReader{difficulty: 2, maxBlock: 1000}
+	// Anchor at 100 with TD 500; blocks 101..200 have no TD row.
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(100), 100, *uint256.NewInt(500)))
+
+	target := uint64(200)
+	require.NoError(t, ensureTDAtBlock(ctx, tx, br, target, br.hashAt(target)))
+
+	got, err := rawdb.ReadTd(tx, br.hashAt(target), target)
+	require.NoError(t, err)
+	require.NotNil(t, got, "unwind target must have a TD row or the next insert wedges")
+	// 500 + 100 blocks x difficulty 2.
+	require.Equal(t, uint256.NewInt(700).String(), got.String())
+}
+
+// TestEnsureTDAtBlock_NoOpWhenPresent pins that an existing TD row is
+// left exactly as-is — TD is hash-keyed and idempotent, and recomputing
+// over a value the chain already agreed on would be a silent rewrite.
+func TestEnsureTDAtBlock_NoOpWhenPresent(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubHeaderReader{difficulty: 7, maxBlock: 1000}
+	target := uint64(300)
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(target), target, *uint256.NewInt(42)))
+
+	require.NoError(t, ensureTDAtBlock(ctx, tx, br, target, br.hashAt(target)))
+
+	got, err := rawdb.ReadTd(tx, br.hashAt(target), target)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(42).String(), got.String(), "present TD must not be recomputed")
+}
+
+// TestEnsureTDAtBlock_GenesisAnchor pins that the walk terminates at
+// genesis rather than running off the bottom of the chain.
+func TestEnsureTDAtBlock_GenesisAnchor(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubHeaderReader{difficulty: 1, maxBlock: 1000}
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(0), 0, *uint256.NewInt(0)))
+
+	require.NoError(t, ensureTDAtBlock(ctx, tx, br, 10, br.hashAt(10)))
+
+	got, err := rawdb.ReadTd(tx, br.hashAt(10), 10)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(10).String(), got.String())
+}
+
+// TestEnsureTDAtBlock_NoAnchorIsNotFatal pins that a DB with no TD row
+// at all leaves the unwind to proceed. The backfill is a repair for a
+// gap, not a new precondition — failing the unwind here would turn a
+// recoverable state into a hard stop.
+func TestEnsureTDAtBlock_NoAnchorIsNotFatal(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubHeaderReader{difficulty: 1, maxBlock: 1000}
+	require.NoError(t, ensureTDAtBlock(ctx, tx, br, 50, br.hashAt(50)))
+}
+
+// TestEnsureTDAtBlock_SkipsNonCanonicalAnchor pins that a TD row left
+// behind by a sidechain block is not used as the anchor. Rows are keyed
+// (blockNum, hash), so a height can carry several; only the canonical
+// one reconstructs this chain's TD, and picking a sibling would write a
+// plausible-looking but wrong value.
+func TestEnsureTDAtBlock_SkipsNonCanonicalAnchor(t *testing.T) {
+	t.Parallel()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	br := stubHeaderReader{difficulty: 3, maxBlock: 1000}
+	// Canonical anchor at 100 with TD 1000.
+	require.NoError(t, rawdb.WriteTd(tx, br.hashAt(100), 100, *uint256.NewInt(1000)))
+	// A sidechain row at 150 — higher, but not the canonical hash.
+	var sideHash common.Hash
+	sideHash[31] = 0xff
+	require.NoError(t, rawdb.WriteTd(tx, sideHash, 150, *uint256.NewInt(999999)))
+
+	target := uint64(200)
+	require.NoError(t, ensureTDAtBlock(ctx, tx, br, target, br.hashAt(target)))
+
+	got, err := rawdb.ReadTd(tx, br.hashAt(target), target)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	// Must come from the canonical anchor at 100: 1000 + 100 blocks x 3.
+	require.Equal(t, uint256.NewInt(1300).String(), got.String(),
+		"anchor must be the canonical row at 100, not the sidechain row at 150")
+}

@@ -21,6 +21,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // unwindDBPastBlock resets all writable-DB content covering blocks
@@ -85,6 +88,14 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 	}
 	if !ok || targetHash == (common.Hash{}) {
 		return fmt.Errorf("no canonical hash recorded at toBlock %d — cannot mode-B unwind to an off-chain target", toBlock)
+	}
+
+	// The target becomes the parent of the next block inserted, and that
+	// insert reads its TD. Snapshots don't carry TD, so a target landing
+	// in a DB-side TD gap has none — backfill before the chain is
+	// declared to be at toBlock.
+	if err := ensureTDAtBlock(ctx, tx, p.BlockReader, toBlock, targetHash); err != nil {
+		return fmt.Errorf("ensureTDAtBlock(%d): %w", toBlock, err)
 	}
 
 	if err := rawdbv3.TxNums.Truncate(tx, toBlock+1); err != nil {
@@ -316,4 +327,120 @@ func deleteChangeSetsPastBlock(tx kv.RwTx, toBlock uint64) error {
 		}
 	}
 	return nil
+}
+
+// headerCanonicalReader is the slice of the block reader the TD backfill
+// needs. Narrow so the walk can be tested without a snapshot fixture.
+type headerCanonicalReader interface {
+	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+}
+
+// ensureTDAtBlock guarantees a TD row exists for the unwind target.
+//
+// Caplin's BlockCollector reads parent.TD when inserting the first block
+// after the target. TD lives only in MDBX — snapshots don't carry it — so
+// a target inside a TD gap wedges forward progress on "parent's total
+// difficulty not found", which no FCU nudge recovers from: the node holds
+// at the target indefinitely.
+//
+// Walks back to the nearest canonical ancestor that has a TD row, summing
+// header difficulties on the way, and writes the target's TD. Ancestors
+// are used rather than the nearer descendants above the target because a
+// descendant's TD row may belong to a chain the unwind is about to
+// discard, while an ancestor's is stable and its sum provably reconstructs
+// the target's value.
+//
+// A DB with no TD row at all is left alone: the backfill repairs a gap and
+// is not a precondition of unwinding, so failing here would convert a
+// recoverable state into a hard stop.
+func ensureTDAtBlock(ctx context.Context, tx kv.RwTx, br headerCanonicalReader, blockNum uint64, hash common.Hash) error {
+	existing, err := rawdb.ReadTd(tx, hash, blockNum)
+	if err != nil {
+		return fmt.Errorf("ReadTd(%d): %w", blockNum, err)
+	}
+	if existing != nil {
+		return nil
+	}
+
+	anchorNum, anchorTD, err := nearestTDAncestor(ctx, tx, br, blockNum)
+	if err != nil {
+		return err
+	}
+	if anchorTD == nil {
+		return nil
+	}
+
+	sum := anchorTD.Clone()
+	for b := anchorNum + 1; b <= blockNum; b++ {
+		header, err := br.HeaderByNumber(ctx, tx, b)
+		if err != nil {
+			return fmt.Errorf("HeaderByNumber(%d) during TD backfill: %w", b, err)
+		}
+		if header == nil {
+			return nil
+		}
+		if _, overflow := sum.AddOverflow(sum, &header.Difficulty); overflow {
+			return fmt.Errorf("TD overflows uint256 backfilling block %d", blockNum)
+		}
+	}
+	return rawdb.WriteTd(tx, hash, blockNum, *sum)
+}
+
+// nearestTDAncestor finds the highest block below blockNum that carries a
+// TD row for its canonical hash. Seeks the TD table rather than probing
+// block by block so a chain with no usable anchor costs a seek instead of
+// a walk to genesis. Returns a nil TD when there is none.
+func nearestTDAncestor(ctx context.Context, tx kv.RwTx, br headerCanonicalReader, blockNum uint64) (uint64, *uint256.Int, error) {
+	c, err := tx.Cursor(kv.HeaderTD)
+	if err != nil {
+		return 0, nil, fmt.Errorf("cursor(HeaderTD): %w", err)
+	}
+	defer c.Close()
+
+	seek := make([]byte, 8)
+	binary.BigEndian.PutUint64(seek, blockNum)
+	k, _, err := c.Seek(seek)
+	if err != nil {
+		return 0, nil, fmt.Errorf("seek(HeaderTD, %d): %w", blockNum, err)
+	}
+	if k == nil {
+		k, _, err = c.Last()
+	} else {
+		k, _, err = c.Prev()
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("scan(HeaderTD) below %d: %w", blockNum, err)
+	}
+
+	// Rows are keyed (blockNum, hash), so a height can carry several
+	// hashes; only the canonical one reconstructs this chain's TD. Step
+	// back past non-canonical rows, and past heights whose canonical hash
+	// has no row of its own.
+	for k != nil {
+		candidate := binary.BigEndian.Uint64(k[:8])
+		if candidate >= blockNum {
+			k, _, err = c.Prev()
+			if err != nil {
+				return 0, nil, err
+			}
+			continue
+		}
+		canonHash, ok, err := br.CanonicalHash(ctx, tx, candidate)
+		if err != nil {
+			return 0, nil, fmt.Errorf("CanonicalHash(%d) during TD backfill: %w", candidate, err)
+		}
+		if ok {
+			if td, err := rawdb.ReadTd(tx, canonHash, candidate); err != nil {
+				return 0, nil, fmt.Errorf("ReadTd(%d) during TD backfill: %w", candidate, err)
+			} else if td != nil {
+				return candidate, td, nil
+			}
+		}
+		k, _, err = c.Prev()
+		if err != nil {
+			return 0, nil, err
+		}
+	}
+	return 0, nil, nil
 }
