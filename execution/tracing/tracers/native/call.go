@@ -103,9 +103,7 @@ type callTracer struct {
 	depth       int
 	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
 	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
-	logIndex    uint64
-	logGaps     map[uint64]int
-	precompiles []bool // keep track of whether scopes are for pre-compiles or not
+	precompiles []bool                // keep track of whether scopes are for pre-compiles or not
 }
 
 func defaultCallTracerConfig() callTracerConfig {
@@ -266,8 +264,6 @@ func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, revert
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.gasLimit = tx.GetGasLimit()
-	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
 }
 
 func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
@@ -285,11 +281,8 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.callstack[0].GasUsed = hexutil.Uint64(receipt.GasUsed)
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false, t.logGaps)
-		fixLogIndexGap(&t.callstack[0], addCumulativeGaps(t.logIndex, t.logGaps))
+		clearFailedLogs(&t.callstack[0], false)
 	}
-	t.logIndex = 0
-	t.logGaps = nil
 }
 
 func (t *callTracer) OnLog(log *types.Log) {
@@ -305,8 +298,9 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: hexutil.Uint64(t.logIndex), Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
-	t.logIndex++
+	frame := &t.callstack[len(t.callstack)-1]
+	frame.Logs = append(frame.Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data,
+		Index: hexutil.Uint64(log.Index), Position: hexutil.Uint(len(frame.Calls))})
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -338,51 +332,15 @@ func (t *callTracer) Stop(err error) {
 }
 
 // clearFailedLogs clears the logs of a callframe and all its children
-// in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool, logGaps map[uint64]int) {
+// in case of execution failure. The frames it drops are the ones whose logs the
+// state reverted, and reverting gave each of those indices back, so what
+// survives keeps the contiguous numbering the state assigned it.
+func clearFailedLogs(cf *callFrame, parentFailed bool) {
 	failed := cf.failed() || parentFailed
 	if failed {
-		lastIdx := len(cf.Logs) - 1
-		if lastIdx >= 0 && logGaps != nil {
-			idx := uint64(cf.Logs[lastIdx].Index)
-			logGaps[idx] = len(cf.Logs)
-		}
-		// Clear own logs
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed, logGaps)
-	}
-}
-
-// Find the shift position of each potential logIndex
-func addCumulativeGaps(h uint64, logGaps map[uint64]int) []uint64 {
-	if len(logGaps) == 0 || logGaps == nil {
-		return nil
-	}
-	cumulativeGaps := make([]uint64, h)
-	for idx, gap := range logGaps {
-		if idx+1 < h {
-			cumulativeGaps[idx+1] = uint64(gap) // Next index of the last failed index
-		}
-	}
-	for i := 1; i < int(h); i++ {
-		cumulativeGaps[i] += cumulativeGaps[i-1]
-	}
-	return cumulativeGaps
-}
-
-// Recursively shift log indices of callframe - self and children
-func fixLogIndexGap(cf *callFrame, cumulativeGaps []uint64) {
-	if cumulativeGaps == nil {
-		return
-	}
-	if len(cf.Logs) > 0 {
-		for i := range cf.Logs {
-			cf.Logs[i].Index = hexutil.Uint64(uint64(cf.Logs[i].Index) - cumulativeGaps[cf.Logs[i].Index])
-		}
-	}
-	for i := range cf.Calls {
-		fixLogIndexGap(&cf.Calls[i], cumulativeGaps)
+		clearFailedLogs(&cf.Calls[i], failed)
 	}
 }
