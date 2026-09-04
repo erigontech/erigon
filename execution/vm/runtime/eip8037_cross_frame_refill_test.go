@@ -35,9 +35,11 @@ import (
 )
 
 const (
-	setterAddr  = 0x1000
-	clearerAddr = 0x1001
-	callerAddr  = 0x2000
+	setterAddr   = 0x1000
+	clearerAddr  = 0x1001
+	reverterAddr = 0x1002
+	halterAddr   = 0x1003
+	callerAddr   = 0x2000
 )
 
 // delegateCallTo emits a DELEGATECALL to target forwarding all gas, so the
@@ -56,8 +58,9 @@ func sstore(slot, value byte) []byte {
 	return []byte{byte(vm.PUSH1), value, byte(vm.PUSH1), slot, byte(vm.SSTORE)}
 }
 
-// deployStateGasContracts installs the setter/clearer pair plus a caller running
-// callerCode, and returns the caller and the state it was deployed into.
+// deployStateGasContracts installs the setter/clearer pair, the two setters that
+// fail after spilling, plus a caller running callerCode, and returns the caller
+// and the state it was deployed into.
 func deployStateGasContracts(t *testing.T, callerCode []byte) (accounts.Address, *state.IntraBlockState) {
 	t.Helper()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -75,6 +78,9 @@ func deployStateGasContracts(t *testing.T, callerCode []byte) (accounts.Address,
 	stop := []byte{byte(vm.STOP)}
 	deploy(setterAddr, slices.Concat(sstore(1, 1), stop))
 	deploy(clearerAddr, slices.Concat(sstore(1, 0), stop))
+	revert := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
+	deploy(reverterAddr, slices.Concat(sstore(1, 1), revert))
+	deploy(halterAddr, slices.Concat(sstore(1, 1), []byte{byte(vm.INVALID)}))
 	return deploy(callerAddr, callerCode), statedb
 }
 
@@ -151,4 +157,36 @@ func TestStateGasMergeIsAnnouncedToTracer(t *testing.T) {
 		"the reservoir->gas_left move must be reported")
 	require.Len(t, gains[tracing.GasChangeCallLeftOverRefunded], 2,
 		"one leftover refund per child call, and none for the state-gas merge")
+}
+
+// A failing child hands back its entry reservoir and its spill with it, so the
+// parent must not merge that spill: doing so would credit gas_left twice for
+// state creation the child rolled back.
+func TestFailingChildStateGasIsNotMerged(t *testing.T) {
+	t.Parallel()
+
+	stop := []byte{byte(vm.STOP)}
+	for _, tc := range []struct {
+		name                       string
+		child                      uint16
+		wantReservoir, wantGasLeft uint64
+	}{
+		{"revert", reverterAddr, 50_000, 16_762_085},
+		{"exceptional halt", halterAddr, 50_000, 262_094},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			caller, statedb := deployStateGasContracts(t, slices.Concat(delegateCallTo(tc.child), stop))
+
+			_, gasRemaining, err := Call(caller, nil, &Config{
+				ChainConfig: chain.AllProtocolChanges,
+				GasLimit:    params.MaxTxnGasLimit + 50_000,
+				State:       statedb,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.wantReservoir, gasRemaining.State)
+			require.Equal(t, tc.wantGasLeft, gasRemaining.Execution)
+		})
+	}
 }
