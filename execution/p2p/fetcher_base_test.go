@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -617,7 +616,6 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 			PeerId: peerId.H512(),
 			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
 				bodyBytes,
-				bodyBytes,
 				rlp.RawValue{0x80},
 			),
 		},
@@ -631,10 +629,6 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId))
 	test.fetcher.config = test.fetcher.config.CopyWithOptions(WithMaxRetries(0))
-	test.sentryClient.EXPECT().
-		PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
 	test.mockSentryStreams(mockRequestResponse)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errTooManyBodies *ErrTooManyBodies
