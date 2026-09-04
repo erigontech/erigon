@@ -923,8 +923,7 @@ func (rs *RecSplit) SetProgress(p *background.Progress) {
 	rs.progress = p
 }
 
-// writeIndexHeader writes dataStructureVersion, baseDataID, the key count and
-// the index record width -- everything that precedes the buckets.
+// writeIndexHeader writes everything that precedes the buckets.
 func (rs *RecSplit) writeIndexHeader() error {
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)

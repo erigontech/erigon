@@ -392,16 +392,14 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	t := time.Now()
 
 	var intermediateFile *os.File
-	var intermediatePath string
 	{
 		var err error
 		intermediateFile, err = dir.CreateTemp(segmentFilePath)
 		if err != nil {
 			return fmt.Errorf("create intermediate file: %w", err)
 		}
-		intermediatePath = intermediateFile.Name()
-		defer dir.RemoveFile(intermediatePath) //nolint:errcheck
-		defer intermediateFile.Close()         //nolint:errcheck
+		defer dir.RemoveFile(intermediateFile.Name()) //nolint:errcheck
+		defer intermediateFile.Close()                //nolint:errcheck
 	}
 	intermediateW := bufiopool.Writer(intermediateFile)
 	defer bufiopool.PutWriter(intermediateW)
