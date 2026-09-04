@@ -64,7 +64,7 @@ const MaxTxTTL = 60 * time.Second
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
 // 7.1.0 - Add maximum-step and branch-cache options to GetLatest
-// 7.2.0 - Add MaxPrunableStepsBacklog
+// 7.2.0 - Remove HasPrefix and add MaxPrunableStepsBacklog
 var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 2, Patch: 0}
 
 type KvServer struct {
@@ -566,24 +566,6 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	}); err != nil {
 		return nil, err
 	}
-	return reply, nil
-}
-
-func (s *KvServer) HasPrefix(_ context.Context, req *remoteproto.HasPrefixReq) (*remoteproto.HasPrefixReply, error) {
-	domain, err := kv.String2Domain(req.Table)
-	if err != nil {
-		return nil, err
-	}
-
-	reply := &remoteproto.HasPrefixReply{}
-	err = s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.FirstKey, reply.FirstVal, reply.HasPrefix, err = tx.HasPrefix(domain, req.Prefix)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	return reply, nil
 }
 

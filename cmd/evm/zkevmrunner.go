@@ -25,7 +25,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -60,6 +59,7 @@ var zkevmTestCommand = cli.Command{
 	Flags: []cli.Flag{
 		&JSONOutputFlag,
 		&RunFlag,
+		&ExcludeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
 	},
@@ -81,9 +81,9 @@ func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
-	re, err := regexp.Compile(ctx.String(RunFlag.Name))
+	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
 	if err != nil {
-		return fmt.Errorf("invalid --run regex: %w", err)
+		return err
 	}
 
 	// debug_executionWitness requires the historical-commitment schema; enable it
@@ -92,8 +92,8 @@ func zkevmTestCmd(_ context.Context, ctx *cli.Command) error {
 	statecfg.EnableHistoricalCommitment()
 
 	tm := newZkevmFailMatcher()
-	files := collectFiles(path)
-	results, err := runZkevmTestsParallel(path, files, re, tm, workers)
+	files := filter.filterFiles(collectFiles(path))
+	results, err := runZkevmTestsParallel(path, files, filter, tm, workers)
 	if err != nil {
 		return err
 	}
@@ -121,11 +121,11 @@ func newZkevmFailMatcher() *testutil.TestMatcher {
 	return tm
 }
 
-func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *testutil.TestMatcher, workers uint64) ([]testResult, error) {
+func runZkevmTestsParallel(root string, files []string, filter testFilter, tm *testutil.TestMatcher, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4)
 		for _, fname := range files {
-			r, err := runZkevmTestFile(root, fname, re, tm)
+			r, err := runZkevmTestFile(root, fname, filter, tm)
 			if err != nil {
 				return nil, err
 			}
@@ -153,7 +153,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	for range workers {
 		wg.Go(func() {
 			for item := range fileCh {
-				r, err := runZkevmTestFile(root, item.fname, re, tm)
+				r, err := runZkevmTestFile(root, item.fname, filter, tm)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
 		})
@@ -181,7 +181,7 @@ func runZkevmTestsParallel(root string, files []string, re *regexp.Regexp, tm *t
 	return results, nil
 }
 
-func runZkevmTestFile(root, fname string, re *regexp.Regexp, tm *testutil.TestMatcher) ([]testResult, error) {
+func runZkevmTestFile(root, fname string, filter testFilter, tm *testutil.TestMatcher) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
@@ -196,7 +196,7 @@ func runZkevmTestFile(root, fname string, re *regexp.Regexp, tm *testutil.TestMa
 	results := make([]testResult, 0, len(keys))
 	for _, key := range keys {
 		name := relPath + "/" + key
-		if !re.MatchString(name) {
+		if !filter.includeCase(relPath, name) {
 			continue
 		}
 		result := testResult{Name: name, Pass: true}

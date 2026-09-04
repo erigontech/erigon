@@ -325,10 +325,6 @@ func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, ke
 	return hr.reader.ReadAccountStorage(address, key)
 }
 
-func (hr *cachedHistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	return hr.reader.HasStorage(address)
-}
-
 func (hr *cachedHistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	return hr.reader.ReadAccountCode(address)
 }

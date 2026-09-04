@@ -17,9 +17,9 @@
     "ref": "tests@v20.0.2"
   },
   "eest_zkevm": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.8.0/fixtures_zkevm.tar.gz",
-    "sha256": "f19f782fb5cefb7466e852e101d28883452221f03cfa1867eec5d520a3112c5c",
-    "size": 549434596
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.8.3/fixtures_zkevm.tar.gz",
+    "sha256": "cb194b71e5df81c9d591f0251c78ef84f8482055aa902623aad37230edf8b6e8",
+    "size": 549997258
   },
   "cl_mainnet": {
     "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.12/mainnet.tar.gz",

@@ -501,7 +501,6 @@ func (opts GetLatestOptions) BranchCache() bool {
 
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte, opts GetLatestOptions) (v []byte, step Step, err error)
-	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
 }
 
@@ -641,8 +640,6 @@ type TemporalMemBatch interface {
 	Merge(other TemporalMemBatch) error
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
-	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
-	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx, opts ...FlushOption) error
 	Close()

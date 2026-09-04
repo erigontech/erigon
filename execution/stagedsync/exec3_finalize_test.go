@@ -81,10 +81,6 @@ func (r *mapStateReader) ReadAccountStorage(addr accounts.Address, key accounts.
 	return uint256.Int{}, false, nil
 }
 
-func (r *mapStateReader) HasStorage(accounts.Address) (bool, error) {
-	return false, nil
-}
-
 func (r *mapStateReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	return r.code[addr], nil
 }
