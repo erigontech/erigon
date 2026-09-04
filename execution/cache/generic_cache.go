@@ -254,8 +254,8 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 // for the bytes an entry points at — what a slice or string header refers to,
 // not T's own inline bytes, which the slot cost already charges along with the
 // element and its bookkeeping (accounts ≈ 70 B, storage ≈ 64 B). Folding either
-// in charges them twice and shrinks the ceiling. It starts small and jump-grows toward the
-// ceiling on demand, funding each step from the shared envelope.
+// in charges them twice and shrinks the ceiling. It starts small and jump-grows
+// toward the ceiling on demand, funding each step from the shared envelope.
 func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
@@ -263,6 +263,8 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	elemBytes := elemBytesFor[entry[T]]()
 	// A shard grows on its own, so its share of maxCap bounds one grow's copy.
 	budgeted, shards := budgetedSlots(capacityBytes, avgBytes, elemBytes)
+	// A budget too small to buy the start capacity keeps it anyway: the byte
+	// accounting a cache evicts and drops on has to stay usable at any budget.
 	maxCap := max(budgeted, genericCacheStartCapacity)
 	// The start size is raised to keep each shard off a one-slot table, which a
 	// large GOMAXPROCS would otherwise produce.
@@ -570,7 +572,9 @@ func (c *GenericCache[T]) Clear() {
 	// can be mid-grow, and outside it that grow would either attach a
 	// reservation to the generation being retired or refund bytes already
 	// released here.
-	if c.enveloped {
+	// Close settles reservedBytes once; a rebuild charged after that would hold
+	// envelope bytes nothing releases.
+	if c.enveloped && !c.closed.Load() {
 		start := c.generationBytes(c.startCap)
 		cachebudget.Global.Release(c.reservedBytes.Swap(start) - start)
 	}
@@ -663,9 +667,12 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 // the two disagree by the whole value. Bytes are reported as size_mb.
 func (c *GenericCache[T]) slotsPct() float64 {
 	d := c.data.Load()
+	// Length first: capacity only rises within a generation, so a capacity read
+	// after it can only make the ratio smaller, never report over 100%.
+	held := d.Len()
 	allocated := d.Cap()
 	if allocated == 0 {
 		return 0
 	}
-	return float64(d.Len()) / float64(allocated) * 100
+	return float64(held) / float64(allocated) * 100
 }
