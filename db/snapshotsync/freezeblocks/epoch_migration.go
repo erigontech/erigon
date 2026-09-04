@@ -164,6 +164,10 @@ func startOnPlan(plan [][2]uint64, frontier uint64) uint64 {
 // its .torrent and its indexes (an index may have a different version, so we match range+type with the
 // version left wild). The trailing wildcard that picks up those extensions also picks up the epoch file
 // printing the same digits, so each match is decoded and only the decimal ones are deleted.
+//
+// A removal that fails is ignored, as elsewhere in the snapshot code. On Windows it fails while
+// anything still holds the file, and by this point its blocks are in an epoch segment, so the
+// leftover is redundant: the next run sweeps it.
 func removeDecimalSegFiles(segs []snaptype.FileInfo) error {
 	for i := range segs {
 		f := &segs[i]
@@ -176,9 +180,7 @@ func removeDecimalSegFiles(segs []snaptype.FileInfo) error {
 			if fi, _, ok := snaptype.ParseFileName("", filepath.Base(m)); ok && fi.Epoch {
 				continue
 			}
-			if err := dir.RemoveFile(m); err != nil {
-				return err
-			}
+			_ = dir.RemoveFile(m)
 		}
 	}
 	return nil
