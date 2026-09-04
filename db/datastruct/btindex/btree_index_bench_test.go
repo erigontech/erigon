@@ -92,7 +92,7 @@ func BenchmarkBtIndex_Get(b *testing.B) {
 			b.ResetTimer()
 			for b.Loop() {
 				p := rnd.IntN(len(keys))
-				k, _, _, found, err := bt.Get(keys[p], getter)
+				k, _, _, found, err := bt.Get(keys[p], nil, getter)
 				if err != nil {
 					b.Fatal(err)
 				}

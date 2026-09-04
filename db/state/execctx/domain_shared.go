@@ -1396,6 +1396,12 @@ func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 	return opts
 }
 
+// maxPooledCodeBuf caps what a decode buffer keeps between uses, so one huge
+// contract does not pin a large buffer per worker for the process lifetime.
+const maxPooledCodeBuf = 128 * 1024
+
+var codeDecodeBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4096); return &b }}
+
 // getLatest is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
@@ -1539,8 +1545,6 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
-	} else if viaPool && len(v) > 0 {
-		v = bytes.Clone(v) // not admitted; the caller cannot keep the pooled buffer
 	}
 	return v, step, nil
 }
