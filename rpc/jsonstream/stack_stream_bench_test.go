@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -50,4 +51,20 @@ func BenchmarkStreamAcquire(b *testing.B) {
 			Put(s)
 		}
 	})
+}
+
+// Mirrors the response path: pooled stream, envelope, one big pre-encoded result.
+func BenchmarkWriteRawBytesLargeResult(b *testing.B) {
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4<<20)...)
+	payload = append(payload, '"')
+	b.ReportAllocs()
+	for b.Loop() {
+		s := Get(io.Discard)
+		s.WriteObjectStart()
+		s.WriteObjectField("result")
+		s.WriteRawBytes(payload)
+		s.WriteObjectEnd()
+		_ = s.Flush()
+		Put(s)
+	}
 }
