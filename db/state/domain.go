@@ -1541,9 +1541,7 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k []byte, maxTxNum uint64, bounded b
 		}
 
 		if dt.getFromFileCache != nil && useCache {
-			// Clone: v borrows the file reader's buffer, which the next value read
-			// overwrites, and the cache outlives that read.
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: bytes.Clone(v)})
+			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
