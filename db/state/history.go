@@ -283,9 +283,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		if err != nil {
 			return fmt.Errorf("create recsplit: %w", err)
 		}
+		defer rs.Close()
+		rs.LogLvl(log.LvlTrace)
 	}
-	defer rs.Close()
-	rs.LogLvl(log.LvlTrace)
 	if h._testBuildVIHook != nil {
 		h._testBuildVIHook(rs)
 	}
