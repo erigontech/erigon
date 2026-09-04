@@ -86,8 +86,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
-		var n int
-		n, err = rnd.Read(addr)
+		n, err := rnd.Read(addr)
 		require.NoError(t, err)
 		require.Equal(t, length.Addr, n)
 
@@ -111,12 +110,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
-			var trieState []byte
-			trieState, err = hph.EncodeCurrentState(nil)
+			trieState, err := hph.EncodeCurrentState(nil)
 			require.NoError(t, err)
 			cs := commitmentdb.NewCommitmentState(txNum, 0, trieState)
-			var encodedState []byte
-			encodedState, err = cs.Encode()
+			encodedState, err := cs.Encode()
 			require.NoError(t, err)
 			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil)
 			require.NoError(t, err)
@@ -169,8 +166,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-stepSize {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		var stored []byte
-		stored, _, err = tx.GetLatest(kv.AccountsDomain, key[:length.Addr], kv.GetLatestOptions{})
+		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -183,8 +179,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		var storedV []byte
-		storedV, _, err = tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
@@ -245,8 +240,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	var txNum uint64
 	for txNum = uint64(1); txNum <= txs/2; txNum++ {
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
-		var n int
-		n, err = rnd.Read(addr)
+		n, err := rnd.Read(addr)
 		require.NoError(t, err)
 		require.Equal(t, length.Addr, n)
 
@@ -278,8 +272,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	for txNum++; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		var prev []byte
-		prev, _, err = tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half], kv.GetLatestOptions{})
+		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev)
 		require.NoError(t, err)
@@ -294,8 +287,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	for i, key := range keys {
 
-		var storedV []byte
-		storedV, _, err = tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
@@ -335,8 +327,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
-		var n int
-		n, err = rnd.Read(addr)
+		n, err := rnd.Read(addr)
 		require.NoError(t, err)
 		require.Equal(t, length.Addr, n)
 
@@ -359,16 +350,14 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			var pv []byte
-			pv, _, err = domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
+			pv, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			var pv []byte
-			pv, _, err = domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
+			pv, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
@@ -429,7 +418,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		_, err = state.AggTx(rwTx).PruneSmallBatches(t.Context(), time.Hour, rwTx)
+		_, err := state.AggTx(rwTx).PruneSmallBatches(t.Context(), time.Hour, rwTx)
 		require.NoError(t, err)
 
 		err = rwTx.Commit()
@@ -495,8 +484,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	)
 	maxInt := math.MaxInt
 	{
-		var it stream.KV
-		it, err = tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
+		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, maxInt)
 		require.NoError(t, err)
 		accountsRange = extractKVErrIterator(t, it)
 
@@ -508,8 +496,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		require.NoError(t, err)
 		codeRange = extractKVErrIterator(t, it)
 
-		var its stream.KV
-		its, err = tx.HistoryRange(kv.AccountsDomain, 0, int(maxTx), order.Asc, maxInt)
+		its, err := tx.HistoryRange(kv.AccountsDomain, 0, int(maxTx), order.Asc, maxInt)
 		require.NoError(t, err)
 		accountHistRange = extractKVErrIterator(t, its)
 		its, err = tx.HistoryRange(kv.CodeDomain, 0, int(maxTx), order.Asc, maxInt)
@@ -691,8 +678,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
 
-		var n int
-		n, err = rnd.Read(addr)
+		n, err := rnd.Read(addr)
 		require.NoError(t, err)
 		require.Equal(t, length.Addr, n)
 
@@ -713,7 +699,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
-			_, err = domains.ComputeCommitment(t.Context(), rwTx, true, txNum/10, txNum, "", nil)
+			_, err := domains.ComputeCommitment(t.Context(), rwTx, true, txNum/10, txNum, "", nil)
 			require.NoError(t, err)
 		}
 

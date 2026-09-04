@@ -198,8 +198,7 @@ func TestFlushAppendPath(t *testing.T) {
 	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	for k, want := range map[string]string{"DAAA": "v-d", "EAAA": "v-e", "FAAA": "v-f"} {
-		var v []byte
-		v, err = rwTx.GetOne(kv.HeaderNumber, []byte(k))
+		v, err := rwTx.GetOne(kv.HeaderNumber, []byte(k))
 		require.NoError(t, err)
 		require.Equal(t, want, string(v))
 	}
@@ -361,9 +360,7 @@ func TestPrefix(t *testing.T) {
 	require.NoError(t, err)
 	defer kvs2.Close()
 	for kvs2.HasNext() {
-		var k1 []byte
-		var v1 []byte
-		k1, v1, err = kvs2.Next()
+		k1, v1, err := kvs2.Next()
 		require.NoError(t, err)
 		keys1 = append(keys1, string(k1))
 		values1 = append(values1, string(v1))

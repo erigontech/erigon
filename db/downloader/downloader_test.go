@@ -255,11 +255,11 @@ func TestAddDel(t *testing.T) {
 	server := NewRpcClient(DirectGrpcServerClient(grpcServer), test.dirs.Snap)
 
 	// So... errors.AsType is coming.
-	var errName errRpcSnapName
+	var errRpcSnapName errRpcSnapName
 
 	// Add: expect relative paths
 	err = server.Seed(ctx, []string{f1BadAbs})
-	require.ErrorAs(err, &errName)
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
 
 	f1, _ := filepath.Rel(test.dirs.Snap, f1Abs)
@@ -279,7 +279,7 @@ func TestAddDel(t *testing.T) {
 
 	// Del: expect relative paths
 	err = server.Delete(ctx, []string{f1BadAbs})
-	require.ErrorAs(err, &errName)
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(2, len(test.downloader.torrentClient.Torrents()))
 
 	// Del: idempotency

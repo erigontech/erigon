@@ -201,13 +201,13 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 					sKey := keyGen.nextStorageKey()
 					val := make([]byte, 32)
 					binary.BigEndian.PutUint64(val[24:], txNum)
-					err = domains.DomainPut(kv.StorageDomain, rwTx, sKey, val, txNum, nil)
+					err := domains.DomainPut(kv.StorageDomain, rwTx, sKey, val, txNum, nil)
 					require.NoError(b, err)
 				}
 
 				for range accountKeys {
 					aKey, aVal := keyGen.nextAccountKey(txNum)
-					err = domains.DomainPut(kv.AccountsDomain, rwTx, aKey, aVal, txNum, nil)
+					err := domains.DomainPut(kv.AccountsDomain, rwTx, aKey, aVal, txNum, nil)
 					require.NoError(b, err)
 				}
 			}
@@ -216,14 +216,14 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 			// === COMMIT: ComputeCommitment at block boundary ===
 			commitStart := time.Now()
 			blockNum++
-			_, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 			timings.commit += time.Since(commitStart)
 		}
 
 		// === FLUSH: write in-memory batch to MDBX ===
 		flushStart := time.Now()
-		err = domains.Flush(ctx, rwTx)
+		err := domains.Flush(ctx, rwTx)
 		require.NoError(b, err)
 		timings.flush += time.Since(flushStart)
 
@@ -242,7 +242,7 @@ func runLifecycle(b *testing.B, cfg lifecycleConfig) (*lifecycleTimings, kv.Temp
 		if step > 5 && step%10 == 0 {
 			pruneStart := time.Now()
 			at := agg.BeginFilesRo()
-			_, err = at.PruneSmallBatches(ctx, 5*time.Second, rwTx)
+			_, err := at.PruneSmallBatches(ctx, 5*time.Second, rwTx)
 			at.Close()
 			require.NoError(b, err)
 			timings.prune += time.Since(pruneStart)
@@ -419,7 +419,7 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 			sKey := keyGen.nextStorageKey()
 			val := make([]byte, 32)
 			binary.BigEndian.PutUint64(val[24:], txNum)
-			err = domains.DomainPut(kv.StorageDomain, rwTx, sKey, val, txNum, nil) //nolint:gocritic
+			err := domains.DomainPut(kv.StorageDomain, rwTx, sKey, val, txNum, nil) //nolint:gocritic
 			require.NoError(b, err)
 		}
 		_, err = domains.ComputeCommitment(ctx, rwTx, true, 1, txNum, "", nil)
@@ -462,14 +462,14 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 					sKey := keyGen.nextStorageKey()
 					val := make([]byte, 32)
 					binary.BigEndian.PutUint64(val[24:], txNum)
-					err = domains.DomainPut(kv.StorageDomain, rwTx, sKey, val, txNum, nil)
+					err := domains.DomainPut(kv.StorageDomain, rwTx, sKey, val, txNum, nil)
 					require.NoError(b, err)
 				}
 				blockNum++
-				_, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+				_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 				require.NoError(b, err)
 			}
-			err = domains.Flush(ctx, rwTx)
+			err := domains.Flush(ctx, rwTx)
 			require.NoError(b, err)
 		}
 		err = rwTx.Commit()

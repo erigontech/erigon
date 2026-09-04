@@ -38,7 +38,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 		if len(listing) > 100000 {
 			break
 		}
-		key, _ = getter.Next(key[:0])
+		key, _ := getter.Next(key[:0])
 		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
@@ -80,8 +80,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	for i := range keyCount {
 		key := make([]byte, keySize)
-		var n int
-		n, err = rnd.Read(key)
+		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)

@@ -41,7 +41,7 @@ func ToArrayDuo[K, V any](s Duo[K, V]) (keys []K, values []V, err error) {
 
 func Count[T any](s Uno[T]) (cnt int, err error) {
 	for s.HasNext() {
-		_, err = s.Next()
+		_, err := s.Next()
 		if err != nil {
 			return cnt, err
 		}
@@ -52,7 +52,7 @@ func Count[T any](s Uno[T]) (cnt int, err error) {
 
 func CountDuo[K, V any](s Duo[K, V]) (cnt int, err error) {
 	for s.HasNext() {
-		_, _, err = s.Next()
+		_, _, err := s.Next()
 		if err != nil {
 			return cnt, err
 		}

@@ -166,7 +166,7 @@ func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName stri
 		}
 	}
 
-	if err = SaveChainToml(snapDir, tomlBytes); err != nil {
+	if err := SaveChainToml(snapDir, tomlBytes); err != nil {
 		return fmt.Errorf("saving chain.toml: %w", err)
 	}
 

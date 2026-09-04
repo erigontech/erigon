@@ -470,8 +470,7 @@ func TestPrefix(t *testing.T) {
 	require.NoError(t, err)
 	defer kvs1.Close()
 	for kvs1.HasNext() {
-		var k1 []byte
-		k1, _, err = kvs1.Next()
+		k1, _, err := kvs1.Next()
 		require.NoError(t, err)
 		keys = append(keys, string(k1))
 	}
@@ -481,8 +480,7 @@ func TestPrefix(t *testing.T) {
 	require.NoError(t, err)
 	defer kvs2.Close()
 	for kvs2.HasNext() {
-		var k1 []byte
-		k1, _, err = kvs2.Next()
+		k1, _, err := kvs2.Next()
 		require.NoError(t, err)
 		keys1 = append(keys1, string(k1))
 	}

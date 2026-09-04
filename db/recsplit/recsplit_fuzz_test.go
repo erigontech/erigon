@@ -66,12 +66,12 @@ func FuzzRecSplit(f *testing.F) {
 		defer rs.Close()
 		var off uint64
 		for i = 0; i < len(in)-l; i += l {
-			if err = rs.AddKey(in[i:i+l], off); err != nil {
+			if err := rs.AddKey(in[i:i+l], off); err != nil {
 				t.Fatal(err)
 			}
 			off++
 		}
-		if err = rs.AddKey(in[i:], off); err != nil {
+		if err := rs.AddKey(in[i:], off); err != nil {
 			t.Fatal(err)
 		}
 		if err = rs.Build(t.Context()); err != nil {

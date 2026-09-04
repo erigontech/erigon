@@ -2103,8 +2103,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	var mode prune.StorageMode
 	if dt.d.LargeValues {
 		mode = prune.StepKeyStorageMode
-		var valsRwCursor kv.RwCursor
-		valsRwCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
+		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
 		if err != nil {
 			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
 		}

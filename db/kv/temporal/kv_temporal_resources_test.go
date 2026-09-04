@@ -37,7 +37,7 @@ func TestTemporalTx_AbandonedIteratorsRollbackCleanly(t *testing.T) {
 	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	to, _ := kv.NextSubtree(addr[:])
 	for range 100 {
-		_, err = ttx.RangeAsOf(kv.StorageDomain, addr[:], to, 0, order.Asc, kv.Unlim)
+		_, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], to, 0, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		_, err = ttx.HistoryRange(kv.StorageDomain, 0, -1, order.Asc, kv.Unlim)
 		require.NoError(t, err)

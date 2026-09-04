@@ -118,13 +118,13 @@ func FuzzWriterRoundTrip(f *testing.F) {
 			z = (z ^ (z >> 27)) * 0x94D049BB133111EB
 			z ^= (z >> 31)
 			keys = append(keys, z)
-			if err = w.AddHash(z); err != nil {
+			if err := w.AddHash(z); err != nil {
 				t.Fatal(err)
 			}
 		}
 
 		var buf bytes.Buffer
-		if _, err = w.BuildTo(&buf); err != nil {
+		if _, err := w.BuildTo(&buf); err != nil {
 			t.Fatal(err)
 		}
 

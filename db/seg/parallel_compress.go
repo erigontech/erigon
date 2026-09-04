@@ -1028,7 +1028,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 			/* j contains index of the next substring to
 			   be considered  to compare with the present
 			   substring, i.e., next string in suffix array */
-			j = int(filtered[inv[i]+1])
+			j := int(filtered[inv[i]+1])
 
 			// Directly start matching from k'th index as
 			// at-least k-1 characters will match

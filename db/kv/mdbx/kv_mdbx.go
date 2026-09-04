@@ -198,8 +198,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {
-			var exists bool
-			exists, err = dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
+			exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
 			if err != nil {
 				return nil, err
 			}
@@ -277,8 +276,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		//	return nil, err
 		//}
 
-		var txnDpInitial uint64
-		txnDpInitial, err = env.GetOption(mdbx.OptTxnDpInitial)
+		txnDpInitial, err := env.GetOption(mdbx.OptTxnDpInitial)
 		if err != nil {
 			return nil, err
 		}
@@ -286,8 +284,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			if err := env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
 				return nil, err
 			}
-			var dpReserveLimit uint64
-			dpReserveLimit, err = env.GetOption(mdbx.OptDpReverseLimit)
+			dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
 			if err != nil {
 				return nil, err
 			}
@@ -343,7 +340,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	// an existing db, so a stale limit would scale the dirty-page memory by the size ratio.
 	// Accede must stay lock-free here - SetOption after Open takes the rwtx-lock.
 	if dirtySpace > 0 && opts.pageSize != requestedPageSize && !opts.HasFlag(mdbx.Accede) {
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize.Bytes()); err != nil {
+		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize.Bytes()); err != nil {
 			return nil, fmt.Errorf("%w, label: %s", err, opts.label)
 		}
 	}
@@ -937,8 +934,7 @@ func (tx *MdbxTx) DistributeCursors(table string, from []byte, n int) ([][]byte,
 	wrappers := make([]kv.Cursor, n)
 	cursors := make([]*mdbx.Cursor, n)
 	for i := range wrappers {
-		var cw kv.Cursor
-		cw, err = tx.Cursor(table)
+		cw, err := tx.Cursor(table)
 		if err != nil {
 			return nil, err
 		}

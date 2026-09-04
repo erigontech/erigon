@@ -104,11 +104,11 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 	}
 	defer rwTx.Rollback() //nolint:gocritic
 	for i := range uint64(benchBlockCount) {
-		if err = rawdb.WriteCanonicalHash(rwTx, realisticHeader(i).Hash(), i); err != nil {
+		if err := rawdb.WriteCanonicalHash(rwTx, realisticHeader(i).Hash(), i); err != nil {
 			b.Fatal(err)
 		}
 	}
-	if err = rwTx.Commit(); err != nil {
+	if err := rwTx.Commit(); err != nil {
 		b.Fatal(err)
 	}
 

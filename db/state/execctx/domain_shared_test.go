@@ -133,8 +133,7 @@ Loop:
 			}
 			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
-			var pv []byte
-			pv, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, k0)
+			pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, v, uint64(i), pv)
@@ -142,8 +141,7 @@ Loop:
 		}
 
 		if i%commitStep == 0 {
-			var rh []byte
-			rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -388,43 +386,6 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 // that re-advances past the step boundary.
 //
 // After the final unwind the commitment "state" key and the commitment values
-
-// requireNoCommitmentStepAbove fails when the commitment values table still holds
-// an entry above maxStep -- the "orphan" entries that made mainnet execution
-// resume from stale commitment state.
-func requireNoCommitmentStepAbove(t *testing.T, rwTx kv.TemporalRwTx, maxStep uint64) {
-	t.Helper()
-	require := require.New(t)
-
-	var c kv.Cursor
-	{
-		var err error
-		c, err = rwTx.Cursor(kv.TblCommitmentVals)
-		require.NoError(err)
-	}
-	defer c.Close()
-
-	offending := 0
-	var exampleStep uint64
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		require.NoError(err)
-		if len(v) < 8 {
-			continue
-		}
-		step := ^binary.BigEndian.Uint64(v[:8])
-		if step > maxStep {
-			if offending == 0 {
-				exampleStep = step
-			}
-			offending++
-		}
-	}
-	require.Zerof(offending,
-		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
-			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
-		offending, maxStep, exampleStep)
-}
-
 // table must not contain entries at a step beyond the unwind target —
 // otherwise the next `SeekCommitment` will return a blockNum > TxNums.Last()
 // and execution will skip blocks.
@@ -527,6 +488,42 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	requireNoCommitmentStepAbove(t, rwTx, unwindTarget/stepSize)
 }
 
+// requireNoCommitmentStepAbove fails when the commitment values table still holds
+// an entry above maxStep -- the "orphan" entries that made mainnet execution
+// resume from stale commitment state.
+func requireNoCommitmentStepAbove(t *testing.T, rwTx kv.TemporalRwTx, maxStep uint64) {
+	t.Helper()
+	require := require.New(t)
+
+	var c kv.Cursor
+	{
+		var err error
+		c, err = rwTx.Cursor(kv.TblCommitmentVals)
+		require.NoError(err)
+	}
+	defer c.Close()
+
+	offending := 0
+	var exampleStep uint64
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			if offending == 0 {
+				exampleStep = step
+			}
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
+			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
+		offending, maxStep, exampleStep)
+}
+
 // TestSharedDomain_MergeUnwindAcrossStepBoundary exercises the raw-changeset
 // merge branch of TemporalMemBatch.Merge, which is what ForkValidator.MergeExtendingFork
 // drives in production. It splits the unwind of a step-boundary-crossing range
@@ -572,13 +569,11 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 		for i := range 8 {
 			addr[0] = byte(i)
 			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
-			var pv []byte
-			pv, _, err = doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 			require.NoError(err)
 			require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
 		}
-		var rh []byte
-		rh, err = doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
 		require.NoError(err)
 		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
 		perBlockDiffs[bn] = cs
@@ -733,13 +728,11 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 			addr[0] = byte(i)
 			addr[1] = byte(bn)
 			acc := accounts3.Account{Nonce: bn, Balance: *uint256.NewInt(bn*1000 + uint64(i))}
-			var pv []byte
-			pv, _, err = doms.GetLatest(kv.AccountsDomain, rwTx, addr)
+			pv, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 			require.NoError(err)
 			require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, accounts3.SerialiseV3(&acc), bn, pv))
 		}
-		var rh []byte
-		rh, err = doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
 		require.NoError(err)
 		require.NotEmpty(rh)
 		blockHashes[bn] = common.BytesToHash(rh)
@@ -1014,8 +1007,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
 
-			var pv []byte
-			pv, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, k0)
+			pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, k0, v, txNum, pv)
@@ -1024,7 +1016,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 			for locs := range 1000 {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				pv, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...)) //nolint:makezero
+				pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...)) //nolint:makezero
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), l0[24:], txNum, pv)
@@ -1033,8 +1025,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		}
 
 		if i%commitStep == 0 {
-			var rh []byte
-			rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			if hashes[uint64(i)] != nil {
 				require.Equal(t, hashes[uint64(i)], rh)
@@ -1077,8 +1068,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	for accs := range noaccounts {
 		k0[0] = byte(accs)
-		var pv []byte
-		pv, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, k0)
+		pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 		require.NoError(t, err)
 
 		existed := make(map[string]struct{})
@@ -1196,10 +1186,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		txNum = stepSize
-		if err = domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(1)...), txNum, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(1)...), txNum, nil); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(2)...), txNum, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(2)...), txNum, nil); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
@@ -1238,7 +1228,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		ac := state.AggTx(rwTx)
 		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
 
-		_, err = ac.PruneSmallBatches(ctx, time.Hour, rwTx)
+		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
 
 		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
@@ -1255,10 +1245,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 
 		txNum = stepSize*2 + 1
-		if err = domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), txNum, nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, rwTx, append(addr, st(4)...), txNum, nil); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), acc(5), txNum, nil); err != nil {
+		if err := domains.DomainPut(kv.StorageDomain, rwTx, append(addr, st(5)...), acc(5), txNum, nil); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -1317,10 +1307,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 
 	// --- check 1: non-existing storage ---
 	{
-		var firstKey []byte
-		var firstVal []byte
-		var ok bool
-		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx1)
+		firstKey, firstVal, ok, err := sd.HasPrefix(kv.StorageDomain, acc1[:], rwTtx1)
 		require.NoError(t, err)
 		require.False(t, ok)
 		require.Nil(t, firstKey)
@@ -1619,7 +1606,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 					continue
 				}
 				v := valPalette[writes[txNum]]
-				err = domains.DomainPut(dc.domain, rwTx, key, v, txNum, nil)
+				err := domains.DomainPut(dc.domain, rwTx, key, v, txNum, nil)
 				require.NoError(t, err)
 			}
 
@@ -1639,9 +1626,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 			}
 
 			for ts := uint64(1); ts <= totalTxs; ts++ {
-				var got []byte
-				var ok bool
-				got, ok, err = rwTx.GetAsOf(dc.domain, key, ts)
+				got, ok, err := rwTx.GetAsOf(dc.domain, key, ts)
 				require.NoError(t, err, "ts=%d", ts)
 				want := expectedAtTx[ts]
 				if want == nil {
@@ -1773,18 +1758,15 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 
 	// --- check 1: non-existing account & storage and empty commitment trie ---
 	{
-		var acc1Value []byte
-		acc1Value, _, err = sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr[:])
+		acc1Value, _, err := sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr[:])
 		require.NoError(t, err)
 		require.Nil(t, acc1Value)
 
-		var acc1SlotValue []byte
-		acc1SlotValue, _, err = sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot[:])
+		acc1SlotValue, _, err := sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot[:])
 		require.NoError(t, err)
 		require.Nil(t, acc1SlotValue)
 
-		var rootHash []byte
-		rootHash, err = sd1.GetCommitmentContext().Trie().RootHash()
+		rootHash, err := sd1.GetCommitmentContext().Trie().RootHash()
 		require.NoError(t, err)
 		require.Equal(t, empty.RootHash[:], rootHash)
 	}

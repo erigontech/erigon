@@ -143,7 +143,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 			dir.RemoveFile(f.Name())
 		}
 	}()
-	if err = fallocate(f, sizeBytes); err != nil {
+	if err := fallocate(f, sizeBytes); err != nil {
 		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
 	}
 	m, err := mmap.OpenRw(f, int(sizeBytes))

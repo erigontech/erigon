@@ -349,8 +349,7 @@ func checkFs(t *testing.T, fsRoot fs.FS, checkers ...fsChecker) {
 			println("checkFs", path, d, err)
 			matched := false
 			for _, c := range checkers {
-				var stop bool
-				stop, err = c.OnWalkDir(fsCheckerWalkInput{
+				stop, err := c.OnWalkDir(fsCheckerWalkInput{
 					name: slashName(path),
 					d:    d,
 					err:  err,

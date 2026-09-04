@@ -319,13 +319,11 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 		var fps []fileFingerprint
 		if cache != nil {
 			kvPath := file.Fullpath()
-			var accPath string
-			accPath, err = derivePathForOtherDomain(kvPath, kv.CommitmentDomain, kv.AccountsDomain)
+			accPath, err := derivePathForOtherDomain(kvPath, kv.CommitmentDomain, kv.AccountsDomain)
 			if err != nil {
 				return err
 			}
-			var stoPath string
-			stoPath, err = derivePathForOtherDomain(kvPath, kv.CommitmentDomain, kv.StorageDomain)
+			stoPath, err := derivePathForOtherDomain(kvPath, kv.CommitmentDomain, kv.StorageDomain)
 			if err != nil {
 				return err
 			}
@@ -972,15 +970,11 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 			return 0, err
 		}
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-			var rootHashBytes []byte
-			var blockNum uint64
-			var txNum uint64
-			rootHashBytes, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(v)
+			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
-			var maxTxNum uint64
-			maxTxNum, err = txNumReader.Max(ctx, tx, blockNum)
+			maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
 			if err != nil {
 				return 0, err
 			}
@@ -1051,9 +1045,7 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 	// limit which blocks can be verified.
 	aggTx := state.AggTx(tx)
 	if aggMax := aggTx.EndTxNumNoCommitment(); maxTxNum+1 > aggMax {
-		var blockNumOfState uint64
-		var ok bool
-		blockNumOfState, ok, err = txNumsReader.FindBlockNum(ctx, tx, aggMax)
+		blockNumOfState, ok, err := txNumsReader.FindBlockNum(ctx, tx, aggMax)
 		if err != nil {
 			return fmt.Errorf("block %d is beyond state coverage and FindBlockNum failed: %w", blockNum, err)
 		}
@@ -1119,13 +1111,13 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 			logger.Trace("commitment touched key", args...)
 		}
 	}
-	if _, err = touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	if _, err = touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
-	if _, err = touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
+	if _, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, blockNum, idx, touchLoggingVisitor); err != nil {
 		return err
 	}
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "", nil /* commitProgress */)
@@ -1624,7 +1616,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 				touchMap = binary.BigEndian.Uint16(branchData[0:])
 				afterMap = binary.BigEndian.Uint16(branchData[2:])
 			}
-			err = fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
+			err := fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
 			if failFast {
 				return err
 			}
@@ -1633,7 +1625,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			continue
 		}
 
-		_, err = branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1686,7 +1678,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 
 	// Also extract refs from the next commitment file (handles step boundary effects)
 	if nextFile != nil {
-		if err = extractCommitmentRefsToCollectors(ctx, nextFile, accCollector, stoCollector, logger); err != nil {
+		if err := extractCommitmentRefsToCollectors(ctx, nextFile, accCollector, stoCollector, logger); err != nil {
 			logger.Warn("[integrity] StateVerify failed to extract refs from next file", "err", err)
 			// Non-fatal: proceed with what we have
 		}

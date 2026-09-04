@@ -103,7 +103,7 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 	if len(saltBytes) != 4 {
 		dir.MustExist(baseDir)
 
-		saltBytes = make([]byte, 4)
+		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err

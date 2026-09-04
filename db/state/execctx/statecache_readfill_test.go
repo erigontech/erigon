@@ -290,8 +290,7 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	for i := byte(2); i <= 3; i++ {
 		missing := make([]byte, 20)
 		missing[0] = i
-		var value []byte
-		value, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
 		require.NoError(t, err)
 		require.Empty(t, value)
 	}

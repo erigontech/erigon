@@ -113,8 +113,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		var locVal common.Hash
-		var n int
-		n, err = rnd.Read(locVal[:])
+		n, err := rnd.Read(locVal[:])
 		loc = accounts.InternKey(locVal)
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
@@ -141,8 +140,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		}
 
 		if txNum%blockSize == 0 && interesting {
-			var rh []byte
-			rh, err = domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			fmt.Printf("tx %d bn %d rh %x\n", txNum, txNum/blockSize, rh)
 
@@ -314,8 +312,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			binary.BigEndian.PutUint64(aux[:], txNum)
 
 			var locVal common.Hash
-			var n int
-			n, err = rnd.Read(locVal[:])
+			n, err := rnd.Read(locVal[:])
 			require.NoError(t, err)
 			require.Equal(t, length.Hash, n)
 			loc = accounts.InternKey(locVal)
@@ -332,8 +329,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			require.NoError(t, err)
 
 			if txNum%blockSize == 0 {
-				var rh []byte
-				rh, err = domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
+				rh, err := domains.ComputeCommitment(ctx, tx, true, blockNum, txNum, "", nil)
 				require.NoError(t, err)
 
 				hashes = append(hashes, rh)

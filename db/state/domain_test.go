@@ -355,12 +355,12 @@ func TestDumpStepRangeToPath(t *testing.T) {
 	// .bt (commitment/account domain has BTree accessor) must also land in dstDir.
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePathIn(dstDir, 0, 1)
-		_, err = os.Stat(btPath)
+		_, err := os.Stat(btPath)
 		require.NoError(t, err, "expected .bt at %s", btPath)
 	}
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
 		kviPath := d.kviAccessorNewFilePathIn(dstDir, 0, 1)
-		_, err = os.Stat(kviPath)
+		_, err := os.Stat(kviPath)
 		require.NoError(t, err, "expected .kvi at %s", kviPath)
 	}
 
@@ -1170,8 +1170,7 @@ func TestDomain_Delete(t *testing.T) {
 
 	// Put on even txNum, delete on odd txNum
 	for txNum := range uint64(1000) {
-		var original []byte
-		original, _, _, err = domainRoTx.GetLatest([]byte("key1"), tx)
+		original, _, _, err := domainRoTx.GetLatest([]byte("key1"), tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
 			err = writer.PutWithPrev([]byte("key1"), []byte("value1"), txNum, original)
@@ -2831,8 +2830,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		defer it.Close()
 
 		for it.HasNext() {
-			var txn uint64
-			txn, err = it.Next()
+			txn, err := it.Next()
 			require.NoError(t, err)
 			require.Truef(t, txn < pruneFrom || txn >= pruneTo, "txn %d should be pruned", txn)
 		}
@@ -3829,24 +3827,17 @@ func TestDomain_GetLatestValSize(t *testing.T) {
 		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
 			var key [8]byte
 			binary.BigEndian.PutUint64(key[:], keyNum)
-			var fileValue []byte
-			var fileFound bool
-			fileValue, fileFound, _, _, err = domainTx.debugGetLatestFromFiles(key[:], 0)
+			fileValue, fileFound, _, _, err := domainTx.debugGetLatestFromFiles(key[:], 0)
 			require.NoError(t, err)
-			var fileSize int
-			var sizeFound bool
-			fileSize, sizeFound, err = domainTx.getLatestFromFilesValSize(key[:], 0)
+			fileSize, sizeFound, err := domainTx.getLatestFromFilesValSize(key[:], 0)
 			require.NoError(t, err)
 			require.Equal(t, fileFound, sizeFound)
 			require.Equal(t, len(fileValue), fileSize)
 
-			var value []byte
-			var found bool
-			value, _, found, err = domainTx.GetLatest(key[:], roTx)
+			value, _, found, err := domainTx.GetLatest(key[:], roTx)
 			require.NoError(t, err)
 			require.True(t, found)
-			var size int
-			size, found, err = domainTx.GetLatestValSize(key[:], roTx)
+			size, found, err := domainTx.GetLatestValSize(key[:], roTx)
 			require.NoError(t, err)
 			require.True(t, found)
 			require.Equal(t, len(value), size)

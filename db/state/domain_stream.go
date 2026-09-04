@@ -475,7 +475,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	filesEndTxNum := dt.files.EndTxNum()
 
 	if ramIter.Seek(string(prefix)) {
-		k = common.ToBytesZeroCopy(ramIter.Key())
+		k := common.ToBytesZeroCopy(ramIter.Key())
 
 		v = ramIter.Value()[len(ramIter.Value())-1].data
 

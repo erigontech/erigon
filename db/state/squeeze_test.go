@@ -184,16 +184,14 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			var prev []byte
-			prev, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(tb, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
 			require.NoError(tb, err)
 		}
 		if uint64(i+1)%agg.StepSize() == 0 {
-			var rh []byte
-			rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(tb, err)
 			require.NotEmpty(tb, rh)
 		}
@@ -258,8 +256,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	trieCtx := domains.GetCommitmentContext()
 	require.NoError(t, err)
 	for acit.HasNext() {
-		var k []byte
-		k, _, err = acit.Next()
+		k, _, err := acit.Next()
 		require.NoError(t, err)
 		trieCtx.TouchKey(kv.AccountsDomain, string(k), nil)
 	}
@@ -544,8 +541,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		txNum = i
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
-		var n int
-		n, err = rnd.Read(addr)
+		n, err := rnd.Read(addr)
 		require.NoError(t, err)
 		require.Equal(t, length.Addr, n)
 
@@ -772,8 +768,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 		// At step boundary: compute commitment, flush, and record block→txNum mapping
 		if (txNum+1)%stepSize == 0 {
 			step := (txNum + 1) / stepSize
-			var rh []byte
-			rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			require.NotEmpty(t, rh)
 			lastRoot = rh
@@ -851,16 +846,14 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			var prev []byte
-			prev, _, err = domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, keys[j])
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
 			require.NoError(t, err)
 		}
-		var rh []byte
-		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		roots = append(roots, rh)
@@ -898,8 +891,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			var prev []byte
-			prev, _, err = rwTx.GetLatest(kv.AccountsDomain, keys[j], kv.GetLatestOptions{})
+			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j], kv.GetLatestOptions{})
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
@@ -908,8 +900,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			//require.NoError(t, err)
 		}
 
-		var rh []byte
-		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+		rh, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, rh)
 		require.Equal(t, roots[i], rh)

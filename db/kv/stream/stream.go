@@ -187,25 +187,21 @@ func (m *UnionUno[T]) Next() (res T, err error) {
 	m.limit--
 	if m.xHas && m.yHas {
 		if m.less() {
-			var k T
-			k, err = m.xNextK, m.err
+			k, err := m.xNextK, m.err
 			m.advanceX()
 			return k, err
 		} else if m.xNextK == m.yNextK {
-			var k T
-			k, err = m.xNextK, m.err
+			k, err := m.xNextK, m.err
 			m.advanceX()
 			m.advanceY()
 			return k, err
 		}
-		var k T
-		k, err = m.yNextK, m.err
+		k, err := m.yNextK, m.err
 		m.advanceY()
 		return k, err
 	}
 	if m.xHas {
-		var k T
-		k, err = m.xNextK, m.err
+		k, err := m.xNextK, m.err
 		m.advanceX()
 		return k, err
 	}
@@ -657,29 +653,21 @@ func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
 	m.limit--
 	if m.xHas && m.yHas {
 		if m.less() {
-			var k K
-			var v V
-			k, v, err = m.xNextK, m.xNextV, m.err
+			k, v, err := m.xNextK, m.xNextV, m.err
 			m.advanceX()
 			return k, v, err
 		} else if m.xNextK == m.yNextK {
-			var k K
-			var v V
-			k, v, err = m.xNextK, m.xNextV, m.err
+			k, v, err := m.xNextK, m.xNextV, m.err
 			m.advanceX()
 			m.advanceY()
 			return k, v, err
 		}
-		var k K
-		var v V
-		k, v, err = m.yNextK, m.yNextV, m.err
+		k, v, err := m.yNextK, m.yNextV, m.err
 		m.advanceY()
 		return k, v, err
 	}
 	if m.xHas {
-		var k K
-		var v V
-		k, v, err = m.xNextK, m.xNextV, m.err
+		k, v, err := m.xNextK, m.xNextV, m.err
 		m.advanceX()
 		return k, v, err
 	}

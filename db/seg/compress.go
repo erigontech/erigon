@@ -327,12 +327,12 @@ func (c *Compressor) Compress() error {
 	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
-		if _, err = cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
+		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
 			return err
 		}
 
 		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
-			if _, err = cf.Write([]byte{c.compPageValuesCount}); err != nil {
+			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
 				return err
 			}
 		}
@@ -342,10 +342,10 @@ func (c *Compressor) Compress() error {
 		dataLen := uint32(len(c.metadata))
 		var dataLenB [4]byte
 		binary.BigEndian.PutUint32(dataLenB[:], dataLen)
-		if _, err = cf.Write(dataLenB[:]); err != nil {
+		if _, err := cf.Write(dataLenB[:]); err != nil {
 			return err
 		}
-		if _, err = cf.Write(c.metadata); err != nil {
+		if _, err := cf.Write(c.metadata); err != nil {
 			return err
 		}
 	}
@@ -386,7 +386,7 @@ func (c *Compressor) Compress() error {
 	if err := cf.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpFileName, c.outputFile); err != nil {
+	if err := os.Rename(tmpFileName, c.outputFile); err != nil {
 		return fmt.Errorf("renaming: %w", err)
 	}
 

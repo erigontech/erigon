@@ -716,7 +716,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 		writer := ic.NewWriter()
 		defer writer.close()
 
-		var fl flusher
+		var flusher flusher
 
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
@@ -729,16 +729,16 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 					require.NoError(err)
 				}
 			}
-			if fl != nil {
-				require.NoError(fl.Flush(ctx, tx))
+			if flusher != nil {
+				require.NoError(flusher.Flush(ctx, tx))
 			}
 			if txNum%10 == 0 {
-				fl = writer
+				flusher = writer
 				writer = ic.NewWriter()
 			}
 		}
-		if fl != nil {
-			require.NoError(fl.Flush(ctx, tx))
+		if flusher != nil {
+			require.NoError(flusher.Flush(ctx, tx))
 		}
 		return writer.Flush(ctx, tx)
 	})
@@ -818,8 +818,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		for i := keyNum * ((400 + keyNum - 1) / keyNum); i < txs; i += keyNum {
 			label := fmt.Sprintf("keyNum=%d, txNum=%d", keyNum, i)
 			require.True(t, it.HasNext(), label)
-			var n uint64
-			n, err = it.Next()
+			n, err := it.Next()
 			require.NoError(t, err)
 			require.Equal(t, i, n, label)
 			values = append(values, n)
@@ -1010,28 +1009,28 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	vf := calcVisibleFiles(ii.dirtyFiles, 0, nil, false, ii.dirtyFilesEndTxNumMinimax())
-	for i, item := range vf {
+	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, nil, false, ii.dirtyFilesEndTxNumMinimax())
+	for i, item := range visibleFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
 		}
 		if i == 0 {
 			continue
 		}
-		if item.src.isProperSubsetOf(vf[i-1].src) || vf[i-1].src.isProperSubsetOf(item.src) {
-			require.Failf(t, "overlaping vf", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, vf[i-1].startTxNum, vf[i-1].endTxNum)
+		if item.src.isProperSubsetOf(visibleFiles[i-1].src) || visibleFiles[i-1].src.isProperSubsetOf(item.src) {
+			require.Failf(t, "overlaping files", "%d-%d, %d-%d", item.startTxNum, item.endTxNum, visibleFiles[i-1].startTxNum, visibleFiles[i-1].endTxNum)
 		}
 	}
-	require.Len(t, vf, 3)
+	require.Len(t, visibleFiles, 3)
 
-	require.Equal(t, 0, int(vf[0].startTxNum))
-	require.Equal(t, 4, int(vf[0].endTxNum))
+	require.Equal(t, 0, int(visibleFiles[0].startTxNum))
+	require.Equal(t, 4, int(visibleFiles[0].endTxNum))
 
-	require.Equal(t, 4, int(vf[1].startTxNum))
-	require.Equal(t, 5, int(vf[1].endTxNum))
+	require.Equal(t, 4, int(visibleFiles[1].startTxNum))
+	require.Equal(t, 5, int(visibleFiles[1].endTxNum))
 
-	require.Equal(t, 480, int(vf[2].startTxNum))
-	require.Equal(t, 512, int(vf[2].endTxNum))
+	require.Equal(t, 480, int(visibleFiles[2].startTxNum))
+	require.Equal(t, 512, int(visibleFiles[2].endTxNum))
 }
 
 func TestIsSubset(t *testing.T) {
@@ -1159,8 +1158,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	require.NoError(err)
 	var got []uint64
 	for it.HasNext() {
-		var v uint64
-		v, err = it.Next()
+		v, err := it.Next()
 		require.NoError(err)
 		got = append(got, v)
 	}
@@ -1244,8 +1242,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	require.NoError(err)
 	var got []uint64
 	for it.HasNext() {
-		var v uint64
-		v, err = it.Next()
+		v, err := it.Next()
 		require.NoError(err)
 		got = append(got, v)
 	}

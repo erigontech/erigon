@@ -117,7 +117,7 @@ func BenchmarkMapTxNum2BlockNumIter(b *testing.B) {
 					}
 					// Min: MaxTxNum(blockNum-1)+1 — shared cursor
 					if blockNum > 0 {
-						if _, _, err = DefaultTxBlockIndexInstance.MaxTxNum(ctx, tx, c, blockNum-1); err != nil {
+						if _, _, err := DefaultTxBlockIndexInstance.MaxTxNum(ctx, tx, c, blockNum-1); err != nil {
 							b.Fatal(err)
 						}
 					}

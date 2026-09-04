@@ -156,7 +156,7 @@ func runBuild(t *testing.T, label string, stream streamer, outPath string, shard
 	runtime.GC()
 	sampler := startPeakSampler(500 * time.Microsecond)
 	buildStart := time.Now()
-	if err = build(); err != nil {
+	if err := build(); err != nil {
 		sampler.Stop()
 		t.Fatalf("%s: Build: %v", label, err)
 	}

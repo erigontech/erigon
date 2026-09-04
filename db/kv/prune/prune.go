@@ -371,8 +371,7 @@ func tableScanningPrune(
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
-			var dups uint64
-			dups, err = valDelCursor.CountDuplicates()
+			dups, err := valDelCursor.CountDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("count dups %s: %w", filenameBase, err)
 			}

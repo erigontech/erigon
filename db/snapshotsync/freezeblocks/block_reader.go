@@ -603,8 +603,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		var blockHash common.Hash
-		blockHash, err = rawdb.ReadCanonicalHash(tx, blockHeight)
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, err
 		}
@@ -944,8 +943,7 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
 	bodySeg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
 	if !ok {
-		var hash common.Hash
-		hash, ok, err = r.CanonicalHash(ctx, tx, blockNum)
+		hash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -970,9 +968,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if forceCanonical {
-			var canonicalHash common.Hash
-			var ok bool
-			canonicalHash, ok, err = r.CanonicalHash(ctx, tx, blockHeight)
+			canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 			if err != nil {
 				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 			}
@@ -1562,14 +1558,11 @@ func (r *BlockReader) ReadAncestor(tx kv.Getter, hash common.Hash, number, ances
 			panic(err)
 		}
 		if ok && h == hash {
-			var ancestorHash common.Hash
-			var ok1 bool
-			ancestorHash, ok1, err = r.CanonicalHash(context.Background(), tx, number-ancestor)
+			ancestorHash, ok1, err := r.CanonicalHash(context.Background(), tx, number-ancestor)
 			if err != nil {
 				panic(err)
 			}
-			var ok2 bool
-			h, ok2, err = r.CanonicalHash(context.Background(), tx, number)
+			h, ok2, err := r.CanonicalHash(context.Background(), tx, number)
 			if err != nil {
 				panic(err)
 			}

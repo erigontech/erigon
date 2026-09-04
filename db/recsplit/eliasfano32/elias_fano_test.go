@@ -692,7 +692,7 @@ func TestIterator(t *testing.T) {
 
 		it = ef.ReverseIterator()
 		for range offsets {
-			_, err = it.Next()
+			_, err := it.Next()
 			require.NoError(t, err)
 		}
 		_, err = it.Next()

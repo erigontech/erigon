@@ -45,7 +45,7 @@ func (me SortedItems) Get(name string) (item Item, found bool) {
 
 func (me SortedItems) Contains(name string, ignoreVersion ...bool) bool {
 	if len(ignoreVersion) > 0 && ignoreVersion[0] {
-		_, name, _ = strings.Cut(name, "-")
+		_, name, _ := strings.Cut(name, "-")
 		for _, item := range me {
 			_, noVersion, _ := strings.Cut(item.Name, "-")
 			if noVersion == name {

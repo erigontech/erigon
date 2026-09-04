@@ -100,12 +100,12 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, i)
 		for j := range keys {
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], v, txNum, nil)
+			err := domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], v, txNum, nil)
 			require.NoError(t, err)
 		}
 
 		if i%stepSize == 0 {
-			_, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(t, err)
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
@@ -351,7 +351,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	for txNum := uint64(1); txNum <= maxTx; txNum++ {
 		generateSharedDomainsUpdatesForBench(b, domains, rwTx, txNum, rnd, usedKeys, length.Addr, keysCount)
 		if txNum%(stepSize/2) == 0 {
-			_, err = domains.ComputeCommitment(ctx, rwTx, true, txNum/(stepSize/2), txNum, "", nil)
+			_, err := domains.ComputeCommitment(ctx, rwTx, true, txNum/(stepSize/2), txNum, "", nil)
 			require.NoError(b, err)
 		}
 	}
