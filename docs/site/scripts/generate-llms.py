@@ -681,6 +681,15 @@ def build():
     lines.append("> modularity, and minimal disk footprint. It features an integrated consensus layer")
     lines.append("> (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.")
     lines.append("")
+    # The only machine-readable route from this index to the full corpus. Pages
+    # advertise llms.txt via <link rel="describedby">, not llms-full.txt, so an
+    # agent that arrives here would otherwise have no way to reach it.
+    lines.append(
+        f"The text of every page listed below is also available as a single file: "
+        f"[llms-full.txt]({BASE_URL}/llms-full.txt). Pages are cleaned for machine "
+        f"reading: MDX components are stripped."
+    )
+    lines.append("")
 
     current_section = None
     for p in all_pages:
