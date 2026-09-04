@@ -286,7 +286,7 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
-func (m *mockOracleBackend) CheckBlockReceiptsAvailable(_ context.Context, _ uint64) error {
+func (m *mockOracleBackend) CheckBlockRewardsAvailable(_ context.Context, _ uint64) error {
 	return nil
 }
 

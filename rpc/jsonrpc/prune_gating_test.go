@@ -241,12 +241,13 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		return apis.erigon.GetBlockByTimestamp(ctx, rpc.Timestamp(ref.time), false)
 	}},
 	// The base-fee and gas-used series come from headers alone. Reward percentiles are
-	// computed from the transactions of each block weighted by the gas their receipts
-	// report, so asking for them adds both boundaries.
+	// computed from the transactions of each block weighted by the gas used their
+	// receipts report, which is read from the tiny-receipt history rather than the
+	// receipt cache, so asking for them adds the blocks and the history boundary.
 	{"eth_feeHistory", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.FeeHistory(ctx, 1, rpc.BlockNumber(ref.num), nil)
 	}},
-	{"eth_feeHistory_rewards", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_feeHistory_rewards", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.FeeHistory(ctx, 1, rpc.BlockNumber(ref.num), []float64{50})
 	}},
 	// Replaying a block reads its transactions and starts from the state history

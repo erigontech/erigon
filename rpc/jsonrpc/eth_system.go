@@ -779,6 +779,6 @@ func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *t
 	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
 }
 
-func (b *GasPriceOracleBackend) CheckBlockReceiptsAvailable(ctx context.Context, blockNumber uint64) error {
-	return b.baseApi.checkBlockReceiptsAvailable(ctx, b.tx, blockNumber)
+func (b *GasPriceOracleBackend) CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error {
+	return b.baseApi.checkBlockHistoryAvailable(ctx, b.tx, blockNumber)
 }
