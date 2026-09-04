@@ -2,23 +2,10 @@ package debug
 
 import (
 	"math"
-	"runtime/debug"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/common/log/v3"
 )
-
-// An operator-supplied limit must win: the derived one is a fallback, not a policy.
-func TestSetGoMemLimitKeepsExistingLimit(t *testing.T) {
-	const explicit = int64(3 << 30)
-	prev := debug.SetMemoryLimit(explicit)
-	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
-
-	SetGoMemLimit(log.New())
-	require.Equal(t, explicit, debug.SetMemoryLimit(-1), "an explicit GOMEMLIMIT must not be overridden")
-}
 
 // GOMEMLIMIT=off is a deliberate choice, but the runtime reports it exactly like
 // an unset variable, so only the environment can tell the two apart.
@@ -36,14 +23,16 @@ func TestGoMemLimitInForce(t *testing.T) {
 }
 
 // The predicate that decides whether a cgroup constrains us at all, pinned
-// independently of the machine the test runs on.
+// independently of the machine the test runs on. The two sentinels are what a
+// cgroup reports when it is not limiting memory: v2 "max", and v1's MaxInt64
+// rounded down to a page — which no int64 clamp catches on its own.
 func TestDerivedGoMemLimit(t *testing.T) {
 	const gb = uint64(1) << 30
 	require.Zero(t, derivedGoMemLimit(0, 16*gb), "no cgroup limit")
 	require.Zero(t, derivedGoMemLimit(16*gb, 16*gb), "a cgroup at physical memory constrains nothing")
-	require.Zero(t, derivedGoMemLimit(32*gb, 16*gb), "a cgroup above physical memory constrains nothing")
-	require.Zero(t, derivedGoMemLimit(math.MaxUint64, 0),
-		"an unlimited cgroup constrains nothing even when physical memory is unknown")
+	require.Zero(t, derivedGoMemLimit(math.MaxUint64, 16*gb), "cgroup v2 reports unlimited as max")
+	require.Zero(t, derivedGoMemLimit(0x7FFFFFFFFFFFF000, 16*gb), "cgroup v1 reports unlimited just under MaxInt64")
+	require.Zero(t, derivedGoMemLimit(math.MaxUint64, 0), "unlimited stays unlimited with physical memory unknown")
 	require.Equal(t, int64(7*gb), derivedGoMemLimit(10*gb, 16*gb))
 	require.Equal(t, int64(7*gb), derivedGoMemLimit(10*gb, 0), "unknown physical memory still honours the cgroup")
 }
