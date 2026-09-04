@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type readerMock struct {
@@ -249,13 +248,14 @@ func (blockDerivedL2) ResolveRules(_, blockNum, _ uint64, r *chain.Rules) {
 
 func TestInitializeTracesTheRulesTheSystemCallResolves(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		l2       chain.L2Config
-		blockNum uint64
+		name        string
+		l2          chain.L2Config
+		blockNum    uint64
+		wantVersion uint64
 	}{
-		{"version from block number, below the ladder step", blockDerivedL2{}, 15_000_000},
-		{"version from block number, above the ladder step", blockDerivedL2{}, 21_000_000},
-		{"version from state, which system calls never carry", stateDerivedL2{}, 21_000_000},
+		{"version from block number, below the ladder step", blockDerivedL2{}, 15_000_000, 30},
+		{"version from block number, above the ladder step", blockDerivedL2{}, 21_000_000, 50},
+		{"version from state, which system calls never carry", stateDerivedL2{}, 21_000_000, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cancunTime := uint64(0)
@@ -291,39 +291,8 @@ func TestInitializeTracesTheRulesTheSystemCallResolves(t *testing.T) {
 			require.NotNil(t, seen, "the Cancun system call must reach OnSystemCallStartV2")
 			require.NotNil(t, seen.Rules, "the traced context must carry the rules, not the ingredients to rebuild them")
 
-			execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
-			require.Equal(t, execCtx.Rules(&chainConfig).L2Version, seen.Rules.L2Version,
-				"the traced rules must be the ones the system call's own EVM resolves")
+			require.Equal(t, tc.wantVersion, seen.Rules.L2Version,
+				"the traced rules must carry the version the system call's own EVM resolves")
 		})
 	}
-}
-
-func TestInitializeTracesABlockDerivedVersionChange(t *testing.T) {
-	traced := func(blockNum uint64) uint64 {
-		cancunTime := uint64(0)
-		chainConfig := chain.Config{ChainID: uint256.NewInt(1337), CancunTime: &cancunTime, L2: blockDerivedL2{}}
-		beaconRoot := common.HexToHash("0xbeac07")
-		header := &types.Header{
-			Difficulty:            *ProofOfStakeDifficulty,
-			Number:                *uint256.NewInt(blockNum),
-			Time:                  1,
-			ParentBeaconBlockRoot: &beaconRoot,
-		}
-		var seen *tracing.VMContext
-		tracer := tracing.Hooks{OnSystemCallStartV2: func(env *tracing.VMContext) { seen = env }}
-		logger := log.New()
-		var intraBlockState state.IntraBlockState
-		var eth1Engine rules.Engine
-		require.NoError(t, New(eth1Engine).Initialize(&chainConfig,
-			consensuschain.NewReader(&chainConfig, nil, nil, logger), header, &intraBlockState,
-			func(accounts.Address, []byte, *state.IntraBlockState, *types.Header, bool) ([]byte, error) {
-				return nil, nil
-			}, logger, &tracer))
-		require.NotNil(t, seen.Rules)
-		return seen.Rules.L2Version
-	}
-
-	require.Equal(t, uint64(30), traced(15_000_000))
-	require.Equal(t, uint64(50), traced(21_000_000),
-		"a version that moves with the block must move in the trace too")
 }
