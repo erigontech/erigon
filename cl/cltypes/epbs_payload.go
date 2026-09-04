@@ -272,8 +272,8 @@ type ExecutionPayloadBid struct {
 	GasLimit              uint64                        `json:"gas_limit,string"`
 	BuilderIndex          uint64                        `json:"builder_index,string"`
 	Slot                  uint64                        `json:"slot,string"`
-	Value                 uint64                        `json:"value,string"`
-	ExecutionPayment      uint64                        `json:"execution_payment,string"`
+	Value                 uint64                        `json:"value,string"`             // Gwei
+	ExecutionPayment      uint64                        `json:"execution_payment,string"` // Gwei
 	BlobKzgCommitments    solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 	ExecutionRequestsRoot common.Hash                   `json:"execution_requests_root"`
 }
