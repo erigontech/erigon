@@ -939,11 +939,8 @@ func TestGrowLRU_CloseStopsFurtherReservations(t *testing.T) {
 // test fills a growLRU the way hashed production keys do.
 func spreadKey(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
 
-// The envelope is charged one way and audited another: growBytes prices a step
-// as a per-shard delta, generationBytes prices a whole generation. They agree
-// only by telescoping, which nothing enforces, so an edit to either drifts the
-// reservation away from what the cache holds without any test noticing. At a
-// ceiling every shard has reached, the sum of the steps is the generation.
+// At the ceiling, summing every per-shard growBytes delta must equal
+// generationBytes for the complete generation.
 func TestGenericCache_StepAndGenerationCostsAgreeAtTheCeiling(t *testing.T) {
 	prevProcs := runtime.GOMAXPROCS(0)
 	prevBudget := cachebudget.Global
