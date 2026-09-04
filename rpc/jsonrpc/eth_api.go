@@ -255,8 +255,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 // view. The probe never changes the selected transaction.
 func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
-	var blockNotFound rpc.BlockNotFoundErr
-	if !errors.As(err, &blockNotFound) {
+	if _, ok := errors.AsType[rpc.BlockNotFoundErr](err); !ok {
 		return blockNumber, err
 	}
 
@@ -879,7 +878,7 @@ type APIImpl struct {
 	ethBackend                  rpchelper.ApiBackend
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
-	gasCache                    *GasPriceCache
+	gasCache                    gasprice.Cache
 	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64

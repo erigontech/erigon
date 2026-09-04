@@ -47,10 +47,38 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
+	// CanonicalHashes returns the canonical hashes of [from, to] on the
+	// backend's view, one entry per height. Heights the view has no canonical
+	// marker for (beyond the head, or pruned) get the zero hash. It resolves
+	// the whole range at once because a per-height lookup is a remote round
+	// trip in rpcdaemon mode.
+	CanonicalHashes(ctx context.Context, from, to uint64) ([]common.Hash, error)
+
+	// FrozenBlocks returns the frozen (snapshot) boundary: the canonical
+	// number-to-hash mapping at or below it is immutable.
+	FrozenBlocks() uint64
+
+	// HeaderByHashNumber and BlockByHashNumber fetch by an already-resolved
+	// canonical (hash, number) pair, so a cached entry can never name a
+	// different block than the one processed.
+	HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
+	BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error)
+
+	// PrepareFork resolves, on the caller's goroutine, whatever identity Fork
+	// validates a forked snapshot against. It must be called before the first
+	// Fork and is a no-op afterwards: Fork runs on the fan-out goroutines,
+	// which must never read the parent transaction. Its error reports what
+	// stays unresolved; it does not decide the request's fate, and Fork then
+	// answers nil.
+	PrepareFork(ctx context.Context) error
+
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
-	// If the backend does not support forking, it returns (nil, nil, nil) and
-	// the caller should fall back to using the main backend sequentially.
+	// A (nil, nil, nil) return means no forked backend is available for this
+	// call — the backend may not support forking at all, or a concurrent reorg
+	// may have made a consistent fork momentarily impossible. It is a per-call
+	// answer, not a static capability: callers fall back to sequential reads on
+	// this backend for the current request and must not memoize the nil.
 	Fork(ctx context.Context) (OracleBackend, func(), error)
 }
 
@@ -224,6 +252,9 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 //
 // The returned slice has length count: entry i corresponds to block head-i.
 func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64, count int) ([][]*uint256.Int, error) {
+	if err := oracle.backend.PrepareFork(ctx); err != nil {
+		oracle.log.Debug("gas price: parent identity unresolved, serving sequentially", "err", err)
+	}
 	results := make([][]*uint256.Int, count)
 	var (
 		nextIdx atomic.Uint64
@@ -237,8 +268,9 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 				return forkErr
 			}
 			if localBackend == nil {
-				// Fork not supported: allow exactly one goroutine to proceed
-				// sequentially on the shared backend; the others exit.
+				// No forked backend for this call (unsupported, or a concurrent
+				// reorg): exactly one goroutine proceeds sequentially on the
+				// shared backend; the others exit.
 				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
