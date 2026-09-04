@@ -106,10 +106,6 @@ func closeLockedDir(m dsl.Matcher) {
 		Report(`Add "defer $c.Close()" after locked.OpenDir`)
 }
 
-func passValuesByContext(m dsl.Matcher) {
-	m.Match(`ctx.WithValue($*_)`).Report(`Don't pass app-level parameters by context, pass them as-is or as typed objects`)
-}
-
 func mismatchingUnlock(m dsl.Matcher) {
 	// By default, an entire match position is used as a location.
 	// This can be changed by the At() method that binds the location
@@ -143,7 +139,7 @@ func forbidOsRemove(m dsl.Matcher) {
 }
 
 func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
-	m.Match(`filepath.Walk($dir, $cb)`).Report(`report("Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls")`)
+	m.Match(`filepath.Walk($dir, $cb)`).Report(`Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls`)
 }
 
 func osCreateBlankAssign(m dsl.Matcher) {
