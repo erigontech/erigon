@@ -386,7 +386,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	headers := []*types.Header{{Number: *uint256.NewInt(1)}}
+	headers := []*types.Header{newMockHeaderForBody(1, &types.Body{})}
 	hashes := []common.Hash{headers[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
@@ -416,7 +416,39 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 	})
 }
 
-func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrMissingBodies(t *testing.T) {
+func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenBodyDoesNotMatchHeader(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := newMockHeaderForBody(1, &types.Body{})
+	body := &types.Body{Transactions: types.Transactions{
+		types.NewTransaction(0, common.Address{}, uint256.NewInt(0), 21_000, uint256.NewInt(0), nil),
+	}}
+	mockResponse := requestResponseMock{
+		requestId: requestId,
+		mockResponseInboundMessages: []*sentryproto.InboundMessage{
+			{
+				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, requestId, body),
+			},
+		},
+		wantRequestPeerId: peerId,
+		wantRequestHashes: []common.Hash{header.Hash()},
+	}
+
+	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockResponse)
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.penalizingFetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.ErrorIs(t, err, &ErrBodyDoesNotMatchHeader{})
+		require.Nil(t, bodies.Data)
+	})
+}
+
+func TestPenalizingFetcherFetchBodiesShouldNotPenalizePeerWhenErrMissingBodies(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -439,8 +471,6 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrMissingBodies(t *t
 
 	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
 	test.mockSentryStreams(mockRequestResponse)
-	// setup expectation that peer should be penalized
-	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errMissingBodies *ErrMissingBodies
 		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
@@ -503,7 +533,7 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrToo
 	})
 }
 
-func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrMissingBodies(t *testing.T) {
+func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldNotPenalizePeerWhenErrMissingBodies(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -542,8 +572,6 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrMis
 
 	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
-	// setup expectation that peer should be penalized
-	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errMissingBodies *ErrMissingBodies
 		blocks, err := test.penalizingFetcher.FetchBlocksBackwardsByHash(ctx, hash, 1, peerId)

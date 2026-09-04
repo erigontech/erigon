@@ -209,7 +209,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId2.H512(),
-			Data:   nil, // response timeout
+			Data:   newMockBlockBodiesPacketBytes(t, requestId2),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{
@@ -223,7 +223,7 @@ func TestTrackingFetcherFetchBodiesUpdatesPeerTracker(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId2.H512(),
-			Data:   nil, // response timeout
+			Data:   newMockBlockBodiesPacketBytes(t, requestId3),
 		},
 	}
 	mockRequestResponse3 := requestResponseMock{

@@ -66,6 +66,9 @@ func TestDeriveSha(t *testing.T) {
 		genTransactions(4),
 		genTransactions(10),
 		genTransactions(100),
+		genTransactions(127),
+		genTransactions(128),
+		genTransactions(129),
 		genTransactions(1000),
 		genTransactions(10000),
 		genTransactions(100000),
@@ -73,6 +76,81 @@ func TestDeriveSha(t *testing.T) {
 
 	for _, test := range tests {
 		checkDeriveSha(t, test)
+	}
+}
+
+func TestDeriveShaAllocations(t *testing.T) {
+	transactions := genTransactions(100)
+	allocations := testing.AllocsPerRun(10, func() {
+		DeriveSha(transactions)
+	})
+	if allocations > 150 {
+		t.Fatalf("allocations = %.0f, want at most 150", allocations)
+	}
+}
+
+func TestDeriveShaRawTransactions(t *testing.T) {
+	for _, count := range []uint64{0, 1, 2, 127, 128, 129, 255, 256, 257, 1000} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			transactions := genTransactions(count)
+			if count == 2 {
+				transactions[1] = NewEIP1559Transaction(
+					*uint256.NewInt(1),
+					1,
+					common.Address{1},
+					uint256.NewInt(2),
+					21_000,
+					uint256.NewInt(3),
+					uint256.NewInt(4),
+					uint256.NewInt(5),
+					nil,
+				)
+			}
+
+			body, err := rlp.EncodeToBytes(&Body{Transactions: transactions})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bodyContent, _, err := rlp.SplitList(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encodedTransactions, _, err := rlp.SplitList(bodyContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := DeriveShaRawTransactions(encodedTransactions)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := DeriveSha(transactions); got != want {
+				t.Fatalf("hash = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestDeriveShaRawValues(t *testing.T) {
+	withdrawals := Withdrawals{
+		{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4},
+		{Index: 5, Validator: 6, Address: common.Address{7}, Amount: 8},
+	}
+	encoded, err := rlp.EncodeToBytes(withdrawals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedValues, _, err := rlp.SplitList(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := DeriveShaRawValues(encodedValues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := DeriveSha(withdrawals); got != want {
+		t.Fatalf("hash = %s, want %s", got, want)
 	}
 }
 

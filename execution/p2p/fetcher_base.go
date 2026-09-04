@@ -122,31 +122,45 @@ func (f *FetcherBase) FetchBodies(
 	peerId *PeerId,
 	opts ...FetcherOption,
 ) (FetcherResponse[[]*types.Body], error) {
-	var bodies []*types.Body
+	bodies := make([]*types.Body, len(headers))
+	pendingHeaders := slices.Clone(headers)
+	pendingResultIndexes := make([]int, len(headers))
+	for i := range pendingResultIndexes {
+		pendingResultIndexes[i] = i
+	}
 	totalBodiesSize := 0
 
-	for len(headers) > 0 {
-		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
-		// In most cases the response will contain incomplete bodies list (ie < MaxBodiesServe) so we just
-		// continue asking it for more starting from the first hash in the sequence after the last received one.
-		// This is akin to how a paging API is consumed.
-		var headersChunk []*types.Header
-		if len(headers) > eth.MaxBodiesServe {
-			headersChunk = headers[:eth.MaxBodiesServe]
-		} else {
-			headersChunk = headers
-		}
+	for len(pendingHeaders) > 0 {
+		// BlockBodies responses preserve request order but may omit unavailable bodies.
+		chunkLen := min(len(pendingHeaders), eth.MaxBodiesServe)
+		headersChunk := pendingHeaders[:chunkLen]
 
 		bodiesChunk, err := f.fetchBodiesWithRetry(ctx, headersChunk, peerId, f.config.CopyWithOptions(opts...))
 		if err != nil {
 			return FetcherResponse[[]*types.Body]{}, err
 		}
-		if len(bodiesChunk.Data) == 0 {
-			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headers)
+
+		matchedCount := 0
+		missingCount := 0
+		for i, body := range bodiesChunk.Data {
+			if body == nil {
+				pendingHeaders[missingCount] = headersChunk[i]
+				pendingResultIndexes[missingCount] = pendingResultIndexes[i]
+				missingCount++
+				continue
+			}
+
+			bodies[pendingResultIndexes[i]] = body
+			matchedCount++
+		}
+		if matchedCount == 0 {
+			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headersChunk)
 		}
 
-		bodies = append(bodies, bodiesChunk.Data...)
-		headers = headers[len(bodiesChunk.Data):]
+		// Compact missing entries before the untouched tail while keeping headers
+		// aligned with their result indexes.
+		pendingHeaders = append(pendingHeaders[:missingCount], pendingHeaders[chunkLen:]...)
+		pendingResultIndexes = append(pendingResultIndexes[:missingCount], pendingResultIndexes[chunkLen:]...)
 		totalBodiesSize += bodiesChunk.TotalSize
 	}
 
@@ -409,7 +423,7 @@ func (f *FetcherBase) fetchBodies(
 		responseTimeout,
 		messages,
 		filterBlockBodies(peerId, requestId),
-		len(headers),
+		headers,
 	)
 	if err != nil {
 		if rlp.IsInvalidRLPError(err) {
@@ -451,7 +465,7 @@ func awaitBlockBodiesResponse(
 	timeout time.Duration,
 	messages chan *RawBlockBodiesInboundMessage,
 	filter func(*RawBlockBodiesInboundMessage) bool,
-	maxBodies int,
+	headers []*types.Header,
 ) ([]*types.Body, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -466,33 +480,10 @@ func awaitBlockBodiesResponse(
 				continue
 			}
 
-			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, maxBodies)
+			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, headers)
 			return bodies, len(message.Data), err
 		}
 	}
-}
-
-func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Body, error) {
-	stream := rlp.NewBytesStream(encodedBodies)
-	defer rlp.PutStream(stream)
-
-	bodies := make([]*types.Body, 0, maxBodies)
-	for stream.Remaining() > 0 {
-		if len(bodies) == maxBodies {
-			return nil, &ErrTooManyBodies{
-				requested: maxBodies,
-				received:  maxBodies + 1,
-			}
-		}
-
-		body := new(types.Body)
-		if err := stream.Decode(body); err != nil {
-			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
-		}
-		bodies = append(bodies, body)
-	}
-
-	return bodies, nil
 }
 
 func awaitResponse[TPacket any](
