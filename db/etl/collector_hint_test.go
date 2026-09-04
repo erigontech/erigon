@@ -124,7 +124,7 @@ func TestAllocatorFillHintsAreBounded(t *testing.T) {
 	require.Zero(t, allocator.lastFill(fmt.Sprintf("index-%d", 2*maxFillHints-1)), "a new name is refused once the table is full")
 }
 
-func TestChurnEvictsTheLongLivedHint(t *testing.T) {
+func TestAllocatorFillHintSurvivesNameChurn(t *testing.T) {
 	allocator := emptyPool(BufferOptimalSize)
 	runCycle(t, NewCollectorWithAllocator("accounts.domain.flush", t.TempDir(), allocator, log.New()), 1000)
 	require.Equal(t, 1000, allocator.lastFill("accounts.domain.flush"))
