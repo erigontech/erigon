@@ -124,3 +124,73 @@ func TestSealedBodyKeepsItsOwnTransactionsAfterTheNextBlock(t *testing.T) {
 			"transaction %d of block %d is not the one it sealed", i, number)
 	}
 }
+
+// A re-open must replay the block's body VERBATIM, not re-adjudicate it.
+//
+// The re-open corrects the header's attributes; membership was decided when each transaction was first
+// accepted. Re-filtering revisits that decision against whichever generation is active at that instant — and
+// the re-open has just abandoned the one the transactions were executed into. When that read resolves to a
+// state where they are already applied they are dropped as "stale", the block seals without them, and since
+// the driver has already taken them off its backlog they are lost: seen live as a block handed txs=1 sealing
+// sealedTxs=0, leaving a trailing transaction that could never mine.
+//
+// SCOPE: this pins the re-open CONTRACT — given a body, replay exactly that body. It does NOT reproduce the
+// production race (which generation is active at the moment of the re-open), so it does not fail against the
+// old re-filtering path; that path only loses transactions under a timing this test cannot construct.
+func TestReopenReplaysTheBodyItWasGivenInsteadOfRefilteringIt(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	cfg := *chain.AllProtocolChanges
+	cfg.AmsterdamTime = nil
+	genesis := &types.Genesis{
+		Config: &cfg,
+		Alloc:  types.GenesisAlloc{sender: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	exec := m.ExecModule
+
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	rlps := make([][]byte, 0, 3)
+	for nonce := uint64(0); nonce < 3; nonce++ {
+		tx, serr := types.SignTx(
+			types.NewTransaction(nonce, sender, uint256.NewInt(1), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*signer, privKey)
+		require.NoError(t, serr)
+		var buf bytes.Buffer
+		require.NoError(t, tx.MarshalBinary(&buf))
+		rlps = append(rlps, buf.Bytes())
+	}
+
+	head, err := exec.CurrentHeader(ctx)
+	require.NoError(t, err)
+	inputs := execmodule.FlashblockInputs{
+		Parent:      head.Hash(),
+		Number:      head.Number.Uint64() + 1,
+		GasLimit:    head.GasLimit,
+		BaseFee:     *misc.CalcBaseFee(m.ChainConfig, head),
+		Timestamp:   head.Time + 1,
+		Withdrawals: []*types.Withdrawal{},
+	}
+
+	// Accumulate the three transactions; the generation now holds them applied.
+	body, _, vr, err := exec.AccumulateFlashblockForTest(ctx, inputs, rlps, false)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "accumulate: %s", vr.ValidationError)
+	require.Len(t, body.Transactions, 3)
+
+	// Clear the body and its dedup records, as the abandon inside a re-open does — so the restore cannot be
+	// satisfied by what the module already remembered.
+	exec.ResetFlashBodyForTest(inputs.Number)
+
+	// The re-open path restores the body it was given, whatever that read would have said.
+	restored, _, vr, err := exec.AccumulateFlashblockForTest(ctx, inputs, rlps, true)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, vr.ValidationStatus, "re-open: %s", vr.ValidationError)
+	require.Len(t, restored.Transactions, 3, "the re-open must replay every transaction it was given")
+	for i, want := range rlps {
+		require.Equal(t, want, restored.Transactions[i], "transaction %d changed across the re-open", i)
+	}
+}

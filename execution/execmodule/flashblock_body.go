@@ -199,6 +199,16 @@ func (e *ExecModule) PreExecuteFlashblock(ctx context.Context, inputs Flashblock
 // preExecuteFlashblockLocked is PreExecuteFlashblock's body with the caller ALREADY holding e.semaphore, so
 // SealBlock can open the successor flashblock (empty round) atomically inside its own hold.
 func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
+	return e.accumulateFlashblockLocked(ctx, inputs, newTxRLPs, false)
+}
+
+// accumulateFlashblockLocked is the shared body of the accumulate and re-open paths. restore=true means the
+// supplied transactions were ALREADY accepted into this block and are being replayed under corrected
+// attributes, so they are restored verbatim instead of being re-filtered.
+func (e *ExecModule) accumulateFlashblockLocked(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte, restore bool) (*types.RawBody, common.Hash, ValidationResult, error) {
+	if restore {
+		return e.reopenFlashblockLocked(ctx, inputs, newTxRLPs)
+	}
 	e.flash.mu.Lock()
 	if e.flash.num != inputs.Number {
 		e.flash.resetLocked(inputs.Number)
@@ -251,6 +261,68 @@ func (e *ExecModule) preExecuteFlashblockLocked(ctx context.Context, inputs Flas
 	}
 	e.flash.mu.Unlock()
 	return &types.RawBody{Transactions: body}, hash, vr, nil
+}
+
+// reopenFlashblockLocked re-opens the CURRENT block under corrected attributes, restoring a body that was
+// ALREADY accepted into it.
+//
+// The body is restored VERBATIM. Re-running the stream filter over it would re-adjudicate transactions that
+// were admitted rounds ago, against whichever generation happens to be active at this instant — and the
+// re-open has just abandoned the one they were executed into. When that read resolves to a state where they
+// are already applied they are judged "stale" and dropped, the block seals without them, and because the
+// driver has already taken them off its backlog they are lost outright: observed as a block handed txs=1
+// sealing sealedTxs=0, with a single trailing transaction that could then never mine. Membership was decided
+// when the transaction was first accepted; a header correction must not revisit it.
+//
+// Caller holds e.semaphore. e.flash.seen and bodyNonce are rebuilt from the restored body so a later
+// accumulation round still dedups against it.
+func (e *ExecModule) reopenFlashblockLocked(ctx context.Context, inputs FlashblockInputs, body [][]byte) (*types.RawBody, common.Hash, ValidationResult, error) {
+	e.flash.mu.Lock()
+	e.flash.resetLocked(inputs.Number)
+	signer := types.LatestSignerForChainID(e.config.ChainID)
+	for _, rlp := range body {
+		tx, derr := types.DecodeTransaction(rlp)
+		if derr != nil {
+			continue
+		}
+		s, ok := tx.GetSender()
+		if !ok {
+			if rec, serr := signer.Sender(tx); serr == nil {
+				s, ok = rec, true
+			}
+		}
+		if ok {
+			e.flash.seen[snKeyExec{addr: s, nonce: tx.GetNonce()}] = true
+			e.flash.bodyNonce[s] = tx.GetNonce()
+		}
+	}
+	e.flash.body = append([][]byte(nil), body...)
+	restored := append([][]byte(nil), e.flash.body...)
+	e.flash.mu.Unlock()
+
+	header := BuildFlashHeader(inputs, restored, FlashblockOutputs{})
+	hash := header.Hash()
+	rawBlock := &types.RawBlock{Header: header, Body: &types.RawBody{Transactions: restored}}
+	status, err := e.insertBlocksLocked(ctx, []*types.RawBlock{rawBlock})
+	if err != nil || status != ExecutionStatusSuccess {
+		return nil, common.Hash{}, ValidationResult{ValidationStatus: status}, fmt.Errorf("reopenFlashblock: insert num=%d bodyTxs=%d status=%v: %w", inputs.Number, len(restored), status, err)
+	}
+	vr, err := e.preExecuteLocked(ctx, hash, inputs.Number)
+	if err != nil {
+		return nil, common.Hash{}, vr, err
+	}
+	e.logger.Info("[execmodule] block re-opened under corrected attributes", "block", inputs.Number,
+		"restoredTxs", len(restored), "receipts", vr.FlashblockReceiptCount, "status", vr.ValidationStatus)
+	e.flash.mu.Lock()
+	if e.flash.num == inputs.Number {
+		e.flash.valid = true
+		e.flash.built = inputs
+		e.flash.hash = hash
+		e.flash.root = vr.ComputedRoot
+		e.flash.receipts = vr.FlashblockReceiptCount
+	}
+	e.flash.mu.Unlock()
+	return &types.RawBody{Transactions: restored}, hash, vr, nil
 }
 
 // filterStreamLocked filters newTxRLPs against the frontier SD account nonces (sequencing per sender across the
@@ -309,6 +381,12 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		exp := nextNonce(s)
 		if tx.GetNonce() < exp {
 			nStale++
+			srcKind, srcBlock := "canonical", uint64(0)
+			if _, n, sd := e.preExec.Active(); sd != nil {
+				srcKind, srcBlock = "preexec", n
+			}
+			e.logger.Warn("[TRACE-filter] STALE drop", "block", e.flash.num, "sender", s,
+				"nonce", tx.GetNonce(), "exp", exp, "src", srcKind, "srcBlock", srcBlock)
 			continue // stale: already sealed on the frontier — dropped (and now remembered)
 		}
 		if tx.GetNonce() > exp {

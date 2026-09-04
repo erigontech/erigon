@@ -343,13 +343,15 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 	// openUnderParams opens the block under params, re-executing body if given. Passing the accumulated body
 	// back in is what makes a re-open under corrected attributes non-destructive: the txs are re-executed
 	// under the right values instead of being dropped.
+	// restore=true when a body is passed back in: those transactions were already accepted into this block,
+	// so the re-open replays them verbatim rather than re-adjudicating them (see reopenFlashblockLocked).
 	openUnderParams := func(body [][]byte) error {
 		parent := e.frontierOrHead(ctx)
 		if parent == nil {
 			return fmt.Errorf("reconcileForAssembleLocked: no parent header to open on")
 		}
 		in := e.flashInputsForChild(parent, params, params.Timestamp)
-		_, _, vr, err := e.preExecuteFlashblockLocked(ctx, in, body)
+		_, _, vr, err := e.accumulateFlashblockLocked(ctx, in, body, len(body) > 0)
 		if err != nil {
 			return err
 		}
@@ -380,8 +382,15 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 		// txs so far. (This used to run only for an EMPTY block; a non-empty one was left alone, and then
 		// the seal rejected it every slot thereafter — the block could never be produced.)
 		body := e.flashBodyCopy()
+		var reqPbbr common.Hash
+		if params.ParentBeaconBlockRoot != nil {
+			reqPbbr = *params.ParentBeaconBlockRoot
+		}
 		e.logger.Info("[execmodule] attrs changed for the open block — re-opening", "txs", len(body),
-			"builtTs", built.Timestamp, "reqTs", params.Timestamp)
+			"builtTs", built.Timestamp, "reqTs", params.Timestamp,
+			"builtRandao", built.PrevRandao, "reqRandao", params.PrevRandao,
+			"builtCoinbase", built.FeeRecipient, "reqCoinbase", params.SuggestedFeeRecipient,
+			"builtPbbr", built.ParentBeaconBlockRoot, "reqPbbr", reqPbbr)
 		e.abandonExtendingForkLocked()
 		return openUnderParams(body)
 	default:
