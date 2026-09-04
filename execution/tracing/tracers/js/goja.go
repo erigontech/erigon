@@ -238,7 +238,7 @@ func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
-	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
+	t.activePrecompiles = vm.ActivePrecompilesFromContext(env)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
 	t.ctx["gas"] = t.vm.ToValue(gasLimit)
 	gasPriceBig, err := t.toBig(t.vm, env.GasPrice.String())

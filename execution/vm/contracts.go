@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -110,6 +111,20 @@ func forkTierFor(chainRules *chain.Rules) forkTier {
 // activeSet resolves the fork-selected built-ins for chainRules, overlaid with
 // any provider registered for chainRules.ChainID. With no registered provider
 // it is the built-in set itself.
+// ActivePrecompilesFromContext reads the resolved rules a tracer was handed,
+// falling back to rebuilding them from the context's block number, time and
+// chain config for a VMContext producer that predates the Rules field.
+func ActivePrecompilesFromContext(env *tracing.VMContext) []accounts.Address {
+	if env.Rules != nil {
+		return ActivePrecompiles(env.Rules)
+	}
+	if env.ChainConfig == nil {
+		return ActivePrecompiles(nil)
+	}
+	execCtx := evmtypes.BlockContext{BlockNumber: env.BlockNumber, Time: env.Time}
+	return ActivePrecompiles(execCtx.Rules(env.ChainConfig))
+}
+
 func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
 	if chainRules == nil {
 		chainRules = &chain.Rules{}

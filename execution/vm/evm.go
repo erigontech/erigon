@@ -918,6 +918,7 @@ func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 // GetVMContext provides context about the block being executed as well as state
 // to the tracers.
 func (evm *EVM) GetVMContext() *tracing.VMContext {
+	rules := *evm.chainRules
 	return &tracing.VMContext{
 		Coinbase:        evm.Context.Coinbase,
 		BlockNumber:     evm.Context.BlockNumber,
@@ -926,7 +927,7 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 		GasPrice:        evm.TxContext.GasPrice,
 		ChainConfig:     evm.ChainConfig(),
 		IntraBlockState: evm.IntraBlockState(),
-		Rules:           evm.chainRules,
+		Rules:           &rules,
 		TxHash:          evm.TxHash,
 	}
 }

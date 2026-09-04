@@ -88,7 +88,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
-	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
+	t.activePrecompiles = vm.ActivePrecompilesFromContext(env)
 }
 
 func (t *fourByteTracer) OnEnter(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
