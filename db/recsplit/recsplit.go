@@ -971,11 +971,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	{
-		indexF, err := dir.CreateTemp(rs.filePath)
+		var err error
+		rs.indexF, err = dir.CreateTemp(rs.filePath)
 		if err != nil {
 			return fmt.Errorf("create index file %s: %w", rs.filePath, err)
 		}
-		rs.indexF = indexF
 		defer rs.indexF.Close()
 		rs.indexW = bufiopool.Writer(rs.indexF)
 		defer bufiopool.PutWriter(rs.indexW)
