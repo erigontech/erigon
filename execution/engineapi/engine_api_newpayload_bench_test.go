@@ -125,7 +125,7 @@ func BenchmarkNewPayloadDecode(b *testing.B) {
 				b.ReportAllocs()
 				b.SetBytes(int64(len(req)))
 				for b.Loop() {
-					r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+					r := httptest.NewRequestWithContext(b.Context(), http.MethodPost, "/", strings.NewReader(body))
 					r.Header.Set("content-type", "application/json")
 					w := httptest.NewRecorder()
 					srv.ServeHTTP(w, r)

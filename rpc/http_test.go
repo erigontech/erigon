@@ -376,7 +376,7 @@ func TestHTTPRequestFraming(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
 			req.Header.Set("content-type", "application/json")
 			rec := httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
@@ -422,9 +422,9 @@ func TestHTTPBatchRequestFraming(t *testing.T) {
 	var items []string
 	for i := range 8 {
 		arg := strings.Repeat(string(rune('a'+i)), 5000)
-		items = append(items, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":["%s",%d]}`, i+1, arg, i))
+		items = append(items, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":[%q,%d]}`, i+1, arg, i))
 	}
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("["+strings.Join(items, ",")+"]"))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader("["+strings.Join(items, ",")+"]"))
 	req.Header.Set("content-type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)

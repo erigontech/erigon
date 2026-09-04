@@ -292,10 +292,10 @@ func TestParsePositionalArgumentsScan(t *testing.T) {
 	t.Parallel()
 
 	var (
-		tInt  = reflect.TypeOf(int(0))
-		tPtr  = reflect.TypeOf(new(int))
-		tStr  = reflect.TypeOf("")
-		tSelf = reflect.TypeOf(selfDecoding{})
+		tInt  = reflect.TypeFor[int]()
+		tPtr  = reflect.TypeFor[*int]()
+		tStr  = reflect.TypeFor[string]()
+		tSelf = reflect.TypeFor[selfDecoding]()
 	)
 	tests := []struct {
 		name    string
