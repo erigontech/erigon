@@ -489,8 +489,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 }
 
 // requireNoCommitmentStepAbove fails when the commitment values table still holds
-// an entry above maxStep -- the "orphan" entries that made mainnet execution
-// resume from stale commitment state.
+// an entry above maxStep.
 func requireNoCommitmentStepAbove(t *testing.T, rwTx kv.TemporalRwTx, maxStep uint64) {
 	t.Helper()
 	require := require.New(t)

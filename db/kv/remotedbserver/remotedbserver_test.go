@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"errors"
 	"runtime"
 	"testing"
 
@@ -66,6 +67,21 @@ func TestGetLatestForwardsMaxStep(t *testing.T) {
 	_, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.AccountsDomain.String(), Latest: true, MaxStep: &maxStep})
 	require.NoError(t, err)
 	require.Equal(t, kv.Step(0), tx.opts.MaxStep())
+}
+
+type readSequenceTx struct {
+	kv.TemporalTx
+	err error
+}
+
+func (tx *readSequenceTx) ReadSequence(string) (uint64, error) { return 0, tx.err }
+
+func TestSequenceReturnsReadSequenceError(t *testing.T) {
+	sentinel := errors.New("read sequence failed")
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: &readSequenceTx{err: sentinel}}
+	_, err := s.Sequence(t.Context(), &remoteproto.SequenceReq{TxId: 1, Table: kv.HeaderNumber})
+	require.ErrorIs(t, err, sentinel)
 }
 
 func TestGetLatestForwardsBranchCache(t *testing.T) {
