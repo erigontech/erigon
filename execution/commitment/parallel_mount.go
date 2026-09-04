@@ -16,15 +16,7 @@ import (
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
 // above this touched-slot count, storage subtree folds concurrently instead of streaming through one worker
-const deepStorageThreshold = 128
-
-const topNibbles = 16
-
-const deepStorageShareDivisor = 4
-
-func deepStorageThresholdFor(roundKeys uint32) int {
-	return max(deepStorageThreshold, int(roundKeys)/topNibbles/deepStorageShareDivisor)
-}
+const deepStorageThreshold = 512
 
 func parallelMountConcurrency(numWorkers int) int {
 	return min(numWorkers, maxFoldConcurrency())
@@ -140,7 +132,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		present [16]bool
 	)
 	foldSem := newFoldSem()
-	deepThreshold := deepStorageThresholdFor(root.subtreeCount)
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(parallelMountConcurrency(p.numWorkers))
 
@@ -182,7 +173,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 			path := make([]byte, 0, 144)
 			path = append(path, byte(ni))
 			path = append(path, ch.ext...)
-			buildErr := dfsSubtreeDeep(w, ch, path, deepThreshold, func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
+			buildErr := dfsSubtreeDeep(w, ch, path, func(n *prefixNode, pth []byte, accountFresh bool) (cell, error) {
 				sr, err := foldStorageRoot(gctx, foldSem, p.newStorageWorker, pu, n, pth, accountFresh)
 				if err == nil {
 					p.deepLocalFolds.Add(1)

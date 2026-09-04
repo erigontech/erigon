@@ -375,15 +375,7 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
 }
 
-func TestDeepStorageThresholdFor(t *testing.T) {
-	require.Equal(t, 128, deepStorageThresholdFor(0))
-	require.Equal(t, 128, deepStorageThresholdFor(2_000))
-	require.Equal(t, 128, deepStorageThresholdFor(8_192))
-	require.Equal(t, 156, deepStorageThresholdFor(10_000))
-	require.Equal(t, 7_812, deepStorageThresholdFor(500_000))
-}
-
-func TestDeepFold_BulkRoundKeepsMediumAccountsOnWorker(t *testing.T) {
+func TestDeepFold_MediumAccountsStayOnWorker(t *testing.T) {
 	rnd := rand.New(rand.NewSource(20260902))
 	ub := NewUpdateBuilder()
 	for range 100 {
@@ -397,25 +389,7 @@ func TestDeepFold_BulkRoundKeepsMediumAccountsOnWorker(t *testing.T) {
 	ms.SetConcurrentCommitment(true)
 	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
 	require.Equal(t, seqRoot, parRoot)
-	require.Zero(t, deepFolds, "200-slot accounts in a 20k-key round are no straggler and must stay on their worker")
-}
-
-func TestDeepFold_SmallRoundDetachesStraggler(t *testing.T) {
-	rnd := rand.New(rand.NewSource(20260903))
-	ub := NewUpdateBuilder()
-	addRandomAccount(ub, rnd, 200)
-	k1, u1 := ub.Build()
-	fk, fu := buildMixedCorpus(557, 300)
-	keys := append(append([][]byte{}, fk...), k1...)
-	upds := append(append([]Update{}, fu...), u1...)
-
-	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
-
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
-	require.Equal(t, seqRoot, parRoot)
-	require.Equal(t, uint64(1), deepFolds, "one 200-slot account in a 500-key round is the straggler and must deep-fold")
+	require.Zero(t, deepFolds, "200 slots is under deepStorageThreshold: the account stays on its top-nibble worker")
 }
 
 func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {

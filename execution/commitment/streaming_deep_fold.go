@@ -83,12 +83,12 @@ func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatrici
 	return w.foldMounted(ctx, nib)
 }
 
-func isDeepStorageAccount(node *prefixNode, depth int, threshold int) bool {
+func isDeepStorageAccount(node *prefixNode, depth int) bool {
 	return depth == 64 && node.plainKey != nil &&
-		bits.OnesCount16(node.bitmap) >= 2 && int(node.subtreeCount) > threshold
+		bits.OnesCount16(node.bitmap) >= 2 && node.subtreeCount > deepStorageThreshold
 }
 
-func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, threshold int, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (cell, error)) error {
+func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storageRoot func(node *prefixNode, path []byte, accountFresh bool) (cell, error)) error {
 	if node == nil {
 		return nil
 	}
@@ -102,7 +102,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, thresho
 		return errors.New("commitment: trie leaf without a plainKey")
 	}
 
-	if isDeepStorageAccount(node, len(path), threshold) {
+	if isDeepStorageAccount(node, len(path)) {
 		sr, err := storageRoot(node, path, accountFresh)
 		if err == nil {
 			setAccountStorageRoot(w, path, sr)
@@ -120,7 +120,7 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, thresho
 		base := len(path)
 		path = append(path, nib)
 		path = append(path, child.ext...)
-		if err := dfsSubtreeDeep(w, child, path, threshold, storageRoot); err != nil {
+		if err := dfsSubtreeDeep(w, child, path, storageRoot); err != nil {
 			return err
 		}
 		path = path[:base]
