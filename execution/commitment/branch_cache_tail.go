@@ -29,14 +29,12 @@ import (
 const (
 	tailStartCapacity = 512
 	tailGrowFactor    = 4
-	// Per tail entry: the keyed entry allocation, plus ~464B for the freelru
-	// slot and the branch encoding it points at.
-	tailEntryBytes = keyedEntryBytes + 464
+	tailEntryBytes    = 512
 )
 
 // Writes racing a resize may be dropped (benign cache miss; re-read from DB).
 type tailLRU struct {
-	cur    atomic.Pointer[freelru.ShardedLRU[uint64, *keyedBranchCacheEntry]]
+	cur    atomic.Pointer[freelru.ShardedLRU[uint64, *branchCacheEntry]]
 	maxCap uint32
 
 	resizeMu sync.Mutex
@@ -54,8 +52,8 @@ func newTailLRU(maxCapacity uint32) *tailLRU {
 	return t
 }
 
-func newTailShards(capacity uint32) *freelru.ShardedLRU[uint64, *keyedBranchCacheEntry] {
-	lru, err := freelru.NewShardedWithSize[uint64, *keyedBranchCacheEntry](
+func newTailShards(capacity uint32) *freelru.ShardedLRU[uint64, *branchCacheEntry] {
+	lru, err := freelru.NewShardedWithSize[uint64, *branchCacheEntry](
 		branchCacheTailShards, capacity, capacity+capacity/4, u64ident)
 	if err != nil {
 		panic(fmt.Sprintf("BranchCache tail: NewShardedWithSize(%d): %s", capacity, err))
@@ -63,11 +61,11 @@ func newTailShards(capacity uint32) *freelru.ShardedLRU[uint64, *keyedBranchCach
 	return lru
 }
 
-func (t *tailLRU) Get(key uint64) (*keyedBranchCacheEntry, bool) {
+func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 	return t.cur.Load().Get(key)
 }
 
-func (t *tailLRU) Add(key uint64, entry *keyedBranchCacheEntry) {
+func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
 	// Avoid lru.Len() locks once fully grown.
 	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {

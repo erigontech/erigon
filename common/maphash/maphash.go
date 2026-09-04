@@ -9,18 +9,25 @@ import (
 )
 
 var seed maphash.Seed
+var verifySeed maphash.Seed
 
 func init() {
 	seed = maphash.MakeSeed()
+	verifySeed = maphash.MakeSeed()
 }
 
 func SetSeed(s uint64) {
 	*(*uint64)(unsafe.Pointer(&seed)) = s
+	*(*uint64)(unsafe.Pointer(&verifySeed)) = s ^ 0x9e3779b97f4a7c15
 }
 
 // Hash computes a uint64 hash for a byte slice using the global seed.
 func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
+}
+
+func Verify(key []byte) uint32 {
+	return uint32(maphash.Bytes(verifySeed, key))
 }
 
 // Map is a concurrent map that uses maphash to hash []byte keys.

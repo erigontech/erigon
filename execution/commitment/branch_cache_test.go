@@ -194,7 +194,7 @@ func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	key := []byte{0x00}
 	preClearEpoch := c.coh.Epoch()
 	c.Clear()
-	c.store(key, branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
+	c.store(key, &branchCacheEntry{data: []byte("dead-fork-branch"), txN: 200, epoch: preClearEpoch})
 	c.Unwind(150)
 
 	_, _, ok := c.Get(key)
@@ -511,11 +511,6 @@ func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 	}
 }
 
-// TestBranchCache_TailCollisionServesMiss forces a genuine hash collision by
-// writing two different prefixes into the tail LRU under the same maphash
-// bucket, using tailLRU's raw uint64-keyed Add (the same seam BranchCache
-// itself writes through) rather than fabricating one via content search,
-// which is infeasible over a 64-bit hash.
 func TestBranchCache_TailCollisionServesMiss(t *testing.T) {
 	c := NewBranchCache(100)
 	defer c.Close()
@@ -525,16 +520,16 @@ func TestBranchCache_TailCollisionServesMiss(t *testing.T) {
 	bucket := maphash.Hash(prefixA)
 
 	tail := c.tailForWrite()
-	tail.Add(bucket, newKeyedBranchCacheEntry(prefixA, branchCacheEntry{data: []byte("A-data"), epoch: c.coh.Epoch()}))
-	tail.Add(bucket, newKeyedBranchCacheEntry(prefixB, branchCacheEntry{data: []byte("B-data"), epoch: c.coh.Epoch()}))
+	tail.Add(bucket, &branchCacheEntry{data: []byte("A-data"), epoch: c.coh.Epoch(), verify: maphash.Verify(prefixA)})
+	tail.Add(bucket, &branchCacheEntry{data: []byte("B-data"), epoch: c.coh.Epoch(), verify: maphash.Verify(prefixB)})
 
 	_, _, ok := c.Get(prefixA)
 	require.False(t, ok, "prefixA's bucket is shadowed by colliding prefixB; Get must miss, not serve prefixB's bytes")
 
-	ke, found := tail.Get(bucket)
+	entry, found := tail.Get(bucket)
 	require.True(t, found, "the bucket itself must still hold an entry")
-	require.True(t, ke.matchesPrefix(prefixB), "the guard must discriminate, not simply always-miss: the bucket holds prefixB's entry")
-	require.Equal(t, []byte("B-data"), ke.data)
+	require.Equal(t, maphash.Verify(prefixB), entry.verify, "the guard must discriminate, not simply always-miss: the bucket holds prefixB's entry")
+	require.Equal(t, []byte("B-data"), entry.data)
 }
 
 func TestBranchCache_PinnedTrunkCollisionServesMiss(t *testing.T) {
@@ -609,12 +604,6 @@ func TestBranchCache_PinnedTrunkCollisionDoesNotCorruptOnWrite(t *testing.T) {
 	require.Equal(t, []byte("A-account-branch"), dataA)
 }
 
-// TestBranchCache_DeepTierPrefixMismatchServesMiss covers the other
-// maphash-addressed tier (trunk.deep). maphash.Map only exposes byte-keyed
-// Get/Set, so a real collision can't be forced without adding a raw-hash
-// seam to that type; instead this simulates the aftermath a collision would
-// leave behind (a bucket occupied by an entry stored under a different
-// prefix) by mutating the stored entry directly.
 func TestBranchCache_DeepTierPrefixMismatchServesMiss(t *testing.T) {
 	c := NewBranchCache(100)
 	defer c.Close()
@@ -631,12 +620,12 @@ func TestBranchCache_DeepTierPrefixMismatchServesMiss(t *testing.T) {
 	require.True(t, ok)
 	require.Nil(t, st.slot(&nibBuf, n, false), "prefix must overflow into the deep tier for this test to be meaningful")
 
-	ke, found := st.deep.Get(prefix)
+	entry, found := st.deep.Get(prefix)
 	require.True(t, found)
-	ke.prefixLen = uint8(copy(ke.prefix[:], "a-different-prefix-entirely"))
+	entry.verify = maphash.Verify([]byte("a-different-prefix-entirely"))
 
 	_, _, ok = c.Get(prefix)
-	require.False(t, ok, "deep-tier entry whose stored prefix no longer matches must miss, not serve foreign bytes")
+	require.False(t, ok, "deep-tier entry whose stored tag no longer matches must miss, not serve foreign bytes")
 }
 
 func TestBranchCache_DeepTierCollidingWriteKeepsForeignEntry(t *testing.T) {
@@ -655,16 +644,16 @@ func TestBranchCache_DeepTierCollidingWriteKeepsForeignEntry(t *testing.T) {
 	require.True(t, ok)
 	require.Nil(t, st.slot(&nibBuf, n, false), "prefix must overflow into the deep tier for this test to be meaningful")
 
-	ke, found := st.deep.Get(prefix)
+	entry, found := st.deep.Get(prefix)
 	require.True(t, found)
-	foreign := []byte("a-different-prefix-entirely")
-	ke.prefixLen = uint8(copy(ke.prefix[:], foreign))
+	foreign := maphash.Verify([]byte("a-different-prefix-entirely"))
+	entry.verify = foreign
 
 	c.Put(prefix, []byte("own-data"), 0, 0)
 
 	after, found := st.deep.Get(prefix)
 	require.True(t, found)
-	require.True(t, after.matchesPrefix(foreign), "a colliding write must not evict the entry that owns the bucket")
+	require.Equal(t, foreign, after.verify, "a colliding write must not evict the entry that owns the bucket")
 	require.Equal(t, []byte("foreign-data"), after.data)
 
 	data, _, hit := c.Get(prefix)
