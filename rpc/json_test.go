@@ -377,6 +377,24 @@ func FuzzJSONScanFields(f *testing.F) {
 
 // FuzzJSONScanElements checks that the element scan agrees with encoding/json on
 // any valid JSON array.
+// TestJSONScanMalformedTerminates pins that both walkers make progress on input
+// json.Valid rejects, so a custom transport that skips that gate cannot hang.
+func TestJSONScanMalformedTerminates(t *testing.T) {
+	const maxCalls = 1000
+	for _, input := range []string{"[}", "[}]", "[,}", "{\"a\":}", "{\"a\":,}", "{}}", "[[}", "[:", "{\"a\"}"} {
+		calls := 0
+		count := func() {
+			calls++
+			if calls > maxCalls {
+				t.Fatalf("no progress on %q", input)
+			}
+		}
+		forEachJSONElement([]byte(input), func([]byte) { count() })
+		calls = 0
+		forEachJSONField([]byte(input), func(_, _ []byte) { count() })
+	}
+}
+
 func FuzzJSONScanElements(f *testing.F) {
 	for _, s := range messageCorpus {
 		f.Add(s)
@@ -415,26 +433,40 @@ func FuzzFillMessage(f *testing.F) {
 			return
 		}
 		var want jsonrpcMessage
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(data, &obj); err == nil {
-			// A field that does not decode counts as absent, same as fillMessage.
-			if v, ok := obj["jsonrpc"]; ok && json.Unmarshal(v, &want.Version) != nil {
-				want.Version = ""
-			}
-			if v, ok := obj["id"]; ok {
-				want.ID = v
-			}
-			if v, ok := obj["method"]; ok && json.Unmarshal(v, &want.Method) != nil {
-				want.Method = ""
-			}
-			if v, ok := obj["params"]; ok {
-				want.Params = v
-			}
-			if v, ok := obj["error"]; ok && json.Unmarshal(v, &want.Error) != nil {
-				want.Error = nil
-			}
-			if v, ok := obj["result"]; ok {
-				want.Result = v
+		// encoding/json splits the object; the per-field rules mirror fillMessage.
+		// A map would collapse repeated keys, which both of them merge.
+		dec := json.NewDecoder(bytes.NewReader(data))
+		if tok, err := dec.Token(); err == nil && tok == json.Delim('{') {
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					break
+				}
+				key, _ := keyTok.(string)
+				var v json.RawMessage
+				if err := dec.Decode(&v); err != nil {
+					break
+				}
+				switch key {
+				case "jsonrpc":
+					if json.Unmarshal(v, &want.Version) != nil {
+						want.Version = ""
+					}
+				case "id":
+					want.ID = v
+				case "method":
+					if json.Unmarshal(v, &want.Method) != nil {
+						want.Method = ""
+					}
+				case "params":
+					want.Params = v
+				case "error":
+					if json.Unmarshal(v, &want.Error) != nil {
+						want.Error = nil
+					}
+				case "result":
+					want.Result = v
+				}
 			}
 		}
 		got := new(jsonrpcMessage)

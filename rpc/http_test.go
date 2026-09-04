@@ -355,6 +355,10 @@ func TestHTTPRequestFraming(t *testing.T) {
 		{"whitespace only", "   \n\t ", ``},
 		{"truncated object", `{"jsonrpc":"2.0","id":1,"method":"test_echo"`, `parse error`},
 		{"not json", `hello`, `parse error`},
+		// JSON whitespace is space, tab, CR and LF only. Unicode whitespace is a body.
+		{"vertical tab body", "\v", `parse error`},
+		{"form feed body", "\f", `parse error`},
+		{"no-break space body", "\u00a0", `parse error`},
 		{"unbalanced bracket", `[{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",3]}`, `parse error`},
 		{"control character in string", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"test_\x01echo\",\"params\":[]}", `parse error`},
 		// A body holding more than one value is rejected. The decoder this

@@ -239,7 +239,7 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 		if err != nil {
 			return nil, err
 		}
-		if len(bytes.TrimSpace(frame)) == 0 {
+		if skipJSONSpace(frame, 0) == len(frame) {
 			// An empty body carries no message, which is not an error. The decoder
 			// used to report this as EOF and callers rely on that.
 			return nil, io.EOF

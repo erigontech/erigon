@@ -158,6 +158,10 @@ func forEachJSONElement(data []byte, fn func(value []byte)) {
 		}
 		start := i
 		i = scanJSONValue(data, i)
+		if i == start {
+			// A value that scans to nothing would spin here. Valid JSON never does.
+			return
+		}
 		fn(data[start:i])
 	}
 }
