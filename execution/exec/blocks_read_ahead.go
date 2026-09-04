@@ -91,6 +91,9 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // touch of any prefetched address.
 //
 // Code reads also populate the content-addressed and size-cache layers.
+// maxReadAheadCodeBuf caps the per-worker prefetch buffer.
+const maxReadAheadCodeBuf = 128 * 1024
+
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view     cache.ReadView
@@ -136,8 +139,8 @@ func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, 
 	if err != nil {
 		return nil, false, err
 	}
-	if cap(code) > cap(cpg.codeBuf) {
-		cpg.codeBuf = code[:0]
+	if n := len(code); n > cap(cpg.codeBuf) && n <= maxReadAheadCodeBuf {
+		cpg.codeBuf = make([]byte, 0, n) // never adopt code: it can point into a mapped file
 	}
 	return code, len(code) > 0, nil
 }

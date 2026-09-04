@@ -1400,12 +1400,6 @@ func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
-// maxPooledCodeBuf caps what a decode buffer keeps between uses, so one huge
-// contract does not pin a large buffer per worker for the process lifetime.
-const maxPooledCodeBuf = 128 * 1024
-
-var codeDecodeBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4096); return &b }}
-
 func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte, wm kv.GetLatestMetrics, start time.Time, stepBound kv.Step, view cache.ReadView, opts getLatestOptions) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
@@ -1512,12 +1506,16 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	viaPool := willFill && domain == kv.CodeDomain && len(opts.codeHash) == len(common.Hash{})
 	if viaPool {
 		pooled := codeDecodeBufPool.Get().(*[]byte)
-		defer codeDecodeBufPool.Put(pooled)
 		getOpts = getOpts.WithBuf(*pooled)
+		// Grow by allocating, never by adopting the returned slice: by the time
+		// this runs v is the cache's copy, and pooling that would hand a live
+		// cache entry to the next reader to overwrite. len(v) is the decoded
+		// length either way.
 		defer func() {
-			if cap(v) > cap(*pooled) && cap(v) <= maxPooledCodeBuf {
-				*pooled = v[:0]
+			if n := len(v); n > cap(*pooled) && n <= maxPooledCodeBuf {
+				*pooled = make([]byte, 0, n)
 			}
+			codeDecodeBufPool.Put(pooled)
 		}()
 	}
 
