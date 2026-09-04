@@ -99,13 +99,13 @@ func TestGatherMetrics(t *testing.T) {
 	testCounter.Inc()
 	testGauge.Set(42.5)
 
-	metrics, err := GatherMetrics()
+	metrics, err := GatherMetricsFiltered("")
 	if err != nil {
-		t.Fatalf("GatherMetrics() error = %v", err)
+		t.Fatalf("GatherMetricsFiltered: %v", err)
 	}
 
 	if len(metrics) == 0 {
-		t.Error("GatherMetrics() returned empty map")
+		t.Error("GatherMetricsFiltered returned empty map")
 	}
 
 	// Check counter

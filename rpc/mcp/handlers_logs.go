@@ -128,7 +128,7 @@ func (l logTools) handleLogsGrep(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	logLines, err := grepLog(logFile, pattern, maxLines, caseInsensitive)
+	logLines, err := scanLog(logFile, maxLines, pattern, caseInsensitive)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Failed to grep log: %v", err)), nil
 	}
@@ -155,7 +155,16 @@ func (l logTools) handleLogsStats(ctx context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(toJSONText(stats)), nil
 }
 
-// readLogTail reads the last N lines from a log file with optional filtering
+// newLogScanner reads a log file line by line, with room for erigon's long
+// lines: the scanner's default 64 KB token limit would truncate them.
+func newLogScanner(f *os.File) *bufio.Scanner {
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	return s
+}
+
+// readLogTail reads the last N matching lines, holding only those N: a node's
+// erigon.log runs to hundreds of MB.
 func readLogTail(filename string, lines int, filter string) ([]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -163,101 +172,64 @@ func readLogTail(filename string, lines int, filter string) ([]string, error) {
 	}
 	defer file.Close()
 
-	// Read all lines (for simplicity, could optimize with reverse reading for large files)
-	var allLines []string
-	scanner := bufio.NewScanner(file)
-
-	// Increase buffer size for long log lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
+	ring := make([]string, 0, lines)
+	oldest := 0
+	scanner := newLogScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if filter == "" || strings.Contains(line, filter) {
-			allLines = append(allLines, line)
+		if filter != "" && !strings.Contains(line, filter) {
+			continue
 		}
+		if len(ring) < lines {
+			ring = append(ring, line)
+			continue
+		}
+		ring[oldest] = line
+		oldest = (oldest + 1) % lines
 	}
-
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-
-	// Return last N lines
-	start := max(len(allLines)-lines, 0)
-
-	return allLines[start:], nil
+	if oldest == 0 {
+		return ring, nil
+	}
+	// Full-capacity slice so the append copies instead of overwriting the head.
+	return append(ring[oldest:len(ring):len(ring)], ring[:oldest]...), nil
 }
 
-// readLogHead reads the first N lines from a log file with optional filtering
-func readLogHead(filename string, lines int, filter string) ([]string, error) {
+// scanLog returns up to max lines matching match, from the start of the file.
+// An empty match keeps every line.
+func scanLog(filename string, max int, match string, caseInsensitive bool) ([]string, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	var result []string
-	scanner := bufio.NewScanner(file)
-
-	// Increase buffer size for long log lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	count := 0
-	for scanner.Scan() && count < lines {
-		line := scanner.Text()
-		if filter == "" || strings.Contains(line, filter) {
-			result = append(result, line)
-			count++
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// grepLog searches for a pattern in log file
-func grepLog(filename, pattern string, maxLines int, caseInsensitive bool) ([]string, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	var result []string
-	scanner := bufio.NewScanner(file)
-
-	// Increase buffer size for long log lines
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	searchPattern := pattern
 	if caseInsensitive {
-		searchPattern = strings.ToLower(pattern)
+		match = strings.ToLower(match)
 	}
-
-	count := 0
-	for scanner.Scan() && count < maxLines {
+	var result []string
+	scanner := newLogScanner(file)
+	for scanner.Scan() && len(result) < max {
 		line := scanner.Text()
-		searchLine := line
+		hay := line
 		if caseInsensitive {
-			searchLine = strings.ToLower(line)
+			hay = strings.ToLower(hay)
 		}
-
-		if strings.Contains(searchLine, searchPattern) {
+		if match == "" || strings.Contains(hay, match) {
 			result = append(result, line)
-			count++
 		}
 	}
-
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-
 	return result, nil
+}
+
+// readLogHead reads the first N lines from a log file with optional filtering.
+func readLogHead(filename string, lines int, filter string) ([]string, error) {
+	return scanLog(filename, lines, filter, false)
 }
 
 // getLogStats returns statistics about a log file
@@ -278,20 +250,15 @@ func getLogStats(filename string) (map[string]any, error) {
 	var warnLines int
 	var infoLines int
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
+	scanner := newLogScanner(file)
 	for scanner.Scan() {
 		totalLines++
-		line := strings.ToLower(scanner.Text())
-
-		switch {
-		case strings.Contains(line, "error") || strings.Contains(line, "err="):
+		switch logLevel(scanner.Text()) {
+		case "eror", "crit":
 			errorLines++
-		case strings.Contains(line, "warn"):
+		case "warn":
 			warnLines++
-		case strings.Contains(line, "info"):
+		case "info":
 			infoLines++
 		}
 	}
@@ -312,4 +279,22 @@ func getLogStats(filename string) (map[string]any, error) {
 	}
 
 	return stats, nil
+}
+
+// logLevel is the level token a log line carries: "[EROR] [time] msg" in the
+// default file format, {"lvl":"eror"} under --log.dir.json. It is empty for a
+// line in neither shape, such as a panic trace. Matching the token rather than
+// the whole line keeps an "err=" key on an info line out of the error count.
+func logLevel(line string) string {
+	if rest, ok := strings.CutPrefix(line, "["); ok {
+		if i := strings.IndexByte(rest, ']'); i > 0 {
+			return strings.ToLower(rest[:i])
+		}
+	}
+	if _, rest, ok := strings.Cut(line, `"lvl":"`); ok {
+		if i := strings.IndexByte(rest, '"'); i > 0 {
+			return strings.ToLower(rest[:i])
+		}
+	}
+	return ""
 }
