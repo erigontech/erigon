@@ -425,11 +425,8 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if err != nil || !ok {
 		return nil, false, 0, err
 	}
-	// Reader.Buf, not nil: Next allocates and zeroes a fresh buffer per call
-	// otherwise, and on multi-KB values that memclr dominates the read. Callers
-	// that retain the value copy it (cache.ReadView.FillCode).
-	g.Buf, _ = g.Next(g.Buf[:0])
-	return g.Buf, true, offset, nil
+	v, _ = g.Next(nil)
+	return v, true, offset, nil
 }
 
 func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err error) {
