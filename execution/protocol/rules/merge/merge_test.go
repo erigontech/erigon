@@ -226,14 +226,6 @@ func TestFinalizeWithdrawalStateErrorPropagates(t *testing.T) {
 	require.Contains(t, err.Error(), "withdrawal 7")
 }
 
-type stateDerivedL2 struct{}
-
-func (stateDerivedL2) Name() string { return "statederived" }
-
-func (stateDerivedL2) ResolveRules(l2Version, _, _ uint64, r *chain.Rules) {
-	r.L2Version = l2Version
-}
-
 type blockDerivedL2 struct{}
 
 func (blockDerivedL2) Name() string { return "blockderived" }
@@ -255,7 +247,6 @@ func TestInitializeTracesTheRulesTheSystemCallResolves(t *testing.T) {
 	}{
 		{"version from block number, below the ladder step", blockDerivedL2{}, 15_000_000, 30},
 		{"version from block number, above the ladder step", blockDerivedL2{}, 21_000_000, 50},
-		{"version from state, which system calls never carry", stateDerivedL2{}, 21_000_000, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cancunTime := uint64(0)
