@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -974,9 +975,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 
 	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
-		newBuf := make([]byte, len(buf)+int(wordLen))
-		copy(newBuf, buf)
-		buf = newBuf
+		// slices.Grow, not make: the loops below write every byte of
+		// buf[bufOffset:bufOffset+wordLen] - patterns first, then the uncovered
+		// gaps - so make's zeroing of a multi-KB word is pure waste.
+		buf = slices.Grow(buf, int(wordLen))
+		buf = buf[:len(buf)+int(wordLen)]
 	} else {
 		// Expand buffer
 		if len(buf)+int(wordLen) < 0 {
