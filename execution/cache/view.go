@@ -281,6 +281,17 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
 	v.fillCodeWithHash(addr, bytes.Clone(code), codeHash, readTxNum)
 }
 
+// FillCodeStored is FillCode that returns the copy it stored. A reader that
+// decoded into a reusable buffer hands that copy to its caller instead of
+// allocating a second one: the entry is immutable, so cache and caller share it
+// exactly as they already do on a cache hit. The copy is returned whether or not
+// the cache admitted it, so the caller never aliases the reusable buffer.
+func (v ReadView) FillCodeStored(addr, code, codeHash []byte, readTxNum uint64) []byte {
+	stored := bytes.Clone(code)
+	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)
+	return stored
+}
+
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account
 // record read from this view, so admission checks the accounts frontier even
 // though the mapping lives in the code cache.

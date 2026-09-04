@@ -1400,6 +1400,12 @@ func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
+// maxPooledCodeBuf caps what a decode buffer keeps between uses, so one huge
+// contract does not pin a large buffer per worker for the process lifetime.
+const maxPooledCodeBuf = 128 * 1024
+
+var codeDecodeBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4096); return &b }}
+
 func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte, wm kv.GetLatestMetrics, start time.Time, stepBound kv.Step, view cache.ReadView, opts getLatestOptions) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
@@ -1498,13 +1504,30 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
+	// Only the code domain compresses its values, so it is the only one whose
+	// read allocates a buffer; every other domain hands back a slice of the
+	// mapped file. When the value is about to be copied into the cache anyway,
+	// decode it through a pooled buffer and give the caller the cache's copy.
+	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	viaPool := willFill && domain == kv.CodeDomain && len(opts.codeHash) == len(common.Hash{})
+	if viaPool {
+		pooled := codeDecodeBufPool.Get().(*[]byte)
+		defer codeDecodeBufPool.Put(pooled)
+		getOpts = getOpts.WithBuf(*pooled)
+		defer func() {
+			if cap(v) > cap(*pooled) && cap(v) <= maxPooledCodeBuf {
+				*pooled = v[:0]
+			}
+		}()
+	}
+
 	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
-	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
+	if willFill {
 		readTxNum := step.LastTxNum(sd.StepSize())
 		fillView := view
 		if fillView.NeedsFrontier() {
@@ -1513,10 +1536,13 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		if len(opts.codeHash) == len(common.Hash{}) {
-			fillView.FillCode(k, v, opts.codeHash, readTxNum)
+			// The stored copy replaces v: the decode buffer goes back to the pool.
+			v = fillView.FillCodeStored(k, v, opts.codeHash, readTxNum)
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
+	} else if viaPool && len(v) > 0 {
+		v = bytes.Clone(v) // not admitted; the caller cannot keep the pooled buffer
 	}
 	return v, step, nil
 }
