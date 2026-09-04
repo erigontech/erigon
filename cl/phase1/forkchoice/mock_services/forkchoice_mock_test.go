@@ -26,22 +26,22 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-func TestGetHeadPayloadStatusRequiresMatchingHead(t *testing.T) {
+func TestResolveHeadPayloadStatusRequiresMatchingHead(t *testing.T) {
 	root := common.Hash{0x41}
 	store := &ForkChoiceStorageMock{HeadPayloadStatusVal: cltypes.PayloadStatusEmpty}
 
-	status, matches := store.GetHeadPayloadStatus(root)
+	status, matches := store.ResolveHeadPayloadStatus(root)
 
 	require.False(t, matches)
 	require.Equal(t, cltypes.PayloadStatusPending, status)
 
 	store.HeadVal = root
-	status, matches = store.GetHeadPayloadStatus(root)
+	status, matches = store.ResolveHeadPayloadStatus(root)
 	require.True(t, matches)
 	require.Equal(t, cltypes.PayloadStatusEmpty, status)
 }
 
-func TestGetHeadPayloadStatusRefreshIsConcurrentSafe(t *testing.T) {
+func TestResolveHeadPayloadStatusRefreshIsConcurrentSafe(t *testing.T) {
 	root := common.Hash{0x41}
 	store := &ForkChoiceStorageMock{
 		HeadVal:              root,
@@ -56,7 +56,7 @@ func TestGetHeadPayloadStatusRefreshIsConcurrentSafe(t *testing.T) {
 	}, 32)
 	for range 32 {
 		calls.Go(func() {
-			status, matches := store.GetHeadPayloadStatus(root)
+			status, matches := store.ResolveHeadPayloadStatus(root)
 			results <- struct {
 				status  cltypes.PayloadStatus
 				matches bool

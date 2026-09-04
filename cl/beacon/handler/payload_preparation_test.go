@@ -836,7 +836,7 @@ func TestPreparePayloadLoopWarnsWhenGloasPathRemainsPending(t *testing.T) {
 			return view(postState, baseBlockRoot, currentSlot)
 		},
 	).AnyTimes()
-	forkchoiceStore.GetHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
+	forkchoiceStore.ResolveHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
 		require.Equal(t, baseBlockRoot, root)
 		cancel()
 		return cltypes.PayloadStatusPending, false
@@ -1107,7 +1107,7 @@ func TestPreparePayloadLoopMemoizesTheGloasPathItBuilt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	statusReads := 0
-	forkchoiceStore.GetHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
+	forkchoiceStore.ResolveHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
 		require.Equal(t, baseBlockRoot, root)
 		statusReads++
 		if statusReads == 1 {

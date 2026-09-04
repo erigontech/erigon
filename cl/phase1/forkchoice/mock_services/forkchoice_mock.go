@@ -81,7 +81,7 @@ type ForkChoiceStorageMock struct {
 	VerifiedPayloads             map[common.Hash]bool
 	OnExecutionPayloadFn         func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnExecutionPayloadErr        error
-	GetHeadPayloadStatusFn       func(common.Hash) (cltypes.PayloadStatus, bool)
+	ResolveHeadPayloadStatusFn   func(common.Hash) (cltypes.PayloadStatus, bool)
 	ReadEnvelopeFromDiskFn       func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
@@ -476,9 +476,9 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 	return true
 }
 
-func (f *ForkChoiceStorageMock) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
-	if f.GetHeadPayloadStatusFn != nil {
-		return f.GetHeadPayloadStatusFn(root)
+func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	if f.ResolveHeadPayloadStatusFn != nil {
+		return f.ResolveHeadPayloadStatusFn(root)
 	}
 	if f.HeadPayloadStatusInvalidated.Load() {
 		_, _, _ = f.GetHead(nil)

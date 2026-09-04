@@ -143,9 +143,9 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return f.getHead(auxilliaryState)
 }
 
-// GetHeadPayloadStatus returns the current head's payload status when it matches root. It
-// recomputes an invalidated cache, but a valid cache for another root is reported as a mismatch.
-func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+// ResolveHeadPayloadStatus returns the current head's payload status when it matches root. An
+// invalidated Gloas head is recomputed, cached, and published; a valid different head is a mismatch.
+func (f *ForkChoiceStore) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
 	status, matches, ready := f.cachedHeadPayloadStatus(root)
 	if ready {
 		return status, matches
@@ -155,8 +155,8 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.Payloa
 	}
 	head, _, status, err := f.getHeadGloasWithPayloadStatus()
 	if err != nil {
-		if f.shouldLogHeadPayloadStatusFailure(time.Now()) {
-			log.Warn("GetHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
+		if f.shouldLogHeadResolutionFailure(time.Now()) {
+			log.Warn("ResolveHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
 		}
 		return cltypes.PayloadStatusPending, false
 	}
@@ -166,7 +166,7 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.Payloa
 	return status, true
 }
 
-func (f *ForkChoiceStore) shouldLogHeadPayloadStatusFailure(now time.Time) bool {
+func (f *ForkChoiceStore) shouldLogHeadResolutionFailure(now time.Time) bool {
 	nowNanos := now.UnixNano()
 	for {
 		previous := f.headPayloadStatusLogAt.Load()

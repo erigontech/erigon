@@ -833,7 +833,7 @@ func (a *ApiHandler) isPreGloasParent(baseState *state.CachingBeaconState) bool 
 }
 
 func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) gloasPayloadPath {
-	status, matchesHead := a.forkchoiceStore.GetHeadPayloadStatus(baseBlockRoot)
+	status, matchesHead := a.forkchoiceStore.ResolveHeadPayloadStatus(baseBlockRoot)
 	if !matchesHead {
 		return gloasPayloadPathPending
 	}

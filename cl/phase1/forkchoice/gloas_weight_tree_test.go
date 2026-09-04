@@ -177,7 +177,7 @@ func TestGetHeadPublishesAnchorFallback(t *testing.T) {
 	require.Equal(t, slot, selectedSlot)
 }
 
-func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
+func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -217,7 +217,7 @@ func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, selectedRoot, recomputedRoot)
 	require.Equal(t, selectedSlot, recomputedSlot)
-	expectedStatus, matchesHead := store.GetHeadPayloadStatus(root)
+	expectedStatus, matchesHead := store.ResolveHeadPayloadStatus(root)
 	require.True(t, matchesHead)
 	require.Equal(t, expectedStatus, recomputedStatus)
 
@@ -226,12 +226,12 @@ func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	store.headPayloadStatus = cltypes.PayloadStatusPending
 	store.mu.Unlock()
 
-	status, matchesHead := store.GetHeadPayloadStatus(root)
+	status, matchesHead := store.ResolveHeadPayloadStatus(root)
 	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
 	require.Equal(t, expectedStatus, status)
 }
 
-func TestGetHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
+func TestResolveHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	manager := synced_data.NewSyncedDataManager(&cfg, true)
 	root := common.Hash{0xaa}
@@ -252,7 +252,7 @@ func TestGetHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
 	store.proposerBoostRoot.Store(common.Hash{})
 	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
 
-	status, matchesHead := store.GetHeadPayloadStatus(root)
+	status, matchesHead := store.ResolveHeadPayloadStatus(root)
 
 	require.False(t, matchesHead)
 	require.Equal(t, cltypes.PayloadStatusPending, status)
@@ -264,9 +264,9 @@ func TestHeadPayloadStatusWarningIsRateLimited(t *testing.T) {
 	store := newGloasWeightTreeTestStore()
 	startedAt := time.Unix(100, 0)
 
-	require.True(t, store.shouldLogHeadPayloadStatusFailure(startedAt))
-	require.False(t, store.shouldLogHeadPayloadStatusFailure(startedAt.Add(time.Minute-time.Nanosecond)))
-	require.True(t, store.shouldLogHeadPayloadStatusFailure(startedAt.Add(time.Minute)))
+	require.True(t, store.shouldLogHeadResolutionFailure(startedAt))
+	require.False(t, store.shouldLogHeadResolutionFailure(startedAt.Add(time.Minute-time.Nanosecond)))
+	require.True(t, store.shouldLogHeadResolutionFailure(startedAt.Add(time.Minute)))
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
@@ -822,18 +822,18 @@ func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
 	require.Zero(t, applyWeightDelta(3, 10, false))
 }
 
-func TestGetHeadPayloadStatusRequiresMatchingRoot(t *testing.T) {
+func TestResolveHeadPayloadStatusRequiresMatchingRoot(t *testing.T) {
 	headRoot := common.Hash{0x41}
 	store := &ForkChoiceStore{
 		headHash:          headRoot,
 		headPayloadStatus: cltypes.PayloadStatusFull,
 	}
 
-	status, ok := store.GetHeadPayloadStatus(headRoot)
+	status, ok := store.ResolveHeadPayloadStatus(headRoot)
 	require.True(t, ok)
 	require.Equal(t, cltypes.PayloadStatusFull, status)
 
-	status, ok = store.GetHeadPayloadStatus(common.Hash{0x42})
+	status, ok = store.ResolveHeadPayloadStatus(common.Hash{0x42})
 	require.False(t, ok)
 	require.Equal(t, cltypes.PayloadStatusPending, status)
 }
