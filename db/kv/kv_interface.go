@@ -465,7 +465,24 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	buf         []byte
 }
+
+// WithBuf offers a buffer to decompress a file-resident value into, so a hot
+// reader can reuse one allocation instead of taking a fresh one per call. The
+// returned value is only the buffer when it was big enough and the value came
+// from a file; a db-resident value still points into the tx's pages. So the
+// caller must treat the result as valid until its own next read with the same
+// buffer, which is stricter than the plain end-of-tx lifetime.
+//
+// A buffered read skips the per-DomainRoTx file cache: that cache outlives the
+// call and must not retain memory the caller is about to overwrite.
+func (opts GetLatestOptions) WithBuf(buf []byte) GetLatestOptions {
+	opts.buf = buf
+	return opts
+}
+
+func (opts GetLatestOptions) Buf() []byte { return opts.buf }
 
 func (opts GetLatestOptions) WithMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOptions {
 	opts.metrics, opts.start = metrics, start

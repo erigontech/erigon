@@ -206,7 +206,7 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -251,7 +251,7 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -296,7 +296,7 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
@@ -341,7 +341,7 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
-			k, _, _, _, err := bt.Get(keys[p], getter)
+			k, _, _, _, err := bt.Get(keys[p], nil, getter)
 			if err != nil {
 				panic(err)
 			}
