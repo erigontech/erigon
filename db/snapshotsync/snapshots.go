@@ -1653,17 +1653,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 
 	// The older index of an equal-range pair is what no segment resolves to once the newer
 	// one exists, so reclamation never reaches it: unlink it here instead of leaking it.
-	if len(supersededIdx) > 0 {
-		held := s.heldIdxPaths()
-		orphans := make([]string, 0, len(supersededIdx))
-		for i := range supersededIdx {
-			if _, ok := held[supersededIdx[i].Path]; ok {
-				continue
-			}
-			orphans = append(orphans, supersededIdx[i].Path)
-		}
-		removeOldFiles(orphans) // pairs each file with its .torrent, as reclamation does
-	}
+	s.removeOrphanedIdx(supersededIdx)
 
 	// remove .tmp files
 	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
@@ -1677,11 +1667,16 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	return nil
 }
 
-// heldIdxPaths is every index file a dirty segment still has open, so a superseded index
-// a reader resolved before its newer sibling landed is not unlinked out from under it.
-func (s *BaseRoSnapshots) heldIdxPaths() map[string]struct{} {
+// removeOrphanedIdx unlinks the superseded index files no dirty segment has open. The read
+// lock spans the unlink: released earlier, a concurrent openSegments could resolve one of
+// these files between the check and the unlink, and Windows refuses to unlink an open file.
+func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
+	if len(superseded) == 0 {
+		return
+	}
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()
+
 	held := make(map[string]struct{})
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
@@ -1695,7 +1690,15 @@ func (s *BaseRoSnapshots) heldIdxPaths() map[string]struct{} {
 			return true
 		})
 	}
-	return held
+
+	orphans := make([]string, 0, len(superseded))
+	for i := range superseded {
+		if _, ok := held[superseded[i].Path]; ok {
+			continue
+		}
+		orphans = append(orphans, superseded[i].Path)
+	}
+	removeOldFiles(orphans) // pairs each file with its .torrent, as reclamation does
 }
 
 func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []string, err error) {
