@@ -33,7 +33,7 @@ import (
 func manyPairs() [][2]string {
 	const prefix = "0xf90211a0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	pairs := make([][2]string, 0, 500)
-	for i := 0; i < 500; i++ {
+	for i := range 500 {
 		c := string(rune('A' + i%26))
 		pairs = append(pairs, [2]string{prefix + "key" + c, prefix + "val" + c})
 	}
