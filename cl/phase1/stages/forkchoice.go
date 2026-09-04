@@ -239,7 +239,13 @@ func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint6
 	nextSlot := headSlot + 1
 
 	epoch := cfg.ethClock.GetEpochAtSlot(nextSlot)
-	randaoMix := s.GetRandaoMixes(epoch)
+	// Read the mix at the HEAD's epoch, not the next slot's. An epoch transition copies the current epoch's
+	// mix into the next epoch's slot (process_randao_mixes_reset), and the head state has not run that
+	// transition yet when nextSlot begins a new epoch — so the next epoch's entry still holds whatever it
+	// last held, genesis on the first pass round the ring. The proposer advances its state through the
+	// transition and therefore computes the copied value, so reading the next epoch's entry here disagrees
+	// with the proposer on exactly the first slot of every epoch. Within an epoch the two are identical.
+	randaoMix := s.GetRandaoMixes(cfg.ethClock.GetEpochAtSlot(headSlot))
 
 	proposerIndex, err := s.GetBeaconProposerIndexForSlot(nextSlot)
 	if err != nil {
@@ -259,8 +265,14 @@ func emitNextPaylodAttributesEvent(ctx context.Context, cfg *Cfg, headSlot uint6
 			Address:   w.Address,
 		})
 	}
+	// Derive the timestamp from the SLOT, as the proposer does (ComputeTimestampAtSlot), not by adding one
+	// slot to the head payload's time. The two agree only when the head sits exactly one slot back: at
+	// genesis the head payload time is 0, so this said 2, and after any missed slot it lags by the slots
+	// missed. Either way the execution layer opened the block under a timestamp the proposer then
+	// contradicted, forcing a re-open — which re-executes the accumulated body, the one thing the DAG-L2
+	// seal exists to avoid.
 	payloadAttributes := engine_types.PayloadAttributes{
-		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
+		Timestamp:             hexutil.Uint64(state.ComputeTimestampAtSlot(s, nextSlot)),
 		PrevRandao:            randaoMix,
 		SuggestedFeeRecipient: (common.Address{}), // We can not know this ahead of time
 		ParentBeaconBlockRoot: &headRoot,

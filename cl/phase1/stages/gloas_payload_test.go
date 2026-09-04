@@ -386,6 +386,10 @@ func (t *testExecutionEngine) NewPayload(context.Context, *cltypes.Eth1Block, *c
 	return t.payloadStatus, nil
 }
 
+func (t *testExecutionEngine) NewPayloadAttrs(context.Context, common.Hash, *engine_types.PayloadAttributes) error {
+	return nil
+}
+
 func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
 	return nil, nil
 }

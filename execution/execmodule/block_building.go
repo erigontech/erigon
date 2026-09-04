@@ -386,7 +386,7 @@ func (e *ExecModule) reconcileForAssembleLocked(ctx context.Context, params *bui
 		if params.ParentBeaconBlockRoot != nil {
 			reqPbbr = *params.ParentBeaconBlockRoot
 		}
-		e.logger.Info("[execmodule] attrs changed for the open block — re-opening", "txs", len(body),
+		e.logger.Info("[execmodule] attrs changed for the open block — re-opening", "block", e.flash.num, "txs", len(body),
 			"builtTs", built.Timestamp, "reqTs", params.Timestamp,
 			"builtRandao", built.PrevRandao, "reqRandao", params.PrevRandao,
 			"builtCoinbase", built.FeeRecipient, "reqCoinbase", params.SuggestedFeeRecipient,
