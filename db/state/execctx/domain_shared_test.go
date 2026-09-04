@@ -388,6 +388,43 @@ func TestNewSharedDomains_StateAheadOfBlocks(t *testing.T) {
 // that re-advances past the step boundary.
 //
 // After the final unwind the commitment "state" key and the commitment values
+
+// requireNoCommitmentStepAbove fails when the commitment values table still holds
+// an entry above maxStep -- the "orphan" entries that made mainnet execution
+// resume from stale commitment state.
+func requireNoCommitmentStepAbove(t *testing.T, rwTx kv.TemporalRwTx, maxStep uint64) {
+	t.Helper()
+	require := require.New(t)
+
+	var c kv.Cursor
+	{
+		var err error
+		c, err = rwTx.Cursor(kv.TblCommitmentVals)
+		require.NoError(err)
+	}
+	defer c.Close()
+
+	offending := 0
+	var exampleStep uint64
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(err)
+		if len(v) < 8 {
+			continue
+		}
+		step := ^binary.BigEndian.Uint64(v[:8])
+		if step > maxStep {
+			if offending == 0 {
+				exampleStep = step
+			}
+			offending++
+		}
+	}
+	require.Zerof(offending,
+		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
+			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
+		offending, maxStep, exampleStep)
+}
+
 // table must not contain entries at a step beyond the unwind target —
 // otherwise the next `SeekCommitment` will return a blockNum > TxNums.Last()
 // and execution will skip blocks.
@@ -408,21 +445,11 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	const lastBlock = uint64(29)
 	const unwindTarget = uint64(4) // inside step 0
 
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(err)
-	defer rwTx.Rollback()
-	for bn := uint64(0); bn <= lastBlock; bn++ {
-		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
-	}
-
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(err)
-	defer doms.Close()
 	addr := make([]byte, length.Addr)
 	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
 	blockHashes := make(map[uint64]common.Hash)
 
-	executeRange := func(from, to uint64) {
+	executeRange := func(doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, from, to uint64) {
 		for bn := from; bn <= to; bn++ {
 			cs := &changeset.StateChangeSet{}
 			doms.SetChangesetAccumulator(cs)
@@ -443,6 +470,17 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		}
 	}
 
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(err)
+	defer rwTx.Rollback()
+	for bn := uint64(0); bn <= lastBlock; bn++ {
+		require.NoError(rawdbv3.TxNums.Append(rwTx, bn, bn))
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(err)
+	defer doms.Close()
+
 	unwindTo := func(target uint64, curBlock uint64) {
 		var merged [kv.DomainLen][]kv.DomainEntryDiff
 		for bn := curBlock; bn > target; bn-- {
@@ -460,19 +498,19 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	}
 
 	// Cycle 1: execute 0..lastBlock, flush, unwind, flush.
-	executeRange(0, lastBlock)
+	executeRange(doms, rwTx, 0, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 	unwindTo(unwindTarget, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Cycle 2: re-execute, unwind, flush.
-	executeRange(unwindTarget+1, lastBlock)
+	executeRange(doms, rwTx, unwindTarget+1, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 	unwindTo(unwindTarget, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 
 	// Cycle 3: re-execute, unwind, flush.
-	executeRange(unwindTarget+1, lastBlock)
+	executeRange(doms, rwTx, unwindTarget+1, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
 	unwindTo(unwindTarget, lastBlock)
 	require.NoError(doms.Flush(ctx, rwTx))
@@ -486,29 +524,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
 		postBlock, unwindTarget)
 	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
-	maxStep := unwindTarget / stepSize
-	c, err := rwTx.Cursor(kv.TblCommitmentVals)
-	require.NoError(err)
-	defer c.Close()
-	offending := 0
-	var exampleStep uint64
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
-		require.NoError(err)
-		if len(v) < 8 {
-			continue
-		}
-		step := ^binary.BigEndian.Uint64(v[:8])
-		if step > maxStep {
-			if offending == 0 {
-				exampleStep = step
-			}
-			offending++
-		}
-	}
-	require.Zerof(offending,
-		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
-			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
-		offending, maxStep, exampleStep)
+	requireNoCommitmentStepAbove(t, rwTx, unwindTarget/stepSize)
 }
 
 // TestSharedDomain_MergeUnwindAcrossStepBoundary exercises the raw-changeset
@@ -823,6 +839,21 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 	// Blocks 0..19 span step 0 (0..9) and step 1 (10..19).
 	const lastBlock = uint64(19)
 	const unwindTarget = uint64(4) // inside step 0
+	addr := make([]byte, length.Addr)
+	addr[0] = 0x42
+
+	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
+	executeBlock := func(doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, bn uint64, fn func()) {
+		cs := &changeset.StateChangeSet{}
+		doms.SetChangesetAccumulator(cs)
+		fn()
+		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
+		require.NoError(err)
+		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
+		perBlockDiffs[bn] = cs
+		doms.SetChangesetAccumulator(nil)
+	}
+
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(err)
 	defer rwTx.Rollback()
@@ -833,21 +864,6 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer doms.Close()
-
-	addr := make([]byte, length.Addr)
-	addr[0] = 0x42
-
-	perBlockDiffs := make(map[uint64]*changeset.StateChangeSet)
-	executeBlock := func(bn uint64, fn func()) {
-		cs := &changeset.StateChangeSet{}
-		doms.SetChangesetAccumulator(cs)
-		fn()
-		rh, err := doms.ComputeCommitment(ctx, rwTx, true, bn, bn, "", nil)
-		require.NoError(err)
-		doms.SavePastChangesetAccumulator(common.BytesToHash(rh), bn, cs)
-		perBlockDiffs[bn] = cs
-		doms.SetChangesetAccumulator(nil)
-	}
 
 	// Forward execution:
 	//   block 0 (step 0): write addr = {nonce=1, balance=100}
@@ -863,17 +879,17 @@ func TestSharedDomain_UnwindWithDeleteAcrossStepBoundary(t *testing.T) {
 
 	pv0, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 	require.NoError(err)
-	executeBlock(0, func() {
+	executeBlock(doms, rwTx, 0, func() {
 		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc1Bytes, 0, pv0))
 	})
 	pv5, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 	require.NoError(err)
-	executeBlock(5, func() {
+	executeBlock(doms, rwTx, 5, func() {
 		require.NoError(doms.DomainPut(kv.AccountsDomain, rwTx, addr, acc2Bytes, 5, pv5))
 	})
 	pv15, _, err := doms.GetLatest(kv.AccountsDomain, rwTx, addr)
 	require.NoError(err)
-	executeBlock(15, func() {
+	executeBlock(doms, rwTx, 15, func() {
 		require.NoError(doms.DomainDel(kv.AccountsDomain, rwTx, addr, 15, pv15))
 	})
 	require.NoError(doms.Flush(ctx, rwTx))

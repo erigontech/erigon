@@ -466,11 +466,12 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remoteproto.SnapshotsRequest)
 	return reply, nil
 }
 
-func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, err error) {
+func (s *KvServer) Sequence(_ context.Context, req *remoteproto.SequenceReq) (reply *remoteproto.SequenceReply, _ error) {
 	reply = &remoteproto.SequenceReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		var err error
 		reply.Value, err = tx.ReadSequence(req.Table)
-		return nil
+		return err
 	}); err != nil {
 		return nil, err
 	}
@@ -529,7 +530,7 @@ func (s *StateChangePubSub) remove(id uint) {
 // Temporal methods
 //
 
-func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, err error) {
+func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (reply *remoteproto.GetLatestReply, _ error) {
 	domainName, err := kv.String2Domain(req.Table)
 	if err != nil {
 		return nil, err

@@ -695,7 +695,8 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 
 var emptyHash = common.Hash{}
 
-func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
+func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, _ error) {
+	var err error
 	h, err = rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
 		return emptyHash, false, err
