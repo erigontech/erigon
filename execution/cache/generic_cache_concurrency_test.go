@@ -938,3 +938,40 @@ func TestGrowLRU_CloseStopsFurtherReservations(t *testing.T) {
 // spreadKey mixes a counter into the bits freelru selects a shard with, so a
 // test fills a growLRU the way hashed production keys do.
 func spreadKey(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+// The envelope is charged one way and audited another: growBytes prices a step
+// as a per-shard delta, generationBytes prices a whole generation. They agree
+// only by telescoping, which nothing enforces, so an edit to either drifts the
+// reservation away from what the cache holds without any test noticing. At a
+// ceiling every shard has reached, the sum of the steps is the generation.
+func TestGenericCache_StepAndGenerationCostsAgreeAtTheCeiling(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(0)
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prevProcs)
+		cachebudget.Global = prevBudget
+	})
+
+	key := make([]byte, 32)
+	for _, procs := range []int{1, 8, 64} {
+		runtime.GOMAXPROCS(procs)
+		for _, budget := range []datasize.ByteSize{1 * datasize.MB, 16 * datasize.MB} {
+			cachebudget.Global = cachebudget.New(math.MaxInt64)
+			c := NewGenericCacheWithAvg[[]byte](budget, avgStoragePayloadBytes,
+				func(v []byte) int { return len(v) }, ModeEvictLRU)
+			for i := range 40 * int(c.maxCap) {
+				binary.BigEndian.PutUint64(key, uint64(i))
+				c.Put(key, key[:8], 1)
+			}
+			require.Equal(t, int(c.maxCap), c.data.Load().Cap(),
+				"procs=%d budget=%s: the fill left a shard below the ceiling, so the sums are not comparable",
+				procs, budget)
+			require.Equal(t, c.generationBytes(c.maxCap), c.reservedBytes.Load(),
+				"procs=%d budget=%s: the steps charged %d B for a generation costing %d B",
+				procs, budget, c.reservedBytes.Load(), c.generationBytes(c.maxCap))
+			require.Equal(t, c.reservedBytes.Load(), cachebudget.Global.Used(),
+				"procs=%d budget=%s", procs, budget)
+			c.Close()
+		}
+	}
+}
