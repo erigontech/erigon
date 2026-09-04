@@ -648,7 +648,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			return err
 		}
 		if tv == nil {
-			if err = collect(nil); err != nil {
+			if err := collect(nil); err != nil {
 				return err
 			}
 			return nil

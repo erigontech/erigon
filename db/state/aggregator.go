@@ -216,7 +216,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 		salt = &saltV
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, *salt)
-		if err = dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
 		}
 		return salt, nil // Return the newly created salt directly

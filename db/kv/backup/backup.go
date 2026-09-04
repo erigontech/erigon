@@ -284,7 +284,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	}
 	defer ra.Close()
 
-	if err = dst.Update(ctx, func(tx kv.RwTx) error {
+	if err := dst.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ClearTable(table)
 	}); err != nil {
 		return 0, err

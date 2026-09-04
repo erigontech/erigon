@@ -257,7 +257,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
 			}
 		}

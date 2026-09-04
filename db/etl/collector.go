@@ -296,7 +296,7 @@ func (c *Collector) Close() {
 // this continues until all providers have reached their EOF.
 func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) (err error) {
 	for _, provider := range providers {
-		if err = provider.Wait(); err != nil {
+		if err := provider.Wait(); err != nil {
 			return err
 		}
 	}
@@ -320,7 +320,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 	for h.Len() > 0 {
 		i++
 		if i%1024 == 0 {
-			if err = common.Stopped(args.Quit); err != nil {
+			if err := common.Stopped(args.Quit); err != nil {
 				return err
 			}
 		}
@@ -334,7 +334,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		switch args.BufferType {
 		case SortableOldestAppearedBuffer:
 			if !bytes.Equal(prevK, element.Key) {
-				if err = loadFunc(element.Key, element.Value); err != nil {
+				if err := loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
 				prevK = element.Key
@@ -342,7 +342,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 		case SortableAppendBuffer:
 			if !bytes.Equal(prevK, element.Key) {
 				if prevK != nil {
-					if err = loadFunc(prevK, prevV); err != nil {
+					if err := loadFunc(prevK, prevV); err != nil {
 						return err
 					}
 				}
@@ -352,7 +352,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				prevV = append(prevV, element.Value...)
 			}
 		default:
-			if err = loadFunc(element.Key, element.Value); err != nil {
+			if err := loadFunc(element.Key, element.Value); err != nil {
 				return err
 			}
 		}

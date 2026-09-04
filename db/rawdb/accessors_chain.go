@@ -756,7 +756,7 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 			break
 		}
 		bodyForStorage := types.BodyForStorage{}
-		if err = rlp.DecodeBytes(data, &bodyForStorage); err != nil {
+		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
 			return err
 		}
 

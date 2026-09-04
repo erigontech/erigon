@@ -282,7 +282,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				}
 			}
 
-			if err = writer.Compress(); err != nil {
+			if err := writer.Compress(); err != nil {
 				return err
 			}
 			writer.Close()
@@ -629,7 +629,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				return fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", pruneErr)
 			}
 		}
-		if err = pruneRwTx.Commit(); err != nil {
+		if err := pruneRwTx.Commit(); err != nil {
 			return err
 		}
 
@@ -734,8 +734,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Info("[rebuild_commitment_history] step start",
 			"step", currentStep, "blockFrom", blockFrom, "blockTo", batchEnd)
 
-		//nolint:gocritic
 		var roTx kv.TemporalTx
+		//nolint:gocritic
 		roTx, err = rwDb.BeginTemporalRo(ctx)
 		if err != nil {
 			return nil, err
@@ -806,7 +806,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		blockFrom = batchEnd + 1
 
-		if err = flushDomainsAndRebuild(); err != nil {
+		if err := flushDomainsAndRebuild(); err != nil {
 			return nil, err
 		}
 	}

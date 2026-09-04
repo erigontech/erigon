@@ -92,7 +92,7 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err = dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
 		}
 	}
@@ -524,7 +524,7 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 
 		for g.HasNext() {
 			word, nextPos = g.Next(word[:0])
-			if err = walker(rs, i, offset, word); err != nil {
+			if err := walker(rs, i, offset, word); err != nil {
 				return err
 			}
 			i++
@@ -582,7 +582,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 
 		for g.HasNext() {
 			word, nextPos = g.Next(word[:0])
-			if err = walker(rs, i, offset, word); err != nil {
+			if err := walker(rs, i, offset, word); err != nil {
 				return err
 			}
 			i++

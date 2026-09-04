@@ -1314,7 +1314,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 		// Reset positions at the start of each iteration to handle collision retries correctly
 		var keyPos, valPos uint64
 		word := make([]byte, 0, 256)
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		g.Reset(0)

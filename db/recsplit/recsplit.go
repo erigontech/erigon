@@ -981,15 +981,15 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	if rs.workers > 1 {
-		if err = rs.buildWithWorkers(ctx); err != nil {
+		if err := rs.buildWithWorkers(ctx); err != nil {
 			return err
 		}
 	} else {
-		if err = rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 		if len(rs.currentBucket) > 0 {
-			if err = rs.recsplitCurrentBucket(); err != nil {
+			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
 		}
@@ -999,7 +999,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		if err = rs.buildOffsetEf(); err != nil {
+		if err := rs.buildOffsetEf(); err != nil {
 			return err
 		}
 		defer func() {
@@ -1061,7 +1061,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		rs.offsetEf.Close()
 		rs.offsetEf = nil
 	}
-	if err = rs.flushExistenceFilter(); err != nil {
+	if err := rs.flushExistenceFilter(); err != nil {
 		return err
 	}
 	// Write out the size of golomb rice params
@@ -1078,13 +1078,13 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("writing elias fano: %w", err)
 	}
 
-	if err = rs.indexW.Flush(); err != nil {
+	if err := rs.indexW.Flush(); err != nil {
 		return err
 	}
-	if err = rs.fsync(); err != nil {
+	if err := rs.fsync(); err != nil {
 		return err
 	}
-	if err = rs.indexF.Close(); err != nil {
+	if err := rs.indexF.Close(); err != nil {
 		return err
 	}
 
