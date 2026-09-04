@@ -181,14 +181,68 @@ func TestGrowGloasContributionsGrowsAmortized(t *testing.T) {
 	applied := growGloasContributions(nil, 1)
 	require.Len(t, applied, 1)
 	require.Equal(t, 1, cap(applied))
+	applied[0] = gloasVoteContribution{contribution: 42, set: true}
 
 	applied = growGloasContributions(applied, 2)
 	require.Len(t, applied, 2)
 	require.Equal(t, 2, cap(applied))
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
 
 	applied = growGloasContributions(applied, 3)
 	require.Len(t, applied, 3)
 	require.Greater(t, cap(applied), len(applied))
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
+func TestGrowGloasContributionsReusesCapacity(t *testing.T) {
+	applied := make([]gloasVoteContribution, 1, 3)
+	applied[0] = gloasVoteContribution{contribution: 42, set: true}
+	first := &applied[0]
+
+	applied = growGloasContributions(applied, 3)
+
+	require.Len(t, applied, 3)
+	require.Equal(t, 3, cap(applied))
+	require.Same(t, first, &applied[0])
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
+func TestGrowGloasContributionsClearsReexposedCapacity(t *testing.T) {
+	backing := []gloasVoteContribution{
+		{contribution: 42, set: true},
+		{contribution: 64, set: true},
+		{contribution: 128, set: true},
+	}
+	applied := backing[:1]
+	first := &applied[0]
+
+	applied = growGloasContributions(applied, len(backing))
+
+	require.Same(t, first, &applied[0])
+	require.Equal(t, gloasVoteContribution{contribution: 42, set: true}, applied[0])
+	require.Equal(t, gloasVoteContribution{}, applied[1])
+	require.Equal(t, gloasVoteContribution{}, applied[2])
+}
+
+func TestGrowGloasContributionsNoGrowth(t *testing.T) {
+	require.Nil(t, growGloasContributions(nil, 0))
+
+	applied := []gloasVoteContribution{{contribution: 42, set: true}, {contribution: 64}}
+	first := &applied[0]
+
+	unchanged := growGloasContributions(applied, len(applied))
+	require.Len(t, unchanged, len(applied))
+	require.Same(t, first, &unchanged[0])
+	require.Equal(t, applied, unchanged)
+
+	notShrunk := growGloasContributions(applied, 1)
+	require.Len(t, notShrunk, len(applied))
+	require.Same(t, first, &notShrunk[0])
+	require.Equal(t, applied, notShrunk)
 }
 
 func TestGloasMarksDirtyWeightTree(t *testing.T) {

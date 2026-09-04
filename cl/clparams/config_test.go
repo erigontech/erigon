@@ -49,6 +49,27 @@ func TestChiadoDoesNotConfigureStaticPeers(t *testing.T) {
 	require.Empty(t, network.StaticPeers)
 }
 
+func TestGnosisNetworksUseConfiguredBlockRequestWindow(t *testing.T) {
+	gnosis := BeaconConfigs[chainspec.GnosisChainID]
+	chiado := BeaconConfigs[chainspec.ChiadoChainID]
+	require.Equal(t, uint64(33_024), gnosis.MinEpochsForBlockRequests())
+	require.Equal(t, uint64(33_024), chiado.MinEpochsForBlockRequests())
+}
+
+func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
+	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
+	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MIN_EPOCHS_FOR_BLOCK_REQUESTS: 12345\n"), 0o644))
+
+	beaconCfg, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
+}
+
 func TestCaplinConfigCanSetStaticPeers(t *testing.T) {
 	network := NetworkConfigs[chainspec.ChiadoChainID]
 
