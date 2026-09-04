@@ -57,6 +57,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -103,6 +104,9 @@ type Downloader struct {
 	activeDownloadRequestsLock sync.Mutex
 	activeDownloadRequests     int
 	zeroActiveDownloadRequests sync.Cond
+
+	// Caps concurrent whole-file hashing by kept-snapshot seeding across all batches.
+	seedSem *semaphore.Weighted
 
 	// Synchronizes state-sensitive changes to things affected by Downloader.Close.
 	lock           sync.RWMutex
@@ -328,6 +332,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	d.logConfig()
 
 	d.ctx, d.stop = context.WithCancel(context.Background())
+	d.seedSem = semaphore.NewWeighted(int64(defaultSeedConcurrency()))
 
 	return d, nil
 }
@@ -493,8 +498,18 @@ func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	})
 }
 
-// Check snapshot data looks right.
-func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
+// preverified.toml is written once the initial snapshot set completes, pinning the local hash set.
+// Read on every call: the snapshot stage writes the file mid-run, and from that moment local data
+// must be kept.
+func (d *Downloader) initialDownloadComplete() (bool, error) {
+	complete, err := dir.FileExist(d.cfg.Dirs.PreverifiedPath())
+	if err != nil {
+		return false, fmt.Errorf("checking %v: %w", d.cfg.Dirs.PreverifiedPath(), err)
+	}
+	return complete, nil
+}
+
+func (d *Downloader) snapshotDataSizesMatch(info *metainfo.Info) bool {
 	for f := range info.UpvertedFilesIter() {
 		pathParts := append([]string{info.BestName()}, f.BestPath()...)
 		slashPath := path.Join(pathParts...)
@@ -760,9 +775,16 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
 	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
-	_, _, err = d.addCompleteTorrent(name)
+	t, isNew, err := d.addCompleteTorrent(name)
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
+	}
+	// addTorrent starts every torrent with DisallowDataUpload, so a seedable file
+	// that never reaches afterAdd is registered and still cannot upload a byte.
+	// AddTorrentsFromDisk runs afterAdd over its own new torrents; this is the
+	// other path that adds one.
+	if isNew {
+		d.afterAdd(t)
 	}
 	return nil
 }
@@ -772,9 +794,9 @@ func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, e
 	return metainfo.LoadFromFile(miPath)
 }
 
-// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
-// errors.
-func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (miOpt g.Option[*metainfo.MetaInfo], err error) {
+// Loads metainfo from disk. Returns Some metainfo if it's valid, None if it is missing. An invalid
+// metainfo is returned as an error and left on disk.
+func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (localMetainfo g.Option[*metainfo.MetaInfo], err error) {
 	miPath := d.metainfoFilePathForName(name)
 	mi, err := metainfo.LoadFromFile(miPath)
 	if err != nil {
@@ -783,7 +805,7 @@ func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (miOpt g.Option[*met
 		}
 		return
 	}
-	miOpt.Set(mi)
+	localMetainfo.Set(mi)
 	return
 }
 
@@ -832,6 +854,7 @@ func (d *Downloader) startSnapshotsDownload(
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
 	var batchCtx context.Context
 	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
 
 	batch.all.Go(func() {
 		d.logDownload(
@@ -855,7 +878,7 @@ func (d *Downloader) startSnapshotsDownload(
 
 	defer func() {
 		if err != nil {
-			batch.abandon()
+			err = batch.end(ctx, err)
 		}
 	}()
 	err = batch.addAllItems(ctx, items)
@@ -1000,39 +1023,58 @@ func (d *Downloader) testStartSingleDownloadNoWait(
 	return err
 }
 
-func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (err error) {
-	_, ok := d.torrentClient.Torrent(infoHash)
+// Moves data aside so a download can't reuse it. Only legal while the initial download is
+// incomplete: after that the local files are what this node built or restored, and nothing may
+// remove them.
+func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metainfo.Hash) (err error) {
+	complete, err := d.initialDownloadComplete()
+	if err != nil {
+		return err
+	}
+	if complete {
+		return fmt.Errorf("refusing to invalidate %q: initial download is complete", name)
+	}
+	_, ok := d.torrentClient.Torrent(preverifiedInfoHash)
 	// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
 	// the existing name earlier.
 	panicif.True(ok)
 	// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
 	// to wait until another torrent is fetched, and then we mistake a non-partial file with
 	// the correct size as being complete.
-	err = os.Rename(d.filePathForName(name), d.filePathForName(name+".part"))
-	if err != nil && errors.Is(err, os.ErrNotExist) {
-		err = nil
+	from := d.filePathForName(name)
+	to := d.filePathForName(name + ".part")
+	err = os.Rename(from, to)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		return
 	}
+	d.log(log.LvlWarn, "invalidated local snapshot data, will re-download",
+		"name", name, "renamed_to", to, "preverified", preverifiedInfoHash)
 	return
 }
 
 // Download a preverified file. That means it has a published manifest (metainfo), and a known info
 // hash. Caller is responsible for flushing missing metainfos to disk when complete.
 func (d *Downloader) addPreverifiedSnapshotForDownload(
-	infoHash metainfo.Hash,
+	preverifiedInfoHash metainfo.Hash,
 	name string,
 ) (
-	t *torrent.Torrent,
-	// First add of this Torrent that asked to download. The caller is responsible for adding
-	// download tasks.
-	firstDownloader bool,
-	miOpt g.Option[*metainfo.MetaInfo],
+	// None when local data wins.
+	snapshotTorrent g.Option[*torrent.Torrent],
+	firstDownloader bool, // First add of this Torrent that asked to download. The caller is responsible for adding download tasks.
+	localMetainfo g.Option[*metainfo.MetaInfo],
+	// Local data was kept and no torrent is registered for it. The caller seeds it, off d.lock:
+	// deriving a metainfo hashes the whole file.
+	keptLocal bool,
 	err error,
 ) {
 	// Prevent anyone else from trying to add a torrent in the meanwhile, so we can do data
 	// invalidation, and identify the first downloader.
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
+	t, ok, err := d.getExistingSnapshotTorrent(name, preverifiedInfoHash)
 	if err != nil {
 		// If a torrent for this name is already loaded with a different infohash, keep the
 		// existing local torrent and skip the preverified download. This handles the case where
@@ -1043,12 +1085,12 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 		// by AddTorrentsFromDisk before initial sync runs) is tracked separately. The proper fix
 		// is to run initial sync before AddTorrentsFromDisk so the preverified TOML hashes can
 		// always take precedence. See: https://github.com/erigontech/erigon/issues/19435
-		if existingT, nameOk := d.torrentsByName[name]; nameOk && existingT.InfoHash() != infoHash {
+		if existingT, nameOk := d.torrentsByName[name]; nameOk && existingT.InfoHash() != preverifiedInfoHash {
 			d.log(log.LvlWarn, "snapshot already loaded with different infohash, keeping existing local torrent (preverified skipped)",
 				"name", name,
 				"existing_infohash", existingT.InfoHash().HexString(),
-				"preverified_infohash", infoHash.HexString())
-			t = existingT
+				"preverified_infohash", preverifiedInfoHash.HexString())
+			snapshotTorrent.Set(existingT)
 			err = nil
 			return
 		}
@@ -1056,74 +1098,171 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	}
 	// We can invalidate data if a torrent isn't yet loaded.
 	if !ok {
-		miOpt, err = d.loadMatchingMetainfoOrInvalidateData(infoHash, name)
-		if err != nil {
+		var isNew bool
+		var addedTorrent g.Option[*torrent.Torrent]
+		addedTorrent, isNew, localMetainfo, keptLocal, err = d.addTorrentForPreverifiedSnapshot(preverifiedInfoHash, name)
+		if err != nil || !addedTorrent.Ok {
 			return
 		}
-		var new bool
-		t, new, err = d.addTorrent(name, infoHash)
-		if err != nil {
-			return
-		}
-		panicif.False(new)
+		panicif.False(isNew)
+		t = addedTorrent.Value
 	}
 	g.MakeMapIfNil(&d.downloads)
 	firstDownloader = !g.MapInsert(d.downloads, t, struct{}{}).Ok
+	snapshotTorrent.Set(t)
 	return
 }
 
-func (d *Downloader) loadMatchingMetainfoOrInvalidateData(
-	infoHash metainfo.Hash,
+func (d *Downloader) addTorrentForPreverifiedSnapshot(
+	preverifiedInfoHash metainfo.Hash,
 	name string,
 ) (
-	miOpt g.Option[*metainfo.MetaInfo],
+	// None when local data wins.
+	addedTorrent g.Option[*torrent.Torrent],
+	isNew bool,
+	localMetainfo g.Option[*metainfo.MetaInfo],
+	keptLocal bool,
 	err error,
 ) {
-	miOpt, err = d.maybeLoadMetainfoFromDisk(name)
-	if err != nil {
-		d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
-		err = nil
+	var download bool
+	localMetainfo, download, err = d.prepareLocalDataForDownload(preverifiedInfoHash, name)
+	if err != nil || !download {
+		keptLocal = err == nil
+		return
 	}
-	if miOpt.Ok {
-		loadedIh := miOpt.Value.HashInfoBytes()
-		if loadedIh == infoHash {
-			return
+	t, isNew, err := d.addTorrent(name, preverifiedInfoHash)
+	if err != nil {
+		return
+	}
+	addedTorrent.Set(t)
+	return
+}
+
+// Reports whether the preverified download should go ahead. Data that backs no matching metainfo is
+// invalidated, but only while the manifest is still authoritative.
+func (d *Downloader) prepareLocalDataForDownload(
+	preverifiedInfoHash metainfo.Hash,
+	name string,
+) (
+	localMetainfo g.Option[*metainfo.MetaInfo],
+	download bool,
+	err error,
+) {
+	// An unreadable metainfo is logged and then treated as missing: it says nothing about the data.
+	localMetainfo, loadErr := d.maybeLoadMetainfoFromDisk(name)
+	if loadErr != nil {
+		d.log(log.LvlWarn, "error loading metainfo from disk", "err", loadErr, "name", name)
+	}
+	localMetainfoUnbacked := false
+	if localMetainfo.Ok {
+		localInfoHash := localMetainfo.Value.HashInfoBytes()
+		if localInfoHash == preverifiedInfoHash {
+			return localMetainfo, true, nil
 		}
-		// This is fine if we're doing initial sync. If we're not we shouldn't be here.
 		d.log(log.LvlWarn, "preverified snapshot hash has changed",
-			"expected", infoHash,
-			"actual", loadedIh,
+			"preverified", preverifiedInfoHash,
+			"local", localInfoHash,
 			"name", name)
+		info, infoErr := localMetainfo.Value.UnmarshalInfo()
+		if infoErr != nil {
+			d.log(log.LvlWarn, "error unmarshalling local metainfo", "err", infoErr, "name", name)
+		}
+		localMetainfoUnbacked = infoErr == nil && !d.snapshotDataSizesMatch(&info)
 		// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
-		miOpt.SetNone()
+		localMetainfo.SetNone()
 	} else {
 		d.log(log.LvlDebug, "snapshot metainfo missing", "name", name)
 	}
-	err = d.invalidateData(name, infoHash)
+
+	complete, err := d.initialDownloadComplete()
 	if err != nil {
-		err = fmt.Errorf("invalidating old snapshot data: %w", err)
-		return
+		return localMetainfo, false, err
 	}
-	return
+	if complete {
+		// Local data outranks the manifest from here on: keep whatever we have, download the rest.
+		exists, err := d.snapshotDataExists(name)
+		if err != nil {
+			return localMetainfo, false, err
+		}
+		if !exists {
+			return localMetainfo, true, nil
+		}
+		if localMetainfoUnbacked {
+			// The data backs neither manifest. Downloading hands it to the client, which
+			// completes the file by length, so a wrong length is re-fetched while
+			// same-length-different-bytes is not.
+			d.log(log.LvlWarn, "local snapshot does not match its own metainfo, downloading",
+				"name", name)
+			return localMetainfo, true, nil
+		}
+		d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
+		return localMetainfo, false, nil
+	}
+
+	if err := d.invalidateData(name, preverifiedInfoHash); err != nil {
+		return localMetainfo, false, fmt.Errorf("invalidating old snapshot data: %w", err)
+	}
+	return localMetainfo, true, nil
+}
+
+// seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
+// none is on disk. Must run without d.lock: addCompleteTorrent takes it and the lock is not
+// reentrant, so calling this under it deadlocks. Deriving also hashes the whole file. A ctx-caused
+// failure is returned but not logged; the batch counts those into one drop total.
+func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) error {
+	if err := d.removeMalformedMetainfo(name); err != nil {
+		d.log(log.LvlWarn, "cannot remove malformed metainfo", "err", err, "name", name)
+		return err
+	}
+	err := d.AddNewSeedableFile(ctx, name)
+	if err != nil && ctx.Err() == nil {
+		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
+	}
+	return err
+}
+
+// BuildTorrentIfNeed only checks that the .torrent path exists, so metainfo that cannot be parsed
+// suppresses the derivation the kept data would otherwise supply.
+func (d *Downloader) removeMalformedMetainfo(name string) error {
+	name, err := ensureCantLeaveDir(name, d.snapDir())
+	if err != nil {
+		return err
+	}
+	removed, err := d.torrentFS.DeleteMalformed(d.metainfoFilePathForName(name))
+	if err != nil {
+		return err
+	}
+	if removed {
+		d.log(log.LvlWarn, "removed malformed metainfo, deriving a new one from kept data", "name", name)
+	}
+	return nil
+}
+
+func (d *Downloader) snapshotDataExists(name string) (bool, error) {
+	exists, err := dir.FileExist(d.filePathForName(name))
+	if err != nil {
+		return false, fmt.Errorf("checking snapshot data for %q: %w", name, err)
+	}
+	return exists, nil
 }
 
 func (d *Downloader) addedFirstDownloader(
 	ctx context.Context,
 	t *torrent.Torrent,
-	miOpt g.Option[*metainfo.MetaInfo],
+	localMetainfo g.Option[*metainfo.MetaInfo],
 	name string,
 	infoHash metainfo.Hash,
 ) (afterAdd func()) {
-	// Try again, we would have invalidated data for changed infohashes now.
-	if !miOpt.Ok {
+	// Try the webseeds for the metainfo that wasn't on disk. Nothing here relies on the data having
+	// been moved aside: after the initial download it never is, and the client completes the file
+	// by length.
+	if !localMetainfo.Ok {
 		// Yes I mean for this error to be scoped here.
 		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
 		if err == nil {
 			// Always reuse code paths to ensure no surprises later. I.e. load the metainfo again
-			// through the same path that is used on a good run. No data invalidation here, at this
-			// point we've added the torrent, and already invalidated if the metainfo was missing
-			// the first time.
-			miOpt, err = d.maybeLoadMetainfoFromDisk(name)
+			// through the same path that is used on a good run.
+			localMetainfo, err = d.maybeLoadMetainfoFromDisk(name)
 			if err != nil {
 				// Should this error be returned instead?
 				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
@@ -1133,10 +1272,10 @@ func (d *Downloader) addedFirstDownloader(
 		}
 	}
 
-	if miOpt.Ok {
+	if localMetainfo.Ok {
 		// Good case: We have a metainfo with the right infohash, either just fetched from a
 		// webseed, or it was cached on disk.
-		err := d.applyMetainfo(miOpt.Value, t)
+		err := d.applyMetainfo(localMetainfo.Value, t)
 		if err != nil {
 			d.log(log.LvlError, "error applying metainfo", "err", err, "name", name)
 		}
@@ -1285,7 +1424,7 @@ func (d *Downloader) addTorrentIfComplete(
 		err = fmt.Errorf("unmarshalling info from metainfo: %w", err)
 		return
 	}
-	if !d.snapshotDataLooksComplete(&info) {
+	if !d.snapshotDataSizesMatch(&info) {
 		err = nil
 		return
 	}
