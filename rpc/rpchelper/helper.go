@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -169,8 +170,8 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 }
 
 func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	if _, reader, _, ok := PreconfirmedView(ctx, tx, blockNrOrHash, filters); ok {
-		return reader, nil
+	if p, ok := PreconfirmedView(ctx, tx, blockNrOrHash, filters); ok {
+		return p.Reader, nil
 	}
 
 	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
@@ -206,21 +207,52 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 // chain with no run-ahead producer), or the caller's context cannot end. That last case is refused
 // rather than served because the lease is released on context end: an unreleasable lease would pin a
 // generation open forever and the frontier would stop retiring.
-func PreconfirmedView(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters) (kv.TemporalTx, state.StateReader, uint64, bool) {
+func PreconfirmedView(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters) (*Preconfirmed, bool) {
 	if r := blockNrOrHash.BlockNumber; r == nil || *r != rpc.PendingBlockNumber || ctx.Done() == nil {
-		return nil, nil, 0, false
+		return nil, false
 	}
-	sd, _, number, release, ok := filters.PinPreconfirmed()
+	sd, hash, number, release, ok := filters.PinPreconfirmed()
 	if !ok {
-		return nil, nil, 0, false
+		return nil, false
 	}
 	context.AfterFunc(ctx, release)
 
-	view := tx
-	if overlayTx := sd.BlockOverlayTemporalTx(tx); overlayTx != nil {
-		view = overlayTx
+	p := &Preconfirmed{
+		Tx:     tx,
+		Reader: NewLatestStateReader(sd.AsGetter(tx)),
+		Number: number,
+		Hash:   hash,
+		sd:     sd,
+		ff:     filters,
 	}
-	return view, NewLatestStateReader(sd.AsGetter(tx)), number, true
+	if overlayTx := sd.BlockOverlayTemporalTx(tx); overlayTx != nil {
+		p.Tx = overlayTx
+	}
+	return p, true
+}
+
+// Preconfirmed is one coherent view of the pre-executed frontier, all of it from a single lease so the
+// parts cannot describe different blocks.
+type Preconfirmed struct {
+	// Tx reads the pre-confirmed block's metadata — its header, its canonical hash — layered over the
+	// caller's tx. The durable DB does not have them yet.
+	Tx kv.TemporalTx
+	// Reader reads the state as executed into that block.
+	Reader state.StateReader
+	Number uint64
+	Hash   common.Hash
+
+	sd *execctx.SharedDomains
+	ff *Filters
+}
+
+// Body returns the pre-confirmed block's transactions and the receipts they produced, in body order,
+// or ok=false when the block's output is not coherent to serve (mid-round, or nothing executed yet).
+func (p *Preconfirmed) Body() (types.Transactions, types.Receipts, bool) {
+	if p == nil {
+		return nil, nil, false
+	}
+	return p.ff.preconfirmedBodyOf(p.sd, p.Number)
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {

@@ -113,9 +113,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	// `pending` answers from the pre-executed frontier: header and state both come from the live
 	// generation, and the prune/executed checks are skipped because they ask about DURABLE state — a
 	// pre-confirmed block is by definition neither pruned nor yet executed into the canonical stages.
-	preTx, preReader, _, preconfirmed := rpchelper.PreconfirmedView(ctx, tx, blockNrOrHash, api.filters)
+	pre, preconfirmed := rpchelper.PreconfirmedView(ctx, tx, blockNrOrHash, api.filters)
 	if preconfirmed {
-		tx = preTx
+		tx = pre.Tx
 	}
 
 	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
@@ -126,7 +126,10 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("header not found")
 	}
 
-	stateReader := preReader
+	var stateReader state.StateReader
+	if preconfirmed {
+		stateReader = pre.Reader
+	}
 	if !preconfirmed {
 		if err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
 			return nil, err

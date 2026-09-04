@@ -83,7 +83,8 @@ type Filters struct {
 	// than a published pointer on purpose: the frontier's generations are retired continuously, so a
 	// stored *SharedDomains goes stale (and then invalid) between publish and read. The lease is taken
 	// at the moment of the query and held only for its duration.
-	preconfirmed atomic.Pointer[PreconfirmedProvider]
+	preconfirmed     atomic.Pointer[PreconfirmedProvider]
+	preconfirmedBody atomic.Pointer[PreconfirmedBodyProvider]
 
 	config FiltersConfig
 }
@@ -899,14 +900,31 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 // release that must be called when the query is done.
 type PreconfirmedProvider func() (sd *execctx.SharedDomains, hash common.Hash, number uint64, release func(), ok bool)
 
+// PreconfirmedBodyProvider returns the pre-confirmed block's transactions and receipts for a leased
+// generation. Separate from the state lease because a caller answering eth_call has no use for it.
+type PreconfirmedBodyProvider func(sd *execctx.SharedDomains, number uint64) (types.Transactions, types.Receipts, bool)
+
 // SetPreconfirmedProvider wires the source of pre-confirmed state — the execution module's pre-exec
 // frontier. Absent a provider (a remote rpcdaemon, or a chain with no run-ahead producer) the `pending`
 // tag keeps its previous meaning.
-func (ff *Filters) SetPreconfirmedProvider(p PreconfirmedProvider) {
+func (ff *Filters) SetPreconfirmedProvider(p PreconfirmedProvider, body PreconfirmedBodyProvider) {
 	if ff == nil {
 		return
 	}
 	ff.preconfirmed.Store(&p)
+	ff.preconfirmedBody.Store(&body)
+}
+
+// preconfirmedBodyOf returns the leased generation's transactions and receipts, or ok=false.
+func (ff *Filters) preconfirmedBodyOf(sd *execctx.SharedDomains, number uint64) (types.Transactions, types.Receipts, bool) {
+	if ff == nil {
+		return nil, nil, false
+	}
+	p := ff.preconfirmedBody.Load()
+	if p == nil || *p == nil {
+		return nil, nil, false
+	}
+	return (*p)(sd, number)
 }
 
 // PinPreconfirmed leases the pre-executed frontier for one query, or reports ok=false when this node

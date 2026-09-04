@@ -609,10 +609,35 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 	defer tx.Rollback()
 
-	// Pending block receipts are only available if the miner has a pending block
-	// with executed transactions. Erigon receives only header+txs from the miner
-	// and cannot compute receipts on-the-fly.
+	// `pending` receipts come from the pre-executed frontier: that block HAS executed, so its receipts
+	// are real — they just have not been committed anywhere a normal lookup would find them. This is
+	// the case the old refusal could not serve, which was about the MINING pending block: erigon
+	// receives only header+txs from a miner and cannot compute those receipts at all.
+	if pre, ok := rpchelper.PreconfirmedView(ctx, tx, numberOrHash, api.filters); ok {
+		txs, receipts, ok := pre.Body()
+		if !ok {
+			return nil, errors.New("pre-confirmed receipts are not available: the block is mid-round")
+		}
+		header, err := api._blockReader.Header(ctx, pre.Tx, pre.Hash, pre.Number)
+		if err != nil {
+			return nil, err
+		}
+		if header == nil {
+			return nil, errors.New("pre-confirmed receipts are not available: no header for the in-progress block")
+		}
+		chainConfig, err := api.chainConfig(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]map[string]any, 0, len(receipts))
+		for i, receipt := range receipts {
+			result = append(result, ethutils.MarshalReceipt(receipt, txs[i], chainConfig, header, txs[i].Hash(), true, true))
+		}
+		return result, nil
+	}
 	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		// No pre-exec frontier on this node: the only "pending" available is the miner's, whose
+		// receipts erigon cannot compute (it receives header+txs only).
 		return nil, errors.New("pending receipts are not available")
 	}
 

@@ -52,8 +52,8 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 	// reached yet.
 	// The caller rolls back the tx it is handed, so hand back the one it can: these readers want
 	// account state only, not the frontier's block metadata.
-	if _, preReader, _, ok := rpchelper.PreconfirmedView(ctx, tx, blockNrOrHash, api.filters); ok {
-		return tx, preReader, nil
+	if p, ok := rpchelper.PreconfirmedView(ctx, tx, blockNrOrHash, api.filters); ok {
+		return tx, p.Reader, nil
 	}
 
 	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)

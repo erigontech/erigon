@@ -504,6 +504,37 @@ func (e *ExecModule) PinPreconfirmed() (*execctx.SharedDomains, common.Hash, uin
 	return e.preExec.PinActive()
 }
 
+// PreconfirmedBody returns the in-progress block's transactions and the receipts they produced, in body
+// order — the pre-confirmed block's OUTPUT, which exists only here: it has executed, so its receipts are
+// real, but it has not committed, so nothing has written them anywhere a normal receipts lookup would
+// find. The two are read under one lock and returned only if they agree in length and belong to `number`;
+// a body and a receipt set caught mid-round would otherwise pair a transaction with another's receipt.
+func (e *ExecModule) PreconfirmedBody(sd *execctx.SharedDomains, number uint64) (types.Transactions, types.Receipts, bool) {
+	if e == nil || sd == nil {
+		return nil, nil, false
+	}
+	e.flash.mu.Lock()
+	num, valid := e.flash.num, e.flash.valid
+	body := append([][]byte(nil), e.flash.body...)
+	e.flash.mu.Unlock()
+	if !valid || num != number {
+		return nil, nil, false
+	}
+	receipts := sd.FlashblockReceipts()
+	if len(receipts) != len(body) {
+		return nil, nil, false
+	}
+	txs := make(types.Transactions, 0, len(body))
+	for _, raw := range body {
+		txn, err := types.DecodeTransaction(raw)
+		if err != nil {
+			return nil, nil, false
+		}
+		txs = append(txs, txn)
+	}
+	return txs, receipts, true
+}
+
 // reanchorFrontierForBlockLocked re-anchors the run-ahead frontier when the CL's FCU (AssembleBlock's params)
 // builds on a DIFFERENT parent than the in-progress flashblock was opened on — Caplin accepted a new head
 // (catch-up/reorg). It drops the stale in-progress fork and re-anchors the frontier to that accepted head, so the

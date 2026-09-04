@@ -984,7 +984,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 	// Let RPC answer `pending` from the pre-executed frontier. Wired as a provider, not a published
 	// pointer: generations retire continuously, so the lease has to be taken at query time.
-	backend.rpcFilters.SetPreconfirmedProvider(backend.execModule.PinPreconfirmed)
+	backend.rpcFilters.SetPreconfirmedProvider(backend.execModule.PinPreconfirmed, backend.execModule.PreconfirmedBody)
 
 	var executionEngine executionclient.ExecutionEngine
 
