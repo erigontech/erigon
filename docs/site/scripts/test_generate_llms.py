@@ -172,7 +172,7 @@ class MermaidSpliceTests(unittest.TestCase):
 
     def test_fence_is_extracted_from_source(self):
         src = 'intro\n\n```mermaid\ngraph TD\n  A --> B\n```\n\ntail\n'
-        self.assertEqual([("", 0, "```mermaid\ngraph TD\n  A --> B\n```")],
+        self.assertEqual([("", 0, "intro", "```mermaid\ngraph TD\n  A --> B\n```")],
                          g.mermaid_blocks(src))
 
     def test_no_mermaid_yields_nothing(self):
@@ -283,11 +283,11 @@ class MermaidFenceSafetyTests(unittest.TestCase):
     def test_shorter_closer_does_not_end_the_block(self):
         out = g.mermaid_blocks("````mermaid\ngraph TD\n```\n")
         self.assertEqual(1, len(out))
-        self.assertTrue(out[0][2].startswith("````mermaid"))
+        self.assertTrue(out[0][3].startswith("````mermaid"))
 
     def test_diagram_is_extracted(self):
         self.assertEqual(
-            [("", 0, "```mermaid\ngraph TD\n A-->B\n```")],
+            [("", 0, "x", "```mermaid\ngraph TD\n A-->B\n```")],
             g.mermaid_blocks("x\n\n```mermaid\ngraph TD\n A-->B\n```\n\ny\n"),
         )
 
@@ -545,7 +545,7 @@ class MermaidLivenessTests(unittest.TestCase):
     def test_an_indented_fence_is_still_a_diagram(self):
         # MDX has no indented code blocks, so indentation does not demote a
         # fence; this site's build renders such a block as a diagram.
-        self.assertEqual([("", 0, "```mermaid\ngraph TD\n```")],
+        self.assertEqual([("", 0, "", "```mermaid\ngraph TD\n```")],
                          g.mermaid_blocks("    ```mermaid\n    graph TD\n    ```\n"))
 
     def test_delimiters_in_code_do_not_comment_out_a_diagram(self):
@@ -554,7 +554,7 @@ class MermaidLivenessTests(unittest.TestCase):
         # must not see delimiters that are themselves code.
         src = ("# P\n\nWrite `{/*` to open.\n\n## Live\n\n"
                "```mermaid\ngraph TD; A-->B;\n```\n\nclose with `*/}`.\n")
-        self.assertEqual([("Live", 0, "```mermaid\ngraph TD; A-->B;\n```")],
+        self.assertEqual([("Live", 0, "", "```mermaid\ngraph TD; A-->B;\n```")],
                          g.mermaid_blocks(src))
 
     def test_delimiters_inside_a_fence_do_not_comment_out_a_diagram(self):
@@ -567,7 +567,7 @@ class MermaidLivenessTests(unittest.TestCase):
 
     def test_live_diagram_is_still_found(self):
         self.assertEqual(
-            [("", 0, "```mermaid\ngraph TD\n```")],
+            [("", 0, "", "```mermaid\ngraph TD\n```")],
             g.mermaid_blocks("```mermaid\ngraph TD\n```\n")
         )
 
@@ -740,7 +740,7 @@ class RenderingFidelityTests(unittest.TestCase):
     # -- mermaid ------------------------------------------------------------
     def test_diagram_records_the_heading_above_it(self):
         src = "## At a glance\n\n```mermaid\ngraph TD\n```\n\nEvery box above...\n"
-        self.assertEqual([("At a glance", 0, "```mermaid\ngraph TD\n```")],
+        self.assertEqual([("At a glance", 0, "", "```mermaid\ngraph TD\n```")],
                          g.mermaid_blocks(src))
 
     def test_diagram_is_spliced_under_its_heading_not_appended(self):
@@ -771,12 +771,12 @@ class RenderingFidelityTests(unittest.TestCase):
         # `>` is legal inside a diagram, so peeling container markers from a
         # fence that was never quoted would edit the diagram's source.
         out = g.mermaid_blocks("```mermaid\ngraph TD\n> a label\n```\n")
-        self.assertIn("> a label", out[0][2])
+        self.assertIn("> a label", out[0][3])
 
     def test_diagram_inside_a_blockquote_is_still_found(self):
         out = g.mermaid_blocks("> ```mermaid\n> graph TD\n>   A-->B\n> ```\n")
         self.assertEqual(1, len(out))
-        self.assertIn("graph TD", out[0][2])
+        self.assertIn("graph TD", out[0][3])
 
     # -- first_description fence tracking -----------------------------------
     def test_four_backtick_fence_does_not_desync_the_description(self):
@@ -966,7 +966,7 @@ class ContainerRelativeFenceTests(unittest.TestCase):
 
     def test_a_mermaid_fence_inside_a_list_item_is_found(self):
         src = "## H\n\n1. Step\n\n    ```mermaid\n    graph TD; A-->B;\n    ```\n"
-        self.assertEqual([("H", 0, "```mermaid\ngraph TD; A-->B;\n```")],
+        self.assertEqual([("H", 0, "1. Step", "```mermaid\ngraph TD; A-->B;\n```")],
                          g.mermaid_blocks(src))
 
     def test_a_four_space_fence_at_top_level_is_a_diagram(self):
@@ -974,7 +974,7 @@ class ContainerRelativeFenceTests(unittest.TestCase):
         # no indented code blocks: this site's production build renders such a
         # fence as a diagram, so rejecting it dropped the graph from the corpus.
         src = "## H\n\n    ```mermaid\n    graph TD; A-->B;\n    ```\n"
-        self.assertEqual([("H", 0, "```mermaid\ngraph TD; A-->B;\n```")],
+        self.assertEqual([("H", 0, "", "```mermaid\ngraph TD; A-->B;\n```")],
                          g.mermaid_blocks(src))
 
 
@@ -989,14 +989,28 @@ class DiagramSpliceTests(unittest.TestCase):
         src = f"## Setup\n\n{a}\n\n## Other\n\nx\n\n## Setup\n\n{b}\n"
         found = g.mermaid_blocks(src)
         self.assertEqual([("Setup", 0), ("Setup", 1)],
-                         [(h, o) for h, o, _ in found])
+                         [(h, o) for h, o, _, _ in found])
         body = "# T\n\n## Setup\n\nfirst\n\n## Other\n\nx\n\n## Setup\n\nsecond\n"
-        for heading, occurrence, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence)
+        for heading, occurrence, preceding, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence, preceding)
         sections = body.split("## ")
         self.assertIn("A-->B", sections[1], "first diagram left its section")
         self.assertIn("C-->D", sections[3], "second diagram went to the wrong one")
         self.assertNotIn("C-->D", sections[1])
+
+    def test_a_diagram_keeps_the_prose_that_preceded_it(self):
+        # Anchoring on the heading alone puts the diagram at the top of its
+        # section, turning `heading -> prose -> diagram` into
+        # `heading -> diagram -> prose`.
+        d = "```mermaid\ngraph TD; A-->B;\n```"
+        src = f"## Flow\n\nIntro prose here.\n\n{d}\n\nAfter prose.\n"
+        found = g.mermaid_blocks(src)
+        self.assertEqual("Intro prose here.", found[0][2])
+        body = "# T\n\n## Flow\n\nIntro prose here.\n\nAfter prose.\n"
+        for heading, occurrence, preceding, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence, preceding)
+        self.assertLess(body.index("Intro prose here."), body.index("A-->B"))
+        self.assertLess(body.index("A-->B"), body.index("After prose."))
 
     def test_a_diagram_under_a_later_heading_is_not_moved_to_the_first(self):
         # The occurrence has to count headings, not diagrams. Counting diagrams
@@ -1006,10 +1020,10 @@ class DiagramSpliceTests(unittest.TestCase):
         d = "```mermaid\ngraph TD; X-->Y;\n```"
         src = f"## Setup\n\nprose\n\n## Other\n\nx\n\n## Setup\n\n{d}\n"
         found = g.mermaid_blocks(src)
-        self.assertEqual([("Setup", 1)], [(h, o) for h, o, _ in found])
+        self.assertEqual([("Setup", 1)], [(h, o) for h, o, _, _ in found])
         body = "# T\n\n## Setup\n\nFIRST\n\n## Other\n\nx\n\n## Setup\n\nSECOND\n"
-        for heading, occurrence, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence)
+        for heading, occurrence, preceding, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence, preceding)
         sections = body.split("## ")
         self.assertNotIn("X-->Y", sections[1], "diagram moved to the first section")
         self.assertIn("X-->Y", sections[3])
@@ -1018,10 +1032,10 @@ class DiagramSpliceTests(unittest.TestCase):
         block = "```mermaid\ngraph TD; A-->B;\n```"
         src = f"## One\n\n{block}\n\n## Two\n\n{block}\n"
         found = g.mermaid_blocks(src)
-        self.assertEqual([("One", 0, block), ("Two", 0, block)], found)
+        self.assertEqual([("One", 0, "", block), ("Two", 0, "", block)], found)
         body = "# T\n\n## One\n\nprose\n\n## Two\n\nprose\n"
-        for heading, occurrence, diagram in found:
-            body = g.splice_diagram(body, heading, diagram, occurrence)
+        for heading, occurrence, preceding, diagram in found:
+            body = g.splice_diagram(body, heading, diagram, occurrence, preceding)
         self.assertEqual(2, body.count("graph TD; A-->B;"))
 
 
@@ -1070,38 +1084,66 @@ class SourceFenceContainmentTests(unittest.TestCase):
     item, so the count of those is compared against the corpus.
     """
 
-    def test_a_fence_written_inside_a_container_stays_indented(self):
-        # MDX has no indented code blocks, so a fence written with any indent in
-        # the source is inside a container — a list item in practice. If those
-        # came back at column zero the item would have been broken open, and no
-        # check over the corpus alone can see that: a fence at column zero
-        # between two lists is ordinary Markdown and this corpus has six.
-        # Openers are the unit; closers move independently of their container.
-        def openers(lines):
-            count, inside = 0, False
-            for line in lines:
-                fence = g._fence_at(line)
-                if not fence:
-                    continue
-                if inside:
-                    inside = False
-                    continue
-                inside = True
-                if fence[2] > 0:
-                    count += 1
-            return count
+    def test_a_fence_inside_a_container_is_indented_in_the_corpus(self):
+        """Ties the corpus back to the containers the built page actually has.
 
-        in_container = sum(
-            openers(path.read_text(encoding="utf-8", errors="replace").split("\n"))
-            for _, directory, _ in g.SECTIONS
-            for path in sorted(directory.rglob("*.md*")))
-        self.assertGreater(in_container, 0, "no indented fences found; check the scan")
+        Counting indented openers in the source cannot express this: MDX accepts
+        a four-space fence at top level, which the reader normalises to column
+        zero, so an indented source opener is not evidence of a container. The
+        built HTML is where containment is unambiguous.
+        """
+        from html.parser import HTMLParser
 
+        class Contained(HTMLParser):
+            """Counts <pre> elements with a list-item or blockquote ancestor."""
+
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.depth, self.stack, self.count = 0, [], 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag in ("li", "blockquote"):
+                    self.stack.append(self.depth)
+                if tag == "pre" and self.stack:
+                    self.count += 1
+                if tag not in ("br", "img", "hr", "input", "meta", "link"):
+                    self.depth += 1
+
+            def handle_endtag(self, tag):
+                if tag not in ("br", "img", "hr", "input", "meta", "link"):
+                    self.depth -= 1
+                if tag in ("li", "blockquote") and self.stack \
+                        and self.stack[-1] == self.depth:
+                    self.stack.pop()
+
+        contained = 0
+        for path in sorted(g.BUILD_DIR.rglob("*.html")):
+            if any(part.startswith("v") and part[1:2].isdigit()
+                   for part in path.parts):
+                continue          # archived versions are not in the corpus
+            parser = Contained()
+            parser.feed(path.read_text(encoding="utf-8", errors="replace"))
+            contained += parser.count
+        self.assertGreater(contained, 0, "no contained <pre> found; check the scan")
+
+        # Openers only: a closer moves independently of its container.
         _, full, _ = g.build()
+        indented, inside = 0, False
+        for line in full.split("\n"):
+            m = re.match(r"^([ \t]*)(`{3,}|~{3,})", line)
+            if not m:
+                continue
+            if inside:
+                inside = False
+                continue
+            inside = True
+            if m.group(1):
+                indented += 1
         self.assertEqual(
-            in_container, openers(full.split("\n")),
-            "an indented fence opener in the sources is not indented in the "
-            "corpus: a fence has escaped its container")
+            contained, indented,
+            f"the built pages put {contained} fenced blocks inside a list item "
+            f"or blockquote, but {indented} are indented in the corpus: a fence "
+            f"has escaped its container")
 
 
 class ReleaseDriftTests(unittest.TestCase):

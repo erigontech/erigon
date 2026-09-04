@@ -743,12 +743,60 @@ _ATX_HEADING_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)[ \t]*#*[ \t]*$")
 _QUOTE_PREFIX_RE = re.compile(r"^[ \t]{0,3}(?:>[ \t]?)+")
 
 
+_LIST_MARKER_RE = re.compile(r"^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)(?=[`~])")
+
+
 def _peel_quote(line):
     """Strip blockquote markers so a fence inside a quote is seen as a fence."""
     return _QUOTE_PREFIX_RE.sub("", line)
 
 
-_CODE_SPAN_RE = re.compile(r"`+[^`\n]*`+")
+def _peel_container(line):
+    """Strip the container markers in front of a fence opener.
+
+    A fence may open on the line that starts its list item — `- ```mermaid` is
+    how Docusaurus renders one — and on that line the marker sits between the
+    indent and the backticks. The marker is replaced by spaces rather than
+    removed so the opener keeps the column its content is measured from.
+    """
+    peeled = _QUOTE_PREFIX_RE.sub("", line)
+    m = _LIST_MARKER_RE.match(peeled)
+    if m:
+        peeled = " " * len(m.group(0).expandtabs(4)) + peeled[m.end():]
+    return peeled
+
+
+_BACKTICK_RUN_RE = re.compile(r"`+")
+
+
+def _blank_code_spans(text):
+    """Blank every code span, pairing runs the way CommonMark does.
+
+    A run of N backticks opens a span that only a run of exactly N closes. The
+    span may cross a line but not a blank one, since that ends the paragraph:
+    pairing across it lets a stray backtick blank a real comment region and
+    bring a commented-out diagram back. Matching greedily instead of by run
+    length lets a one-backtick run close a two-backtick opener, which leaves
+    the delimiters of a span like ``a ` {/* b`` visible to the comment scan.
+    """
+    spans, i = [], 0
+    for m in _BACKTICK_RUN_RE.finditer(text):
+        if m.start() < i:
+            continue
+        run = m.group(0)
+        for c in _BACKTICK_RUN_RE.finditer(text, m.end()):
+            if "\n\n" in text[m.end():c.start()]:
+                break
+            if c.group(0) == run:
+                spans.append((m.start(), c.end()))
+                i = c.end()
+                break
+    chars = list(text)
+    for start, end in spans:
+        for j in range(start, end):
+            if chars[j] != "\n":
+                chars[j] = " "
+    return "".join(chars)
 
 
 def _mask_jsx_comments(source):
@@ -772,9 +820,10 @@ def _mask_jsx_comments(source):
                 open_fence = None
             shadow.append(blank(line))
             continue
-        shadow.append(blank(line) if open_fence is not None
-                      else _CODE_SPAN_RE.sub(lambda c: blank(c.group(0)), line))
-    shadow = "\n".join(shadow)
+        shadow.append(blank(line) if open_fence is not None else line)
+    # Code spans are blanked over the joined text, not line by line: a span may
+    # cross lines, and its delimiters must not be visible to the comment scan.
+    shadow = _blank_code_spans("\n".join(shadow))
 
     out = list(source)
     for match in _JSX_COMMENT_RE.finditer(shadow):
@@ -807,7 +856,7 @@ def mermaid_blocks(source):
     i, n, heading, occurrence = 0, len(lines), "", 0
     while i < n:
         h = _ATX_HEADING_RE.match(lines[i])
-        opener = _peel_quote(lines[i])
+        opener = _peel_container(lines[i])
         # Only a fence that was itself quoted has its body peeled: `>` is legal
         # inside a diagram, and stripping it from a top-level fence would edit
         # the diagram's own source.
@@ -821,7 +870,24 @@ def mermaid_blocks(source):
                 occurrence = seen[heading] - 1
             i += 1
             continue
-        marker, info, fence_indent = m[0], m[1].lower(), m[2]
+        # Docusaurus transforms only `lang === "mermaid"`, so an uppercase
+        # info string stays an ordinary code block in the built HTML. Lowering
+        # it here would splice a diagram beside the code block already there.
+        marker, info, fence_indent = m[0], m[1], m[2]
+        # The line of prose the fence followed, if any. A heading alone places
+        # the diagram at the top of its section, which reorders
+        # `heading -> prose -> diagram` into `heading -> diagram -> prose`.
+        at_preceding = ""
+        for back in range(i - 1, -1, -1):
+            candidate = lines[back].strip()
+            if not candidate:
+                continue
+            if _ATX_HEADING_RE.match(lines[back]):
+                break
+            if _fence_at(_peel_container(lines[back])):
+                break          # a fence line is not prose to anchor against
+            at_preceding = _strip_markers(candidate)
+            break
         at, at_occurrence, body, i = heading, occurrence, [], i + 1
         while i < n:
             c = _fence_at(see(lines[i]))
@@ -842,18 +908,58 @@ def mermaid_blocks(source):
             # repeat a heading within themselves. The count must be of heading
             # sightings, not of diagrams — a section with no diagram still
             # advances the occurrence its successors are placed by.
-            blocks.append((at, at_occurrence,
+            blocks.append((at, at_occurrence, at_preceding,
                            _strip_markers(f"{fence}mermaid\n{text}\n{fence}")))
     return blocks
 
 
-def splice_diagram(body, heading, block, occurrence=0):
-    """Insert `block` under the `occurrence`-th `heading` in `body`.
+def _insert_after(body, preceding, start, block):
+    """Insert point just past `preceding`, searched from `start`, outside fences.
 
-    Appends when that heading is gone. Matching the text alone put every
-    diagram under the first section sharing a title.
+    Returns None when the line is not found there. Searching the whole page
+    instead would anchor to the first copy of a repeated line and undo the
+    heading occurrence; ignoring fences would splice the diagram into a code
+    block that quotes the same text.
+    """
+    lines = body.split("\n")
+    offsets, pos = [], 0
+    for line in lines:
+        offsets.append(pos)
+        pos += len(line) + 1
+    open_fence = None
+    for n, line in enumerate(lines):
+        m = _LINE_FENCE_RE.match(line)
+        if m:
+            marker = m.group(1)
+            if open_fence is None:
+                open_fence = marker
+            elif marker[0] == open_fence[0] and len(marker) >= len(open_fence):
+                open_fence = None
+            continue
+        if open_fence is not None or offsets[n] < start:
+            continue
+        if line.strip() == preceding:
+            cut = offsets[n] + len(line)
+            return body[:cut] + "\n\n" + block + body[cut:]
+    return None
+
+
+def splice_diagram(body, heading, block, occurrence=0, preceding=""):
+    """Insert `block` where it sat in the source, as closely as can be told.
+
+    The diagram is absent from the built page — Docusaurus draws it client-side
+    — so there is no placeholder to anchor to and the position has to be
+    recovered from the source. `preceding` is the prose the fence followed and
+    is the most precise anchor available; the `occurrence`-th `heading` is the
+    fallback, and appending is the last resort. A diagram written inside a list
+    item or a blockquote still lands at the top level of its section: that
+    needs the container recovered as well, which this does not attempt.
     """
     if not heading:
+        if preceding:
+            spliced = _insert_after(body, preceding, 0, block)
+            if spliced is not None:
+                return spliced
         return body + "\n\n" + block
 
     lines = body.split("\n")
@@ -880,6 +986,14 @@ def splice_diagram(body, heading, block, occurrence=0):
             hits += 1
     if idx is None:
         return body + "\n\n" + block
+
+    # Inside the located section, the prose the fence followed is the precise
+    # anchor; the heading is only where that section begins.
+    if preceding:
+        section_start = sum(len(ln) + 1 for ln in lines[:idx])
+        spliced = _insert_after(body, preceding, section_start, block)
+        if spliced is not None:
+            return spliced
 
     # Step over diagrams already spliced under this heading, so a heading
     # carrying several of them keeps them in source order.
@@ -1102,8 +1216,9 @@ def collect_pages(base_dir, route_prefix):
         # and a diagram whose text also appeared in a literal example was skipped
         # entirely. mermaid_blocks() is fence-accurate, so each block it yields is
         # a real diagram that belongs under its own heading.
-        for heading, occurrence, diagram in mermaid_blocks(text):
-            clean_body = splice_diagram(clean_body, heading, diagram, occurrence)
+        for heading, occurrence, preceding, diagram in mermaid_blocks(text):
+            clean_body = splice_diagram(
+                clean_body, heading, diagram, occurrence, preceding)
 
         # The duplicate H1 comes off when llms-full.txt is assembled, so a page
         # holding nothing but its own heading is empty there while passing a

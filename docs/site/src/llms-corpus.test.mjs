@@ -48,10 +48,22 @@ test('every page sentinel survives as prose, none captured by a fence', () => {
   const text = fs.readFileSync(CORPUS, 'utf8')
   const tree = parse(text)
 
-  const captured = nodesOfType(tree, 'code')
-    .filter((c) => /^URL: https:\/\//m.test(c.value))
-  assert.deepEqual(captured.map((c) => c.value.match(/^URL: \S+/m)[0]), [],
-    'a fence absorbed a page sentinel')
+  // Only the URLs the index lists are page sentinels. A configuration example
+  // containing a line like "URL: https://rpc.example" is documentation, not a
+  // captured page, and must not fail the build.
+  const index = fs.readFileSync(
+    path.join(HERE, '..', 'static', 'llms.txt'), 'utf8')
+  const listed = [...index.matchAll(/^- \[[^\]]*\]\((https:\/\/docs\.erigon\.tech[^)]*)\)/gm)]
+    .map((m) => m[1])
+  const sentinel = new Set(listed.map((u) => `URL: ${u}`))
+
+  const captured = []
+  for (const code of nodesOfType(tree, 'code')) {
+    for (const line of code.value.split('\n')) {
+      if (sentinel.has(line.trim())) captured.push(line.trim())
+    }
+  }
+  assert.deepEqual(captured, [], 'a fence absorbed a page sentinel')
 
   // GFM autolinks the bare URL, so the paragraph is text("URL: ") + link(...)
   // rather than one text node.
@@ -66,56 +78,62 @@ test('every page sentinel survives as prose, none captured by a fence', () => {
     'a page lost its title or its URL line')
   assert.ok(urlParagraphs.length > 0, 'no page sentinels found at all')
 
-  // Every page the index lists must still be a page here. llms.txt also links
-  // out to GitHub and Docker Hub, which are not pages, so only the doc URLs
-  // are compared.
-  const index = fs.readFileSync(
-    path.join(HERE, '..', 'static', 'llms.txt'), 'utf8')
-  const listed = [...index.matchAll(/^- \[[^\]]*\]\((https:\/\/docs\.erigon\.tech[^)]*)\)/gm)]
-    .map((m) => m[1])
   const present = new Set(urlParagraphs.map((v) => v.slice('URL: '.length)))
   assert.deepEqual(listed.filter((u) => !present.has(u)), [],
     'a page listed in llms.txt is missing from llms-full.txt')
 })
 
 test('every fenced block in the corpus closes', () => {
+  // Page boundaries come from the parse, not from a regex over "URL:" lines: a
+  // configuration example can contain one, and splitting there cuts a fenced
+  // block in half and reports the halves as unclosed.
   const text = fs.readFileSync(CORPUS, 'utf8')
+  const lines = text.split('\n')
+  const starts = parse(text).children
+    .filter((n) => n.type === 'heading' && n.depth === 1)
+    .map((n) => n.position.start.line - 1)
+  assert.ok(starts.length > 0, 'no page headings found')
+
   const unclosed = []
-  for (const [url, body] of pages(text)) {
+  starts.forEach((from, i) => {
+    const to = i + 1 < starts.length ? starts[i + 1] : lines.length
     let open = null
-    for (const line of body.split('\n')) {
+    for (const line of lines.slice(from, to)) {
       const m = line.match(/^\s*(`{3,}|~{3,})/)
       if (!m) continue
       if (open === null) open = m[1]
       else if (m[1][0] === open[0] && m[1].length >= open.length) open = null
     }
-    if (open !== null) unclosed.push(url)
-  }
+    if (open !== null) unclosed.push(lines[from].slice(0, 60))
+  })
   assert.deepEqual(unclosed, [], 'page ends inside a fenced block')
 })
 
-test('an indented fence produces code that is inside a list item', () => {
-  // The weaker form of this check compared the opening and closing columns,
-  // which a uniformly under-indented fence satisfies while the parser still
-  // puts its code outside the item. Ask the parser instead: a fence the
-  // generator indented is only doing its job if the code node it produces is
-  // inside a listItem. A column-1 fence is top-level on purpose.
+test('an indented fence produces code inside the container it belongs to', () => {
+  // Comparing the opening and closing columns alone passes a uniformly
+  // under-indented fence whose code the parser still puts outside the item, so
+  // ask the parser for the container instead. Indentation can come from a list
+  // item or from a blockquote marker, and both are legitimate: what must not
+  // happen is an indented fence landing at the top level.
   const text = fs.readFileSync(CORPUS, 'utf8')
   const escaped = []
   for (const [url, body] of pages(text)) {
-    const tree = parse(body)
-    const inItem = new Set()
-    for (const item of nodesOfType(tree, 'listItem')) {
-      for (const code of nodesOfType(item, 'code')) inItem.add(code)
+    const contained = new Set()
+    const walk = (node, depth) => {
+      const inside = depth || node.type === 'listItem' || node.type === 'blockquote'
+      if (inside && node.type === 'code') contained.add(node)
+      ;(node.children ?? []).forEach((c) => walk(c, inside))
     }
+    const tree = parse(body)
+    walk(tree, false)
     for (const code of nodesOfType(tree, 'code')) {
       const col = code.position?.start?.column ?? 1
-      if (col > 1 && !inItem.has(code)) {
-        escaped.push(`${url}: fence at column ${col} is not inside its item`)
+      if (col > 1 && !contained.has(code)) {
+        escaped.push(`${url}: fence at column ${col} is in no container`)
       }
     }
   }
-  assert.deepEqual(escaped, [], 'an indented fence left its list item')
+  assert.deepEqual(escaped, [], 'an indented fence left its container')
 })
 
 test('a fence closes at the column it opened at', () => {
