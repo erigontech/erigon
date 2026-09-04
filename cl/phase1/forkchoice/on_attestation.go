@@ -90,10 +90,6 @@ func (f *ForkChoiceStore) ProcessAttestingIndicies(
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.trackGloasWeights() {
-		f.headHash = common.Hash{}
-		f.headPayloadStatus = cltypes.PayloadStatusPending
-	}
 	f.updateLatestMessages(attestation, attestionIndicies)
 }
 
@@ -246,6 +242,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 	slot := attestation.Data.Slot
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	payloadPresent := attestation.Data.CommitteeIndex == 1
+	updated := false
 
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
@@ -258,7 +255,12 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
 			})
+			updated = true
 		}
+	}
+	if updated {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
 	}
 }
 

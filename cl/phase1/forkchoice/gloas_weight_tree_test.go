@@ -91,7 +91,7 @@ func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
 }
 
-func TestProcessAttestingIndiciesInvalidatesGloasHeadCache(t *testing.T) {
+func TestProcessAttestingIndiciesInvalidatesGloasHeadCacheOnlyForNewMessages(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -103,7 +103,8 @@ func TestProcessAttestingIndiciesInvalidatesGloasHeadCache(t *testing.T) {
 	cfg.InitializeForkSchedule()
 	f := newGloasWeightTreeTestStore()
 	f.beaconCfg = &cfg
-	f.headHash = common.HexToHash("0xbeef")
+	cachedHead := common.HexToHash("0xbeef")
+	f.headHash = cachedHead
 	f.headPayloadStatus = cltypes.PayloadStatusFull
 	attestation := &solid.Attestation{Data: &solid.AttestationData{
 		Slot:            1,
@@ -113,8 +114,15 @@ func TestProcessAttestingIndiciesInvalidatesGloasHeadCache(t *testing.T) {
 
 	f.ProcessAttestingIndicies(attestation, []uint64{1})
 
-	require.Equal(t, common.Hash{}, f.headHash)
+	require.Equal(t, common.Hash{}, f.headHash, "a new latest message must invalidate the cached head")
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, cachedHead, f.headHash, "an unchanged latest message must preserve the cached head")
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
 }
 
 func TestProcessAttestingIndiciesKeepsPreGloasHeadCache(t *testing.T) {
