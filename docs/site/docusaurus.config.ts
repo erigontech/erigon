@@ -24,9 +24,9 @@ type Release = {tag_name: string; prerelease: boolean; draft: boolean};
 // semantic version instead of trusting that order.
 const {installableVersion, latestStableInSeries} = require('./src/releases.js');
 
-// Routes with no indexable content. Single source of truth: the sitemap skips
-// them and src/theme/Root.tsx keeps the llms.txt descriptor off them, because
-// the index does not list them either.
+// Routes with no indexable content, skipped by the sitemap. The llms.txt
+// descriptor does not need them listed: it is emitted only for a declared
+// document route, which these are not.
 const nonDocumentRoutes: string[] = ['/search', '/404.html'];
 
 function githubHeaders(): Record<string, string> {
@@ -78,7 +78,7 @@ export default async function createConfig(): Promise<Config> {
 
     // Both lists reach src/theme/Root.tsx, which uses them to keep the llms.txt
     // descriptor off the routes the index does not cover.
-    customFields: {latestVersion, archivedVersions, nonDocumentRoutes},
+    customFields: {latestVersion, archivedVersions},
 
     headTags: [
       {
@@ -161,9 +161,10 @@ export default async function createConfig(): Promise<Config> {
         blog: false as false,
         theme: {customCss: './src/css/custom.css'},
         sitemap: {
-          // Emit <lastmod> per URL (from git history via showLastUpdateTime) so
-          // crawlers can prioritise changed pages. The ignored routes still
-          // exist; they just have no indexable content.
+          // Emit <lastmod> for routed pages (from git history via
+          // showLastUpdateTime) so crawlers can prioritise changed pages; the
+          // static artifacts appended below have no route and so carry none.
+          // The ignored routes still exist; they just have no indexable content.
           lastmod: 'date',
           changefreq: 'weekly',
           priority: 0.5,
