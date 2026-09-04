@@ -120,6 +120,15 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.PendingBlockNumber:
+			// `pending` is the PRE-CONFIRMED head: the block currently being executed, which on a
+			// run-ahead producer is AHEAD of the forkchoice head that `latest` resolves to. Same
+			// convention as OP Stack flashblocks, where `pending` serves the sub-block being built.
+			// Only when this node has no pre-exec frontier does it fall back to the old meaning
+			// (the txpool/mining block).
+			if _, preHash, preNum, release, ok := filters.PinPreconfirmed(); ok {
+				release()
+				return preNum, preHash, false, true, nil
+			}
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
 				blockNumber = plainStateBlockNumber
@@ -160,6 +169,10 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 }
 
 func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	if _, reader, _, ok := PreconfirmedView(ctx, tx, blockNrOrHash, filters); ok {
+		return reader, nil
+	}
+
 	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 	if err != nil {
 		return nil, err
@@ -176,6 +189,38 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 		}
 	}
 	return CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, txnIndex, stateCache, txNumReader)
+}
+
+// PreconfirmedView serves a query asking for `pending` from the PRE-EXECUTED frontier: the block the
+// producer has executed but consensus has not yet made canonical. It hands back ONE coherent view of
+// that generation — a temporal tx layering its block metadata (headers, canonical hashes) over the
+// caller's tx, and a state reader over the same SharedDomains — because the two must agree: the header
+// of a pre-confirmed block is not in the durable DB, so a reader paired with a DB-resolved header would
+// answer for a different block than it claims.
+//
+// It cannot go through the ordinary block-number path, which picks between a plain-state reader and a
+// HISTORY reader. The pre-confirmed block has executed but not committed: there is no history to read
+// it from, and plain state is the lagging canonical view — the very thing `pending` exists to get past.
+//
+// ok=false whenever this is not a `pending` request, the node has no frontier (a remote rpcdaemon, or a
+// chain with no run-ahead producer), or the caller's context cannot end. That last case is refused
+// rather than served because the lease is released on context end: an unreleasable lease would pin a
+// generation open forever and the frontier would stop retiring.
+func PreconfirmedView(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, filters *Filters) (kv.TemporalTx, state.StateReader, uint64, bool) {
+	if r := blockNrOrHash.BlockNumber; r == nil || *r != rpc.PendingBlockNumber || ctx.Done() == nil {
+		return nil, nil, 0, false
+	}
+	sd, _, number, release, ok := filters.PinPreconfirmed()
+	if !ok {
+		return nil, nil, 0, false
+	}
+	context.AfterFunc(ctx, release)
+
+	view := tx
+	if overlayTx := sd.BlockOverlayTemporalTx(tx); overlayTx != nil {
+		view = overlayTx
+	}
+	return view, NewLatestStateReader(sd.AsGetter(tx)), number, true
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {

@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -486,6 +487,22 @@ func builtAttrsMatchParams(built FlashblockInputs, params *builder.Parameters) b
 // exec semaphore, which AssembleBlock's anchor path does. This is the ownership move that removes the driver's
 // ibMu-guarded d.frontier cache and the ibMu↔exec-semaphore deadlock.
 func (e *ExecModule) FrontierHeader() *types.Header { return e.frontierHeader.Load() }
+
+// PinPreconfirmed leases the pre-confirmed frontier for a query: the state as PRE-EXECUTED, which on
+// this rollup runs AHEAD of the canonical head. It is what answers the `pending` block tag — the same
+// convention OP Stack flashblocks use for a sub-block being built — so a client can see the effect of a
+// transaction that has executed but whose block is not yet canonical. Reading the forkchoice head
+// instead (RPC `latest`) returns state that LAGS execution, which for anything deciding on what just
+// happened is not a stale answer but a wrong one.
+//
+// The returned release MUST be called when the query finishes. Until it is, the generation will not be
+// closed even if retirement passes it.
+func (e *ExecModule) PinPreconfirmed() (*execctx.SharedDomains, common.Hash, uint64, func(), bool) {
+	if e == nil || e.preExec == nil {
+		return nil, common.Hash{}, 0, nil, false
+	}
+	return e.preExec.PinActive()
+}
 
 // reanchorFrontierForBlockLocked re-anchors the run-ahead frontier when the CL's FCU (AssembleBlock's params)
 // builds on a DIFFERENT parent than the in-progress flashblock was opened on — Caplin accepted a new head

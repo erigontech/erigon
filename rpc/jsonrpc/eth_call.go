@@ -110,6 +110,14 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
+	// `pending` answers from the pre-executed frontier: header and state both come from the live
+	// generation, and the prune/executed checks are skipped because they ask about DURABLE state — a
+	// pre-confirmed block is by definition neither pruned nor yet executed into the canonical stages.
+	preTx, preReader, _, preconfirmed := rpchelper.PreconfirmedView(ctx, tx, blockNrOrHash, api.filters)
+	if preconfirmed {
+		tx = preTx
+	}
+
 	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
@@ -118,19 +126,17 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("header not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
+	stateReader := preReader
+	if !preconfirmed {
+		if err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+			return nil, err
+		}
+		if err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+			return nil, err
+		}
+		if stateReader, err = rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader); err != nil {
+			return nil, err
+		}
 	}
 
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, stateOverrides, blockOverrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)

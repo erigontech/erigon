@@ -59,6 +59,9 @@ type preExecFrontier struct {
 	// is retired only once committed — until then its commitment branches live only in its SD, so closing
 	// it early makes a successor's commitment read them empty ("empty branch data read during unfold").
 	committedHeight uint64
+	// draining holds generations that have been dropped from gens but still have readers pinning them.
+	// They are out of the chain — never a parent, never matched — and close on the last release.
+	draining []*preExecGen
 }
 
 // preExecGen is one pre-executed block held live: its SharedDomains and the block it belongs to.
@@ -74,9 +77,73 @@ type preExecGen struct {
 	// when the block canonicalises, so they belong to the generation rather than to the validator — pre-exec
 	// never writes validation state, and a promoted generation must still be able to announce itself.
 	notifications *shards.Notifications
+	// pins counts readers currently holding this generation's SharedDomains — RPC answering a query at
+	// the pre-confirmed frontier. A pinned generation is never closed out from under them: the close is
+	// deferred to the last release. Without this a retirement mid-read frees the SD the reader is using.
+	pins int
+	// dropped marks a generation already removed from the chain, whose close is waiting on its last pin.
+	dropped bool
 }
 
 func newPreExecFrontier() *preExecFrontier { return &preExecFrontier{} }
+
+// closeGen releases a generation's SharedDomains, or — if a reader is pinning it — moves it out of the
+// chain and defers the close to that reader's release. Caller holds f.mu. Every close of a generation
+// goes through here; closing an SD directly is what makes a concurrent reader use freed memory.
+func (f *preExecFrontier) closeGen(g *preExecGen) {
+	if g == nil || g.sd == nil {
+		return
+	}
+	if g.pins > 0 {
+		g.dropped = true
+		f.draining = append(f.draining, g)
+		return
+	}
+	g.sd.Close()
+	g.sd = nil
+}
+
+// PinActive takes a read lease on the ACTIVE (in-progress) generation — the pre-confirmed frontier —
+// and returns its state alongside the block it belongs to. The generation cannot be closed until the
+// returned release is called, so a query may read it concurrently with the producer accumulating into
+// it and with retirement running behind it. Returns ok=false when no generation is live.
+//
+// The SharedDomains handed back is the LIVE one the producer is writing to, deliberately: that is what
+// "pre-confirmed" means here — the state as executed, ahead of the canonical head. A reader must treat
+// it as read-only and must not hold the lease longer than one query.
+func (f *preExecFrontier) PinActive() (sd *execctx.SharedDomains, hash common.Hash, number uint64, release func(), ok bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := len(f.gens)
+	if n == 0 || f.gens[n-1].sd == nil {
+		return nil, common.Hash{}, 0, nil, false
+	}
+	g := f.gens[n-1]
+	g.pins++
+	var once sync.Once
+	return g.sd, g.headHash, g.number, func() { once.Do(func() { f.unpin(g) }) }, true
+}
+
+// unpin drops one read lease, closing the generation if it was dropped from the chain while pinned.
+func (f *preExecFrontier) unpin(g *preExecGen) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if g.pins > 0 {
+		g.pins--
+	}
+	if g.pins > 0 || !g.dropped || g.sd == nil {
+		return
+	}
+	g.sd.Close()
+	g.sd = nil
+	kept := f.draining[:0]
+	for _, d := range f.draining {
+		if d != g {
+			kept = append(kept, d)
+		}
+	}
+	f.draining = kept
+}
 
 // Open records sd as the ACTIVE generation for the given block, pushing it onto the chain. The previous
 // active generation stays live beneath it as the read-through parent. Re-opening the SAME block number
@@ -89,7 +156,7 @@ func (f *preExecFrontier) Open(sd *execctx.SharedDomains, headHash common.Hash, 
 	defer f.mu.Unlock()
 	if n := len(f.gens); n > 0 && f.gens[n-1].number == number {
 		if old := f.gens[n-1]; old.sd != nil && old.sd != sd {
-			old.sd.Close()
+			f.closeGen(old)
 		}
 		f.gens[n-1] = &preExecGen{sd: sd, headHash: headHash, number: number}
 		f.txHashes = nil
@@ -161,7 +228,7 @@ func (f *preExecFrontier) Abandon() {
 		return
 	}
 	if g := f.gens[n-1]; g.sd != nil {
-		g.sd.Close()
+		f.closeGen(g)
 	}
 	f.gens = f.gens[:n-1]
 	f.txHashes = nil
@@ -272,7 +339,7 @@ func (f *preExecFrontier) RetireBelow(ctx context.Context, tx kv.TemporalTx, upT
 		if g.number < upTo {
 			if g.sd != nil {
 				_ = g.sd.FlushPendingUpdates(ctx, tx)
-				g.sd.Close()
+				f.closeGen(g)
 			}
 			continue
 		}

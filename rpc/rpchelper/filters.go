@@ -79,6 +79,12 @@ type Filters struct {
 	latestSD atomic.Pointer[execctx.SharedDomains]
 	events   *shards.Events
 
+	// preconfirmed leases the PRE-EXECUTED frontier for one query. It is a provider function rather
+	// than a published pointer on purpose: the frontier's generations are retired continuously, so a
+	// stored *SharedDomains goes stale (and then invalid) between publish and read. The lease is taken
+	// at the moment of the query and held only for its duration.
+	preconfirmed atomic.Pointer[PreconfirmedProvider]
+
 	config FiltersConfig
 }
 
@@ -887,6 +893,33 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 		return ff.events.LatestSD()
 	}
 	return ff.latestSD.Load()
+}
+
+// PreconfirmedProvider leases the pre-executed frontier: its state, the block it belongs to, and a
+// release that must be called when the query is done.
+type PreconfirmedProvider func() (sd *execctx.SharedDomains, hash common.Hash, number uint64, release func(), ok bool)
+
+// SetPreconfirmedProvider wires the source of pre-confirmed state — the execution module's pre-exec
+// frontier. Absent a provider (a remote rpcdaemon, or a chain with no run-ahead producer) the `pending`
+// tag keeps its previous meaning.
+func (ff *Filters) SetPreconfirmedProvider(p PreconfirmedProvider) {
+	if ff == nil {
+		return
+	}
+	ff.preconfirmed.Store(&p)
+}
+
+// PinPreconfirmed leases the pre-executed frontier for one query, or reports ok=false when this node
+// has none to offer. Safe on a nil receiver.
+func (ff *Filters) PinPreconfirmed() (*execctx.SharedDomains, common.Hash, uint64, func(), bool) {
+	if ff == nil {
+		return nil, common.Hash{}, 0, nil, false
+	}
+	p := ff.preconfirmed.Load()
+	if p == nil || *p == nil {
+		return nil, common.Hash{}, 0, nil, false
+	}
+	return (*p)()
 }
 
 // WithOverlay returns a read view backed by the latest block overlay if one
