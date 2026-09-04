@@ -61,7 +61,7 @@ type PrivateDebugAPI interface {
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
-	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
+	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
@@ -630,7 +630,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 	result := &AccountResult{}
-	result.Balance.ToInt().Set(a.Balance.ToBig())
+	result.Balance = hexutil.U256(a.Balance)
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
@@ -643,7 +643,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 }
 
 type AccountResult struct {
-	Balance  hexutil.Big    `json:"balance"`
+	Balance  hexutil.U256   `json:"balance"`
 	Nonce    hexutil.Uint64 `json:"nonce"`
 	Code     hexutil.Bytes  `json:"code"`
 	CodeHash common.Hash    `json:"codeHash"`
@@ -732,7 +732,7 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}

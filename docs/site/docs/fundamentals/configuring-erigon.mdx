@@ -293,15 +293,15 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `100`
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`
 * `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
   * Default: `20000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
   * Set to `0` to remove the limit entirely (use with caution on large ranges).
   * Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
-* `--rpc.logs.querylimit value`: Maximum number of alternative addresses or topics allowed per search position in the `eth_getLogs` filter criteria.
+* `--rpc.logs.querylimit value`: Maximum number of alternative addresses or topics allowed per search position in the `eth_getLogs` and `eth_getFilterLogs` filter criteria.
   * Default: `1000`
-  * Applies to: `eth_getLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`
   * Set to `0` or a negative value for no limit.
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
@@ -329,9 +329,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
   * Default: `10000`
-* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
+* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses accepted per log subscription.
   * Default: `0`
-* `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
+* `--rpc.subscription.filters.maxtopics value`: Maximum topic alternatives accepted across all positions per log subscription.
   * Default: `0`
 * `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
   * Default: `5m0s`
@@ -550,7 +550,7 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
 * `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
-  * Default: `131072` (~18 days)
+  * Default: `0` — uses the chain's spec window, `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.resume-max-staleness-epochs value`: Max epochs a locally-finalized state may be stale for Caplin to resume from it on restart instead of remote checkpoint syncing. Data-availability bound; larger values are clamped to the anchor fork's sidecar-retention window.
@@ -631,6 +631,10 @@ http = true
 
 Erigon supports configuration through environment variables, primarily for experimental features and advanced settings.
 
+:::tip
+Erigon's own variables — everything below except the [Docker](#docker-environment-variables) ones, which do not take the `ERIGON_` prefix — can be set with or without it. `ERIGON_SNAPSHOT_MADV_RND` and `SNAPSHOT_MADV_RND` both work. Prefer the prefixed form. Erigon logs every variable it reads at warn level either way, but the bare name draws an extra `use ERIGON_ prefix for env` warning on top, and the prefix keeps these from colliding with unrelated variables in your environment. The examples below use it.
+:::
+
 ### Core Environment Variables
 
 **Database and Performance:**
@@ -653,6 +657,25 @@ Erigon supports configuration through environment variables, primarily for exper
 * `EXEC3_PARALLEL` - Enables parallel block execution (Block-STM). **Default changed to `true` in v3.5** — parallel execution is now on by default. Set to `false` or use `--exec.serial` to revert to single-threaded execution.
 * `EXEC3_WORKERS` - Sets number of parallel execution workers (default: number of CPU cores)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
+
+**State Cache:**
+
+* `USE_STATE_CACHE` - Enables the executor's domain-shared read cache (default: `true`; flag equivalent: `--exec.state-cache`). When `false` no cache is built, and neither the budgets nor the pin controller below have any effect.
+* `STATE_CACHE_ACCOUNTS` - Byte budget for the account cache (default: `150MB`). **New in v3.6**; the built-in budget it overrides was `1GB` in v3.5.
+* `STATE_CACHE_STORAGE` - Byte budget for the storage cache (default: `1GB`)
+* `STATE_CACHE_CODE` - Byte budget for the code cache, applied separately to each of its two byte-bearing layers; a third, size-only layer is sized independently (default: `512MB`)
+* `STATE_CACHE_CODE_INDEX` - Byte budget for the address-to-code index, shared by its two address-keyed LRUs (default: `32MB`, floor 1024 entries each). **New in v3.6**; the built-in budget was `16MB` in v3.5.
+* `DISABLE_ADAPTIVE_PIN` - Disables the adaptive trunk-pin controller, which watches per-contract miss pressure on the commitment branch cache and pins the hottest contracts' trunk branches in RAM to cut per-block I/O (default: `true`, so pinning is off; new in v3.6). Set to `false` to enable it — it targets workloads where a single contract dominates storage reads, and costs RAM on the commit path.
+
+The four `STATE_CACHE_*` budgets are new in v3.6. Values parse as human-readable sizes (`150MB`, `1GB`); an unparseable value aborts startup, though only when the state cache is enabled — with `USE_STATE_CACHE=false` nothing reads them.
+
+None of the four is an exact byte bound. Each is divided by a typical per-domain entry size to produce an entry-count cap, and it is that cap, not a running byte total, that evicts — so residency follows the entries actually stored. The code layers assume roughly 12 KiB per contract, and a working set of larger contracts will exceed the configured figure. `STATE_CACHE_CODE` applies to each of the two byte-bearing code layers, so their combined nominal ceiling is twice the value; a third, size-only layer answers `EXTCODESIZE`/`EXTCODEHASH` — `STATE_CACHE_CODE` does not size it, but it grows on demand from the same envelope, up to a ceiling of about 61 MiB. A contract inserted into both at once is stored once and referenced twice, but the layers are independent LRUs: once their eviction orders diverge, a refill into one while the other still holds a live entry leaves two backing arrays for the same contract, so heap use can approach the two-layer total. The account and storage caps are additionally clamped to between 1024 and 2^24 entries, which for their entry sizes means roughly 96 KiB–1.5 GiB for accounts and 88 KiB–1.375 GiB for storage; a value outside its own range makes no difference.
+
+The budgets are not reserved up front. The account, storage and code caches start small and grow in steps, funding each step from one process-wide envelope sized at 1/32 of the memory available to Erigon (system RAM, cgroup limit or `GOMEMLIMIT`, whichever is lowest) and shared with other in-process caches such as the commitment branch cache. A growth step that would overflow the envelope is refused, and that cache evicts within its current size until envelope space frees up. The small construction-time reservation is taken unconditionally, so a full envelope can be modestly overdrawn.
+
+What that means for sizing: each of these state caches starts at `max(1024, shards × 16)` entries, capped by its own ceiling. The shard count is the smaller of the ceiling over 64 and `GOMAXPROCS × 16`, each rounded up to a power of two, so on a multi-core host the initial reservation is larger than the 1024-entry floor — with 8 cores it settles at 2048 entries once the budget is big enough to support that many shards. A `STATE_CACHE_CODE` below about 12 MiB is bounded by its ceiling instead and stays under 1024 entries. That initial capacity is reserved from the envelope at construction, not on first use: the two byte-bearing code layers take 24 MiB between them before a single block executes. Only growth beyond it is demand-driven, so twice `STATE_CACHE_CODE` is the largest reservation those layers can reach, not one they hold from the start. `STATE_CACHE_CODE_INDEX` differs again — it fixes its entry count at construction but never reserves envelope bytes at all.
+
+Budgets summing past the envelope therefore mean it *can* saturate, not that it will — that depends on the working set. With 32 GiB available to Erigon after limits the whole envelope is 1 GiB — below the roughly 2.2 GiB the envelope-backed caches can reserve under the defaults (accounts, storage, twice the code budget, and the size-only layer) — so a large enough working set saturates it; past that point raising the envelope-backed budgets together adds no aggregate capacity and only changes which cache wins the space left. Where more is available the envelope may never saturate, and there raising them does help. Mind that the figure follows the *lowest* of physical RAM, the cgroup limit and `GOMEMLIMIT`: a 32 GiB host running Erigon in an 8 GiB container gets a 256 MiB envelope, not 1 GiB. `STATE_CACHE_CODE_INDEX` sits outside the envelope altogether — its entry cap is fixed up front from the budget, so above the 1024-entry floor noted above, raising it adds index capacity independently of how saturated the envelope is.
 
 ### Memory and Debugging Variables
 
@@ -681,16 +704,16 @@ When running Erigon in [Docker](/fundamentals/docker-compose), you can configure
 **Basic Performance Tuning:**
 
 ```bash
-export MDBX_LOCK_IN_RAM=true
-export SNAPSHOT_MADV_RND=false
+export ERIGON_MDBX_LOCK_IN_RAM=true
+export ERIGON_SNAPSHOT_MADV_RND=false
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Memory Debugging:**
 
 ```bash
-export SAVE_HEAP_PROFILE=true
-export HEAP_PROFILE_THRESHOLD=45
+export ERIGON_SAVE_HEAP_PROFILE=true
+export ERIGON_HEAP_PROFILE_THRESHOLD=45
 ./build/bin/erigon --datadir=/path/to/data
 ```
 

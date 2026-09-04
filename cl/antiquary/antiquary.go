@@ -394,16 +394,16 @@ func (a *Antiquary) antiquate() error {
 	}
 
 	var from, to uint64
-	var err error
 
 	if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 		// read the last beacon snapshots
 		from = a.sn.BlocksAvailable() + 1
 		// read the finalized head
-		to, err = beacon_indicies.ReadHighestFinalized(roTx)
+		highest, err := beacon_indicies.ReadHighestFinalized(roTx)
 		if err != nil {
 			return err
 		}
+		to = highest
 		return nil
 	}); err != nil {
 		return err
@@ -453,8 +453,8 @@ func (a *Antiquary) NotifyBackfilled() {
 	a.backfilled.Store(true) // this is the lowest slot not in snapshots
 }
 
-func (a *Antiquary) NotifyBlobBackfilled() {
-	a.blobBackfilled.Store(true)
+func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
+	a.blobBackfilled.Store(completed)
 }
 
 func (a *Antiquary) antiquateBlobs() error {

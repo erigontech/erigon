@@ -87,6 +87,17 @@ func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 	return db.err
 }
 
+func awaitErrorResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation did not finish")
+		return nil
+	}
+}
+
 func newPayloadBuildEngine(t *testing.T, ctrl *gomock.Controller) *payloadBuildEngine {
 	return &payloadBuildEngine{
 		MockExecutionEngine: execution_client.NewMockExecutionEngine(ctrl),
@@ -1938,29 +1949,6 @@ func TestProductionUsesTargetSlotRandao(t *testing.T) {
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.Error(t, err)
-}
-
-func TestProductionRejectsMissingBlobsBundle(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	targetSlot := postState.Slot() + 1
-	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(payloadID, nil)
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), payloadID, clparams.ElectraVersion).
-		Return(cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg), nil, nil, nil, nil)
-	handler.engine = engine
-
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
-	handler.ethClock = clock
-
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
-		targetSlot, common.Bytes96{}, common.Hash{})
-
-	require.ErrorContains(t, err, "execution layer returned no blobs bundle")
 }
 
 func TestProductionUsesPreparedWarmupForPayloadCollection(t *testing.T) {

@@ -39,13 +39,14 @@ type HighestBidKey struct {
 // EpbsPool holds EPBS-related gossip data caches.
 // [New in Gloas:EIP7732]
 type EpbsPool struct {
+	// Individual cache operations are synchronized by the LRU. This mutex makes
+	// bid replacement atomic with conditional removal.
+	highestBidUpdatesMu sync.Mutex
+	highestBids         *lru.Cache[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
+
 	// ProposerPreferences stores validated SignedProposerPreferences keyed by (slot, dependent_root).
 	// Written by the proposer_preferences gossip service, read by the execution_payload_bid service.
 	ProposerPreferences *lru.Cache[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]
-
-	// HighestBids stores the highest bid seen per (slot, parent_block_hash, parent_block_root).
-	// Written and read by the execution_payload_bid gossip service.
-	HighestBids *lru.Cache[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
 
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
@@ -55,6 +56,32 @@ type EpbsPool struct {
 	proposerPreferenceGenerationsMu  sync.Mutex
 	proposerPreferenceGenerations    map[uint64]uint64
 	nextProposerPreferenceGeneration uint64
+}
+
+func (p *EpbsPool) GetHighestBid(key HighestBidKey) (*cltypes.SignedExecutionPayloadBid, bool) {
+	return p.highestBids.Get(key)
+}
+
+func (p *EpbsPool) HighestBidKeys() []HighestBidKey {
+	return p.highestBids.Keys()
+}
+
+// StoreHighestBid replaces the current entry for key.
+func (p *EpbsPool) StoreHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
+	p.highestBidUpdatesMu.Lock()
+	defer p.highestBidUpdatesMu.Unlock()
+	p.highestBids.Add(key, bid)
+}
+
+// RemoveHighestBid preserves a concurrently stored replacement for the same key.
+func (p *EpbsPool) RemoveHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) bool {
+	p.highestBidUpdatesMu.Lock()
+	defer p.highestBidUpdatesMu.Unlock()
+	current, found := p.highestBids.Get(key)
+	if !found || current != bid {
+		return false
+	}
+	return p.highestBids.Remove(key)
 }
 
 func NewEpbsPool() *EpbsPool {
@@ -79,7 +106,7 @@ func NewEpbsPool() *EpbsPool {
 		panic(err)
 	}
 	epbsPool.ProposerPreferences = preferencesCache
-	epbsPool.HighestBids = highestBidsCache
+	epbsPool.highestBids = highestBidsCache
 	epbsPool.PayloadAttestations = payloadAttestationsCache
 	return epbsPool
 }
