@@ -171,11 +171,12 @@ func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
 }
 
 func (g *payloadPreparationGate) noteProducedBlock(
-	currentSlot, producedSlot uint64,
+	completionSlot, producedSlot uint64,
 	completedAt, expiresAt time.Time,
 ) {
-	// The signing interval can cross one slot boundary, but no more.
-	if !slotsWithinOne(currentSlot, producedSlot) {
+	// Only production completed in its target slot or a neighboring slot can overlap the next
+	// preparation window. Older or farther-future requests must not suppress unrelated work.
+	if !slotsWithinOne(completionSlot, producedSlot) {
 		return
 	}
 	g.producedBlockMu.Lock()
