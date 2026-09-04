@@ -132,35 +132,6 @@ func blockResultFixture(n int) map[string]any {
 	}
 }
 
-// BenchmarkResponsePreMarshal is the path this change replaces: the result is
-// marshalled to a standalone []byte, which writeTo then copies into the stream.
-func BenchmarkResponsePreMarshal(b *testing.B) {
-	res, id := blockResultFixture(150), json.RawMessage(`1`)
-	b.ReportAllocs()
-	for b.Loop() {
-		enc, err := json.Marshal(res)
-		if err != nil {
-			b.Fatal(err)
-		}
-		s := jsonstream.Get(&bytes.Buffer{})
-		(&jsonrpcMessage{Version: vsn, ID: id, Result: enc}).writeTo(s)
-		_ = s.Flush()
-		jsonstream.Put(s)
-	}
-}
-
-// BenchmarkResponseDeferred encodes the value straight into the pooled stream.
-func BenchmarkResponseDeferred(b *testing.B) {
-	res, id := blockResultFixture(150), json.RawMessage(`1`)
-	b.ReportAllocs()
-	for b.Loop() {
-		s := jsonstream.Get(&bytes.Buffer{})
-		(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s)
-		_ = s.Flush()
-		jsonstream.Put(s)
-	}
-}
-
 // the two paths must be byte-identical
 func TestResponsePathsIdentical(t *testing.T) {
 	for _, n := range []int{0, 1, 150} {
@@ -188,9 +159,8 @@ func TestResponsePathsIdentical(t *testing.T) {
 	t.Log("byte-identical across 0/1/150 transactions")
 }
 
-// A result that cannot be encoded must come back as a JSON-RPC error carrying the
-// request id, the same as before the result was encoded lazily -- never as a
-// success with a null result, and never as a dropped reply.
+// An unencodable result must come back as an error carrying the request id,
+// never as a success with a null result and never as a dropped reply.
 func TestResponseUnmarshalableResultBecomesError(t *testing.T) {
 	var out bytes.Buffer
 	s := jsonstream.Get(&out)
@@ -220,11 +190,8 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-// The three transports differ in how writeTo's output reaches the client, and an
-// encode failure has to produce a proper error response on all of them. The
-// WS/IPC path is the one that matters most: it reads the bytes back out of
-// Buffer with no writer at all, so a failure signalled only through Flush is
-// invisible there.
+// WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
+// signalled only through Flush would be invisible there.
 func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 	bad := func() *jsonrpcMessage {
 		return (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).response(make(chan int))
@@ -267,10 +234,9 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 	})
 }
 
-// A result too large to buffer must still reach the client byte-for-byte, and
-// must not grow the stream buffer past what the pool keeps: the deferred encode
-// gives up and the value is streamed as raw bytes instead.
-func TestLargeDeferredResultStreamsAndStaysPoolable(t *testing.T) {
+// A result too large to buffer must still reach the client byte-for-byte,
+// without growing the stream buffer past what the stream pool keeps.
+func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 	res := blockResultFixture(4000)
 	enc, err := json.Marshal(res)
 	if err != nil {
@@ -289,7 +255,7 @@ func TestLargeDeferredResultStreamsAndStaysPoolable(t *testing.T) {
 	s2 := jsonstream.Get(&got)
 	(&jsonrpcMessage{Version: vsn, ID: id}).response(res).writeTo(s2)
 	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
-		"deferred encode grew the buffer past the pool limit")
+		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 
 	require.Equal(t, want.String(), got.String())
@@ -297,10 +263,8 @@ func TestLargeDeferredResultStreamsAndStaysPoolable(t *testing.T) {
 	jsonstream.Put(s2)
 }
 
-// A request id large enough to flush the response prefix before the result is
-// written used to leave a success prefix on the wire that a later failure could
-// not retract. The result is encoded before any of the envelope now, so an id of
-// any size is safe. Sizes straddle prefix+id == FlushThreshold.
+// The result is encoded before any of the envelope, so an id of any size is
+// safe. Sizes straddle prefix+id == FlushThreshold.
 func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 	const prefix = len(`{"jsonrpc":"2.0","id":`)
 	for _, n := range []int{jsonstream.FlushThreshold - prefix - 1, jsonstream.FlushThreshold - prefix, jsonstream.FlushThreshold} {
