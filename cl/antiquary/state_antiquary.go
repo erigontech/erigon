@@ -632,9 +632,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	return nil
 }
 
-// removeStateOverlapsAndSeed runs overlap removal before seeding, so a subset superseded by
-// the dump is not hashed and announced microseconds before it is unlinked. It is outside the
-// snapgen block because downloaded files overlap too and snapgen is off by default.
+// removeStateOverlapsAndSeed removes before seeding, so a subset the dump supersedes is not
+// hashed and announced microseconds before it is unlinked.
 func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uint64) {
 	if s.stateSn == nil {
 		return
@@ -654,12 +653,9 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 	if dumpedTo == 0 || s.downloader == nil {
 		return
 	}
-	// A removal that failed part-way leaves superseded subsets in the dirty set SegFileNames
-	// walks, and announcing one re-adds what Delete was just asked to drop. Skipping the seed
-	// outright instead would strand this dump until the next file period, since dumpedTo is
-	// not carried forward — so drop just the names that went to Delete.
-	// From 0, not from the dump's own start: a per-type resume can dump a new type from
-	// genesis, and those files need announcing too.
+	// A removal that failed part-way leaves superseded subsets in the dirty set, and
+	// announcing one re-adds what Delete was just asked to drop.
+	// From 0, not the dump's start: a per-type resume can dump a new type from genesis.
 	all := s.stateSn.SegFileNames(0, dumpedTo)
 	names := make([]string, 0, len(all))
 	for _, name := range all {
@@ -676,8 +672,7 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 	}
 }
 
-// dumpCaplinStateIfDue freezes a new state range once enough slots have accumulated past the
-// safety margin. It reports the slot dumped to, or 0 when snapgen is off or nothing was due.
+// dumpCaplinStateIfDue reports the slot dumped to, or 0 when nothing was due.
 func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
 	if !s.snapgen || s.stateSn == nil {
 		return 0, nil
@@ -692,9 +687,8 @@ func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
 		return 0, nil
 	}
 	to -= (safetyMargin + blocksPerStatefulFile)
-	// planStateDump floors toSlot to a whole file; comparing against the unaligned value
-	// reports a dump the planner never scheduled, and the caller re-seeds on every
-	// finalized update until the next boundary.
+	// planStateDump floors toSlot to a whole file; reporting the unaligned value re-seeds
+	// on every finalized update until the next boundary.
 	to = (to / blocksPerStatefulFile) * blocksPerStatefulFile
 	if from >= to {
 		return 0, nil
@@ -711,7 +705,6 @@ func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
 	); err != nil {
 		return 0, err
 	}
-	// Open the new files so the caller's SegFileNames sees them.
 	if err := s.stateSn.OpenFolder(); err != nil {
 		return 0, err
 	}

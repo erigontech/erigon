@@ -976,10 +976,8 @@ func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
 	}
 }
 
-// pendingUnlinkNames is every retired segment still on disk because a live reader pins the
-// generation holding it. A directory rescan sees those files, and reopening one builds a
-// second DirtySegment that the next removal retires again: one fd and mapping per scan for
-// as long as the pin lasts. Must be called with dirtyLock held.
+// pendingUnlinkNames is every retired segment a reader's pin still holds on disk. Reopening
+// one costs an fd and a mapping per rescan for as long as the pin lasts. Needs dirtyLock.
 func (s *BaseRoSnapshots) pendingUnlinkNames() map[string]struct{} {
 	var names map[string]struct{}
 	cur := s.visible.Load()
@@ -1651,8 +1649,8 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		s.recalcVisibleFiles(s.alignMin, retired)
 	}()
 
-	// The older index of an equal-range pair is what no segment resolves to once the newer
-	// one exists, so reclamation never reaches it: unlink it here instead of leaking it.
+	// No segment resolves to the older index of an equal-range pair, so reclamation never
+	// reaches it.
 	s.removeOrphanedIdx(supersededIdx)
 
 	// remove .tmp files
@@ -1668,8 +1666,7 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 }
 
 // removeOrphanedIdx unlinks the superseded index files no dirty segment has open. The read
-// lock spans the unlink: released earlier, a concurrent openSegments could resolve one of
-// these files between the check and the unlink, and Windows refuses to unlink an open file.
+// lock spans the unlink, or openSegments could reopen one between the check and the unlink.
 func (s *BaseRoSnapshots) removeOrphanedIdx(superseded []snaptype.FileInfo) {
 	if len(superseded) == 0 {
 		return

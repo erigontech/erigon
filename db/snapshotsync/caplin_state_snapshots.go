@@ -137,8 +137,7 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 	}
 }
 
-// caplinDownloaderPrefix is how the downloader names caplin state files: it is rooted at
-// dirs.Snap while these live in dirs.SnapCaplin. See snapshotsync.go and downloader/util.go.
+// caplinDownloaderPrefix: the downloader is rooted at dirs.Snap, these live in dirs.SnapCaplin.
 const caplinDownloaderPrefix = "caplin"
 
 // value: chunked(ssz(SignedBeaconBlocks))
@@ -234,9 +233,7 @@ func (s *CaplinStateSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
-// RemoveOverlaps re-keys the removed names before reporting them. The base reports paths
-// relative to this collection's dir, but the downloader is rooted at dirs.Snap and registers
-// caplin files as caplin/<name>, always slash-separated — filepath.Join would miss on Windows.
+// RemoveOverlaps re-keys the base's dir-relative names to what the downloader registered.
 func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
@@ -561,9 +558,8 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 	return jobs
 }
 
-// DumpCaplinState must not run concurrently with RemoveOverlaps: the compressor writes .tmp
-// output into the same directory RemoveOverlaps sweeps unconditionally (#23470). Both run on
-// the single loopStates goroutine; parallelising the per-type dump unlinks in-flight output.
+// DumpCaplinState must not run concurrently with RemoveOverlaps, which sweeps every .tmp in
+// the output directory (#23470). Both run on loopStates; parallelising the dump breaks that.
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
 	for name := range s.snapshotTypes.KeyValueGetters {
