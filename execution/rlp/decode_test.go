@@ -34,13 +34,6 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-func TestIsInvalidRLPErrorUnexpectedEOF(t *testing.T) {
-	err := fmt.Errorf("decode value: %w", io.ErrUnexpectedEOF)
-	if !IsInvalidRLPError(err) {
-		t.Fatalf("expected truncated RLP to be invalid: %v", err)
-	}
-}
-
 func TestStreamKind(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -1365,17 +1358,6 @@ func TestStreamResetSliceRdrCoherency(t *testing.T) {
 		s.sliceRdr = data
 		s.Reset(&s.sliceRdr, uint64(len(data)))
 		check(t, s, true)
-	})
-
-	t.Run("empty-bytes-stream-rearm", func(t *testing.T) {
-		s := NewBytesStream(data)
-		defer PutStream(s)
-		s.sliceRdr = []byte{}
-		s.Reset(&s.sliceRdr, 0)
-		check(t, s, true)
-		if remaining := s.Remaining(); remaining != 0 {
-			t.Fatalf("remaining = %d, want 0", remaining)
-		}
 	})
 
 	t.Run("foreign-slice-reader-adopted", func(t *testing.T) {

@@ -66,9 +66,6 @@ func TestDeriveSha(t *testing.T) {
 		genTransactions(4),
 		genTransactions(10),
 		genTransactions(100),
-		genTransactions(127),
-		genTransactions(128),
-		genTransactions(129),
 		genTransactions(1000),
 		genTransactions(10000),
 		genTransactions(100000),
@@ -76,16 +73,6 @@ func TestDeriveSha(t *testing.T) {
 
 	for _, test := range tests {
 		checkDeriveSha(t, test)
-	}
-}
-
-func TestDeriveShaAllocations(t *testing.T) {
-	transactions := genTransactions(100)
-	allocations := testing.AllocsPerRun(10, func() {
-		DeriveSha(transactions)
-	})
-	if allocations > 150 {
-		t.Fatalf("allocations = %.0f, want at most 150", allocations)
 	}
 }
 

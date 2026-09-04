@@ -58,30 +58,6 @@ func TestDecodeBlockBodiesResponseMatchesHeaderBeforeDecoding(t *testing.T) {
 	}
 }
 
-func TestDecodeBlockBodiesResponseAlignsSparseBodies(t *testing.T) {
-	requestedBodies := []*types.Body{
-		{},
-		{Withdrawals: []*types.Withdrawal{
-			{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4},
-		}},
-	}
-	headers := []*types.Header{
-		newMockHeaderForBody(1, requestedBodies[0]),
-		newMockHeaderForBody(2, requestedBodies[1]),
-	}
-	encoded, err := rlp.EncodeToBytes(requestedBodies[1:])
-	require.NoError(t, err)
-	encodedBodies, rest, err := rlp.SplitList(encoded)
-	require.NoError(t, err)
-	require.Empty(t, rest)
-
-	decoded, err := decodeBlockBodiesResponse(encodedBodies, headers)
-	require.NoError(t, err)
-	require.Len(t, decoded, len(headers))
-	require.Nil(t, decoded[0])
-	require.NoError(t, decoded[1].MatchesHeader(headers[1]))
-}
-
 func TestDecodeBlockBodiesResponseRejectsMismatchBeforeTransactionDecode(t *testing.T) {
 	transactions := rlpTestList([]byte{rlp.EmptyListCode})
 	body := rlpTestList(append(transactions, rlp.EmptyListCode))
@@ -106,17 +82,20 @@ func TestDecodeBlockBodiesResponseRejectsTransactionAmplification(t *testing.T) 
 	require.Nil(t, decoded)
 }
 
-func TestDecodeBlockBodiesResponseEmptyAfterExcess(t *testing.T) {
+func TestDecodeBlockBodiesResponseRejectsExcessBeforeDecoding(t *testing.T) {
 	body, err := rlp.EncodeToBytes(&types.Body{})
 	require.NoError(t, err)
 	header := newMockHeaderForBody(1, &types.Body{})
 
-	_, err = decodeBlockBodiesResponse(append(body, body...), []*types.Header{header})
+	_, err = decodeBlockBodiesResponse(append(body, 0x80), []*types.Header{header})
 	require.ErrorIs(t, err, &ErrTooManyBodies{})
+}
 
+func TestDecodeBlockBodiesResponseEmpty(t *testing.T) {
+	header := newMockHeaderForBody(1, &types.Body{})
 	decoded, err := decodeBlockBodiesResponse(nil, []*types.Header{header})
 	require.NoError(t, err)
-	require.Equal(t, []*types.Body{nil}, decoded)
+	require.Empty(t, decoded)
 }
 
 func rlpTestList(content []byte) []byte {

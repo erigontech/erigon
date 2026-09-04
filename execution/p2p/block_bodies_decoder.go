@@ -41,17 +41,12 @@ type blockBodyCommitments struct {
 }
 
 func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([]*types.Body, error) {
-	bodyCount, err := rlp.CountValues(encodedBodies)
-	if err != nil {
-		return nil, fmt.Errorf("count block bodies: %w", err)
-	}
-	if bodyCount > len(headers) {
-		return nil, &ErrTooManyBodies{requested: len(headers), received: bodyCount}
-	}
+	bodies := make([]*types.Body, 0, len(headers))
+	for bodyIndex := 0; len(encodedBodies) > 0; bodyIndex++ {
+		if bodyIndex == len(headers) {
+			return nil, &ErrTooManyBodies{requested: len(headers), received: bodyIndex + 1}
+		}
 
-	bodies := make([]*types.Body, len(headers))
-	candidateIndex := 0
-	for bodyIndex := range bodyCount {
 		bodyPayload, rest, err := rlp.SplitList(encodedBodies)
 		if err != nil {
 			return nil, fmt.Errorf("split block body %d: %w", bodyIndex, err)
@@ -67,32 +62,15 @@ func decodeBlockBodiesResponse(encodedBodies []byte, headers []*types.Header) ([
 		if err != nil {
 			return nil, fmt.Errorf("hash block body %d: %w", bodyIndex, err)
 		}
-
-		// Stop early enough to leave one header for every later body.
-		lastCandidateIndex := len(headers) - (bodyCount - bodyIndex)
-		firstCandidateIndex := candidateIndex
-		var firstMismatch error
-		for candidateIndex <= lastCandidateIndex {
-			mismatch := commitments.matchesHeader(headers[candidateIndex])
-			if mismatch == nil {
-				break
-			}
-			if firstMismatch == nil {
-				firstMismatch = mismatch
-			}
-			candidateIndex++
-		}
-		if candidateIndex > lastCandidateIndex {
-			firstMismatch = fmt.Errorf("body matches no remaining requested header: %w", firstMismatch)
-			return nil, newBodyHeaderMismatch(headers[firstCandidateIndex], firstMismatch)
+		if err := commitments.matchesHeader(headers[bodyIndex]); err != nil {
+			return nil, newBodyHeaderMismatch(headers[bodyIndex], err)
 		}
 
 		body := new(types.Body)
 		if err := rlp.DecodeBytes(encodedBody, body); err != nil {
 			return nil, fmt.Errorf("decode block body %d: %w", bodyIndex, err)
 		}
-		bodies[candidateIndex] = body
-		candidateIndex++
+		bodies = append(bodies, body)
 	}
 	return bodies, nil
 }

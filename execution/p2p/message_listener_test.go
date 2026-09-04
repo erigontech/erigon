@@ -194,7 +194,7 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	})
 }
 
-func TestMessageListenerShouldPenalizePeerWhenRlpIsTruncated(t *testing.T) {
+func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	t.Parallel()
 
 	peerId1 := PeerIdFromUint64(1)
@@ -214,9 +214,9 @@ func TestMessageListenerShouldPenalizePeerWhenRlpIsTruncated(t *testing.T) {
 
 		test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
 			message: &sentryproto.InboundMessage{
-				Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+				Id:     sentryproto.MessageId_BLOCK_HEADERS_66,
 				PeerId: peerId1.H512(),
-				Data:   []byte{0xc2, 0x01, 0xf8},
+				Data:   []byte{'i', 'n', 'v', 'a', 'l', 'i', 'd', '.', 'r', 'l', 'p'},
 			},
 		}
 

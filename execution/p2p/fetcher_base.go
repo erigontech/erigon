@@ -122,45 +122,31 @@ func (f *FetcherBase) FetchBodies(
 	peerId *PeerId,
 	opts ...FetcherOption,
 ) (FetcherResponse[[]*types.Body], error) {
-	bodies := make([]*types.Body, len(headers))
-	pendingHeaders := slices.Clone(headers)
-	pendingResultIndexes := make([]int, len(headers))
-	for i := range pendingResultIndexes {
-		pendingResultIndexes[i] = i
-	}
+	var bodies []*types.Body
 	totalBodiesSize := 0
 
-	for len(pendingHeaders) > 0 {
-		// BlockBodies responses preserve request order but may omit unavailable bodies.
-		chunkLen := min(len(pendingHeaders), eth.MaxBodiesServe)
-		headersChunk := pendingHeaders[:chunkLen]
+	for len(headers) > 0 {
+		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
+		// In most cases the response will contain incomplete bodies list (ie < MaxBodiesServe) so we just
+		// continue asking it for more starting from the first hash in the sequence after the last received one.
+		// This is akin to how a paging API is consumed.
+		var headersChunk []*types.Header
+		if len(headers) > eth.MaxBodiesServe {
+			headersChunk = headers[:eth.MaxBodiesServe]
+		} else {
+			headersChunk = headers
+		}
 
 		bodiesChunk, err := f.fetchBodiesWithRetry(ctx, headersChunk, peerId, f.config.CopyWithOptions(opts...))
 		if err != nil {
 			return FetcherResponse[[]*types.Body]{}, err
 		}
-
-		matchedCount := 0
-		missingCount := 0
-		for i, body := range bodiesChunk.Data {
-			if body == nil {
-				pendingHeaders[missingCount] = headersChunk[i]
-				pendingResultIndexes[missingCount] = pendingResultIndexes[i]
-				missingCount++
-				continue
-			}
-
-			bodies[pendingResultIndexes[i]] = body
-			matchedCount++
-		}
-		if matchedCount == 0 {
-			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headersChunk)
+		if len(bodiesChunk.Data) == 0 {
+			return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headers)
 		}
 
-		// Compact missing entries before the untouched tail while keeping headers
-		// aligned with their result indexes.
-		pendingHeaders = append(pendingHeaders[:missingCount], pendingHeaders[chunkLen:]...)
-		pendingResultIndexes = append(pendingResultIndexes[:missingCount], pendingResultIndexes[chunkLen:]...)
+		bodies = append(bodies, bodiesChunk.Data...)
+		headers = headers[len(bodiesChunk.Data):]
 		totalBodiesSize += bodiesChunk.TotalSize
 	}
 

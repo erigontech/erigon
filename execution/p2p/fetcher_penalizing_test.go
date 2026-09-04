@@ -448,7 +448,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenBodyDoesNotMatchHeade
 	})
 }
 
-func TestPenalizingFetcherFetchBodiesShouldNotPenalizePeerWhenErrMissingBodies(t *testing.T) {
+func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrMissingBodies(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -471,6 +471,8 @@ func TestPenalizingFetcherFetchBodiesShouldNotPenalizePeerWhenErrMissingBodies(t
 
 	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId))
 	test.mockSentryStreams(mockRequestResponse)
+	// setup expectation that peer should be penalized
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errMissingBodies *ErrMissingBodies
 		bodies, err := test.penalizingFetcher.FetchBodies(ctx, headers, peerId)
@@ -533,7 +535,7 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrToo
 	})
 }
 
-func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldNotPenalizePeerWhenErrMissingBodies(t *testing.T) {
+func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrMissingBodies(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -572,6 +574,8 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldNotPenalizePeerWhenErr
 
 	test := newPenalizingFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	// setup expectation that peer should be penalized
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errMissingBodies *ErrMissingBodies
 		blocks, err := test.penalizingFetcher.FetchBlocksBackwardsByHash(ctx, hash, 1, peerId)
