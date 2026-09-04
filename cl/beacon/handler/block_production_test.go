@@ -30,24 +30,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -59,6 +68,14 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+type updateFailingDB struct {
+	kv.RwDB
+}
+
+func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
+	return errors.New("stop after persistence")
+}
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
@@ -468,6 +485,22 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+func TestPollAssembledPayloadStopsOnInvalidResponse(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	calls := 0
+
+	payload, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, fmt.Errorf("get payload: %w", execution_client.ErrInvalidGetPayloadResponse)
+		})
+
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.Nil(t, payload)
+	require.Equal(t, 1, calls)
+}
+
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 
@@ -528,7 +561,7 @@ func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T)
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, 123, 456)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, big.NewInt(123), big.NewInt(456))
 
 	require.Equal(t, "gloas", rr.Header().Get("Eth-Consensus-Version"))
 	require.Equal(t, "123", rr.Header().Get("Eth-Execution-Payload-Value"))
@@ -541,7 +574,7 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, big.NewInt(123), big.NewInt(456))
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
 }
@@ -634,6 +667,790 @@ func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 	return body, err
+}
+
+func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.CapellaVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.CapellaVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlock := blocks[len(blocks)-1].Block
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Zero(t, body.BlobKzgCommitments.Len())
+}
+
+func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
+	_, blocks, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
+
+	baseBlock := blocks[len(blocks)-1].Block
+	targetSlot := baseBlock.Slot + 1
+	h.beaconChainCfg.DenebForkEpoch = targetSlot / h.beaconChainCfg.SlotsPerEpoch
+
+	payload := cltypes.NewEth1BlockFromExecutionHeader(postState.LatestExecutionPayloadHeader(), clparams.DenebVersion, h.beaconChainCfg)
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return([]byte{1}, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.DenebVersion).
+		Return(payload, nil, nil, nil, nil)
+	h.engine = engine
+
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
+
+	body, _, err := h.produceBeaconBody(
+		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
+		common.Bytes96{0xc0}, common.Hash{},
+	)
+
+	require.Nil(t, body)
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
+	require.ErrorContains(t, err, "missing blobs bundle")
+}
+
+func TestSelectHigherGloasP2PBidValueUsesWei(t *testing.T) {
+	t.Run("higher bid", func(t *testing.T) {
+		localValueWei := gweiToWei(big.NewInt(2))
+		externalBid := &cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{Value: 3},
+		}
+
+		selectedValueWei, selected := selectHigherGloasP2PBidValue(localValueWei, externalBid)
+
+		require.True(t, selected)
+		require.Equal(t, "3000000000", selectedValueWei.String())
+	})
+
+	t.Run("equal bid", func(t *testing.T) {
+		localValueWei := gweiToWei(big.NewInt(2))
+		externalBid := &cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{Value: 2},
+		}
+
+		selectedValueWei, selected := selectHigherGloasP2PBidValue(localValueWei, externalBid)
+
+		require.False(t, selected)
+		require.Same(t, localValueWei, selectedValueWei)
+	})
+
+	t.Run("maximum bid", func(t *testing.T) {
+		externalBid := &cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{Value: ^uint64(0)},
+		}
+		wantWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
+
+		selectedValueWei, selected := selectHigherGloasP2PBidValue(new(big.Int), externalBid)
+
+		require.True(t, selected)
+		require.Equal(t, wantWei, selectedValueWei)
+	})
+}
+
+func TestPreferLocalExecutionValueRejectsNilBuilderValue(t *testing.T) {
+	require.True(t, preferLocalExecutionValue(big.NewInt(1), nil, 100))
+}
+
+func TestShouldRequestBuilderHeader(t *testing.T) {
+	require.True(t, shouldRequestBuilderHeader(clparams.FuluVersion))
+	require.False(t, shouldRequestBuilderHeader(clparams.GloasVersion))
+}
+
+func TestGetBuilderPayloadRejectsInvalidBlockValue(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+	}{
+		{name: "empty"},
+		{name: "not_a_number", value: "not-a-number"},
+		{name: "leading_plus", value: "+1"},
+		{name: "negative", value: "-1"},
+		{name: "over_uint256", value: new(big.Int).Lsh(big.NewInt(1), 256).String()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			builderClient.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(&builder.ExecutionHeader{
+				Version: postState.Version().String(),
+				Data: builder.ExecutionHeaderData{Message: builder.ExecutionHeaderMessage{
+					Value: test.value,
+				}},
+			}, nil)
+			handler.builderClient = builderClient
+
+			_, _, err := handler.getBuilderPayload(t.Context(), postState, postState.Slot()+1)
+
+			require.ErrorContains(t, err, "invalid builder block value")
+		})
+	}
+}
+
+func TestProcessProducedBlockFallsBackWithoutCandidateStateLeak(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{exitBuilder: true})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	expectedState, err := fixture.productionState.Copy()
+	require.NoError(t, err)
+	_, err = processBlockForProduction(expectedState, fixture.block)
+	require.NoError(t, err)
+	expectedRoot, err := expectedState.HashSSZ()
+	require.NoError(t, err)
+	logs := captureProductionLogs(t)
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	selectedState, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.productionState, selectedState)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "1000000000", fixture.block.ExecutionValue.String())
+	require.Len(t, fixture.block.Blobs, 1)
+	require.Len(t, fixture.block.KzgProofs, 1)
+	selectedRoot, err := selectedState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expectedRoot, selectedRoot)
+	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+	require.False(t, found)
+	require.Contains(t, logs(), "builderIndex=0")
+	require.Contains(t, logs(), "bidValueGwei=3")
+}
+
+func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+	transitionErr := errors.New("temporary transition failure")
+	processBlock := func(
+		productionState *state.CachingBeaconState,
+		block *cltypes.BlindOrExecutionBeaconBlock,
+	) (*eth2.Impl, error) {
+		bid := block.BeaconBody.GetSignedExecutionPayloadBid()
+		if bid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
+			return nil, transitionErr
+		}
+		return processBlockForProduction(productionState, block)
+	}
+
+	selectedState, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		processBlock,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.productionState, selectedState)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	storedBid, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+	require.True(t, found)
+	require.Same(t, fixture.externalBid, storedBid)
+}
+
+func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+	invalidBidErr := fmt.Errorf("%w: rejected candidate", eth2.ErrInvalidExecutionPayloadBid)
+	selfBuildErr := errors.New("self-build failed")
+	processBlock := func(
+		_ *state.CachingBeaconState,
+		block *cltypes.BlindOrExecutionBeaconBlock,
+	) (*eth2.Impl, error) {
+		bid := block.BeaconBody.GetSignedExecutionPayloadBid()
+		if bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
+			return nil, selfBuildErr
+		}
+		return nil, invalidBidErr
+	}
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		processBlock,
+	)
+
+	require.ErrorIs(t, err, invalidBidErr)
+	require.ErrorIs(t, err, selfBuildErr)
+	require.ErrorContains(t, err, "bid evicted: true")
+	_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+	require.False(t, found)
+}
+
+func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	originalRoot, err := fixture.productionState.HashSSZ()
+	require.NoError(t, err)
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	selectedState, blockMachine, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+	require.NoError(t, err)
+	require.NotSame(t, fixture.productionState, selectedState)
+	require.NotNil(t, blockMachine.BlockRewardsCollector)
+	require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "3000000000", fixture.block.ExecutionValue.String())
+	require.Nil(t, fixture.block.Blobs)
+	require.Nil(t, fixture.block.KzgProofs)
+	afterRoot, err := fixture.productionState.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, originalRoot, afterRoot)
+	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
+}
+
+func TestGetEthV3ValidatorBlockClearsStaleSelfBuildEnvelopeForExternalBid(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg = fixture.block.Cfg
+	forkEpoch := state.Epoch(fixture.productionState)
+	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
+	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
+	handler.beaconChainCfg.CapellaForkEpoch = forkEpoch
+	handler.beaconChainCfg.DenebForkEpoch = forkEpoch
+	handler.beaconChainCfg.ElectraForkEpoch = forkEpoch
+	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
+	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
+	handler.beaconChainCfg.InitializeForkSchedule()
+	headState, err := fixture.productionState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, headState.SetSlot(fixture.block.Slot-1))
+	headStateRoot, err := headState.HashSSZ()
+	require.NoError(t, err)
+	headHeader := headState.LatestBlockHeader()
+	headHeader.Root = common.Hash(headStateRoot)
+	headState.SetLatestBlockHeader(&headHeader)
+	headRootRaw, err := headHeader.HashSSZ()
+	require.NoError(t, err)
+	headRoot := common.Hash(headRootRaw)
+	fixture.externalBid.Message.ParentBlockRoot = headRoot
+	fixture.bidKey.ParentBlockRoot = headRoot
+	domain, err := headState.GetDomain(handler.beaconChainCfg.DomainBeaconBuilder, state.Epoch(headState))
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(fixture.externalBid.Message, domain)
+	require.NoError(t, err)
+	copy(fixture.externalBid.Signature[:], fixture.builderKey.Sign(signingRoot[:]).Bytes())
+	syncedData := synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
+	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, headRoot))
+	handler.syncedData = syncedData
+	forkchoiceStore.HeadVal = headRoot
+	forkchoiceStore.HeadSlotVal = headState.Slot()
+	handler.epbsPool = pool.NewEpbsPool()
+	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
+	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
+		Times(2)
+	handler.syncMessagePool = syncPool
+
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = fixture.externalBid.Message.ParentBlockHash
+	payload.BlockHash = common.Hash{0x66}
+	payload.PrevRandao = fixture.externalBid.Message.PrevRandao
+	payload.FeeRecipient = common.Address{0x77}
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	payload.SlotNumber = fixture.block.Slot
+
+	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil).
+		Times(2)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
+		Times(2)
+	handler.engine = engine
+
+	produce := func() *cltypes.BeaconBlock {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
+			"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&graffiti=0x01",
+			fixture.block.Slot,
+			(common.Bytes96{}).String(),
+		), http.NoBody)
+		routeContext := chi.NewRouteContext()
+		routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
+		request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+		response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+		require.NoError(t, err)
+		producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
+		require.True(t, ok)
+		return producedBlock
+	}
+
+	selfBuiltBlock := produce()
+	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	_, found := handler.selfBuildEnvelopes.Get(fixture.block.Slot)
+	require.True(t, found)
+
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+	externalBlock := produce()
+	require.Equal(t, fixture.externalBid.Message.BuilderIndex, externalBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	_, found = handler.selfBuildEnvelopes.Get(fixture.block.Slot)
+	require.False(t, found)
+}
+
+func TestUpdateSelfBuildEnvelopeCacheRetainsMatchingEnvelope(t *testing.T) {
+	cache, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
+	require.NoError(t, err)
+	handler := &ApiHandler{selfBuildEnvelopes: cache}
+	slot := uint64(1)
+	blockRoot := common.Hash{0x01}
+	existing := &cltypes.ExecutionPayloadEnvelope{
+		BuilderIndex:    clparams.BuilderIndexSelfBuild,
+		BeaconBlockRoot: blockRoot,
+	}
+	handler.selfBuildEnvelopes.Add(slot, existing)
+
+	handler.updateSelfBuildEnvelopeCache(slot, &blockRoot, nil)
+
+	got, found := handler.selfBuildEnvelopes.Get(slot)
+	require.True(t, found)
+	require.Same(t, existing, got)
+}
+
+func TestUpdateSelfBuildEnvelopeCacheRemovesMismatchedEnvelope(t *testing.T) {
+	cache, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
+	require.NoError(t, err)
+	handler := &ApiHandler{selfBuildEnvelopes: cache}
+	slot := uint64(1)
+	existing := &cltypes.ExecutionPayloadEnvelope{
+		BuilderIndex:    clparams.BuilderIndexSelfBuild,
+		BeaconBlockRoot: common.Hash{0x01},
+	}
+	handler.selfBuildEnvelopes.Add(slot, existing)
+	producedBlockRoot := common.Hash{0x02}
+
+	handler.updateSelfBuildEnvelopeCache(slot, &producedBlockRoot, nil)
+
+	_, found := handler.selfBuildEnvelopes.Get(slot)
+	require.False(t, found)
+}
+
+type coordinatedSelfBuildEnvelopeStore struct {
+	mu               sync.Mutex
+	envelope         *cltypes.ExecutionPayloadEnvelope
+	removeStarted    chan struct{}
+	replacementAdded chan struct{}
+	releaseRemoval   chan struct{}
+}
+
+func (s *coordinatedSelfBuildEnvelopeStore) Add(_ uint64, envelope *cltypes.ExecutionPayloadEnvelope) bool {
+	s.mu.Lock()
+	s.envelope = envelope
+	s.mu.Unlock()
+	close(s.replacementAdded)
+	return false
+}
+
+func (s *coordinatedSelfBuildEnvelopeStore) Get(_ uint64) (*cltypes.ExecutionPayloadEnvelope, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.envelope, s.envelope != nil
+}
+
+func (s *coordinatedSelfBuildEnvelopeStore) Remove(_ uint64) bool {
+	close(s.removeStarted)
+	select {
+	case <-s.replacementAdded:
+	case <-s.releaseRemoval:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := s.envelope != nil
+	s.envelope = nil
+	return found
+}
+
+func TestUpdateSelfBuildEnvelopeCacheSerializesReplacementWithRemoval(t *testing.T) {
+	existing := &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{0x01}}
+	replacement := &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{0x02}}
+	store := &coordinatedSelfBuildEnvelopeStore{
+		envelope:         existing,
+		removeStarted:    make(chan struct{}),
+		replacementAdded: make(chan struct{}),
+		releaseRemoval:   make(chan struct{}),
+	}
+	handler := &ApiHandler{selfBuildEnvelopes: store}
+	producedBlockRoot := common.Hash{0x03}
+	removalDone := make(chan struct{})
+	go func() {
+		handler.updateSelfBuildEnvelopeCache(1, &producedBlockRoot, nil)
+		close(removalDone)
+	}()
+	<-store.removeStarted
+
+	replacementDone := make(chan struct{})
+	go func() {
+		handler.updateSelfBuildEnvelopeCache(1, nil, replacement)
+		close(replacementDone)
+	}()
+	select {
+	case <-replacementDone:
+	case <-time.After(250 * time.Millisecond):
+		close(store.releaseRemoval)
+	}
+	<-removalDone
+	<-replacementDone
+
+	got, found := store.Get(1)
+	require.True(t, found)
+	require.Same(t, replacement, got)
+}
+
+func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	fixture.block.ExecutionValue = nil
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+	require.NoError(t, err)
+	require.Same(t, fixture.externalBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "3000000000", fixture.block.GetExecutionValue().String())
+}
+
+func TestProcessProducedBlockRejectsBlindedGloasBlock(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	block := &cltypes.BlindOrExecutionBeaconBlock{
+		BlindedBeaconBody: cltypes.NewBlindedBeaconBody(fixture.block.Cfg, clparams.GloasVersion),
+		Cfg:               fixture.block.Cfg,
+	}
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, block)
+
+	require.ErrorContains(t, err, "cannot process blinded Gloas block")
+}
+
+func TestProcessProducedBlockRejectsNilBlock(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+
+	_, _, err := handler.processProducedBlock(fixture.productionState, nil)
+
+	require.ErrorContains(t, err, "cannot process nil block")
+}
+
+func TestProcessProducedBlockRejectsBlockWithoutBody(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	block := &cltypes.BlindOrExecutionBeaconBlock{Cfg: fixture.block.Cfg}
+	processed := false
+	processBlock := func(
+		_ *state.CachingBeaconState,
+		_ *cltypes.BlindOrExecutionBeaconBlock,
+	) (*eth2.Impl, error) {
+		processed = true
+		return &eth2.Impl{}, nil
+	}
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		block,
+		processBlock,
+	)
+
+	require.ErrorContains(t, err, "cannot process block without body")
+	require.False(t, processed)
+}
+
+func TestProcessProducedBlockRejectsInvalidExternalBidGuards(t *testing.T) {
+	tests := []struct {
+		name    string
+		options gloasBidSelectionOptions
+	}{
+		{
+			name: "randao mismatch",
+			options: gloasBidSelectionOptions{mutateBid: func(bid *cltypes.ExecutionPayloadBid) {
+				bid.PrevRandao[0] ^= 0xff
+			}},
+		},
+		{
+			name: "builder version mismatch",
+			options: gloasBidSelectionOptions{mutateBuilder: func(builder *cltypes.Builder) {
+				builder.Version++
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newGloasBidSelectionFixture(t, test.options)
+			selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+			handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+			_, _, err := handler.processProducedBlock(fixture.productionState, fixture.block)
+
+			require.NoError(t, err)
+			require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+			_, found := handler.epbsPool.GetHighestBid(fixture.bidKey)
+			require.False(t, found)
+		})
+	}
+}
+
+func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
+	rewards := &eth2.BlockRewardsCollector{
+		Attestations:      ^uint64(0),
+		AttesterSlashings: 2,
+		ProposerSlashings: 3,
+		SyncAggregate:     4,
+	}
+	wantGwei := new(big.Int).Add(new(big.Int).SetUint64(^uint64(0)), big.NewInt(9))
+	wantWei := gweiToWei(wantGwei)
+
+	require.Equal(t, wantWei, consensusBlockValueWei(rewards))
+}
+
+type gloasBidSelectionOptions struct {
+	exitBuilder   bool
+	slotOffset    uint64
+	mutateBuilder func(*cltypes.Builder)
+	mutateBid     func(*cltypes.ExecutionPayloadBid)
+}
+
+type gloasBidSelectionFixture struct {
+	productionState *state.CachingBeaconState
+	block           *cltypes.BlindOrExecutionBeaconBlock
+	externalBid     *cltypes.SignedExecutionPayloadBid
+	bidKey          pool.HighestBidKey
+	builderKey      *bls.PrivateKey
+}
+
+func newGloasBidSelectionFixture(t *testing.T, options gloasBidSelectionOptions) gloasBidSelectionFixture {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.PayloadBuilderVersion = 7
+	productionState := state.New(&cfg)
+	productionState.SetVersion(clparams.GloasVersion)
+	slot := cfg.SlotsPerEpoch + options.slotOffset
+	require.NoError(t, productionState.SetSlot(slot))
+	productionState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
+	productionState.SetGenesisValidatorsRoot(common.Hash{0x91})
+	productionState.SetFork(&cltypes.Fork{
+		PreviousVersion: utils.Uint32ToBytes4(uint32(cfg.FuluForkVersion)),
+		CurrentVersion:  utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion)),
+		Epoch:           state.Epoch(productionState),
+	})
+	require.NoError(t, productionState.SetRandaoMixAt(
+		int(state.Epoch(productionState)%cfg.EpochsPerHistoricalVector),
+		common.Hash{0xa1},
+	))
+
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	pubkey := common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
+	require.NoError(t, productionState.AddValidator(solid.NewValidatorFromParameters(
+		pubkey,
+		common.Hash{},
+		cfg.MaxEffectiveBalance,
+		false,
+		0,
+		0,
+		cfg.FarFutureEpoch,
+		cfg.FarFutureEpoch,
+	), cfg.MaxEffectiveBalance))
+	committee := make([]common.Bytes48, int(cfg.SyncCommitteeSize))
+	for i := range committee {
+		committee[i] = pubkey
+	}
+	require.NoError(t, productionState.SetCurrentSyncCommittee(
+		solid.NewSyncCommitteeFromParameters(committee, pubkey),
+	))
+
+	executionAddress := common.Address{0x42}
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	payloadBuilder := &cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		ExecutionAddress:  executionAddress,
+		Balance:           cfg.MinDepositAmount + 100,
+		DepositEpoch:      0,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	}
+	if options.mutateBuilder != nil {
+		options.mutateBuilder(payloadBuilder)
+	}
+	builders.Append(payloadBuilder)
+	productionState.SetBuilders(builders)
+
+	parentHeader := productionState.LatestBlockHeader()
+	parentRootRaw, err := (&parentHeader).HashSSZ()
+	require.NoError(t, err)
+	parentRoot := common.Hash(parentRootRaw)
+	parentHash := common.Hash{0x22}
+	require.NoError(t, productionState.SetBlockRootAt(int((slot-1)%cfg.SlotsPerHistoricalRoot), parentRoot))
+	parentRequests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	if options.exitBuilder {
+		parentRequests.BuilderExits.Append(&solid.BuilderExitRequest{
+			SourceAddress: executionAddress,
+			PubKey:        pubkey,
+		})
+	}
+	parentRequestsRoot, err := parentRequests.HashSSZ()
+	require.NoError(t, err)
+	productionState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:             parentHash,
+		Slot:                  slot - 1,
+		ExecutionRequestsRoot: parentRequestsRoot,
+	})
+	productionState.SetLatestBlockHash(parentHash)
+
+	commitments := solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	commitments.Append(&cltypes.KZGCommitment{0x33})
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash:    parentHash,
+		ParentBlockRoot:    parentRoot,
+		BlockHash:          common.Hash{0x44},
+		PrevRandao:         productionState.GetRandaoMixes(state.Epoch(productionState)),
+		FeeRecipient:       common.Address{0x55},
+		BuilderIndex:       0,
+		Slot:               slot,
+		Value:              3,
+		BlobKzgCommitments: *commitments,
+	}}
+	if options.mutateBid != nil {
+		options.mutateBid(externalBid.Message)
+	}
+	domain, err := productionState.GetDomain(cfg.DomainBeaconBuilder, state.Epoch(productionState))
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(externalBid.Message, domain)
+	require.NoError(t, err)
+	copy(externalBid.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+
+	selfCommitments := solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
+		Message: &cltypes.ExecutionPayloadBid{
+			ParentBlockHash:    parentHash,
+			ParentBlockRoot:    parentRoot,
+			BlockHash:          common.Hash{0x66},
+			PrevRandao:         productionState.GetRandaoMixes(state.Epoch(productionState)),
+			BuilderIndex:       clparams.BuilderIndexSelfBuild,
+			Slot:               slot,
+			BlobKzgCommitments: *selfCommitments,
+		},
+		Signature: common.Bytes96(bls.InfiniteSignature),
+	}
+	body.ParentExecutionRequests = parentRequests
+
+	block := &cltypes.BlindOrExecutionBeaconBlock{
+		Slot:           slot,
+		ProposerIndex:  0,
+		ParentRoot:     parentRoot,
+		BeaconBody:     body,
+		Blobs:          []*cltypes.Blob{{0x77}},
+		KzgProofs:      []common.Bytes48{{0x88}},
+		ExecutionValue: gweiToWei(big.NewInt(1)),
+		Cfg:            &cfg,
+	}
+	return gloasBidSelectionFixture{
+		productionState: productionState,
+		block:           block,
+		externalBid:     externalBid,
+		builderKey:      privateKey,
+		bidKey: pool.HighestBidKey{
+			Slot:            slot,
+			ParentBlockHash: parentHash,
+			ParentBlockRoot: parentRoot,
+		},
+	}
+}
+
+func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+	valueWei := gweiToWei(new(big.Int).SetUint64(^uint64(0)))
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, valueWei, new(big.Int))
+
+	require.Equal(t, valueWei.String(), rr.Header().Get("Eth-Execution-Payload-Value"))
+}
+
+func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	h.routerCfg.Builder = false
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, h.beaconChainCfg)
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	valueWei := new(big.Int).Add(new(big.Int).SetUint64(^uint64(0)), big.NewInt(1))
+	wantValueWei := valueWei.String()
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(payload, &engine_types.BlobsBundle{}, nil, valueWei, nil).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	h.engine = engine
+
+	block, err := h.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+
+	require.NoError(t, err)
+	require.Equal(t, wantValueWei, block.ExecutionValue.String())
+}
+
+func TestProduceBlockUsesLocalPayloadWithoutBuilderClient(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	require.True(t, h.routerCfg.Builder)
+	require.Nil(t, h.builderClient)
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, h.beaconChainCfg)
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	valueWei := big.NewInt(1)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(payload, &engine_types.BlobsBundle{}, nil, valueWei, nil).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	h.engine = engine
+
+	block, err := h.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+
+	require.NoError(t, err)
+	require.False(t, block.IsBlinded())
+	require.Equal(t, valueWei, block.ExecutionValue)
+}
+
+func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
+	logs := captureAllProductionLogs(t)
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	h.indiciesDB = updateFailingDB{RwDB: h.indiciesDB}
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	require.NotNil(t, bid)
+	require.NotNil(t, bid.Message)
+	bid.Message.BuilderIndex = 1
+	bid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0x01})
+
+	require.NoError(t, h.broadcastBlock(t.Context(), block))
+
+	// The persistence error is logged at the end of the background store goroutine.
+	require.Eventually(t, func() bool {
+		return strings.Contains(logs(), "stop after persistence")
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Contains(t, logs(), "blobSidecars=0")
+	require.Contains(t, logs(), "columnSidecars=0")
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
@@ -743,7 +1560,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, beaconBody)
-	require.NotZero(t, execValue)
+	require.Positive(t, execValue.Sign())
 
 	// --- Verify execution requests were decoded by Caplin ---
 
@@ -988,18 +1805,24 @@ func (s *syncedBuffer) String() string {
 	return s.buf.String()
 }
 
-// captureProductionLogs redirects the root logger for one test and returns everything written at
-// warning level or above. It deliberately does not filter by message: a record this package emits
-// under another name is exactly what a test asserting silence needs to see.
-func captureProductionLogs(t *testing.T) func() string {
+func captureAllProductionLogs(t *testing.T) func() string {
 	t.Helper()
 	output := &syncedBuffer{}
 	previous := log.Root().GetHandler()
 	log.Root().SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
 	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	return output.String
+}
+
+// captureProductionLogs redirects the root logger for one test and returns everything written at
+// warning level or above. It deliberately does not filter by message: a record this package emits
+// under another name is exactly what a test asserting silence needs to see.
+func captureProductionLogs(t *testing.T) func() string {
+	t.Helper()
+	allLogs := captureAllProductionLogs(t)
 	return func() string {
 		var loud []string
-		for line := range strings.SplitSeq(output.String(), "\n") {
+		for line := range strings.SplitSeq(allLogs(), "\n") {
 			if strings.Contains(line, "lvl=eror") || strings.Contains(line, "lvl=warn") {
 				loud = append(loud, line)
 			}

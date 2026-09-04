@@ -61,10 +61,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -480,14 +484,16 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	var to uint64
-	db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
 			to, err = beacon_indicies.ReadHighestFinalized(tx)
 			return
 		}
 		to = c.To
 		return
-	})
+	}); err != nil {
+		return err
+	}
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
 
@@ -632,7 +638,9 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
 	start := time.Now()
 	for i := c.Slot; i < to; i++ {
-		snReader.ReadBlockBySlot(ctx, tx, i)
+		if _, err := snReader.ReadBlockBySlot(ctx, tx, i); err != nil {
+			return fmt.Errorf("failed to read block at slot %d: %w", i, err)
+		}
 	}
 	log.Info("Successfully checked", "slot", c.Slot, "time", time.Since(start))
 	return nil
@@ -677,7 +685,30 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	}
 
 	blockReader := freezeblocks.NewBlockReader(allSnapshots)
-	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
+	// EL bodies live in the chain DB and its block files, not in the Caplin
+	// indexing DB. Block reads need a tx that pins a block-files view.
+	chainDB, err := mdbx.New(dbcfg.ChainDB, log.Root()).Path(dirs.Chaindata).Accede(true).Open(ctx)
+	if err != nil {
+		return fmt.Errorf("opening chaindata for EL payload reads: %w", err)
+	}
+	defer chainDB.Close()
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, log.Root(), false)
+	if err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).SanityOldNaming().Logger(log.Root()).WithErigonDBSettings(erigonDBSettings).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	elDB, err := temporal.New(chainDB, agg, allSnapshots)
+	if err != nil {
+		return err
+	}
+	if err := elDB.OpenStateSnapshots(ctx); err != nil {
+		return err
+	}
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, elDB)
 	eth1Getter.SetBeaconChainConfig(beaconConfig)
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	if err := csn.OpenFolder(); err != nil {
@@ -703,7 +734,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	sn := synced_data.NewSyncedDataManager(beaconConfig, true)
-	sn.OnHeadState(bs)
+	if err := sn.OnHeadState(bs); err != nil {
+		return err
+	}
 
 	r.withPPROF.withProfile()
 	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot, stateSn, sn)
@@ -1124,14 +1157,16 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	var to uint64
-	db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
 			to, err = beacon_indicies.ReadHighestFinalized(tx)
 			return
 		}
 		to = c.To
 		return
-	})
+	}); err != nil {
+		return err
+	}
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
@@ -1360,14 +1395,16 @@ func (c *DumpStateSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	var to uint64
-	db.View(ctx, func(tx kv.Tx) (err error) {
+	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
 			to, err = state_accessors.GetStateProcessingProgress(tx)
 			return
 		}
 		to = c.To
 		return
-	})
+	}); err != nil {
+		return err
+	}
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = c.Chain

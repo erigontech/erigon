@@ -98,6 +98,7 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
@@ -116,7 +117,7 @@ type BlockRetire interface {
 	BuildFilesInBackground(
 		ctx context.Context,
 		minBlockNum uint64,
-		maxBlockNum uint64,
+		finalityCtx kv.FinalityContext,
 		lvl log.Lvl,
 		seeder SeederClient,
 		onFinishRetire func() error,

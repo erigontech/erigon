@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -262,6 +261,12 @@ func (e *ExecModule) unwindIfNeeded(
 		}
 	}
 	unwindTarget := currentParentNumber
+	if canonicalHash != blockHash && unwindTarget < finalisedBlockNum {
+		return &ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusInvalidForkchoice,
+		}, nil
+	}
 	// Determine current canonical tip from TxNums. If unwindTarget is at or
 	// above the canonical tip, there's nothing above to roll back — skip the
 	// unwind path entirely and proceed straight to forward-filling new
@@ -295,6 +300,14 @@ func (e *ExecModule) unwindIfNeeded(
 		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return nil, err
+		}
+		e.observeStateTransition(ctx, StateTransitionUnwindComplete)
+	} else {
+		execProgress, progressErr := stages.GetStageProgress(tx, stages.Execution)
+		if progressErr != nil {
+			e.logger.Warn("updateForkChoice: execution progress unavailable for skipped unwind", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "err", progressErr)
+		} else if execProgress > unwindTarget {
+			e.logger.Info("updateForkChoice: unwind skipped with executed state above reorg point", "unwindTarget", unwindTarget, "lastCanonicalBlock", lastCanonicalBlock, "execProgress", execProgress)
 		}
 	}
 	// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
@@ -419,12 +432,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// Clear the published overlay before closing the SD, so concurrent
 	// readers (e.g. a second FCU calling GetHeaderByHash) don't access
 	// a closed SharedDomains via Events.LatestSD().
+	overlayPublished := false
 	teardownOverlay := func() {
 		if currentContext == nil {
 			return
 		}
 		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
 			dispatcher.PublishOverlay(nil)
+			if overlayPublished {
+				overlayPublished = false
+				e.observeStateTransition(ctx, StateTransitionOverlayCleared)
+			}
 		}
 		currentContext.Close()
 		currentContext = nil
@@ -699,8 +717,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash)
-		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
+		published, dispatchErr := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore)
+		overlayPublished = published
+		if dispatchErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
 		}
 
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
@@ -722,6 +742,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		e.observeStateTransition(ctx, StateTransitionCommitComplete)
 
 		// Prune: background by default (fcuBackgroundPrune=true). RunPrune
 		// shares the pipeline Sync with the next FCU's RunLoop, so the
@@ -777,31 +798,35 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 // SD's block overlay. The state version is supplied separately because the
 // domain flush, not the metadata overlay, owns its durable sequence advance.
 // Dispatch must finish before the execution semaphore is released so the next
-// FCU cannot overtake these notifications.
-func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64) error {
+// FCU cannot overtake these notifications. The result reports whether
+// publication happened, including when the later notification dispatch fails.
+func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64) (bool, error) {
 	dispatcher := e.pipelineExecutor.Dispatcher()
 	if dispatcher == nil || e.accum == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: dispatcher or accum nil", "dispatcherNil", dispatcher == nil, "accumNil", e.accum == nil)
-		return nil
+		return false, nil
 	}
 	overlay := sd.BlockOverlay()
 	if overlay == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: overlay nil")
-		return nil
+		return false, nil
 	}
 	finishProgressAfter, err := stages.GetStageProgress(overlay, stages.Finish)
 	if err != nil {
-		return err
+		return false, err
 	}
 	stateVersion, err := sd.ProjectedStateVersion()
 	if err != nil {
-		return fmt.Errorf("project notification state version: %w", err)
+		return false, fmt.Errorf("project notification state version: %w", err)
 	}
 	// Publish the overlay BEFORE dispatching notifications. This ensures
 	// the BlockListener (overlay-aware shutter) sees the overlay as active
 	// before any StateChangeBatch arrives, so it can buffer events properly.
 	e.logger.Debug("[dispatchNotifications] publishing SD")
 	dispatcher.PublishOverlay(sd)
+	// Overlay publication is drop-tolerant; the observer supplies the blocking
+	// boundary required by deterministic integration tests.
+	e.observeStateTransition(ctx, StateTransitionOverlayPublished)
 
 	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
 	if err := dispatcher.Dispatch(
@@ -814,10 +839,10 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 		finishProgressAfter,
 		e.pipelineExecutor.Sync().PrevUnwindPoint(),
 	); err != nil {
-		return err
+		return true, err
 	}
 
-	return nil
+	return true, nil
 }
 
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
@@ -878,32 +903,28 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	// unbounded (commitment domain especially) until the next initial-cycle
 	// trip through StageLoopIteration. CollateAndPrune internally
 	// opens its own RW tx and calls the pruneFn callback inside it.
-	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			// Same adaptive prune budget as PruneExecutionStage (stage_execute.go):
-			// base = SecondsPerSlot/3, +200ms per 100 prunable steps, capped at 2/3 slot.
-			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
-			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
-			pruneTimeout := min(baseTimeout+time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
-			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
-				if e.codeStore != nil {
-					if err := e.codeStore.Evict(tx); err != nil {
-						return err
-					}
-				}
-				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
-			}, e.logger)
-			if err != nil {
+	// Same adaptive prune budget as PruneExecutionStage (stage_execute.go):
+	// base = SecondsPerSlot/3, +200ms per 100 prunable steps, capped at 2/3 slot.
+	baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
+	maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
+	pruneTimeout := min(baseTimeout+time.Duration(e.db.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
+	started, finished, err := e.db.CollateAndPrune(e.backgroundCtx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
+		if e.codeStore != nil {
+			if err := e.codeStore.Evict(tx); err != nil {
 				return nil, err
 			}
-			e.hook.NotifyStateRetirementStart(started)
-			if started {
-				go func() {
-					<-finished
-					e.hook.NotifyStateRetirementDone()
-				}()
-			}
 		}
+		return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
+	})
+	if err != nil {
+		return nil, err
+	}
+	e.hook.NotifyStateRetirementStart(started)
+	if started {
+		go func() {
+			<-finished
+			e.hook.NotifyStateRetirementDone()
+		}()
 	}
 
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))

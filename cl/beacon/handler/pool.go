@@ -23,6 +23,7 @@ import (
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -458,6 +459,10 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			}
 			return nil
 		}); err != nil {
+			if errors.Is(err, synced_data.ErrNotSynced) {
+				beaconhttp.WrapEndpointError(err).WriteTo(w)
+				return
+			}
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}

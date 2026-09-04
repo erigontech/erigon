@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -51,21 +53,30 @@ import (
 type RemoteBlockReader struct {
 	client       remoteproto.ETHBACKENDClient
 	txNumsReader rawdbv3.TxNumsReader
+
+	frozenBlocksMu        sync.Mutex
+	frozenBlocksValue     uint64
+	frozenBlocksFetchedAt time.Time
+	frozenBlocksFetching  bool
+	frozenBlocksFetched   chan struct{}
+	frozenBlocksTTL       time.Duration
+	frozenBlocksTimeout   time.Duration
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
 	panic("not implemented")
 }
-func (r *RemoteBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
-	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber, err := r.HeaderNumber(context.Background(), db, headHash)
+
+func (r *RemoteBlockReader) CurrentBlock(tx kv.Tx) (*types.Block, error) {
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber, err := r.HeaderNumber(context.Background(), tx, headHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if headNumber == nil {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(context.Background(), db, headHash, *headNumber)
+	block, _, err := r.BlockWithSenders(context.Background(), tx, headHash, *headNumber)
 	return block, err
 }
 
@@ -86,9 +97,10 @@ func (r *RemoteBlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func (r *RemoteBlockReader) ReadAncestor(tx kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	panic("not implemented")
 }
+
 func (r *RemoteBlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	panic("not implemented")
 }
@@ -101,28 +113,30 @@ func (r *RemoteBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, h
 	return rawdb.ReadBadHeaderNumber(tx, hash)
 }
 
-func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
-	hash, ok, err := r.CanonicalHash(ctx, db, number)
+func (r *RemoteBlockReader) BlockByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
+	hash, ok, err := r.CanonicalHash(ctx, tx, number)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if !ok {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
+	block, _, err := r.BlockWithSenders(ctx, tx, hash, number)
 	return block, err
 }
-func (r *RemoteBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
-	number, err := r.HeaderNumber(ctx, db, hash)
+
+func (r *RemoteBlockReader) BlockByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
+	number, err := r.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
 	if number == nil {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	block, _, err := r.BlockWithSenders(ctx, tx, hash, *number)
 	return block, err
 }
+
 func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
@@ -137,10 +151,85 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots  { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots   { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type              { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing  { panic("not supported") }
+
+// FrozenBlocks is answered by the backend. The context-free signature leaves no way to
+// surface an error or honor cancellation, so the whole call is bounded by an internal
+// timeout however many rounds it takes, cached for a short TTL, and not duplicated while
+// one is in flight. The count only grows, so a stale-low answer is conservative for the
+// availability gates; zero is not, since callers read it as "no snapshots", so a failed
+// fetch is not cached.
+func (r *RemoteBlockReader) FrozenBlocks() uint64 {
+	deadline := time.Now().Add(r.frozenBlocksTimeout)
+	for waited := false; ; waited = true {
+		r.frozenBlocksMu.Lock()
+		observed := !r.frozenBlocksFetchedAt.IsZero()
+		fresh := time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
+		if observed && (fresh || r.frozenBlocksFetching) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if waited && !time.Now().Before(deadline) {
+			value := r.frozenBlocksValue
+			r.frozenBlocksMu.Unlock()
+			return value
+		}
+		if r.frozenBlocksFetching {
+			fetched := r.frozenBlocksFetched
+			r.frozenBlocksMu.Unlock()
+			select {
+			case <-fetched:
+			case <-time.After(time.Until(deadline)):
+			}
+			if waited {
+				r.frozenBlocksMu.Lock()
+				value := r.frozenBlocksValue
+				r.frozenBlocksMu.Unlock()
+				return value
+			}
+			// A caller that has not fetched yet retries once the in-flight one ends;
+			// waiting again would put it past the single timeout it is bounded by.
+			continue
+		}
+		r.frozenBlocksFetching = true
+		r.frozenBlocksFetched = make(chan struct{})
+		fetched := r.frozenBlocksFetched
+		r.frozenBlocksMu.Unlock()
+
+		return r.fetchFrozenBlocks(fetched, deadline)
+	}
+}
+
+// fetchFrozenBlocks asks the backend, within what is left of the caller's budget, and
+// publishes what came back. Releasing the callers waiting on it is deferred: a fetch
+// that dies must not leave them on a result nobody will produce.
+func (r *RemoteBlockReader) fetchFrozenBlocks(fetched chan struct{}, deadline time.Time) uint64 {
+	defer func() {
+		r.frozenBlocksMu.Lock()
+		defer r.frozenBlocksMu.Unlock()
+		close(fetched)
+		r.frozenBlocksFetching = false
+	}()
+
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
+	if err != nil {
+		log.Warn("[frozen-blocks] backend did not answer", "err", err)
+	}
+
+	r.frozenBlocksMu.Lock()
+	defer r.frozenBlocksMu.Unlock()
+	if err == nil {
+		r.frozenBlocksValue = reply.FrozenBlocks
+		r.frozenBlocksFetchedAt = time.Now()
+	}
+	return r.frozenBlocksValue
+}
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -184,7 +273,9 @@ var _ dbservices.FullBlockReader = &RemoteBlockReader{}
 
 func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReader {
 	br := &RemoteBlockReader{
-		client: client,
+		client:              client,
+		frozenBlocksTTL:     30 * time.Second,
+		frozenBlocksTimeout: 5 * time.Second,
 	}
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
@@ -251,7 +342,7 @@ func (r *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, h
 	for i := range senders {
 		senders[i].SetBytes(reply.Senders[i*20 : (i+1)*20])
 	}
-	if len(senders) == block.Transactions().Len() { //it's fine if no senders provided - they can be lazy recovered
+	if len(senders) == block.Transactions().Len() { // it's fine if no senders provided - they can be lazy recovered
 		block.SendersToTxs(senders)
 	}
 	return block, senders, nil
@@ -271,6 +362,7 @@ func (r *RemoteBlockReader) Header(ctx context.Context, tx kv.Getter, hash commo
 	}
 	return block.Header(), nil
 }
+
 func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
 	block, _, err := r.BlockWithSenders(ctx, tx, hash, blockHeight)
 	if err != nil {
@@ -281,6 +373,7 @@ func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.
 	}
 	return block.Body(), uint32(len(block.Body().Transactions)), nil
 }
+
 func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	expected, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
@@ -291,6 +384,7 @@ func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash 
 	}
 	return expected == hash, nil
 }
+
 func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	block, _, err := r.BlockWithSenders(ctx, tx, hash, blockHeight)
 	if err != nil {
@@ -301,6 +395,7 @@ func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Gett
 	}
 	return block.Body(), nil
 }
+
 func (r *RemoteBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
 	resp, err := r.client.HeaderNumber(ctx, &remoteproto.HeaderNumberRequest{Hash: gointerfaces.ConvertHashToH256(hash)})
 	if err != nil {
@@ -311,10 +406,16 @@ func (r *RemoteBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash
 	}
 	return resp.Number, nil
 }
+
 func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
 	if err != nil {
 		return nil, err
+	}
+	if body == nil {
+		// A nil body still encodes as an empty list, which a caller cannot tell
+		// apart from a block that genuinely holds no transactions.
+		return nil, nil
 	}
 	bodyRlp, err = rlp.EncodeToBytes(body)
 	if err != nil {
@@ -360,13 +461,15 @@ type BlockReader struct {
 	sn           *blocksnapshots.RoSnapshots
 	txNumsReader rawdbv3.TxNumsReader
 
-	//files are immutable: no reorgs, on updates - means no invalidation needed
+	// files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache   *lru.Cache[uint64, *types.Header]
 	canonicalHashCache *lru.Cache[uint64, common.Hash]
 }
 
-var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
-var canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
+var (
+	headerByNumCacheSize   = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
+	canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
+)
 
 func NewBlockReader(snapshots dbservices.BlockSnapshots) *BlockReader {
 	sn, _ := snapshots.(*blocksnapshots.RoSnapshots)
@@ -388,6 +491,10 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+
+// FrozenBlocksInView is FrozenBlocks as seen by tx: a caller that then reads the block
+// must ask the same generation it reads from, not the live set that may be ahead of it.
+func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	if r.FrozenBlocks() > 0 {
@@ -441,8 +548,9 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 	return ForEachHeader(ctx, r.sn, walker)
 }
 
-// HasBlockFilesRoTx is a tx (e.g. a temporal tx) exposing a block-files view
-// pinned for its lifetime.
+// HasBlockFilesRoTx is a tx (e.g. a temporal tx) that can carry a block-files
+// view pinned for its lifetime. BlockFilesRoTx returns nil when it carries none
+// — a state-only tx implements this too.
 type HasBlockFilesRoTx interface {
 	BlockFilesRoTx() *blocksnapshots.View
 }
@@ -450,83 +558,76 @@ type HasBlockFiles interface {
 	DebugBlockFiles() *blocksnapshots.RoSnapshots
 }
 
-// txBlockView returns the block-files view pinned by tx, or nil.
-func txBlockView(tx kv.Getter) *blocksnapshots.View {
-	if v, ok := tx.(HasBlockFilesRoTx); ok {
-		return v.BlockFilesRoTx()
+// view returns tx's pinned block-files view. Block files are only ever read
+// through it, so a tx that pins none is a bug at the caller, not a fallback.
+func (r *BlockReader) view(tx kv.Getter) *blocksnapshots.View {
+	p, ok := tx.(HasBlockFilesRoTx)
+	if !ok {
+		panic(fmt.Sprintf("block reads require a tx that pins a block-files view, got %T", tx))
 	}
-	return nil
+	v := p.BlockFilesRoTx()
+	if v == nil {
+		panic(fmt.Sprintf("block reads require a pinned block-files view, but %T carries none", tx))
+	}
+	return v
 }
 
-// viewSingleFile returns the segment of type t covering blockNum, from tx's pinned
-// view when present (no-op release), else a fresh r.sn view the caller releases.
-func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool, func()) {
-	if bv := txBlockView(tx); bv != nil {
-		seg, ok := bv.Segment(t, blockNum)
-		return seg, ok, func() {}
+// HeaderFromView reads a header from an explicitly supplied block-files view, for
+// paths that open their own RoSnapshots instead of reading the ones a tx pins.
+// Block files are still only read through a view; this one just isn't tx-carried.
+func (r *BlockReader) HeaderFromView(view *blocksnapshots.View, blockHeight uint64) (*types.Header, error) {
+	seg, ok := view.Segment(snaptype2.Headers, blockHeight)
+	if !ok {
+		return nil, nil
 	}
-	return r.sn.ViewSingleFile(t, blockNum)
+	h, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
+	return h, err
 }
 
-// viewType returns type t's segments, from tx's pinned view when present (no-op
-// release), else a fresh r.sn view the caller releases.
-func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) ([]*snapshotsync.VisibleSegment, func()) {
-	if bv := txBlockView(tx); bv != nil {
-		return bv.Segments(t), func() {}
-	}
-	rotx := r.sn.ViewType(t)
-	return rotx.Segments, rotx.Close
+// viewSingleFile returns the segment of type t covering blockNum, from tx's pinned view.
+func (r *BlockReader) viewSingleFile(tx kv.Getter, t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
+	return r.view(tx).Segment(t, blockNum)
 }
 
-// view returns a block-files view, tx's pinned one when present (no-op release),
-// else a fresh r.sn view the caller releases.
-func (r *BlockReader) view(tx kv.Getter) (*blocksnapshots.View, func()) {
-	if bv := txBlockView(tx); bv != nil {
-		return bv, func() {}
-	}
-	v := r.sn.View()
-	return v, v.Close
+// viewType returns type t's segments, from tx's pinned view.
+func (r *BlockReader) viewType(tx kv.Getter, t snaptype.Type) []*snapshotsync.VisibleSegment {
+	return r.view(tx).Segments(t)
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).HeaderByNumber(blk=%d) -> ", r.FrozenBlocksInView(tx), blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx != nil {
-			blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-			if err != nil {
-				return nil, err
-			}
-			// if no canonical marker - still can try read from files
-			if blockHash != emptyHash {
-				h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-				if h != nil {
-					return h, nil
-				} else if dbgLogs {
-					log.Info(dbgPrefix + "not found in db")
-				}
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		// if no canonical marker - still can try read from files
+		if blockHash != emptyHash {
+			h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+			if h != nil {
+				return h, nil
 			} else if dbgLogs {
-				log.Info(dbgPrefix + "canonical hash is empty")
+				log.Info(dbgPrefix + "not found in db")
 			}
 		} else if dbgLogs {
-			log.Info(dbgPrefix + "tx is nil")
+			log.Info(dbgPrefix + "canonical hash is empty")
 		}
 		return nil, nil
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "not found file for such blockHeight")
 		}
 		return
 	}
-	defer release()
 
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -539,6 +640,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	}
 	return h, nil
 }
+
 func (r *BlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
 	ret := rawdb.ReadHeaderNumber(tx, hash)
 	if ret != nil {
@@ -556,6 +658,7 @@ func (r *BlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash commo
 	*ret = h.Number.Uint64()
 	return ret, nil
 }
+
 func (r *BlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
 	expected, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 	if err != nil {
@@ -574,8 +677,7 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 		return h, nil
 	}
 
-	segments, release := r.viewType(tx, snaptype2.Headers)
-	defer release()
+	segments := r.viewType(tx, snaptype2.Headers)
 
 	buf := make([]byte, 128)
 	for _, segment := range slices.Backward(segments) {
@@ -605,11 +707,10 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return cached, true, nil
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		return h, false, nil
 	}
-	defer release()
 
 	header, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -621,6 +722,41 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 	h = header.Hash()
 	r.canonicalHashCache.Add(blockHeight, h)
 	return h, true, nil
+}
+
+// frozenHashAt returns the hash of the header the block files hold at
+// blockHeight. Segments are indexed by height only, so a positional read there
+// can only answer for this one block: callers that decode a body - which
+// carries no hash of its own - compare against this before trusting it, and
+// fall back to the (hash, height)-keyed db when it does not match. A zero hash
+// carries no such constraint and skips the comparison entirely.
+func (r *BlockReader) frozenHashAt(tx kv.Getter, blockHeight uint64) (common.Hash, bool, error) {
+	seg, ok := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	if !ok {
+		return emptyHash, false, nil
+	}
+
+	h, _, err := r.headerFromSnapshot(blockHeight, seg, nil)
+	if err != nil {
+		return emptyHash, false, err
+	}
+	if h == nil {
+		return emptyHash, false, nil
+	}
+	return h.Hash(), true, nil
+}
+
+// frozenHashMatches reports whether a positional read at blockHeight answers for
+// hash. See frozenHashAt.
+func (r *BlockReader) frozenHashMatches(tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
+	if hash == emptyHash {
+		return true, nil
+	}
+	frozenHash, ok, err := r.frozenHashAt(tx, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	return ok && frozenHash == hash, nil
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
@@ -640,15 +776,19 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 		}
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		return
 	}
-	defer release()
 
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return h, err
+	}
+	if h != nil && hash != emptyHash && h.Hash() != hash {
+		// The db read above already covered the requested hash, so there is
+		// nothing left to fall back to. See frozenHashAt.
+		return nil, nil
 	}
 	return h, nil
 }
@@ -657,17 +797,11 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), hash, blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			if dbgLogs {
-				log.Info(dbgPrefix + "RoTx is nil")
-			}
-			return nil, nil
-		}
 		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 		if err != nil {
 			return nil, err
@@ -680,14 +814,24 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		}
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return nil, nil
 	}
-	defer release()
+
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		if dbgLogs {
+			log.Info(dbgPrefix + "requested hash is not the block held at this height")
+		}
+		return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+	}
 
 	var baseTxnID uint64
 	var txCount uint32
@@ -696,7 +840,6 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	if err != nil {
 		return nil, err
 	}
-	release()
 
 	if body == nil {
 		if dbgLogs {
@@ -705,20 +848,18 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, nil
 	}
 
-	txnSeg, ok, release := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
+	txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
+			log.Info(dbgPrefix+"no transactions file for this block num", "blocksAvailableInView", maxBlockNumInFiles, "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
 		}
 		return nil, nil
 	}
-	defer release()
 
 	txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
 	if err != nil {
 		return nil, err
 	}
-	release()
 
 	if txs == nil {
 		if dbgLogs {
@@ -739,6 +880,11 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 	if err != nil {
 		return nil, err
 	}
+	if body == nil {
+		// A nil body still encodes as an empty list, which a caller cannot tell
+		// apart from a block that genuinely holds no transactions.
+		return nil, nil
+	}
 	bodyRlp, err = rlp.EncodeToBytes(body)
 	if err != nil {
 		return nil, err
@@ -747,20 +893,25 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 }
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			return nil, 0, nil
-		}
 		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
 	if !ok {
 		return
 	}
-	defer release()
+
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !matches {
+		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
+		return body, txCount, nil
+	}
 
 	body, _, txCount, _, err = r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
@@ -770,8 +921,15 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 }
 
 func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		return rawdb.HasSenders(tx, hash, blockHeight)
+	}
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return false, err
+	}
+	if !matches {
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
 	return true, nil
@@ -780,8 +938,9 @@ func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.
 func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
+
 func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error) {
-	bodySeg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
+	bodySeg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
 	if !ok {
 		hash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
@@ -792,27 +951,21 @@ func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter,
 		}
 		return rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockNum, hash))
 	}
-	defer release()
 
 	var buf []byte
 	b, _, err := r.bodyForStorageFromSnapshot(blockNum, bodySeg, buf)
 	return b, err
 }
+
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), hash, blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		if tx == nil {
-			if dbgLogs {
-				log.Info(dbgPrefix + "RoTx is nil")
-			}
-			return nil, nil, nil
-		}
 		if forceCanonical {
 			canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
 			if err != nil {
@@ -843,14 +996,13 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no header files for this block num")
 		}
 		return
 	}
-	defer release()
 
 	var buf []byte
 	h, buf, err := r.headerFromSnapshot(blockHeight, seg, buf)
@@ -862,28 +1014,31 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			log.Info(dbgPrefix + "got nil header from file")
 		}
 		return
-	} else {
-		hash = h.Hash()
 	}
-	release()
+	if hash != emptyHash && h.Hash() != hash {
+		// See frozenHashAt: the files answer for h.Hash() only, so the
+		// requested block can still be in the db until this height is pruned.
+		if dbgLogs {
+			log.Info(dbgPrefix + fmt.Sprintf("requested hash does not match header %x held at this height", h.Hash()))
+		}
+		return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+	}
 
 	var b *types.Body
 	var baseTxnId uint64
 	var txCount uint32
-	bodySeg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
+	bodySeg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
 			log.Info(dbgPrefix + "no bodies file for this block num")
 		}
 		return
 	}
-	defer release()
 
 	b, baseTxnId, txCount, buf, err = r.bodyFromSnapshot(blockHeight, bodySeg, buf)
 	if err != nil {
 		return nil, nil, err
 	}
-	release()
 
 	if b == nil {
 		if dbgLogs {
@@ -894,17 +1049,15 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 
 	var txs []types.Transaction
 	if txCount != 0 {
-		txnSeg, ok, release := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
+		txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
 		if !ok {
-			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
+			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailableInView=%d", blockHeight, maxBlockNumInFiles)
 			return nil, nil, err
 		}
-		defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
 		if err != nil {
 			return nil, nil, err
 		}
-		release()
 	}
 
 	if h.WithdrawalsHash == nil && len(b.Withdrawals) == 0 {
@@ -912,7 +1065,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, nil)
+	block = types.NewBlockFromStorage(h.Hash(), h, txs, b.Uncles, b.Withdrawals, nil)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -1144,6 +1297,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	txn.SetSender(accounts.InternAddress(*(*common.Address)(sender))) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 	return txn, true, nil
 }
+
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.VisibleSegment, buf []byte) (types.Transaction, uint64, uint64, bool, error) {
 	for _, sn := range slices.Backward(segments) {
 		idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
@@ -1194,7 +1348,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 // system transactions at the block boundaries. ok is false when the block or
 // that transaction does not exist.
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockNum == 0 || maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
 		if err != nil {
@@ -1206,17 +1360,15 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return rawdb.TxnByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
 	}
 
-	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
+	seg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)
 	if !ok {
 		return nil, false, nil
 	}
-	defer release()
 
 	b, _, err := BodyForTxnFromSnapshot(blockNum, seg, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	release()
 	if b == nil {
 		return nil, false, nil
 	}
@@ -1226,11 +1378,10 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 		return nil, false, nil
 	}
 
-	txnSeg, ok, release := r.viewSingleFile(tx, snaptype2.Transactions, blockNum)
+	txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockNum)
 	if !ok {
 		return nil, false, nil
 	}
-	defer release()
 
 	// +1 because block has system-txn in the beginning of block
 	return r.txnByID(b.BaseTxnID.At(txIdxInBlock), txnSeg, nil)
@@ -1247,8 +1398,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 		return *blockNumPointer, *txNumPointer, true, nil
 	}
 
-	segments, release := r.viewType(tx, snaptype2.Transactions)
-	defer release()
+	segments := r.viewType(tx, snaptype2.Transactions)
 	_, blockNum, txNum, ok, err = r.txnByHash(txnHash, segments, nil)
 	if err != nil {
 		return 0, 0, false, err
@@ -1257,10 +1407,7 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 }
 
 func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
-	view, release := r.view(tx)
-	defer release()
-
-	segs := view.Segments(snaptype2.Transactions)
+	segs := r.view(tx).Segments(snaptype2.Transactions)
 	if len(segs) == 0 {
 		return 0
 	}
@@ -1272,9 +1419,7 @@ func (r *BlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 {
 }
 
 func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
-	view, release := r.view(tx)
-	defer release()
-	for _, sn := range view.Bodies() {
+	for _, sn := range r.view(tx).Bodies() {
 		if err := func() error {
 			defer sn.Src().MadvSequential().DisableReadAhead()
 
@@ -1300,10 +1445,9 @@ func (r *BlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxN
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, tx kv.Getter, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
-	view := r.sn.View()
-	defer view.Close()
+	view := r.view(tx)
 
 	var expectedFirstTxnID uint64
 	for i, snb := range view.Bodies() {
@@ -1345,12 +1489,13 @@ func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error) {
 	return rawdb.ReadBadHeaderNumber(tx, hash)
 }
-func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+
+func (r *BlockReader) BlockByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
 	hash := emptyHash
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if number == 0 || maxBlockNumInFiles == 0 || number > maxBlockNumInFiles {
 		var err error
-		hash, err = rawdb.ReadCanonicalHash(db, number)
+		hash, err = rawdb.ReadCanonicalHash(tx, number)
 		if err != nil {
 			return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 		}
@@ -1358,27 +1503,32 @@ func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64
 			return nil, nil
 		}
 	}
-	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
+	block, _, err := r.BlockWithSenders(ctx, tx, hash, number)
 	return block, err
 }
-func (r *BlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
-	number, err := r.HeaderNumber(ctx, db, hash)
+
+func (r *BlockReader) BlockByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
+	number, err := r.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
 	}
 	if number == nil {
 		return nil, nil
 	}
-	block, _, err := r.BlockWithSenders(ctx, db, hash, *number)
+	block, _, err := r.BlockWithSenders(ctx, tx, hash, *number)
 	return block, err
 }
-func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
-	headHash := rawdb.ReadHeadBlockHash(db)
-	headNumber, err := r.HeaderNumber(context.Background(), db, headHash)
+
+func (r *BlockReader) CurrentBlock(tx kv.Tx) (*types.Block, error) {
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber, err := r.HeaderNumber(context.Background(), tx, headHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
 	}
-	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
+	if headNumber == nil {
+		return nil, nil
+	}
+	block, _, err := r.blockWithSenders(context.Background(), tx, headHash, *headNumber, true)
 	return block, err
 }
 
@@ -1386,12 +1536,12 @@ func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlo
 	return rawdb.RawTransactionsRange(tx, fromBlock, toBlock)
 }
 
-func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func (r *BlockReader) ReadAncestor(tx kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}
 	if ancestor == 1 {
-		header, err := r.Header(context.Background(), db, hash, number)
+		header, err := r.Header(context.Background(), tx, hash, number)
 		if err != nil {
 			panic(err)
 		}
@@ -1402,16 +1552,16 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 		return common.Hash{}, 0
 	}
 	for ancestor != 0 {
-		h, ok, err := r.CanonicalHash(context.Background(), db, number)
+		h, ok, err := r.CanonicalHash(context.Background(), tx, number)
 		if err != nil {
 			panic(err)
 		}
 		if ok && h == hash {
-			ancestorHash, ok1, err := r.CanonicalHash(context.Background(), db, number-ancestor)
+			ancestorHash, ok1, err := r.CanonicalHash(context.Background(), tx, number-ancestor)
 			if err != nil {
 				panic(err)
 			}
-			h, ok2, err := r.CanonicalHash(context.Background(), db, number)
+			h, ok2, err := r.CanonicalHash(context.Background(), tx, number)
 			if err != nil {
 				panic(err)
 			}
@@ -1425,7 +1575,7 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 		}
 		*maxNonCanonical--
 		ancestor--
-		header, err := r.Header(context.Background(), db, hash, number)
+		header, err := r.Header(context.Background(), tx, hash, number)
 		if err != nil {
 			panic(err)
 		}
@@ -1454,9 +1604,8 @@ func (r *BlockReader) ensureHeaderNumber(n uint64, seg *snapshotsync.VisibleSegm
 	return nil
 }
 
-func (r *BlockReader) Integrity(ctx context.Context, _ kv.Getter) error {
-	view := r.sn.View()
-	defer view.Close()
+func (r *BlockReader) Integrity(ctx context.Context, tx kv.Getter) error {
+	view := r.view(tx)
 	for _, seg := range view.Headers() {
 		if err := r.ensureHeaderNumber(seg.From(), seg); err != nil {
 			return err
@@ -1513,13 +1662,13 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(ctx context.Context, tx kv.Tx, c 
 }
 
 func (t *txBlockIndexWithBlockReader) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
-	if _, ok := t.r.(*BlockReader); !ok {
+	br, isBlockReader := t.r.(*BlockReader)
+	if !isBlockReader {
 		return t.r.BlockForTxNum(ctx, tx, txNum)
 	}
 	var buf []byte
 	var b *types.BodyOnlyTxn
-	view := t.r.Snapshots().(*blocksnapshots.RoSnapshots).View()
-	defer view.Close()
+	view := br.view(tx)
 
 	getMaxTxNum := func(seg *snapshotsync.VisibleSegment) GetMaxTxNum {
 		return func(i uint64) (uint64, error) {

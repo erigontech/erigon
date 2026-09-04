@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -141,6 +142,50 @@ func TestExecModule_GivenReorgPastFinalised_WhenFinality_ThenInvalidFCU(t *testi
 	require.NoError(t, err)
 	defer tx.Rollback()
 	require.Equal(t, uint64(33), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
+}
+
+func TestExecModule_GivenReorgAtFinalisedBlock_WhenFinality_ThenInvalidFCU(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	prefix, err := emt.GenerateChain(2, nil)
+	require.NoError(t, err)
+	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, prefix.Blocks))
+	canonical, err := emt.GenerateChainFrom(prefix.TopBlock, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	fork, err := emt.GenerateChainFrom(prefix.TopBlock, 1, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{2})
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, canonical.TopBlock.Hash(), fork.TopBlock.Hash())
+	canonicalHash := canonical.TopBlock.Hash()
+	require.NoError(t, emt.InsertValidateAndUfc1By1(ctx, canonical.Blocks, execmoduletester.WithFcuOptSeq([][]execmoduletester.UFCOpt{{
+		execmoduletester.WithSafeHash(canonicalHash),
+		execmoduletester.WithFinalisedHash(canonicalHash),
+	}})))
+	status, err := emt.InsertBlocks(ctx, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := emt.ValidateChain(ctx, fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	forkHash := fork.TopBlock.Hash()
+	result, err := emt.UpdateForkChoice(ctx, fork.TopBlock.Header(), execmoduletester.WithSafeHash(forkHash), execmoduletester.WithFinalisedHash(forkHash))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+	forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
+	require.NoError(t, err)
+	require.Equal(t, canonicalHash, forkchoice.HeadHash)
+	require.Equal(t, canonicalHash, forkchoice.SafeHash)
+	require.Equal(t, canonicalHash, forkchoice.FinalizedHash)
+	require.NoError(t, emt.DB.View(ctx, func(tx kv.Tx) error {
+		canonicalHashAfterReorg, err := rawdb.ReadCanonicalHash(tx, canonical.TopBlock.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, canonicalHash, canonicalHashAfterReorg)
+		return nil
+	}))
 }
 
 func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *testing.T) {
