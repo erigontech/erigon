@@ -238,7 +238,7 @@ func TestPostExecutionPayloadEnvelopeDoesNotRebroadcastAfterIntegrationFailure(t
 }
 
 func TestPostExecutionPayloadEnvelopeWaitsForLocalBlockIntegration(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	integration := handler.startLocalBlockIntegration(common.Hash{})
 	requestCtx := &signalingContext{Context: t.Context(), entered: make(chan struct{})}
 	request := httptest.NewRequestWithContext(requestCtx, http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
@@ -253,6 +253,7 @@ func TestPostExecutionPayloadEnvelopeWaitsForLocalBlockIntegration(t *testing.T)
 	}()
 	<-requestCtx.entered
 
+	fcu.Blocks[common.Hash{}] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	handler.finishLocalBlockIntegration(common.Hash{}, integration, nil)
 	firstRecorder := <-firstResponse
 	require.Equal(t, http.StatusOK, firstRecorder.Code, firstRecorder.Body.String())
@@ -461,6 +462,7 @@ func TestPostExecutionPayloadEnvelopeRetriesAfterBroadcastFailure(t *testing.T) 
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
+	fcu.Blocks[common.Hash{}] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	injected := errors.New("gossip unavailable")
 	gomock.InOrder(
 		handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
@@ -531,6 +533,7 @@ func TestPostExecutionPayloadEnvelopeClaimsBeforeConcurrentValidation(t *testing
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
+	fcu.Blocks[common.Hash{}] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
 		gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
 	).Return(nil)
@@ -590,6 +593,7 @@ func TestPostExecutionPayloadEnvelopeConcurrentWaiterRetriesRejectedOwner(t *tes
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
+	fcu.Blocks[common.Hash{}] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
 		gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
 	).Return(nil)
@@ -678,6 +682,7 @@ func TestPostExecutionPayloadEnvelopeRejectsConsensusEquivocationBeforeApplyOrPu
 	handler.sentinel = &nonNilSentinelClient{}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	fcu.HasEquivocatingBlockFunc = func(root common.Hash) (bool, bool) {
@@ -705,6 +710,7 @@ func TestPostExecutionPayloadEnvelopeEquivocationCheckOnlyAppliesToRequestedMode
 				return false, false
 			}
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 			body, err := json.Marshal(envelope)
 			require.NoError(t, err)
 			path := "/eth/v1/beacon/execution_payload_envelope"
@@ -728,6 +734,7 @@ func TestPostExecutionPayloadEnvelopeRejectsUnavailableEquivocationContext(t *te
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HasEquivocatingBlockFunc = func(common.Hash) (bool, bool) { return false, false }
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation=consensus_and_equivocation", bytes.NewReader(body))
@@ -1159,6 +1166,7 @@ func TestPostExecutionPayloadEnvelopeRejectsUnpersistableEnvelopeBeforeBlobColum
 func TestPostExecutionPayloadEnvelopeChecksDataAvailability(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
@@ -1185,6 +1193,7 @@ func TestPostExecutionPayloadEnvelopeGossipsAndReturnsAcceptedWhenFullIntegratio
 		gomock.Any(),
 	).Return(nil)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
@@ -1261,6 +1270,7 @@ func TestPostExecutionPayloadEnvelopePublishesBeforeFullIntegration(t *testing.T
 		return nil
 	}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
@@ -1283,6 +1293,7 @@ func TestPostExecutionPayloadEnvelopeRequestedValidationFailureIsNotBroadcast(t 
 			handler.sentinel = &nonNilSentinelClient{}
 			fcu.ValidateExecutionPayloadEnvelopeForGossipErr = errors.New("gossip validation failed")
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+			fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 			body, err := json.Marshal(envelope)
 			require.NoError(t, err)
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation="+validation, bytes.NewReader(body))
@@ -1307,6 +1318,7 @@ func TestPostExecutionPayloadEnvelopeConsensusFailureIsNotBroadcast(t *testing.T
 	handler.sentinel = &nonNilSentinelClient{}
 	fcu.ValidateExecutionPayloadEnvelopeForConsensusErr = forkchoice.ErrIgnore
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope?broadcast_validation=consensus", bytes.NewReader(body))
@@ -1335,6 +1347,7 @@ func TestPostExecutionPayloadEnvelopeGossipsIgnoredLocalEnvelope(t *testing.T) {
 		gomock.Any(),
 	).Return(nil)
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
@@ -1358,6 +1371,7 @@ func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningAcc
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
 	}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	recorder := httptest.NewRecorder()
@@ -1380,7 +1394,7 @@ func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningAcc
 }
 
 func TestPostExecutionPayloadEnvelopeReturnsGossipPublishFailure(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
 	handler.sentinel = &nonNilSentinelClient{}
@@ -1394,6 +1408,7 @@ func TestPostExecutionPayloadEnvelopeReturnsGossipPublishFailure(t *testing.T) {
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
 	}
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", bytes.NewReader(body))
@@ -1423,6 +1438,7 @@ func TestPostExecutionPayloadEnvelopeDoesNotDuplicateAvailabilityWhenIndicesAreQ
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
 	}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
@@ -1474,6 +1490,7 @@ func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *t
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
 	}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	envelope.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}, {3}})
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
@@ -1515,6 +1532,7 @@ func TestPostExecutionPayloadEnvelopeAcceptsTrailingJSONWhitespace(t *testing.T)
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
 	}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x9abc")
+	fcu.Blocks[envelope.Message.BeaconBlockRoot] = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)+" \n\t"))
