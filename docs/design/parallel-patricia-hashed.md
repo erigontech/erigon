@@ -174,8 +174,11 @@ variant (§10).
 3. **Aggregate.** `stitchSplitCells` overlays the folded child cells onto the unfolded
    base row (setting/clearing each touched present bit, leaving untouched on-disk
    siblings intact) and `foldSplitRow` folds it once to the account's storage-root cell.
-   Three outcomes: an empty row with no prior branch returns an empty cell; two or more
-   survivors fold into a branch cell and write the branch record at the split prefix;
+   Four outcomes, by the surviving child count and whether a branch record was already
+   on disk: an empty row with no prior branch returns an empty cell without folding; an
+   empty row that had one folds through `foldDelete`, writing the branch delete record at
+   the split prefix and returning an empty cell; two or more survivors fold into a branch
+   cell and write the branch record at the split prefix;
    a single survivor does not fold at all — `splitCellFromSingleChild` deletes the
    branch record at the split prefix and promotes the survivor one nibble shallower,
    prepending its nibble to the extension of a keyless sub-branch (and mirroring it into
@@ -183,8 +186,9 @@ variant (§10).
    `fillFromLowerCell`/`deriveHashedKeys` would at the destination depth.
 4. **Inject.** `setAccountStorageRoot` carries the returned cell onto the account leaf:
    a branch or extension root as `cell.extension`/`cell.hash`, a single surviving slot as
-   `storageAddr`/`Storage` with `hashLen = 0`. `computeCellHash` derives the storageRoot
-   from whichever it finds for an account whose storage cell was not streamed, so the
+   `storageAddr`/`Storage` with its `hashLen` carried through unchanged. `computeCellHash`
+   derives the storageRoot from whichever it finds for an account whose storage cell was
+   not streamed — a set `storageAddr` wins and the carried `hashLen` is ignored — so the
    leaf hashes identically to the serial path. The DFS then skips the account's storage
    children.
 
