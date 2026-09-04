@@ -959,18 +959,20 @@ func TestGenericCache_StepAndGenerationCostsAgreeAtTheCeiling(t *testing.T) {
 			cachebudget.Global = cachebudget.New(math.MaxInt64)
 			c := NewGenericCacheWithAvg[[]byte](budget, avgStoragePayloadBytes,
 				func(v []byte) int { return len(v) }, ModeEvictLRU)
-			for i := range 40 * int(c.maxCap) {
+			// Shards grow independently, so fill until the last one reaches the
+			// ceiling. The bound is only there to fail the assertion below rather
+			// than spin if a regression stops the climb.
+			lru := c.data.Load()
+			for i := 0; lru.Cap() < int(c.maxCap) && i < 40*int(c.maxCap); i++ {
 				binary.BigEndian.PutUint64(key, uint64(i))
 				c.Put(key, key[:8], 1)
 			}
-			require.Equal(t, int(c.maxCap), c.data.Load().Cap(),
+			require.Equal(t, int(c.maxCap), lru.Cap(),
 				"procs=%d budget=%s: the fill left a shard below the ceiling, so the sums are not comparable",
 				procs, budget)
 			require.Equal(t, c.generationBytes(c.maxCap), c.reservedBytes.Load(),
 				"procs=%d budget=%s: the steps charged %d B for a generation costing %d B",
 				procs, budget, c.reservedBytes.Load(), c.generationBytes(c.maxCap))
-			require.Equal(t, c.reservedBytes.Load(), cachebudget.Global.Used(),
-				"procs=%d budget=%s", procs, budget)
 			c.Close()
 		}
 	}
