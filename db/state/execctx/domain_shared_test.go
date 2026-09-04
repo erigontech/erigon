@@ -52,7 +52,7 @@ import (
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 	return state.NewTest(dirs)

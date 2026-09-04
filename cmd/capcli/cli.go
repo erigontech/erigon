@@ -701,11 +701,11 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(chainDB); err != nil {
-		return err
-	}
 	elDB, err := temporal.New(chainDB, agg, allSnapshots)
 	if err != nil {
+		return err
+	}
+	if err := elDB.OpenStateSnapshots(ctx); err != nil {
 		return err
 	}
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, elDB)
