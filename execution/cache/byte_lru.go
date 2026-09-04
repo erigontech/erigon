@@ -50,13 +50,20 @@ type byteLRU[V any] struct {
 	closed bool
 }
 
-// byteLRUChunkBytes is the granularity of envelope reservations: coarse enough
-// that growth touches cachebudget.Global a handful of times per cache.
-const byteLRUChunkBytes = int64(32 * datasize.MB)
+const (
+	// byteLRUFloorBytes is the residency a cache is born with. Taken
+	// unconditionally, so the envelope cannot refuse it — which is why it must
+	// stay small: a harness that builds many short-lived caches pays this floor
+	// for every one of them, with no shared budget left to say no.
+	byteLRUFloorBytes = int64(1 * datasize.MB)
+	// byteLRUChunkBytes is the granularity of envelope reservations: coarse
+	// enough that growth touches cachebudget.Global a handful of times per cache.
+	byteLRUChunkBytes = int64(32 * datasize.MB)
+)
 
 func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, onEvict func(uint64, V)) *byteLRU[V] {
 	b := &byteLRU[V]{weigh: weigh, maxBytes: max(int64(maxBytes), 1)}
-	floor := min(byteLRUChunkBytes, b.maxBytes)
+	floor := min(byteLRUFloorBytes, b.maxBytes)
 	cachebudget.Global.Take(floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
@@ -115,7 +122,7 @@ func (b *byteLRU[V]) Remove(key uint64) { b.c.Invalidate(key) }
 func (b *byteLRU[V]) Len() int          { return b.c.EstimatedSize() }
 
 // Purge empties the cache and returns the grown reservation to the envelope,
-// keeping the floor chunk so the cache is never born disabled again.
+// keeping the floor so the cache is never left disabled.
 func (b *byteLRU[V]) Purge() {
 	b.growMu.Lock()
 	defer b.growMu.Unlock()
@@ -124,7 +131,7 @@ func (b *byteLRU[V]) Purge() {
 	if b.closed {
 		return
 	}
-	floor := min(byteLRUChunkBytes, b.maxBytes)
+	floor := min(byteLRUFloorBytes, b.maxBytes)
 	cachebudget.Global.Release(b.limit.Load() - floor)
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
