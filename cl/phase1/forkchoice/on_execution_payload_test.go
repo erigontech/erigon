@@ -1295,20 +1295,25 @@ func TestFullIndexRepairAndPendingBacklogsDoNotEvictPersistedRepairOwner(t *test
 	}))
 }
 
-func TestCombinedIndexRepairBacklogRejectsBeforePersistence(t *testing.T) {
+func TestCombinedIndexRepairBacklogDoesNotBlockPersistence(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	root := common.Hash(envelope.Message.BeaconBlockRoot)
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
+	pendingLocal, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
 	eth2Roots, err := lru.New[common.Hash, common.Hash](queueCacheSize)
 	require.NoError(t, err)
 	graph := &persistingEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := &failingUpdateDB{RwDB: rwdb, fail: true}
 	f := &ForkChoiceStore{
-		beaconCfg:        cfg,
-		forkGraph:        graph,
-		eth2Roots:        eth2Roots,
-		pendingEnvelopes: pending,
-		db:               mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+		beaconCfg:                      cfg,
+		forkGraph:                      graph,
+		eth2Roots:                      eth2Roots,
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: pendingLocal,
+		db:                             db,
 	}
 	for i := range envelopeIndexRepairCapacity {
 		queuedRoot := common.BigToHash(new(big.Int).SetUint64(uint64(i + 1)))
@@ -1318,9 +1323,20 @@ func TestCombinedIndexRepairBacklogRejectsBeforePersistence(t *testing.T) {
 
 	err = f.OnExecutionPayload(context.Background(), envelope, false, false)
 
-	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopePersistenceFailed)
-	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeIndexRepairBacklogFull)
-	require.False(t, graph.HasEnvelope(root))
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeIndicesPending)
+	require.True(t, graph.HasEnvelope(root))
+	require.True(t, pending.Contains(root))
+
+	db.fail = false
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+	require.False(t, pending.Contains(root))
+	require.NoError(t, rwdb.View(context.Background(), func(tx kv.Tx) error {
+		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
+		require.NoError(t, err)
+		require.NotNil(t, blockNumber)
+		require.Equal(t, envelope.Message.Payload.BlockNumber, *blockNumber)
+		return nil
+	}))
 }
 
 func TestIndexRepairGenerationDoesNotClearReplacement(t *testing.T) {
@@ -1595,7 +1611,7 @@ func TestStoreAnchorEnvelopeCoordinatesCanonicalIndexWrite(t *testing.T) {
 	}))
 }
 
-func TestStoreAnchorEnvelopeUsesReservedIndexRepairSlot(t *testing.T) {
+func TestStoreAnchorEnvelopeUsesDedicatedIndexRepairSlot(t *testing.T) {
 	root := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	envelope.Message.BeaconBlockRoot = root

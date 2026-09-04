@@ -325,7 +325,6 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 func TestExecutionPayloadServiceAcceptsButDoesNotMarkSeenOnLocalPersistenceFailures(t *testing.T) {
 	for _, processErr := range []error{
 		forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed,
-		forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull,
 	} {
 		t.Run(processErr.Error(), func(t *testing.T) {
 			service, fcu := setupExecutionPayloadService(t)

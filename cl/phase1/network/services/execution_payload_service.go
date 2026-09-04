@@ -196,8 +196,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
 			log.Debug("Execution payload envelope indices queued", "beaconBlockRoot", beaconBlockRoot, "err", err)
-		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed),
-			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndexRepairBacklogFull):
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistencePending = true
 			log.Debug("Execution payload envelope accepted with local persistence pending", "beaconBlockRoot", beaconBlockRoot, "err", err)
 		case errors.Is(err, forkchoice.ErrIgnore), errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable),

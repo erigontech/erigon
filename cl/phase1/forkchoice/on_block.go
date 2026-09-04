@@ -502,12 +502,6 @@ func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, 
 	if !found {
 		return
 	}
-	if f.forkGraph.HasEnvelope(blockRoot) {
-		if err := f.claimEnvelopeIndexRepairOwner(blockRoot); err != nil {
-			log.Warn("OnBlock: execution payload index repair backlog is full", "blockRoot", blockRoot, "local", local, "err", err)
-			return
-		}
-	}
 	appliedEnvelope := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
 	if appliedEnvelope != nil {
 		f.writePendingEnvelopeIndices(ctx, blockRoot, pending, appliedEnvelope, local)
@@ -523,15 +517,18 @@ func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, block
 	}
 	token, tracked, err := f.claimEnvelopeIndexRepair(blockRoot, pending, true)
 	if err != nil {
-		log.Warn("OnBlock: execution payload index repair backlog is full", "blockRoot", blockRoot, "local", local, "err", err)
+		log.Warn("OnBlock: failed to prepare execution payload index repair", "blockRoot", blockRoot, "local", local, "err", err)
 		return
 	}
-	_, err = f.ensureClaimedEnvelopeIndexRepair(ctx, blockRoot, token, tracked, pending, true)
+	indexEnvelope, err := f.ensureClaimedEnvelopeIndexRepair(ctx, blockRoot, token, tracked, pending, true)
 	if err == nil {
 		if tracked {
 			f.envelopeIndexRepairs.complete(token)
 		}
 		return
+	}
+	if !tracked {
+		f.queuePendingEnvelopeIndexRepair(blockRoot, indexEnvelope, local)
 	}
 	log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 }
