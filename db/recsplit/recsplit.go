@@ -923,6 +923,33 @@ func (rs *RecSplit) SetProgress(p *background.Progress) {
 	rs.progress = p
 }
 
+// writeIndexHeader writes dataStructureVersion, baseDataID, the key count and
+// the index record width -- everything that precedes the buckets.
+func (rs *RecSplit) writeIndexHeader() error {
+	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
+	rs.numBuf[0] = uint8(rs.dataStructureVersion)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+
+	// Write number of keys
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+	// Write number of bytes per index record
+	if rs.enums {
+		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
+	if err := rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
+		return fmt.Errorf("write bytes per record: %w", err)
+	}
+	return nil
+}
+
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
@@ -943,34 +970,19 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
 	}
 
-	var err error
-	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
-		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
+	{
+		indexF, err := dir.CreateTemp(rs.filePath)
+		if err != nil {
+			return fmt.Errorf("create index file %s: %w", rs.filePath, err)
+		}
+		rs.indexF = indexF
+		defer rs.indexF.Close()
+		rs.indexW = bufiopool.Writer(rs.indexF)
+		defer bufiopool.PutWriter(rs.indexW)
 	}
 
-	defer rs.indexF.Close()
-	rs.indexW = bufiopool.Writer(rs.indexF)
-	defer bufiopool.PutWriter(rs.indexW)
-	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
-	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
-	rs.numBuf[0] = uint8(rs.dataStructureVersion)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-
-	// Write number of keys
-	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-	// Write number of bytes per index record
-	if rs.enums {
-		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
-	} else {
-		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
-	}
-	if err = rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
-		return fmt.Errorf("write bytes per record: %w", err)
+	if err := rs.writeIndexHeader(); err != nil {
+		return err
 	}
 
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
@@ -1088,7 +1100,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
-	if err = os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
+	if err := os.Rename(rs.indexF.Name(), rs.filePath); err != nil {
 		rs.logger.Warn("[index] rename", "file", rs.indexF.Name(), "err", err)
 		return err
 	}
