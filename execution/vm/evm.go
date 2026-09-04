@@ -506,11 +506,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			// Charging through the handle keeps gasUsed.State and
 			// gasUsed.StateSpill in step with gasRemaining, so the accounting
 			// defer and handleFrameRevert below both read the real figures.
-			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
+			frameRemaining, frameUsed := gasRemaining, gasUsed
+			pgas := &PrecompileGas{remaining: &frameRemaining, used: &frameUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
 			func() {
 				// Released here, not after the call: a recovered panic out of
 				// RunStateful would otherwise leave a stashed handle live.
 				defer pgas.release()
+				defer func() { gasRemaining, gasUsed = frameRemaining, frameUsed }()
 				defer evm.exitFrame(evm.enterFrame(ctx.ReadOnly))
 				ret, err = sp.RunStateful(input, pgas, ctx)
 			}()
