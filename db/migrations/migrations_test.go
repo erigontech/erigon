@@ -79,23 +79,22 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
-		require.NoError(err)
-
-		_, ok := applied[m[0].Name]
-		require.True(ok)
-		_, ok = applied[m[1].Name]
-		require.True(ok)
-		return nil
+		return err
 	}))
+	_, ok := applied[m[0].Name]
+	require.True(ok)
+	_, ok = applied[m[1].Name]
+	require.True(ok)
 
 	// apply again
 	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
+	var applied2 map[string][]byte
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
-		applied2, err := AppliedMigrations(tx, false)
-		require.NoError(err)
-		require.Equal(applied, applied2)
-		return nil
+		var err error
+		applied2, err = AppliedMigrations(tx, false)
+		return err
 	}))
+	require.Equal(applied, applied2)
 }
 
 func TestApplyWithoutInit(t *testing.T) {
@@ -139,25 +138,24 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
-		require.NoError(err)
-
-		require.Len(applied, 2)
-		_, ok := applied[m[1].Name]
-		require.True(ok)
-		_, ok = applied[m[0].Name]
-		require.True(ok)
-		return nil
+		return err
 	}))
+	require.Len(applied, 2)
+	_, ok := applied[m[1].Name]
+	require.True(ok)
+	_, ok = applied[m[0].Name]
+	require.True(ok)
 
 	// apply again
 	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
 
+	var applied2 map[string][]byte
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
-		applied2, err := AppliedMigrations(tx, false)
-		require.NoError(err)
-		require.Equal(applied, applied2)
-		return nil
+		var err error
+		applied2, err = AppliedMigrations(tx, false)
+		return err
 	}))
+	require.Equal(applied, applied2)
 
 }
 
@@ -202,24 +200,23 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
-		require.NoError(err)
-
-		require.Len(applied, 2)
-		_, ok := applied[m[1].Name]
-		require.True(ok)
-		_, ok = applied[m[0].Name]
-		require.True(ok)
-		return nil
+		return err
 	}))
+	require.Len(applied, 2)
+	_, ok := applied[m[1].Name]
+	require.True(ok)
+	_, ok = applied[m[0].Name]
+	require.True(ok)
 
 	// apply again
 	require.NoError(migrator.Apply(db, migrationsDB, "", "", logger))
+	var applied2 map[string][]byte
 	require.NoError(migrationsDB.View(ctx, func(tx kv.Tx) error {
-		applied2, err := AppliedMigrations(tx, false)
-		require.NoError(err)
-		require.Equal(applied, applied2)
-		return nil
+		var err error
+		applied2, err = AppliedMigrations(tx, false)
+		return err
 	}))
+	require.Equal(applied, applied2)
 }
 
 func TestValidation(t *testing.T) {
