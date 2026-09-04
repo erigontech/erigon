@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// goMemLimitShare leaves the rest of the cgroup to what GOMEMLIMIT cannot see:
+// goMemLimitShare leaves the rest of the budget to what GOMEMLIMIT cannot see:
 // MDBX's write buffer, other cgo allocations, and reclaimable page cache.
 const goMemLimitShare = 0.7
 
@@ -39,8 +39,14 @@ func goMemLimitInForce(current int64) bool {
 	return fromEnv || current != math.MaxInt64
 }
 
-// SetGoMemLimit gives the Go heap a ceiling derived from the cgroup this process
-// runs in, unless a limit is already in force.
+// SetGoMemLimit gives the Go heap a ceiling, unless a limit is already in force.
+// Without one, GOGC alone decides when to collect, so a process whose live heap
+// is over half its budget targets a number it is not allowed to reach and is
+// killed before the collection that would have saved it.
+//
+// TotalMemory is the budget: system RAM, or the cgroup limit when that is lower.
+// It has to be read before the limit is installed, or it would fold our own
+// ceiling back into the number that sizes the caches.
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
 	if goMemLimitInForce(current) {
@@ -48,28 +54,16 @@ func SetGoMemLimit(logger log.Logger) {
 		return
 	}
 
-	cgroup, system := estimate.CgroupsMemoryLimit(), estimate.SystemMemory()
-	limit := derivedGoMemLimit(cgroup, system)
-	if limit == 0 {
-		logger.Info("[mem] GOMEMLIMIT unset and no cgroup limit constrains this process",
-			"system", datasize.ByteSize(system).HR())
+	total := estimate.TotalMemory()
+	if total == 0 {
+		logger.Info("[mem] GOMEMLIMIT unset and available memory is unknown, leaving the heap unbounded")
 		return
 	}
 
+	limit := int64(float64(total) * goMemLimitShare)
 	debug.SetMemoryLimit(limit)
-	logger.Info("[mem] GOMEMLIMIT derived from cgroup limit",
-		"cgroup", datasize.ByteSize(cgroup).HR(),
+	logger.Info("[mem] GOMEMLIMIT derived from available memory",
+		"available", datasize.ByteSize(total).HR(),
 		"GOMEMLIMIT", datasize.ByteSize(uint64(limit)).HR(),
 		"share", goMemLimitShare)
-}
-
-// derivedGoMemLimit returns the heap ceiling for a cgroup limit, or 0 when the
-// cgroup does not constrain this process. system is physical memory, not
-// TotalMemory: the latter folds the cgroup in, so it can never show the cgroup
-// as the smaller of the two, and it is what rules out both unlimited sentinels.
-func derivedGoMemLimit(cgroup, system uint64) int64 {
-	if cgroup == 0 || cgroup >= math.MaxInt64 || (system > 0 && cgroup >= system) {
-		return 0
-	}
-	return int64(float64(cgroup) * goMemLimitShare)
 }

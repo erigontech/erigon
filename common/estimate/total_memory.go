@@ -28,25 +28,6 @@ var (
 	totalMemoryCached uint64
 )
 
-// SystemMemory reports physical memory, ignoring any cgroup confinement.
-func SystemMemory() uint64 {
-	vm, err := mem.VirtualMemory()
-	if err != nil {
-		return 0
-	}
-	return vm.Total
-}
-
-// CgroupsMemoryLimit reports the raw cgroup memory limit, or 0 when unreadable.
-// Callers that only want a sizing input should use TotalMemory.
-func CgroupsMemoryLimit() uint64 {
-	limit, err := cgroupsMemoryLimit()
-	if err != nil {
-		return 0
-	}
-	return limit
-}
-
 func TotalMemory() uint64 {
 	totalMemoryOnce.Do(func() {
 		var total uint64

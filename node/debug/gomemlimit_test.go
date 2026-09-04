@@ -21,18 +21,3 @@ func TestGoMemLimitInForce(t *testing.T) {
 		require.True(t, goMemLimitInForce(3<<30))
 	})
 }
-
-// The predicate that decides whether a cgroup constrains us at all, pinned
-// independently of the machine the test runs on. The two sentinels are what a
-// cgroup reports when it is not limiting memory: v2 "max", and v1's MaxInt64
-// rounded down to a page — which no int64 clamp catches on its own.
-func TestDerivedGoMemLimit(t *testing.T) {
-	const gb = uint64(1) << 30
-	require.Zero(t, derivedGoMemLimit(0, 16*gb), "no cgroup limit")
-	require.Zero(t, derivedGoMemLimit(16*gb, 16*gb), "a cgroup at physical memory constrains nothing")
-	require.Zero(t, derivedGoMemLimit(math.MaxUint64, 16*gb), "cgroup v2 reports unlimited as max")
-	require.Zero(t, derivedGoMemLimit(0x7FFFFFFFFFFFF000, 16*gb), "cgroup v1 reports unlimited just under MaxInt64")
-	require.Zero(t, derivedGoMemLimit(math.MaxUint64, 0), "unlimited stays unlimited with physical memory unknown")
-	require.Equal(t, int64(7*gb), derivedGoMemLimit(10*gb, 16*gb))
-	require.Equal(t, int64(7*gb), derivedGoMemLimit(10*gb, 0), "unknown physical memory still honours the cgroup")
-}
