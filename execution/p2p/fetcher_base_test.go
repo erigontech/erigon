@@ -19,7 +19,6 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -29,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -529,9 +527,11 @@ func TestFetcherFetchBodies(t *testing.T) {
 	// setup 2 request to test "paging"-style fetch logic
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
+	body1 := &types.Body{}
+	body2 := &types.Body{Withdrawals: []*types.Withdrawal{{Index: 1}}}
 	mockHeaders := []*types.Header{
-		{Number: *uint256.NewInt(1)},
-		{Number: *uint256.NewInt(2)},
+		newMockHeaderForBody(1, body1),
+		newMockHeaderForBody(2, body2),
 	}
 	mockHashes := []common.Hash{
 		mockHeaders[0].Hash(),
@@ -541,21 +541,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId1, &types.Body{
-				Transactions: types.Transactions{
-					types.NewEIP1559Transaction(
-						*uint256.NewInt(1),
-						1,
-						common.BigToAddress(big.NewInt(123)),
-						uint256.NewInt(55),
-						0,
-						uint256.NewInt(666),
-						uint256.NewInt(777),
-						uint256.NewInt(888),
-						nil,
-					),
-				},
-			}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId1, body1),
 		},
 	}
 	mockRequestResponse1 := requestResponseMock{
@@ -568,21 +554,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
-				Transactions: types.Transactions{
-					types.NewEIP1559Transaction(
-						*uint256.NewInt(1),
-						2,
-						common.BigToAddress(big.NewInt(321)),
-						uint256.NewInt(21),
-						0,
-						uint256.NewInt(987),
-						uint256.NewInt(876),
-						uint256.NewInt(765),
-						nil,
-					),
-				},
-			}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId2, body2),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{
@@ -600,6 +572,10 @@ func TestFetcherFetchBodies(t *testing.T) {
 		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.NoError(t, err)
 		require.Len(t, bodies.Data, 2)
+		for i, body := range bodies.Data {
+			require.NotNil(t, body)
+			require.NoError(t, body.MatchesHeader(mockHeaders[i]))
+		}
 	})
 }
 
@@ -608,7 +584,7 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	header := &types.Header{Number: *uint256.NewInt(1)}
+	header := newMockHeaderForBody(1, &types.Body{})
 	bodyBytes, err := rlp.EncodeToBytes(&types.Body{})
 	require.NoError(t, err)
 	mockInboundMessages := []*sentryproto.InboundMessage{
@@ -616,7 +592,6 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
 			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
-				bodyBytes,
 				bodyBytes,
 				rlp.RawValue{0x80},
 			),
@@ -631,10 +606,6 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 
 	test := newFetcherTest(t, newMockRequestGenerator(requestId))
 	test.fetcher.config = test.fetcher.config.CopyWithOptions(WithMaxRetries(0))
-	test.sentryClient.EXPECT().
-		PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&emptypb.Empty{}, nil).
-		AnyTimes()
 	test.mockSentryStreams(mockRequestResponse)
 	test.run(func(ctx context.Context, t *testing.T) {
 		var errTooManyBodies *ErrTooManyBodies
@@ -651,7 +622,7 @@ func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	header := &types.Header{Number: *uint256.NewInt(1)}
+	header := newMockHeaderForBody(1, &types.Body{})
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
@@ -767,7 +738,8 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	peerId := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
-	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
+	body := &types.Body{}
+	mockHeaders := []*types.Header{newMockHeaderForBody(1, body)}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
@@ -787,21 +759,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
-				Transactions: types.Transactions{
-					types.NewEIP1559Transaction(
-						*uint256.NewInt(1),
-						1,
-						common.BigToAddress(big.NewInt(123)),
-						uint256.NewInt(55),
-						0,
-						uint256.NewInt(666),
-						uint256.NewInt(777),
-						uint256.NewInt(888),
-						nil,
-					),
-				},
-			}),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId2, body),
 		},
 	}
 	mockRequestResponse2 := requestResponseMock{

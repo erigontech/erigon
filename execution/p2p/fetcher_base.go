@@ -409,7 +409,7 @@ func (f *FetcherBase) fetchBodies(
 		responseTimeout,
 		messages,
 		filterBlockBodies(peerId, requestId),
-		len(headers),
+		headers,
 	)
 	if err != nil {
 		if rlp.IsInvalidRLPError(err) {
@@ -451,7 +451,7 @@ func awaitBlockBodiesResponse(
 	timeout time.Duration,
 	messages chan *RawBlockBodiesInboundMessage,
 	filter func(*RawBlockBodiesInboundMessage) bool,
-	maxBodies int,
+	headers []*types.Header,
 ) ([]*types.Body, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -466,33 +466,10 @@ func awaitBlockBodiesResponse(
 				continue
 			}
 
-			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, maxBodies)
+			bodies, err := decodeBlockBodiesResponse(message.EncodedBodies, headers)
 			return bodies, len(message.Data), err
 		}
 	}
-}
-
-func decodeBlockBodiesResponse(encodedBodies []byte, maxBodies int) ([]*types.Body, error) {
-	stream := rlp.NewBytesStream(encodedBodies)
-	defer rlp.PutStream(stream)
-
-	bodies := make([]*types.Body, 0, maxBodies)
-	for stream.Remaining() > 0 {
-		if len(bodies) == maxBodies {
-			return nil, &ErrTooManyBodies{
-				requested: maxBodies,
-				received:  maxBodies + 1,
-			}
-		}
-
-		body := new(types.Body)
-		if err := stream.Decode(body); err != nil {
-			return nil, fmt.Errorf("decode block body %d: %w", len(bodies), err)
-		}
-		bodies = append(bodies, body)
-	}
-
-	return bodies, nil
 }
 
 func awaitResponse[TPacket any](
