@@ -318,13 +318,18 @@ func (c *Compressor) Compress() error {
 	}
 	c.stopWorkers()
 
-	cf, err := dir.CreateTemp(c.outputFile)
-	if err != nil {
-		return err
+	var cf *os.File
+	var tmpFileName string
+	{
+		var err error
+		cf, err = dir.CreateTemp(c.outputFile)
+		if err != nil {
+			return err
+		}
+		tmpFileName = cf.Name()
+		defer dir.RemoveFile(tmpFileName) //nolint:errcheck
+		defer cf.Close()                  //nolint:errcheck
 	}
-	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName) //nolint:errcheck
-	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
@@ -365,8 +370,7 @@ func (c *Compressor) Compress() error {
 		if c.lvl < log.LvlTrace {
 			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 		}
-		var db *DictionaryBuilder
-		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 		if err != nil {
 			return err
 		}
@@ -390,8 +394,7 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	var outputStat os.FileInfo
-	outputStat, err = os.Stat(c.outputFile)
+	outputStat, err := os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
 	}

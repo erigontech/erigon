@@ -391,13 +391,18 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var freeList []*CompressionWord                         // written words available for reuse
 	t := time.Now()
 
-	intermediateFile, err := dir.CreateTemp(segmentFilePath)
-	if err != nil {
-		return fmt.Errorf("create intermediate file: %w", err)
+	var intermediateFile *os.File
+	var intermediatePath string
+	{
+		var err error
+		intermediateFile, err = dir.CreateTemp(segmentFilePath)
+		if err != nil {
+			return fmt.Errorf("create intermediate file: %w", err)
+		}
+		intermediatePath = intermediateFile.Name()
+		defer dir.RemoveFile(intermediatePath) //nolint:errcheck
+		defer intermediateFile.Close()         //nolint:errcheck
 	}
-	intermediatePath := intermediateFile.Name()
-	defer dir.RemoveFile(intermediatePath) //nolint:errcheck
-	defer intermediateFile.Close()         //nolint:errcheck
 	intermediateW := bufiopool.Writer(intermediateFile)
 	defer bufiopool.PutWriter(intermediateW)
 
@@ -544,7 +549,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "took", time.Since(t))
 	}
-	if _, err = intermediateFile.Seek(0, 0); err != nil {
+	if _, err := intermediateFile.Seek(0, 0); err != nil {
 		return fmt.Errorf("return to the start of intermediate file: %w", err)
 	}
 
@@ -640,16 +645,16 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	defer bufiopool.PutWriter(cw)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
-	if _, err = cw.Write(numBuf[:8]); err != nil {
+	if _, err := cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
 	binary.BigEndian.PutUint64(numBuf[:], emptyWordsCount)
-	if _, err = cw.Write(numBuf[:8]); err != nil {
+	if _, err := cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
 	// 2-nd, output dictionary size
 	binary.BigEndian.PutUint64(numBuf[:], patternsSize) // Dictionary size
-	if _, err = cw.Write(numBuf[:8]); err != nil {
+	if _, err := cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
 	//fmt.Printf("patternsSize = %d\n", patternsSize)
@@ -657,14 +662,14 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	slices.SortFunc(patternList, patternListCmp)
 	for _, p := range patternList {
 		ns := binary.PutUvarint(numBuf[:], uint64(p.depth))
-		if _, err = cw.Write(numBuf[:ns]); err != nil {
+		if _, err := cw.Write(numBuf[:ns]); err != nil {
 			return err
 		}
 		n := binary.PutUvarint(numBuf[:], uint64(len(p.word)))
-		if _, err = cw.Write(numBuf[:n]); err != nil {
+		if _, err := cw.Write(numBuf[:n]); err != nil {
 			return err
 		}
-		if _, err = cw.Write(p.word); err != nil {
+		if _, err := cw.Write(p.word); err != nil {
 			return err
 		}
 		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pattern=[%x]\n", p.depth, p.code, p.codeBits, p.word)
@@ -700,8 +705,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	copyNBuf := make([]byte, 32*1024)
 
 	var l uint64
-	var e error
-	for l, e = binary.ReadUvarint(r); e == nil; l, e = binary.ReadUvarint(r) {
+	var readErr error
+	for l, readErr = binary.ReadUvarint(r); readErr == nil; l, readErr = binary.ReadUvarint(r) {
 		posCode := pos2codeAt(l + 1)
 		if posCode != nil {
 			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
@@ -714,8 +719,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		} else {
 			var pNum uint64 // Number of patterns
-			if pNum, e = binary.ReadUvarint(r); e != nil {
-				return e
+			if pNum, readErr = binary.ReadUvarint(r); readErr != nil {
+				return readErr
 			}
 			// Now reading patterns one by one
 			var lastPos uint64
@@ -723,8 +728,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			var uncoveredCount int
 			for i := 0; i < int(pNum); i++ {
 				var pos uint64 // Starting position for pattern
-				if pos, e = binary.ReadUvarint(r); e != nil {
-					return e
+				if pos, readErr = binary.ReadUvarint(r); readErr != nil {
+					return readErr
 				}
 				posCode = pos2codeAt(pos - lastPos + 1)
 				lastPos = pos
@@ -734,8 +739,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 					}
 				}
 				var code uint64 // Code of the pattern
-				if code, e = binary.ReadUvarint(r); e != nil {
-					return e
+				if code, readErr = binary.ReadUvarint(r); readErr != nil {
+					return readErr
 				}
 				patternCode := code2pattern[code]
 				if int(pos) > lastUncovered {
@@ -775,8 +780,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		}
 	}
-	if !errors.Is(e, io.EOF) {
-		return e
+	if !errors.Is(readErr, io.EOF) {
+		return readErr
 	}
 	if err := intermediateFile.Close(); err != nil {
 		return err
@@ -1025,14 +1030,14 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 				continue
 			}
 
-			/* j contains index of the next substring to
+			/* next holds the index of the substring to
 			   be considered  to compare with the present
 			   substring, i.e., next string in suffix array */
-			j := int(filtered[inv[i]+1])
+			next := int(filtered[inv[i]+1])
 
 			// Directly start matching from k'th index as
 			// at-least k-1 characters will match
-			for i+k < n && j+k < n && superstring[i+k] != 0 && superstring[i+k] == superstring[j+k] {
+			for i+k < n && next+k < n && superstring[i+k] != 0 && superstring[i+k] == superstring[next+k] {
 				k++
 			}
 			lcp[inv[i]] = int32(k) // lcp for the present suffix.
