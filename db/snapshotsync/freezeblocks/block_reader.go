@@ -23,13 +23,13 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -54,13 +54,8 @@ type RemoteBlockReader struct {
 	client       remoteproto.ETHBACKENDClient
 	txNumsReader rawdbv3.TxNumsReader
 
-	frozenBlocksMu        sync.Mutex
-	frozenBlocksValue     uint64
-	frozenBlocksFetchedAt time.Time
-	frozenBlocksFetching  bool
-	frozenBlocksFetched   chan struct{}
-	frozenBlocksTTL       time.Duration
-	frozenBlocksTimeout   time.Duration
+	frozenBlocks        concurrent.CachedValue[uint64]
+	frozenBlocksTimeout time.Duration
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -156,79 +151,46 @@ func (r *RemoteBlockReader) AllTypes() []snaptype.Type              { panic("not
 func (r *RemoteBlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing  { panic("not supported") }
 
-// FrozenBlocks is answered by the backend. The context-free signature leaves no way to
-// surface an error or honor cancellation, so the whole call is bounded by an internal
-// timeout however many rounds it takes, cached for a short TTL, and not duplicated while
-// one is in flight. The count only grows, so a stale-low answer is conservative for the
-// availability gates; zero is not, since callers read it as "no snapshots", so a failed
-// fetch is not cached.
+// FrozenBlocks answers with the count alone. The zero it hands out before the backend
+// ever answers reads as "no snapshots", which is what FrozenBlocksObserved separates.
 func (r *RemoteBlockReader) FrozenBlocks() uint64 {
-	deadline := time.Now().Add(r.frozenBlocksTimeout)
-	for waited := false; ; waited = true {
-		r.frozenBlocksMu.Lock()
-		observed := !r.frozenBlocksFetchedAt.IsZero()
-		fresh := time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
-		if observed && (fresh || r.frozenBlocksFetching) {
-			value := r.frozenBlocksValue
-			r.frozenBlocksMu.Unlock()
-			return value
-		}
-		if waited && !time.Now().Before(deadline) {
-			value := r.frozenBlocksValue
-			r.frozenBlocksMu.Unlock()
-			return value
-		}
-		if r.frozenBlocksFetching {
-			fetched := r.frozenBlocksFetched
-			r.frozenBlocksMu.Unlock()
-			select {
-			case <-fetched:
-			case <-time.After(time.Until(deadline)):
-			}
-			if waited {
-				r.frozenBlocksMu.Lock()
-				value := r.frozenBlocksValue
-				r.frozenBlocksMu.Unlock()
-				return value
-			}
-			// A caller that has not fetched yet retries once the in-flight one ends;
-			// waiting again would put it past the single timeout it is bounded by.
-			continue
-		}
-		r.frozenBlocksFetching = true
-		r.frozenBlocksFetched = make(chan struct{})
-		fetched := r.frozenBlocksFetched
-		r.frozenBlocksMu.Unlock()
-
-		return r.fetchFrozenBlocks(fetched, deadline)
-	}
+	value, _ := r.FrozenBlocksObserved()
+	return value
 }
 
-// fetchFrozenBlocks asks the backend, within what is left of the caller's budget, and
-// publishes what came back. Releasing the callers waiting on it is deferred: a fetch
-// that dies must not leave them on a result nobody will produce.
-func (r *RemoteBlockReader) fetchFrozenBlocks(fetched chan struct{}, deadline time.Time) uint64 {
-	defer func() {
-		r.frozenBlocksMu.Lock()
-		defer r.frozenBlocksMu.Unlock()
-		close(fetched)
-		r.frozenBlocksFetching = false
-	}()
+// FrozenBlocksObserved reports the count and whether the backend ever answered. The
+// context-free signature leaves no way to honor cancellation, so a fetch is bounded by an
+// internal timeout and runs on a goroutine of its own: this getter is reached with a read
+// transaction open, so a caller that has a value to serve must not pay for the next one.
+// The count only grows, so a stale-low answer stays conservative for the availability gates.
+func (r *RemoteBlockReader) FrozenBlocksObserved() (uint64, bool) {
+	value, observed, fresh := r.frozenBlocks.Load()
+	if fresh {
+		return value, observed
+	}
+	refreshed := r.frozenBlocks.Go(r.fetchFrozenBlocks)
+	if observed {
+		return value, true
+	}
+	timeout := time.NewTimer(r.frozenBlocksTimeout)
+	defer timeout.Stop()
+	select {
+	case <-refreshed:
+	case <-timeout.C:
+	}
+	value, observed, _ = r.frozenBlocks.Load()
+	return value, observed
+}
 
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+func (r *RemoteBlockReader) fetchFrozenBlocks() (uint64, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), r.frozenBlocksTimeout)
 	defer cancel()
 	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
 		log.Warn("[frozen-blocks] backend did not answer", "err", err)
+		return 0, false, err
 	}
-
-	r.frozenBlocksMu.Lock()
-	defer r.frozenBlocksMu.Unlock()
-	if err == nil {
-		r.frozenBlocksValue = reply.FrozenBlocks
-		r.frozenBlocksFetchedAt = time.Now()
-	}
-	return r.frozenBlocksValue
+	return reply.FrozenBlocks, true, nil
 }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
@@ -274,9 +236,9 @@ var _ dbservices.FullBlockReader = &RemoteBlockReader{}
 func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReader {
 	br := &RemoteBlockReader{
 		client:              client,
-		frozenBlocksTTL:     30 * time.Second,
 		frozenBlocksTimeout: 5 * time.Second,
 	}
+	br.frozenBlocks.SetTTL(30 * time.Second)
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
 }
@@ -491,6 +453,8 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+
+func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.BlocksAvailable(), true }
 
 // FrozenBlocksInView is FrozenBlocks as seen by tx: a caller that then reads the block
 // must ask the same generation it reads from, not the live set that may be ahead of it.

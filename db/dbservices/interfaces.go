@@ -98,6 +98,8 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	// FrozenBlocksObserved reports the count and whether it was observed rather than defaulted.
+	FrozenBlocksObserved() (uint64, bool)
 	FrozenBlocksInView(tx kv.Getter) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
