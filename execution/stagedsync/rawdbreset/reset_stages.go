@@ -326,10 +326,16 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			// pass. Stop seeding TD at the first discontinuity;
 			// ExtendTDFromSnapshots resumes there once the range is visible.
 			var nextTDBlock uint64
+			var walkFirst, walkLast, walkCount uint64
 			tdContiguous := true
 			blockNumBytes := make([]byte, 8)
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
+				if walkCount == 0 {
+					walkFirst = blockNum
+				}
+				walkLast = blockNum
+				walkCount++
 				if tdContiguous && blockNum != nextTDBlock {
 					tdContiguous = false
 					logger.Warn(fmt.Sprintf("[%s] header coverage break at %d (expected %d) — TD seeded up to %d, resuming there once contiguous",
@@ -385,6 +391,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}); err != nil {
 				return err
 			}
+			logger.Info(fmt.Sprintf("[%s] TD seed: walked %d headers [%d..%d] contiguous=%v seededTo=%d frozen=%d",
+				logPrefix, walkCount, walkFirst, walkLast, tdContiguous, tdSeededTo, blocksAvailable))
+
 			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return err
 			}
@@ -519,6 +528,7 @@ func ExtendTDFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, bl
 	if blocksAvailable <= seeded {
 		return nil
 	}
+	logger.Info(fmt.Sprintf("[%s] TD extend: seeded=%d frozen=%d", logPrefix, seeded, blocksAvailable))
 
 	anchorHash, ok, err := blockReader.CanonicalHash(ctx, tx, seeded)
 	if err != nil {
@@ -541,6 +551,7 @@ func ExtendTDFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, bl
 	defer logEvery.Stop()
 
 	running := td.Clone()
+	var written uint64
 	for blockNum := seeded + 1; blockNum <= blocksAvailable; blockNum++ {
 		header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
 		if err != nil {
@@ -564,6 +575,7 @@ func ExtendTDFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, bl
 			if err := rawdb.WriteTd(tx, hash, blockNum, *running); err != nil {
 				return fmt.Errorf("write TD at %d: %w", blockNum, err)
 			}
+			written++
 		}
 		select {
 		case <-ctx.Done():
@@ -574,5 +586,6 @@ func ExtendTDFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, bl
 		default:
 		}
 	}
+	logger.Info(fmt.Sprintf("[%s] TD extend: wrote %d, watermark -> %d", logPrefix, written, blocksAvailable))
 	return SaveSnapshotSeedProgress(tx, blocksAvailable)
 }

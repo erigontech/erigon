@@ -588,7 +588,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 		return err
 	}
 	defer c.Close()
-	var tdKey [40]byte
 	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum == 0 { // Do not prune genesis marker
@@ -600,13 +599,13 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 		if err := tx.Delete(kv.HeaderNumber, v); err != nil {
 			return err
 		}
-		if dbg.PruneTotalDifficulty() {
-			copy(tdKey[:], k)
-			copy(tdKey[8:], v)
-			if err := tx.Delete(kv.HeaderTD, tdKey[:]); err != nil {
-				return err
-			}
-		}
+		// TD is deliberately NOT pruned with the marker. Mode-B/D unwind
+		// to an arbitrary historical target and the first insert after it
+		// reads the target's TD; snapshots do not carry TD, so removing it
+		// here makes such an unwind unrecoverable ("parent's total
+		// difficulty not found"). FillDBFromSnapshots writes TD for every
+		// frozen header for that reason — pruning it back out of the same
+		// range put the two in direct contradiction. ~32 bytes/block.
 		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
