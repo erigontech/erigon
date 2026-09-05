@@ -294,7 +294,7 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -357,6 +357,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			}
 		}
 
+		var err error
 		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
