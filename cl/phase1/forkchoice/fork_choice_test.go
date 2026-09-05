@@ -19,10 +19,12 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"testing"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
@@ -46,6 +49,86 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	injected := errors.New("injected validation error")
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusValidated, injected)
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	err = store.OnBlock(context.Background(), block, true, true, false)
+
+	require.ErrorIs(t, err, injected)
+	require.False(t, store.IsPayloadVerified(blockRoot))
+}
+
+func TestOnBlockRejectsKnownInvalidPayloadWithoutRepeatingEngineCall(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusInvalidated, errors.New("injected invalid payload"))
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+}
+
+func TestOnBlockKnownInvalidRetryClearsOptimisticCandidate(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	executionHash := block.Block.Body.ExecutionPayload.BlockHash
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusNotValidated, nil)
+	store := newBellatrixForkChoiceStore(t, anchorState, engine)
+
+	require.NoError(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.True(t, store.IsRootOptimistic(blockRoot))
+	store.MarkPayloadInvalid(blockRoot, executionHash)
+	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	require.False(t, store.IsRootOptimistic(blockRoot))
+}
+
+func newBellatrixForkChoiceStore(t *testing.T, anchorState *state.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{Beacon: true})
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		engine,
+		pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
+		forkGraphDisk,
+		beaconevents.NewEventEmitter(),
+		synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true),
+		blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs()),
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(2000)
+	return store
+}
 
 //go:embed test_data/anchor_state.ssz_snappy
 var anchorStateEncoded []byte

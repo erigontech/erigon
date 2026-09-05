@@ -17,8 +17,20 @@
 package stages
 
 import (
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 )
+
+func TestGloasEnvelopeAppliedForCollection(t *testing.T) {
+	require.True(t, gloasEnvelopeAppliedForCollection(nil))
+	require.True(t, gloasEnvelopeAppliedForCollection(forkchoice.ErrExecutionPayloadEnvelopeIndicesPending))
+	require.False(t, gloasEnvelopeAppliedForCollection(forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed))
+	require.False(t, gloasEnvelopeAppliedForCollection(errors.New("invalid envelope")))
+}
 
 // currentSlot can overshoot the captured chainTipSlot; slotsRemaining must clamp
 // to 0 rather than underflow into a ~2^64 slot count.

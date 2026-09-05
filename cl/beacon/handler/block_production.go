@@ -85,6 +85,9 @@ const (
 
 const minPayloadPollingWindow = 100 * time.Millisecond
 
+const selfBuildEnvelopePublicationWait = 30 * time.Second
+const selfBuildEnvelopeOwnerLifetime = 60 * time.Second
+
 // Polling for the assembled payload stops attestationDeadline/payloadPublicationDivisor before the
 // attestation deadline, reserving that margin for consensus processing, signing and gossip so the
 // produced block still reaches attesters in time to earn the proposer boost.
@@ -1744,10 +1747,15 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	_ = validation
 
 	if err := a.broadcastBlock(ctx, block.SignedBlock, block.SignedExecutionPayloadEnvelope); err != nil {
+		if errors.Is(err, errPublishedBlockIntegrationPending) {
+			return nil, beaconhttp.NewEndpointError(http.StatusAccepted, err)
+		}
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return newBeaconResponse(nil), nil
 }
+
+var errPublishedBlockIntegrationPending = errors.New("published beacon block integration pending")
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	resp, err := a.publishBlindedBlocks(w, r, 1)
@@ -1959,7 +1967,7 @@ func (a *ApiHandler) parseEthConsensusVersion(
 }
 
 func (a *ApiHandler) parseBlockPublishingValidation(
-	w http.ResponseWriter,
+	_ http.ResponseWriter,
 	r *http.Request,
 	apiVersion int,
 ) BlockPublishingValidation {
@@ -1967,7 +1975,6 @@ func (a *ApiHandler) parseBlockPublishingValidation(
 	if apiVersion == 1 || str == string(BlockPublishingValidationGossip) {
 		return BlockPublishingValidationGossip
 	}
-	// fall to consensus anyway. equivocation is not supported yet.
 	return BlockPublishingValidationConsensus
 }
 
@@ -2033,11 +2040,29 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 		}
 		if _, hasSignedBlock := probe["signed_block"]; hasSignedBlock {
 			block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg, version)
-			if block != nil {
-				if err := json.Unmarshal(body, block); err == nil {
-					return block, nil
+			if block == nil {
+				return nil, errors.New("failed to create wrapped block")
+			}
+			rawEnvelope, hasEnvelope := probe["signed_execution_payload_envelope"]
+			hasNonNullEnvelope := hasEnvelope && !bytes.Equal(bytes.TrimSpace(rawEnvelope), []byte("null"))
+			if hasNonNullEnvelope {
+				block.SignedExecutionPayloadEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
+					Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(a.beaconChainCfg, version),
 				}
 			}
+			if err := json.Unmarshal(body, block); err != nil {
+				return nil, fmt.Errorf("wrapped json: %w", err)
+			}
+			if block.SignedBlock == nil {
+				return nil, errors.New("wrapped json has null signed_block")
+			}
+			if hasNonNullEnvelope {
+				envelope := block.SignedExecutionPayloadEnvelope
+				if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil || envelope.Message.ExecutionRequests == nil {
+					return nil, errors.New("wrapped json has incomplete signed execution payload envelope")
+				}
+			}
+			return block, nil
 		}
 		// Fall back to plain SignedBeaconBlock (keys: "message", "signature")
 		if err := json.Unmarshal(body, signedBlock); err != nil {
@@ -2053,7 +2078,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			return nil, err
 		}
 		// In GLOAS, SSZ payload is just SignedBeaconBlock (no KZGProofs/Blobs wrapper)
-		if err := signedBlock.DecodeSSZ(octect, int(version)); err != nil {
+		if err := signedBlock.DecodeSSZStrict(octect, int(version)); err != nil {
 			return nil, fmt.Errorf("ssz(%w)", err)
 		}
 		return &cltypes.DenebSignedBeaconBlock{
@@ -2158,7 +2183,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				if err != nil {
 					return fmt.Errorf("failed to compute block root: %w", err)
 				}
-				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(a.beaconChainCfg, blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
 				if err != nil {
 					return fmt.Errorf("failed to get data column sidecars: %w", err)
 				}
@@ -2181,8 +2206,21 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	storageIntegrated := make(chan error, 1)
+	blockIntegrated := make(chan error, 1)
+	var localIntegration *localBlockIntegration
+	var localBlockRoot common.Hash
+	if blk.Version() >= clparams.GloasVersion {
+		localBlockRoot, err = blk.Block.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("failed to compute block root: %w", err)
+		}
+		localIntegration = a.startLocalBlockIntegration(localBlockRoot)
+	}
+	go a.relayLocalBlockIntegration(localBlockRoot, localIntegration, storageIntegrated, blockIntegrated)
 	go func() {
-		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars); err != nil {
+		err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars, storageIntegrated)
+		if err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
 	}()
@@ -2196,61 +2234,146 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		"columnSidecars",
 		len(columnsSidecars),
 	)
-	// Broadcast the block and its blobs
-	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
-		a.logger.Error("Failed to publish block", "err", err)
+	if err := a.publishBlockAndSidecars(ctx, blkSSZ, blobsSidecarsBytes, columnsSidecars, blk.Version()); err != nil {
+		return err
 	}
 
-	if blk.Version() < clparams.FuluVersion {
-		for idx, blob := range blobsSidecarsBytes {
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
-				a.logger.Error("Failed to publish blob sidecar", "err", err)
-			}
-		}
-	}
-
-	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
-		for _, column := range columnsSidecars {
-			columnSSZ, err := column.EncodeSSZ(nil)
-			if err != nil {
-				a.logger.Error("Failed to encode column sidecar", "err", err)
-				continue
-			}
-			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
-				a.logger.Error("Failed to publish data column sidecar", "err", err)
-			}
-		}
-	}
-
-	// [New in Gloas:EIP7732] For self-built blocks, construct and broadcast the
-	// SignedExecutionPayloadEnvelope so the block can transition from PENDING to FULL.
-	// If the validator client provided a signed envelope, use it directly (real BLS signature).
-	// Otherwise fall back to constructing one from the cache (legacy/fallback path).
+	// [New in Gloas:EIP7732] Publish the validator-signed envelope after local block integration.
 	if blk.Version() >= clparams.GloasVersion {
 		var validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope
 		if len(signedEnvelope) > 0 && signedEnvelope[0] != nil {
 			validatorSignedEnvelope = signedEnvelope[0]
 		}
-		if err := a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope); err != nil {
-			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
+		if err := publishSelfBuildEnvelopeAfterIntegration(ctx, blockIntegrated, validatorSignedEnvelope != nil, selfBuildEnvelopePublicationWait, selfBuildEnvelopeOwnerLifetime, func(publicationCtx context.Context) error {
+			return a.broadcastSelfBuildEnvelope(publicationCtx, blk, validatorSignedEnvelope)
+		}); err != nil {
+			return fmt.Errorf("failed to broadcast self-build execution payload envelope: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// broadcastSelfBuildEnvelope constructs and broadcasts a SignedExecutionPayloadEnvelope
-// for a self-built GLOAS block. If the validator client provided a signed envelope
-// (via the block publish request), it is used directly with the real BLS signature.
-// Otherwise, the envelope is reconstructed from the cache as a fallback.
-//
-// The function:
-//  1. Broadcasts the envelope on the execution_payload gossip topic
-//  2. Processes the envelope through forkchoice (OnExecutionPayload) so the local
-//     node transitions the block from PENDING to FULL status
-//
-// [New in Gloas:EIP7732]
+func (a *ApiHandler) startLocalBlockIntegration(root common.Hash) *localBlockIntegration {
+	integration := &localBlockIntegration{done: make(chan struct{})}
+	a.localBlockIntegrations.Store(root, integration)
+	return integration
+}
+
+func (a *ApiHandler) finishLocalBlockIntegration(root common.Hash, integration *localBlockIntegration, err error) {
+	integration.err = err
+	close(integration.done)
+	a.localBlockIntegrations.CompareAndDelete(root, integration)
+}
+
+func (a *ApiHandler) relayLocalBlockIntegration(root common.Hash, integration *localBlockIntegration, source <-chan error, destination chan<- error) {
+	err := <-source
+	if integration != nil {
+		a.finishLocalBlockIntegration(root, integration, err)
+	}
+	destination <- err
+}
+
+func (a *ApiHandler) waitForLocalBlockIntegration(ctx context.Context, root common.Hash) error {
+	pending, ok := a.localBlockIntegrations.Load(root)
+	if !ok {
+		return nil
+	}
+	integration := pending.(*localBlockIntegration)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-integration.done:
+		return integration.err
+	}
+}
+
+func (a *ApiHandler) publishBlockAndSidecars(
+	ctx context.Context,
+	blockSSZ []byte,
+	blobSidecars [][]byte,
+	columnSidecars []*cltypes.DataColumnSidecar,
+	version clparams.StateVersion,
+) error {
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blockSSZ); err != nil {
+		return fmt.Errorf("failed to publish beacon block: %w", err)
+	}
+	if version < clparams.FuluVersion {
+		for index, blob := range blobSidecars {
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(index)), blob); err != nil {
+				return fmt.Errorf("failed to publish blob sidecar %d: %w", index, err)
+			}
+		}
+		return nil
+	}
+	return a.publishDataColumnSidecars(ctx, columnSidecars)
+}
+
+func (a *ApiHandler) publishDataColumnSidecars(ctx context.Context, columnSidecars []*cltypes.DataColumnSidecar) error {
+	for _, column := range columnSidecars {
+		if column == nil {
+			return errors.New("missing data column sidecar")
+		}
+		columnSSZ, err := column.EncodeSSZ(nil)
+		if err != nil {
+			return fmt.Errorf("failed to encode data column sidecar %d: %w", column.Index, err)
+		}
+		subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
+		if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
+			return fmt.Errorf("failed to publish data column sidecar %d: %w", column.Index, err)
+		}
+	}
+	return nil
+}
+
+func publishSelfBuildEnvelopeAfterIntegration(
+	ctx context.Context,
+	blockIntegrated <-chan error,
+	envelopeSupplied bool,
+	wait time.Duration,
+	ownerLifetime time.Duration,
+	publish func(context.Context) error,
+) error {
+	if !envelopeSupplied {
+		return nil
+	}
+	detachedCtx := context.WithoutCancel(ctx)
+	ownerCtx, cancelOwner := context.WithTimeout(detachedCtx, ownerLifetime)
+	published := make(chan error, 1)
+	go func() {
+		defer cancelOwner()
+		select {
+		case err := <-blockIntegrated:
+			if err != nil {
+				published <- fmt.Errorf("%w: failed to integrate block and blobs: %w", errPublishedBlockIntegrationPending, err)
+				return
+			}
+			published <- publish(ownerCtx)
+		case <-ownerCtx.Done():
+			published <- ownerCtx.Err()
+		}
+	}()
+
+	waitCtx, cancel := context.WithTimeout(detachedCtx, wait)
+	defer cancel()
+	select {
+	case err := <-published:
+		return err
+	case <-waitCtx.Done():
+		return fmt.Errorf("%w: %w", errPublishedBlockIntegrationPending, waitCtx.Err())
+	}
+}
+
+func runBlockStoragePhases(blockIntegrated chan<- error, integrate, finish func() error) error {
+	err := integrate()
+	blockIntegrated <- err
+	if err != nil {
+		return err
+	}
+	return finish()
+}
+
+// broadcastSelfBuildEnvelope validates and broadcasts the validator-signed envelope for a self-built Gloas block.
 func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock, validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
@@ -2266,78 +2389,51 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		return fmt.Errorf("failed to compute block root: %w", err)
 	}
 
-	var signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	if validatorSignedEnvelope == nil || validatorSignedEnvelope.Message == nil {
+		return errors.New("validator-signed envelope is required for a self-build block")
+	}
+	signedEnvelope := validatorSignedEnvelope
+	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(a.beaconChainCfg, blk, signedEnvelope); err != nil {
+		return err
+	}
+	admissionToken, err := a.forkchoiceStore.ClaimExecutionPayloadEnvelopeForPublication(ctx, blockRoot, signedEnvelope.Message.BuilderIndex)
+	if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAlreadySeen) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to claim self-build envelope publication: %w", err)
+	}
+	published := false
+	defer func() {
+		a.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, published)
+	}()
 
-	if validatorSignedEnvelope != nil && validatorSignedEnvelope.Message != nil {
-		// Use the validator-signed envelope directly (real BLS signature).
-		signedEnvelope = validatorSignedEnvelope
-		log.Debug("BlockPublishing: using validator-signed execution payload envelope",
-			"slot", blk.Block.Slot, "blockRoot", blockRoot)
-	} else {
-		// Fallback: reconstruct from cache. This path uses InfiniteSignature and will
-		// fail BLS verification on other nodes — it exists only as a backward-compat
-		// safety net during the transition period.
-		cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
-		if !ok {
-			return fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
-		}
-
-		log.Debug("BlockPublishing: no validator-signed envelope provided, falling back to InfiniteSignature (will fail BLS verification on peers)",
-			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
-
-		execReqs := cached.ExecutionRequests
-		if execReqs == nil {
-			execReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
-		}
-		envelope := &cltypes.ExecutionPayloadEnvelope{
-			Payload:               cached.Payload,
-			ExecutionRequests:     execReqs,
-			BuilderIndex:          clparams.BuilderIndexSelfBuild,
-			BeaconBlockRoot:       blockRoot,
-			ParentBeaconBlockRoot: blk.Block.ParentRoot,
-		}
-		signedEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
-			Message:   envelope,
-			Signature: common.Bytes96(bls.InfiniteSignature),
+	applyErr := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true)
+	persistenceFailed := false
+	if applyErr != nil {
+		switch {
+		case errors.Is(applyErr, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
+			a.logger.Debug("Self-build envelope indices queued for retry", "err", applyErr, "blockRoot", blockRoot)
+		case errors.Is(applyErr, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
+			persistenceFailed = true
+			a.logger.Debug("Self-build envelope validated but not persisted", "err", applyErr, "blockRoot", blockRoot)
+		default:
+			return fmt.Errorf("failed to apply self-build envelope: %w", applyErr)
 		}
 	}
 
-	// Remove from cache after use (regardless of path taken)
+	encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
+	if err != nil {
+		return fmt.Errorf("failed to encode self-build envelope: %w", err)
+	}
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+		return fmt.Errorf("failed to publish self-build execution payload envelope: %w", err)
+	}
+	published = true
+	if persistenceFailed {
+		return fmt.Errorf("published self-build envelope before local persistence retry: %w", applyErr)
+	}
 	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
-
-	// Process through forkchoice so the local node marks the block as FULL.
-	// Use ApplyLocalSelfBuildEnvelope instead of OnExecutionPayload: it skips BLS
-	// signature verification (we produced this envelope locally and may not have the
-	// VC's private key) while still validating the payload with the EL via NewPayload.
-	// Note: this typically returns an error because OnBlock (running in a background
-	// goroutine) has not finished yet — the forkchoice store queues the envelope in
-	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
-	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
-		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
-	}
-
-	// Only broadcast the envelope if it has a real BLS signature.
-	// Envelopes with InfiniteSignature (fallback when the VC doesn't provide a
-	// pre-signed envelope) will fail BLS verification on peers, causing them to
-	// penalize and ban us. Process locally only until the VC supports envelope signing.
-	if signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
-		log.Debug("BlockPublishing: skipping gossip of self-build envelope with InfiniteSignature (no valid BLS signature)",
-			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
-	} else {
-		// Broadcast the envelope on the execution_payload gossip topic
-		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
-		if err != nil {
-			return fmt.Errorf("failed to encode self-build envelope: %w", err)
-		}
-		if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-			a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
-		} else {
-			log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
-				"slot", blk.Block.Slot,
-				"blockRoot", blockRoot,
-				"blockHash", bid.Message.BlockHash)
-		}
-	}
 
 	return nil
 }
@@ -2347,19 +2443,36 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	block *cltypes.SignedBeaconBlock,
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
+	blockIntegrated chan<- error,
 ) error {
 	finishProduction := a.payloadPreparationGate.beginProduction()
 	defer finishProduction()
+	var blockRoot common.Hash
+	return runBlockStoragePhases(blockIntegrated, func() (err error) {
+		blockRoot, err = a.integrateBlockAndBlobs(ctx, block, sidecars, columnSidecars)
+		return err
+	}, func() error {
+		return a.finishBlockAndBlobs(ctx, block, blockRoot)
+	})
+}
 
+func (a *ApiHandler) integrateBlockAndBlobs(
+	ctx context.Context,
+	block *cltypes.SignedBeaconBlock,
+	sidecars []*cltypes.BlobSidecar,
+	columnSidecars []*cltypes.DataColumnSidecar,
+) (common.Hash, error) {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
-	// TODO: write column sidecars if needed
+	if err := a.persistDataColumnSidecars(ctx, blockRoot, columnSidecars); err != nil {
+		return common.Hash{}, err
+	}
 
 	if block.Version() < clparams.FuluVersion {
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
-			return err
+			return common.Hash{}, err
 		}
 	}
 
@@ -2373,7 +2486,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	// Advance fork choice time to the current slot so OnBlock accepts the block.
@@ -2391,8 +2504,24 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
 	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
-		return err
+		return common.Hash{}, err
 	}
+	return blockRoot, nil
+}
+
+func (a *ApiHandler) persistDataColumnSidecars(ctx context.Context, blockRoot common.Hash, columnSidecars []*cltypes.DataColumnSidecar) error {
+	for i, column := range columnSidecars {
+		if column == nil {
+			return fmt.Errorf("missing data column sidecar %d", i)
+		}
+		if err := a.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(column.Index), column); err != nil {
+			return fmt.Errorf("failed to persist data column sidecar %d: %w", column.Index, err)
+		}
+	}
+	return nil
+}
+
+func (a *ApiHandler) finishBlockAndBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) error {
 	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
 	if err != nil {
 		return err

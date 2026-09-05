@@ -79,6 +79,13 @@ type chainCfg struct {
 	Chain string
 }
 
+func validateChainHistoryCheckpoint(version clparams.StateVersion) error {
+	if version >= clparams.GloasVersion {
+		return errors.New("capcli chain does not support Gloas checkpoints")
+	}
+	return nil
+}
+
 type outputFolder struct {
 	Datadir string
 }
@@ -132,6 +139,9 @@ func (c *Chain) Run(ctx context.Context) error {
 	csn := freezeblocks.NewCaplinSnapshots(freezingCfg, beaconConfig, dirs, log.Root())
 	bs, err := checkpoint_sync.NewRemoteCheckpointSync(beaconConfig, networkType).GetLatestBeaconState(ctx)
 	if err != nil {
+		return err
+	}
+	if err := validateChainHistoryCheckpoint(bs.Version()); err != nil {
 		return err
 	}
 

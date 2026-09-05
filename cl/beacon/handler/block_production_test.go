@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,9 +45,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	gossip_topic "github.com/erigontech/erigon/cl/gossip"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
@@ -75,6 +81,501 @@ type updateFailingDB struct {
 
 func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 	return errors.New("stop after persistence")
+}
+
+func matchedSelfBuildEnvelope(t *testing.T, cfg *clparams.BeaconChainConfig, block *cltypes.SignedBeaconBlock) *cltypes.SignedExecutionPayloadEnvelope {
+	t.Helper()
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewProgressiveTransactionsSSZ()
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	payload.SlotNumber = block.Block.Slot
+	payload.ParentHash = bid.Message.ParentBlockHash
+	payload.PrevRandao = bid.Message.PrevRandao
+	payload.FeeRecipient = bid.Message.FeeRecipient
+	payload.GasLimit = bid.Message.GasLimit
+	requests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	requestsRoot, err := requests.HashSSZ()
+	require.NoError(t, err)
+	bid.Message.ExecutionRequestsRoot = requestsRoot
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, requests))
+	payload.BlockHash, err = payload.ComputeBlockHash(&block.Block.ParentRoot, requestsHash, nil)
+	require.NoError(t, err)
+	bid.Message.BlockHash = payload.BlockHash
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	return &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			Payload:               payload,
+			ExecutionRequests:     requests,
+			BuilderIndex:          bid.Message.BuilderIndex,
+			BeaconBlockRoot:       blockRoot,
+			ParentBeaconBlockRoot: block.Block.ParentRoot,
+		},
+		Signature: common.Bytes96{1},
+	}
+}
+
+func TestBroadcastSelfBuildEnvelopeStopsPermanentApplyErrorBeforeGossip(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.OnExecutionPayloadErr = errors.New("invalid payload")
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+
+	err := h.broadcastSelfBuildEnvelope(context.Background(), block, envelope)
+	require.ErrorContains(t, err, "invalid payload")
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.True(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopeDoesNotPublishQueuedUnverifiedEnvelope(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	require.ErrorIs(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), forkchoice.ErrIgnore)
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.True(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopeRejectsUnsignedLocalFallback(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	h.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	fcu.ApplyLocalSelfBuildEnvelopeErr = errors.New("local apply must not be called")
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)
+	payload.BlockHash = bid.Message.BlockHash
+	payload.SlotNumber = block.Block.Slot
+	requests := cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion)
+	requestsRoot, err := requests.HashSSZ()
+	require.NoError(t, err)
+	bid.Message.ExecutionRequestsRoot = requestsRoot
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: payload, ExecutionRequests: requests})
+
+	require.ErrorContains(t, h.broadcastSelfBuildEnvelope(context.Background(), block, nil), "validator-signed envelope")
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.True(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopeRejectsQueuedEnvelopeForDifferentBlock(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr string
+		mutate  func(t *testing.T, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope)
+	}{
+		{name: "beacon block root", wantErr: "beacon block root", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.BeaconBlockRoot = common.HexToHash("0xdead")
+		}},
+		{name: "parent beacon block root", wantErr: "parent beacon block root", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.ParentBeaconBlockRoot = common.HexToHash("0xdead")
+		}},
+		{name: "payload slot", wantErr: "payload slot", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.Payload.SlotNumber++
+		}},
+		{name: "builder index", wantErr: "builder index", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.BuilderIndex++
+		}},
+		{name: "payload block hash", wantErr: "block hash", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.Payload.BlockHash = common.HexToHash("0xdead")
+		}},
+		{name: "prev randao", wantErr: "prev randao", mutate: func(_ *testing.T, _ *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			envelope.Message.Payload.PrevRandao = common.HexToHash("0xdead")
+		}},
+		{name: "execution requests root", wantErr: "execution requests root", mutate: func(t *testing.T, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+			block.Block.Body.GetSignedExecutionPayloadBid().Message.ExecutionRequestsRoot = common.HexToHash("0xdead")
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = blockRoot
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			ctrl := gomock.NewController(t)
+			h.gossipManager = gossip_mock.NewMockGossip(ctrl)
+			fcu.OnExecutionPayloadErr = forkchoice.ErrIgnore
+
+			block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+			bid := block.Block.Body.GetSignedExecutionPayloadBid()
+			bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+			bid.Message.BlockHash = common.HexToHash("0x1234")
+			envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+			h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+			test.mutate(t, block, envelope)
+
+			err := h.broadcastSelfBuildEnvelope(context.Background(), block, envelope)
+			require.ErrorContains(t, err, test.wantErr)
+			_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+			require.True(t, cached)
+		})
+	}
+}
+
+func TestBroadcastSelfBuildEnvelopeContinuesWhenIndicesArePending(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.OnExecutionPayloadErr = fmt.Errorf("index write failed: %w", forkchoice.ErrExecutionPayloadEnvelopeIndicesPending)
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+
+	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.False(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopeUsesFullyValidatedIngress(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.ApplyLocalSelfBuildEnvelopeErr = errors.New("local apply must not be called")
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+
+	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	require.True(t, fcu.OnExecutionPayloadCheckBlobData)
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.False(t, cached)
+}
+
+func TestIntegrateBlockPersistsGeneratedColumnsBeforeForkchoice(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	h.columnStorage = columnStorage
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	column := &cltypes.DataColumnSidecar{Index: 3}
+	written := false
+	columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(column.Index), column).DoAndReturn(
+		func(context.Context, common.Hash, int64, *cltypes.DataColumnSidecar) error {
+			written = true
+			return nil
+		},
+	)
+	fcu.OnBlockFunc = func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+		require.True(t, written)
+		return nil
+	}
+	fcu.OnTickFunc = func(uint64) {}
+
+	_, err = h.integrateBlockAndBlobs(t.Context(), block, nil, []*cltypes.DataColumnSidecar{column})
+
+	require.NoError(t, err)
+}
+
+func TestPublishBlockAndSidecarsReturnsPublishFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h := &ApiHandler{gossipManager: gossipManager}
+	injected := errors.New("injected publish failure")
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameBeaconBlock, []byte{1}).Return(injected)
+
+	err := h.publishBlockAndSidecars(t.Context(), []byte{1}, nil, nil, clparams.Phase0Version)
+
+	require.ErrorIs(t, err, injected)
+}
+
+func TestPublishDataColumnSidecarsReturnsPublishFailure(t *testing.T) {
+	if clparams.GetBeaconConfig() == nil {
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+	}
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	h.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	injected := errors.New("column publish failed")
+	column := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+	h.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(), gomock.Any(), gomock.Any(),
+	).Return(injected)
+
+	err := h.publishDataColumnSidecars(t.Context(), []*cltypes.DataColumnSidecar{column})
+
+	require.ErrorIs(t, err, injected)
+}
+
+func TestBroadcastSelfBuildEnvelopeRetriesGossipAfterPublishFailure(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	var publishes atomic.Int32
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Times(2).DoAndReturn(
+		func(context.Context, string, []byte) error {
+			if publishes.Add(1) == 1 {
+				return errors.New("publish failed")
+			}
+			return nil
+		},
+	)
+
+	require.ErrorContains(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), "publish failed")
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.True(t, cached)
+	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	require.EqualValues(t, 2, publishes.Load())
+	_, cached = h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.False(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRetry(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.OnExecutionPayloadErr = fmt.Errorf("disk unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed)
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+
+	require.ErrorIs(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope), forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed)
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.True(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopeCoalescesConcurrentPublication(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	var publishes atomic.Int32
+	fcu.OnExecutionPayloadFunc = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return nil
+	}
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).DoAndReturn(
+		func(context.Context, string, []byte) error {
+			publishes.Add(1)
+			return nil
+		},
+	).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+
+	done := make(chan error, 2)
+	go func() { done <- h.broadcastSelfBuildEnvelope(t.Context(), block, envelope) }()
+	<-started
+	go func() { done <- h.broadcastSelfBuildEnvelope(t.Context(), block, envelope) }()
+	close(release)
+
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+	require.EqualValues(t, 1, calls.Load())
+	require.EqualValues(t, 1, publishes.Load())
+}
+
+func TestPublishSelfBuildEnvelopeAfterIntegration(t *testing.T) {
+	t.Run("optional envelope absent does not wait for integration", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		done := make(chan error, 1)
+		called := false
+		go func() {
+			done <- publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, false, time.Second, 2*time.Second, func(context.Context) error {
+				called = true
+				return nil
+			})
+		}()
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+			require.False(t, called)
+		case <-time.After(100 * time.Millisecond):
+			integrated <- nil
+			require.NoError(t, <-done)
+			t.Fatal("canonical block publication waited for asynchronous integration without an envelope")
+		}
+	})
+
+	t.Run("optional envelope absent", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		integrated <- nil
+		called := false
+		require.NoError(t, publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, false, time.Second, 2*time.Second, func(context.Context) error {
+			called = true
+			return nil
+		}))
+		require.False(t, called)
+	})
+
+	t.Run("integration failure", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		integrated <- errors.New("integration failed")
+		called := false
+		err := publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, time.Second, 2*time.Second, func(context.Context) error {
+			called = true
+			return nil
+		})
+		require.ErrorContains(t, err, "integration failed")
+		require.False(t, called)
+	})
+
+	t.Run("integration success", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		integrated <- nil
+		called := false
+		require.NoError(t, publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, time.Second, 2*time.Second, func(context.Context) error {
+			called = true
+			return nil
+		}))
+		require.True(t, called)
+	})
+
+	t.Run("canceled", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		integrated <- nil
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		called := false
+		err := publishSelfBuildEnvelopeAfterIntegration(ctx, integrated, true, time.Second, 2*time.Second, func(publicationCtx context.Context) error {
+			called = true
+			require.NoError(t, publicationCtx.Err())
+			return nil
+		})
+		require.NoError(t, err)
+		require.True(t, called)
+	})
+}
+
+func TestPublishSelfBuildEnvelopeAfterIntegrationRetainsOwnerAfterRequestTimeout(t *testing.T) {
+	integrated := make(chan error, 1)
+	published := make(chan error, 2)
+
+	err := publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, 10*time.Millisecond, time.Second, func(ctx context.Context) error {
+		published <- ctx.Err()
+		return nil
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	integrated <- nil
+	select {
+	case err := <-published:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("detached envelope owner did not publish after integration completed")
+	}
+
+	select {
+	case <-published:
+		t.Fatal("detached envelope owner published more than once")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestPublishSelfBuildEnvelopeAfterIntegrationOwnerExpiresWithoutIntegration(t *testing.T) {
+	integrated := make(chan error, 1)
+	published := make(chan struct{}, 1)
+
+	err := publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, time.Second, 10*time.Millisecond, func(context.Context) error {
+		published <- struct{}{}
+		return nil
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	integrated <- nil
+	select {
+	case <-published:
+		t.Fatal("expired envelope owner published after late integration")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestRunBlockStoragePhasesSignalsIntegrationBeforeSuffixFailure(t *testing.T) {
+	integrated := make(chan error, 1)
+	finishStarted := make(chan struct{})
+	finishRelease := make(chan struct{})
+	done := make(chan error, 1)
+	suffixErr := errors.New("forkchoice update failed")
+
+	go func() {
+		done <- runBlockStoragePhases(integrated, func() error {
+			return nil
+		}, func() error {
+			close(finishStarted)
+			<-finishRelease
+			return suffixErr
+		})
+	}()
+
+	require.NoError(t, <-integrated)
+	<-finishStarted
+	close(finishRelease)
+	require.ErrorIs(t, <-done, suffixErr)
+}
+
+func TestRunBlockStoragePhasesDoesNotRunSuffixAfterIntegrationFailure(t *testing.T) {
+	integrated := make(chan error, 1)
+	integrationErr := errors.New("on block failed")
+	finished := false
+
+	err := runBlockStoragePhases(integrated, func() error {
+		return integrationErr
+	}, func() error {
+		finished = true
+		return nil
+	})
+
+	require.ErrorIs(t, err, integrationErr)
+	require.ErrorIs(t, <-integrated, integrationErr)
+	require.False(t, finished)
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -115,6 +616,118 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestParseGloasRequestBeaconBlockAcceptsConfiguredWrappedJSON(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	wrapper := cltypes.NewDenebSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	wrapper.SignedBlock.Block.Slot = 123
+	wrapper.SignedExecutionPayloadEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(h.beaconChainCfg, clparams.GloasVersion),
+	}
+	payload := wrapper.SignedExecutionPayloadEnvelope.Message.Payload
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}})
+	payload.Withdrawals = solid.NewStaticListSSZFromList(
+		[]*cltypes.Withdrawal{{Index: 1}},
+		int(h.beaconChainCfg.MaxWithdrawalsPerPayload),
+		44,
+	)
+	body, err := json.Marshal(wrapper)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+
+	var parsed *cltypes.DenebSignedBeaconBlock
+	require.NotPanics(t, func() {
+		parsed, err = h.parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), parsed.SignedBlock.Block.Slot)
+	require.NotNil(t, parsed.SignedExecutionPayloadEnvelope)
+	require.Equal(t, clparams.GloasVersion, parsed.SignedExecutionPayloadEnvelope.Message.Payload.Version())
+	require.Equal(t, clparams.GloasVersion, parsed.SignedExecutionPayloadEnvelope.Message.ExecutionRequests.Version())
+	require.Equal(t, 1, parsed.SignedExecutionPayloadEnvelope.Message.Payload.Withdrawals.Len())
+}
+
+func TestPostBeaconBlocksReturnsAcceptedAfterPublishedBlockIntegrationFailure(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	injected := errors.New("injected block integration failure")
+	fcu.OnBlockFunc = func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+		return injected
+	}
+	fcu.OnTickFunc = func(uint64) {}
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	envelope := matchedSelfBuildEnvelope(t, h.beaconChainCfg, block)
+	wrapper := cltypes.NewDenebSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	wrapper.SignedBlock = block
+	wrapper.SignedExecutionPayloadEnvelope = envelope
+	body, err := json.Marshal(wrapper)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+
+	_, err = h.postBeaconBlocks(httptest.NewRecorder(), request, 2)
+
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusAccepted, endpointErr.Code)
+	require.ErrorContains(t, err, injected.Error())
+}
+
+func TestParseGloasRequestBeaconBlockRejectsMalformedWrappedEnvelope(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/eth/v2/beacon/blocks",
+		strings.NewReader(`{"signed_block":{},"signed_execution_payload_envelope":1}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	parsed, err := h.parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	require.Error(t, err)
+	require.Nil(t, parsed)
+}
+
+func TestParseGloasRequestBeaconBlockRejectsNonCanonicalSSZ(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const requestOffsetsSize = 20
+	requestsStart := len(encoded) - requestOffsetsSize
+	for offset := requestsStart; offset < len(encoded); offset += 4 {
+		binary.LittleEndian.PutUint32(encoded[offset:], requestOffsetsSize+1)
+	}
+	encoded = append(encoded, 0)
+
+	lax := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	require.NoError(t, lax.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/octet-stream")
+
+	parsed, err := (&ApiHandler{beaconChainCfg: cfg}).parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	require.Error(t, err)
+	require.Nil(t, parsed)
+}
+
+func TestParseGloasRequestBeaconBlockAcceptsCanonicalSSZ(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = 123
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/octet-stream")
+
+	parsed, err := (&ApiHandler{beaconChainCfg: cfg}).parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), parsed.SignedBlock.Block.Slot)
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
@@ -1666,11 +2279,11 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 
 	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
-	fcu.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+	fcu.SetEnvelope(baseBlockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(h.beaconChainCfg, clparams.GloasVersion),
 		},
-	}
+	})
 
 	beaconBody, _, err := h.produceBeaconBody(
 		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
@@ -2073,4 +2686,99 @@ func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
 	// actionable, at any layer. The unregistered fee recipient this fixture also warns about is a
 	// separate matter and not what this measures.
 	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
+}
+
+func TestLocalBlockIntegrationWaitsForMatchingBlock(t *testing.T) {
+	handler := &ApiHandler{}
+	root := common.HexToHash("0x1234")
+	integration := handler.startLocalBlockIntegration(root)
+	waited := make(chan error, 1)
+	go func() {
+		waited <- handler.waitForLocalBlockIntegration(t.Context(), root)
+	}()
+
+	select {
+	case err := <-waited:
+		require.Failf(t, "wait returned early", "error: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	handler.finishLocalBlockIntegration(root, integration, nil)
+	require.NoError(t, <-waited)
+	require.NoError(t, handler.waitForLocalBlockIntegration(t.Context(), common.HexToHash("0x5678")))
+}
+
+func TestLocalBlockIntegrationPropagatesFailure(t *testing.T) {
+	handler := &ApiHandler{}
+	root := common.HexToHash("0x1234")
+	integration := handler.startLocalBlockIntegration(root)
+	want := errors.New("block integration failed")
+	waitCtx := &signalingContext{Context: t.Context(), entered: make(chan struct{})}
+	waited := make(chan error, 1)
+	go func() { waited <- handler.waitForLocalBlockIntegration(waitCtx, root) }()
+	<-waitCtx.entered
+	source := make(chan error, 1)
+	destination := make(chan error, 1)
+	go handler.relayLocalBlockIntegration(root, integration, source, destination)
+	source <- want
+
+	require.ErrorIs(t, <-waited, want)
+	require.ErrorIs(t, <-destination, want)
+}
+
+func TestLocalBlockIntegrationCompletesBeforeStorageSuffix(t *testing.T) {
+	handler := &ApiHandler{}
+	root := common.HexToHash("0x1234")
+	integration := handler.startLocalBlockIntegration(root)
+	storageIntegrated := make(chan error, 1)
+	blockIntegrated := make(chan error, 1)
+	go handler.relayLocalBlockIntegration(root, integration, storageIntegrated, blockIntegrated)
+	finishRelease := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		finished <- runBlockStoragePhases(storageIntegrated, func() error { return nil }, func() error {
+			<-finishRelease
+			return errors.New("storage suffix failed")
+		})
+	}()
+
+	require.NoError(t, handler.waitForLocalBlockIntegration(t.Context(), root))
+	require.NoError(t, <-blockIntegrated)
+	close(finishRelease)
+	require.ErrorContains(t, <-finished, "storage suffix failed")
+}
+
+func TestBroadcastBlockRegistersLocalIntegrationBeforeReturning(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	integrationEntered := make(chan struct{})
+	releaseIntegration := make(chan struct{})
+	fcu.OnTickFunc = func(uint64) {}
+	fcu.OnBlockFunc = func(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+		close(integrationEntered)
+		<-releaseIntegration
+		return nil
+	}
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(), gossip_topic.TopicNameBeaconBlock, gomock.Any(),
+	).Return(nil)
+
+	require.NoError(t, handler.broadcastBlock(t.Context(), block))
+	<-integrationEntered
+	waitCtx := &signalingContext{Context: t.Context(), entered: make(chan struct{})}
+	waited := make(chan error, 1)
+	go func() { waited <- handler.waitForLocalBlockIntegration(waitCtx, root) }()
+	<-waitCtx.entered
+	select {
+	case err := <-waited:
+		require.Failf(t, "wait returned before block integration", "error: %v", err)
+	default:
+	}
+
+	close(releaseIntegration)
+	require.NoError(t, <-waited)
 }

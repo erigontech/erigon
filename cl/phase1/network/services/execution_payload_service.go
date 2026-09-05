@@ -108,10 +108,13 @@ func (s *executionPayloadService) IsMyGossipMessage(name string) bool {
 }
 
 func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	obj := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(s.beaconCfg),
+	if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(version); err != nil {
+		return nil, err
 	}
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	obj := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(s.beaconCfg, version),
+	}
+	if err := obj.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -121,8 +124,8 @@ func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, ve
 // Reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/_features/epbs/p2p-interface.md#execution_payload
 // [New in Gloas:EIP7732]
 func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		return errors.New("nil execution payload envelope")
+	if err := signedEnvelope.ValidateForConfig(s.beaconCfg); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
 	}
 
 	envelope := signedEnvelope.Message
@@ -155,6 +158,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 			"builderIndex", builderIndex)
 		return ErrIgnore
 	}
+	if err := cltypes.ValidateExecutionPayloadEnvelopeBuilderIndex(block, signedEnvelope); err != nil {
+		return fmt.Errorf("invalid execution payload envelope: %w", err)
+	}
 
 	// [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
 	// for this block root from this builder.
@@ -167,30 +173,51 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	}
 
 	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
-	finalizedSlot := s.forkchoiceStore.FinalizedSlot()
+	finalizedSlot := s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
 	if block.Block.Slot < finalizedSlot {
 		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
 	}
+	admissionToken, err := s.forkchoiceStore.ClaimExecutionPayloadEnvelopeForGossip(ctx, beaconBlockRoot, builderIndex)
+	if err != nil {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) {
+			s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
+		}
+		return fmt.Errorf("%w: %w", ErrIgnore, err)
+	}
+	seen := false
+	persistencePending := false
+	defer func() {
+		s.forkchoiceStore.FinishExecutionPayloadEnvelopeForGossip(admissionToken, seen)
+	}()
 
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		switch {
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
+			log.Debug("Execution payload envelope indices queued", "beaconBlockRoot", beaconBlockRoot, "err", err)
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
+			persistencePending = true
+			log.Debug("Execution payload envelope accepted with local persistence pending", "beaconBlockRoot", beaconBlockRoot, "err", err)
+		case errors.Is(err, forkchoice.ErrIgnore), errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable),
+			errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
+		default:
+			return fmt.Errorf("failed to process execution payload: %w", err)
 		}
-		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
+	finalizedSlot = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
+	if block.Block.Slot < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
+	}
+	if persistencePending {
+		return nil
+	}
+	seen = true
 
 	// Mark as seen AFTER successful validation
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
-
-	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
-	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
-		Slot:      block.Block.Slot,
-		BlockRoot: beaconBlockRoot,
-	})
 
 	log.Trace("Processed execution payload via gossip",
 		"slot", block.Block.Slot,

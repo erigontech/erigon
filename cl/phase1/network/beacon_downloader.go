@@ -381,7 +381,13 @@ Process:
 				}
 			} else {
 				var envErr error
-				envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, processBlocks...)
+				envelopes, envErr = requestEnvelopesFranticallyWithValidator(
+					ctx,
+					f.rpc,
+					fullRoots,
+					newEnvelopeCommitmentValidator(f.beaconCfg, processBlocks),
+					processBlocks...,
+				)
 				if envErr != nil {
 					log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
 				}
@@ -644,12 +650,11 @@ func fetchEnvelopesFromBeaconAPI(
 	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	beaconCfg *clparams.BeaconChainConfig,
 ) int {
-	// Build root-to-slot mapping from blocks
-	rootToSlot := make(map[common.Hash]uint64, len(blocks))
+	rootToBlock := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
 	for _, blk := range blocks {
 		root, err := blk.Block.HashSSZ()
 		if err == nil {
-			rootToSlot[root] = blk.Block.Slot
+			rootToBlock[root] = blk
 		}
 	}
 
@@ -660,22 +665,22 @@ func fetchEnvelopesFromBeaconAPI(
 
 	// Filter roots that need fetching
 	var toFetch []struct {
-		root [32]byte
-		slot uint64
+		root  [32]byte
+		block *cltypes.SignedBeaconBlock
 	}
 	for _, root := range fullRoots {
 		h := common.Hash(root)
 		if _, ok := received[h]; ok {
 			continue
 		}
-		slot, ok := rootToSlot[h]
+		block, ok := rootToBlock[h]
 		if !ok {
 			continue
 		}
 		toFetch = append(toFetch, struct {
-			root [32]byte
-			slot uint64
-		}{root, slot})
+			root  [32]byte
+			block *cltypes.SignedBeaconBlock
+		}{root, block})
 	}
 
 	if len(toFetch) == 0 {
@@ -689,13 +694,14 @@ func fetchEnvelopesFromBeaconAPI(
 
 	for i, item := range toFetch {
 		idx := i
-		slot := item.slot
+		block := item.block
+		slot := block.Block.Slot
 		root := item.root
 		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", baseURL, slot)
+			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/0x%x", baseURL, root)
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -706,17 +712,34 @@ func fetchEnvelopesFromBeaconAPI(
 			if err != nil {
 				return
 			}
-			body, err := io.ReadAll(resp.Body)
+			body, err := readEnvelopeHTTPBody(resp.Body)
 			resp.Body.Close()
 			if err != nil || resp.StatusCode != http.StatusOK {
 				return
 			}
+			version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+			if err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope consensus version invalid", "slot", slot, "err", err)
+				return
+			}
 
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{
-				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
+				Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(beaconCfg, version),
 			}
-			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
+			if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+				return
+			}
+			if err := envelope.ValidateForConfig(beaconCfg); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope validation failed", "slot", slot, "err", err)
+				return
+			}
+			if envelope.Message.BeaconBlockRoot != common.Hash(root) {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope block root mismatch", "slot", slot, "requested", common.Hash(root), "received", envelope.Message.BeaconBlockRoot)
+				return
+			}
+			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(beaconCfg, block, envelope); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope block commitments mismatch", "slot", slot, "err", err)
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}
@@ -732,6 +755,17 @@ func fetchEnvelopesFromBeaconAPI(
 		}
 	}
 	return fetched
+}
+
+func readEnvelopeHTTPBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, int64(clparams.MaxChunkSize)+1))
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope response too large: max %d bytes", clparams.MaxChunkSize)
+	}
+	return body, nil
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
