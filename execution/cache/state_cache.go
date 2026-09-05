@@ -300,6 +300,9 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
 		return
 	}
+	if !codeCache.AdmitsFills() {
+		return
+	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
 	if c.publishing ||

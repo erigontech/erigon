@@ -25,6 +25,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/cache/coherence"
@@ -171,10 +172,19 @@ type CodeCache struct {
 	putStripes [256]sync.Mutex
 
 	// Stats counters (atomic for concurrent access)
-	addrHits       atomic.Uint64
-	addrMisses     atomic.Uint64
-	codeHits       atomic.Uint64
-	codeMisses     atomic.Uint64
+	addrHits   atomic.Uint64
+	addrMisses atomic.Uint64
+	codeHits   atomic.Uint64
+	codeMisses atomic.Uint64
+
+	// Admission sampling: a code layer that never hits costs bytes and copies
+	// for nothing, and no capacity is the right capacity for it. Measured over
+	// a window so a workload that stops reusing code stops paying, and one that
+	// starts reusing it is picked up on the next window.
+	admitLookups   atomic.Uint64
+	admitHits      atomic.Uint64
+	admitting      atomic.Bool
+	admitProbe     atomic.Uint64
 	codeHashHits   atomic.Uint64
 	codeHashMisses atomic.Uint64
 	codeSizeHits   atomic.Uint64
@@ -263,6 +273,35 @@ func NewDefaultCodeCache() *CodeCache {
 }
 
 // Get retrieves contract code for the given address, implementing the Cache interface.
+const (
+	codeAdmitWindow     = 8192 // lookups between re-evaluations
+	codeAdmitMinHitPct  = 1
+	codeAdmitProbeEvery = 64 // fills still allowed while cold, so reuse is noticed
+)
+
+func (c *CodeCache) noteCodeLookup(hit bool) {
+	if !dbg.CodeCacheAdmission {
+		return
+	}
+	if hit {
+		c.admitHits.Add(1)
+	}
+	if n := c.admitLookups.Add(1); n >= codeAdmitWindow {
+		hits := c.admitHits.Swap(0)
+		c.admitLookups.Store(0)
+		c.admitting.Store(hits*100 >= n*codeAdmitMinHitPct)
+	}
+}
+
+// AdmitsFills reports whether the code layer is earning its fills. Always true
+// until the sampler has closed a window, so a cold start still populates.
+func (c *CodeCache) AdmitsFills() bool {
+	if !dbg.CodeCacheAdmission || c.admitting.Load() || c.admitLookups.Load() < codeAdmitWindow {
+		return true
+	}
+	return c.admitProbe.Add(1)%codeAdmitProbeEvery == 0
+}
+
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	v, _, ok := c.GetWithTxNum(addr)
 	return v, ok
@@ -290,11 +329,13 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	ce, ok := c.hashToCode.Get(vID.addrID)
 	if !ok || len(ce.code) == 0 {
 		c.codeMisses.Add(1)
+		c.noteCodeLookup(false)
 		return nil, 0, false
 	}
 	if coh.IsStale(ce.txNum, ce.epoch) {
 		c.hashToCode.Remove(vID.addrID) // OnEvict decrements codeSize
 		c.codeMisses.Add(1)
+		c.noteCodeLookup(false)
 		return nil, 0, false
 	}
 	// Reject a 64-bit maphash collision: the stored code belongs to a different
@@ -302,9 +343,11 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 	// codeHash (always for PutWithCodeHash-populated code; the EVM read path).
 	if vID.codeHash != ([32]byte{}) && ce.keyHash != vID.codeHash {
 		c.codeMisses.Add(1)
+		c.noteCodeLookup(false)
 		return nil, 0, false
 	}
 	c.codeHits.Add(1)
+	c.noteCodeLookup(true)
 	// The addr→code binding is what an unwind re-binds; vID.txNum bounds it.
 	return ce.code, vID.txNum, true
 }
