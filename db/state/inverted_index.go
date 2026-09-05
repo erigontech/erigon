@@ -562,8 +562,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 		g := iit.statelessGetter(i)
 		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(k, key) {
+		if g.MatchCmp(key) != 0 { // MPH false-positives protection
 			continue
 		}
 		encodedSeq, _ := g.Next(nil)
