@@ -47,11 +47,11 @@ const (
 	// EXTCODESIZE / EXTCODEHASH callers).
 	DefaultCodeSizeCacheEntries int64 = 1_000_000
 	// avgCodeEntryBytes translates the code byte budget into the freelru
-	// entry-count cap (the only bound — the byte counters don't evict). Sized to
-	// the resident-code skew (hot contracts run 10-24 KB) rather than the raw
-	// average so the cap keeps RAM near the budget instead of several × over; the
-	// persistent (MDBX-backed) cold tier backstops entries the tighter cap evicts.
-	avgCodeEntryBytes = 12 * 1024
+	// entry-count cap (the only bound — the byte counters don't evict). It
+	// rations the shared envelope rather than predicting residency, so the cap
+	// it buys governs the hit rate, not how close it lands to any one workload.
+	// Sized to the LRU-resident mean of mainnet contract code.
+	avgCodeEntryBytes = 6554
 	// codeSizeEntryBytes is the resident cost of one size-layer slot (freelru
 	// element holding size/keyHash/txNum/epoch), used to map the size-layer entry
 	// ceiling to an envelope byte budget.
