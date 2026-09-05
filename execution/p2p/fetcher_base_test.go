@@ -602,6 +602,112 @@ func TestFetcherFetchBodies(t *testing.T) {
 	})
 }
 
+func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	bodyBytes, err := rlp.EncodeToBytes(&types.Body{})
+	require.NoError(t, err)
+	mockInboundMessages := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
+				bodyBytes,
+				rlp.RawValue{0x80},
+			),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           []common.Hash{header.Hash()},
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.fetcher.config = test.fetcher.config.CopyWithOptions(WithMaxRetries(0))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errTooManyBodies *ErrTooManyBodies
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.ErrorAs(t, err, &errTooManyBodies)
+		require.Equal(t, 1, errTooManyBodies.requested)
+		require.Equal(t, 2, errTooManyBodies.received)
+		require.Nil(t, bodies.Data)
+	})
+}
+
+func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	mockInboundMessages := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockRawBlockBodiesPacketBytes(t, requestId+1,
+				rlp.RawValue{0x80},
+			),
+		},
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           []common.Hash{header.Hash()},
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.NoError(t, err)
+		require.Len(t, bodies.Data, 1)
+	})
+}
+
+func TestFetcherFetchBodiesPenalizesInvalidMatchingResponse(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	header := &types.Header{Number: *uint256.NewInt(1)}
+	mockInboundMessages := []*sentryproto.InboundMessage{
+		{
+			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
+				rlp.RawValue{0x80},
+			),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           []common.Hash{header.Hash()},
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	mockExpectPenalizePeer(t, test.sentryClient, peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, []*types.Header{header}, peerId)
+		require.True(t, rlp.IsInvalidRLPError(err), err)
+		require.Nil(t, bodies.Data)
+	})
+}
+
 func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
