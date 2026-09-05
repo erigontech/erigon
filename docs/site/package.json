@@ -33,6 +33,9 @@
     "@docusaurus/tsconfig": "3.10.2",
     "@docusaurus/types": "3.10.2",
     "@types/react": "^19.2.18",
+    "mdast-util-from-markdown": "2.0.3",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "typescript": "6.0.3"
   },
   "browserslist": {
@@ -54,7 +57,7 @@
     "webpack": "5.105.0",
     "@babel/plugin-transform-modules-systemjs": "^7.29.4",
     "@babel/core": "^7.29.6",
-    "fast-uri": "^3.1.7",
+    "fast-uri": "^3.1.5",
     "http-proxy-middleware": "^2.0.10",
     "joi": "^17.13.4",
     "js-yaml": "^4.3.0",
@@ -68,7 +71,6 @@
     },
     "webpack-dev-server": {
       "ws": "^8.20.1"
-    },
-    "qs": "^6.16.0"
+    }
   }
 }
