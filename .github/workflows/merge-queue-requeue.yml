@@ -1,0 +1,78 @@
+name: Merge Queue Requeue
+
+# Puts a PR back into the merge queue when the queue evicted it because of a
+# CI infrastructure failure (dead runner, broken runner network) rather than a
+# failure of the PR's own checks. Classification, guard rails, and the re-queue
+# rate limit live in scripts/merge-queue-requeue.sh.
+#
+# A failed gate dispatches this default-branch workflow because events created
+# with GITHUB_TOKEN do not normally start other workflow runs. GitHub-owned
+# dequeue events still arrive through pull_request_target.
+
+on:
+  pull_request_target:
+    types:
+      - dequeued
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: string
+      pr_node_id:
+        description: Pull request GraphQL node ID
+        required: true
+        type: string
+      expected_head_oid:
+        description: Pull request head commit tested by CI Gate
+        required: true
+        type: string
+      run_id:
+        description: Failed CI Gate run ID
+        required: true
+        type: string
+      dequeue_reason:
+        description: Reason for removing the pull request
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: write
+
+# Serialize per PR so repeated dequeue events cannot race the rate limit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number }}
+
+jobs:
+  requeue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          permission-merge-queues: write
+
+      - name: Classify the eviction and re-queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENQUEUE_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id || inputs.pr_node_id }}
+          EXPECTED_HEAD_OID: ${{ github.event.pull_request.head.sha || inputs.expected_head_oid }}
+          DEQUEUE_REASON: ${{ github.event.reason || inputs.dequeue_reason }}
+          MQ_RUN_ID: ${{ inputs.run_id }}
+        run: bash .github/workflows/scripts/merge-queue-requeue.sh
