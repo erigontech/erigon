@@ -30,12 +30,10 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -905,28 +903,24 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	// unbounded (commitment domain especially) until the next initial-cycle
 	// trip through StageLoopIteration. CollateAndPrune internally
 	// opens its own RW tx and calls the pruneFn callback inside it.
-	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			pruneTimeout := stagedsync.TipPruneTimeout(e.config.SecondsPerSlot(), agg.MaxPrunableStepsBacklog())
-			started, finished, err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) (dbfinality.Context, error) {
-				if e.codeStore != nil {
-					if err := e.codeStore.Evict(tx); err != nil {
-						return nil, err
-					}
-				}
-				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
-			}, e.logger)
-			if err != nil {
+	pruneTimeout := stagedsync.TipPruneTimeout(e.config.SecondsPerSlot(), e.db.MaxPrunableStepsBacklog())
+	started, finished, err := e.db.CollateAndPrune(e.backgroundCtx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
+		if e.codeStore != nil {
+			if err := e.codeStore.Evict(tx); err != nil {
 				return nil, err
 			}
-			e.hook.NotifyStateRetirementStart(started)
-			if started {
-				go func() {
-					<-finished
-					e.hook.NotifyStateRetirementDone()
-				}()
-			}
 		}
+		return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
+	})
+	if err != nil {
+		return nil, err
+	}
+	e.hook.NotifyStateRetirementStart(started)
+	if started {
+		go func() {
+			<-finished
+			e.hook.NotifyStateRetirementDone()
+		}()
 	}
 
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))

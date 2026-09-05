@@ -165,7 +165,7 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 	state := &PruneState{
 		ID:              stages.Execution,
 		ForwardProgress: forwardProgress,
-		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true),
+		FinalityCtx:     execfinality.NewContext(forwardProgress, finalisedBlockNum, maxReorgDepth, true, rawdbv3.TxNums),
 		CurrentSyncCycle: CurrentSyncCycleInfo{
 			IsInitialCycle: true,
 		},
@@ -198,7 +198,7 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 // larger one silently wins.
 func TestTipPruneTimeout(t *testing.T) {
 	const mainnetSlot = 12
-	require.Equal(t, 2*time.Second, TipPruneTimeout(mainnetSlot, 0))
-	require.Equal(t, 2200*time.Millisecond, TipPruneTimeout(mainnetSlot, 100))
-	require.Equal(t, 4*time.Second, TipPruneTimeout(mainnetSlot, 100_000), "backlog must not push past the cap")
+	require.Equal(t, 4*time.Second, TipPruneTimeout(mainnetSlot, 0))
+	require.Equal(t, 4200*time.Millisecond, TipPruneTimeout(mainnetSlot, 100))
+	require.Equal(t, 8*time.Second, TipPruneTimeout(mainnetSlot, 100_000), "backlog must not push past the cap")
 }
