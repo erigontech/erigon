@@ -144,6 +144,8 @@ type stubFrozenHeaders struct {
 	dbservices.FullBlockReader
 	frozen     uint64
 	visibleTo  uint64
+	gapFrom    uint64
+	gapTo      uint64
 	difficulty uint64
 }
 
@@ -267,6 +269,9 @@ func TestExtendTDFromSnapshots_SkipsBlocksAlreadySeeded(t *testing.T) {
 // ignores gaps.
 func (s stubFrozenHeaders) HeadersRange(ctx context.Context, walker func(*types.Header) error) error {
 	for n := uint64(0); n <= s.visibleTo; n++ {
+		if s.gapTo > s.gapFrom && n >= s.gapFrom && n < s.gapTo {
+			continue // segment not visible yet — ForEachHeader skips it silently
+		}
 		h, _ := s.HeaderByNumber(ctx, nil, n)
 		if h == nil {
 			return nil
@@ -312,4 +317,44 @@ func TestFillDBFromSnapshots_WatermarkRecordsWhatWasWritten(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(100), got,
 		"watermark must be the highest block seeded, not FrozenBlocks() — otherwise the unwritten remainder is stranded")
+}
+
+// TestFillDBFromSnapshots_StopsSeedingAtCoverageBreak pins the shape
+// cycle 28 produced. The visible header set was non-contiguous while
+// files were still arriving; ForEachHeader walks every visible segment
+// in order without checking, so both sides of the hole got TD and the
+// middle got none. Taking the highest written block as the watermark
+// then put it past the hole, and the incremental pass resumed above the
+// range it exists to fill — a 56,000-block TD gap that survived.
+//
+// Seeding must stop at the break: past it the running sum is short by
+// the skipped difficulties, so those values would be wrong as well as
+// the watermark being a lie.
+func TestFillDBFromSnapshots_StopsSeedingAtCoverageBreak(t *testing.T) {
+	t.Parallel()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Visible headers: [0,50) and [80,200] — a hole at [50,80).
+	br := stubFrozenHeaders{frozen: 200, visibleTo: 200, gapFrom: 50, gapTo: 80, difficulty: 1}
+	for _, st := range []stages.SyncStage{stages.Bodies, stages.BlockHashes, stages.Senders} {
+		require.NoError(t, stages.SaveStageProgress(tx, st, 200))
+	}
+
+	require.NoError(t, rawdbreset.FillDBFromSnapshots("test", ctx, tx, dirs, br, log.New()))
+
+	got, err := rawdbreset.SnapshotSeedProgress(tx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(49), got,
+		"watermark must stop at the break, not jump past it to the highest visible block")
+
+	// Nothing beyond the break may carry TD: the running sum there is
+	// short by the skipped range.
+	past, err := rawdb.ReadTd(tx, br.hashAt(100), 100)
+	require.NoError(t, err)
+	require.Nil(t, past, "no TD may be written past a coverage break")
 }
