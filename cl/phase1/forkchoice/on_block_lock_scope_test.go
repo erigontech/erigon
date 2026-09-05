@@ -351,6 +351,25 @@ func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
 	})
 }
 
+// A NOT_VALIDATED verdict is kept even when finality drops the block: the payload really
+// is unvalidated, so the root stays optimistic. Cleanup is not finality-driven — it waits
+// for a later validated payload with a higher execution block number.
+func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
+	store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNotValidated, nil)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+
+	require.NoError(t, run())
+	requireBlockNotAdded(t, store, block)
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, store.IsRootOptimistic(blockRoot), "an unvalidated payload stays optimistic")
+
+	block.Block.Body.ExecutionPayload.BlockNumber++
+	require.NoError(t, store.optimisticStore.ValidateBlock(common.HexToHash("0xfeed"), block.Block))
+	require.False(t, store.IsRootOptimistic(blockRoot), "a later validated payload sweeps the entry")
+}
+
 // A caller that wins admission only after someone else validated the same payload
 // must not send it to the EL a second time.
 func TestNewPayloadWhileYieldingLockSkipsValidatedPayload(t *testing.T) {
