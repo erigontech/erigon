@@ -81,23 +81,6 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.grid[:n], root.grid[:n])
 }
 
-func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
-	for nib := range 16 {
-		if !present[nib] {
-			continue
-		}
-		c := cells[nib]
-		base.touchMap[0] |= uint16(1) << nib
-		if !c.IsEmpty() {
-			base.afterMap[0] |= uint16(1) << nib
-		} else {
-			base.afterMap[0] &^= uint16(1) << nib
-		}
-		base.depths[0] = 1
-		base.grid[0][nib] = c
-	}
-}
-
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel
 	base := p.template
@@ -134,10 +117,7 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		tUnfolded = time.Now()
 	}
 
-	var (
-		cells   [16]cell
-		present [16]bool
-	)
+	var cells [16]cell
 	foldSem := newFoldSem()
 	deepThreshold := deepStorageThresholdFor(root.subtreeCount)
 	g, gctx := errgroup.WithContext(ctx)
@@ -206,7 +186,6 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 				return fmt.Errorf("mount[%x] fold: %w", ni, err)
 			}
 			cells[ni] = c
-			present[ni] = true
 			if deferred := w.TakeDeferredUpdates(); len(deferred) > 0 {
 				pu.appendDeferred(deferred)
 			}
@@ -223,18 +202,10 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		tWorkers = time.Now()
 	}
 
-	stitchSplitCells(base, &cells, &present)
+	stitchSplitCells(base, &cells, root.bitmap)
 
-	if base.activeRows == 0 {
-		base.activeRows = 1
-	}
-	for base.activeRows > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if err := base.fold(); err != nil {
-			return nil, fmt.Errorf("processMounted: root fold: %w", err)
-		}
+	if _, err := foldSplitRow(ctx, base, foldToRoot); err != nil {
+		return nil, fmt.Errorf("processMounted: root fold: %w", err)
 	}
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)

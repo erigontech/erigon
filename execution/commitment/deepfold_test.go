@@ -348,7 +348,7 @@ func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
 	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
 }
 
-// Single-nibble on-disk storage has no branch record at the account prefix; unfoldStorageBase
+// Single-nibble on-disk storage has no branch record at the account prefix; unfoldSplitBase
 // must still recover it rather than seeding an empty base.
 func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
 	onDisk := nibs(0)
@@ -436,7 +436,7 @@ func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
 }
 
 // A streaming collapse leaves an afterMap==0 tombstone at the account prefix, distinct from
-// the deep fold's outright branch-key delete; unfoldStorageBase must not seed an empty base
+// the deep fold's outright branch-key delete; unfoldSplitBase must not seed an empty base
 // from it, or a later re-expansion drops the untouched survivor.
 func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
 	t.Parallel()
@@ -633,12 +633,28 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 }
 
 func storageLocsForNibble(nibble byte, n, seed int) []string {
+	return slotLocsForHexPrefix([]byte{nibble}, n, seed)
+}
+func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
 	out := make([]string, 0, n)
 	var s [32]byte
 	for i := seed; len(out) < n; i++ {
 		binary.BigEndian.PutUint64(s[24:], uint64(i))
 		h := keccak.Sum256(s[:])
-		if (h[0]>>4)&0xf == nibble {
+		match := true
+		for j, nb := range nibblePrefix {
+			var hn byte
+			if j%2 == 0 {
+				hn = h[j/2] >> 4
+			} else {
+				hn = h[j/2] & 0xf
+			}
+			if hn != nb {
+				match = false
+				break
+			}
+		}
+		if match {
 			out = append(out, common.Bytes2Hex(s[:]))
 		}
 	}

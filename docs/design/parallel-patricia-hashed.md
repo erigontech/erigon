@@ -158,7 +158,7 @@ mount/fold model one level down at depth 64. It runs the same primitives
 (`mountTo`/`foldMounted`/`followAndUpdate`) and is shared verbatim by the streaming
 variant (§10).
 
-1. **Unfold the storage-root branch.** `unfoldStorageBase(base, accHash[:64])` seeds a
+1. **Unfold the storage-root branch.** `unfoldSplitBase(base, accHash[:64])` seeds a
    base worker by reading the account's on-disk storage-root branch
    (`branchFromCacheOrDB` + `decodeBranchIntoRow` — the same decode the account unfold
    `unfoldBranchNode` uses, entered manually at depth 64 instead of by recursive
@@ -171,13 +171,26 @@ variant (§10).
    streams the nibble's sorted slots, and `foldMounted` returns the depth-65 child
    cell. Workers defer their branch writes into the shared accumulator. They own
    disjoint storage prefixes, so concurrent reads of the shared base are race-free.
-3. **Aggregate.** `aggregateMountedStorageRoot` overlays the folded child cells onto
-   the unfolded base row (setting/clearing each touched present bit, leaving untouched
-   on-disk siblings intact) and folds once to the account's storage-root cell.
-4. **Inject.** `setAccountStorageRoot` writes that hash into the account leaf
-   (`cell.hash`, `hashLen = 32`); `computeCellHash` uses it as the storageRoot for an
-   account whose storage cell was not streamed, so the leaf hashes identically to the
-   serial path. The DFS then skips the account's storage children.
+3. **Aggregate.** `stitchSplitCells` overlays the folded child cells onto the unfolded
+   base row (setting/clearing each touched present bit, leaving untouched on-disk
+   siblings intact) and `foldSplitRow` folds it once to the account's storage-root cell.
+   Four outcomes, by the surviving child count and whether a branch record was already
+   on disk: an empty row with no prior branch returns an empty cell without folding; an
+   empty row that had one folds through `foldDelete`, writing the branch delete record at
+   the split prefix and returning an empty cell; two or more survivors fold into a branch
+   cell and write the branch record at the split prefix;
+   a single survivor does not fold at all — `splitCellFromSingleChild` deletes the
+   branch record at the split prefix and promotes the survivor one nibble shallower,
+   prepending its nibble to the extension of a keyless sub-branch (and mirroring it into
+   `hashedExtension`) or to the hashed path of a keyed leaf, exactly as
+   `fillFromLowerCell`/`deriveHashedKeys` would at the destination depth.
+4. **Inject.** `setAccountStorageRoot` carries the returned cell onto the account leaf:
+   a branch or extension root as `cell.extension`/`cell.hash`, a single surviving slot as
+   `storageAddr`/`Storage` with its `hashLen` carried through unchanged. `computeCellHash`
+   derives the storageRoot from whichever it finds for an account whose storage cell was
+   not streamed — a set `storageAddr` wins and the carried `hashLen` is ignored — so the
+   leaf hashes identically to the serial path. The DFS then skips the account's storage
+   children.
 
 Below `deepStorageThreshold`, or with storage in a single first nibble, the account
 streams inline as in §4.1 — the per-account setup cost (a pooled worker, a fresh
@@ -209,7 +222,7 @@ primary enforcement of I1.
   nibbles, every branch row a fold collapses MUST first be unfolded from `ctx.Branch`
   so untouched on-disk siblings are present. This holds at two depths: the shared
   root row before mounting (`processMounted`), and each big-storage account's
-  storage-root branch before the deep fold (`unfoldStorageBase`, §4.1.1). Dropping
+  storage-root branch before the deep fold (`unfoldSplitBase`, §4.1.1). Dropping
   either unfold drops untouched siblings and diverges the root.
 - **I3 — `plainKey` follows the split.** `prefixTrie.Insert` MUST route a
   terminator's `plainKey` to the correct node across path-compression splits (§3.1).
@@ -348,7 +361,8 @@ MDBX readers; figures are for inspection, not a CI gate.
 | --- | --- |
 | `execution/commitment/parallel_patricia_hashed.go` | `ParallelPatriciaHashed`, `Process` (routes to `processStreaming` when a committer is set), `dfsSubtree`, deferred apply and hand-off |
 | `execution/commitment/parallel_mount.go` | `processMounted` — unfold, per-nibble mount/fold via `dfsSubtreeDeep`, merged root fold; `mountTo`; `setAccountStorageRoot`; `deepStorageThreshold` |
-| `execution/commitment/streaming_deep_fold.go` | the deep storage fold shared by the parallel and streaming paths: `dfsSubtreeDeep`, `isDeepStorageAccount`, `foldStorageRoot`, `unfoldStorageBase`, `foldStorageLeaf`, `aggregateMountedStorageRoot` |
+| `execution/commitment/streaming_deep_fold.go` | the deep storage fold shared by the parallel and streaming paths: `dfsSubtreeDeep`, `isDeepStorageAccount`, `foldStorageRoot`, `foldStorageLeaf` |
+| `execution/commitment/split_point.go` | depth-agnostic split-point primitives used at every split depth: `unfoldSplitBase`, `stitchSplitCells`, `foldSplitRow`, `splitCellFromSingleChild` |
 | `execution/commitment/hex_patricia_hashed.go` | sequential engine; `foldMounted` and the `mountWall` stop used by both fold levels |
 | `execution/commitment/parallel_update.go` | `parallelUpdate`, `plainKeyArena`, `Insert`/deferred accumulation |
 | `execution/commitment/prefix_trie.go` | path-compressed prefix trie + slab arena; `Insert` `plainKey` placement |
