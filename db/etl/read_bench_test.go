@@ -204,12 +204,13 @@ func benchBufioU16(b *testing.B, fname string, bufSize int) {
 	defer f.Close()
 
 	r := bufio.NewReaderSize(f, bufSize)
+	lenBuf := make([]byte, 2)
 	var buf []byte
 	for {
-		if buf, err = readFieldBufioU16(r, buf); err != nil {
+		if buf, err = readFieldBufioU16(r, lenBuf, buf); err != nil {
 			break
 		}
-		if buf, err = readFieldBufioU16(r, buf); err != nil {
+		if buf, err = readFieldBufioU16(r, lenBuf, buf); err != nil {
 			break
 		}
 	}
@@ -224,20 +225,22 @@ func benchBufioU32(b *testing.B, fname string, bufSize int) {
 	defer f.Close()
 
 	r := bufio.NewReaderSize(f, bufSize)
+	lenBuf := make([]byte, 4)
 	var buf []byte
 	for {
-		if buf, err = readFieldBufioU32(r, buf); err != nil {
+		if buf, err = readFieldBufioU32(r, lenBuf, buf); err != nil {
 			break
 		}
-		if buf, err = readFieldBufioU32(r, buf); err != nil {
+		if buf, err = readFieldBufioU32(r, lenBuf, buf); err != nil {
 			break
 		}
 	}
 }
 
-func readFieldBufioU16(r *bufio.Reader, buf []byte) ([]byte, error) {
-	var lenBuf [2]byte
-	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+func readFieldBufioU16(r *bufio.Reader, lenBuf, buf []byte) ([]byte, error) {
+	// lenBuf comes from the caller: io.ReadFull takes an io.Reader, so a local
+	// array escapes and costs an allocation on every field read.
+	if _, err := io.ReadFull(r, lenBuf); err != nil {
 		return buf, err
 	}
 	n := int(*(*uint16)(unsafe.Pointer(&lenBuf[0])))
@@ -255,9 +258,10 @@ func readFieldBufioU16(r *bufio.Reader, buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func readFieldBufioU32(r *bufio.Reader, buf []byte) ([]byte, error) {
-	var lenBuf [4]byte
-	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+func readFieldBufioU32(r *bufio.Reader, lenBuf, buf []byte) ([]byte, error) {
+	// lenBuf comes from the caller: io.ReadFull takes an io.Reader, so a local
+	// array escapes and costs an allocation on every field read.
+	if _, err := io.ReadFull(r, lenBuf); err != nil {
 		return buf, err
 	}
 	n := int(*(*uint32)(unsafe.Pointer(&lenBuf[0])))

@@ -94,6 +94,8 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
+	// sortableBuffer.Put panics past this, and Collect sits under enough
+	// error-returning callers that a long key should fail the stage instead.
 	if len(k) > MaxKeyLen {
 		return fmt.Errorf("%s: key of %d bytes exceeds %d", c.logPrefix, len(k), MaxKeyLen)
 	}
