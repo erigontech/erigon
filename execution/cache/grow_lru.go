@@ -18,6 +18,7 @@ package cache
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/cachebudget"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
@@ -42,12 +44,18 @@ import (
 // approximate across grow windows (a lost write is counted but never
 // evicted; a raced removal can subtract twice).
 type growLRU[V any] struct {
-	cur      atomic.Pointer[freelru.ShardedLRU[uint64, V]]
-	onEvict  func(uint64, V)
-	avgBytes int64
+	cur       atomic.Pointer[freelru.ShardedLRU[uint64, V]]
+	onEvict   func(uint64, V)
+	avgBytes  int64
+	elemBytes int64
 
 	startCap uint32
 	maxCap   uint32
+	// procs is the GOMAXPROCS the ceiling was fitted against, sampled once:
+	// GOMAXPROCS can change under a running process, and a generation sized by a
+	// different shard count than the fit used would leave the cache outside its
+	// byte budget.
+	procs uint32
 
 	resizeMu sync.Mutex
 	curCap   atomic.Uint32
@@ -55,26 +63,83 @@ type growLRU[V any] struct {
 	closed   bool
 }
 
+// newGrowLRUEntries builds a growLRU from an entry ceiling rather than a byte
+// budget, for layers whose contract is the entry count. avgBytes is the payload
+// held outside the freelru element; a layer with an inline value passes 0.
+func newGrowLRUEntries[V any](maxEntries, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
+	return newGrowLRUWith(max(min(maxEntries, maxCacheSlots), 1), int64(avgBytes),
+		uint32(runtime.GOMAXPROCS(0)), onEvict)
+}
+
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	maxCap := min(max(uint32(uint64(maxBytes)/uint64(avgBytes)), 1), 1<<24)
+	procs := uint32(runtime.GOMAXPROCS(0))
+	elemBytes := elemBytesFor[V]()
+	perSlot := int64(avgBytes) + slotChargeBytes(elemBytes)
+	approx := max(fitTableSlots(uint32(min(uint64(maxBytes)/uint64(perSlot), maxCacheSlots))), 1)
+	maxCap := fitCeiling(approx, maxBytes, func(c uint32) int64 {
+		return growLRUBytes(c, procs, int64(avgBytes), elemBytes)
+	})
+	return newGrowLRUWith(maxCap, int64(avgBytes), procs, onEvict)
+}
+
+// growLRUGeneration is the table size and shard count freelru builds a capacity
+// with: capacity plus 25% rounded up to a power of two once for the whole cache,
+// then the procs-derived shard count dropped until it fits that table.
+func growLRUGeneration(capacity, procs uint32) (table uint64, shards uint32) {
+	table = math.NextPowerOfTwo(uint64(capacity) * 5 / 4)
+	shards = uint32(math.NextPowerOfTwo(uint64(procs) * 16))
+	for uint64(shards) > table/16 {
+		shards /= 16
+	}
+	return table, max(shards, 1)
+}
+
+// growLRUBytes is what a generation of this capacity costs at this shard
+// geometry. The table is 2x at a power-of-two capacity and 5/4 only on the
+// fitted boundary. The per-shard structs are charged separately: a value
+// filling the freelru element leaves the table charge no slack to absorb them.
+func growLRUBytes(capacity, procs uint32, payloadBytes, elemBytes int64) int64 {
+	if capacity == 0 {
+		return 0
+	}
+	table, shards := growLRUGeneration(capacity, procs)
+	return int64(capacity)*payloadBytes + int64(table)*elemBytes +
+		int64(shards)*shardChargeBytes(elemBytes)
+}
+
+func (g *growLRU[V]) generationBytes(capacity uint32) int64 {
+	return growLRUBytes(capacity, g.procs, g.avgBytes, g.elemBytes)
+}
+
+func newGrowLRUWith[V any](maxCap uint32, payloadBytes int64, procs uint32, onEvict func(uint64, V)) *growLRU[V] {
 	// Start small (bounded by the ceiling); the floor is on the start size, not
-	// the ceiling — a tiny configured budget yields a tiny, still-evicting cap.
+	// the ceiling -- a tiny configured budget yields a tiny, still-evicting cap.
 	start := min(uint32(genericCacheStartCapacity), maxCap)
-	g := &growLRU[V]{onEvict: onEvict, avgBytes: int64(avgBytes), startCap: start, maxCap: maxCap}
+	g := &growLRU[V]{
+		onEvict:   onEvict,
+		avgBytes:  payloadBytes,
+		elemBytes: elemBytesFor[V](),
+		startCap:  start,
+		maxCap:    maxCap,
+		procs:     max(procs, 1),
+	}
 	g.curCap.Store(start)
-	g.reserved = int64(start) * g.avgBytes
+	g.reserved = g.generationBytes(start)
 	cachebudget.Global.Take(g.reserved)
 	g.cur.Store(g.newShards(start))
 	return g
 }
 
+// newShards builds a generation at the pinned geometry, so the shard count the
+// reservation was computed from is the one freelru allocates.
 func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
-	lru, err := freelru.NewSharded[uint64, V](capacity, u64identity)
+	table, shards := growLRUGeneration(capacity, g.procs)
+	lru, err := freelru.NewShardedWithSize[uint64, V](shards, capacity, uint32(table), u64identity)
 	if err != nil {
-		panic(fmt.Sprintf("growLRU: NewSharded(%d): %s", capacity, err))
+		panic(fmt.Sprintf("growLRU: NewShardedWithSize(%d, %d): %s", shards, capacity, err))
 	}
 	if g.onEvict != nil {
 		lru.SetOnEvict(g.onEvict)
@@ -98,11 +163,12 @@ func (g *growLRU[V]) maybeGrow() {
 	defer g.resizeMu.Unlock()
 	old := g.cur.Load()
 	curCap := g.curCap.Load()
-	if curCap >= g.maxCap || old.Len() < int(curCap) {
+	// A step funded after Close would hold envelope bytes nothing releases.
+	if g.closed || curCap >= g.maxCap || old.Len() < int(curCap) {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
-	delta := int64(newCap-curCap) * g.avgBytes
+	delta := g.generationBytes(newCap) - g.generationBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
@@ -125,10 +191,16 @@ func (g *growLRU[V]) Len() int          { return g.cur.Load().Len() }
 func (g *growLRU[V]) Purge() {
 	g.resizeMu.Lock()
 	defer g.resizeMu.Unlock()
-	cachebudget.Global.Release(g.reserved - int64(g.startCap)*g.avgBytes)
-	g.reserved = int64(g.startCap) * g.avgBytes
 	g.curCap.Store(g.startCap)
 	g.cur.Store(g.newShards(g.startCap))
+	// Close settles the reservation once; charging the rebuild after that would
+	// hold envelope bytes nothing releases.
+	if g.closed {
+		return
+	}
+	start := g.generationBytes(g.startCap)
+	cachebudget.Global.Release(g.reserved - start)
+	g.reserved = start
 }
 
 // Close returns this LRU's envelope reservation. Idempotent.
