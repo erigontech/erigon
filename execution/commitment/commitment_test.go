@@ -905,6 +905,30 @@ func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 		"duplicate TouchPlainKey must not double-count in the trie")
 }
 
+func TestUpdatesModeParallel_RepeatTouchDoesNotRehash(t *testing.T) {
+	t.Parallel()
+
+	var hashCalls atomic.Int64
+	hasher := func(key []byte) []byte {
+		hashCalls.Add(1)
+		return KeyToHexNibbleHash(key)
+	}
+	require.False(t, hasherReusesAddrPrefix(hasher), "wrapped hasher must not alias KeyToHexNibbleHash")
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), hasher)
+	defer ut.Close()
+
+	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
+	for range 3 {
+		ut.TouchPlainKey(key, nil, func(c *KeyUpdate, val []byte) {})
+	}
+
+	require.EqualValues(t, 1, hashCalls.Load(), "a repeat touch must not rehash the key")
+	require.Equal(t, uint64(1), ut.Size())
+	require.NotNil(t, ut.parallel.trie.root)
+	require.EqualValues(t, 1, ut.parallel.trie.root.subtreeCount)
+}
+
 func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {
 	t.Parallel()
 

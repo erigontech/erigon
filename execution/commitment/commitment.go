@@ -1551,13 +1551,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		if _, ok := t.keys[key]; ok {
+			return
+		}
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		ik := keyBytes
-		if _, ok := t.keys[key]; !ok {
-			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
-		}
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
 	default:
 	}
