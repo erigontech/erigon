@@ -1059,6 +1059,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if err != nil {
 			return nil, nil, err
 		}
+		// The access list above is this method's own working accumulator, not a
+		// caller declaring EIP-2930 intent, so preCheck's Berlin gate must not
+		// apply to it, even on a pre-Berlin block.
+		msg.SetSkipAccessListForkCheck(true)
 
 		// Apply the transaction with the access list tracer
 		tracer := prevTracer.SeedNew(ibs)

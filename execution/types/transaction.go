@@ -413,6 +413,8 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+
+	skipAccessListForkCheck bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -503,3 +505,8 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 }
 
 func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
+
+func (m *Message) SkipAccessListForkCheck() bool { return m.skipAccessListForkCheck }
+func (m *Message) SetSkipAccessListForkCheck(skip bool) {
+	m.skipAccessListForkCheck = skip
+}
