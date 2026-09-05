@@ -19,7 +19,10 @@ var (
 	collectTableSizesPeriodically = dbg.EnvBool("COLLECT_TABLE_SIZES", true)
 	collectTableSizesFrequency    = dbg.EnvDuration("COLLECT_TABLE_SIZES_FREQUENCY", 5*time.Minute)
 	dbTableSizeBytes              = metrics.GetOrCreateGaugeVec("db_table_size_bytes", []string{"db", "table"})
+	reclaimableSpaceWarn          = dbg.EnvDataSize("RECLAIMABLE_SPACE_WARN", 16*datasize.GB)
 )
+
+const reclaimableSpaceRow = "ReclaimableSpace"
 
 type TableSize struct {
 	Name string
@@ -64,7 +67,7 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 
 	amountOfFreePagesInDb := freeListSize / 4 // page_id encoded as bigEndian_u32
 	tableSizes = append(tableSizes, TableSize{
-		Name: "ReclaimableSpace",
+		Name: reclaimableSpaceRow,
 		Size: amountOfFreePagesInDb * db.PageSize().Bytes(),
 	})
 
@@ -81,6 +84,7 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 	}
 
 	debugLogging := logger.Enabled(ctx, log.LvlDebug)
+	var warnedReclaimable bool
 	ticker := time.NewTicker(collectTableSizesFrequency)
 	defer ticker.Stop()
 
@@ -104,6 +108,14 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 					continue
 				}
 				dbTableSizeBytes.WithLabelValues(string(label), t.Name).Set(float64(t.Size))
+				if t.Name == reclaimableSpaceRow {
+					if crossed := t.Size > reclaimableSpaceWarn.Bytes(); crossed != warnedReclaimable {
+						warnedReclaimable = crossed
+						if crossed {
+							logger.Warn("[kv] db holds a lot of free space: stop erigon and run `erigon db compact`", "db", label, "reclaimable", common.ByteCount(t.Size))
+						}
+					}
+				}
 				if t.Size == 0 || !debugLogging {
 					continue
 				}

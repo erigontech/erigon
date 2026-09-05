@@ -903,11 +903,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	// unbounded (commitment domain especially) until the next initial-cycle
 	// trip through StageLoopIteration. CollateAndPrune internally
 	// opens its own RW tx and calls the pruneFn callback inside it.
-	// Same adaptive prune budget as PruneExecutionStage (stage_execute.go):
-	// base = SecondsPerSlot/3, +200ms per 100 prunable steps, capped at 2/3 slot.
-	baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
-	maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
-	pruneTimeout := min(baseTimeout+time.Duration(e.db.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
+	pruneTimeout := stagedsync.TipPruneTimeout(e.config.SecondsPerSlot(), e.db.MaxPrunableStepsBacklog())
 	started, finished, err := e.db.CollateAndPrune(e.backgroundCtx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
 		if e.codeStore != nil {
 			if err := e.codeStore.Evict(tx); err != nil {
