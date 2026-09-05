@@ -53,13 +53,14 @@ import (
 )
 
 type Sentinel struct {
-	started  bool
-	listener *discover.UDPv5 // this is us in the network.
-	ctx      context.Context
-	cancel   context.CancelFunc
-	cfg      *SentinelConfig
-	peers    *peers.Pool
-	p2p      p2p.P2PManager
+	started       bool
+	listener      *discover.UDPv5 // this is us in the network.
+	ctx           context.Context
+	cancel        context.CancelFunc
+	cfg           *SentinelConfig
+	peers         *peers.Pool
+	handshakeGate *handshakeGate
+	p2p           p2p.P2PManager
 
 	httpApi http.Handler
 
@@ -143,6 +144,7 @@ func New(
 
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
+	s.handshakeGate = newHandshakeGate()
 
 	mux := chi.NewRouter()
 	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
