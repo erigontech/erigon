@@ -153,3 +153,46 @@ func TestSynthesizeBranchRowResultSurvivesALaterCall(t *testing.T) {
 
 	require.Equal(t, kept, []byte(first.Data), "a later call overwrote an earlier result: the encode buffer leaked to the caller")
 }
+
+type maskGapRecordContext struct {
+	records [16][]byte
+	present uint16
+}
+
+func (*maskGapRecordContext) Branch([]byte) ([]byte, kv.Step, error) { return nil, 0, nil }
+func (*maskGapRecordContext) PutBranch([]byte, []byte, []byte) error { return nil }
+func (*maskGapRecordContext) Account([]byte) (*Update, error)        { return nil, nil }
+func (*maskGapRecordContext) Storage([]byte) (*Update, error)        { return nil, nil }
+func (*maskGapRecordContext) EdgeRecords() bool                      { return true }
+
+func (c *maskGapRecordContext) BranchRecords(_ []byte, _ uint16, _ bool) ([16][]byte, uint16, kv.Step, error) {
+	return c.records, c.present, 0, nil
+}
+
+func TestUnfoldBranchNodeRecordsErrorsOnMaskedButMissingChild(t *testing.T) {
+	t.Parallel()
+
+	var cells [16]cellEncodeData
+	cells[2] = recordTestData("branch", nil)
+	ctx := &maskGapRecordContext{present: 1 << 2}
+	ctx.records[2] = EncodeBranchChild(0, &cells[2])
+
+	newTrie := func() *HexPatriciaHashed {
+		hph := newHexPatriciaHashed()
+		hph.cfg.EdgeRecords = true
+		hph.ctx = ctx
+		return hph
+	}
+
+	claimed := newTrie()
+	err := claimed.unfoldBranchNodeRecords(claimed.recordReader(), 0, 1, false, 1<<2|1<<5, true, []byte{0x00})
+	require.ErrorContains(t, err, "missing record for mask bit 5")
+
+	exact := newTrie()
+	require.NoError(t, exact.unfoldBranchNodeRecords(exact.recordReader(), 0, 1, false, 1<<2, true, []byte{0x00}))
+	require.Equal(t, uint16(1<<2), exact.afterMap[0])
+	require.Zero(t, exact.touchMap[0])
+
+	unknown := newTrie()
+	require.NoError(t, unknown.unfoldBranchNodeRecords(unknown.recordReader(), 0, 1, false, 0, false, []byte{0x00}))
+}

@@ -38,14 +38,15 @@ import (
 // runs concurrently on one AggregatorRoTx across fold workers, so the buffer cannot live on it.
 var childKeyBufs = sync.Pool{New: func() any { b := make([]byte, 0, 72); return &b }}
 
-func getChildKeyBuf(nodeKey []byte) []byte {
+func getChildKeyBuf(nodeKey []byte) (*[]byte, []byte) {
 	b := childKeyBufs.Get().(*[]byte)
-	return append(append((*b)[:0], nodeKey...), 0)
+	*b = append(append((*b)[:0], nodeKey...), 0)
+	return b, *b
 }
 
-func putChildKeyBuf(b []byte) {
-	b = b[:0]
-	childKeyBufs.Put(&b)
+func putChildKeyBuf(b *[]byte) {
+	*b = (*b)[:0]
+	childKeyBufs.Put(b)
 }
 
 func (at *AggregatorRoTx) ReadCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask uint16, maskKnown bool, maxTxNum uint64, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
@@ -81,8 +82,8 @@ func (at *AggregatorRoTx) readCommitmentRecords(roTx kv.Tx, nodeKey []byte, mask
 	// a staged unwind, and a files-only read would cache a value a newer DB write supersedes.
 	cacheBranch := includeDB && roTx != nil && maxTxNum == math.MaxUint64
 
-	childKey := getChildKeyBuf(nodeKey)
-	defer putChildKeyBuf(childKey)
+	childKeyBuf, childKey := getChildKeyBuf(nodeKey)
+	defer putChildKeyBuf(childKeyBuf)
 
 	// Cache fills are gathered and applied once per node: one Put per record costs two allocations
 	// each, and a node resolves 3 records on average.
