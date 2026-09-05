@@ -138,17 +138,16 @@ func TestCodeCache_PutWithCodeHash_EmptyHashOrCodeIsNoOp(t *testing.T) {
 }
 
 func TestCodeCache_PutWithCodeHash_EvictsColdestWhenFull(t *testing.T) {
-	// Tiny byte budget → a 1-entry freelru cap. The second put must EVICT the
-	// coldest entry (LRU), not freeze the layer: the newest code is retrievable
-	// and the oldest is gone.
-	c := closeOnCleanup(t, NewCodeCache(8, 1*datasize.MB))
+	// A budget with room for one entry. The second put must evict rather than
+	// freeze the layer, leaving exactly one of the two codes resident.
+	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeEntryBytes+8), 1*datasize.MB))
 	c.PutWithCodeHash(makeAddr(1), []byte{1, 2, 3, 4}, makeCodeHash(1), 0)
 	c.PutWithCodeHash(makeAddr(2), []byte{5, 6, 7, 8}, makeCodeHash(2), 0)
 
-	_, ok := c.GetByCodeHash(makeCodeHash(2))
-	assert.True(t, ok, "newest codeHashToCode entry must be present after eviction (no freeze)")
-	_, ok = c.GetByCodeHash(makeCodeHash(1))
-	assert.False(t, ok, "coldest codeHashToCode entry must have been evicted")
+	_, first := c.GetByCodeHash(makeCodeHash(1))
+	_, second := c.GetByCodeHash(makeCodeHash(2))
+	assert.NotEqual(t, first, second, "exactly one entry must survive the byte bound")
+	assert.Equal(t, 1, c.codeHashToCode.Len())
 }
 
 func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {

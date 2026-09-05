@@ -499,6 +499,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
 	cfg.BatchSize = 5 * datasize.MB
+	// Fixture harnesses build one module per test and run many at once; the
+	// production budget would let each claim the whole shared cache envelope.
+	cfg.StateCacheBudget = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
 	cfg.Sync.ParallelStateFlushing = false
 	cfg.TxPool.Disable = !withTxPool

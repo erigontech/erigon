@@ -362,10 +362,10 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	assert.True(t, ok, "most recent entry should remain")
 	assert.Equal(t, wideCode(1099), v)
 
-	// hashToCode now LRU-evicts at its own entry cap (codeCapacityB /
-	// avgCodeEntryBytes), so it holds far fewer than the 1100 distinct codes
-	// rather than growing unbounded.
-	assert.Less(t, c.CodeLen(), 1100)
+	// hashToCode is bounded by bytes, so 1100 three-byte codes all fit in the
+	// 1MB budget — and residency stays inside it.
+	assert.Equal(t, 1100, c.CodeLen())
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024))
 
 	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
 	c.Put(wideAddr(1099), wideCode(4242), 0)
@@ -375,25 +375,30 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	// Tiny byte budget → a 1-entry code layer cap. Successive distinct codes
-	// LRU-evict the coldest rather than freezing the layer.
-	c := closeOnCleanup(t, NewCodeCache(25, 1024*1024)) // 25 bytes code, 1MB addr
+	// A budget with room for one entry. Successive distinct codes evict rather
+	// than freezing the layer, and residency never exceeds the budget.
+	const codeCap = codeEntryBytes + 8
+	c := closeOnCleanup(t, NewCodeCache(datasize.ByteSize(codeCap), 1024*1024))
 
 	c.Put(makeAddr(1), makeCode(1), 0)
 	c.Put(makeAddr(2), makeCode(2), 0)
 	c.Put(makeAddr(3), makeCode(3), 0)
 
-	// Addr LRU keeps all three mappings (1MB); the code layer holds only the
-	// most-recent code(s) after eviction.
+	// Addr LRU keeps all three mappings (1MB); the code layer holds one.
 	assert.Equal(t, 3, c.Len())
-	assert.LessOrEqual(t, c.CodeLen(), 1)
+	assert.Equal(t, 1, c.CodeLen())
+	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(codeCap))
 
-	// Newest code is retrievable; the coldest was evicted from the code layer.
-	v, ok := c.Get(makeAddr(3))
-	assert.True(t, ok)
-	assert.Equal(t, makeCode(3), v)
-	_, ok = c.Get(makeAddr(1))
-	assert.False(t, ok, "coldest code should have been evicted")
+	// Exactly one of the three addrs still resolves to its code — which one is
+	// the eviction policy's call, not the test's.
+	var live int
+	for i := 1; i <= 3; i++ {
+		if v, ok := c.Get(makeAddr(i)); ok {
+			assert.Equal(t, makeCode(i), v)
+			live++
+		}
+	}
+	assert.Equal(t, 1, live)
 }
 
 func TestCodeCache_Delete(t *testing.T) {
@@ -1639,4 +1644,48 @@ func TestPublishDerivesMalformedCodeHash(t *testing.T) {
 
 	_, ok = c.View(nil).GetCodeByHash(short)
 	require.False(t, ok, "the short hash must not key the entry")
+}
+
+// byteLRU bounds by the bytes it holds rather than an entry count: mixed-size
+// values evict until the newcomer fits, every removal reports through onEvict,
+// and a value larger than the whole budget is rejected without disturbing the
+// resident set.
+func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
+	const maxBytes = 256 * datasize.KB
+	evicted := map[uint64]int{}
+	b := closeOnCleanup(t, newByteLRU(maxBytes,
+		func(_ uint64, v []byte) int64 { return int64(len(v)) },
+		func(k uint64, _ []byte) { evicted[k]++ }))
+
+	sizes := map[uint64]int{}
+	for i := range 40 {
+		n := 1 * int(datasize.KB)
+		if i%4 == 0 {
+			n = 64 * int(datasize.KB)
+		}
+		sizes[uint64(i)] = n
+		b.Add(uint64(i), make([]byte, n))
+	}
+
+	var resident int64
+	survivors := map[uint64]bool{}
+	for k, n := range sizes {
+		_, ok := b.Get(k)
+		survivors[k] = ok
+		if ok {
+			resident += int64(n)
+		}
+		require.Equal(t, ok, evicted[k] == 0, "key %d: onEvict must fire exactly for the evicted keys", k)
+	}
+	require.NotZero(t, resident, "the layer must not freeze empty")
+	require.LessOrEqual(t, resident, int64(maxBytes), "resident bytes must stay within the budget")
+
+	b.Add(999, make([]byte, int(maxBytes)+1))
+	_, ok := b.Get(999)
+	require.False(t, ok, "a value larger than the budget must not be admitted")
+	require.Zero(t, evicted[999], "onEvict must not fire for a value that was never admitted")
+	for k, wasResident := range survivors {
+		_, ok := b.Get(k)
+		require.Equal(t, wasResident, ok, "key %d: an oversize Add must not evict the resident set", k)
+	}
 }

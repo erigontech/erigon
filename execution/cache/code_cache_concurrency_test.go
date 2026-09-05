@@ -49,9 +49,9 @@ func TestCodeCache_ConcurrentPutSameCode_NoSizeDrift(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, int64(8+len(code)), cc.codeSize.Load(),
+	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeSize.Load(),
 		"hashToCode size must reflect exactly one insert after concurrent same-code Puts")
-	require.Equal(t, int64(len(codeHash)+len(code)), cc.codeHashCodeSize.Load(),
+	require.Equal(t, codeEntryBytes+int64(len(code)), cc.codeHashCodeSize.Load(),
 		"codeHashToCode size must reflect exactly one insert after concurrent same-code Puts")
 	require.Equal(t, int64(1), cc.codeSizeEntries.Load(),
 		"codeSizeByCodeHash must hold exactly one entry after concurrent same-code Puts")
@@ -88,9 +88,9 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 }
 
 // TestCodeCache_ConcurrentDistinctPuts_RespectCap drives many workers putting
-// distinct codes whose combined size far exceeds a tiny cap. The freelru layer
-// evicts the coldest entries to stay within its entry cap (no freeze), and the
-// OnEvict-maintained byte counter must never drift negative under concurrency.
+// distinct codes whose combined size far exceeds a tiny budget. The layer
+// evicts to stay within its byte bound (no freeze), and the onEvict-maintained
+// byte counter must never drift negative under concurrency.
 func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	const codeCap = 4 * datasize.KB
 	cc := closeOnCleanup(t, NewCodeCache(codeCap, 16*datasize.MB))
@@ -107,10 +107,10 @@ func TestCodeCache_ConcurrentDistinctPuts_RespectCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	// The entry cap (codeCap/avgCodeEntryBytes) is the hard bound; residency
-	// settled far below the 128 distinct puts rather than freezing at the first.
+	// The byte budget is the hard bound; residency settled far below the 128
+	// distinct puts rather than freezing at the first.
 	require.Less(t, cc.codeHashToCode.Len(), workers,
-		"freelru must evict to its entry cap, not hold all 128 distinct codes")
+		"the layer must evict to its byte budget, not hold all 128 distinct codes")
 	require.GreaterOrEqual(t, cc.codeHashCodeSize.Load(), int64(0),
 		"byte counter must stay non-negative (OnEvict accounting must not double-subtract)")
 }
