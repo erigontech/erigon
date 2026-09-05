@@ -218,6 +218,16 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
+// gasChangeDimension picks the dimension a gas change is reported in: a state
+// charge the EIP-8037 reservoir covers in full moves state gas, and anything
+// that spilled moves execution gas.
+func gasChangeDimension(before, after mdgas.MdGas, t mdgas.MdGasType, spilled uint64) (from, to uint64) {
+	if t == mdgas.StateGas && spilled == 0 {
+		return before.State, after.State
+	}
+	return before.Execution, after.Execution
+}
+
 func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, uint64, bool) {
 	remaining := initial
 	var used mdgas.MdGasUsage
@@ -225,10 +235,7 @@ func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracin
 		return initial, 0, false
 	}
 	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
-		before, after := initial.Execution, remaining.Execution
-		if t == mdgas.StateGas && used.StateSpill == 0 {
-			before, after = initial.State, remaining.State
-		}
+		before, after := gasChangeDimension(initial, remaining, t, used.StateSpill)
 		tracer.OnGasChange(before, after, reason)
 	}
 	return remaining, used.StateSpill, true
@@ -422,14 +429,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
 
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	restoreReadonly := readOnly && !evm.readOnly
-	if restoreReadonly {
-		evm.readOnly = true
-	}
-	// Increment the call depth which is restricted to 1024
-	evm.depth++
+	restoreReadonly := evm.enterFrame(readOnly)
 	defer func() {
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
@@ -441,10 +441,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
 		callContext.put()
-		if restoreReadonly {
-			evm.readOnly = false
-		}
-		evm.depth--
+		evm.exitFrame(restoreReadonly)
 	}()
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs

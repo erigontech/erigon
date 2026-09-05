@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -69,23 +71,76 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkBerlin
+	forkCancun
+	forkPrague
+	forkOsaka
+	forkTierCount
+)
+
+var forkSets [forkTierCount]mergedPrecompileSet
+
+func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
 	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
+		return forkOsaka
 	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
+		return forkPrague
 	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
+		return forkCancun
 	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
+		return forkBerlin
 	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
+		return forkIstanbul
 	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+		return forkByzantium
 	default:
-		return PrecompiledContractsHomestead
+		return forkHomestead
 	}
+}
+
+// activeSet resolves the fork-selected built-ins for chainRules, overlaid with
+// any provider registered for chainRules.ChainID. With no registered provider
+// it is the built-in set itself.
+// ActivePrecompilesFromContext reads the resolved rules a tracer was handed,
+// falling back to rebuilding them from the context's block number, time and
+// chain config for a VMContext producer that predates the Rules field.
+func ActivePrecompilesFromContext(env *tracing.VMContext) []accounts.Address {
+	if env.Rules != nil {
+		return ActivePrecompiles(env.Rules)
+	}
+	if env.ChainConfig == nil {
+		return ActivePrecompiles(nil)
+	}
+	execCtx := evmtypes.BlockContext{BlockNumber: env.BlockNumber, Time: env.Time}
+	return ActivePrecompiles(execCtx.Rules(env.ChainConfig))
+}
+
+func activeSet(chainRules *chain.Rules) *mergedPrecompileSet {
+	if chainRules == nil {
+		chainRules = &chain.Rules{}
+	}
+	fork := forkTierFor(chainRules)
+	chainID := rulesChainID(chainRules)
+	provider, ok := lookupProvider(chainID)
+	if !ok {
+		return &forkSets[fork]
+	}
+	return mergedSetFor(chainRules, fork, chainID, provider)
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return activeSet(chainRules).contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -192,58 +247,42 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
 }
 
+// Deprecated: prefer ActivePrecompiles, which reflects a registered provider's
+// overlay. These are the built-in address sets for a fork and nothing else, and
+// are kept because they are exported API that chains outside this repo compile
+// against.
 var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
 	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesByzantium []accounts.Address
+	PrecompiledAddressesIstanbul  []accounts.Address
+	PrecompiledAddressesBerlin    []accounts.Address
+	PrecompiledAddressesCancun    []accounts.Address
+	PrecompiledAddressesPrague    []accounts.Address
+	PrecompiledAddressesOsaka     []accounts.Address
 )
 
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead: {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium: {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:  {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:    {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+	} {
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		*tierSet.addresses = forkSets[tier].addresses
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
-	}
+	return activeSet(rules).addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

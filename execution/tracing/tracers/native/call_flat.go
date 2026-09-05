@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func init() {
@@ -202,13 +201,7 @@ func (t *flatCallTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		return
 	}
 	t.tracer.OnTxStart(env, tx, from)
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: env.BlockNumber,
-		Time:        env.Time,
-	}
-	// Update list of precompiles based on current block
-	rules := blockContext.Rules(env.ChainConfig)
-	t.activePrecompiles = vm.ActivePrecompiles(rules)
+	t.activePrecompiles = vm.ActivePrecompilesFromContext(env)
 }
 
 func (t *flatCallTracer) OnTxEnd(receipt *types.Receipt, err error) {
