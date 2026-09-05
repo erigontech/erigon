@@ -27,16 +27,18 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// defaultGoMemLimitShare leaves headroom for memory the Go runtime does not
-// account for: mdbx dirty pages (~1G, C-owned), an external CL, and the OS page
-// cache Erigon leans on heavily. The gc-guide's 5-10% rule of thumb assumes a
-// web app with none of those.
+// defaultGoMemLimitShare
 // See: https://go.dev/doc/gc-guide#Suggested_uses
+// Do take advantage of the memory limit
+// For web-apps good rule of thumb: leave 5-10% headroom to account for memory sources the Go runtime is unaware of
+//
+// Erigon has such resources:
+// - mdbx dirty_space (C-owned): ~1G
+// - External CL: better don't predict it. Leave it out of estimate.
+// - OOM Killer and SWAP: Erigon recommends to disable SWAP on server and enable OOM-Killer
+// - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
 const defaultGoMemLimitShare = 0.8
 
-// goMemLimitIsSet reports an operator's choice. An empty value is not one: the
-// runtime reads it exactly like "off", and it is what an unrendered k8s or
-// compose template leaves behind.
 func goMemLimitIsSet(current int64) bool {
 	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
 		return true
