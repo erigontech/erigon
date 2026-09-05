@@ -192,13 +192,14 @@ jobs:
         id: test_step
         env:
           RUNNER_WS: ${{ runner.workspace }}
+          FORCE_DUMP_RESPONSE: ${{ inputs.force_dump_response }}
         run: |
           commit=$(git -C "$RUNNER_WS/erigon" rev-parse --short HEAD)
           TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           DUMP_RESPONSE=""
-          if [[ "${{ inputs.force_dump_response }}" == "true" ]]; then
+          if [[ "$FORCE_DUMP_RESPONSE" == "true" ]]; then
             DUMP_RESPONSE="always-dump-response"
             echo "Force response dump is enabled"
           fi

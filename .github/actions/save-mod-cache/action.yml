@@ -15,9 +15,11 @@ runs:
     - name: Show module cache size
       if: ${{ always() }}
       shell: bash
+      env:
+        MODCACHE_PATH: ${{ inputs.modcache-path }}
       run: |
-        time du -hs "${{ inputs.modcache-path }}" || true
-        time du -hs "${{ inputs.modcache-path }}/cache/download" || true
+        time du -hs "$MODCACHE_PATH" || true
+        time du -hs "$MODCACHE_PATH/cache/download" || true
 
     - uses: actions/cache/save@v5
       if: ${{ always() }}
