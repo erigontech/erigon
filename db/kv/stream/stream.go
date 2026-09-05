@@ -17,10 +17,12 @@
 package stream
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
 	"slices"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 )
@@ -40,15 +42,19 @@ type (
 	}
 )
 
-func (Empty[T]) HasNext() bool                                    { return false }
-func (Empty[T]) Next() (v T, err error)                           { return v, err }
-func (Empty[T]) Close()                                           {}
-func (EmptyDuo[K, V]) HasNext() bool                              { return false }
-func (EmptyDuo[K, V]) Next() (k K, v V, err error)                { return k, v, err }
-func (EmptyDuo[K, V]) Close()                                     {}
-func (EmptyTrio[K, V1, v2]) HasNext() bool                        { return false }
-func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
-func (EmptyTrio[K, V1, V2]) Close()                               {}
+func (Empty[T]) HasNext() bool          { return false }
+func (Empty[T]) Next() (v T, err error) { return v, ErrIteratorExhausted }
+func (Empty[T]) Close()                 {}
+
+func (EmptyDuo[K, V]) HasNext() bool               { return false }
+func (EmptyDuo[K, V]) Next() (k K, v V, err error) { return k, v, ErrIteratorExhausted }
+func (EmptyDuo[K, V]) Close()                      {}
+
+func (EmptyTrio[K, V1, V2]) HasNext() bool { return false }
+func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) {
+	return k, v1, v2, ErrIteratorExhausted
+}
+func (EmptyTrio[K, V1, V2]) Close() {}
 
 func NewSingleDuo[K, V any](k K, v V) *SingleDuo[K, V] {
 	return &SingleDuo[K, V]{k: k, v: v, hasNext: true}
@@ -56,7 +62,7 @@ func NewSingleDuo[K, V any](k K, v V) *SingleDuo[K, V] {
 func (s *SingleDuo[K, V]) HasNext() bool { return s.hasNext }
 func (s *SingleDuo[K, V]) Next() (k K, v V, err error) {
 	if !s.hasNext {
-		return k, v, fmt.Errorf("no more elements")
+		return k, v, ErrIteratorExhausted
 	}
 	s.hasNext = false
 	return s.k, s.v, nil
@@ -78,8 +84,11 @@ func ReverseArray[V any](arr []V) *ArrStream[V] {
 func Array[V any](arr []V) *ArrStream[V] { return &ArrStream[V]{arr: arr} }
 func (it *ArrStream[V]) HasNext() bool   { return it.i < len(it.arr) }
 func (it *ArrStream[V]) Close()          {}
-func (it *ArrStream[V]) Next() (V, error) {
-	v := it.arr[it.i]
+func (it *ArrStream[V]) Next() (v V, err error) {
+	if !it.HasNext() {
+		return v, ErrIteratorExhausted
+	}
+	v = it.arr[it.i]
 	it.i++
 	return v, nil
 }
@@ -89,6 +98,7 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	return v, nil
 }
 
+// Range - ascending [from, to)
 func Range[T integer](from, to T) *RangeIter[T] {
 	return &RangeIter[T]{i: from, to: to}
 }
@@ -99,12 +109,17 @@ type RangeIter[T integer] struct {
 
 func (it *RangeIter[T]) HasNext() bool { return it.i < it.to }
 func (it *RangeIter[T]) Close()        {}
-func (it *RangeIter[T]) Next() (T, error) {
-	v := it.i
+func (it *RangeIter[T]) Next() (v T, err error) {
+	if !it.HasNext() {
+		return v, ErrIteratorExhausted
+	}
+	v = it.i
 	it.i++
 	return v, nil
 }
 
+// ReverseRange - descending [from, to), matching kv.TemporalTx.IndexRange's Desc semantic.
+// For unsigned T the last element is `to+1`, so 0 is not reachable as an element.
 func ReverseRange[T integer](from, to T) *ReverseRangeIter[T] {
 	return &ReverseRangeIter[T]{i: from, to: to}
 }
@@ -115,10 +130,65 @@ type ReverseRangeIter[T integer] struct {
 
 func (it *ReverseRangeIter[T]) HasNext() bool { return it.i > it.to }
 func (it *ReverseRangeIter[T]) Close()        {}
-func (it *ReverseRangeIter[T]) Next() (T, error) {
-	v := it.i
+func (it *ReverseRangeIter[T]) Next() (v T, err error) {
+	if !it.HasNext() {
+		return v, ErrIteratorExhausted
+	}
+	v = it.i
 	it.i--
 	return v, nil
+}
+
+// Limit - caps a stream at `limit` elements. limit<0 (kv.Unlim) means unlimited and returns `it` as-is.
+func Limit[T any](it Uno[T], limit int) Uno[T] {
+	if limit < 0 {
+		return it
+	}
+	return &Limited[T]{it: it, limit: limit}
+}
+
+type Limited[T any] struct {
+	it    Uno[T]
+	limit int
+}
+
+func (m *Limited[T]) HasNext() bool { return m.limit > 0 && m.it.HasNext() }
+func (m *Limited[T]) Close()        { m.it.Close() }
+func (m *Limited[T]) Next() (v T, err error) {
+	if m.limit <= 0 {
+		return v, ErrIteratorExhausted
+	}
+	v, err = m.it.Next()
+	if err == nil {
+		m.limit--
+	}
+	return v, err
+}
+
+// LimitDuo - caps a stream at `limit` elements. limit<0 (kv.Unlim) means unlimited and returns `it` as-is.
+func LimitDuo[K, V any](it Duo[K, V], limit int) Duo[K, V] {
+	if limit < 0 {
+		return it
+	}
+	return &LimitedDuo[K, V]{it: it, limit: limit}
+}
+
+type LimitedDuo[K, V any] struct {
+	it    Duo[K, V]
+	limit int
+}
+
+func (m *LimitedDuo[K, V]) HasNext() bool { return m.limit > 0 && m.it.HasNext() }
+func (m *LimitedDuo[K, V]) Close()        { m.it.Close() }
+func (m *LimitedDuo[K, V]) Next() (k K, v V, err error) {
+	if m.limit <= 0 {
+		return k, v, ErrIteratorExhausted
+	}
+	k, v, err = m.it.Next()
+	if err == nil {
+		m.limit--
+	}
+	return k, v, err
 }
 
 type UnionUno[T cmp.Ordered] struct {
@@ -137,16 +207,18 @@ func Union[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 		return &Empty[T]{}
 	}
 	if x == nil {
-		return y
+		return Limit(y, limit)
 	}
 	if y == nil {
-		return x
+		return Limit(x, limit)
 	}
 	if !x.HasNext() {
-		return y
+		x.Close()
+		return Limit(y, limit)
 	}
 	if !y.HasNext() {
-		return x
+		y.Close()
+		return Limit(x, limit)
 	}
 	m := &UnionUno[T]{x: x, y: y, asc: bool(asc), limit: limit}
 	m.advanceX()
@@ -184,38 +256,37 @@ func (m *UnionUno[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
+	if !m.HasNext() {
+		return res, ErrIteratorExhausted
+	}
 	m.limit--
 	if m.xHas && m.yHas {
 		if m.less() {
-			k, err := m.xNextK, m.err
+			k := m.xNextK
 			m.advanceX()
-			return k, err
+			return k, nil
 		} else if m.xNextK == m.yNextK {
-			k, err := m.xNextK, m.err
+			k := m.xNextK
 			m.advanceX()
 			m.advanceY()
-			return k, err
+			return k, nil
 		}
-		k, err := m.yNextK, m.err
+		k := m.yNextK
 		m.advanceY()
-		return k, err
+		return k, nil
 	}
 	if m.xHas {
-		k, err := m.xNextK, m.err
+		k := m.xNextK
 		m.advanceX()
-		return k, err
+		return k, nil
 	}
-	k, err := m.yNextK, m.err
+	k := m.yNextK
 	m.advanceY()
-	return k, err
+	return k, nil
 }
 func (m *UnionUno[T]) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
+	m.x.Close()
+	m.y.Close()
 }
 
 // Intersected
@@ -232,6 +303,12 @@ type Intersected[T cmp.Ordered] struct {
 // Set Theory Definition: A ∩ B = {x | x ∈ A ∧ x ∈ B}
 func Intersect[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
+		if x != nil {
+			x.Close()
+		}
+		if y != nil {
+			y.Close()
+		}
 		return &Empty[T]{}
 	}
 	m := &Intersected[T]{x: x, y: y, asc: asc, limit: limit}
@@ -291,68 +368,73 @@ func (m *Intersected[T]) advanceY() {
 		m.yNextK, m.err = m.y.Next()
 	}
 }
-func (m *Intersected[T]) Next() (T, error) {
+func (m *Intersected[T]) Next() (res T, err error) {
 	if m.err != nil {
-		return m.xNextK, m.err
+		return res, m.err
+	}
+	if !m.HasNext() {
+		return res, ErrIteratorExhausted
 	}
 	m.limit--
-	k, err := m.xNextK, m.err
+	k := m.xNextK
 	m.advance()
-	return k, err
+	return k, nil
 }
 func (m *Intersected[T]) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
-	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
-	}
+	m.x.Close()
+	m.y.Close()
 }
 
 // TransformedDuo - analog `map` (in terms of map-filter-reduce pattern)
 type TransformedDuo[K, V any] struct {
 	it        Duo[K, V]
 	transform func(K, V) (K, V, error)
+	err       error
 }
 
 func TransformDuo[K, V any](it Duo[K, V], transform func(K, V) (K, V, error)) *TransformedDuo[K, V] {
 	return &TransformedDuo[K, V]{it: it, transform: transform}
 }
-func (m *TransformedDuo[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *TransformedDuo[K, V]) Next() (K, V, error) {
-	k, v, err := m.it.Next()
+func (m *TransformedDuo[K, V]) HasNext() bool { return m.err != nil || m.it.HasNext() }
+func (m *TransformedDuo[K, V]) Next() (k K, v V, err error) {
+	if m.err != nil {
+		return k, v, m.err
+	}
+	k, v, err = m.it.Next()
 	if err != nil {
 		return k, v, err
 	}
-	return m.transform(k, v)
+	k, v, m.err = m.transform(k, v)
+	return k, v, m.err
 }
 func (m *TransformedDuo[K, v]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+	m.it.Close()
 }
 
 // TransformedDuoV - analog `map` (in terms of map-filter-reduce pattern) but with different value type
 type TransformedDuoV[K, V, VR any] struct {
 	it        Duo[K, V]
 	transform func(K, V) (K, VR, error)
+	err       error
 }
 
 func TransformDuoV[K, V, VR any](it Duo[K, V], transform func(K, V) (K, VR, error)) *TransformedDuoV[K, V, VR] {
 	return &TransformedDuoV[K, V, VR]{it: it, transform: transform}
 }
-func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.err != nil || m.it.HasNext() }
 func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
+	if m.err != nil {
+		return k, vr, m.err
+	}
 	k, v, err := m.it.Next()
 	if err != nil {
 		return k, vr, err
 	}
-	return m.transform(k, v)
+	k, vr, m.err = m.transform(k, v)
+	return k, vr, m.err
 }
 func (m *TransformedDuoV[K, V, VR]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+	m.it.Close()
 }
 
 // FilteredDuo - analog `map` (in terms of map-filter-reduce pattern)
@@ -393,14 +475,18 @@ func (m *FilteredDuo[K, V]) advance() {
 }
 func (m *FilteredDuo[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
 func (m *FilteredDuo[K, V]) Next() (k K, v V, err error) {
-	k, v, err = m.nextK, m.nextV, m.err
+	if m.err != nil {
+		return k, v, m.err
+	}
+	if !m.hasNext {
+		return k, v, ErrIteratorExhausted
+	}
+	k, v = m.nextK, m.nextV
 	m.advance()
-	return k, v, err
+	return k, v, nil
 }
 func (m *FilteredDuo[K, v]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+	m.it.Close()
 }
 
 // Filtered - analog `map` (in terms of map-filter-reduce pattern)
@@ -439,14 +525,18 @@ func (m *Filtered[T]) advance() {
 }
 func (m *Filtered[T]) HasNext() bool { return m.err != nil || m.hasNext }
 func (m *Filtered[T]) Next() (k T, err error) {
-	k, err = m.nextK, m.err
+	if m.err != nil {
+		return k, m.err
+	}
+	if !m.hasNext {
+		return k, ErrIteratorExhausted
+	}
+	k = m.nextK
 	m.advance()
-	return k, err
+	return k, nil
 }
 func (m *Filtered[T]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+	m.it.Close()
 }
 
 // PaginatedIter - for remote-list pagination
@@ -466,25 +556,57 @@ type Paginated[T any] struct {
 	nextPage      NextPageUno[T]
 	nextPageToken string
 	initialized   bool
+	emptyPages    int
 }
 
 func Paginate[T any](f NextPageUno[T]) *Paginated[T] { return &Paginated[T]{nextPage: f} }
+
+// maxEmptyPages - only "" terminates a listing, so a server that keeps handing back fresh tokens
+// with no rows would be polled forever. Cycles of any length end up here, not just an echoed token.
+const maxEmptyPages = 1024
+
+func countEmptyPages(seen, pageLen int) int {
+	if pageLen > 0 {
+		return 0
+	}
+	return seen + 1
+}
+
+// errNoPageProgress - fails a run of empty pages rather than letting HasNext spin on it. An echoed
+// token is caught on the spot; a longer cycle of fresh tokens falls to the empty-page cap.
+func errNoPageProgress(err error, pageLen, emptyPages int, sent, got string) error {
+	if err != nil || pageLen > 0 {
+		return err
+	}
+	if got != "" && got == sent {
+		return fmt.Errorf("stream: pagination made no progress, token %q returned an empty page", sent)
+	}
+	if emptyPages > maxEmptyPages {
+		return fmt.Errorf("stream: pagination made no progress, %d empty pages, last token %q", emptyPages, sent)
+	}
+	return nil
+}
 func (it *Paginated[T]) HasNext() bool {
-	if it.err != nil || it.i < len(it.arr) {
-		return true
+	for it.err == nil && it.i >= len(it.arr) {
+		if it.initialized && it.nextPageToken == "" {
+			return false
+		}
+		sent := it.nextPageToken
+		it.initialized = true
+		it.i = 0
+		it.arr, it.nextPageToken, it.err = it.nextPage(sent)
+		it.emptyPages = countEmptyPages(it.emptyPages, len(it.arr))
+		it.err = errNoPageProgress(it.err, len(it.arr), it.emptyPages, sent, it.nextPageToken)
 	}
-	if it.initialized && it.nextPageToken == "" {
-		return false
-	}
-	it.initialized = true
-	it.i = 0
-	it.arr, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
-	return it.err != nil || it.i < len(it.arr)
+	return true
 }
 func (it *Paginated[T]) Close() {}
 func (it *Paginated[T]) Next() (v T, err error) {
 	if it.err != nil {
 		return v, it.err
+	}
+	if it.i >= len(it.arr) { // not !HasNext(): that one fetches a page
+		return v, ErrIteratorExhausted
 	}
 	v = it.arr[it.i]
 	it.i++
@@ -499,27 +621,33 @@ type PaginatedDuo[K, V any] struct {
 	nextPage      NextPageDuo[K, V]
 	nextPageToken string
 	initialized   bool
+	emptyPages    int
 }
 
 func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
 	return &PaginatedDuo[K, V]{nextPage: f}
 }
 func (it *PaginatedDuo[K, V]) HasNext() bool {
-	if it.err != nil || it.i < len(it.keys) {
-		return true
+	for it.err == nil && it.i >= len(it.keys) {
+		if it.initialized && it.nextPageToken == "" {
+			return false
+		}
+		sent := it.nextPageToken
+		it.initialized = true
+		it.i = 0
+		it.keys, it.values, it.nextPageToken, it.err = it.nextPage(sent)
+		it.emptyPages = countEmptyPages(it.emptyPages, len(it.keys))
+		it.err = errNoPageProgress(it.err, len(it.keys), it.emptyPages, sent, it.nextPageToken)
 	}
-	if it.initialized && it.nextPageToken == "" {
-		return false
-	}
-	it.initialized = true
-	it.i = 0
-	it.keys, it.values, it.nextPageToken, it.err = it.nextPage(it.nextPageToken)
-	return it.err != nil || it.i < len(it.keys)
+	return true
 }
 func (it *PaginatedDuo[K, V]) Close() {}
 func (it *PaginatedDuo[K, V]) Next() (k K, v V, err error) {
 	if it.err != nil {
 		return k, v, it.err
+	}
+	if it.i >= len(it.keys) { // not !HasNext(): that one fetches a page
+		return k, v, ErrIteratorExhausted
 	}
 	k, v = it.keys[it.i], it.values[it.i]
 	it.i++
@@ -536,22 +664,23 @@ type Traced[T any] struct {
 }
 
 func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Traced[T]{it: it, logger: logger, prefix: prefix}
 }
 func (m *Traced[T]) HasNext() bool {
 	res := m.it.HasNext()
-	log.Warn(m.prefix, "hasNext", res)
+	m.logger.Warn(m.prefix, "hasNext", res)
 	return res
 }
 func (m *Traced[T]) Next() (k T, err error) {
 	k, err = m.it.Next()
-	log.Warn(m.prefix, "next", k)
+	m.logger.Warn(m.prefix, "next", k)
 	return k, err
 }
 func (m *Traced[T]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+	m.it.Close()
 }
 
 // TracedDuo - does `log.Warn` every .Next() call
@@ -562,27 +691,28 @@ type TracedDuo[K, V any] struct {
 }
 
 func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedDuo[K, V] {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
 }
 func (m *TracedDuo[K, V]) HasNext() bool {
 	res := m.it.HasNext()
-	log.Warn(m.prefix, "hasNext", res)
+	m.logger.Warn(m.prefix, "hasNext", res)
 	return res
 }
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
 	switch typedK := any(k).(type) {
 	case []byte:
-		log.Warn(m.prefix, "next", fmt.Sprintf("%x", typedK))
+		m.logger.Warn(m.prefix, "next", fmt.Sprintf("%x", typedK))
 	default:
-		log.Warn(m.prefix, "next", typedK)
+		m.logger.Warn(m.prefix, "next", typedK)
 	}
 	return k, v, err
 }
 func (m *TracedDuo[K, V]) Close() {
-	if x, ok := m.it.(Closer); ok {
-		x.Close()
-	}
+	m.it.Close()
 }
 
 // Union Duo
@@ -603,16 +733,18 @@ func Union2[K cmp.Ordered, V any](x, y Duo[K, V], asc order.By, limit int) Duo[K
 		return &EmptyDuo[K, V]{}
 	}
 	if x == nil {
-		return y
+		return LimitDuo(y, limit)
 	}
 	if y == nil {
-		return x
+		return LimitDuo(x, limit)
 	}
 	if !x.HasNext() {
-		return y
+		x.Close()
+		return LimitDuo(y, limit)
 	}
 	if !y.HasNext() {
-		return x
+		y.Close()
+		return LimitDuo(x, limit)
 	}
 	m := &UnionDuo[K, V]{x: x, y: y, asc: bool(asc), limit: limit}
 	m.advanceX()
@@ -650,36 +782,87 @@ func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
 	if m.err != nil {
 		return res, resV, m.err
 	}
+	if !m.HasNext() {
+		return res, resV, ErrIteratorExhausted
+	}
 	m.limit--
 	if m.xHas && m.yHas {
 		if m.less() {
-			k, v, err := m.xNextK, m.xNextV, m.err
+			k, v := m.xNextK, m.xNextV
 			m.advanceX()
-			return k, v, err
+			return k, v, nil
 		} else if m.xNextK == m.yNextK {
-			k, v, err := m.xNextK, m.xNextV, m.err
+			k, v := m.xNextK, m.xNextV
 			m.advanceX()
 			m.advanceY()
-			return k, v, err
+			return k, v, nil
 		}
-		k, v, err := m.yNextK, m.yNextV, m.err
+		k, v := m.yNextK, m.yNextV
 		m.advanceY()
-		return k, v, err
+		return k, v, nil
 	}
 	if m.xHas {
-		k, v, err := m.xNextK, m.xNextV, m.err
+		k, v := m.xNextK, m.xNextV
 		m.advanceX()
-		return k, v, err
+		return k, v, nil
 	}
-	k, v, err := m.yNextK, m.yNextV, m.err
+	k, v := m.yNextK, m.yNextV
 	m.advanceY()
-	return k, v, err
+	return k, v, nil
 }
 func (m *UnionDuo[K, V]) Close() {
-	if x, ok := m.x.(Closer); ok {
-		x.Close()
+	m.x.Close()
+	m.y.Close()
+}
+
+// AssertValid wraps a []byte-keyed stream to enforce invariant 2 in debug builds: a key must
+// stay readable across the following Next(), because combinators pre-fetch and burn one call of
+// validity before the caller ever sees the value. Panics on a producer that recycles sooner.
+// Returns `it` unchanged unless ERIGON_ASSERT is set.
+func AssertValid[V any](it Duo[[]byte, V]) Duo[[]byte, V] {
+	if !dbg.AssertEnabled {
+		return it
 	}
-	if y, ok := m.y.(Closer); ok {
-		y.Close()
+	return NewValidated(it)
+}
+
+// NewValidated - AssertValid without the ERIGON_ASSERT gate, for callers that want the check
+// unconditionally.
+func NewValidated[V any](it Duo[[]byte, V]) *Validated[V] { return &Validated[V]{it: it} }
+
+type Validated[V any] struct {
+	it   Duo[[]byte, V]
+	prev [2]handout // key and value handed out last time: producer memory plus its contents then
+}
+
+// handout - a buffer the producer gave us, alongside a snapshot of what it held at the time.
+type handout struct {
+	buf  []byte
+	snap []byte
+	set  bool
+}
+
+func (h *handout) check(what string) {
+	if h.set && !bytes.Equal(h.buf, h.snap) {
+		panic(fmt.Sprintf("stream invariant 2: %s %x was recycled after a single Next(), now %x", what, h.snap, h.buf))
 	}
+}
+
+func (h *handout) remember(b []byte) { *h = handout{buf: b, snap: bytes.Clone(b), set: true} }
+
+func (m *Validated[V]) HasNext() bool { return m.it.HasNext() }
+func (m *Validated[V]) Close()        { m.it.Close() }
+
+func (m *Validated[V]) Next() ([]byte, V, error) {
+	k, v, err := m.it.Next()
+	m.prev[0].check("key")
+	m.prev[1].check("value")
+	if err != nil {
+		return k, v, err
+	}
+	m.prev[0].remember(k)
+	if vb, ok := any(v).([]byte); ok {
+		m.prev[1].remember(vb)
+	}
+	return k, v, nil
 }

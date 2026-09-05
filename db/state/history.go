@@ -1305,7 +1305,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		return nil, err
 	}
 
-	return stream.UnionKV(hi, dbit, limit), nil
+	return stream.UnionKV(stream.AssertValid[[]byte](hi), dbit, limit), nil
 }
 
 func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
@@ -1403,7 +1403,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if err != nil {
 		return nil, err
 	}
-	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
+	return stream.UnionKV(stream.AssertValid[[]byte](itOnFiles), itOnDB, limit), nil
 }
 
 // HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTxNum, toTxNum).

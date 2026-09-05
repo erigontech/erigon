@@ -35,10 +35,19 @@ import "errors"
 //   1. HasNext() is Idempotent
 //   2. K, V are valid at-least 2 .Next() calls! It allows zero-copy composition of streams. Example: stream.Union
 //		- 1 value used by User and 1 value used internally by stream.Union
-//   3. No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
-//   4. automatically checks cancellation of `ctx` passed to `db.Begin(ctx)`, can skip this
-//     check in loops on stream. Duo has very limited API - user has no way to
-//     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
+//   3. Close must be idempotent: combinators close the streams they discard, and streams produced
+//      by TemporalTx are closed again inside `tx.Rollback()`
+//   4. Next() past the end should return ErrIteratorExhausted. Streams built by this package do;
+//      most implementations elsewhere still return a zero value and a nil error, so callers must
+//      guard every Next() with HasNext()
+//   5. An error is terminal and repeatable: once Next() returns one, HasNext() stays true and every
+//      further Next() returns the same error. Callers must return on the first error.
+//   6. `limit` counts elements: -1 (kv.Unlim) means unlimited, 0 means empty
+//   7. Cancellation: a leaf stream from `db.Begin(ctx)` checks that ctx inside its own Next(), so
+//      loops over a stream can skip a ctx check. The combinators here add no check of their own.
+//   8. Streams carry data from server to client, so a stream is NOT terminable from the client
+//      side: Duo has very limited API - user has no way to terminate it - but user can specify
+//      more strict conditions when creating stream (then server knows better when to stop)
 
 // Indicates the iterator has no more elements. Meant to be returned by implementations of Next()
 // when there are no more elements.
@@ -87,10 +96,4 @@ type Trio[K, V1, V2 any] interface {
 	Next() (K, V1, V2, error)
 	HasNext() bool
 	Close()
-}
-
-// Deprecated - use Trio
-type DualS[K, V any] interface {
-	Next() (K, V, uint64, error)
-	HasNext() bool
 }
