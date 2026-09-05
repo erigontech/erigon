@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,15 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 )
+
+func TestKzgCommitmentValidationErrorIsPermanent(t *testing.T) {
+	cause := errors.New("blob hash mismatch")
+	err := invalidKzgCommitmentsError(cause)
+	require.ErrorIs(t, err, ErrBlockInvalid)
+	require.ErrorIs(t, err, cause)
+}
 
 // A response's decoded schema comes from the peer-chosen fork digest, so it is
 // independent of the slot the block claims. Gloas removed ExecutionPayload and
@@ -54,4 +63,20 @@ func TestOnBlockRejectsForkSchemaSlotMismatch(t *testing.T) {
 
 	err := store.OnBlock(context.Background(), mismatched, false, true, true)
 	require.ErrorIs(t, err, ErrForkSchemaSlotMismatch)
+}
+
+func TestOnBlockDoesNotShortCircuitKnownPreGloasBlock(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	block.Block.Slot = 1
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: block.Block.Slot}},
+	}
+	store := &ForkChoiceStore{beaconCfg: &cfg, forkGraph: graph}
+
+	err = store.OnBlock(context.Background(), block, true, false, false)
+
+	require.ErrorContains(t, err, "block is too early")
 }

@@ -127,6 +127,16 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	voluntaryExitService := mock_services.NewMockVoluntaryExitService(ctrl)
 	blsToExecutionChangeService := mock_services.NewMockBLSToExecutionChangeService(ctrl)
 	proposerSlashingService := mock_services.NewMockProposerSlashingService(ctrl)
+	blockService := mock_services.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(gomock.Any()).AnyTimes()
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) services.PublishedBlockJob {
+			return completedPublishedBlockJob{err: store(context.Background())}
+		},
+	).AnyTimes()
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SyncCommitteeMessageForGossip) error {
@@ -187,6 +197,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		voluntaryExitService,
 		blsToExecutionChangeService,
 		proposerSlashingService,
+		blockService,
 		nil,
 		nil,
 		gossipManager,

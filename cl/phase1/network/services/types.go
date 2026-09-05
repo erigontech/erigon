@@ -1,12 +1,25 @@
 package services
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 )
 
+type PublishedBlockJob interface {
+	Wait(context.Context) error
+}
+
 //go:generate mockgen -typed=true -destination=./mock_services/block_service_mock.go -package=mock_services . BlockService
-type BlockService serviceinterface.Service[*cltypes.SignedBeaconBlock]
+type BlockService interface {
+	serviceinterface.Service[*cltypes.SignedBeaconBlock]
+	ValidateGossip(context.Context, *cltypes.SignedBeaconBlock) error
+	CommitGossipReservation(*cltypes.SignedBeaconBlock)
+	ReleaseGossipReservation(*cltypes.SignedBeaconBlock)
+	ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock)
+	SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) PublishedBlockJob
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_sidecars_service_mock.go -package=mock_services . BlobSidecarsService
 type BlobSidecarsService serviceinterface.Service[*cltypes.BlobSidecar]
@@ -45,7 +58,10 @@ type ExecutionPayloadService serviceinterface.Service[*cltypes.SignedExecutionPa
 type ExecutionPayloadBidService serviceinterface.Service[*cltypes.SignedExecutionPayloadBid]
 
 //go:generate mockgen -typed=true -destination=./mock_services/payload_attestation_service_mock.go -package=mock_services . PayloadAttestationService
-type PayloadAttestationService serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+type PayloadAttestationService interface {
+	serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+	ProcessRESTMessage(context.Context, *cltypes.PayloadAttestationMessage, func() error) error
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/proposer_preferences_service_mock.go -package=mock_services . ProposerPreferencesService
 type ProposerPreferencesService serviceinterface.Service[*cltypes.SignedProposerPreferences]

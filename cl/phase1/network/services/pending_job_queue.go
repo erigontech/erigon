@@ -38,7 +38,7 @@ type pendingJobQueue[K comparable, M any] struct {
 	// tick; done=true removes it. A non-nil process func runs after the removal,
 	// so that a concurrent re-enqueue under the same key is not lost.
 	tryProcess func(ctx context.Context, key K, msg M) (process func(), done bool)
-	onExpired  func(key K)
+	onExpired  func(key K, msg M)
 
 	jobs  sync.Map // K -> *pendingJob[M]
 	count atomic.Int32
@@ -50,7 +50,7 @@ func newPendingJobQueue[K comparable, M any](
 	expiry time.Duration,
 	tick time.Duration,
 	tryProcess func(ctx context.Context, key K, msg M) (func(), bool),
-	onExpired func(key K),
+	onExpired func(key K, msg M),
 ) *pendingJobQueue[K, M] {
 	return &pendingJobQueue[K, M]{
 		capacity:   capacity,
@@ -60,20 +60,6 @@ func newPendingJobQueue[K comparable, M any](
 		onExpired:  onExpired,
 		cond:       sync.NewCond(&sync.Mutex{}),
 	}
-}
-
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
-	if !q.reserve() {
-		return nil
-	}
-
-	key, err := buildKey()
-	if err != nil {
-		q.count.Add(-1)
-		return err
-	}
-	q.storeReserved(key, msg)
-	return nil
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
@@ -97,9 +83,12 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
 	}
 }
 
-func (q *pendingJobQueue[K, M]) remove(key K) {
-	q.jobs.Delete(key)
+func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
+	if !q.jobs.CompareAndDelete(key, job) {
+		return false
+	}
 	q.count.Add(-1)
+	return true
 }
 
 // loop is the background goroutine that retries pending jobs.
@@ -147,8 +136,9 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		job := value.(*pendingJob[M])
 
 		if time.Since(job.creationTime) > q.expiry {
-			q.remove(k)
-			q.onExpired(k)
+			if q.remove(k, job) {
+				q.onExpired(k, job.msg)
+			}
 			return true
 		}
 
@@ -156,8 +146,7 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		if !done {
 			return true
 		}
-		q.remove(k)
-		if process != nil {
+		if q.remove(k, job) && process != nil {
 			process()
 		}
 		return true

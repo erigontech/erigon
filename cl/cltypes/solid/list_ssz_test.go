@@ -143,6 +143,10 @@ func TestProgressiveListSSZDecodeEnforcesLimit(t *testing.T) {
 			list: NewStaticProgressiveListSSZ[Validator](1, validatorSize),
 		},
 		{
+			name: "static resource limit",
+			list: NewStaticProgressiveListSSZWithResourceLimit[Validator](1, validatorSize),
+		},
+		{
 			name: "dynamic",
 			list: NewDynamicProgressiveListSSZ[Validator](1),
 		},

@@ -438,3 +438,54 @@ func TestRemoveHighestBidOnlyRemovesMatchingBid(t *testing.T) {
 	_, found = pool.GetHighestBid(key)
 	require.False(t, found)
 }
+
+func TestEpbsPoolRetainsLiveEntriesBeyondFormerCapacity(t *testing.T) {
+	p := NewEpbsPool()
+	for i := range uint64(256) {
+		root := common.Hash{byte(i), byte(i >> 8)}
+		p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 100, DependentRoot: root}, &cltypes.SignedProposerPreferences{})
+		p.HighestBids.Add(HighestBidKey{Slot: 100, ParentBlockRoot: root}, &cltypes.SignedExecutionPayloadBid{})
+	}
+
+	_, preferencesFound := p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: 100})
+	_, bidFound := p.HighestBids.Get(HighestBidKey{Slot: 100})
+	require.True(t, preferencesFound)
+	require.True(t, bidFound)
+}
+
+func TestEpbsPoolPrunesEntriesBeforeSlot(t *testing.T) {
+	p := NewEpbsPool()
+	p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 99}, &cltypes.SignedProposerPreferences{})
+	p.ProposerPreferences.Add(ProposerPreferencesKey{Slot: 100}, &cltypes.SignedProposerPreferences{})
+	p.HighestBids.Add(HighestBidKey{Slot: 99}, &cltypes.SignedExecutionPayloadBid{})
+	p.HighestBids.Add(HighestBidKey{Slot: 100}, &cltypes.SignedExecutionPayloadBid{})
+
+	p.ProposerPreferences.PruneSlots(func(slot uint64) bool { return slot < 100 })
+	p.HighestBids.PruneSlots(func(slot uint64) bool { return slot < 100 })
+
+	_, oldPreferencesFound := p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: 99})
+	_, livePreferencesFound := p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: 100})
+	_, oldBidFound := p.HighestBids.Get(HighestBidKey{Slot: 99})
+	_, liveBidFound := p.HighestBids.Get(HighestBidKey{Slot: 100})
+	require.False(t, oldPreferencesFound)
+	require.True(t, livePreferencesFound)
+	require.False(t, oldBidFound)
+	require.True(t, liveBidFound)
+}
+
+func TestSlotMapPrunesSlotBucketsInsteadOfEntries(t *testing.T) {
+	const slot = uint64(100)
+	m := newSlotMap[ProposerPreferencesKey, int](func(key ProposerPreferencesKey) uint64 { return key.Slot })
+	for i := range 2048 {
+		m.Add(ProposerPreferencesKey{Slot: slot, DependentRoot: common.Hash{byte(i), byte(i >> 8)}}, i)
+	}
+	require.Len(t, m.ValuesForSlot(slot), 2048)
+
+	visited := 0
+	m.PruneSlots(func(entrySlot uint64) bool {
+		visited++
+		return entrySlot < slot
+	})
+	require.Equal(t, 1, visited)
+	require.Len(t, m.ValuesForSlot(slot), 2048)
+}

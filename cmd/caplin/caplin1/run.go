@@ -318,13 +318,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	caplinOptions := []CaplinOption{}
-	if config.BeaconAPIRouter.Builder {
-		if config.RelayUrlExist() {
-			caplinOptions = append(caplinOptions, WithBuilder(config.MevRelayUrl, beaconConfig))
-		} else {
+	if builderOption, skippedLegacy := builderOptionForConfig(&config, beaconConfig); builderOption != nil {
+		caplinOptions = append(caplinOptions, builderOption)
+		if skippedLegacy {
 			log.Warn("builder api enable but relay url not set. Skipping builder mode")
-			config.BeaconAPIRouter.Builder = false
 		}
+	} else if skippedLegacy {
+		log.Warn("builder api enable but relay url not set. Skipping builder mode")
 	}
 	log.Info("Starting caplin")
 
@@ -498,8 +498,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
-	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
-	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
+	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters)
+	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,
@@ -634,6 +634,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			voluntaryExitService,
 			blsToExecutionChangeService,
 			proposerSlashingService,
+			blockService,
 			option.builderClient,
 			stateSnapshots,
 			gossipManager,

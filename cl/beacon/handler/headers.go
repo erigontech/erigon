@@ -17,12 +17,15 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -116,7 +119,7 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 		return nil, err
 	}
 
-	signedHeader, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
+	signedHeader, live, err := a.readHeaderByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -129,11 +132,36 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 	if err != nil {
 		return nil, err
 	}
+	canonical := blockId.Head() || canonicalRoot == root
+	if live && !canonical && a.enableMemoizedHeadState {
+		if selectedRoot, _, ok := a.syncedData.SelectedHead(); ok {
+			canonical = selectedRoot == root || a.forkchoiceStore.Ancestor(selectedRoot, signedHeader.Header.Slot).Root == root
+		}
+	}
 
 	return newBeaconResponse(&headerResponse{
 		Root:      root,
-		Canonical: blockId.Head() || canonicalRoot == root,
+		Canonical: canonical,
 		Header:    signedHeader,
-	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).
+	}).WithFinalized(canonical && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil
+}
+
+func (a *ApiHandler) readHeaderByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
+	signedHeader, err := a.blockReader.ReadHeaderByRoot(ctx, tx, root)
+	if err != nil || signedHeader != nil {
+		return signedHeader, false, err
+	}
+	blk, header, ok := a.liveBlockAndHeader(root)
+	if !ok {
+		return nil, false, nil
+	}
+	headerRoot, err := header.HashSSZ()
+	if err != nil {
+		return nil, false, err
+	}
+	if headerRoot != root {
+		return nil, false, nil
+	}
+	return &cltypes.SignedBeaconBlockHeader{Header: header.Copy(), Signature: blk.Signature}, true, nil
 }

@@ -4,9 +4,24 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStalePayloadRetryAfterPruneIsDropped(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	retained := false
+	accepted := map[common.Hash]bool{}
+	f := &ForkChoiceStore{forkGraph: payloadVoteForkGraph{hasEnvelope: true, retained: &retained, acceptedPayloads: accepted}}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+
+	_, applied := f.MarkPayloadStatusIfRetained(root, common.HexToHash("0xabcd"), execution_client.PayloadStatusNotValidated)
+	require.False(t, applied)
+	require.Empty(t, accepted)
+	f.RequeuePendingELPayload(PendingELPayload{Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}}, Envelope: envelope})
+	require.Empty(t, f.DrainPendingELPayloads())
+}
 
 func TestPendingELPayloadsDropOldestAtCap(t *testing.T) {
 	f := &ForkChoiceStore{}

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -56,7 +57,10 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
+const (
+	maxBlobBundleCacheSize    = 48 // 8 blocks worth of blobs
+	maxPendingBuilderPayloads = 4
+)
 
 // Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
 type BlobBundle struct {
@@ -65,19 +69,113 @@ type BlobBundle struct {
 	KzgProofs  []common.Bytes48
 }
 
-// selfBuildPayload holds the execution payload and requests built by the local EL
-// during self-build block production. Cached so broadcastBlock can construct the
-// SignedExecutionPayloadEnvelope when the validator publishes the signed block.
-// [New in Gloas:EIP7732]
 type selfBuildPayload struct {
 	Payload           *cltypes.Eth1Block
 	ExecutionRequests *cltypes.ExecutionRequests
+	BlobBundles       []BlobBundle
 }
 
-type selfBuildEnvelopeStore interface {
-	Add(uint64, *cltypes.ExecutionPayloadEnvelope) bool
-	Get(uint64) (*cltypes.ExecutionPayloadEnvelope, bool)
-	Remove(uint64) bool
+type selfBuildPayloadCache interface {
+	Add(common.Hash, *selfBuildPayload) bool
+	Get(common.Hash) (*selfBuildPayload, bool)
+}
+
+type blobBundleCache interface {
+	Add(common.Bytes48, BlobBundle) bool
+	Get(common.Bytes48) (BlobBundle, bool)
+}
+
+type pendingBuilderPayload struct {
+	bid     *cltypes.ExecutionPayloadBid
+	payload *selfBuildPayload
+}
+
+type pendingBuilderPayloadRequest struct {
+	slot            uint64
+	parentBlockHash common.Hash
+	parentBlockRoot common.Hash
+	prevRandao      common.Hash
+	feeRecipient    common.Address
+	gasLimit        uint64
+}
+
+type pendingBuilderPayloadStore struct {
+	mu       sync.Mutex
+	capacity int
+	entries  map[pendingBuilderPayloadRequest]pendingBuilderPayload
+}
+
+func newPendingBuilderPayloadStore(capacity int) *pendingBuilderPayloadStore {
+	return &pendingBuilderPayloadStore{
+		capacity: capacity,
+		entries:  make(map[pendingBuilderPayloadRequest]pendingBuilderPayload, capacity),
+	}
+}
+
+func (s *pendingBuilderPayloadStore) Add(currentSlot uint64, bid *cltypes.ExecutionPayloadBid, payload *selfBuildPayload) (*cltypes.ExecutionPayloadBid, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(currentSlot)
+	if bid == nil {
+		return nil, false
+	}
+	request := pendingBuilderPayloadRequestFromBid(bid)
+	if entry, ok := s.entries[request]; ok {
+		coalescedBid := entry.bid.Copy()
+		coalescedBid.BuilderIndex = bid.BuilderIndex
+		return coalescedBid, true
+	}
+	if len(s.entries) >= s.capacity {
+		return nil, false
+	}
+	storedBid := bid.Copy()
+	s.entries[request] = pendingBuilderPayload{bid: storedBid, payload: payload}
+	return storedBid.Copy(), true
+}
+
+func (s *pendingBuilderPayloadStore) Get(currentSlot uint64, bid *cltypes.ExecutionPayloadBid) (*selfBuildPayload, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prune(currentSlot)
+	if bid == nil {
+		return nil, false
+	}
+	entry, ok := s.entries[pendingBuilderPayloadRequestFromBid(bid)]
+	if !ok {
+		return nil, false
+	}
+	expectedBid := entry.bid.Copy()
+	expectedBid.BuilderIndex = bid.BuilderIndex
+	expectedRoot, err := expectedBid.HashSSZ()
+	if err != nil {
+		return nil, false
+	}
+	actualRoot, err := bid.HashSSZ()
+	return entry.payload, err == nil && expectedRoot == actualRoot
+}
+
+func (s *pendingBuilderPayloadStore) prune(currentSlot uint64) {
+	for request := range s.entries {
+		if request.slot < currentSlot {
+			delete(s.entries, request)
+		}
+	}
+}
+
+func pendingBuilderPayloadRequestFromBid(bid *cltypes.ExecutionPayloadBid) pendingBuilderPayloadRequest {
+	return pendingBuilderPayloadRequest{
+		slot:            bid.Slot,
+		parentBlockHash: bid.ParentBlockHash,
+		parentBlockRoot: bid.ParentBlockRoot,
+		prevRandao:      bid.PrevRandao,
+		feeRecipient:    bid.FeeRecipient,
+		gasLimit:        bid.GasLimit,
+	}
+}
+
+type selfBuildEnvelopeKey struct {
+	Slot            uint64
+	BeaconBlockRoot common.Hash
 }
 
 type ApiHandler struct {
@@ -120,7 +218,7 @@ type ApiHandler struct {
 	// unregisteredProposers remembers which proposers have already been warned about, so the
 	// warning is once per proposer rather than once per proposal.
 	unregisteredProposers              *lru.Cache[uint64, struct{}]
-	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
+	blobBundles                        blobBundleCache // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
@@ -138,6 +236,7 @@ type ApiHandler struct {
 	voluntaryExitService             services.VoluntaryExitService
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
+	blockService                     services.BlockService
 	builderClient                    builder.BuilderClient
 	gossipManager                    gossip.Gossip
 	enableMemoizedHeadState          bool
@@ -147,19 +246,15 @@ type ApiHandler struct {
 	executionPayloadBidService services.ExecutionPayloadBidService
 	payloadAttestationService  services.PayloadAttestationService
 	proposerPreferencesService services.ProposerPreferencesService
-	// selfBuildPayloads caches the execution payload + requests built by the local
-	// EL during self-build block production, keyed by the execution block hash.
-	// When the validator publishes the signed block, broadcastBlock retrieves the
-	// cached data, wraps it into a SignedExecutionPayloadEnvelope, and broadcasts
-	// it on the execution_payload gossip topic so the block can reach FULL status.
-	selfBuildPayloads *lru.Cache[common.Hash, *selfBuildPayload]
+	selfBuildPayloads          selfBuildPayloadCache
+	pendingBuilderPayloads     *pendingBuilderPayloadStore
 	// selfBuildEnvelopes caches the unsigned ExecutionPayloadEnvelope by slot so
 	// the validator client can retrieve it via
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
-	selfBuildEnvelopeUpdatesMu sync.Mutex
-	selfBuildEnvelopes         selfBuildEnvelopeStore
+	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
+	builderRoutes      *builderRouteStore
 }
 
 func NewApiHandler(
@@ -193,6 +288,7 @@ func NewApiHandler(
 	voluntaryExitService services.VoluntaryExitService,
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
+	blockService services.BlockService,
 	builderClient builder.BuilderClient,
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
 	gossipManager gossip.Gossip,
@@ -224,10 +320,11 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
-	selfBuildEnvelopes, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("selfBuildEnvelopes", 4)
+	selfBuildEnvelopes, err := lru.New[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]("selfBuildEnvelopes", 4)
 	if err != nil {
 		panic(err)
 	}
+	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
@@ -268,6 +365,7 @@ func NewApiHandler(
 		voluntaryExitService:             voluntaryExitService,
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
+		blockService:                     blockService,
 		builderClient:                    builderClient,
 		gossipManager:                    gossipManager,
 		enableMemoizedHeadState:          enableMemoizedHeadState,
@@ -276,7 +374,9 @@ func NewApiHandler(
 		payloadAttestationService:        payloadAttestationService,
 		proposerPreferencesService:       proposerPreferencesService,
 		selfBuildPayloads:                selfBuildPayloads,
+		pendingBuilderPayloads:           newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
 		selfBuildEnvelopes:               selfBuildEnvelopes,
+		builderRoutes:                    builderRoutes,
 	}
 }
 
@@ -380,9 +480,10 @@ func (a *ApiHandler) init() {
 					// [New in Gloas:EIP7732]
 					r.Get("/execution_payload_envelope/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
 					r.Get("/execution_payload_envelopes/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
-					r.Post("/execution_payload_envelope", a.PostEthV1BeaconExecutionPayloadEnvelope)
+					r.Post("/execution_payload_envelope", a.postEthV1BeaconExecutionPayloadEnvelopeLegacy)
 					r.Post("/execution_payload_envelopes", a.PostEthV1BeaconExecutionPayloadEnvelope)
-					r.Post("/execution_payload_bid", a.PostEthV1BeaconExecutionPayloadBid)
+					r.Post("/execution_payload_bid", a.postEthV1BeaconExecutionPayloadBidLegacy)
+					r.Post("/execution_payload_bids", a.PostEthV1BeaconExecutionPayloadBid)
 					r.Route("/states", func(r chi.Router) {
 						r.Route("/{state_id}", func(r chi.Router) {
 							r.Get("/randao", beaconhttp.HandleEndpointFunc(a.getRandao))
@@ -393,6 +494,7 @@ func (a *ApiHandler) init() {
 							r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
 							r.Get("/validators", a.GetEthV1BeaconStatesValidators)
 							r.Post("/validators", a.PostEthV1BeaconStatesValidators)
+							r.Post("/builders", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconStatesBuilders))
 							r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconValidatorsBalances))
 							r.Post("/validator_balances", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconValidatorsBalances))
 							r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
@@ -425,10 +527,14 @@ func (a *ApiHandler) init() {
 					r.Post("/prepare_beacon_proposer", a.PostEthV1ValidatorPrepareBeaconProposal)
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 					// [New in Gloas:EIP7732]
+					r.Get("/payload_attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
 					r.Get("/payload_attestation_data/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
 					r.Post("/proposer_preferences", a.PostEthV1ValidatorProposerPreferences)
+					r.Post("/builder_preferences", a.PostEthV1ValidatorBuilderPreferences)
 					r.Get("/execution_payload_bid/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadBid))
+					r.Get("/execution_payload_bids/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadBid))
 					r.Get("/execution_payload_envelope/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelope))
+					r.Get("/execution_payload_envelopes/{slot}/{beacon_block_root}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot))
 					r.Get("/execution_payload_envelopes/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelopeBySlot))
 					if a.routerCfg.Builder {
 						r.Post("/register_validator", beaconhttp.HandleEndpointFunc(a.PostEthV1BuilderRegisterValidator))
@@ -477,6 +583,7 @@ func (a *ApiHandler) init() {
 		if a.routerCfg.Validator {
 			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 			r.Get("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
+			r.Post("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.PostEthV4ValidatorBlock))
 		}
 	})
 }

@@ -36,15 +36,19 @@ var errBadChannel = errors.New("event: Subscribe argument does not have sendable
 //
 // The zero value is ready to use.
 type Feed struct {
-	once      sync.Once     // ensures that init only runs once
-	sendLock  chan struct{} // sendLock has a one-element buffer and is empty when held.It protects sendCases.
-	removeSub chan any      // interrupts Send
-	sendCases caseList      // the active set of select cases used by Send
+	once        sync.Once     // ensures that init only runs once
+	sendLock    chan struct{} // sendLock has a one-element buffer and is empty when held.It protects sendCases.
+	trySendLock chan struct{}
+	removeSub   chan any // interrupts Send
+	sendCases   caseList // the active set of select cases used by Send
 
 	// The inbox holds newly subscribed channels until they are added to sendCases.
 	mu    sync.Mutex
 	inbox caseList
 	etype reflect.Type
+
+	subscribersMu sync.RWMutex
+	subscribers   map[*feedSub]struct{}
 }
 
 // This is the index of the first actual subscription channel in sendCases.
@@ -65,7 +69,10 @@ func (f *Feed) init(etype reflect.Type) {
 	f.removeSub = make(chan any)
 	f.sendLock = make(chan struct{}, 1)
 	f.sendLock <- struct{}{}
+	f.trySendLock = make(chan struct{}, 1)
+	f.trySendLock <- struct{}{}
 	f.sendCases = caseList{{Chan: reflect.ValueOf(f.removeSub), Dir: reflect.SelectRecv}}
+	f.subscribers = make(map[*feedSub]struct{})
 }
 
 // Subscribe adds a channel to the feed. Future sends will be delivered on the channel
@@ -92,10 +99,17 @@ func (f *Feed) Subscribe(channel any) Subscription {
 	// The next Send will add it to f.sendCases.
 	cas := reflect.SelectCase{Dir: reflect.SelectSend, Chan: chanval}
 	f.inbox = append(f.inbox, cas)
+	f.subscribersMu.Lock()
+	f.subscribers[sub] = struct{}{}
+	f.subscribersMu.Unlock()
 	return sub
 }
 
 func (f *Feed) remove(sub *feedSub) {
+	f.subscribersMu.Lock()
+	delete(f.subscribers, sub)
+	f.subscribersMu.Unlock()
+
 	// Delete from inbox first, which covers channels
 	// that have not been added to f.sendCases yet.
 	ch := sub.channel.Interface()
@@ -179,6 +193,33 @@ func (f *Feed) Send(value any) (nsent int) {
 		f.sendCases[i].Send = reflect.Value{}
 	}
 	f.sendLock <- struct{}{}
+	return nsent
+}
+
+// TrySend delivers to subscribers that can receive immediately and drops the value for the rest.
+func (f *Feed) TrySend(value any) (nsent int) {
+	rvalue := reflect.ValueOf(value)
+
+	f.once.Do(func() { f.init(rvalue.Type()) })
+	if f.etype != rvalue.Type() {
+		panic(feedTypeError{op: "TrySend", got: rvalue.Type(), want: f.etype})
+	}
+	select {
+	case <-f.trySendLock:
+	default:
+		return 0
+	}
+	defer func() { f.trySendLock <- struct{}{} }()
+
+	if !f.subscribersMu.TryRLock() {
+		return 0
+	}
+	defer f.subscribersMu.RUnlock()
+	for sub := range f.subscribers {
+		if sub.channel.TrySend(rvalue) {
+			nsent++
+		}
+	}
 	return nsent
 }
 

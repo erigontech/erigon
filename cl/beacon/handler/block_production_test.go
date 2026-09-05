@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
+	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -43,13 +45,22 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
+	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -75,6 +86,237 @@ type updateFailingDB struct {
 
 func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 	return errors.New("stop after persistence")
+}
+
+var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
+
+type publishingBlockKey struct {
+	proposer uint64
+	slot     uint64
+}
+
+type publishingSeenBlock struct {
+	signedRoot    common.Hash
+	replayAllowed bool
+}
+
+type replayableBlockService struct {
+	*network_services_mock.MockBlockService
+	mu        sync.Mutex
+	pending   map[publishingBlockKey]common.Hash
+	seen      map[publishingBlockKey]publishingSeenBlock
+	scheduled chan struct{}
+}
+
+type completedPublishedBlockJob struct {
+	err error
+}
+
+type evictingSelfBuildPayloadCache struct{}
+
+func (evictingSelfBuildPayloadCache) Add(common.Hash, *selfBuildPayload) bool {
+	return true
+}
+
+func (evictingSelfBuildPayloadCache) Get(common.Hash) (*selfBuildPayload, bool) {
+	return nil, false
+}
+
+type evictingBlobBundleCache struct{}
+
+func (evictingBlobBundleCache) Add(common.Bytes48, BlobBundle) bool { return true }
+
+func (evictingBlobBundleCache) Get(common.Bytes48) (BlobBundle, bool) {
+	return BlobBundle{}, false
+}
+
+func (j completedPublishedBlockJob) Wait(context.Context) error { return j.err }
+
+type synchronousPublishedBlockService struct {
+	*replayableBlockService
+}
+
+func (s *synchronousPublishedBlockService) SchedulePublishedBlockForLaterProcessing(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+	return completedPublishedBlockJob{err: store(context.Background())}
+}
+
+func (s *replayableBlockService) ValidateGossip(_ context.Context, block *cltypes.SignedBeaconBlock) error {
+	root, err := block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	key := publishingBlockKey{proposer: block.Block.ProposerIndex, slot: block.Block.Slot}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seen, ok := s.seen[key]; ok {
+		if seen.signedRoot == common.Hash(root) && seen.replayAllowed {
+			seen.replayAllowed = false
+			s.seen[key] = seen
+			return nil
+		}
+		return fmt.Errorf("%w: block already seen for proposer and slot", clservices.ErrIgnore)
+	}
+	if _, ok := s.pending[key]; ok {
+		return fmt.Errorf("%w: block reservation pending for proposer and slot", clservices.ErrIgnore)
+	}
+	s.pending[key] = common.Hash(root)
+	return nil
+}
+
+func (s *replayableBlockService) CommitGossipReservation(block *cltypes.SignedBeaconBlock) {
+	key := publishingBlockKey{proposer: block.Block.ProposerIndex, slot: block.Block.Slot}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if root, ok := s.pending[key]; ok {
+		s.seen[key] = publishingSeenBlock{signedRoot: root}
+		delete(s.pending, key)
+	}
+}
+
+func (s *replayableBlockService) ReleaseGossipReservation(block *cltypes.SignedBeaconBlock) {
+	root, err := block.HashSSZ()
+	if err != nil {
+		return
+	}
+	key := publishingBlockKey{proposer: block.Block.ProposerIndex, slot: block.Block.Slot}
+	s.mu.Lock()
+	if _, ok := s.pending[key]; ok {
+		delete(s.pending, key)
+	} else if seen, ok := s.seen[key]; ok && seen.signedRoot == common.Hash(root) {
+		seen.replayAllowed = true
+		s.seen[key] = seen
+	}
+	s.mu.Unlock()
+}
+
+func (s *replayableBlockService) ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock) {
+	s.scheduled <- struct{}{}
+}
+
+func (s *replayableBlockService) SchedulePublishedBlockForLaterProcessing(*cltypes.SignedBeaconBlock, func(context.Context) error) clservices.PublishedBlockJob {
+	s.scheduled <- struct{}{}
+	return completedPublishedBlockJob{}
+}
+
+type failFirstSidecarGossip struct {
+	*gossip_mock.MockGossip
+	mu              sync.Mutex
+	blockPublishes  int
+	failBlockAt     int
+	sidecarAttempts int
+}
+
+type unavailableUpdateDB struct {
+	kv.RwDB
+}
+
+func (db unavailableUpdateDB) Update(context.Context, func(kv.RwTx) error) error {
+	return errors.New("database unavailable")
+}
+
+type installingForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	headers      map[common.Hash]*cltypes.BeaconBlockHeader
+	blocks       map[common.Hash]*cltypes.SignedBeaconBlock
+	onBlockCalls int
+}
+
+type conflictAfterValidationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	conflict bool
+}
+
+type rejectingOnBlockForkchoice struct {
+	forkchoice.ForkChoiceStorage
+	err error
+}
+
+func (f *rejectingOnBlockForkchoice) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	return f.err
+}
+
+func (f *conflictAfterValidationForkchoice) OnBlockWithEquivocationCheck(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	f.conflict = true
+	return fmt.Errorf("%w: block conflicts with a previously validated proposal", forkchoice.ErrBlockInvalid)
+}
+
+func (f *conflictAfterValidationForkchoice) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
+	return f.conflict
+}
+
+func (f *installingForkchoice) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	header, ok := f.headers[root]
+	return header, ok
+}
+
+func (f *installingForkchoice) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	block, ok := f.blocks[root]
+	return block, ok
+}
+
+func (f *installingForkchoice) OnBlock(_ context.Context, block *cltypes.SignedBeaconBlock, _, _, _ bool) error {
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	f.headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	f.blocks[root] = block
+	f.onBlockCalls++
+	return nil
+}
+
+func (g *failFirstSidecarGossip) Publish(_ context.Context, topic string, _ []byte) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if topic == gossip.TopicNameBeaconBlock {
+		g.blockPublishes++
+		if g.blockPublishes == g.failBlockAt {
+			return errors.New("block unavailable")
+		}
+		return nil
+	}
+	g.sidecarAttempts++
+	if g.sidecarAttempts == 1 {
+		return errors.New("sidecar unavailable")
+	}
+	return nil
+}
+
+type acceptingExecutionPayloadBidService struct{}
+
+func (acceptingExecutionPayloadBidService) Names() []string { return nil }
+
+func (acceptingExecutionPayloadBidService) DecodeGossipMessage(libp2ppeer.ID, []byte, clparams.StateVersion) (*cltypes.SignedExecutionPayloadBid, error) {
+	return nil, nil
+}
+
+func (acceptingExecutionPayloadBidService) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadBid) error {
+	return nil
+}
+
+func (acceptingExecutionPayloadBidService) ValidateBid(context.Context, *cltypes.SignedExecutionPayloadBid) error {
+	return nil
+}
+
+func TestStoreDataColumnSidecars(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler := &ApiHandler{columnStorage: storage}
+	root := common.Hash{1}
+	column := &cltypes.DataColumnSidecar{Index: 7}
+
+	storage.EXPECT().WriteColumnSidecars(gomock.Any(), root, int64(7), column).Return(nil)
+	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{column}))
+}
+
+func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
+	root := common.Hash{1}
+	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, nil))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{{}}))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{nil}))
+	require.Error(t, (&ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))}).storeDataColumnSidecars(
+		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
+	))
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -107,6 +349,525 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
 }
 
+func TestGloasProposalExecutionHeadAtForkBoundary(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.GloasForkEpoch = 3
+	parentBid := &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.HexToHash("0xaaaa"),
+		BlockHash:       common.HexToHash("0xbbbb"),
+	}
+
+	require.Equal(t, parentBid.BlockHash, gloasProposalExecutionHead(95, &cfg, parentBid, false))
+	require.Equal(t, parentBid.BlockHash, gloasProposalExecutionHead(90, &cfg, parentBid, false))
+	require.Equal(t, parentBid.ParentBlockHash, gloasProposalExecutionHead(96, &cfg, parentBid, false))
+}
+
+func TestValidateGloasHeadSnapshotRejectsMismatchedRoot(t *testing.T) {
+	baseRoot := common.HexToHash("0xa1")
+	headNode := forkchoice.ForkChoiceNode{
+		Root:          common.HexToHash("0xb2"),
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	err := validateGloasHeadSnapshot(baseRoot, headNode)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fork choice head changed")
+	require.NoError(t, validateGloasHeadSnapshot(baseRoot, forkchoice.ForkChoiceNode{
+		Root:          baseRoot,
+		PayloadStatus: cltypes.PayloadStatusEmpty,
+	}))
+}
+
+func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
+	localWei := big.NewInt(1_500_000_000)
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
+	bid.Message.ExecutionPayment = 1
+
+	selected := selectGloasBid(localWei, []gloasBidCandidate{{
+		bid:                 bid,
+		boostFactor:         100,
+		maxExecutionPayment: 1,
+	}})
+
+	require.NotNil(t, selected)
+	require.Same(t, bid, selected.bid)
+	require.Equal(t, "2000000000", selected.executionValueWei.String())
+}
+
+func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 2)}
+
+	require.Nil(t, selectGloasBid(big.NewInt(2_000_000_000), []gloasBidCandidate{{
+		bid:                 bid,
+		boostFactor:         100,
+		maxExecutionPayment: 0,
+	}}))
+	require.Nil(t, selectGloasBid(big.NewInt(1), []gloasBidCandidate{{
+		bid:                 bid,
+		boostFactor:         0,
+		maxExecutionPayment: 0,
+	}}))
+}
+
+func TestSelectGloasBidUsesValidBuilderWhenLocalBuildIsUnavailable(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 0)}
+	selected := selectGloasBid(nil, []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: math.MaxUint64,
+	}})
+
+	require.NotNil(t, selected)
+	require.Same(t, bid, selected.bid)
+}
+
+func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+
+	baseRoot := common.Hash{0x41}
+	targetSlot := postState.Slot() + 1
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("local execution unavailable"))
+	handler.engine = engine
+
+	parentBid := postState.GetLatestExecutionPayloadBid()
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = parentBid.GasLimit
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
+	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
+	externalBid.Message.ParentBlockRoot = baseRoot
+	externalBid.Message.FeeRecipient = common.Address{}
+	externalBid.Message.GasLimit = parentBid.GasLimit
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().RequestExecutionPayloadBid(
+		gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, baseRoot, gomock.Any(), gomock.Any(), gomock.Any(),
+	).Return(externalBid, nil)
+	handler.builderClient = builderClient
+	handler.executionPayloadBidService = acceptingExecutionPayloadBidService{}
+	options := &gloasBlockProductionOptions{builderConfig: &cltypes.BuilderConfig{Builders: []*cltypes.BuilderEntry{{
+		URL: "https://builder.example",
+		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+			Data: []byte("https://builder.example"), Slot: targetSlot,
+		}},
+		BuilderBoostFactor: 100,
+	}}}}
+	ctx := context.WithValue(t.Context(), gloasBlockProductionOptionsKey{}, options)
+
+	block, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
+	require.NoError(t, err)
+	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
+}
+
+func TestProduceBlockUsesP2PBidWhenLocalExecutionIsUnavailable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+
+	baseRoot := common.Hash{0x41}
+	targetSlot := postState.Slot() + 1
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("local execution unavailable"))
+	handler.engine = engine
+
+	parentBid := postState.GetLatestExecutionPayloadBid()
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = parentBid.GasLimit
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
+	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
+	externalBid.Message.ParentBlockRoot = baseRoot
+	externalBid.Message.FeeRecipient = common.Address{}
+	externalBid.Message.GasLimit = parentBid.GasLimit
+	handler.epbsPool = pool.NewEpbsPool()
+	handler.epbsPool.StoreHighestBid(pool.HighestBidKey{
+		Slot:            targetSlot,
+		ParentBlockHash: parentBid.ParentBlockHash,
+		ParentBlockRoot: baseRoot,
+	}, externalBid)
+	options := &gloasBlockProductionOptions{builderConfig: &cltypes.BuilderConfig{BuilderBoostFactor: 100}}
+	ctx := context.WithValue(t.Context(), gloasBlockProductionOptionsKey{}, options)
+
+	block, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
+	require.NoError(t, err)
+	require.NotNil(t, block.ExecutionValue)
+	require.Zero(t, block.ExecutionValue.Sign())
+	require.Same(t, externalBid, options.selectedP2PBid.bid)
+
+	candidateErr := errors.New("candidate transition unavailable")
+	processedSelfBuild := false
+	_, _, err = handler.processProducedBlockWithProcessor(
+		postState,
+		block,
+		func(_ *state.CachingBeaconState, candidate *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			if candidate.BeaconBody.SignedExecutionPayloadBid == externalBid {
+				return nil, candidateErr
+			}
+			processedSelfBuild = true
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+		options.selectedP2PBid,
+	)
+	require.ErrorIs(t, err, candidateErr)
+	require.False(t, processedSelfBuild)
+}
+
+func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		feeRecipient  common.Address
+		parentGas     uint64
+		gasLimit      uint64
+		execPayment   uint64
+		maxPayment    uint64
+		preferenceGas uint64
+		want          int
+	}{
+		{name: "no P2P preference clamps toward latest bid target", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_029_295, want: 1},
+		{name: "wrong fee recipient", feeRecipient: common.Address{0x43}, parentGas: 30_000_000, gasLimit: 30_000_000},
+		{name: "high target clamps to parent maximum", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_029_295, preferenceGas: 40_000_000, want: 1},
+		{name: "high target rejects unclamped target", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 40_000_000, preferenceGas: 40_000_000},
+		{name: "low target clamps to parent minimum", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 29_970_705, preferenceGas: 20_000_000, want: 1},
+		{name: "low target rejects value below clamp", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 20_000_000, preferenceGas: 20_000_000},
+		{name: "zero parent requires zero", feeRecipient: common.Address{0x42}, parentGas: 0, gasLimit: 0, preferenceGas: 1, want: 1},
+		{name: "one parent requires one", feeRecipient: common.Address{0x42}, parentGas: 1, gasLimit: 1, preferenceGas: math.MaxUint64, want: 1},
+		{name: "execution payment at cap", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_000_000, preferenceGas: 30_000_000, execPayment: 5, maxPayment: 5, want: 1},
+		{name: "execution payment above cap remains a candidate", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_000_000, preferenceGas: 30_000_000, execPayment: 6, maxPayment: 5, want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, _, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.FuluForkEpoch = 0
+			handler.beaconChainCfg.GloasForkEpoch = 0
+			handler.beaconChainCfg.InitializeForkSchedule()
+			require.NoError(t, postState.UpgradeToFulu())
+			require.NoError(t, postState.UpgradeToGloas())
+			postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+			targetSlot := postState.Slot() + 1
+			proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+			if tc.preferenceGas != 0 {
+				handler.epbsPool = pool.NewEpbsPool()
+				proposalEpoch := state.GetEpochAtSlot(handler.beaconChainCfg, targetSlot)
+				dependentRoot, err := state.GetProposerDependentRoot(postState, proposalEpoch)
+				require.NoError(t, err)
+				handler.epbsPool.ProposerPreferences.Add(
+					pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+					&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+						ProposalSlot: targetSlot, ValidatorIndex: proposerIndex, FeeRecipient: common.Address{0x42},
+						TargetGasLimit: tc.preferenceGas, DependentRoot: dependentRoot,
+					}},
+				)
+			}
+			latestBid := postState.GetLatestExecutionPayloadBid()
+			latestBid.GasLimit = 99_000_000
+			parentBid := latestBid.Clone().(*cltypes.ExecutionPayloadBid)
+			parentBid.ParentBlockHash = common.Hash{0xa1}
+			forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = tc.parentGas
+			bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 1)}
+			bid.Message.ParentBlockHash = parentBid.ParentBlockHash
+			bid.Message.ParentBlockRoot = parentBid.ParentBlockRoot
+			bid.Message.FeeRecipient = tc.feeRecipient
+			bid.Message.GasLimit = tc.gasLimit
+			bid.Message.ExecutionPayment = tc.execPayment
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			builderClient.EXPECT().RequestExecutionPayloadBid(
+				gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, parentBid.ParentBlockRoot,
+				gomock.Any(), gomock.Any(), gomock.Any(),
+			).Return(bid, nil)
+			handler.builderClient = builderClient
+			handler.executionPayloadBidService = acceptingExecutionPayloadBidService{}
+
+			candidates := handler.requestConfiguredBuilderBids(t.Context(), postState, targetSlot, common.Bytes48{}, parentBid, []*cltypes.BuilderEntry{{
+				URL: "https://builder.example", BuilderBoostFactor: 100, MaxExecutionPayment: tc.maxPayment,
+			}})
+
+			require.Len(t, candidates, tc.want)
+		})
+	}
+}
+
+func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
+	capped := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
+	capped.Message.ExecutionPayment = 100
+	overflow := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, ^uint64(0))}
+	overflow.Message.ExecutionPayment = ^uint64(0)
+
+	selected := selectGloasBid(big.NewInt(2_500_000_000), []gloasBidCandidate{
+		{bid: capped, boostFactor: 100, maxExecutionPayment: 1},
+		{bid: overflow, boostFactor: 1, maxExecutionPayment: ^uint64(0)},
+	})
+
+	require.NotNil(t, selected)
+	require.Same(t, overflow, selected.bid)
+	require.Equal(t, new(big.Int).Mul(
+		new(big.Int).Add(new(big.Int).SetUint64(math.MaxUint64), new(big.Int).SetUint64(math.MaxUint64)),
+		big.NewInt(1_000_000_000),
+	), selected.executionValueWei)
+}
+
+func TestSelectGloasBidSaturatesOverflowTotalsAndKeepsFirstTie(t *testing.T) {
+	a := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, math.MaxUint64-1)}
+	a.Message.ExecutionPayment = 2
+	b := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, math.MaxUint64)}
+	b.Message.ExecutionPayment = 2
+
+	for _, bids := range [][]*cltypes.SignedExecutionPayloadBid{{a, b}, {b, a}} {
+		selected := selectGloasBid(nil, []gloasBidCandidate{
+			{bid: bids[0], boostFactor: 100, maxExecutionPayment: 2},
+			{bid: bids[1], boostFactor: 100, maxExecutionPayment: 2},
+		})
+
+		require.NotNil(t, selected)
+		require.Same(t, bids[0], selected.bid)
+		expectedValueWei := new(big.Int).Mul(
+			new(big.Int).Add(
+				new(big.Int).SetUint64(bids[0].Message.Value),
+				new(big.Int).SetUint64(bids[0].Message.ExecutionPayment),
+			),
+			big.NewInt(1_000_000_000),
+		)
+		require.Equal(t, expectedValueWei, selected.executionValueWei)
+	}
+}
+
+func TestSelectGloasBidLocalWinsOneWeiAboveSaturatedExternal(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, math.MaxUint64)}
+	bid.Message.ExecutionPayment = 1
+	localValueWei := new(big.Int).Add(
+		new(big.Int).Mul(new(big.Int).SetUint64(math.MaxUint64), big.NewInt(1_000_000_000)),
+		big.NewInt(1),
+	)
+
+	require.Nil(t, selectGloasBid(localValueWei, []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: 1,
+	}}))
+}
+
+func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 5)}
+	bid.Message.ExecutionPayment = 10
+	require.Nil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: 2, minBid: 8,
+	}}))
+	require.NotNil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: 3, minBid: 8,
+	}}))
+}
+
+func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {
+	config := &cltypes.BuilderConfig{
+		MinBid:             4,
+		BuilderBoostFactor: 125,
+		Builders: []*cltypes.BuilderEntry{{
+			URL: "https://builder.example",
+			Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+				Data: []byte("https://builder.example"), Slot: 10,
+			}},
+			BuilderPubkeys:      []common.Bytes48{{1}},
+			MaxExecutionPayment: 5,
+			MinBid:              6,
+			BuilderBoostFactor:  150,
+		}},
+	}
+	jsonBody, err := json.Marshal(config)
+	require.NoError(t, err)
+	sszBody, err := config.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        []byte
+	}{
+		{name: "json", contentType: "application/json", body: jsonBody},
+		{name: "ssz", contentType: "application/octet-stream", body: sszBody},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", bytes.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			req.Header.Set("Eth-Consensus-Version", "gloas")
+			opts, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+			require.NoError(t, err)
+			require.True(t, opts.includePayload)
+			require.Equal(t, config.MinBid, opts.builderConfig.MinBid)
+			require.Equal(t, config.Builders[0].URL, opts.builderConfig.Builders[0].URL)
+		})
+	}
+}
+
+func TestDecodeGloasBlockProductionOptionsRejectsInvalidBuildersPerEntry(t *testing.T) {
+	body := `{"min_bid":"0","builder_boost_factor":"100","builders":[null,{"url":"https://missing-auth.example"},{"url":"https://wrong-slot.example","auth":{"message":{"data":"0x01","slot":"11"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"builder_pubkeys":[],"max_execution_payment":"0","min_bid":"0","builder_boost_factor":"0"},{"url":"https://builder.example","auth":{"message":{"data":"0x01","slot":"10"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"builder_pubkeys":[],"max_execution_payment":"0","min_bid":"0","builder_boost_factor":"0"}]}`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+
+	options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+	require.Len(t, options.builderConfig.Builders, 1)
+	require.Equal(t, "https://builder.example", options.builderConfig.Builders[0].URL)
+}
+
+func TestDecodeGloasBlockProductionOptionsIsolatesDuplicateEntriesJSON(t *testing.T) {
+	entry := &cltypes.BuilderEntry{
+		URL: "https://builder.example",
+		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+			Data: []byte("auth-one"), Slot: 10,
+		}},
+		BuilderPubkeys: []common.Bytes48{{1}},
+	}
+	differentAuth := entry.Clone().(*cltypes.BuilderEntry)
+	differentAuth.Auth.Message.Data = []byte("auth-two")
+	first, err := json.Marshal(entry)
+	require.NoError(t, err)
+	second, err := json.Marshal(differentAuth)
+	require.NoError(t, err)
+	body := fmt.Sprintf(`{"min_bid":"0","builder_boost_factor":"100","builders":[%s,%s,%s]}`, first, first, second)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+
+	options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+	require.Len(t, options.builderConfig.Builders, 2)
+	require.Equal(t, []byte("auth-one"), []byte(options.builderConfig.Builders[0].Auth.Message.Data))
+	require.Equal(t, []byte("auth-two"), []byte(options.builderConfig.Builders[1].Auth.Message.Data))
+}
+
+func TestDecodeGloasBlockProductionOptionsKeepsDistinctPoliciesForOneRequest(t *testing.T) {
+	base := &cltypes.BuilderEntry{
+		URL: "https://builder.example",
+		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+			Data: []byte("auth-one"), Slot: 10,
+		}},
+		BuilderPubkeys:      []common.Bytes48{{1}},
+		MaxExecutionPayment: 1,
+		MinBid:              2,
+		BuilderBoostFactor:  100,
+	}
+	tests := []struct {
+		name   string
+		mutate func(*cltypes.BuilderEntry)
+	}{
+		{name: "builder pubkeys", mutate: func(entry *cltypes.BuilderEntry) { entry.BuilderPubkeys = []common.Bytes48{{2}} }},
+		{name: "maximum payment", mutate: func(entry *cltypes.BuilderEntry) { entry.MaxExecutionPayment++ }},
+		{name: "minimum bid", mutate: func(entry *cltypes.BuilderEntry) { entry.MinBid++ }},
+		{name: "boost factor", mutate: func(entry *cltypes.BuilderEntry) { entry.BuilderBoostFactor++ }},
+		{name: "auth signature", mutate: func(entry *cltypes.BuilderEntry) { entry.Auth.Signature[0] = 1 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			variant := base.Clone().(*cltypes.BuilderEntry)
+			test.mutate(variant)
+			first, err := json.Marshal(base)
+			require.NoError(t, err)
+			second, err := json.Marshal(variant)
+			require.NoError(t, err)
+			body := fmt.Sprintf(`{"min_bid":"0","builder_boost_factor":"100","builders":[%s,%s]}`, first, second)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", "gloas")
+
+			options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+			require.NoError(t, err)
+			require.Len(t, options.builderConfig.Builders, 2)
+		})
+	}
+}
+
+func TestDecodeGloasBlockProductionOptionsIsolatesInvalidAndDuplicateEntriesSSZ(t *testing.T) {
+	makeEntry := func(url, auth string, slot uint64) *cltypes.BuilderEntry {
+		return &cltypes.BuilderEntry{
+			URL: url,
+			Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+				Data: []byte(auth), Slot: slot,
+			}},
+			BuilderPubkeys: []common.Bytes48{{1}},
+		}
+	}
+	config := &cltypes.BuilderConfig{Builders: []*cltypes.BuilderEntry{
+		makeEntry("https://builder.example", "auth-one-unique", 10),
+		makeEntry("https://builder.example", "auth-two-unique", 10),
+		makeEntry("https://builder.example", "auth-three-long", 10),
+		makeEntry("https://wrong-slot.example", "auth-wrong-slot", 11),
+	}}
+	body, err := config.EncodeSSZ(nil)
+	require.NoError(t, err)
+	body = bytes.Replace(body, []byte("auth-two-unique"), []byte("auth-one-unique"), 1)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+
+	options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+	require.Len(t, options.builderConfig.Builders, 2)
+	require.Equal(t, []byte("auth-one-unique"), []byte(options.builderConfig.Builders[0].Auth.Message.Data))
+	require.Equal(t, []byte("auth-three-long"), []byte(options.builderConfig.Builders[1].Auth.Message.Data))
+}
+
+func TestDecodeGloasBlockProductionOptionsRejectsInvalidMetadata(t *testing.T) {
+	valid := `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`
+	for _, tc := range []struct {
+		name    string
+		url     string
+		version string
+		body    string
+	}{
+		{name: "missing include payload", url: "/eth/v4/validator/blocks/10", version: "gloas", body: valid},
+		{name: "invalid include payload", url: "/eth/v4/validator/blocks/10?include_payload=sure", version: "gloas", body: valid},
+		{name: "missing version", url: "/eth/v4/validator/blocks/10?include_payload=true", body: valid},
+		{name: "wrong version", url: "/eth/v4/validator/blocks/10?include_payload=true", version: "fulu", body: valid},
+		{name: "missing body", url: "/eth/v4/validator/blocks/10?include_payload=true", version: "gloas"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.url, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.version != "" {
+				req.Header.Set("Eth-Consensus-Version", tc.version)
+			}
+			_, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestDecodeGloasBlockProductionOptionsAcceptsMaximumJSONConfig(t *testing.T) {
+	config := &cltypes.BuilderConfig{Builders: make([]*cltypes.BuilderEntry, cltypes.MaxBuilderEntries)}
+	for i := range config.Builders {
+		authData := make([]byte, cltypes.MaxBuilderAuthDataSize)
+		authData[0] = byte(i)
+		config.Builders[i] = &cltypes.BuilderEntry{
+			URL:            "https://example.com/" + strings.Repeat("a", 2020) + fmt.Sprintf("%02d", i),
+			Auth:           &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{Data: authData, Slot: 10}},
+			BuilderPubkeys: make([]common.Bytes48, cltypes.MaxBuilderPubkeys),
+		}
+	}
+	body, err := json.Marshal(config)
+	require.NoError(t, err)
+	require.Greater(t, len(body), 1<<20)
+	require.LessOrEqual(t, len(body), maxBuilderConfigRequestSize)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=false", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+	_, err = decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+}
+
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
@@ -115,6 +876,914 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestParseGloasPublishedBlockRejectsWrapperAndOversizeBodies(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	h.beaconChainCfg.GloasForkEpoch = 0
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "wrapper", body: `{"signed_block":{}}`},
+		{name: "oversize", body: `{"message":{}}` + strings.Repeat(" ", maxGloasPublishedBlockSize)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			_, err := h.parseGloasRequestBeaconBlock(clparams.GloasVersion, req)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	h.beaconChainCfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encoded = append(encoded, 0)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(encoded))
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	_, err = h.parseGloasRequestBeaconBlock(clparams.GloasVersion, req)
+	require.Error(t, err)
+}
+
+func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(gomock.Any())
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(completedPublishedBlockJob{})
+	handler.blockService = blockService
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderURL := "https://builder.example"
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
+	forwardedCh := make(chan struct{}, 2)
+	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ string, forwarded *cltypes.SignedBeaconBlock) error {
+			require.Equal(t, block.Block.Slot, forwarded.Block.Slot)
+			forwardedCh <- struct{}{}
+			return errors.New("builder unavailable")
+		},
+	).Times(2)
+	handler.builderClient = builderClient
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	req.Header.Set("Eth-Builder-Url", builderURL)
+
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	require.NoError(t, err)
+	for range 2 {
+		select {
+		case <-forwardedCh:
+		case <-time.After(time.Second):
+			t.Fatal("signed block was not forwarded to the winning builder")
+		}
+	}
+}
+
+func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	forwarded := make(chan struct{})
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(gomock.Any())
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).Return(completedPublishedBlockJob{})
+	handler.blockService = blockService
+	client := builder_mock.NewMockBuilderClient(ctrl)
+	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwarded)
+			return nil
+		},
+	)
+	handler.builderClient = client
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	req.Header.Set("Eth-Builder-Url", builderURL)
+
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	require.NoError(t, err)
+	select {
+	case <-forwarded:
+	case <-time.After(time.Second):
+		t.Fatal("signed block was not forwarded by the receiving beacon node")
+	}
+}
+
+func TestPostEthV2BeaconBlocksReturnsAcceptedAndForwardsBuilderAfterPermanentIntegrationFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+
+	validationErr := fmt.Errorf("%w: execution payload transactions are invalid", forkchoice.ErrBlockInvalid)
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: forkchoiceStore, err: validationErr}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	handler.gossipManager = &failFirstSidecarGossip{}
+
+	builderURL := "https://builder.example"
+	forwarded := make(chan struct{})
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwarded)
+			return nil
+		},
+	)
+	handler.builderClient = client
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=gossip", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	req.Header.Set("Eth-Builder-Url", builderURL)
+
+	_, err = handler.PostEthV2BeaconBlocks(recorder, req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	select {
+	case <-forwarded:
+	case <-time.After(time.Second):
+		t.Fatal("accepted block was not forwarded to the builder")
+	}
+}
+
+func TestPostEthV2BeaconBlocksConsensusRejectsPreflightFailureBeforeGossip(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	forkchoiceStore.ValidateBlockForPublishingFn = func(got *cltypes.SignedBeaconBlock, rejectEquivocation bool) error {
+		require.Equal(t, block.Block.Slot, got.Block.Slot)
+		require.False(t, rejectEquivocation)
+		return fmt.Errorf("%w: invalid consensus transition", forkchoice.ErrBlockInvalid)
+	}
+	handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=consensus", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusBadRequest, endpointErr.Code)
+}
+
+func TestPostEthV2BeaconBlocksConsensusBroadcastsBeforeExecutionInvalidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	preflightCalls := 0
+	forkchoiceStore.ValidateBlockForPublishingFn = func(*cltypes.SignedBeaconBlock, bool) error {
+		preflightCalls++
+		return nil
+	}
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               fmt.Errorf("%w: execution payload transactions are invalid", forkchoice.ErrBlockInvalid),
+	}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	gossipManager := gossip_mock.NewMockGossip(gomock.NewController(t))
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=consensus", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	_, err = handler.PostEthV2BeaconBlocks(recorder, req)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Equal(t, 1, preflightCalls)
+}
+
+func TestPostEthV2BeaconBlocksReturnsServerErrorForTransientIntegrationFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{ForkChoiceStorage: forkchoiceStore, err: errors.New("database unavailable")}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	handler.gossipManager = &failFirstSidecarGossip{}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=gossip", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	var endpointErr *beaconhttp.EndpointError
+	require.ErrorAs(t, err, &endpointErr)
+	require.Equal(t, http.StatusInternalServerError, endpointErr.Code)
+}
+
+func TestPostEthV1BeaconBlocksDoesNotWaitForFullIntegration(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	version := handler.beaconChainCfg.GetCurrentStateVersion(handler.ethClock.GetCurrentEpoch())
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+	block.Block.Slot = 1
+	body, err := json.Marshal(&cltypes.DenebSignedBeaconBlock{SignedBlock: block})
+	require.NoError(t, err)
+	handler.forkchoiceStore = &rejectingOnBlockForkchoice{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               fmt.Errorf("%w: integration rejected", forkchoice.ErrBlockInvalid),
+	}
+	blockService := &replayableBlockService{
+		MockBlockService: network_services_mock.NewMockBlockService(gomock.NewController(t)),
+		pending:          make(map[publishingBlockKey]common.Hash),
+		seen:             make(map[publishingBlockKey]publishingSeenBlock),
+		scheduled:        make(chan struct{}, 1),
+	}
+	handler.blockService = &synchronousPublishedBlockService{replayableBlockService: blockService}
+	handler.gossipManager = &failFirstSidecarGossip{}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err = handler.PostEthV1BeaconBlocks(httptest.NewRecorder(), req)
+	require.NoError(t, err)
+}
+
+func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
+
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	forwardedCh := make(chan struct{})
+	release := make(chan struct{})
+	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwardedCh)
+			<-release
+			return nil
+		},
+	)
+	handler.builderClient = builderClient
+
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-forwardedCh:
+	case <-time.After(time.Second):
+		t.Fatal("signed block was not forwarded")
+	}
+	for range 32 {
+		handler.forwardPublishedBlockToBuilder(builderURL, block)
+	}
+	close(release)
+}
+
+func TestForwardPublishedBlockToBuilderDoesNotForwardPreGloasBlock(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
+	handler.builderClient = builder_mock.NewMockBuilderClient(gomock.NewController(t))
+
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+
+	require.True(t, handler.builderRoutes.Claim(blockRoot, builderURL))
+}
+
+func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
+
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondDone := make(chan struct{})
+	gomock.InOrder(
+		builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
+			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+				close(firstStarted)
+				<-releaseFirst
+				return errors.New("temporary failure")
+			},
+		),
+		builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
+			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+				close(secondDone)
+				return nil
+			},
+		),
+	)
+	handler.builderClient = builderClient
+
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first submission did not start")
+	}
+	for range 32 {
+		handler.forwardPublishedBlockToBuilder(builderURL, block)
+	}
+	close(releaseFirst)
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("submission was not retried automatically")
+	}
+}
+
+func TestForwardPublishedBlockUnboundRetryRemainsPublicOnly(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	failedAttempts := make(chan struct{})
+	succeeded := make(chan struct{})
+	gomock.InOrder(
+		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).Return(errors.New("unavailable")),
+		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).DoAndReturn(
+			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+				close(failedAttempts)
+				return errors.New("unavailable")
+			},
+		),
+		client.EXPECT().SubmitSignedBeaconBlockPublic(gomock.Any(), builderURL, block).DoAndReturn(
+			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+				close(succeeded)
+				return nil
+			},
+		),
+	)
+	handler.builderClient = client
+
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-failedAttempts:
+	case <-time.After(time.Second):
+		t.Fatal("unbound route attempts did not fail")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		handler.builderRoutes.mu.Lock()
+		_, exists := handler.builderRoutes.routes[builderRouteKey{root: root, url: builderURL}]
+		handler.builderRoutes.mu.Unlock()
+		if !exists {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("unbound route was not discarded after failure")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	handler.forwardPublishedBlockToBuilder(builderURL, block)
+	select {
+	case <-succeeded:
+	case <-time.After(time.Second):
+		t.Fatal("unbound public retry did not succeed")
+	}
+}
+
+func TestValidateSelfBuildPayloadAvailablePreservesUnsignedPayloadForValidator(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	payloadHash := common.HexToHash("0x1234")
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = payloadHash
+	cacheEntry := &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)}
+	cacheEntry.Payload.BlockHash = payloadHash
+	handler.selfBuildPayloads.Add(payloadHash, cacheEntry)
+
+	require.NoError(t, handler.validateSelfBuildPayloadAvailable(block))
+	retained, ok := handler.selfBuildPayloads.Get(payloadHash)
+	require.True(t, ok)
+	require.Same(t, cacheEntry, retained)
+	require.Empty(t, fcu.Envelopes)
+}
+
+func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=fast", nil)
+	_, err := (&ApiHandler{}).parseBlockPublishingValidation(req, 2)
+	require.Error(t, err)
+
+	for _, value := range []BlockPublishingValidation{
+		BlockPublishingValidationGossip,
+		BlockPublishingValidationConsensus,
+		BlockPublishingValidationConsensusAndEquivocation,
+	} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation="+string(value), nil)
+		got, err := (&ApiHandler{}).parseBlockPublishingValidation(req, 2)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	}
+}
+
+func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	validationErr := errors.New("invalid gossip block")
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(validationErr)
+
+	err := (&ApiHandler{blockService: blockService}).broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorIs(t, err, errPublishedBlockValidation)
+	require.ErrorContains(t, err, validationErr.Error())
+}
+
+func TestBroadcastBlockRejectsKnownRootWithDifferentSignature(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
+			t.Run(version.String()+"/"+string(validation), func(t *testing.T) {
+				_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+				stored := blocks[1]
+				if version == clparams.GloasVersion {
+					stored = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+					stored.Block.Slot = blocks[1].Block.Slot
+				}
+				root, err := stored.Block.HashSSZ()
+				require.NoError(t, err)
+				fcu.Headers[root] = stored.SignedBeaconBlockHeader().Header
+				fcu.Blocks[root] = stored
+				fcu.OnTickFn = func(uint64) {}
+
+				incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
+				incoming.Signature[0] ^= 1
+				incomingRoot, rootErr := incoming.Block.HashSSZ()
+				require.NoError(t, rootErr)
+				require.Equal(t, root, incomingRoot)
+				handler.gossipManager = gossip_mock.NewMockGossip(gomock.NewController(t))
+				handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+
+				err = handler.broadcastBlock(t.Context(), incoming, validation)
+				require.ErrorIs(t, err, errPublishedBlockValidation)
+				require.Same(t, stored, fcu.Blocks[root])
+			})
+		}
+	}
+}
+
+func TestBroadcastBlockAcceptsExactKnownReplay(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+			block := blocks[1]
+			if version == clparams.GloasVersion {
+				block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+				block.Block.Slot = blocks[1].Block.Slot
+			}
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+			fcu.Blocks[root] = block
+			fcu.StateAtBlockRootVal[root] = postState
+			fcu.HeadVal = root
+			fcu.HeadSlotVal = block.Block.Slot
+			fcu.OnTickFn = func(uint64) {}
+			ctrl := gomock.NewController(t)
+			engine := execution_client.NewMockExecutionEngine(ctrl)
+			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(2)
+			handler.engine = engine
+			handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
+			gossipManager := gossip_mock.NewMockGossip(ctrl)
+			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil).Times(2)
+			handler.gossipManager = gossipManager
+
+			incoming := &cltypes.SignedBeaconBlock{Block: block.Block, Signature: block.Signature}
+			incomingRoot, err := incoming.Block.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, root, incomingRoot)
+			_, known := fcu.GetHeader(incomingRoot)
+			require.True(t, known)
+			for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
+				require.NoError(t, handler.broadcastBlock(t.Context(), incoming, validation))
+			}
+		})
+	}
+}
+
+func TestBroadcastBlockRejectsUnknownBlockAtFinalizedHorizonBeforeWrites(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		for _, validation := range []BlockPublishingValidation{BlockPublishingValidationConsensus, BlockPublishingValidationConsensusAndEquivocation} {
+			t.Run(version.String()+"/"+string(validation), func(t *testing.T) {
+				ctrl := gomock.NewController(t)
+				_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+				block := blocks[1]
+				if version == clparams.GloasVersion {
+					block = cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, version)
+					block.Block.Slot = blocks[1].Block.Slot
+				}
+				fcu.FinalizedSlotVal = block.Block.Slot
+				handler.blobStoage = blob_storage_mock.NewMockBlobStorage(ctrl)
+				handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+				handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+
+				err := handler.broadcastBlock(t.Context(), block, validation)
+				require.ErrorIs(t, err, errPublishedBlockValidation)
+				require.ErrorContains(t, err, "finalized validation horizon")
+			})
+		}
+	}
+}
+
+func TestBroadcastBlockReportsAcceptedWhenEquivocationAppearsDuringIntegration(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.StateAtBlockRootVal[root] = postState
+	fcu.HeadVal = root
+	fcu.HeadSlotVal = block.Block.Slot
+	fcu.OnTickFn = func(uint64) {}
+	handler.forkchoiceStore = &conflictAfterValidationForkchoice{ForkChoiceStorage: fcu}
+	handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationConsensusAndEquivocation)
+
+	require.ErrorIs(t, err, errPublishedBlockAccepted)
+	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
+}
+
+func TestBroadcastBlockRejectsKnownBlockAfterConflictingProposal(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = blocks[1].Block.Slot
+	block.Block.ProposerIndex = 7
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	conflict := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	conflict.Block.Slot = block.Block.Slot
+	conflict.Block.ProposerIndex = block.Block.ProposerIndex
+	conflict.Block.StateRoot[0] = 1
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+	fcu.Headers[common.Hash{0xff}] = conflict.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = block
+	fcu.Blocks[common.Hash{0xff}] = conflict
+	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+
+	err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationConsensusAndEquivocation)
+
+	require.ErrorIs(t, err, errPublishedBlockValidation)
+	require.ErrorContains(t, err, "conflicts with a previously validated proposal")
+}
+
+func TestBroadcastBlockReleasesGossipReservationAfterPreparationFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("test-blobs", 1)
+	require.NoError(t, err)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().ReleaseGossipReservation(block)
+
+	err = (&ApiHandler{blockService: blockService, blobBundles: blobBundles}).broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "missing blob bundle")
+}
+
+func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().ReleaseGossipReservation(block)
+	handler.blockService = blockService
+	storeCalled := make(chan struct{})
+	var closeStoreCalled sync.Once
+	blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+		closeStoreCalled.Do(func() { close(storeCalled) })
+		return nil
+	}).AnyTimes()
+	handler.blobStoage = blobStorage
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(errors.New("block unavailable"))
+	handler.gossipManager = gossipManager
+
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "block unavailable")
+	select {
+	case <-storeCalled:
+		t.Fatal("block storage started before beacon block publication succeeded")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestBroadcastBlockSchedulesFullRecoveryAfterBlobStorageFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	block := blocks[1]
+	commitment := &cltypes.KZGCommitment{1}
+	block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](1, 48)
+	block.Block.Body.BlobKzgCommitments.Append(commitment)
+	handler.blobBundles.Add(common.Bytes48(*commitment), BlobBundle{
+		Commitment: common.Bytes48(*commitment),
+		Blob:       &cltypes.Blob{},
+		KzgProofs:  []common.Bytes48{{1}},
+	})
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(block)
+	blockService.EXPECT().ReleaseGossipReservation(block)
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(block).Times(0)
+	scheduledStore := make(chan func(context.Context) error, 1)
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).DoAndReturn(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+		scheduledStore <- store
+		return completedPublishedBlockJob{}
+	})
+	handler.blockService = blockService
+	blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+		return errors.New("storage unavailable")
+	}).Times(1)
+	handler.blobStoage = blobStorage
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(uint64(0)), gomock.Any()).Return(errors.New("sidecar unavailable"))
+	handler.gossipManager = gossipManager
+
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "sidecar unavailable")
+	select {
+	case store := <-scheduledStore:
+		require.ErrorContains(t, store(t.Context()), "storage unavailable")
+	case <-time.After(time.Second):
+		t.Fatal("full published-block storage was not scheduled")
+	}
+}
+
+func TestBroadcastBlockSchedulesRecoveryAfterSidecarsAndForkchoiceSucceed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	block := blocks[1]
+	commitment := &cltypes.KZGCommitment{1}
+	block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](1, 48)
+	block.Block.Body.BlobKzgCommitments.Append(commitment)
+	handler.blobBundles.Add(common.Bytes48(*commitment), BlobBundle{
+		Commitment: common.Bytes48(*commitment),
+		Blob:       &cltypes.Blob{},
+		KzgProofs:  []common.Bytes48{{1}},
+	})
+	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+	fcu.OnTickFn = func(uint64) {}
+
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(block)
+	scheduledStore := make(chan func(context.Context) error, 1)
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(block, gomock.Any()).DoAndReturn(func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) clservices.PublishedBlockJob {
+		scheduledStore <- store
+		return completedPublishedBlockJob{}
+	})
+	handler.blockService = blockService
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(uint64(0)), gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	require.NoError(t, handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip))
+	select {
+	case store := <-scheduledStore:
+		require.ErrorContains(t, store(t.Context()), "database unavailable")
+	case <-time.After(time.Second):
+		t.Fatal("post-forkchoice database failure was not scheduled")
+	}
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	sidecars, found, err := handler.blobStoage.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, sidecars, 1)
+}
+
+func TestStoreBlockAndBlobsDoesNotRepeatForkchoiceAfterDatabaseFailure(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	fcu.OnTickFn = func(uint64) {}
+	installing := &installingForkchoice{
+		ForkChoiceStorage: fcu,
+		headers:           make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		blocks:            make(map[common.Hash]*cltypes.SignedBeaconBlock),
+	}
+	handler.forkchoiceStore = installing
+	handler.indiciesDB = unavailableUpdateDB{RwDB: handler.indiciesDB}
+
+	for range 2 {
+		err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationGossip)
+		require.ErrorContains(t, err, "database unavailable")
+	}
+	require.Equal(t, 1, installing.onBlockCalls)
+}
+
+func TestStoreBlockAndBlobsClassifiesKnownRootMismatchAsPermanent(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	stored := blocks[1]
+	root, err := stored.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = stored.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = stored
+	incoming := &cltypes.SignedBeaconBlock{Block: stored.Block, Signature: stored.Signature}
+	incoming.Signature[0] ^= 1
+
+	err = handler.storeBlockAndBlobs(t.Context(), incoming, nil, nil, BlockPublishingValidationConsensus)
+	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+func TestStoreBlockAndBlobsClassifiesFinalizedHorizonRaceAsPermanent(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	fcu.FinalizedSlotVal = block.Block.Slot
+
+	err := handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensus)
+	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+func TestStoreBlockAndBlobsClassifiesKnownEquivocationAsPermanent(t *testing.T) {
+	_, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header
+	fcu.Blocks[root] = block
+	conflict := block.SignedBeaconBlockHeader().Header.Copy()
+	conflict.Root[0] ^= 1
+	fcu.Headers[common.Hash{0xff}] = conflict
+
+	err = handler.storeBlockAndBlobs(t.Context(), block, nil, nil, BlockPublishingValidationConsensusAndEquivocation)
+	require.ErrorIs(t, err, forkchoice.ErrBlockInvalid)
+}
+
+func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
+	for _, version := range []clparams.StateVersion{clparams.DenebVersion, clparams.FuluVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			cfg := clparams.MainnetBeaconConfig
+			if clparams.GetBeaconConfig() == nil {
+				clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+			}
+			block := cltypes.NewSignedBeaconBlock(&cfg, version)
+			block.Block.Slot = cfg.SlotsPerEpoch
+			commitment := &cltypes.KZGCommitment{1}
+			block.Block.Body.BlobKzgCommitments.Append(commitment)
+			blobBundles, err := lru.New[common.Bytes48, BlobBundle]("test-replay-blobs", 1)
+			require.NoError(t, err)
+			proofs := []common.Bytes48{{1}}
+			if version >= clparams.FuluVersion {
+				proofs = make([]common.Bytes48, cfg.NumberOfColumns)
+			}
+			blobBundles.Add(common.Bytes48(*commitment), BlobBundle{
+				Commitment: common.Bytes48(*commitment),
+				Blob:       &cltypes.Blob{},
+				KzgProofs:  proofs,
+			})
+
+			blockService := &replayableBlockService{
+				MockBlockService: network_services_mock.NewMockBlockService(ctrl),
+				pending:          make(map[publishingBlockKey]common.Hash),
+				seen:             make(map[publishingBlockKey]publishingSeenBlock),
+				scheduled:        make(chan struct{}, 2),
+			}
+			gossipManager := &failFirstSidecarGossip{MockGossip: gossip_mock.NewMockGossip(ctrl)}
+			handler := &ApiHandler{
+				beaconChainCfg: &cfg,
+				blockService:   blockService,
+				blobBundles:    blobBundles,
+				gossipManager:  gossipManager,
+				logger:         log.Root(),
+			}
+			if version < clparams.FuluVersion {
+				blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
+				blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+				handler.blobStoage = blobStorage
+			} else {
+				columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+				columnStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+				handler.columnStorage = columnStorage
+			}
+
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorContains(t, err, "sidecar unavailable")
+			gossipManager.mu.Lock()
+			gossipManager.failBlockAt = 2
+			gossipManager.mu.Unlock()
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorContains(t, err, "block unavailable")
+			require.NoError(t, handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip))
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorIs(t, err, errPublishedBlockValidation)
+			require.ErrorIs(t, err, clservices.ErrIgnore)
+
+			block.Block.StateRoot[0] ^= 1
+			err = handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+			require.ErrorIs(t, err, errPublishedBlockValidation)
+			require.ErrorIs(t, err, clservices.ErrIgnore)
+
+			for range 2 {
+				select {
+				case <-blockService.scheduled:
+				case <-time.After(time.Second):
+					t.Fatal("sidecar storage failure did not schedule full recovery")
+				}
+			}
+			gossipManager.mu.Lock()
+			require.Equal(t, 3, gossipManager.blockPublishes)
+			require.GreaterOrEqual(t, gossipManager.sidecarAttempts, 2)
+			gossipManager.mu.Unlock()
+		})
+	}
+}
+
+func TestPublishGossipReturnsPublishFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, []byte{1}).Return(errors.New("gossip unavailable"))
+	handler := &ApiHandler{gossipManager: gossipManager}
+
+	err := handler.publishGossip(t.Context(), gossip.TopicNameBeaconBlock, []byte{1})
+
+	require.ErrorContains(t, err, "gossip unavailable")
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
@@ -343,6 +2012,41 @@ func TestValidateBuilderPayloadRejectsMissingElectraExecutionRequests(t *testing
 
 	require.ErrorContains(t, validateBuilderPayload(payload, nil, clparams.ElectraVersion), "missing execution requests")
 	require.NoError(t, validateBuilderPayload(payload, cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.ElectraVersion), clparams.ElectraVersion))
+}
+
+func TestValidateBuilderExecutionRequestsDoesNotApplyLegacyGloasDepositMaximum(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxDepositRequestsPerPayload = 1
+	requests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	requests.Deposits.Append(&solid.DepositRequest{})
+	requests.Deposits.Append(&solid.DepositRequest{})
+
+	require.NoError(t, validateBuilderExecutionRequests(&cfg, clparams.GloasVersion, requests))
+}
+
+func TestValidateBuilderExecutionRequestsBoundsGloasDepositResources(t *testing.T) {
+	requests := cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	request := &solid.DepositRequest{}
+	for range int(clparams.MaxChunkSize)/solid.SizeDepositRequest + 1 {
+		requests.Deposits.Append(request)
+	}
+
+	require.ErrorContains(t, validateBuilderExecutionRequests(&clparams.MainnetBeaconConfig, clparams.GloasVersion, requests), "too many deposit requests")
+}
+
+func TestValidateBuilderExecutionRequestsPreservesOtherProtocolLimits(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxDepositRequestsPerPayload = 1
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	electra := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.ElectraVersion)
+	electra.Deposits.Append(&solid.DepositRequest{})
+	electra.Deposits.Append(&solid.DepositRequest{})
+	require.ErrorContains(t, validateBuilderExecutionRequests(&cfg, clparams.ElectraVersion, electra), "too many deposit requests")
+
+	gloas := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	gloas.Withdrawals.Append(&solid.WithdrawalRequest{})
+	gloas.Withdrawals.Append(&solid.WithdrawalRequest{})
+	require.ErrorContains(t, validateBuilderExecutionRequests(&cfg, clparams.GloasVersion, gloas), "too many withdrawal requests")
 }
 
 func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
@@ -577,6 +2281,79 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, big.NewInt(123), big.NewInt(456))
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.NumberOfColumns = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+
+	parentHash := common.HexToHash("0x1111")
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	require.NoError(t, err)
+	postState.SetLatestBlockHash(parentHash)
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:             parentHash,
+		ParentBlockHash:       parentHash,
+		GasLimit:              30_000_000,
+		ExecutionRequestsRoot: common.Hash(emptyRequestsRoot),
+	})
+	require.NoError(t, handler.syncedData.OnHeadState(postState))
+	targetSlot := postState.Slot() + 1
+	baseRoot, err := postState.BlockRoot()
+	require.NoError(t, err)
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadSlotVal = postState.Slot()
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentHash] = 30_000_000
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now()).AnyTimes()
+	handler.ethClock = clock
+
+	payloadHash := common.HexToHash("0x2222")
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = parentHash
+	payload.BlockHash = payloadHash
+	payload.PrevRandao = postState.GetRandaoMixes(targetSlot / handler.beaconChainCfg.SlotsPerEpoch)
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), parentHash, gomock.Any(), clparams.GloasVersion).
+		Return([]byte{1}, nil)
+	blob := make(hexutil.Bytes, cltypes.BYTES_PER_BLOB)
+	commitment := make(hexutil.Bytes, length.Bytes48)
+	proof := make(hexutil.Bytes, length.Bytes48)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{
+			Blobs: []hexutil.Bytes{blob}, Commitments: []hexutil.Bytes{commitment}, Proofs: []hexutil.Bytes{proof},
+		}, nil, big.NewInt(1_000_000_000), nil)
+	handler.engine = engine
+	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
+	handler.blobBundles = evictingBlobBundleCache{}
+
+	body := strings.NewReader(`{"min_bid":"0","builder_boost_factor":"0","builders":[]}`)
+	url := fmt.Sprintf("/eth/v4/validator/blocks/%d?randao_reveal=0x%s&graffiti=0x%s&skip_randao_verification=true&include_payload=true", targetSlot, strings.Repeat("00", 96), strings.Repeat("00", 32))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, url, body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "true", recorder.Header().Get("Eth-Execution-Payload-Included"))
+	require.Contains(t, recorder.Body.String(), `"execution_payload_envelope"`)
+	require.Contains(t, recorder.Body.String(), `"blobs":["0x`)
+	require.Contains(t, recorder.Body.String(), `"kzg_proofs":["0x`)
 }
 
 func TestProduceBeaconBodyRejectsInvalidFuluCellProofLength(t *testing.T) {
@@ -858,6 +2635,79 @@ func TestProcessProducedBlockRetainsBidAfterUnclassifiedTransitionFailure(t *tes
 	require.Same(t, fixture.externalBid, storedBid)
 }
 
+func TestProcessProducedBlockDoesNotReplacePreselectedConfiguredBid(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	configuredBid := fixture.externalBid
+	configuredBid.Message.Value = 2
+	fixture.block.BeaconBody.SignedExecutionPayloadBid = configuredBid
+	fixture.block.ExecutionValue = gweiToWei(big.NewInt(2))
+	p2pBid := &cltypes.SignedExecutionPayloadBid{Message: fixture.externalBid.Message.Clone().(*cltypes.ExecutionPayloadBid)}
+	p2pBid.Message.Value = 3
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, p2pBid)
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		func(_ *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			require.Same(t, configuredBid, block.BeaconBody.SignedExecutionPayloadBid)
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+	)
+
+	require.NoError(t, err)
+	require.Same(t, configuredBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+}
+
+func TestProcessProducedBlockUsesAuthoritativeP2PSelection(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	selectedBid := fixture.externalBid
+	selectedBid.Message.Value = 2
+	higherBid := &cltypes.SignedExecutionPayloadBid{Message: selectedBid.Message.Clone().(*cltypes.ExecutionPayloadBid)}
+	higherBid.Message.Value = 3
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, higherBid)
+	candidate := &gloasBidCandidate{bid: selectedBid, executionValueWei: gweiToWei(big.NewInt(2))}
+	processed := 0
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		func(_ *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			processed++
+			require.Same(t, selectedBid, block.BeaconBody.SignedExecutionPayloadBid)
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+		candidate,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, processed)
+	require.NotSame(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+	require.Same(t, selectedBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+}
+
+func TestProcessProducedBlockHonorsAuthoritativeNoP2PSelection(t *testing.T) {
+	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
+	selfBid := fixture.block.BeaconBody.SignedExecutionPayloadBid
+	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
+	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
+
+	_, _, err := handler.processProducedBlockWithProcessor(
+		fixture.productionState,
+		fixture.block,
+		func(_ *state.CachingBeaconState, block *cltypes.BlindOrExecutionBeaconBlock) (*eth2.Impl, error) {
+			require.Same(t, selfBid, block.BeaconBody.SignedExecutionPayloadBid)
+			return &eth2.Impl{BlockRewardsCollector: &eth2.BlockRewardsCollector{}}, nil
+		},
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.Same(t, selfBid, fixture.block.BeaconBody.SignedExecutionPayloadBid)
+}
+
 func TestProcessProducedBlockEvictsInvalidBidWhenSelfBuildFails(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{})
 	handler := &ApiHandler{epbsPool: pool.NewEpbsPool()}
@@ -910,7 +2760,7 @@ func TestProcessProducedBlockSelectsExternalBidWithoutLegacyBuilderBoost(t *test
 	require.Equal(t, fixture.externalBid.Message.BlockHash, selectedState.GetLatestExecutionPayloadBid().BlockHash)
 }
 
-func TestGetEthV3ValidatorBlockClearsStaleSelfBuildEnvelopeForExternalBid(t *testing.T) {
+func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
 	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg = fixture.block.Cfg
@@ -991,122 +2841,43 @@ func TestGetEthV3ValidatorBlockClearsStaleSelfBuildEnvelopeForExternalBid(t *tes
 
 	selfBuiltBlock := produce()
 	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
-	_, found := handler.selfBuildEnvelopes.Get(fixture.block.Slot)
+	selfBuiltRoot, err := selfBuiltBlock.HashSSZ()
+	require.NoError(t, err)
+	key := selfBuildEnvelopeKey{Slot: fixture.block.Slot, BeaconBlockRoot: common.Hash(selfBuiltRoot)}
+	_, found := handler.selfBuildEnvelopes.Get(key)
 	require.True(t, found)
 
 	handler.epbsPool.StoreHighestBid(fixture.bidKey, fixture.externalBid)
 	externalBlock := produce()
 	require.Equal(t, fixture.externalBid.Message.BuilderIndex, externalBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
-	_, found = handler.selfBuildEnvelopes.Get(fixture.block.Slot)
-	require.False(t, found)
+	_, found = handler.selfBuildEnvelopes.Get(key)
+	require.True(t, found)
 }
 
-func TestUpdateSelfBuildEnvelopeCacheRetainsMatchingEnvelope(t *testing.T) {
-	cache, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
+func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {
+	cache, err := lru.New[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
 	require.NoError(t, err)
 	handler := &ApiHandler{selfBuildEnvelopes: cache}
 	slot := uint64(1)
-	blockRoot := common.Hash{0x01}
-	existing := &cltypes.ExecutionPayloadEnvelope{
+	firstRoot := common.Hash{0x01}
+	secondRoot := common.Hash{0x02}
+	first := &cltypes.ExecutionPayloadEnvelope{
 		BuilderIndex:    clparams.BuilderIndexSelfBuild,
-		BeaconBlockRoot: blockRoot,
+		BeaconBlockRoot: firstRoot,
 	}
-	handler.selfBuildEnvelopes.Add(slot, existing)
-
-	handler.updateSelfBuildEnvelopeCache(slot, &blockRoot, nil)
-
-	got, found := handler.selfBuildEnvelopes.Get(slot)
-	require.True(t, found)
-	require.Same(t, existing, got)
-}
-
-func TestUpdateSelfBuildEnvelopeCacheRemovesMismatchedEnvelope(t *testing.T) {
-	cache, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("testSelfBuildEnvelopes", 4)
-	require.NoError(t, err)
-	handler := &ApiHandler{selfBuildEnvelopes: cache}
-	slot := uint64(1)
-	existing := &cltypes.ExecutionPayloadEnvelope{
+	second := &cltypes.ExecutionPayloadEnvelope{
 		BuilderIndex:    clparams.BuilderIndexSelfBuild,
-		BeaconBlockRoot: common.Hash{0x01},
+		BeaconBlockRoot: secondRoot,
 	}
-	handler.selfBuildEnvelopes.Add(slot, existing)
-	producedBlockRoot := common.Hash{0x02}
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: firstRoot}, first)
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: secondRoot}, second)
 
-	handler.updateSelfBuildEnvelopeCache(slot, &producedBlockRoot, nil)
-
-	_, found := handler.selfBuildEnvelopes.Get(slot)
-	require.False(t, found)
-}
-
-type coordinatedSelfBuildEnvelopeStore struct {
-	mu               sync.Mutex
-	envelope         *cltypes.ExecutionPayloadEnvelope
-	removeStarted    chan struct{}
-	replacementAdded chan struct{}
-	releaseRemoval   chan struct{}
-}
-
-func (s *coordinatedSelfBuildEnvelopeStore) Add(_ uint64, envelope *cltypes.ExecutionPayloadEnvelope) bool {
-	s.mu.Lock()
-	s.envelope = envelope
-	s.mu.Unlock()
-	close(s.replacementAdded)
-	return false
-}
-
-func (s *coordinatedSelfBuildEnvelopeStore) Get(_ uint64) (*cltypes.ExecutionPayloadEnvelope, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.envelope, s.envelope != nil
-}
-
-func (s *coordinatedSelfBuildEnvelopeStore) Remove(_ uint64) bool {
-	close(s.removeStarted)
-	select {
-	case <-s.replacementAdded:
-	case <-s.releaseRemoval:
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	found := s.envelope != nil
-	s.envelope = nil
-	return found
-}
-
-func TestUpdateSelfBuildEnvelopeCacheSerializesReplacementWithRemoval(t *testing.T) {
-	existing := &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{0x01}}
-	replacement := &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{0x02}}
-	store := &coordinatedSelfBuildEnvelopeStore{
-		envelope:         existing,
-		removeStarted:    make(chan struct{}),
-		replacementAdded: make(chan struct{}),
-		releaseRemoval:   make(chan struct{}),
-	}
-	handler := &ApiHandler{selfBuildEnvelopes: store}
-	producedBlockRoot := common.Hash{0x03}
-	removalDone := make(chan struct{})
-	go func() {
-		handler.updateSelfBuildEnvelopeCache(1, &producedBlockRoot, nil)
-		close(removalDone)
-	}()
-	<-store.removeStarted
-
-	replacementDone := make(chan struct{})
-	go func() {
-		handler.updateSelfBuildEnvelopeCache(1, nil, replacement)
-		close(replacementDone)
-	}()
-	select {
-	case <-replacementDone:
-	case <-time.After(250 * time.Millisecond):
-		close(store.releaseRemoval)
-	}
-	<-removalDone
-	<-replacementDone
-
-	got, found := store.Get(1)
-	require.True(t, found)
-	require.Same(t, replacement, got)
+	gotFirst, firstFound := handler.selfBuildEnvelopes.Get(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: firstRoot})
+	gotSecond, secondFound := handler.selfBuildEnvelopes.Get(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: secondRoot})
+	require.True(t, firstFound)
+	require.True(t, secondFound)
+	require.Same(t, first, gotFirst)
+	require.Same(t, second, gotSecond)
 }
 
 func TestProcessProducedBlockTreatsNilExecutionValueAsZero(t *testing.T) {
@@ -1434,7 +3205,8 @@ func TestProduceBlockUsesLocalPayloadWithoutBuilderClient(t *testing.T) {
 
 func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	logs := captureAllProductionLogs(t)
-	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	_, _, _, _, _, h, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	forkchoiceStore.OnTickFn = func(uint64) {}
 	h.indiciesDB = updateFailingDB{RwDB: h.indiciesDB}
 	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
 	bid := block.Block.Body.GetSignedExecutionPayloadBid()
@@ -1443,14 +3215,34 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	bid.Message.BuilderIndex = 1
 	bid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{0x01})
 
-	require.NoError(t, h.broadcastBlock(t.Context(), block))
-
-	// The persistence error is logged at the end of the background store goroutine.
-	require.Eventually(t, func() bool {
-		return strings.Contains(logs(), "stop after persistence")
-	}, 5*time.Second, 10*time.Millisecond)
+	err := h.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "stop after persistence")
 	require.Contains(t, logs(), "blobSidecars=0")
 	require.Contains(t, logs(), "columnSidecars=0")
+}
+
+func TestSetupHeaderResponsePreservesExecutionValueAboveUint64(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+	value := new(big.Int).Lsh(big.NewInt(1), 80)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, false, value, new(big.Int))
+	require.Equal(t, value.String(), rr.Header().Get("Eth-Execution-Payload-Value"))
+}
+
+func TestBroadcastGloasBuilderBlockDoesNotRequireEnvelopeBlobsYet(t *testing.T) {
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	commitment := cltypes.KZGCommitment{1}
+	commitments.Append(&commitment)
+	columns, pending, err := collectPublishedPayloadData(commitments, true, func(common.Bytes48) (BlobBundle, bool) {
+		return BlobBundle{}, false
+	})
+	require.NoError(t, err)
+	require.True(t, pending)
+	require.Empty(t, columns)
+	_, _, err = collectPublishedPayloadData(commitments, false, func(common.Bytes48) (BlobBundle, bool) {
+		return BlobBundle{}, false
+	})
+	require.Error(t, err)
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
@@ -1552,6 +3344,8 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+	fcu.HeadVal = baseBlockRoot
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
 	beaconBody, execValue, err := h.produceBeaconBody(
 		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
@@ -1663,6 +3457,8 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+	fcu.HeadVal = baseBlockRoot
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
 	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.
@@ -1740,6 +3536,45 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 	require.Equal(t, []*types.Withdrawal{
 		{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9},
 	}, withdrawals)
+}
+
+func TestProduceBeaconBodyComputesWithdrawalsAtGloasTransition(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 1
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	require.NoError(t, postState.SetSlot(handler.beaconChainCfg.SlotsPerEpoch))
+
+	pending := solid.NewDynamicListSSZ[*cltypes.BuilderPendingWithdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload))
+	pending.Append(&cltypes.BuilderPendingWithdrawal{FeeRecipient: common.Address{0xbb}, Amount: 12, BuilderIndex: 3})
+	postState.SetBuilderPendingWithdrawals(pending)
+	expected, err := state.GetExpectedWithdrawals(postState, 1)
+	require.NoError(t, err)
+	expectedWithdrawals := cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(expected.Withdrawals)
+
+	baseRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadSlotVal = handler.beaconChainCfg.SlotsPerEpoch - 1
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+
+	var gotWithdrawals []*types.Withdrawal
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
+		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			gotWithdrawals = attrs.Withdrawals
+			return nil, errors.New("stop after capturing payload attributes")
+		})
+	handler.engine = engine
+
+	_, _, err = handler.produceBeaconBody(
+		t.Context(), 3, handler.beaconChainCfg.SlotsPerEpoch-1, baseRoot, postState,
+		handler.beaconChainCfg.SlotsPerEpoch, common.Bytes96{0xc0}, common.Hash{},
+	)
+	require.ErrorContains(t, err, "stop after capturing payload attributes")
+	require.Equal(t, expectedWithdrawals, gotWithdrawals)
 }
 
 func TestPayloadAttributesOmitFieldsTheChosenVersionCannotCarry(t *testing.T) {

@@ -341,7 +341,16 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 
 	// Track payload status and gas limit by execution block hash for parent payload validation
 	executionBlockHash := envelope.Payload.BlockHash
-	f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+	if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
+		retained := guard.WithRetainedBlock(beaconBlockRoot, func() {
+			payloadStatus = f.markPayloadStatusRetainedLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+		})
+		if !retained {
+			return fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
+		}
+	} else {
+		payloadStatus = f.markPayloadStatusLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+	}
 	f.executionPayloadGasLimit.Add(executionBlockHash, envelope.Payload.GasLimit)
 
 	switch payloadStatus {
@@ -364,11 +373,9 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", validationErr)
-		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
 		return fmt.Errorf("%w: execution payload is invalid", errInvalidExecutionPayloadEnvelope)
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
-		f.markPayloadVerifiedLocked(beaconBlockRoot, executionBlockHash)
 	}
 
 	if validationErr != nil {
@@ -510,6 +517,11 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
+	if f.engine == nil && envelope.Payload != nil {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
+		}
+	}
 
 	// Invalidate head cache — payload status may have changed from PENDING to FULL.
 	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
@@ -542,6 +554,12 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	if err := f.forkGraph.DumpEnvelopeOnDisk(blockRoot, signedEnvelope); err != nil {
 		f.mu.Unlock()
 		return fmt.Errorf("StoreAnchorEnvelope: failed to dump envelope: %w", err)
+	}
+	if f.engine == nil {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+			f.mu.Unlock()
+			return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
+		}
 	}
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
 	f.headHash = common.Hash{}
@@ -588,8 +606,41 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 		f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
 		return fmt.Errorf("OnExecutionPayload: failed to write execution payload indices: %w", err)
 	}
+	if !applied {
+		return fmt.Errorf("%w: execution payload envelope already processed", ErrIgnore)
+	}
 
 	return nil
+}
+
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	f.executionPayloadValidationOnce.Do(func() {
+		f.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	select {
+	case f.executionPayloadValidation <- struct{}{}:
+		defer func() { <-f.executionPayloadValidation }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	blockRoot := common.Hash(signedEnvelope.Message.BeaconBlockRoot)
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	block, ok := f.forkGraph.GetBlock(blockRoot)
+	if !ok || block == nil {
+		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
+	}
+	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to get block state: %w", err)
+	}
+	if blockState == nil {
+		return fmt.Errorf("block state not found for beacon_block_root %v", blockRoot)
+	}
+	return f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState)
 }
 
 // ApplyLocalSelfBuildEnvelope processes a locally-produced self-build envelope

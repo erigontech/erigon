@@ -125,11 +125,15 @@ func (f *ForkChoiceStore) recordBlockTimeliness(block *cltypes.BeaconBlock, bloc
 
 func (f *ForkChoiceStore) getDependentRoot(root common.Hash) common.Hash {
 	epoch := f.computeEpochAtSlot(f.Slot())
-	if epoch <= f.beaconCfg.MinSeedLookahead {
-		return common.Hash{}
-	}
-	dependentSlot := f.computeStartSlotAtEpoch(epoch-f.beaconCfg.MinSeedLookahead) - 1
+	dependentSlot := computeShufflingDependentSlot(epoch, f.beaconCfg.MinSeedLookahead, f.beaconCfg.SlotsPerEpoch)
 	return f.getAncestor(f.getNodeForRoot(root), dependentSlot).Root
+}
+
+func computeShufflingDependentSlot(epoch, minSeedLookahead, slotsPerEpoch uint64) uint64 {
+	if epoch <= minSeedLookahead {
+		return 0
+	}
+	return (epoch-minSeedLookahead)*slotsPerEpoch - 1
 }
 
 // updateProposerBoostRoot implements update_proposer_boost_root from the spec.
@@ -189,20 +193,20 @@ func (f *ForkChoiceStore) shouldApplyProposerBoostGloas(proposerBoostRoot common
 }
 
 func (f *ForkChoiceStore) shouldApplyProposerBoostGloasWith(proposerBoostRoot common.Hash, isHeadWeak func(common.Hash) bool) bool {
-	boostBlock, ok := f.forkGraph.GetBlock(proposerBoostRoot)
-	if !ok || boostBlock == nil {
+	boostBlock, ok := f.forkGraph.GetHeader(proposerBoostRoot)
+	if !ok {
 		return false
 	}
 
-	parentRoot := boostBlock.Block.ParentRoot
-	slot := boostBlock.Block.Slot
+	parentRoot := boostBlock.ParentRoot
+	slot := boostBlock.Slot
 
-	parentBlock, ok := f.forkGraph.GetBlock(parentRoot)
-	if !ok || parentBlock == nil {
+	parentBlock, ok := f.forkGraph.GetHeader(parentRoot)
+	if !ok {
 		return false
 	}
 
-	if parentBlock.Block.Slot+1 < slot {
+	if parentBlock.Slot+1 < slot {
 		return true
 	}
 
@@ -210,7 +214,7 @@ func (f *ForkChoiceStore) shouldApplyProposerBoostGloasWith(proposerBoostRoot co
 		return true
 	}
 
-	parentProposerIndex := parentBlock.Block.ProposerIndex
+	parentProposerIndex := parentBlock.ProposerIndex
 	hasEquivocation := false
 	f.blockTimeliness.Range(func(key, value any) bool {
 		root := key.(common.Hash)
@@ -222,11 +226,11 @@ func (f *ForkChoiceStore) shouldApplyProposerBoostGloasWith(proposerBoostRoot co
 		if !timeliness[clparams.PtcTimelinessIndex] {
 			return true
 		}
-		blk, blkOk := f.forkGraph.GetBlock(root)
-		if !blkOk || blk == nil {
+		blk, blkOk := f.forkGraph.GetHeader(root)
+		if !blkOk {
 			return true
 		}
-		if blk.Block.ProposerIndex == parentProposerIndex && blk.Block.Slot+1 == slot {
+		if blk.ProposerIndex == parentProposerIndex && blk.Slot+1 == slot {
 			hasEquivocation = true
 			return false
 		}
@@ -318,8 +322,7 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *chec
 				}
 				vi := int(validatorIndex)
 				if vi < checkpointState.validatorSetSize &&
-					readFromBitset(checkpointState.actives, vi) &&
-					!readFromBitset(checkpointState.slasheds, vi) {
+					readFromBitset(checkpointState.actives, vi) {
 					weight += checkpointState.balances[vi]
 				}
 			}

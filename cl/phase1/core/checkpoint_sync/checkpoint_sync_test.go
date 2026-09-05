@@ -63,6 +63,27 @@ func setCheckpointURLs(t *testing.T, urls ...string) {
 	clparams.ConfigurableCheckpointsURLs = urls
 }
 
+func TestRemoteCheckpointSyncEnabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		config clparams.CaplinConfig
+		urls   []string
+		want   bool
+	}{
+		{name: "mainnet defaults", want: true},
+		{name: "disabled", config: clparams.CaplinConfig{DisabledCheckpointSync: true}, want: false},
+		{name: "devnet without custom URL", config: clparams.CaplinConfig{CustomConfigPath: "devnet.yaml"}, want: false},
+		{name: "devnet with custom URL", config: clparams.CaplinConfig{CustomConfigPath: "devnet.yaml"}, urls: []string{"https://checkpoint.example"}, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setCheckpointURLs(t, test.urls...)
+			require.Equal(t, test.want, RemoteCheckpointSyncEnabled(test.config))
+		})
+	}
+}
+
 // newMockSlowHttpServer creates a mock HTTP server that never responds and exits gracefully when context is cancelled
 func newMockSlowHttpServer(ctx context.Context) *httptest.Server {
 	mockSlowServer := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
@@ -167,6 +188,27 @@ func TestNormalizeCheckpointURL(t *testing.T) {
 		got := normalizeCheckpointURL(tt.input)
 		assert.Equal(t, tt.want, got, "normalizeCheckpointURL(%q)", tt.input)
 	}
+}
+
+func TestRemoteCheckpointSyncFetchEnvelopeUsesStandardPath(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/eth/v1/beacon/execution_payload_envelopes/finalized" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(encoded)
+	}))
+	t.Cleanup(server.Close)
+
+	syncer := &RemoteCheckpointSync{beaconConfig: &cfg, timeout: time.Second}
+	got, err := syncer.fetchEnvelope(t.Context(), server.URL+"/eth/v2/debug/beacon/states/finalized")
+	require.NoError(t, err)
+	require.NotNil(t, got)
 }
 
 func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {

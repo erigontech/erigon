@@ -19,24 +19,30 @@ package handler
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"mime"
 	"net/http"
 	"slices"
 	"strconv"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
+	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -174,29 +180,32 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 
 // ---- Payload Attestation Data ----
 
-// payloadAttestationDataResponse matches the PayloadAttestationData spec type.
-type payloadAttestationDataResponse struct {
-	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
-	Slot              uint64      `json:"slot,string"`
-	PayloadPresent    bool        `json:"payload_present"`
-	BlobDataAvailable bool        `json:"blob_data_available"`
-}
-
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
-// GET /eth/v1/validator/payload_attestation_data/{slot}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	if a.syncedData.Syncing() {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
+	}
 	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if slotStr == "" {
+		slotValues, ok := r.URL.Query()["slot"]
+		if !ok || len(slotValues) != 1 || slotValues[0] == "" {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot query parameter is required exactly once"))
+		}
+		slotStr = slotValues[0]
 	}
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("invalid slot: %w", err))
 	}
-
 	// Must be GLOAS epoch
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
@@ -204,15 +213,14 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	}
 
 	// Get the beacon block root for this slot from fork choice
-	headRoot, headSlot, _, err := a.getSelectedHead()
+	headRoot, headSlot, statusCode, err := a.getSelectedHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 
 	// The PTC attests to the current slot's block
 	if slot != headSlot {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("payload attestation data only available for head slot %d, requested %d", headSlot, slot))
+		return beaconhttp.NewNoContentResponse(), nil
 	}
 
 	// Check payload status: has the execution payload envelope been received?
@@ -224,7 +232,7 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	// (b) all local custody columns are present per PeerDAS.
 	blobDataAvailable := a.forkchoiceStore.IsBlobDataAvailable(slot, headRoot)
 
-	return newBeaconResponse(payloadAttestationDataResponse{
+	return newBeaconResponse(&cltypes.PayloadAttestationData{
 		BeaconBlockRoot:   headRoot,
 		Slot:              slot,
 		PayloadPresent:    payloadPresent,
@@ -466,6 +474,10 @@ func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {
 // Accepts application/json or application/octet-stream (SSZ).
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		return
+	}
 	var req []*cltypes.PayloadAttestationMessage
 
 	contentType, err := requestContentType(r)
@@ -486,7 +498,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		msgSize := (&cltypes.PayloadAttestationMessage{
 			Data: new(cltypes.PayloadAttestationData),
 		}).EncodingSizeSSZ()
-		if len(octets) == 0 || len(octets)%msgSize != 0 {
+		if len(octets)%msgSize != 0 {
 			beaconhttp.NewEndpointError(http.StatusBadRequest,
 				fmt.Errorf("SSZ body length %d is not a multiple of PayloadAttestationMessage size %d", len(octets), msgSize)).WriteTo(w)
 			return
@@ -495,7 +507,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 		req = make([]*cltypes.PayloadAttestationMessage, 0, count)
 		for i := range count {
 			msg := &cltypes.PayloadAttestationMessage{}
-			if err := msg.DecodeSSZ(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
+			if err := msg.DecodeSSZStrict(octets[i*msgSize:(i+1)*msgSize], int(clparams.GloasVersion)); err != nil {
 				beaconhttp.NewEndpointError(http.StatusBadRequest,
 					fmt.Errorf("failed to decode SSZ PayloadAttestationMessage at index %d: %w", i, err)).WriteTo(w)
 				return
@@ -503,8 +515,18 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 			req = append(req, msg)
 		}
 	case "application/json":
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(&req); err != nil {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize))
+		if err := decoder.Decode(&req); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data")).WriteTo(w)
+			return
+		}
+		if uint64(len(req)) > a.beaconChainCfg.PtcSize {
+			beaconhttp.NewEndpointError(http.StatusBadRequest,
+				fmt.Errorf("payload attestation count %d exceeds %d", len(req), a.beaconChainCfg.PtcSize)).WriteTo(w)
 			return
 		}
 	default:
@@ -525,38 +547,35 @@ func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWrite
 
 		// Validate via PayloadAttestationService (handles dedup, clock disparity, pending queue,
 		// and delegates to forkchoice.OnPayloadAttestationMessage for signature + PTC checks)
-		if a.payloadAttestationService != nil {
-			if err := a.payloadAttestationService.ProcessMessage(r.Context(), nil, msg); err != nil {
-				if errors.Is(err, clservices.ErrAttestationQueued) {
-					continue
-				}
-				failures = append(failures, poolingFailure{
-					Index:   i,
-					Message: err.Error(),
-				})
-				continue
-			}
+		if a.payloadAttestationService == nil {
+			failures = append(failures, poolingFailure{Index: i, Message: "payload attestation validation unavailable"})
+			continue
 		}
-
-		// Store in pool for GET endpoint serving
-		if a.epbsPool != nil {
-			a.epbsPool.PayloadAttestations.Add(pool.PayloadAttestationKey{
-				Slot:           msg.Data.Slot,
-				ValidatorIndex: msg.ValidatorIndex,
-			}, msg)
+		encodedSSZ, err := msg.EncodeSSZ(nil)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
 		}
-
-		// Broadcast to gossip
-		if a.sentinel != nil {
-			encodedSSZ, err := msg.EncodeSSZ(nil)
-			if err != nil {
+		publishFailed := false
+		if err := a.payloadAttestationService.ProcessRESTMessage(r.Context(), msg, func() error {
+			err := a.publishGossip(r.Context(), gossip.TopicNamePayloadAttestation, encodedSSZ)
+			publishFailed = err != nil
+			return err
+		}); err != nil {
+			if publishFailed {
 				beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 				return
 			}
-			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNamePayloadAttestation, encodedSSZ); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish payload attestation to gossip", "err", err)
+			if errors.Is(err, clservices.ErrAttestationDuplicate) {
+				continue
 			}
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
+
 	}
 
 	if len(failures) > 0 {
@@ -611,7 +630,7 @@ func (a *ApiHandler) GetEthV1BeaconPoolProposerPreferences(w http.ResponseWriter
 // Accepts application/json or application/octet-stream (SSZ).
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolProposerPreferences(w http.ResponseWriter, r *http.Request) {
-	reqs, ok := decodeProposerPreferencesRequest(w, r)
+	reqs, ok := decodeProposerPreferencesRequest(w, r, false)
 	if !ok {
 		return
 	}
@@ -622,14 +641,18 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerPreferences(w http.ResponseWrite
 // POST /eth/v1/validator/proposer_preferences
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter, r *http.Request) {
-	reqs, ok := decodeProposerPreferencesRequest(w, r)
+	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		return
+	}
+	reqs, ok := decodeProposerPreferencesRequest(w, r, true)
 	if !ok {
 		return
 	}
 	a.postProposerPreferences(w, r, reqs)
 }
 
-func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([]*cltypes.SignedProposerPreferences, bool) {
+func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, canonical bool) ([]*cltypes.SignedProposerPreferences, bool) {
 	contentType, err := requestContentType(r)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
@@ -669,7 +692,16 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request) ([
 		}
 		var reqs []*cltypes.SignedProposerPreferences
 		if err := json.Unmarshal(body, &reqs); err == nil {
+			if len(reqs) > maxProposerPreferencesRequestItems {
+				beaconhttp.NewEndpointError(http.StatusBadRequest,
+					fmt.Errorf("proposer preferences count %d exceeds %d", len(reqs), maxProposerPreferencesRequestItems)).WriteTo(w)
+				return nil, false
+			}
 			return reqs, true
+		}
+		if canonical {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("proposer preferences request must be a JSON array")).WriteTo(w)
+			return nil, false
 		}
 		req := &cltypes.SignedProposerPreferences{}
 		if err := json.Unmarshal(body, req); err != nil {
@@ -689,21 +721,21 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty proposer preferences request")).WriteTo(w)
 		return
 	}
+	failures := make([]poolingFailure, 0)
 	for i, req := range reqs {
 		if req == nil || req.Message == nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest,
-				fmt.Errorf("missing message in signed proposer preferences at index %d", i)).WriteTo(w)
-			return
+			failures = append(failures, poolingFailure{Index: i, Message: "missing message in signed proposer preferences"})
+			continue
 		}
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-				return
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
 			}
 		}
 
-		if a.epbsPool != nil {
+		if a.proposerPreferencesService == nil && a.epbsPool != nil {
 			a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
 				Slot:          req.Message.ProposalSlot,
 				DependentRoot: req.Message.DependentRoot,
@@ -721,7 +753,10 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
-
+	if len(failures) != 0 {
+		a.writePoolingFailures(w, failures)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -761,9 +796,14 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("block not found for block root %v", blockRoot))
 	}
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	slot := block.Block.Slot
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
-	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	finalized := a.forkchoiceStore.FinalizedCheckpoint()
+	finalizedSlot := finalized.Epoch * a.beaconChainCfg.SlotsPerEpoch
+	isFinalized := slot <= finalizedSlot && a.forkchoiceStore.Ancestor(finalized.Root, slot).Root == blockRoot
 	return newBeaconResponse(envelope).
 		WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(blockRoot)).
@@ -776,67 +816,407 @@ func (a *ApiHandler) GetEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrite
 // The envelope is processed through forkchoice and broadcast on gossip.
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWriter, r *http.Request) {
-	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(a.beaconChainCfg),
-	}
+	a.postEthV1BeaconExecutionPayloadEnvelope(w, r, true)
+}
 
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelopeLegacy(w http.ResponseWriter, r *http.Request) {
+	a.postEthV1BeaconExecutionPayloadEnvelope(w, r, false)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWriter, r *http.Request, canonical bool) {
 	contentType, err := requestContentType(r)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err).WriteTo(w)
 		return
 	}
-	switch contentType {
-	case "application/json":
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize)).Decode(signedEnvelope); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+	blobDataIncluded := false
+	validation := BlockPublishingValidationGossip
+	if canonical {
+		if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 			return
 		}
-	case "application/octet-stream":
-		octect, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize))
+		value := r.Header.Get("Eth-Blob-Data-Included")
+		if value == "" {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Eth-Blob-Data-Included header is required")).WriteTo(w)
+			return
+		}
+		blobDataIncluded, err = strconv.ParseBool(value)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Blob-Data-Included: %w", err)).WriteTo(w)
+			return
+		}
+		validation, err = a.parseBlockPublishingValidation(r, 2)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := signedEnvelope.DecodeSSZ(octect, int(clparams.GloasVersion)); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
-		}
-	default:
-		beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType,
-			fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))).WriteTo(w)
+	}
+	signedEnvelope, contents, err := a.decodeExecutionPayloadEnvelopeRequest(w, r, contentType, blobDataIncluded)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 
-	if signedEnvelope.Message == nil {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
 	}
-
-	// Process through forkchoice so the local node marks the block as FULL.
-	// checkBlobData=false because gossip validation handles it; validatePayload=true
-	// so the EL receives NewPayload for the execution payload.
-	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, false, true); err != nil {
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
-		} else {
-			beaconhttp.WrapEndpointError(err).WriteTo(w)
+	if canonical && !blobDataIncluded && contents == nil {
+		contents, err = a.pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
 	}
+	if validation == BlockPublishingValidationConsensusAndEquivocation {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if !ok || block == nil || block.Block == nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block is unavailable")).WriteTo(w)
+			return
+		}
+		if a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
+			return
+		}
+	}
+	if validation == BlockPublishingValidationGossip {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(r.Context(), signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+	}
+	contentsIntegrationFailed := false
+	if contents != nil {
+		if err := a.validateAndStoreExecutionPayloadEnvelopeContents(r.Context(), contents); err != nil {
+			if !errors.Is(err, errExecutionPayloadEnvelopeIntegration) {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
+			contentsIntegrationFailed = true
+		}
+	}
 
-	// Broadcast the envelope on the execution_payload gossip topic
-	if a.sentinel != nil {
+	status := http.StatusOK
+	if contentsIntegrationFailed {
+		status = http.StatusAccepted
+	}
+	gossipValidated := false
+	emitGossipEvent := false
+	emitIntegrationEvents := false
+	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
+		if canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if canonical && validation != BlockPublishingValidationGossip {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		switch {
+		case errors.Is(err, forkchoice.ErrIgnore):
+			persisted, _ := a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
+			if !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
+				if canonical {
+					beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err).WriteTo(w)
+					return
+				}
+				status = http.StatusAccepted
+				break
+			}
+			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
+			if !contentsIntegrationFailed {
+				status = http.StatusOK
+			}
+			gossipValidated = true
+		case errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
+			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
+			status = http.StatusAccepted
+			gossipValidated = true
+			emitGossipEvent = true
+		case canonical && validation == BlockPublishingValidationGossip:
+			status = http.StatusAccepted
+			gossipValidated = true
+			emitGossipEvent = true
+		case canonical:
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		default:
+			beaconhttp.WrapEndpointError(err).WriteTo(w)
+			return
+		}
+	} else {
+		gossipValidated = true
+		emitGossipEvent = true
+		emitIntegrationEvents = true
+	}
+	if gossipValidated && (canonical || a.sentinel != nil) && validation == BlockPublishingValidationConsensusAndEquivocation {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if !ok || block == nil || block.Block == nil || a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
+			return
+		}
+	}
+	if emitGossipEvent && (canonical || a.sentinel != nil) && a.emitters != nil && signedEnvelope.Message.Payload != nil {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if ok && block != nil && block.Block != nil {
+			a.emitters.Operation().SendExecutionPayloadGossip(&beaconevents.ExecutionPayloadGossipData{
+				Slot: block.Block.Slot, BuilderIndex: signedEnvelope.Message.BuilderIndex,
+				BlockHash: signedEnvelope.Message.Payload.BlockHash, BlockRoot: signedEnvelope.Message.BeaconBlockRoot,
+			})
+		}
+	}
+	if status == http.StatusOK && emitIntegrationEvents && a.emitters != nil {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if ok && block != nil && block.Block != nil && signedEnvelope.Message.Payload != nil {
+			a.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
+				Slot: block.Block.Slot, BuilderIndex: signedEnvelope.Message.BuilderIndex,
+				BlockHash: signedEnvelope.Message.Payload.BlockHash, BlockRoot: signedEnvelope.Message.BeaconBlockRoot,
+				ExecutionOptimistic: a.forkchoiceStore.IsRootOptimistic(signedEnvelope.Message.BeaconBlockRoot),
+			})
+			a.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
+				Slot: block.Block.Slot, BlockRoot: signedEnvelope.Message.BeaconBlockRoot,
+			})
+			a.emitFullHeadV2(block, signedEnvelope.Message.BeaconBlockRoot)
+		}
+	}
+
+	if gossipValidated && (canonical || a.sentinel != nil) {
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-			a.logger.Debug("[Beacon REST] failed to publish execution payload envelope to gossip", "err", err)
+		if err := a.publishGossip(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
 		}
 	}
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(status)
+}
+
+func signedExecutionPayloadEnvelopesEqual(left, right *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	leftSSZ, leftErr := left.EncodeSSZ(nil)
+	rightSSZ, rightErr := right.EncodeSSZ(nil)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftSSZ, rightSSZ)
+}
+
+func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) {
+	headRoot, headSlot, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil || headRoot != blockRoot || a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return
+	}
+	payloadStatus := a.forkchoiceStore.GetHeadPayloadStatus()
+	if payloadStatus != cltypes.PayloadStatusFull {
+		return
+	}
+	optimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
+	var event *beaconevents.HeadV2Data
+	err = a.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
+		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, headRoot, block.Block.StateRoot, "full", optimistic)
+		return err
+	})
+	if err != nil || event == nil {
+		return
+	}
+	a.emitters.WithHeadEventLock(func() {
+		currentRoot, currentSlot, err := a.forkchoiceStore.GetHead(nil)
+		if err != nil || currentRoot != headRoot || currentSlot != headSlot ||
+			a.forkchoiceStore.GetHeadPayloadStatus() != payloadStatus ||
+			a.forkchoiceStore.IsRootOptimistic(currentRoot) != optimistic {
+			return
+		}
+		a.emitters.State().SendHeadV2(event)
+	})
+}
+
+func (a *ApiHandler) decodeExecutionPayloadEnvelopeRequest(w http.ResponseWriter, r *http.Request, contentType string, blobDataIncluded bool) (*cltypes.SignedExecutionPayloadEnvelope, *cltypes.SignedExecutionPayloadEnvelopeContents, error) {
+	signedEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(a.beaconChainCfg)}
+	var contents *cltypes.SignedExecutionPayloadEnvelopeContents
+	if blobDataIncluded {
+		contents = newSignedExecutionPayloadEnvelopeContentsForDecoding(a.beaconChainCfg, a.ethClock.GetCurrentSlot())
+	}
+	switch contentType {
+	case "application/json":
+		target := any(signedEnvelope)
+		if contents != nil {
+			target = contents
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize))
+		if err := decoder.Decode(target); err != nil {
+			return nil, nil, err
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			return nil, nil, errors.New("request body contains trailing data")
+		}
+	case "application/octet-stream":
+		octets, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxExecutionPayloadEnvelopeRequestSize))
+		if err != nil {
+			return nil, nil, err
+		}
+		if contents != nil {
+			if err := contents.DecodeSSZStrict(octets, int(clparams.GloasVersion)); err != nil {
+				return nil, nil, err
+			}
+		} else if err := signedEnvelope.DecodeSSZStrict(octets, int(clparams.GloasVersion)); err != nil {
+			return nil, nil, err
+		}
+	default:
+		return nil, nil, fmt.Errorf("unsupported content type: %s", r.Header.Get("Content-Type"))
+	}
+	if contents != nil {
+		signedEnvelope = contents.SignedExecutionPayloadEnvelope
+	}
+	return signedEnvelope, contents, nil
+}
+
+func newSignedExecutionPayloadEnvelopeContentsForDecoding(cfg *clparams.BeaconChainConfig, currentSlot uint64) *cltypes.SignedExecutionPayloadEnvelopeContents {
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(cfg, currentSlot)
+	maxBlobs := int(min(cfg.MaxBlobsPerBlockUpperBound(), uint64(cltypes.MaxBlobsCommittmentsPerBlock)))
+	contents.KZGProofs = solid.NewStaticListSSZ[*cltypes.KZGProof](maxBlobs*int(cfg.NumberOfColumns), cltypes.BYTES_KZG_PROOF)
+	contents.Blobs = solid.NewStaticListSSZ[*cltypes.Blob](maxBlobs, int(cltypes.BYTES_PER_BLOB))
+	return contents
+}
+
+func (a *ApiHandler) pendingLocalExecutionPayloadEnvelopeContents(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (*cltypes.SignedExecutionPayloadEnvelopeContents, error) {
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil || a.pendingBuilderPayloads == nil {
+		return nil, nil
+	}
+	block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
+		return nil, nil
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil || bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
+		return nil, nil
+	}
+	cached, ok := a.pendingBuilderPayloads.Get(a.ethClock.GetCurrentSlot(), bid.Message)
+	if !ok || cached == nil || len(cached.BlobBundles) == 0 {
+		return nil, nil
+	}
+	if signedEnvelope.Message.BuilderIndex != bid.Message.BuilderIndex ||
+		signedEnvelope.Message.Payload.BlockHash != bid.Message.BlockHash {
+		return nil, errors.New("signed execution payload envelope does not match the selected local bid")
+	}
+	if err := validateLocalExecutionPayloadBid(a.beaconChainCfg, block.Block.Slot, bid.Message, cached); err != nil {
+		return nil, err
+	}
+	bundles := make(map[common.Bytes48]BlobBundle, len(cached.BlobBundles))
+	for _, bundle := range cached.BlobBundles {
+		bundles[bundle.Commitment] = bundle
+	}
+	contents := newSignedExecutionPayloadEnvelopeContentsForDecoding(a.beaconChainCfg, block.Block.Slot)
+	contents.SignedExecutionPayloadEnvelope = signedEnvelope
+	commitments := &bid.Message.BlobKzgCommitments
+	for i := 0; i < commitments.Len(); i++ {
+		commitment := commitments.Get(i)
+		if commitment == nil {
+			return nil, fmt.Errorf("selected local bid commitment %d is nil", i)
+		}
+		bundle, ok := bundles[common.Bytes48(*commitment)]
+		if !ok || bundle.Blob == nil || len(bundle.KzgProofs) != int(a.beaconChainCfg.NumberOfColumns) {
+			return nil, fmt.Errorf("selected local bid blob data %d is unavailable", i)
+		}
+		contents.Blobs.Append(bundle.Blob)
+		for j := range bundle.KzgProofs {
+			proof := cltypes.KZGProof(bundle.KzgProofs[j])
+			contents.KZGProofs.Append(&proof)
+		}
+	}
+	return contents, nil
+}
+
+func (a *ApiHandler) validateAndStoreExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {
+	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil {
+		return errors.New("execution payload envelope contents has nil envelope")
+	}
+	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(ctx, contents.SignedExecutionPayloadEnvelope); err != nil {
+		return err
+	}
+	return a.storeExecutionPayloadEnvelopeContents(ctx, contents)
+}
+
+var errExecutionPayloadEnvelopeIntegration = errors.New("execution payload envelope integration failed")
+
+func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {
+	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil || contents.SignedExecutionPayloadEnvelope.Message == nil {
+		return errors.New("execution payload envelope contents has nil envelope")
+	}
+	envelope := contents.SignedExecutionPayloadEnvelope.Message
+	block, ok := a.forkchoiceStore.GetBlock(envelope.BeaconBlockRoot)
+	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("execution payload envelope references an unknown block")
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return errors.New("execution payload envelope block has no bid")
+	}
+	commitments := &bid.Message.BlobKzgCommitments
+	if contents.Blobs == nil || contents.KZGProofs == nil || contents.Blobs.Len() != commitments.Len() ||
+		contents.KZGProofs.Len() != commitments.Len()*int(a.beaconChainCfg.NumberOfColumns) {
+		return errors.New("execution payload envelope blob, proof, and commitment counts do not match")
+	}
+	cellsAndProofs := make([]peerdasutils.CellsAndKZGProofs, 0, commitments.Len())
+	bundles := make([]BlobBundle, 0, commitments.Len())
+	for i := 0; i < commitments.Len(); i++ {
+		blob := contents.Blobs.Get(i)
+		commitment := commitments.Get(i)
+		if blob == nil || commitment == nil {
+			return fmt.Errorf("execution payload envelope blob %d is nil", i)
+		}
+		bundle := BlobBundle{Blob: blob, Commitment: common.Bytes48(*commitment), KzgProofs: make([]common.Bytes48, a.beaconChainCfg.NumberOfColumns)}
+		cells, err := das.ComputeCells(blob)
+		if err != nil {
+			return err
+		}
+		proofs := make([]cltypes.KZGProof, a.beaconChainCfg.NumberOfColumns)
+		for j := range proofs {
+			proof := contents.KZGProofs.Get(i*int(a.beaconChainCfg.NumberOfColumns) + j)
+			if proof == nil {
+				return fmt.Errorf("execution payload envelope proof %d is nil", j)
+			}
+			proofs[j] = *proof
+			bundle.KzgProofs[j] = common.Bytes48(*proof)
+		}
+		bundles = append(bundles, bundle)
+		cellsAndProofs = append(cellsAndProofs, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
+	}
+	columns, err := peerdasutils.GetDataColumnSidecarsGloas(block.Block.Slot, envelope.BeaconBlockRoot, cellsAndProofs)
+	if err != nil {
+		return err
+	}
+	for _, column := range columns {
+		if !das.VerifyDataColumnSidecarKZGProofsWithCommitments(column, commitments) {
+			return fmt.Errorf("execution payload envelope column %d has invalid KZG proof", column.Index)
+		}
+	}
+	if len(columns) != 0 && a.columnStorage == nil {
+		return fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration)
+	}
+	for _, column := range columns {
+		if err := a.columnStorage.WriteColumnSidecars(ctx, envelope.BeaconBlockRoot, int64(column.Index), column); err != nil {
+			return fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err)
+		}
+	}
+	for _, bundle := range bundles {
+		a.blobBundles.Add(bundle.Commitment, bundle)
+	}
+	for _, column := range columns {
+		if a.sentinel != nil {
+			encoded, err := column.EncodeSSZ(nil)
+			if err != nil {
+				return err
+			}
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(das.ComputeSubnetForDataColumnSidecar(column.Index)), encoded); err != nil {
+				a.logger.Debug("failed to publish execution payload data column", "err", err)
+			}
+		}
+	}
+	return nil
 }
 
 // ---- Execution Payload Bid ----
@@ -845,6 +1225,18 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 // POST /eth/v1/beacon/execution_payload_bid
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request) {
+	a.postEthV1BeaconExecutionPayloadBid(w, r, true)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadBidLegacy(w http.ResponseWriter, r *http.Request) {
+	a.postEthV1BeaconExecutionPayloadBid(w, r, false)
+}
+
+func (a *ApiHandler) postEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request, canonical bool) {
+	if canonical && r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		return
+	}
 	req := new(cltypes.SignedExecutionPayloadBid)
 	contentType, err := requestContentType(r)
 	if err != nil {
@@ -853,8 +1245,13 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 	}
 	switch contentType {
 	case "application/json":
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize)).Decode(req); err != nil {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize))
+		if err := decoder.Decode(req); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
+		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data")).WriteTo(w)
 			return
 		}
 	case "application/octet-stream":
@@ -863,7 +1260,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := req.DecodeSSZ(octets, int(clparams.GloasVersion)); err != nil {
+		if err := req.DecodeSSZStrict(octets, int(clparams.GloasVersion)); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
@@ -880,11 +1277,8 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 	// Validate via the bid service (checks signature, slot timing, proposer preferences, etc.)
 	if a.executionPayloadBidService != nil {
 		if err := a.executionPayloadBidService.ProcessMessage(r.Context(), nil, req); err != nil {
-			if !errors.Is(err, clservices.ErrBidQueued) {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-				return
-			}
-			a.logger.Debug("[Beacon REST] queued execution payload bid", "err", err)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
 		}
 	}
 
@@ -902,8 +1296,8 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 	w.WriteHeader(http.StatusOK)
 }
 
-// GetEthV1ValidatorExecutionPayloadBid returns the highest bid for a given slot and builder index.
-// GET /eth/v1/validator/execution_payload_bid/{slot}/{builder_index}
+// GetEthV1ValidatorExecutionPayloadBid produces an unsigned bid for a registered builder.
+// GET /eth/v1/validator/execution_payload_bids/{slot}/{builder_index}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
@@ -925,44 +1319,166 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 			fmt.Errorf("invalid builder_index: %w", err))
 	}
 
+	if a.beaconChainCfg.SlotsPerEpoch == 0 {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
+	}
 	// Must be GLOAS epoch
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bids not available before GLOAS fork"))
 	}
-
+	currentSlot := a.ethClock.GetCurrentSlot()
+	if slot < currentSlot || slot-currentSlot > 1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
+	}
+	var (
+		baseBlockRoot common.Hash
+		baseBlockSlot uint64
+		baseState     *state.CachingBeaconState
+	)
+	if a.syncedData != nil {
+		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			baseBlockRoot = root
+			baseBlockSlot = headState.LatestBlockHeader().Slot
+			var copyErr error
+			baseState, copyErr = headState.Copy()
+			return copyErr
+		}); err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+		}
+	}
+	if baseState == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("head state is unavailable"))
+	}
+	if err := transition.DefaultMachine.ProcessSlots(baseState, slot); err != nil {
+		return nil, err
+	}
+	builders := baseState.GetBuilders()
+	if builders == nil || builderIndex >= uint64(builders.Len()) || builders.Get(int(builderIndex)) == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("builder index %d is not registered", builderIndex))
+	}
+	if !state.IsActiveBuilder(baseState, builderIndex) {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("builder index %d is not active", builderIndex))
+	}
+	if builders.Get(int(builderIndex)).Version != a.beaconChainCfg.PayloadBuilderVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("builder index %d has an unsupported version", builderIndex))
+	}
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(slot)
+	if err != nil {
+		return nil, err
+	}
+	dependentRoot, err := state.GetProposerDependentRoot(baseState, epoch)
+	if err != nil {
+		return nil, err
+	}
 	if a.epbsPool == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
-			fmt.Errorf("EPBS pool not available"))
-	}
-
-	// Scan the highest bids cache for a matching (slot, builder_index).
-	// The cache is keyed by (slot, parentBlockHash, parentBlockRoot), so we iterate all keys
-	// and find the highest-value bid matching the requested slot+builder.
-	var bestBid *cltypes.SignedExecutionPayloadBid
-	for _, key := range a.epbsPool.HighestBidKeys() {
-		if key.Slot != slot {
-			continue
-		}
-		bid, ok := a.epbsPool.GetHighestBid(key)
-		if !ok || bid == nil || bid.Message == nil {
-			continue
-		}
-		if bid.Message.BuilderIndex != builderIndex {
-			continue
-		}
-		if bestBid == nil || bid.Message.Value > bestBid.Message.Value {
-			bestBid = bid
-		}
-	}
-
-	if bestBid == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("no bid found for slot %d builder %d", slot, builderIndex))
+			fmt.Errorf("proposer preferences are unavailable for slot %d", slot))
 	}
+	preferences, ok := a.epbsPool.GetPreference(slot, dependentRoot)
+	if !ok || preferences == nil || preferences.Message == nil ||
+		preferences.Message.ProposalSlot != slot || preferences.Message.DependentRoot != dependentRoot ||
+		preferences.Message.ValidatorIndex != proposerIndex {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("proposer preferences are unavailable for slot %d", slot))
+	}
+	ctx := context.WithValue(r.Context(), gloasBlockProductionOptionsKey{}, &gloasBlockProductionOptions{
+		payloadFeeRecipient: &preferences.Message.FeeRecipient,
+		deferPayloadCache:   true,
+	})
+	options := gloasBlockOptionsFromContext(ctx)
+	beaconBody, executionValue, err := a.produceBeaconBody(
+		ctx, 4, baseBlockSlot, baseBlockRoot, baseState, slot, common.Bytes96{}, common.Hash{},
+	)
+	if err != nil {
+		return nil, err
+	}
+	if beaconBody == nil || beaconBody.SignedExecutionPayloadBid == nil || beaconBody.SignedExecutionPayloadBid.Message == nil {
+		return nil, errors.New("local execution payload bid is unavailable")
+	}
+	value, err := executionPayloadValueGwei(executionValue)
+	if err != nil {
+		return nil, err
+	}
+	latestSlot := a.ethClock.GetCurrentSlot()
+	if slot < latestSlot || slot-latestSlot > 1 {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
+			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
+	}
+	latestHeadNode, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil {
+		return nil, err
+	}
+	if latestHeadNode.Root != baseBlockRoot {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("execution payload bid is unavailable because the head changed"))
+	}
+	bid := beaconBody.SignedExecutionPayloadBid.Message
+	expectedExecutionParent := baseState.LatestExecutionPayloadHeader().BlockHash
+	if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
+		isPreGloasParent := baseBlockSlot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch
+		buildOnFull := !isPreGloasParent &&
+			latestHeadNode.PayloadStatus == cltypes.PayloadStatusFull &&
+			a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
+			a.forkchoiceStore.ShouldBuildOnFull(latestHeadNode, slot)
+		expectedExecutionParent = gloasProposalExecutionHead(baseBlockSlot, a.beaconChainCfg, parentBid, buildOnFull)
+	}
+	if bid.ParentBlockHash != expectedExecutionParent {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			errors.New("execution payload bid is unavailable because the execution parent changed"))
+	}
+	bid.BuilderIndex = builderIndex
+	bid.Value = 0
+	bid.ExecutionPayment = value
+	if options.selfBuildPayload == nil {
+		return nil, errors.New("local execution payload is unavailable")
+	}
+	if err := validateLocalExecutionPayloadBid(a.beaconChainCfg, slot, bid, options.selfBuildPayload); err != nil {
+		return nil, err
+	}
+	storedBid, ok := a.pendingBuilderPayloads.Add(latestSlot, bid, options.selfBuildPayload)
+	if !ok {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			errors.New("pending execution payload bid capacity is unavailable"))
+	}
+	return newBeaconResponse(storedBid).WithVersion(clparams.GloasVersion), nil
+}
 
-	return newBeaconResponse(bestBid.Message).WithVersion(clparams.GloasVersion), nil
+func executionPayloadValueGwei(value *big.Int) (uint64, error) {
+	if value == nil || value.Sign() <= 0 {
+		return 0, nil
+	}
+	gwei := new(big.Int).Quo(value, big.NewInt(1_000_000_000))
+	if !gwei.IsUint64() {
+		return 0, errors.New("execution payload value exceeds uint64 gwei")
+	}
+	return gwei.Uint64(), nil
+}
+
+func validateLocalExecutionPayloadBid(cfg *clparams.BeaconChainConfig, slot uint64, bid *cltypes.ExecutionPayloadBid, cached *selfBuildPayload) error {
+	if bid == nil || cached == nil || cached.Payload == nil {
+		return errors.New("local execution payload bid is incomplete")
+	}
+	if cached.Payload.SlotNumber != slot || cached.Payload.BlockHash != bid.BlockHash {
+		return errors.New("local execution payload does not match its bid")
+	}
+	executionRequests := cached.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
+	}
+	requestsRoot, err := executionRequests.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if common.Hash(requestsRoot) != bid.ExecutionRequestsRoot {
+		return errors.New("local execution requests do not match their bid")
+	}
+	return nil
 }
 
 // ---- Validator Execution Payload Envelope ----
@@ -999,15 +1515,10 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelope(w http.ResponseWr
 			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
 	}
 
-	// Look up the cached self-build envelope for this slot.
-	envelope, ok := a.selfBuildEnvelopes.Get(slot)
+	envelope, ok := a.selfBuildEnvelopeForSlot(slot, func(envelope *cltypes.ExecutionPayloadEnvelope) bool {
+		return envelope.BuilderIndex == builderIndex
+	})
 	if !ok || envelope == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("no execution payload envelope found for slot %d", slot))
-	}
-
-	// Validate that the requested builder_index matches the cached envelope.
-	if envelope.BuilderIndex != builderIndex {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("no execution payload envelope found for slot %d with builder_index %d", slot, builderIndex))
 	}
@@ -1035,13 +1546,119 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeBySlot(w http.Resp
 			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
 	}
 
-	envelope, ok := a.selfBuildEnvelopes.Get(slot)
+	envelope, ok := a.selfBuildEnvelopeForSlot(slot, nil)
 	if !ok || envelope == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("no execution payload envelope found for slot %d", slot))
 	}
 
 	return newBeaconResponse(envelope).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+}
+
+func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid slot: %w", err))
+	}
+	rootStr, err := beaconhttp.StringFromRequest(r, "beacon_block_root")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	var root common.Hash
+	if err := root.UnmarshalText([]byte(rootStr)); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid beacon_block_root: %w", err))
+	}
+	if slot != a.ethClock.GetCurrentSlot() {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("execution payload envelope is only retained for the current slot"))
+	}
+	if slot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
+	}
+	headRoot, _, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil {
+		return nil, err
+	}
+	if headRoot != root {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
+	}
+	key := selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: root}
+	envelope, ok := a.selfBuildEnvelopes.Get(key)
+	if !ok {
+		block, found := a.forkchoiceStore.GetBlock(root)
+		if !found || block == nil || block.Block == nil || block.Block.Slot != slot {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+				fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
+		}
+		envelope, err = a.localExecutionPayloadEnvelope(root, block)
+		if err != nil {
+			return nil, err
+		}
+		if envelope != nil {
+			a.selfBuildEnvelopes.Add(key, envelope)
+			ok = true
+		}
+	}
+	if !ok || envelope == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
+	}
+	return newBeaconResponse(envelope).WithVersion(clparams.GloasVersion), nil
+}
+
+func (a *ApiHandler) localExecutionPayloadEnvelope(root common.Hash, block *cltypes.SignedBeaconBlock) (*cltypes.ExecutionPayloadEnvelope, error) {
+	computedRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	if common.Hash(computedRoot) != root {
+		return nil, errors.New("fork choice block does not match its root")
+	}
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return nil, nil
+	}
+	var cached *selfBuildPayload
+	var ok bool
+	if bid.Message.BuilderIndex == clparams.BuilderIndexSelfBuild {
+		cached, ok = a.selfBuildPayloads.Get(bid.Message.BlockHash)
+	} else if a.pendingBuilderPayloads != nil {
+		cached, ok = a.pendingBuilderPayloads.Get(a.ethClock.GetCurrentSlot(), bid.Message)
+	}
+	if !ok {
+		return nil, nil
+	}
+	if err := validateLocalExecutionPayloadBid(a.beaconChainCfg, block.Block.Slot, bid.Message, cached); err != nil {
+		return nil, err
+	}
+	executionRequests := cached.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
+	}
+	return &cltypes.ExecutionPayloadEnvelope{
+		Payload:               cached.Payload,
+		ExecutionRequests:     executionRequests,
+		BuilderIndex:          bid.Message.BuilderIndex,
+		BeaconBlockRoot:       root,
+		ParentBeaconBlockRoot: block.Block.ParentRoot,
+	}, nil
+}
+
+func (a *ApiHandler) selfBuildEnvelopeForSlot(slot uint64, accept func(*cltypes.ExecutionPayloadEnvelope) bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
+	keys := a.selfBuildEnvelopes.Keys()
+	for _, key := range slices.Backward(keys) {
+		if key.Slot != slot {
+			continue
+		}
+		envelope, ok := a.selfBuildEnvelopes.Get(key)
+		if ok && envelope != nil && (accept == nil || accept(envelope)) {
+			return envelope, true
+		}
+	}
+	return nil, false
 }
 
 // ---- Helpers ----

@@ -132,8 +132,11 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 			return f.headHash, f.headSlot, nil
 		}
 		headRoot, headSlot := f.forkGraph.AnchorRoot(), f.forkGraph.AnchorSlot()
-		f.publishSelectedHead(headRoot, headSlot)
-		return headRoot, headSlot, nil
+		f.headHash = headRoot
+		f.headSlot = headSlot
+		f.headPayloadStatus = cltypes.PayloadStatusPending
+		f.publishSelectedHead(f.headHash, f.headSlot)
+		return f.headHash, f.headSlot, nil
 	}
 
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
@@ -149,6 +152,23 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.headPayloadStatus
+}
+
+func (f *ForkChoiceStore) GetHeadNode() (ForkChoiceNode, error) {
+	for range 3 {
+		root, slot, err := f.GetHead(nil)
+		if err != nil {
+			return ForkChoiceNode{}, err
+		}
+		f.mu.RLock()
+		if f.headHash == root && f.headSlot == slot {
+			node := ForkChoiceNode{Root: root, PayloadStatus: f.headPayloadStatus}
+			f.mu.RUnlock()
+			return node, nil
+		}
+		f.mu.RUnlock()
+	}
+	return ForkChoiceNode{}, errors.New("fork choice head changed during snapshot")
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.

@@ -19,8 +19,13 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -30,17 +35,51 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type attesterSlashingErrorStore struct {
 	forkchoice.ForkChoiceStorage
 	err error
+}
+
+type failFirstUpdateDB struct {
+	kv.RwDB
+	failed bool
+}
+
+type doneObservedContext struct {
+	context.Context
+	doneObserved chan struct{}
+	once         sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.doneObserved) })
+	return c.Context.Done()
+}
+
+func (db *failFirstUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
+	if !db.failed {
+		db.failed = true
+		return errors.New("database unavailable")
+	}
+	return db.RwDB.Update(ctx, f)
 }
 
 func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
@@ -153,7 +192,121 @@ func TestBlockServiceSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+
+	service, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, blocks[1]))
+	key := proposerIndexAndSlot{
+		proposerIndex: blocks[1].Block.ProposerIndex,
+		slot:          blocks[1].Block.Slot,
+	}
+	seen, ok := service.(*blockService).seenBlocksCache.Get(key)
+	require.True(t, ok)
+	signedRoot, err := blocks[1].HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(signedRoot), seen.signedRoot)
+}
+
+func TestBlockServiceGossipRejectsBlockOutsideFinalizedChain(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
 	blocks, _, post := tests.GetBellatrixRandom()
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: common.Hash{0xff}}
+
+	err := blockService.ValidateGossip(t.Context(), blocks[1])
+	require.ErrorContains(t, err, "finalized checkpoint is not an ancestor")
+}
+
+func TestBlockServiceGossipUsesCheckpointSyncAnchorForFinalizedAncestor(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	fcu.AnchorSlotVal = blocks[0].Block.Slot
+	fcu.Ancestors[fcu.AnchorSlotVal] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+
+	require.NoError(t, blockService.ValidateGossip(t.Context(), blocks[1]))
+}
+
+func TestBlockServiceGossipUsesForkChoiceFinalizedCheckpointAtGenesis(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	headState, err := post.Copy()
+	require.NoError(t, err)
+	headState.SetFinalizedCheckpoint(solid.Checkpoint{})
+
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(headState))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	anchorRoot := blocks[1].Block.ParentRoot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Root: anchorRoot}
+	fcu.Headers[anchorRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.StateAtBlockRootVal[anchorRoot] = parentState
+	fcu.AnchorRootVal = anchorRoot
+	fcu.AnchorSlotVal = blocks[0].Block.Slot
+	fcu.Ancestors[fcu.AnchorSlotVal] = forkchoice.ForkChoiceNode{Root: anchorRoot}
+
+	require.NoError(t, blockService.ValidateGossip(t.Context(), blocks[1]))
+}
+
+func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	targetEpoch := blocks[1].Block.Slot / parentState.BeaconConfig().SlotsPerEpoch
+	mixPosition := (targetEpoch + parentState.BeaconConfig().EpochsPerHistoricalVector - parentState.BeaconConfig().MinSeedLookahead - 1) % parentState.BeaconConfig().EpochsPerHistoricalVector
+	foundUnexpectedProposer := false
+	for nonce := 1; nonce <= 255; nonce++ {
+		require.NoError(t, parentState.SetRandaoMixAt(int(mixPosition), common.Hash{byte(nonce)}))
+		expected, proposerErr := parentState.GetBeaconProposerIndexForSlot(blocks[1].Block.Slot)
+		require.NoError(t, proposerErr)
+		if expected != blocks[1].Block.ProposerIndex {
+			foundUnexpectedProposer = true
+			break
+		}
+	}
+	require.True(t, foundUnexpectedProposer)
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	require.NoError(t, syncedData.OnHeadState(post))
@@ -161,9 +314,818 @@ func TestBlockServiceSuccess(t *testing.T) {
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
-	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
+	fcu.Blocks[blocks[1].Block.ParentRoot] = blocks[0]
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	var stateReads atomic.Int32
+	var stateCopyMu sync.Mutex
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		if root != blocks[1].Block.ParentRoot || !alwaysCopy {
+			return nil, fmt.Errorf("unexpected parent state request")
+		}
+		stateReads.Add(1)
+		stateCopyMu.Lock()
+		defer stateCopyMu.Unlock()
+		return parentState.Copy()
+	}
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+	encodedBlock, err := blocks[1].EncodeSSZ(nil)
+	require.NoError(t, err)
+	messages := make([]*cltypes.SignedBeaconBlock, 4)
+	for i := range messages {
+		messages[i] = cltypes.NewSignedBeaconBlock(parentState.BeaconConfig(), blocks[1].Version())
+		require.NoError(t, messages[i].DecodeSSZ(encodedBlock, int(blocks[1].Version())))
+	}
 
-	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+	errs := make(chan error, 4)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, message := range messages {
+		wg.Go(func() {
+			<-start
+			errs <- blockService.ValidateGossip(t.Context(), message)
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.ErrorContains(t, err, "does not match expected proposer")
+	}
+	require.EqualValues(t, 1, stateReads.Load())
+}
+
+func TestBlockServiceGossipUsesPostUpgradeExecutionHeadAtGloasBoundary(t *testing.T) {
+	blocks, pre, _ := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+
+	cfg := *parentState.BeaconConfig()
+	activationEpoch := state.Epoch(parentState) + 1
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = activationEpoch
+	cfg.InitializeForkSchedule()
+	require.Equal(t, clparams.GloasVersion, cfg.GetCurrentStateVersion(activationEpoch))
+	encodedState, err := parentState.EncodeSSZ(nil)
+	require.NoError(t, err)
+	parentState = state.New(&cfg)
+	require.NoError(t, parentState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)))
+	require.NoError(t, parentState.UpgradeToCapella())
+	require.NoError(t, parentState.UpgradeToDeneb())
+	require.NoError(t, parentState.UpgradeToElectra())
+	require.NoError(t, parentState.UpgradeToFulu())
+	activationSlot := activationEpoch * cfg.SlotsPerEpoch
+	require.NoError(t, parentState.SetSlot(activationSlot-1))
+	require.Equal(t, common.Hash{}, parentState.GetLatestBlockHash())
+	wantParentHash := parentState.LatestExecutionPayloadHeader().BlockHash
+	require.NotEqual(t, common.Hash{}, wantParentHash)
+
+	postUpgrade, err := parentState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(postUpgrade, activationSlot))
+	expectedProposer, err := postUpgrade.GetBeaconProposerIndexForSlot(activationSlot)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, parentState.GetLatestBlockHash())
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	validator, err := parentState.ValidatorForValidatorIndex(int(expectedProposer))
+	require.NoError(t, err)
+	var pubkey [48]byte
+	copy(pubkey[:], bls.CompressPublicKey(privateKey.PublicKey()))
+	validator.SetPublicKey(pubkey)
+	parentState.SetValidatorAtIndex(int(expectedProposer), validator)
+
+	parentRoot, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	require.Nil(t, blocks[0].Block.Body.GetSignedExecutionPayloadBid())
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = activationSlot
+	child.Block.ProposerIndex = expectedProposer
+	child.Block.ParentRoot = parentRoot
+	childBid := child.Block.Body.GetSignedExecutionPayloadBid().Message
+	childBid.ParentBlockRoot = parentRoot
+	childBid.ParentBlockHash = wantParentHash
+	forkVersion := utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion))
+	domain, err := fork.ComputeDomain(cfg.DomainBeaconProposer[:], forkVersion, parentState.GenesisValidatorsRoot())
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
+	require.NoError(t, err)
+	copy(child.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+
+	ctrl := gomock.NewController(t)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	syncedDataManager := synced_data.NewSyncedDataManager(&cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(parentState))
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	ethClock.EXPECT().GetCurrentSlot().Return(activationSlot).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Root: parentRoot}
+	fcu.Headers[parentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.Blocks[parentRoot] = blocks[0]
+	fcu.StateAtBlockRootVal[parentRoot] = parentState
+	fcu.Ancestors[0] = forkchoice.ForkChoiceNode{Root: parentRoot}
+	service := NewBlockService(t.Context(), db, fcu, syncedDataManager, ethClock, &cfg, nil)
+
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceGossipSharesParentStateFailure(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	parentState := fcu.StateAtBlockRootVal[parentRoot]
+	var stateReads atomic.Int32
+	validationEntered := make(chan struct{})
+	finishValidation := make(chan struct{})
+	var enterOnce sync.Once
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		stateReads.Add(1)
+		enterOnce.Do(func() { close(validationEntered) })
+		<-finishValidation
+		return nil, errors.New("state storage unavailable")
+	}
+	encodedBlock, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	messages := make([]*cltypes.SignedBeaconBlock, 4)
+	for i := range messages {
+		messages[i] = cltypes.NewSignedBeaconBlock(service.(*blockService).beaconCfg, child.Version())
+		require.NoError(t, messages[i].DecodeSSZ(encodedBlock, int(child.Version())))
+	}
+
+	errs := make(chan error, len(messages))
+	var wg sync.WaitGroup
+	wg.Go(func() { errs <- service.ValidateGossip(t.Context(), messages[0]) })
+	<-validationEntered
+	for _, message := range messages[1:] {
+		waiterCtx := &doneObservedContext{Context: t.Context(), doneObserved: make(chan struct{})}
+		wg.Go(func() {
+			errs <- service.ValidateGossip(waiterCtx, message)
+		})
+		<-waiterCtx.doneObserved
+	}
+	close(finishValidation)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.ErrorContains(t, err, "state storage unavailable")
+	}
+	require.EqualValues(t, 1, stateReads.Load())
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		stateReads.Add(1)
+		return parentState.Copy()
+	}
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	require.EqualValues(t, 2, stateReads.Load())
+}
+
+func TestBlockServiceParentStateReplayPanicWakesWaitersAndAllowsRetry(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	bs := service.(*blockService)
+	bs.validationSlots = make(chan struct{}, 1)
+	parentState := fcu.StateAtBlockRootVal[parentRoot]
+	validationEntered := make(chan struct{})
+	triggerPanic := make(chan struct{})
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		close(validationEntered)
+		<-triggerPanic
+		panic("state replay panic")
+	}
+
+	panicValue := make(chan any, 1)
+	go func() {
+		defer func() { panicValue <- recover() }()
+		_, _ = bs.blockValidationContext(t.Context(), parentRoot, child.Block.Slot)
+	}()
+	<-validationEntered
+	waiterCtx := &doneObservedContext{Context: t.Context(), doneObserved: make(chan struct{})}
+	waiterErr := make(chan error, 1)
+	go func() {
+		_, err := bs.blockValidationContext(waiterCtx, parentRoot, child.Block.Slot)
+		waiterErr <- err
+	}()
+	<-waiterCtx.doneObserved
+	close(triggerPanic)
+	require.Equal(t, "state replay panic", <-panicValue)
+	require.ErrorContains(t, <-waiterErr, "parent state validation panicked")
+	bs.validationMu.Lock()
+	require.NotContains(t, bs.validationCalls, blockValidationContextKey{parentRoot: parentRoot, slot: child.Block.Slot})
+	bs.validationMu.Unlock()
+
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		return parentState.Copy()
+	}
+	_, err := bs.blockValidationContext(t.Context(), parentRoot, child.Block.Slot)
+	require.NoError(t, err)
+}
+
+func TestBlockServiceBoundsConcurrentParentStateReplays(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	started := make(chan struct{}, maxConcurrentBlockValidationContexts+1)
+	release := make(chan struct{})
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		started <- struct{}{}
+		<-release
+		return fcu.StateAtBlockRootVal[parentRoot].Copy()
+	}
+
+	errs := make(chan error, maxConcurrentBlockValidationContexts)
+	var wg sync.WaitGroup
+	for offset := range uint64(maxConcurrentBlockValidationContexts) {
+		wg.Go(func() {
+			_, err := service.(*blockService).blockValidationContext(t.Context(), parentRoot, child.Block.Slot+offset)
+			errs <- err
+		})
+	}
+	for range maxConcurrentBlockValidationContexts {
+		<-started
+	}
+	queuedCtx, cancelQueued := context.WithCancel(t.Context())
+	queuedErr := make(chan error, 1)
+	go func() {
+		_, err := service.(*blockService).blockValidationContext(queuedCtx, parentRoot, child.Block.Slot+maxConcurrentBlockValidationContexts)
+		queuedErr <- err
+	}()
+	select {
+	case <-started:
+		require.Fail(t, "queued replay started before a validation slot was available")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancelQueued()
+	require.ErrorIs(t, <-queuedErr, ErrIgnore)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+}
+
+func TestBlockServiceGossipWaitsForFullParentPayloadVerification(t *testing.T) {
+	service, child, fcu, parentRoot, parentBlockHash := newGloasGossipValidationFixture(t, nil)
+	fcu.ExecutionPayloadStatusMap[parentBlockHash] = execution_client.PayloadStatusValidated
+
+	err := service.ValidateGossip(t.Context(), child)
+	require.ErrorContains(t, err, "parent payload is not verified")
+	require.NotContains(t, fcu.PayloadStatusByRootMap, parentRoot)
+}
+
+func TestBlockServiceGossipAcceptsVerifiedFullParentPayload(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceGossipFirstValidReservationIsAtomic(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { errs <- service.ValidateGossip(t.Context(), child) })
+	}
+	wg.Wait()
+	close(errs)
+	accepted := 0
+	ignored := 0
+	for err := range errs {
+		if err == nil {
+			accepted++
+		} else if errors.Is(err, ErrIgnore) {
+			ignored++
+		}
+	}
+	require.Equal(t, 1, accepted)
+	require.Equal(t, 1, ignored)
+}
+
+func TestBlockServiceGossipReservationCanBeReleased(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceCommittedReservationAllowsExactRESTReplayOnly(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.CommitGossipReservation(child)
+	require.ErrorIs(t, service.ValidateGossip(t.Context(), child), ErrIgnore)
+	service.ReleaseGossipReservation(child)
+
+	child.Block.StateRoot[0] ^= 1
+	err := service.ValidateGossip(t.Context(), child)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "already seen")
+	child.Block.StateRoot[0] ^= 1
+
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	require.ErrorIs(t, service.ValidateGossip(t.Context(), child), ErrIgnore)
+	child.Signature[0] ^= 1
+	require.ErrorIs(t, service.ValidateGossip(t.Context(), child), ErrIgnore)
+}
+
+func TestBlockServiceExactRESTReplayClaimIsAtomic(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.CommitGossipReservation(child)
+	service.ReleaseGossipReservation(child)
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { errs <- service.ValidateGossip(t.Context(), child) })
+	}
+	wg.Wait()
+	close(errs)
+	accepted := 0
+	ignored := 0
+	for err := range errs {
+		if err == nil {
+			accepted++
+		} else if errors.Is(err, ErrIgnore) {
+			ignored++
+		}
+	}
+	require.Equal(t, 1, accepted)
+	require.Equal(t, 1, ignored)
+}
+
+func TestBlockServiceFailedExactRESTReplayRestoresClaim(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.CommitGossipReservation(child)
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceValidateGossipRejectsMissingBodyBeforeHashing(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Body = nil
+	require.ErrorContains(t, service.ValidateGossip(t.Context(), block), "missing beacon block")
+}
+
+func TestBlockServiceP2PDuplicateIsIgnoredBeforeHashing(t *testing.T) {
+	service, child, _, _, _ := newGloasGossipValidationFixture(t, nil)
+	child.Block.Body.Eth1Data = nil
+	key := blockGossipKey(child)
+	service.(*blockService).seenBlocksCache.Add(key, seenBlock{})
+
+	err := service.ProcessMessage(t.Context(), nil, child)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Nil(t, child.Block.Body.Eth1Data)
+}
+
+func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
+	underlying := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	db := &failFirstUpdateDB{RwDB: underlying}
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	service := &blockService{db: db, forkchoiceStore: fcu}
+
+	service.ScheduleBlockForLaterProcessing(block)
+	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	job := jobValue.(*blockJob)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	require.True(t, db.failed)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+
+	require.NoError(t, underlying.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, root))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
+		return nil
+	}))
+}
+
+func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	service := &blockService{}
+	attempts := 0
+	storedSidecars := false
+	imported := false
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("sidecar storage unavailable")
+		}
+		storedSidecars = true
+		imported = true
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, block, false)
+		})
+	})
+	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	job := jobValue.(*blockJob)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.False(t, storedSidecars)
+	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+	require.True(t, job.terminal)
+	require.NoError(t, handle.Wait(t.Context()))
+	require.NoError(t, handle.Wait(t.Context()))
+	require.True(t, storedSidecars)
+	require.True(t, imported)
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, root))
+		require.NoError(t, err)
+		require.NotEmpty(t, body)
+		return nil
+	}))
+}
+
+func TestPublishedBlockJobUpgradesBlockOnlyRecovery(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	service.ScheduleBlockForLaterProcessing(block)
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.NotNil(t, jobValue.(*blockJob).store)
+}
+
+func TestPublishedBlockJobUpgradeWithEqualCreationTime(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	existing := newBlockJob(block, nil)
+	candidate := newBlockJob(block, func(context.Context) error { return nil })
+	candidate.creationTime = existing.creationTime
+	service.blocksScheduledForLaterExecution.Store(root, existing)
+
+	reused, generation := service.reuseScheduledBlockJob(root, existing, candidate, candidate.store)
+
+	require.Same(t, existing, reused)
+	require.Equal(t, uint64(1), generation)
+	require.NotNil(t, existing.store)
+}
+
+func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	fullValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	service.ScheduleBlockForLaterProcessing(block)
+	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, fullValue, currentValue)
+}
+
+func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	older := newBlockJob(block, func(context.Context) error {
+		return errors.New("older store should not replace newer store")
+	})
+	newer := newBlockJob(block, func(context.Context) error { return nil })
+	older.creationTime = newer.creationTime
+	service := &blockService{}
+	service.blocksScheduledForLaterExecution.Store(root, newer)
+
+	reused, generation := service.reuseScheduledBlockJob(root, newer, older, older.store)
+
+	require.Same(t, newer, reused)
+	require.Equal(t, newer.storeGeneration, generation)
+	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, newer, currentValue)
+}
+
+func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	fcu.Headers[root] = block.SignedBeaconBlockHeader().Header.Copy()
+	service := &blockService{db: db, forkchoiceStore: fcu}
+	service.ScheduleBlockForLaterProcessing(block)
+	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	staleJob := staleValue.(*blockJob)
+	fullStoreCalls := 0
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		fullStoreCalls++
+		return nil
+	})
+	service.processScheduledBlock(t.Context(), root, staleJob, staleJob.creationTime)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+	require.Equal(t, 1, fullStoreCalls)
+}
+
+func TestPublishedBlockRefreshSurvivesStaleFullStoreWorker(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service := &blockService{}
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		return errors.New("stale store should not run")
+	})
+	staleValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	stableJob := staleValue.(*blockJob)
+	freshStoreCalls := 0
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		freshStoreCalls++
+		return nil
+	})
+	freshValue, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, stableJob, freshValue)
+	service.processScheduledBlock(t.Context(), root, freshValue.(*blockJob), time.Now())
+	require.Equal(t, 1, freshStoreCalls)
+	_, ok = service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, ok)
+}
+
+func TestBlockServicePendingGossipReservationHandsOffToP2P(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(t.Context(), child, nil, true)
+	}()
+	select {
+	case err := <-errCh:
+		t.Fatalf("P2P validation returned before REST reservation resolved: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, <-errCh)
+}
+
+func TestBlockServiceCommittedGossipReservationRejectsWaitingP2P(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(t.Context(), child, nil, true)
+	}()
+	select {
+	case err := <-errCh:
+		t.Fatalf("P2P validation returned before REST reservation resolved: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	service.CommitGossipReservation(child)
+	require.ErrorIs(t, <-errCh, ErrIgnore)
+}
+
+func TestBlockServiceRevalidatesP2PAfterReservationRelease(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	type result struct {
+		err       error
+		scheduled bool
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		scheduled := false
+		err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, true)
+		resultCh <- result{err: err, scheduled: scheduled}
+	}()
+	select {
+	case got := <-resultCh:
+		t.Fatalf("P2P validation returned before REST reservation resolved: %v", got.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+	service.ReleaseGossipReservation(child)
+	got := <-resultCh
+	require.ErrorIs(t, got.err, ErrIgnore)
+	require.True(t, got.scheduled)
+}
+
+func TestBlockServiceUnrelatedReservationDoesNotRevalidateP2P(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	parentState := fcu.StateAtBlockRootVal[parentRoot]
+	validationEntered := make(chan struct{})
+	finishValidation := make(chan struct{})
+	validationCalls := 0
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		require.Equal(t, parentRoot, root)
+		require.True(t, alwaysCopy)
+		validationCalls++
+		if validationCalls == 1 {
+			close(validationEntered)
+			<-finishValidation
+		}
+		return parentState.Copy()
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(t.Context(), child, nil, true)
+	}()
+	<-validationEntered
+	otherKey := proposerIndexAndSlot{proposerIndex: child.Block.ProposerIndex + 1, slot: child.Block.Slot}
+	require.NoError(t, service.(*blockService).reserveGossipKey(otherKey, common.Hash{1}))
+	service.(*blockService).releaseGossipKey(otherKey, common.Hash{1})
+	close(finishValidation)
+	require.NoError(t, <-errCh)
+	require.Equal(t, 1, validationCalls)
+}
+
+func TestBlockServiceCanceledHandoffDoesNotClaimSeen(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	parentState := fcu.StateAtBlockRootVal[parentRoot]
+	revalidationEntered := make(chan struct{})
+	finishRevalidation := make(chan struct{})
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	bs := service.(*blockService)
+	validationKey := blockValidationContextKey{parentRoot: parentRoot, slot: child.Block.Slot}
+	bs.validationMu.Lock()
+	bs.validationCache.Remove(validationKey)
+	bs.validationMu.Unlock()
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		close(revalidationEntered)
+		<-finishRevalidation
+		return parentState.Copy()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(ctx, child, nil, true)
+	}()
+	service.ReleaseGossipReservation(child)
+	<-revalidationEntered
+	cancel()
+	close(finishRevalidation)
+	require.ErrorIs(t, <-errCh, ErrIgnore)
+	key := blockGossipKey(child)
+	bs.seenBlocksMu.Lock()
+	require.False(t, bs.seenBlocksCache.Contains(key))
+	require.NotContains(t, bs.reservations, key)
+	bs.seenBlocksMu.Unlock()
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		return parentState.Copy()
+	}
+	require.NoError(t, bs.validateFirstGossip(t.Context(), child, nil, true))
+}
+
+func TestBlockServiceGossipIgnoresInvalidatedFullParentPayload(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+	scheduled := false
+	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, false)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.True(t, scheduled)
+}
+
+func TestBlockServiceGossipIgnoresUnavailableParentState(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		return nil, errors.New("state storage unavailable")
+	}
+	scheduled := false
+
+	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, false)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.True(t, scheduled)
+}
+
+func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {
+	service, child, _, _, _ := newGloasGossipValidationFixture(t, func(common.Hash, common.Hash) common.Hash {
+		return common.Hash{0x99}
+	})
+	require.ErrorContains(t, service.ValidateGossip(t.Context(), child), "does not build on the parent's execution head")
+}
+
+func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
+	service, child, _, _, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
+		return parentExecutionHead
+	})
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
+		return parentExecutionHead
+	})
+	parent := fcu.Blocks[parentRoot]
+	fcu.StateAtBlockRootVal[parentRoot].SetLatestExecutionPayloadBid(parent.Block.Body.GetSignedExecutionPayloadBid().Message)
+	delete(fcu.Blocks, parentRoot)
+	fcu.AnchorRootVal = parentRoot
+	fcu.AnchorSlotVal = parent.Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: parent.Block.Slot / clparams.MainnetBeaconConfig.SlotsPerEpoch, Root: parentRoot}
+	fcu.Ancestors[parent.Block.Slot] = forkchoice.ForkChoiceNode{Root: parentRoot}
+
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func newGloasGossipValidationFixture(t *testing.T, childParentHash func(parentExecutionHead, parentBlockHash common.Hash) common.Hash) (BlockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, common.Hash) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	parentSlot := cfg.SlotsPerEpoch
+	childSlot := parentSlot + 1
+
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	validator := solid.NewValidator()
+	var pubkey [48]byte
+	copy(pubkey[:], bls.CompressPublicKey(privateKey.PublicKey()))
+	validator.SetPublicKey(pubkey)
+	validator.SetActivationEpoch(0)
+	validator.SetExitEpoch(cfg.FarFutureEpoch)
+	validator.SetEffectiveBalance(cfg.MaxEffectiveBalance)
+	parentState := state.New(&cfg)
+	parentState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, parentState.SetSlot(parentSlot))
+	require.NoError(t, parentState.AddValidator(validator, cfg.MaxEffectiveBalance))
+	parentState.SetProposerLookahead(solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)))
+	parentExecutionHead := common.Hash{0x11}
+	parentState.SetLatestBlockHash(parentExecutionHead)
+
+	parentBlockHash := common.Hash{0x22}
+	parent := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	parent.Block.Slot = parentSlot
+	parent.Block.ProposerIndex = 0
+	parent.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentExecutionHead,
+		BlockHash:       parentBlockHash,
+	}}
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = childSlot
+	child.Block.ProposerIndex = 0
+	child.Block.ParentRoot = parentRoot
+	selectedParentHash := parentBlockHash
+	if childParentHash != nil {
+		selectedParentHash = childParentHash(parentExecutionHead, parentBlockHash)
+	}
+	child.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: selectedParentHash,
+		ParentBlockRoot: parentRoot,
+	}}
+	domain, err := parentState.GetDomain(cfg.DomainBeaconProposer, childSlot/cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
+	require.NoError(t, err)
+	copy(child.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	syncedDataManager := synced_data.NewSyncedDataManager(&cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(parentState))
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	ethClock.EXPECT().GetCurrentSlot().Return(childSlot).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	fcu.Headers[parentRoot] = parent.SignedBeaconBlockHeader().Header.Copy()
+	fcu.Blocks[parentRoot] = parent
+	fcu.StateAtBlockRootVal[parentRoot] = parentState
+	service := NewBlockService(t.Context(), db, fcu, syncedDataManager, ethClock, &cfg, nil)
+	return service, child, fcu, parentRoot, parentBlockHash
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
@@ -214,3 +1176,408 @@ func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
 // - TestBlockServiceGloasSuccess
 //
 // For now, the GLOAS validation code path is verified by code review and integration tests.
+
+func TestValidateGloasBlockBodyLimitsRejectsOversizedOperationAndRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxProposerSlashings = 1
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.ProposerSlashings.Append(&cltypes.ProposerSlashing{})
+	body.ProposerSlashings.Append(&cltypes.ProposerSlashing{})
+	require.Error(t, validateGloasBlockBodyLimits(&cfg, body))
+
+	body = cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.ParentExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	body.ParentExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	require.Error(t, validateGloasBlockBodyLimits(&cfg, body))
+}
+
+func TestValidateGloasBlockBodyLimitsRejectsDeposit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	require.NoError(t, validateGloasBlockBodyLimits(&cfg, body))
+	body.Deposits.Append(&cltypes.Deposit{})
+	require.ErrorContains(t, validateGloasBlockBodyLimits(&cfg, body), "deposits")
+}
+
+func TestBlockServiceDecodeGossipMessageStrict(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	service := &blockService{beaconCfg: &cfg}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	_, err = service.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	outerGap := append([]byte(nil), encoded[:100]...)
+	outerGap = append(outerGap, make([]byte, 4)...)
+	outerGap = append(outerGap, encoded[100:]...)
+	binary.LittleEndian.PutUint32(outerGap, 104)
+	_, err = service.DecodeGossipMessage("peer", outerGap, clparams.GloasVersion)
+	require.Error(t, err)
+
+	const blockStart = 100
+	const blockFixedSize = 84
+	nestedGap := append([]byte(nil), encoded[:blockStart+blockFixedSize]...)
+	nestedGap = append(nestedGap, make([]byte, 4)...)
+	nestedGap = append(nestedGap, encoded[blockStart+blockFixedSize:]...)
+	binary.LittleEndian.PutUint32(nestedGap[blockStart+80:], blockFixedSize+4)
+	_, err = service.DecodeGossipMessage("peer", nestedGap, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestBlockServiceDecodeGossipMessageStrictPreGloasCompatibility(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	service := &blockService{beaconCfg: &cfg}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	_, err = service.DecodeGossipMessage("peer", encoded, clparams.DenebVersion)
+	require.NoError(t, err)
+}
+
+func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	firstStarted := make(chan struct{})
+	firstRelease := make(chan struct{})
+	service.scheduleBlockForLaterProcessing(block, func(context.Context) error {
+		close(firstStarted)
+		<-firstRelease
+		return nil
+	})
+	firstDone := make(chan struct{})
+	go func() {
+		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		close(firstDone)
+	}()
+	<-firstStarted
+	secondCalls := 0
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		secondCalls++
+		return nil
+	})
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- handle.Wait(t.Context()) }()
+	close(firstRelease)
+	<-firstDone
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, scheduled)
+	select {
+	case err := <-waitDone:
+		t.Fatalf("waiter completed for superseded store generation: %v", err)
+	default:
+	}
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.NoError(t, <-waitDone)
+	require.Equal(t, 1, secondCalls)
+}
+
+func TestPublishedBlockJobTransientFailureKeepsWaiterUntilRetrySucceeds(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	transient := errors.New("database unavailable")
+	calls := 0
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return transient
+		}
+		return nil
+	})
+	waitDone := make(chan error, 1)
+	waitStarted := make(chan struct{})
+	go func() {
+		close(waitStarted)
+		waitDone <- handle.Wait(t.Context())
+	}()
+	<-waitStarted
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	select {
+	case err := <-waitDone:
+		t.Fatalf("waiter completed for a retryable failure: %v", err)
+	default:
+	}
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.NoError(t, <-waitDone)
+	require.Equal(t, 2, calls)
+}
+
+func TestPublishedBlockJobWaitConsumesAttemptCompletedWhileWaiting(t *testing.T) {
+	transient := errors.New("database unavailable")
+	job := newBlockJob(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version), func(context.Context) error {
+		return transient
+	})
+	handle := &publishedBlockJobHandle{job: job, generation: job.storeGeneration}
+	attempt := job.attempt
+	attempt.err = transient
+	attempt.generation = job.storeGeneration
+	close(attempt.done)
+	job.mu.Lock()
+	job.lastAttempt = attempt
+	job.attempt = &blockJobAttempt{done: make(chan struct{})}
+	job.mu.Unlock()
+	waitCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, handle.Wait(waitCtx), context.Canceled)
+}
+
+func TestPublishedBlockJobWaitersObserveCancellationIndependently(t *testing.T) {
+	job := newBlockJob(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version), nil)
+	handle := &publishedBlockJobHandle{job: job}
+	firstCtx, cancelFirst := context.WithCancel(t.Context())
+	firstDone := make(chan error, 1)
+	firstStarted := make(chan struct{})
+	go func() {
+		close(firstStarted)
+		firstDone <- handle.Wait(firstCtx)
+	}()
+	<-firstStarted
+
+	secondCtx, cancelSecond := context.WithCancel(t.Context())
+	cancelSecond()
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- handle.Wait(secondCtx) }()
+	select {
+	case err := <-secondDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("canceled waiter blocked behind another waiter")
+	}
+	cancelFirst()
+	require.ErrorIs(t, <-firstDone, context.Canceled)
+}
+
+func TestPublishedBlockJobRequestCancellationDoesNotCancelIntegration(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	})
+	processDone := make(chan struct{})
+	go func() {
+		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+		close(processDone)
+	}()
+	<-started
+	waitCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, handle.Wait(waitCtx), context.Canceled)
+	close(release)
+	<-processDone
+	require.NoError(t, handle.Wait(t.Context()))
+}
+
+func TestPublishedBlockJobPermanentFailureIsTerminal(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	calls := 0
+	permanent := fmt.Errorf("%w: execution payload is invalid", forkchoice.ErrBlockInvalid)
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		calls++
+		return permanent
+	})
+	job := serviceJob(t, service, root)
+	service.processScheduledBlock(context.Background(), root, job, time.Now())
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, scheduled)
+	require.ErrorIs(t, handle.Wait(t.Context()), forkchoice.ErrBlockInvalid)
+	require.ErrorIs(t, handle.Wait(t.Context()), forkchoice.ErrBlockInvalid)
+	service.processScheduledBlock(context.Background(), root, job, time.Now())
+	require.Equal(t, 1, calls)
+}
+
+func TestPublishedBlockJobHashFailureWaitIsReplayable(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	hashErr := errors.New("hash failure")
+	service := &blockService{}
+	job := newFailedBlockJob(block, func(context.Context) error { return nil }, hashErr)
+	handle := &publishedBlockJobHandle{job: job, generation: job.storeGeneration}
+	require.EqualError(t, handle.Wait(t.Context()), hashErr.Error())
+	require.EqualError(t, handle.Wait(t.Context()), hashErr.Error())
+	count := 0
+	service.blocksScheduledForLaterExecution.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	require.Zero(t, count)
+}
+
+func TestPublishedBlockJobDetachedTerminalCannotReplaceCurrentJob(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	detached := newBlockJob(block, func(context.Context) error { return nil })
+	detached.terminal = true
+	current := newBlockJob(block, func(context.Context) error { return nil })
+	service.blocksScheduledForLaterExecution.Store(root, current)
+	candidate := newBlockJob(block, func(context.Context) error { return nil })
+
+	reused, _ := service.reuseScheduledBlockJob(root, detached, candidate, candidate.store)
+
+	require.Nil(t, reused)
+	stored, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	require.Same(t, current, stored)
+}
+
+func TestPublishedBlockJobExpiryRescheduleKeepsFreshStore(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	expiredHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	job := serviceJob(t, service, root)
+	job.creationTime = time.Now().Add(-blockJobExpiry - time.Second)
+	service.processScheduledBlock(context.Background(), root, job, time.Now())
+	require.ErrorIs(t, expiredHandle.Wait(t.Context()), ErrPublishedBlockJobExpired)
+
+	freshStoreCalls := 0
+	freshHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		freshStoreCalls++
+		return nil
+	})
+	freshJob := serviceJob(t, service, root)
+	require.NotSame(t, job, freshJob)
+	service.processScheduledBlock(context.Background(), root, freshJob, time.Now())
+	require.NoError(t, freshHandle.Wait(t.Context()))
+	require.Equal(t, 1, freshStoreCalls)
+}
+
+func TestPublishedBlockJobRefreshSurvivesEarlierExpirySample(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	firstHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	job := serviceJob(t, service, root)
+	job.creationTime = time.Now().Add(-blockJobExpiry - time.Second)
+	expiryNow := time.Now()
+	freshStoreCalls := 0
+	freshHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		freshStoreCalls++
+		return nil
+	})
+
+	service.processScheduledBlock(context.Background(), root, job, expiryNow)
+
+	require.NoError(t, firstHandle.Wait(t.Context()))
+	require.NoError(t, freshHandle.Wait(t.Context()))
+	require.Equal(t, 1, freshStoreCalls)
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, scheduled)
+}
+
+func TestPublishedBlockJobShutdownClosesQueuedWaitersAndRejectsNewSchedules(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := clparams.MainnetBeaconConfig
+	service := NewBlockService(ctx, nil, nil, nil, nil, &cfg, nil).(*blockService)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	secondBlock := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	secondBlock.Block.Slot = 1
+	handles := []PublishedBlockJob{
+		service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil }),
+		service.SchedulePublishedBlockForLaterProcessing(secondBlock, func(context.Context) error { return nil }),
+	}
+	cancel()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	for _, handle := range handles {
+		require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+	}
+
+	lateHandle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	require.ErrorIs(t, lateHandle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+}
+
+func TestPublishedBlockJobShutdownOwnsRunningAttemptAndIgnoresLateResult(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	storeStarted := make(chan struct{})
+	storeRelease := make(chan struct{})
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		close(storeStarted)
+		<-storeRelease
+		return nil
+	})
+	job := serviceJob(t, service, root)
+	processDone := make(chan struct{})
+	go func() {
+		service.processScheduledBlock(context.Background(), root, job, time.Now())
+		close(processDone)
+	}()
+	<-storeStarted
+	service.stopPublishedBlockJobs()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+	close(storeRelease)
+	<-processDone
+	require.ErrorIs(t, handle.Wait(waitCtx), ErrPublishedBlockJobStopped)
+	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+	require.False(t, scheduled)
+}
+
+func TestPublishedBlockJobShutdownPreservesCompletedAttempt(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	require.NoError(t, handle.Wait(t.Context()))
+
+	service.stopPublishedBlockJobs()
+
+	require.NoError(t, handle.Wait(t.Context()))
+}
+
+func TestPublishedBlockJobConcurrentSchedulesReturnWaitableHandles(t *testing.T) {
+	service := &blockService{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	const schedules = 32
+	start := make(chan struct{})
+	handles := make(chan PublishedBlockJob, schedules)
+	var wg sync.WaitGroup
+	for range schedules {
+		wg.Go(func() {
+			<-start
+			handles <- service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(handles)
+	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
+	for handle := range handles {
+		require.NoError(t, handle.Wait(t.Context()))
+	}
+}
+
+func serviceJob(t *testing.T, service *blockService, root [32]byte) *blockJob {
+	t.Helper()
+	job, ok := service.blocksScheduledForLaterExecution.Load(root)
+	require.True(t, ok)
+	return job.(*blockJob)
+}
