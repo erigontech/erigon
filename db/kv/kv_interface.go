@@ -468,15 +468,11 @@ type GetLatestOptions struct {
 	buf         []byte
 }
 
-// WithBuf offers a buffer to decompress a file-resident value into, so a hot
-// reader can reuse one allocation instead of taking a fresh one per call. The
-// returned value is only the buffer when it was big enough and the value came
-// from a file; a db-resident value still points into the tx's pages. So the
-// caller must treat the result as valid until its own next read with the same
-// buffer, which is stricter than the plain end-of-tx lifetime.
-//
-// A buffered read skips the per-DomainRoTx file cache: that cache outlives the
-// call and must not retain memory the caller is about to overwrite.
+// WithBuf lends a buffer to decode a value into. The result may or may not be
+// that buffer, so the caller must treat it as valid only until its own next read
+// with the same buffer — stricter than the end-of-tx lifetime a plain read gives.
+// A buffered read is not served from or added to any cache that outlives the
+// call.
 func (opts GetLatestOptions) WithBuf(buf []byte) GetLatestOptions {
 	opts.buf = buf
 	return opts

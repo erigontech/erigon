@@ -1396,8 +1396,8 @@ func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 	return opts
 }
 
-// maxPooledCodeBuf caps what a decode buffer keeps between uses, so one huge
-// contract does not pin a large buffer per worker for the process lifetime.
+// maxPooledCodeBuf bounds what a decode buffer keeps between uses, so one huge
+// value does not pin a large buffer for the process lifetime.
 const maxPooledCodeBuf = 128 * 1024
 
 var codeDecodeBufPool = sync.Pool{New: func() any { b := make([]byte, 0, 4096); return &b }}
@@ -1504,19 +1504,15 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
-	// Only the code domain compresses its values, so it is the only one whose
-	// read allocates a buffer; every other domain hands back a slice of the
-	// mapped file. When the value is about to be copied into the cache anyway,
-	// decode it through a pooled buffer and give the caller the cache's copy.
+	// The fill below clones, so a value headed for the cache can be decoded into
+	// a borrowed buffer and handed out as the stored copy instead.
 	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	viaPool := willFill && domain == kv.CodeDomain && len(opts.codeHash) == len(common.Hash{})
 	if viaPool {
 		pooled := codeDecodeBufPool.Get().(*[]byte)
 		getOpts = getOpts.WithBuf(*pooled)
-		// Grow by allocating, never by adopting the returned slice: by the time
-		// this runs v is the cache's copy, and pooling that would hand a live
-		// cache entry to the next reader to overwrite. len(v) is the decoded
-		// length either way.
+		// Grow by allocating, never by adopting v: by now v is the stored copy,
+		// and pooling that would hand a live cache entry to the next reader.
 		defer func() {
 			if n := len(v); n > cap(*pooled) && n <= maxPooledCodeBuf {
 				*pooled = make([]byte, 0, n)
@@ -1540,7 +1536,6 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
 		if len(opts.codeHash) == len(common.Hash{}) {
-			// The stored copy replaces v: the decode buffer goes back to the pool.
 			v = fillView.FillCodeStored(k, v, opts.codeHash, readTxNum)
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)

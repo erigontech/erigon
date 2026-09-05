@@ -281,11 +281,11 @@ func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
 	v.fillCodeWithHash(addr, bytes.Clone(code), codeHash, readTxNum)
 }
 
-// FillCodeStored is FillCode that returns the copy it stored. A reader that
-// decoded into a reusable buffer hands that copy to its caller instead of
-// allocating a second one: the entry is immutable, so cache and caller share it
-// exactly as they already do on a cache hit. The copy is returned whether or not
-// the cache admitted it, so the caller never aliases the reusable buffer.
+// FillCodeStored is FillCode that returns the copy it stored, so a caller that
+// decoded into a borrowed buffer can hand out that copy instead of allocating a
+// second one. Entries are immutable, so sharing it is what a cache hit already
+// does. The copy is returned even when the cache declines it, so the caller
+// never aliases the borrowed buffer.
 func (v ReadView) FillCodeStored(addr, code, codeHash []byte, readTxNum uint64) []byte {
 	stored := bytes.Clone(code)
 	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)

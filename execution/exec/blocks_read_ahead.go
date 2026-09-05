@@ -84,6 +84,9 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
+// maxReadAheadCodeBuf bounds the per-worker prefetch buffer.
+const maxReadAheadCodeBuf = 128 * 1024
+
 // cachePopulatingGetter wraps a TemporalGetter and fills a StateCache
 // ReadView as a side effect. Used by warmBody to make read-ahead prefetches
 // populate the same in-process cache layer that SharedDomains.GetLatest
@@ -91,14 +94,11 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 // touch of any prefetched address.
 //
 // Code reads also populate the content-addressed and size-cache layers.
-// maxReadAheadCodeBuf caps the per-worker prefetch buffer.
-const maxReadAheadCodeBuf = 128 * 1024
-
 type cachePopulatingGetter struct {
 	kv.TemporalGetter
 	view     cache.ReadView
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
-	codeBuf  []byte // one per warm worker; prefetched code is copied by the fill and then dropped
+	codeBuf  []byte // per worker; prefetched code is copied by the fill, then dropped
 }
 
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
@@ -132,9 +132,8 @@ func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, 
 	if code, ok := cpg.view.GetCodeByAddressHash(addr); ok {
 		return code, true, nil
 	}
-	// Prefetch only: warmBody and warmTxns drop the bytes, and the cache fill
-	// below copies them, so one buffer per worker serves every code read here
-	// instead of a fresh 64KB per contract.
+	// Prefetch only: the fill copies and the caller drops the bytes, so one
+	// buffer per worker serves every code read here.
 	code, _, err := cpg.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{}.WithBuf(cpg.codeBuf))
 	if err != nil {
 		return nil, false, err
