@@ -277,6 +277,12 @@ func (c *BranchCache) SetEdgeRecords(edgeRecords bool) {
 	c.edgeRecordsInCommitment.Store(edgeRecords)
 }
 
+// EdgeRecords reports the commitment record format this datadir resolved to, which a caller
+// outside db/state has no other way to reach.
+func (c *BranchCache) EdgeRecords() bool {
+	return c.edgeRecordsInCommitment.Load()
+}
+
 func (c *BranchCache) isCommitmentStateKey(prefix []byte) bool {
 	return IsCommitmentStateKeyForFormat(prefix, c.edgeRecordsInCommitment.Load())
 }

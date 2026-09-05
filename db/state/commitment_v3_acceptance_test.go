@@ -326,12 +326,8 @@ func TestCommitmentV3FilesMatchTheirVersion(t *testing.T) {
 		}
 	}
 
-	controlDB, controlAgg := newAcceptanceDB(t, 1, 2)
-	controlAgg.ForTestEdgeRecordsInCommitment(kv.CommitmentDomain, false)
-	var controlRoot []byte
-	for batchNumber, batch := range batches {
-		controlRoot = applyAcceptanceBatch(t, controlDB, batch, uint64(batchNumber+1))
-	}
-	require.Equal(t, controlRoot, v3Root, "v3 root must match the legacy-only root")
+	wantRoot, err := hex.DecodeString(acceptanceLegacyRoots[len(batches)-1])
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, v3Root, "v3 root must match the pinned legacy oracle")
 	require.Equal(t, v3Root, recomputeAcceptanceRoot(t, db), "post-build fresh commitment read")
 }

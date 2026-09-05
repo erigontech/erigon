@@ -158,16 +158,11 @@ func detectFileState(at *AggregatorRoTx, file VisibleFile, samples int) (fileSta
 	}
 
 	stateKey := commitmentdb.LegacyKeyCommitmentState
-	if statecfg.CommitmentEdgeRecords(file.Version()) {
-		stateKey = commitmentdb.KeyCommitmentState
-	}
 	keyEncoding, err := detectKeyEncodingForStateKey(pairs, stateKey)
 	if err != nil {
 		return fileState{}, fmt.Errorf("detectFileState: %q: key-encoding detection: %w", file.Fullpath(), err)
 	}
-	if statecfg.CommitmentEdgeRecords(file.Version()) {
-		keyEncoding = keyEncodingV3
-	} else if keyEncoding == keyEncodingV3 {
+	if keyEncoding == keyEncodingV3 {
 		keyEncoding, err = detectLegacyKeyEncodingForStateKey(pairs, stateKey)
 		if err != nil {
 			return fileState{}, fmt.Errorf("detectFileState: %q: legacy key-encoding detection: %w", file.Fullpath(), err)
@@ -489,9 +484,6 @@ func convertCommitmentFile(
 	// with a (-1) offset that does not match the source file for stepFrom>0 files.
 	var k, v []byte
 	stateKey := commitmentdb.LegacyKeyCommitmentState
-	if statecfg.CommitmentEdgeRecords(file.Version()) {
-		stateKey = commitmentdb.KeyCommitmentState
-	}
 	for reader.HasNext() {
 		k, _ = reader.Next(k[:0])
 		if !reader.HasNext() {

@@ -74,6 +74,16 @@ type benchResult struct {
 	totalBytes      int64
 	root            string
 	cacheStats      string
+	tableBytes      map[string]uint64
+}
+
+// benchCommitmentTables is the chaindata that scales with the commitment record count: the domain
+// values plus the inverted index and history keys SnapshotsDisabled keeps out of files.
+var benchCommitmentTables = []string{
+	kv.TblCommitmentVals,
+	kv.TblCommitmentHistoryKeys,
+	kv.TblCommitmentHistoryVals,
+	kv.TblCommitmentIdx,
 }
 
 func benchEnvInt(key string, def int) int {
@@ -309,6 +319,17 @@ func runBenchArm(t testing.TB, arm benchArm, blocks, blocksPerTx, buildEvery, pr
 		at.Close()
 	}
 
+	tableSizes, err := kv.CollectTableSizes(ctx, db)
+	require.NoError(t, err)
+	tableBytes := make(map[string]uint64, len(benchCommitmentTables))
+	for _, ts := range tableSizes {
+		for _, want := range benchCommitmentTables {
+			if ts.Name == want {
+				tableBytes[want] = ts.Size
+			}
+		}
+	}
+
 	commitmentBytes, commitmentFiles := dirBytes(t, dir, "commitment")
 	totalBytes, _ := dirBytes(t, dir, "")
 	return benchResult{
@@ -322,6 +343,7 @@ func runBenchArm(t testing.TB, arm benchArm, blocks, blocksPerTx, buildEvery, pr
 		totalBytes:      totalBytes,
 		root:            hex.EncodeToString(root),
 		cacheStats:      cacheStats,
+		tableBytes:      tableBytes,
 	}
 }
 
@@ -382,6 +404,15 @@ func BenchmarkCommitmentFormatCost(b *testing.B) {
 				r.arm, r.commitWall.Round(time.Millisecond), r.recordsWritten, r.keysProcessed,
 				datasize.ByteSize(r.commitmentBytes).HR(), r.commitmentFiles,
 				datasize.ByteSize(r.totalBytes).HR(), r.root[:16])
+		}
+		fmt.Printf("\n%-20s %22s %22s %22s %22s\n", "arm (chaindata)",
+			kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx)
+		for _, r := range results {
+			fmt.Printf("%-20s", r.arm)
+			for _, table := range benchCommitmentTables {
+				fmt.Printf(" %22s", datasize.ByteSize(r.tableBytes[table]).HR())
+			}
+			fmt.Println()
 		}
 		for _, r := range results {
 			fmt.Printf("%-20s %s\n", r.arm, r.cacheStats)
