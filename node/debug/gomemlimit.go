@@ -33,9 +33,10 @@ import (
 // For web-apps good rule of thumb: leave 5-10% headroom to account for memory sources the Go runtime is unaware of
 //
 // Erigon has such resources:
-// - mdbx dirty_space (C-owned)
-// - PageCache (OS-owned)
-// - External CL (OS-owned)
+// - mdbx dirty_space (C-owned): ~1G
+// - External CL: better don't predict it. Leave it out of estimate.
+// - OOM Killer and SWAP: Erigon recommends to disable SWAP on server and enable OOM-Killer (kill comes at 90%)
+// - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it. So, leaving 30% for PageCache
 const defaultGoMemLimitShare = 0.7
 
 func goMemLimitIsSet(current int64) bool {
