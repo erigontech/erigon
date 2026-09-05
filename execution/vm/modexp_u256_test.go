@@ -162,3 +162,158 @@ func TestModexpU256Random(t *testing.T) {
 		}
 	}
 }
+func packModexpInput(base, exp, mod []byte) []byte {
+	out := make([]byte, 0, 96+len(base)+len(exp)+len(mod))
+	for _, n := range []int{len(base), len(exp), len(mod)} {
+		var field [32]byte
+		big.NewInt(int64(n)).FillBytes(field[:])
+		out = append(out, field[:]...)
+	}
+	return append(append(append(out, base...), exp...), mod...)
+}
+
+// TestModexpBigIntFaster pins the exponent classification that picks the modulus
+// bound. math/big only reaches its windowed Montgomery path above a one-word
+// exponent, so the modulus width at which it overtakes evmone differs sharply
+// either side of that; the widths themselves are a per-target measurement.
+func TestModexpBigIntFaster(t *testing.T) {
+	if modexpBigIntMinModLenWideExp <= 32 || modexpBigIntMinModLenNarrowExp <= 32 {
+		t.Fatal("both bounds must stay above 32 bytes, or math/big shadows the uint256 route")
+	}
+	exp := func(n int) []byte {
+		b := make([]byte, n)
+		b[0] = 0xff
+		return b
+	}
+	padded := func(n int) []byte { // n-byte field holding a 64-bit value
+		b := make([]byte, n)
+		b[n-8] = 0xff
+		return b
+	}
+	cases := []struct {
+		name string
+		exp  []byte
+		wide bool
+	}{
+		{"empty exponent", nil, false},
+		{"one-byte exponent", exp(1), false},
+		{"65537", []byte{0x01, 0x00, 0x01}, false},
+		{"one-word exponent", exp(8), false},
+		{"one word in a padded field", padded(9), false},
+		{"one word in a 1024-byte field", padded(1024), false},
+		{"exponent just over one word", exp(9), true},
+		{"two-word exponent", exp(16), true},
+		{"full-length exponent", exp(1024), true},
+	}
+	for _, c := range cases {
+		bound := uint64(modexpBigIntMinModLenNarrowExp)
+		if c.wide {
+			bound = modexpBigIntMinModLenWideExp
+		}
+		for _, modLen := range []uint64{1, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 192, 256, 1024} {
+			want := modLen >= bound
+			if got := modexpBigIntFaster(c.exp, exp(int(modLen))); got != want {
+				t.Errorf("%s, %d-byte modulus: modexpBigIntFaster = %v, want %v", c.name, modLen, got, want)
+			}
+			// Both backends ignore leading zero modulus bytes, so a wide field
+			// holding a narrow modulus must route on the narrow one.
+			if got := modexpBigIntFaster(c.exp, padded(int(modLen)+256)); got != (8 >= bound) {
+				t.Errorf("%s, 64-bit modulus in a %d-byte field: modexpBigIntFaster = %v, want %v",
+					c.name, modLen+256, got, 8 >= bound)
+			}
+		}
+	}
+}
+
+// TestModexpRoutingAgrees checks that every backend Run can select returns the
+// same bytes, over operand shapes that straddle each routing boundary.
+func TestModexpRoutingAgrees(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	c := &bigModExp{osaka: true}
+	for _, modLen := range []int{24, 25, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 256} {
+		for _, expLen := range []int{0, 1, 3, 8, 9, 16, 64} {
+			for _, baseLen := range []int{0, 1, 32, 33, 64} {
+				// Parity matters: an even modulus takes a different path in every
+				// backend (evmone splits off the power of two and recombines, math/big
+				// leaves Montgomery), so both must agree.
+				for _, odd := range []bool{true, false} {
+					base, exp, mod := make([]byte, baseLen), make([]byte, expLen), make([]byte, modLen)
+					rng.Read(base)
+					rng.Read(exp)
+					rng.Read(mod)
+					mod[0] |= 0x80 // full-width modulus, so it stays above 1
+					if odd {
+						mod[modLen-1] |= 1
+					} else {
+						mod[modLen-1] &^= 1
+					}
+
+					got, err := c.Run(packModexpInput(base, exp, mod))
+					if err != nil {
+						t.Fatalf("mod %d exp %d base %d odd %v: %v", modLen, expLen, baseLen, odd, err)
+					}
+					want := make([]byte, modLen)
+					new(big.Int).Exp(new(big.Int).SetBytes(base), new(big.Int).SetBytes(exp),
+						new(big.Int).SetBytes(mod)).FillBytes(want)
+					if !bytes.Equal(got, want) {
+						t.Fatalf("mod %d exp %d base %d odd %v:\n got %x\nwant %x",
+							modLen, expLen, baseLen, odd, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestModexpU256Windows walks exponent bit lengths across every window-width
+// boundary, with bit patterns that stress window edges: all-ones (every window
+// full), a lone top bit, alternating bits, and sparse ones separated by runs of
+// zeros longer than the widest window.
+func TestModexpU256Windows(t *testing.T) {
+	mod := make([]byte, 32)
+	for i := range mod {
+		mod[i] = 0xd7
+	}
+	mod[31] |= 1
+	modBig := new(big.Int).SetBytes(mod)
+	base := bytes.Repeat([]byte{0x9c}, 32)
+	baseBig := new(big.Int).SetBytes(base)
+
+	patterns := map[string]func(n int) *big.Int{
+		"all ones": func(n int) *big.Int { return new(big.Int).Sub(bigLsh(uint(n)), big.NewInt(1)) },
+		"top bit":  func(n int) *big.Int { return bigLsh(uint(n - 1)) },
+		"alternating": func(n int) *big.Int {
+			return new(big.Int).Div(new(big.Int).Sub(bigLsh(uint(n+1)), big.NewInt(1)), big.NewInt(3))
+		},
+		"sparse": func(n int) *big.Int {
+			e := bigLsh(uint(n - 1))
+			for s := n - 1 - 7; s > 0; s -= 7 {
+				e.SetBit(e, s, 1)
+			}
+			return e
+		},
+	}
+	// Sweep every width up to well past the last transition rather than a fixed
+	// list of edges, so the cases follow modexpU256WindowWidth wherever it moves.
+	var bitLens []int
+	for n := 1; n <= 300; n++ {
+		bitLens = append(bitLens, n)
+	}
+	bitLens = append(bitLens, 511, 512, 513, 1023, 1024, 1025, 8192)
+	for name, gen := range patterns {
+		for _, n := range bitLens {
+			expBig := gen(n)
+			if expBig.BitLen() != n {
+				continue // pattern cannot express this width
+			}
+			dst := make([]byte, 32)
+			modexpU256(dst, base, expBig.Bytes(), mod)
+
+			want := make([]byte, 32)
+			new(big.Int).Exp(baseBig, expBig, modBig).FillBytes(want)
+			if !bytes.Equal(dst, want) {
+				t.Fatalf("%s, %d-bit exponent:\n got %x\nwant %x", name, n, dst, want)
+			}
+		}
+	}
+}
