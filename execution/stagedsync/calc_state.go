@@ -99,7 +99,8 @@ type storageEnumerator interface {
 // asOfStateReader. Subsequent writes overwrite the local copy. At block boundary,
 // the accumulated state is fed to the trie's Updates buffer.
 type calcState struct {
-	accounts map[accounts.Address]*calcAccountState
+	accounts      map[accounts.Address]*calcAccountState
+	dirtyAccounts []accounts.Address
 	// storageState holds the accumulated value for each slot
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	// storageDirty tracks which slots were modified in the current block
@@ -288,7 +289,10 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 // markWritten records an account write: dirty for block end, queued once for
 // the next commitment pass.
 func (cs *calcState) markWritten(addr accounts.Address, acc *calcAccountState) {
-	acc.dirty = true
+	if !acc.dirty {
+		acc.dirty = true
+		cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	}
 	if !acc.queued {
 		acc.queued = true
 		cs.queuedAccounts = append(cs.queuedAccounts, addr)
@@ -367,11 +371,8 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
-	for addr, acc := range cs.accounts {
-		if !acc.dirty {
-			continue
-		}
-		cs.emitAccount(updates, addr, acc)
+	for _, addr := range cs.dirtyAccounts {
+		cs.emitAccount(updates, addr, cs.accounts[addr])
 	}
 	for addr, slots := range cs.storageDirty {
 		for key, f := range slots {
@@ -487,9 +488,10 @@ func (cs *calcState) AssertWorkBound(blockNum uint64) {
 // prepare for the next block.
 func (cs *calcState) ResetBlockFlags() {
 	cs.DrainQueued()
-	for _, acc := range cs.accounts {
-		acc.dirty = false
+	for _, addr := range cs.dirtyAccounts {
+		cs.accounts[addr].dirty = false
 	}
+	cs.dirtyAccounts = cs.dirtyAccounts[:0]
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
