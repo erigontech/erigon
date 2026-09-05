@@ -27,6 +27,9 @@ type stateGetter struct {
 	tx   kv.TemporalTx
 	view cache.ReadView
 	m    kv.GetLatestMetrics
+	// codeBuf is lent to the code read and never escapes: the value handed back
+	// is the cache's copy. One getter serves one worker, like m.
+	codeBuf []byte
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -41,7 +44,11 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return g.sd.getCode(g.tx, g.view, addr, txNum)
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
+	if n := len(code); n > cap(g.codeBuf) && n <= maxLentCodeBuf {
+		g.codeBuf = make([]byte, 0, n) // grow by allocating; code is not ours to keep
+	}
+	return code, ok, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
