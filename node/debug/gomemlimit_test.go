@@ -20,24 +20,34 @@ func unsetGoMemLimitEnv(t *testing.T) {
 	os.Unsetenv("GOMEMLIMIT")
 }
 
-// GOMEMLIMIT=off is a deliberate choice, but the runtime reports it exactly like
-// an unset variable, so only the environment can tell the two apart.
 func TestGoMemLimitInForce(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
 		unsetGoMemLimitEnv(t)
-		require.False(t, goMemLimitIsSet(math.MaxInt64))
+		require.Equal(t, goMemLimitUnset, goMemLimitInForce(math.MaxInt64))
 	})
 	t.Run("empty", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "")
-		require.False(t, goMemLimitIsSet(math.MaxInt64))
+		require.Equal(t, goMemLimitUnset, goMemLimitInForce(math.MaxInt64))
 	})
 	t.Run("off", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "off")
-		require.True(t, goMemLimitIsSet(math.MaxInt64))
+		require.Equal(t, goMemLimitOff, goMemLimitInForce(math.MaxInt64))
+	})
+	t.Run("set in env", func(t *testing.T) {
+		t.Setenv("GOMEMLIMIT", "4GiB")
+		require.Equal(t, goMemLimitSet, goMemLimitInForce(4<<30))
+	})
+	t.Run("zero is a real limit", func(t *testing.T) {
+		t.Setenv("GOMEMLIMIT", "0")
+		require.Equal(t, goMemLimitSet, goMemLimitInForce(0))
+	})
+	t.Run("max is off in effect", func(t *testing.T) {
+		t.Setenv("GOMEMLIMIT", "9223372036854775807")
+		require.Equal(t, goMemLimitOff, goMemLimitInForce(math.MaxInt64))
 	})
 	t.Run("set in process", func(t *testing.T) {
 		unsetGoMemLimitEnv(t)
-		require.True(t, goMemLimitIsSet(3<<30))
+		require.Equal(t, goMemLimitSet, goMemLimitInForce(3<<30))
 	})
 }
 

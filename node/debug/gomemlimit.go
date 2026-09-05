@@ -39,11 +39,30 @@ import (
 // - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
 const defaultGoMemLimitShare = 0.8
 
-func goMemLimitIsSet(current int64) bool {
-	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
-		return true
+type goMemLimitState int
+
+const (
+	goMemLimitUnset goMemLimitState = iota // nobody chose one; derive it
+	goMemLimitOff                          // an operator disabled it
+	goMemLimitSet                          // one is already in force
+)
+
+// goMemLimitInForce needs both the runtime and the environment: the runtime
+// maps unset, "" and "off" alike to math.MaxInt64, and only the environment
+// separates a deliberate "off" from the empty value an unrendered k8s or
+// compose template leaves behind.
+//
+// Three states cover every input. GOMEMLIMIT matches ^[0-9]+(([KMGT]i)?B)?$, so
+// "-1", "inf" and anything else malformed throw before main; "0" is a real
+// limit like any other; and SetMemoryLimit never stores a negative.
+func goMemLimitInForce(current int64) goMemLimitState {
+	if current != math.MaxInt64 {
+		return goMemLimitSet
 	}
-	return current != math.MaxInt64
+	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
+		return goMemLimitOff
+	}
+	return goMemLimitUnset
 }
 
 func goMemLimitFor(total uint64) (int64, bool) {
@@ -55,12 +74,12 @@ func goMemLimitFor(total uint64) (int64, bool) {
 
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
-	if goMemLimitIsSet(current) {
-		if current == math.MaxInt64 {
-			logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
-		} else {
-			logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
-		}
+	switch goMemLimitInForce(current) {
+	case goMemLimitSet:
+		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
+		return
+	case goMemLimitOff:
+		logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
 		return
 	}
 
