@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -150,10 +151,9 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
-	_preMergeData             atomic.Pointer[preMergeVerdict]
-	_preMergeDataTTL          time.Duration
-	_preMergeProbeMu          sync.Mutex
-	_preMergeProbeInFlight    *preMergeProbe
+	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
+	// availability, which widens as segments arrive.
+	_preMergeData concurrent.CachedValue[bool]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -194,14 +194,13 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
-	return &BaseAPI{
+	api := &BaseAPI{
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
-		_preMergeDataTTL:  defaultPreMergeDataTTL,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
 		receiptsGenerator: receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
@@ -211,6 +210,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		getLogsMaxResults: conf.GetLogsMaxResults,
 		logQueryLimit:     conf.LogQueryLimit,
 	}
+	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
+	return api
 }
 
 func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, error) {
@@ -456,23 +457,6 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
-// preMergeVerdict is the archive-vs-expiry answer with the time it was observed: it
-// reads live snapshot availability, which widens as segments arrive.
-type preMergeVerdict struct {
-	holds bool
-	at    time.Time
-}
-
-// preMergeProbe is a probe other callers can wait on rather than repeat. Its result is
-// readable once done is closed.
-type preMergeProbe struct {
-	done  chan struct{}
-	holds bool
-	err   error
-}
-
-var errPreMergeProbeAbandoned = errors.New("pre-merge block data probe did not complete")
-
 const defaultPreMergeDataTTL = 30 * time.Second
 
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
@@ -534,60 +518,22 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // spanning the merge point reaches below it.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	for {
-		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
-			return v.holds, nil
+		if holds, observed, fresh := api._preMergeData.Load(); observed && fresh {
+			return holds, nil
 		}
-		probe, leader := api.joinPreMergeProbe()
-		if leader {
-			return api.runPreMergeProbe(ctx, tx, mergeHeight, probe)
+		holds, ran, err := api._preMergeData.Produce(ctx, func() (bool, bool, error) {
+			return api.probePreMergeBlockData(ctx, tx, mergeHeight)
+		})
+		switch {
+		case err == nil:
+			return holds, nil
+		case ran || ctx.Err() != nil:
+			return false, err
 		}
-		select {
-		case <-probe.done:
-			if probe.err == nil {
-				return probe.holds, nil
-			}
-			// The probe reads through the transaction of the caller that ran it, so its
-			// failure is about that caller rather than about the datadir: ask again here.
-		case <-ctx.Done():
-			return false, ctx.Err()
-		}
+		// The probe reads through the transaction of the caller that ran it, so a failure
+		// is about that caller rather than about the datadir: one that only waited asks
+		// again on its own.
 	}
-}
-
-// runPreMergeProbe answers the callers waiting on probe. A probe that dies without a
-// result must still release them, and with an error rather than its zero verdict, so
-// that the next caller asks again instead of taking an answer nobody produced.
-func (api *BaseAPI) runPreMergeProbe(ctx context.Context, tx kv.Tx, mergeHeight uint64, probe *preMergeProbe) (bool, error) {
-	holds, decided := false, false
-	err := errPreMergeProbeAbandoned
-	defer func() { api.finishPreMergeProbe(probe, holds, err) }()
-
-	holds, decided, err = api.probePreMergeBlockData(ctx, tx, mergeHeight)
-	if err == nil && decided {
-		api._preMergeData.Store(&preMergeVerdict{holds: holds, at: time.Now()})
-	}
-	return holds, err
-}
-
-// joinPreMergeProbe registers this caller as the one running the probe, or hands back
-// the probe already in flight. The lock covers that bookkeeping alone, never the probe.
-func (api *BaseAPI) joinPreMergeProbe() (*preMergeProbe, bool) {
-	api._preMergeProbeMu.Lock()
-	defer api._preMergeProbeMu.Unlock()
-	if probe := api._preMergeProbeInFlight; probe != nil {
-		return probe, false
-	}
-	probe := &preMergeProbe{done: make(chan struct{})}
-	api._preMergeProbeInFlight = probe
-	return probe, true
-}
-
-func (api *BaseAPI) finishPreMergeProbe(probe *preMergeProbe, holds bool, err error) {
-	api._preMergeProbeMu.Lock()
-	defer api._preMergeProbeMu.Unlock()
-	probe.holds, probe.err = holds, err
-	close(probe.done)
-	api._preMergeProbeInFlight = nil
 }
 
 // probePreMergeBlockData answers holdsPreMergeBlockData from what is on disk. It reports
