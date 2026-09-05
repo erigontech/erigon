@@ -38,6 +38,7 @@ import (
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
@@ -352,8 +353,9 @@ func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
 }
 
 // A NOT_VALIDATED verdict is kept even when finality drops the block: the payload really
-// is unvalidated, so the root stays optimistic. Cleanup is not finality-driven — it waits
-// for a later validated payload with a higher execution block number.
+// is unvalidated, so the root stays optimistic while the block itself is not inserted.
+// Nothing prunes that entry on finality; it waits for a later validated payload, which
+// TestOptimisticStoreSweepsStaleRootsOnValidateBlock covers.
 func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
 	store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNotValidated, nil)
 	store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
@@ -364,10 +366,32 @@ func TestOnBlockKeepsNotValidatedVerdictWhenFinalityMovesDuringNewPayload(t *tes
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	require.True(t, store.IsRootOptimistic(blockRoot), "an unvalidated payload stays optimistic")
+}
 
-	block.Block.Body.ExecutionPayload.BlockNumber++
-	require.NoError(t, store.optimisticStore.ValidateBlock(common.HexToHash("0xfeed"), block.Block))
-	require.False(t, store.IsRootOptimistic(blockRoot), "a later validated payload sweeps the entry")
+// ValidateBlock sweeps every root below the validated execution block number, not just the
+// validated block's ancestors. That sweep is what eventually clears a root left optimistic
+// by the test above, so pin it directly.
+func TestOptimisticStoreSweepsStaleRootsOnValidateBlock(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	stale := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(stale, diffBlockd4Enc, int(clparams.AltairVersion)))
+	staleRoot, err := stale.Block.HashSSZ()
+	require.NoError(t, err)
+
+	store := optimistic.NewOptimisticStore()
+	require.NoError(t, store.AddOptimisticCandidate(staleRoot, stale.Block))
+	require.True(t, store.IsOptimistic(staleRoot))
+
+	// A sibling, never an ancestor of the stale root, so only the block-number sweep
+	// can remove it.
+	later := cltypes.NewSignedBeaconBlock(cfg, clparams.DenebVersion)
+	require.NoError(t, utils.DecodeSSZSnappy(later, diffBlockc2Enc, int(clparams.AltairVersion)))
+	later.Block.Body.ExecutionPayload.BlockNumber = stale.Block.Body.ExecutionPayload.BlockNumber + 1
+	laterRoot, err := later.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, store.ValidateBlock(laterRoot, later.Block))
+	require.False(t, store.IsOptimistic(staleRoot), "a higher-numbered validated payload sweeps the stale root")
 }
 
 // A caller that wins admission only after someone else validated the same payload
