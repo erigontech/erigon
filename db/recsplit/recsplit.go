@@ -923,32 +923,6 @@ func (rs *RecSplit) SetProgress(p *background.Progress) {
 	rs.progress = p
 }
 
-// writeIndexHeader writes everything that precedes the buckets.
-func (rs *RecSplit) writeIndexHeader() error {
-	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
-	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
-	rs.numBuf[0] = uint8(rs.dataStructureVersion)
-	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-
-	// Write number of keys
-	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
-		return fmt.Errorf("write number of keys: %w", err)
-	}
-	// Write number of bytes per index record
-	if rs.enums {
-		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
-	} else {
-		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
-	}
-	if err := rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
-		return fmt.Errorf("write bytes per record: %w", err)
-	}
-	return nil
-}
-
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
@@ -978,8 +952,26 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.indexW = bufiopool.Writer(rs.indexF)
 	defer bufiopool.PutWriter(rs.indexW)
 
-	if err := rs.writeIndexHeader(); err != nil {
-		return err
+	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
+	rs.numBuf[0] = uint8(rs.dataStructureVersion)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+
+	// Write number of keys
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return fmt.Errorf("write number of keys: %w", err)
+	}
+	// Write number of bytes per index record
+	if rs.enums {
+		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+	} else {
+		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+	}
+	if err := rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
+		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
