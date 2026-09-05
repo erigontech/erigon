@@ -354,14 +354,15 @@ func parseMessage(raw json.RawMessage) ([]*jsonrpcMessage, bool, error) {
 		return []*jsonrpcMessage{msg}, false, nil
 	}
 	var msgs []*jsonrpcMessage
-	forEachJSONElement(raw, func(elem []byte) {
+	forEachJSONElement(raw, func(elem []byte) bool {
 		if isJSONNull(elem) {
 			msgs = append(msgs, nil)
-			return
+			return true
 		}
 		msg := new(jsonrpcMessage)
 		fillMessage(elem, msg)
 		msgs = append(msgs, msg)
+		return true
 	})
 	return msgs, true, nil
 }
@@ -453,25 +454,23 @@ func parseArgumentArray(rawArgs json.RawMessage, types []reflect.Type) ([]reflec
 	// A json.Decoder would walk every argument twice, once to find where it ends.
 	args := make([]reflect.Value, 0, len(types))
 	var scanErr error
-	forEachJSONElement(rawArgs, func(elem []byte) {
-		if scanErr != nil {
-			return
-		}
+	forEachJSONElement(rawArgs, func(elem []byte) bool {
 		i := len(args)
 		if i >= len(types) {
 			scanErr = fmt.Errorf("too many arguments, want at most %d", len(types))
-			return
+			return false
 		}
 		if types[i].Kind() != reflect.Pointer && isJSONNull(elem) {
 			scanErr = fmt.Errorf("missing value for required argument %d", i)
-			return
+			return false
 		}
 		argval := reflect.New(types[i])
 		if err := decodeArgument(elem, argval.Interface()); err != nil {
 			scanErr = fmt.Errorf("invalid argument %d: %w", i, err)
-			return
+			return false
 		}
 		args = append(args, argval.Elem())
+		return true
 	})
 	return args, scanErr
 }

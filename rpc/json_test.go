@@ -389,7 +389,7 @@ func TestJSONScanMalformedTerminates(t *testing.T) {
 				t.Fatalf("no progress on %q", input)
 			}
 		}
-		forEachJSONElement([]byte(input), func([]byte) { count() })
+		forEachJSONElement([]byte(input), func([]byte) bool { count(); return true })
 		calls = 0
 		forEachJSONField([]byte(input), func(_, _ []byte) { count() })
 	}
@@ -410,8 +410,9 @@ func FuzzJSONScanElements(f *testing.F) {
 			return // not an array
 		}
 		var got []json.RawMessage
-		forEachJSONElement(data, func(value []byte) {
+		forEachJSONElement(data, func(value []byte) bool {
 			got = append(got, value)
+			return true
 		})
 		require.Len(t, got, len(want), "input %s", input)
 		for i := range want {

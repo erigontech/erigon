@@ -140,8 +140,9 @@ func forEachJSONField(data []byte, fn func(key, value []byte)) {
 }
 
 // forEachJSONElement calls fn with the raw value of every element of the JSON
-// array in data. Nothing is called if data does not hold an array.
-func forEachJSONElement(data []byte, fn func(value []byte)) {
+// array in data, until fn returns false. Nothing is called if data does not
+// hold an array.
+func forEachJSONElement(data []byte, fn func(value []byte) bool) {
 	i := skipJSONSpace(data, 0)
 	if i >= len(data) || data[i] != '[' {
 		return
@@ -162,6 +163,8 @@ func forEachJSONElement(data []byte, fn func(value []byte)) {
 			// A value that scans to nothing would spin here. Valid JSON never does.
 			return
 		}
-		fn(data[start:i])
+		if !fn(data[start:i]) {
+			return
+		}
 	}
 }
