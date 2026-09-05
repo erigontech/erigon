@@ -114,6 +114,9 @@ type CommitProgress struct {
 
 type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
+	// BranchNoCopy returns branch bytes the caller must consume before its next
+	// read on this context, and must not mutate.
+	BranchNoCopy(prefix []byte) ([]byte, kv.Step, error)
 	// Implementations must copy prefix and data rather than retain them: callers may pass
 	// pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error

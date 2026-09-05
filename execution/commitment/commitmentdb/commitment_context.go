@@ -809,6 +809,10 @@ func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, e.err
 }
 
+func (e *errorTrieContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return nil, 0, e.err
+}
+
 func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	return e.err
 }
@@ -1021,12 +1025,9 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.branch(pref)
 	if err != nil {
 		return nil, 0, err
-	}
-	if sdc.traceW != nil {
-		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
 	// The slice from the underlying state cache / getter aliases storage another
 	// commitment worker can recycle, so the bytes have to be owned here. They are
@@ -1043,6 +1044,21 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	}
 	sdc.branchBuf = append(sdc.branchBuf[:0], enc...)
 	return sdc.branchBuf, step, nil
+}
+
+func (sdc *TrieContext) BranchNoCopy(pref []byte) ([]byte, kv.Step, error) {
+	return sdc.branch(pref)
+}
+
+func (sdc *TrieContext) branch(pref []byte) ([]byte, kv.Step, error) {
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
+	}
+	return enc, step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
