@@ -1700,3 +1700,30 @@ func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
 	_, err = apis.eth.receiptsGenerator.GetReceipts(ctx, chainConfig, view, withTxns, eth.ReceiptsOpts{})
 	require.ErrorIs(t, err, state.PrunedError, "the control block must reach the unavailable history")
 }
+
+// TestFeeHistoryGateTakesTheOldestBlockOfTheRange pins that the reward-percentile gate
+// looks at where the requested range starts, not where it ends: a range that reaches
+// below the cutoff is refused even when its newest block is retained. The header series
+// is served for the same range.
+func TestFeeHistoryGateTakesTheOldestBlockOfTheRange(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+	head := chainInfo.head
+	oldest := pruneGatingDistance.PruneTo(head)
+	retained := rpc.DecimalOrHex(head - oldest + 1)
+
+	_, err := apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), []float64{50})
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), "blocks are available")
+
+	_, err = apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), nil)
+	require.NoError(t, err, "the header series reaches past the blocks cutoff")
+
+	res, err := apis.eth.FeeHistory(ctx, retained, rpc.BlockNumber(head), []float64{50})
+	require.NoError(t, err)
+	require.Equal(t, oldest, res.OldestBlock.ToInt().Uint64())
+}

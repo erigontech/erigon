@@ -286,6 +286,10 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
+func (m *mockOracleBackend) CheckBlockRewardsAvailable(_ context.Context, _ uint64) error {
+	return nil
+}
+
 func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
 	m.canonicalMu.Lock()
 	m.canonicalRanges = append(m.canonicalRanges, [2]uint64{from, to})
