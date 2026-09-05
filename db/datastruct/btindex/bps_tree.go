@@ -335,7 +335,7 @@ func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 // If key is nil, returns cursor with first key
 // If found item.key has a prefix of key, returns item.key
 // if key is greater than all keys, returns nil
-func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
+func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, _ error) {
 	//b.trace = true
 	if b.trace {
 		fmt.Printf("seek %x\n", seekKey)
@@ -386,7 +386,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			}
 
 			cur.value, _ = g.Next(cur.value[:0])
-			return cur, err
+			return cur, nil
 		}
 
 		cmp = b.compareKey(g, seekKey, m)
@@ -407,7 +407,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		m = l
 	}
 
-	err = cur.Reset(m, g)
+	err := cur.Reset(m, g)
 	if err != nil || bytes.Compare(cur.Key(), seekKey) < 0 {
 		return nil, err
 	}

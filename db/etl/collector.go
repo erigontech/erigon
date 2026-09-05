@@ -37,10 +37,31 @@ type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) err
 type simpleLoadFunc func(k, v []byte) error
 
 type Allocator struct {
-	p *sync.Pool
+	p     *sync.Pool
+	mu    sync.Mutex
+	fills map[string]int
 }
 
-func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+const maxFillHints = 1024
+
+func NewAllocator(p *sync.Pool) *Allocator {
+	return &Allocator{p: p, fills: map[string]int{}}
+}
+
+func (a *Allocator) lastFill(name string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fills[name]
+}
+
+func (a *Allocator) rememberFill(name string, n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.fills[name]; !ok && len(a.fills) >= maxFillHints {
+		return
+	}
+	a.fills[name] = n
+}
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
@@ -73,6 +94,7 @@ type Collector struct {
 	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
 
 	allocator *Allocator
+	fill      int
 }
 
 // NewCollectorWithAllocator builds a collector that draws its buffer from the
@@ -103,6 +125,9 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
+		if n := max(c.allocator.lastFill(c.logPrefix), c.fill); n > 0 {
+			c.buf.Prealloc(n, 0)
+		}
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -141,6 +166,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 
 	// go bg - but without server overloading
 	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
+	c.fill = max(c.fill, c.buf.Len())
 	if !doInBackground {
 		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
 		if err != nil {
@@ -277,6 +303,7 @@ func (c *Collector) Close() {
 		c.dataProviders = nil
 	}
 	if c.buf != nil { //idempotency
+		c.fill = max(c.fill, c.buf.Len())
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
 			c.buf = nil
@@ -284,6 +311,10 @@ func (c *Collector) Close() {
 			c.buf.Reset()
 		}
 	}
+	if c.allocator != nil && c.fill > 0 {
+		c.allocator.rememberFill(c.logPrefix, c.fill)
+	}
+	c.fill = 0
 	c.allFlushed = false
 }
 
@@ -294,7 +325,7 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs) error {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
@@ -357,6 +388,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			}
 		}
 
+		var err error
 		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
