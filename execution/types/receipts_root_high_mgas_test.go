@@ -48,7 +48,7 @@ func TestDeriveSha_ReceiptOver16MiB(t *testing.T) {
 
 	logs := make(Logs, nLogs)
 	for i := range logs {
-		logs[i] = &Log{Address: addr, Topics: []common.Hash{topic}, Data: nil}
+		logs[i] = Log{Address: addr, Topics: []common.Hash{topic}, Data: nil}
 	}
 
 	r := &Receipt{

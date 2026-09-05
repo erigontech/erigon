@@ -42,7 +42,7 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 	logAddr := common.HexToAddress("0x095e7baea6a6c7c4c2dfeb977efac326af552d87")
 	receipt := &types.Receipt{
 		CumulativeGasUsed: 21912,
-		Logs: []*types.Log{{
+		Logs: types.Logs{{
 			Address: logAddr,
 			Topics:  []common.Hash{},
 			Data:    []byte{},
@@ -93,7 +93,7 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 		{
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21_000,
-			Logs: []*types.Log{
+			Logs: types.Logs{
 				{
 					Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 					Topics:  []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")},
@@ -107,7 +107,7 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 		{
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 42_000,
-			Logs: []*types.Log{
+			Logs: types.Logs{
 				{
 					Address: common.HexToAddress("0x3333333333333333333333333333333333333333"),
 					Topics:  []common.Hash{common.HexToHash("0x04")},

@@ -145,7 +145,7 @@ func TestExternalPackageTxTypeEndToEnd(t *testing.T) {
 		Type:              externalTxType,
 		Status:            types.ReceiptStatusSuccessful,
 		CumulativeGasUsed: 21000,
-		Logs: []*types.Log{{
+		Logs: types.Logs{{
 			Address: common.BytesToAddress([]byte{0x11}),
 			Topics:  []common.Hash{common.HexToHash("dead")},
 			Data:    []byte{0xff},

@@ -533,7 +533,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 	if len(reply.RplLogs) == 0 {
 		return
 	}
-	l := []*types.Log{}
+	l := types.Logs{}
 	if err := rlp.DecodeBytes(reply.RplLogs, &l); err != nil {
 		ff.logger.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}

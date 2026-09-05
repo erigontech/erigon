@@ -1839,7 +1839,7 @@ type txResult struct {
 	blockGasUsed          int64
 	cumulativeBlobGasUsed uint64
 	receipt               *types.Receipt
-	logs                  []*types.Log // yes, logs exist inside `receipt`, but Finalize txn producing `logs` without `receipt`
+	logs                  types.Logs // yes, logs exist inside `receipt`, but Finalize txn producing `logs` without `receipt`
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                *state.WriteSet

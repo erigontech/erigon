@@ -512,7 +512,8 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 // arena reuses the entry.
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	logs := sdb.logs.forTx(txIndex).Copy()
-	for _, l := range logs {
+	for i := range logs {
+		l := &logs[i]
 		l.TxHash = txnHash
 		l.BlockHash = blockHash
 		l.BlockNumber = hexutil.Uint64(blockNumber)

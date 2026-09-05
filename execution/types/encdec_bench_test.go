@@ -268,9 +268,9 @@ func BenchmarkLogJSON(b *testing.B) {
 		}
 	})
 
-	logs := make([]*Log, 100)
+	logs := make([]Log, 100)
 	for i := range logs {
-		logs[i] = mkLog()
+		logs[i] = *mkLog()
 	}
 	b.Run("Log/Batch100", func(b *testing.B) {
 		b.ReportAllocs()

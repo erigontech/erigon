@@ -74,7 +74,7 @@ func TestPendingLogs(t *testing.T) {
 	ch, id := ff.SubscribePendingLogs(1)
 	defer ff.UnsubscribePendingLogs(id)
 
-	b, err := rlp.EncodeToBytes([]*types.Log{{Data: expect}})
+	b, err := rlp.EncodeToBytes(types.Logs{{Data: expect}})
 	require.NoError(t, err)
 	ff.HandlePendingLogs(&txpoolproto.OnPendingLogsReply{RplLogs: b})
 	select {

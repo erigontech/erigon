@@ -82,9 +82,9 @@ func (r *RecentReceipts) NotifyLogs(n ChainEventNotifier, from, to uint64, isUnw
 			if receipt == nil {
 				continue
 			}
-			for _, l := range receipt.Logs {
+			for i := range receipt.Logs {
 				reply = append(reply, &LogNotification{
-					Log:            l,
+					Log:            &receipt.Logs[i],
 					BlockTimestamp: blockTimestamp,
 					Removed:        isUnwind,
 				})

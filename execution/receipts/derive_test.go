@@ -29,7 +29,7 @@ import (
 // arrive without one, and the notification path publishes the set as-is.
 func TestDeriveFieldsSetsBloom(t *testing.T) {
 	withLogs := &types.Receipt{
-		Logs: []*types.Log{{
+		Logs: types.Logs{{
 			Address: common.HexToAddress("0x01"),
 			Topics:  []common.Hash{common.HexToHash("0x02")},
 		}},
@@ -54,7 +54,7 @@ func TestDeriveFieldsPreservesExistingBloom(t *testing.T) {
 	preset[types.BloomByteLength-1] = 0x01
 	withPresetBloom := &types.Receipt{
 		Bloom: preset,
-		Logs: []*types.Log{{
+		Logs: types.Logs{{
 			Address: common.HexToAddress("0x01"),
 			Topics:  []common.Hash{common.HexToHash("0x02")},
 		}},

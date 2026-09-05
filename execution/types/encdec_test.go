@@ -715,7 +715,7 @@ func (tr *TRand) RandReceipt() *Receipt {
 	numLogs := tr.RandIntInRange(1, 5)
 	logs := make(Logs, numLogs)
 	for i := range numLogs {
-		logs[i] = tr.RandLog()
+		logs[i] = *tr.RandLog()
 	}
 	return tr.randReceiptWithLogs(logs)
 }
@@ -725,7 +725,7 @@ func (tr *TRand) RandReceipt() *Receipt {
 func (tr *TRand) RandReceiptFixed() *Receipt {
 	logs := make(Logs, 3)
 	for i := range logs {
-		logs[i] = tr.RandLogFixed()
+		logs[i] = *tr.RandLogFixed()
 	}
 	return tr.randReceiptWithLogs(logs)
 }

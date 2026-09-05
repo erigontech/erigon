@@ -130,8 +130,8 @@ func TestAddLogKeepsCallerTxAndBlockHash(t *testing.T) {
 	require.Equal(t, common.HexToHash("0xad"), logs[0].BlockHash)
 }
 
-// A reverted entry goes back to the pool, and Data past the per-entry cap does
-// not go with it.
+// A reverted entry keeps its slot, and Data past the per-entry cap does not stay
+// with it.
 func TestRevertDropsOversizedLogData(t *testing.T) {
 	t.Parallel()
 
@@ -141,19 +141,19 @@ func TestRevertDropsOversizedLogData(t *testing.T) {
 	snap := ibs.PushSnapshot()
 	ibs.AddLog(&types.Log{
 		Address: common.HexToAddress("0x1"),
-		Data:    make([]byte, maxPooledLogDataCap+1),
+		Data:    make([]byte, maxRetainedLogDataCap+1),
 	})
 	ibs.RevertToSnapshot(snap, nil)
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 1)
-	require.LessOrEqual(t, cap(lp.Data), maxPooledLogDataCap)
+	require.LessOrEqual(t, cap(lp.Data), maxRetainedLogDataCap)
 }
 
-// Entries survive Reset for reuse, so retention belongs to the IntraBlockState
-// and not to one block: a burst of logs at a fresh tx index every block would
-// otherwise add a high-water mark per block. The pool is the whole of it.
+// Slots survive Reset for reuse, so retention belongs to the IntraBlockState and
+// not to one block: a burst of logs at a fresh tx index every block would
+// otherwise add a high-water mark per block. The run's array is the whole of it.
 func TestResetBoundsRetainedLogMemory(t *testing.T) {
 	t.Parallel()
 
@@ -167,17 +167,14 @@ func TestResetBoundsRetainedLogMemory(t *testing.T) {
 		ibs.Reset()
 	}
 
-	require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries)
-	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes)
-
-	// The run keeps its array, but every entry is in the pool.
-	entries, _, dataBytes := retainedLogs(ibs)
-	require.Zero(t, entries, "entries live outside the pool")
-	require.Zero(t, dataBytes)
+	slotCap, dataBytes := retainedLogs(ibs)
+	require.LessOrEqual(t, slotCap, maxRetainedLogSlots)
+	require.LessOrEqual(t, dataBytes, maxRetainedLogBytes)
+	require.Equal(t, dataBytes, ibs.logs.retainedData)
 }
 
-// A transaction that fits the pool costs no entry the next time round. The pool
-// hands them back in its own order, so what is pinned is the set, not the place.
+// A transaction that fits the budget costs no entry the next time round. Slots
+// are reused where they lie, so the run walks back over the same ones in order.
 func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	t.Parallel()
 
@@ -187,21 +184,21 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	for range burst {
 		ibs.AddLog(&types.Log{Address: common.HexToAddress("0x1"), Data: make([]byte, 64)})
 	}
-	before := make(map[*types.Log]struct{}, burst)
-	for _, lp := range ibs.logs.entries {
-		before[lp] = struct{}{}
+	before := make([]*types.Log, burst)
+	for i := range ibs.logs.entries {
+		before[i] = &ibs.logs.entries[i]
 	}
 
 	ibs.Reset()
 	ibs.SetTxContext(2, 0)
 	for i := range burst {
-		require.Contains(t, before, ibs.AllocLog(common.HexToAddress("0x2"), 0, 64), "entry %d", i)
+		require.Same(t, before[i], ibs.AllocLog(common.HexToAddress("0x2"), 0, 64), "entry %d", i)
 	}
 }
 
-// poolBytes is what the pool admits itself against, so it has to match the Data
-// the pooled entries actually hold, through emit, revert and reset.
-func TestLogPoolBytesMatchPooledData(t *testing.T) {
+// retainedData is what the arena admits itself against, so it has to match the
+// Data the slots actually hold, through emit, revert and reset.
+func TestLogRetainedDataMatchesSlots(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
@@ -220,23 +217,20 @@ func TestLogPoolBytesMatchPooledData(t *testing.T) {
 			}
 			ibs.Reset()
 
-			held := 0
-			for _, lp := range ibs.logs.pool {
-				held += cap(lp.Data)
-			}
-			require.Equal(t, held, ibs.logs.poolBytes, "block %d tx %d", blockNum, txIndex)
-			require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes)
-			require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries)
+			slotCap, dataBytes := retainedLogs(ibs)
+			require.Equal(t, dataBytes, ibs.logs.retainedData, "block %d tx %d", blockNum, txIndex)
+			require.LessOrEqual(t, dataBytes, maxRetainedLogBytes)
+			require.LessOrEqual(t, slotCap, maxRetainedLogSlots)
 		}
 	}
 }
 
-// A block of large logs is what the pool is for: the transactions run one after
+// A block of large logs is what the reuse is for: the transactions run one after
 // another, so one buffer serves them all instead of one per transaction.
-func TestLogPoolReusesLargeDataAcrossTxs(t *testing.T) {
+func TestLogSlotReusesLargeDataAcrossTxs(t *testing.T) {
 	t.Parallel()
 
-	const dataSize = maxPooledLogDataCap / 2
+	const dataSize = maxRetainedLogDataCap / 2
 	ibs := New(nil)
 	ibs.SetTxContext(1, 0)
 	first := ibs.AllocLog(common.HexToAddress("0x1"), 0, dataSize)
@@ -250,22 +244,23 @@ func TestLogPoolReusesLargeDataAcrossTxs(t *testing.T) {
 		require.Equal(t, firstData, &lp.Data[0], "tx %d reallocated the buffer", txIndex)
 		ibs.Reset()
 	}
-	require.Len(t, ibs.logs.pool, 1)
+	require.Equal(t, cap(first.Data), ibs.logs.retainedData)
 }
 
-// Data past the per-entry cap is not pooled: one buffer that size would take the
+// Data past the per-entry cap is not kept: one buffer that size would take the
 // whole budget and leave nothing for the small entries.
-func TestLogPoolRejectsOversizedData(t *testing.T) {
+func TestLogSlotRejectsOversizedData(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(nil)
 	ibs.SetTxContext(1, 0)
-	ibs.AllocLog(common.HexToAddress("0x1"), 0, maxPooledLogDataCap+1)
+	ibs.AllocLog(common.HexToAddress("0x1"), 0, maxRetainedLogDataCap+1)
 	ibs.Reset()
 
-	require.Len(t, ibs.logs.pool, 1, "the entry is small enough to keep")
-	require.Zero(t, ibs.logs.poolBytes, "its Data is not")
-	require.Nil(t, ibs.logs.pool[0].Data)
+	kept := keptLogSlots(ibs)
+	require.Len(t, kept, 1, "the slot is small enough to keep")
+	require.Zero(t, ibs.logs.retainedData, "its Data is not")
+	require.Nil(t, kept[0].Data)
 }
 
 // An outlier must not leave the array that held it behind.
@@ -283,17 +278,19 @@ func TestResetDropsOutsizedLogSlots(t *testing.T) {
 	require.Zero(t, cap(ibs.logs.entries))
 }
 
-func retainedLogs(ibs *IntraBlockState) (entries, slotCap, dataBytes int) {
+// keptLogSlots is the run's array in full — the live entries and the slots reset
+// took back, which is everything the arena holds.
+func keptLogSlots(ibs *IntraBlockState) types.Logs {
 	run := ibs.logs.entries
-	slotCap = cap(run)
-	for _, lp := range run[:cap(run)] {
-		if lp == nil {
-			continue
-		}
-		entries++
-		dataBytes += cap(lp.Data)
+	return run[:cap(run)]
+}
+
+func retainedLogs(ibs *IntraBlockState) (slotCap, dataBytes int) {
+	slots := keptLogSlots(ibs)
+	for i := range slots {
+		dataBytes += cap(slots[i].Data)
 	}
-	return entries, slotCap, dataBytes
+	return len(slots), dataBytes
 }
 
 func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
@@ -307,7 +304,7 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 		Address: common.HexToAddress("0x1"),
 		Data:    []byte{1, 2, 3},
 	})
-	first := ibs.logs.entries[0]
+	first := &ibs.logs.entries[0]
 	ibs.RevertToSnapshot(snap, nil)
 
 	lp := ibs.AllocLog(common.HexToAddress("0x2"), 0, 2)
@@ -514,19 +511,20 @@ func TestGetLogsOfPastTxPanicsWithoutAsserts(t *testing.T) {
 	require.Panics(t, func() { ibs.GetRawLogs(2) }, "tx 2 is older than the tail")
 }
 
-// Whatever the traffic looks like, one arena holds a bounded amount: the pool,
-// and the one array the run left behind. This is the invariant a shape-specific
-// leak breaks — logs parked per tx index, an array kept because one block was
-// wide, Data kept because one log was large.
+// Whatever the traffic looks like, one arena holds a bounded amount: the one
+// array the run left behind, and the Data its slots kept. This is the invariant
+// a shape-specific leak breaks — logs parked per tx index, an array kept because
+// one block was wide, Data kept because one log was large.
 func TestArenaRetentionStaysBounded(t *testing.T) {
 	t.Parallel()
 
+	const sizeofLog = 168 // what a slot costs, the run's array being []types.Log
 	shapes := []struct{ txs, logsPerTx, dataSize int }{
-		{200, 3, 96},                        // ordinary
-		{1500, 1, 32},                       // wide: many tx indexes
-		{2, maxRetainedLogSlots + 1000, 8},  // deep: one transaction outgrows the run's array
-		{20, 2, maxPooledLogDataCap + 1000}, // Data past what the pool admits
-		{8, 40, maxPooledLogBytes / 32},     // Data that fits alone but not together
+		{200, 3, 96},                          // ordinary
+		{1500, 1, 32},                         // wide: many tx indexes
+		{2, maxRetainedLogSlots + 1000, 8},    // deep: one transaction outgrows the run's array
+		{20, 2, maxRetainedLogDataCap + 1000}, // Data past what a slot may keep
+		{8, 40, maxRetainedLogBytes / 32},     // Data that fits alone but not together
 		{800, 2, 256},
 	}
 	ibs := New(nil)
@@ -541,11 +539,11 @@ func TestArenaRetentionStaysBounded(t *testing.T) {
 		}
 	}
 
-	slotBytes := cap(ibs.logs.entries) * 8
-	require.LessOrEqual(t, slotBytes, maxRetainedLogSlots*8, "the run's array")
-	require.LessOrEqual(t, len(ibs.logs.pool), maxPooledLogEntries, "pooled entries")
-	require.LessOrEqual(t, ibs.logs.poolBytes, maxPooledLogBytes, "pooled Data")
+	slotCap, dataBytes := retainedLogs(ibs)
+	require.LessOrEqual(t, slotCap, maxRetainedLogSlots, "the run's array")
+	require.LessOrEqual(t, dataBytes, maxRetainedLogBytes, "the Data its slots kept")
+	require.Equal(t, dataBytes, ibs.logs.retainedData)
 
-	held := slotBytes + len(ibs.logs.pool)*304 + ibs.logs.poolBytes
+	held := slotCap*sizeofLog + dataBytes
 	require.Less(t, held, 3<<20, "an arena holds %dKB after mixed traffic", held/1024)
 }

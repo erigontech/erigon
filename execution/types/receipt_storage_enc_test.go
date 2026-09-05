@@ -35,7 +35,7 @@ const storageReceiptGolden = "f9014302018301e24007f90120f85e94000000000000000000
 func storageReceiptFixture() *ReceiptForStorage {
 	logs := make(Logs, 3)
 	for i := range logs {
-		logs[i] = &Log{
+		logs[i] = Log{
 			Address: common.HexToAddress(fmt.Sprintf("0x%02x", 0xa0+i)),
 			Topics:  []common.Hash{common.HexToHash("0x11"), common.HexToHash("0x22")},
 			Data:    []byte{0x01, 0x02, 0x03, byte(i)},
@@ -78,7 +78,8 @@ func TestReceiptForStorage_RoundTrip(t *testing.T) {
 	require.Equal(t, want.TransactionIndex, got.TransactionIndex)
 	require.Equal(t, want.FirstLogIndexWithinBlock, got.FirstLogIndexWithinBlock)
 	require.Len(t, got.Logs, len(want.Logs))
-	for i, l := range got.Logs {
+	for i := range got.Logs {
+		l := &got.Logs[i]
 		require.Equal(t, want.Logs[i].Address, l.Address)
 		require.Equal(t, want.Logs[i].Topics, l.Topics)
 		require.Equal(t, []byte(want.Logs[i].Data), []byte(l.Data))

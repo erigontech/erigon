@@ -343,7 +343,7 @@ func fakeRegisteredReceipt() *Receipt {
 		Type:              fakeRegisteredTxType,
 		Status:            ReceiptStatusSuccessful,
 		CumulativeGasUsed: 42,
-		Logs: []*Log{{
+		Logs: Logs{{
 			Address: common.BytesToAddress([]byte{0x11}),
 			Topics:  []common.Hash{common.HexToHash("dead")},
 			Data:    []byte{0x01, 0x00, 0xff},
