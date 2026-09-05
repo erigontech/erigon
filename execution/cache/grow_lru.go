@@ -27,6 +27,24 @@ import (
 	"github.com/erigontech/erigon/common/cachebudget"
 )
 
+// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
+// freelru's own Len locks every shard, which serialises readers on a path that
+// only wanted a number.
+type lruGen[V any] struct {
+	lru *freelru.ShardedLRU[uint64, V]
+	n   atomic.Int64
+}
+
+func (g *lruGen[V]) len() int { return int(g.n.Load()) }
+
+// add requires a key the LRU does not hold — Put removes first — so the count
+// can rise unconditionally; a capacity eviction fires OnEvict, which lowers it.
+func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
+	evicted = g.lru.Add(h, v)
+	g.n.Add(1)
+	return evicted
+}
+
 // growLRU is a uint64-keyed sharded LRU that starts small and jump-resizes ×4
 // toward a byte-budget ceiling as it fills, funding each step from the shared
 // cachebudget envelope. It exists so a cache with a small working set never
@@ -38,11 +56,10 @@ import (
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
 // drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. The onEvict-maintained counters are
-// approximate across grow windows (a lost write is counted but never
-// evicted; a raced removal can subtract twice).
+// need GenericCache's fenced swap. Each generation's own entry count is exact;
+// the caller's onEvict byte counters stay approximate across grow windows.
 type growLRU[V any] struct {
-	cur      atomic.Pointer[freelru.ShardedLRU[uint64, V]]
+	cur      atomic.Pointer[lruGen[V]]
 	onEvict  func(uint64, V)
 	avgBytes int64
 
@@ -71,26 +88,35 @@ func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func
 	return g
 }
 
-func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
+func (g *growLRU[V]) newShards(capacity uint32) *lruGen[V] {
 	lru, err := freelru.NewSharded[uint64, V](capacity, u64identity)
 	if err != nil {
 		panic(fmt.Sprintf("growLRU: NewSharded(%d): %s", capacity, err))
 	}
-	if g.onEvict != nil {
-		lru.SetOnEvict(g.onEvict)
-	}
-	return lru
+	gen := &lruGen[V]{lru: lru}
+	lru.SetOnEvict(func(k uint64, v V) {
+		gen.n.Add(-1)
+		if g.onEvict != nil {
+			g.onEvict(k, v)
+		}
+	})
+	return gen
 }
 
-func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
+func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key) }
 
-func (g *growLRU[V]) Add(key uint64, value V) {
-	lru := g.cur.Load()
-	if curCap := g.curCap.Load(); curCap < g.maxCap && lru.Len() >= int(curCap) {
+// Put stores a key, growing first when the generation is full. The Remove is not
+// redundant after a caller's miss: an unfenced grow can leave the key present in
+// the generation this Put lands on, and freelru's Add would replace it in place
+// without firing OnEvict, stranding the count and the caller's byte counter.
+func (g *growLRU[V]) Put(key uint64, value V) {
+	gen := g.cur.Load()
+	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
 		g.maybeGrow()
-		lru = g.cur.Load()
+		gen = g.cur.Load()
 	}
-	lru.Add(key, value)
+	gen.lru.Remove(key)
+	gen.add(key, value)
 }
 
 func (g *growLRU[V]) maybeGrow() {
@@ -98,7 +124,7 @@ func (g *growLRU[V]) maybeGrow() {
 	defer g.resizeMu.Unlock()
 	old := g.cur.Load()
 	curCap := g.curCap.Load()
-	if curCap >= g.maxCap || old.Len() < int(curCap) {
+	if curCap >= g.maxCap || old.len() < int(curCap) {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
@@ -107,9 +133,9 @@ func (g *growLRU[V]) maybeGrow() {
 		return
 	}
 	next := g.newShards(newCap)
-	for _, k := range old.Keys() {
-		if v, ok := old.Get(k); ok {
-			next.Add(k, v)
+	for _, k := range old.lru.Keys() {
+		if v, ok := old.lru.Get(k); ok {
+			next.add(k, v)
 		}
 	}
 	g.cur.Store(next)
@@ -117,8 +143,8 @@ func (g *growLRU[V]) maybeGrow() {
 	g.reserved += delta
 }
 
-func (g *growLRU[V]) Remove(key uint64) { g.cur.Load().Remove(key) }
-func (g *growLRU[V]) Len() int          { return g.cur.Load().Len() }
+func (g *growLRU[V]) Remove(key uint64) { g.cur.Load().lru.Remove(key) }
+func (g *growLRU[V]) Len() int          { return g.cur.Load().len() }
 
 // Purge empties the LRU and shrinks it back to the start size, returning the
 // grown budget to the envelope (it regrows on demand).
