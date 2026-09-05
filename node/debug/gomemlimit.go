@@ -47,14 +47,8 @@ const (
 	goMemLimitSet                          // one is already in force
 )
 
-// goMemLimitInForce needs both the runtime and the environment: the runtime
-// maps unset, "" and "off" alike to math.MaxInt64, and only the environment
-// separates a deliberate "off" from the empty value an unrendered k8s or
-// compose template leaves behind.
-//
-// Three states cover every input. GOMEMLIMIT matches ^[0-9]+(([KMGT]i)?B)?$, so
-// "-1", "inf" and anything else malformed throw before main; "0" is a real
-// limit like any other; and SetMemoryLimit never stores a negative.
+// The runtime maps unset, "" and "off" alike to math.MaxInt64, so only the
+// environment separates a deliberate "off" from an empty value.
 func goMemLimitInForce(current int64) goMemLimitState {
 	if current != math.MaxInt64 {
 		return goMemLimitSet
