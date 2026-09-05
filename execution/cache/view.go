@@ -277,8 +277,7 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
 }
 
-// FillCode stores a copy of code and returns it. Entries are immutable, so the
-// caller may keep the returned copy — a cache hit hands out the same way.
+// FillCode offers code to the cache and returns a copy the caller may keep.
 func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte {
 	stored := bytes.Clone(code)
 	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)

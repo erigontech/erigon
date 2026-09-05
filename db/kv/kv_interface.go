@@ -471,8 +471,6 @@ type GetLatestOptions struct {
 // WithBuf lends a buffer to decode a value into. The result may or may not be
 // that buffer, so the caller must treat it as valid only until its own next read
 // with the same buffer — stricter than the end-of-tx lifetime a plain read gives.
-// A buffered read is not served from or added to any cache that outlives the
-// call.
 func (opts GetLatestOptions) WithBuf(buf []byte) GetLatestOptions {
 	opts.buf = buf
 	return opts

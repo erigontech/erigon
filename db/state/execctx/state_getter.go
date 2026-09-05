@@ -33,8 +33,7 @@ type stateGetter struct {
 	tx   kv.TemporalTx
 	view cache.ReadView
 	m    kv.GetLatestMetrics
-	// codeBuf is lent to the code read and never escapes: the value handed back
-	// is the cache's copy. One getter serves one worker, like m.
+	// One getter serves one worker, like m.
 	codeBuf []byte
 }
 
