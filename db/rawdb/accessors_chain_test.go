@@ -22,10 +22,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -1406,6 +1408,61 @@ type forEachErrTx struct {
 }
 
 func (t forEachErrTx) ForEach(string, []byte, func(k, v []byte) error) error { return t.err }
+
+// TestGetLatestBadBlocksConcurrentWithFailingReset pins that GetLatestBadBlocks never
+// panics or blows up when ResetBadBlockCache runs concurrently, including resets that
+// fail mid-load and clear the shared cache out from under an in-flight reader.
+func TestGetLatestBadBlocksConcurrentWithFailingReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	// Not t.Parallel(): bheapCache is a package-level global also touched by
+	// other tests (e.g. TestBadBlocks), which also run in parallel with each
+	// other. Running this one sequentially avoids cross-test interference on
+	// that shared state; the concurrency under test is the goroutines below.
+	m := execmoduletester.New(t)
+
+	rwTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, rawdb.ResetBadBlockCache(rwTx, 4))
+	require.NoError(t, rwTx.Commit())
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	for i := range iterations {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			roTx, err := m.DB.BeginRo(m.Ctx)
+			if err != nil {
+				return
+			}
+			defer roTx.Rollback()
+			// ErrBadBlockCacheEmptyAfterReset is the one expected outcome under this
+			// test's artificially dense failure injection (see ResetBadBlockCache's
+			// doc comment); anything else is a real failure.
+			_, err = rawdb.GetLatestBadBlocks(roTx)
+			if err != nil {
+				assert.ErrorIs(t, err, rawdb.ErrBadBlockCacheEmptyAfterReset)
+			}
+		}()
+		go func(i int) {
+			defer wg.Done()
+			if i%2 == 0 {
+				roTx, err := m.DB.BeginRo(m.Ctx)
+				if err != nil {
+					return
+				}
+				defer roTx.Rollback()
+				_ = rawdb.ResetBadBlockCache(roTx, 4)
+			} else {
+				_ = rawdb.ResetBadBlockCache(forEachErrTx{err: errors.New("boom")}, 4)
+			}
+		}(i)
+	}
+	wg.Wait()
+}
 
 func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {

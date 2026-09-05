@@ -24,6 +24,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -98,21 +99,18 @@ var (
 	bheapMu    sync.RWMutex
 )
 
-func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
-	bheapMu.RLock()
-	needsInit := bheapCache == nil
-	bheapMu.RUnlock()
+// ErrBadBlockCacheEmptyAfterReset is returned when a just-completed reset finds bheapCache nil
+// again by the time it re-reads it: a concurrent ResetBadBlockCache call raced in and cleared it
+// on its own failure first. Retrying (a fresh call) resolves it; it is not expected to recur.
+var ErrBadBlockCacheEmptyAfterReset = errors.New("bad block cache: reset reported success but cache is still empty")
 
-	if needsInit {
-		if err := ResetBadBlockCache(tx, 100); err != nil {
-			return nil, err
-		}
+func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
+	cache, err := latestBadBlockCache(tx)
+	if err != nil {
+		return nil, err
 	}
 
-	bheapMu.RLock()
-	blockIds := bheapCache.SortedValues()
-	bheapMu.RUnlock()
-
+	blockIds := cache.SortedValues()
 	blocks := make([]*types.Block, len(blockIds))
 	for i, blockId := range blockIds {
 		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
@@ -121,24 +119,50 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 	return blocks, nil
 }
 
+// latestBadBlockCache returns the loaded heap, initializing it first if needed.
+// The returned reference stays valid even if a concurrent ResetBadBlockCache
+// call later replaces or clears bheapCache.
+func latestBadBlockCache(tx kv.Tx) (utils.ExtendedHeap, error) {
+	bheapMu.RLock()
+	cache := bheapCache
+	bheapMu.RUnlock()
+	if cache != nil {
+		return cache, nil
+	}
+
+	if err := ResetBadBlockCache(tx, 100); err != nil {
+		return nil, err
+	}
+
+	bheapMu.RLock()
+	cache = bheapCache
+	bheapMu.RUnlock()
+	if cache == nil {
+		return nil, ErrBadBlockCacheEmptyAfterReset
+	}
+	return cache, nil
+}
+
 // mainly for testing purposes
 func ResetBadBlockCache(tx kv.Tx, limit int) error {
-	bheapMu.Lock()
-	bheapCache = utils.NewBlockMaxHeap(limit)
-	bheapMu.Unlock()
-	// load the heap
+	// Built privately so a concurrent GetLatestBadBlocks never observes a
+	// partially-loaded heap; bheapCache is only ever touched once, atomically,
+	// once the load has fully succeeded or failed.
+	newCache := utils.NewBlockMaxHeap(limit)
 	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
-		bheapMu.Lock()
-		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
-		bheapMu.Unlock()
+		heap.Push(newCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 		return nil
 	}); err != nil {
-		// drop the half-filled heap, otherwise readers see it as loaded and get a truncated list
+		// drop the stale cache, otherwise a reader would see the old value as still fresh
 		bheapMu.Lock()
 		bheapCache = nil
 		bheapMu.Unlock()
 		return err
 	}
+
+	bheapMu.Lock()
+	bheapCache = newCache
+	bheapMu.Unlock()
 	return nil
 }
 
