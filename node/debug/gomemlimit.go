@@ -27,37 +27,47 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// defaultGoMemLimitShare
+// defaultGoMemLimitShare leaves headroom for memory the Go runtime does not
+// account for: mdbx dirty pages (~1G, C-owned), an external CL, and the OS page
+// cache Erigon leans on heavily. The gc-guide's 5-10% rule of thumb assumes a
+// web app with none of those.
 // See: https://go.dev/doc/gc-guide#Suggested_uses
-// Do take advantage of the memory limit
-// For web-apps good rule of thumb: leave 5-10% headroom to account for memory sources the Go runtime is unaware of
-//
-// Erigon has such resources:
-// - mdbx dirty_space (C-owned): ~1G
-// - External CL: better don't predict it. Leave it out of estimate.
-// - OOM Killer and SWAP: Erigon recommends to disable SWAP on server and enable OOM-Killer (kill comes at 90%)
-// - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
 const defaultGoMemLimitShare = 0.8
 
+// goMemLimitIsSet reports an operator's choice. An empty value is not one: the
+// runtime reads it exactly like "off", and it is what an unrendered k8s or
+// compose template leaves behind.
 func goMemLimitIsSet(current int64) bool {
-	_, fromEnv := os.LookupEnv("GOMEMLIMIT")
-	return fromEnv || current != math.MaxInt64
+	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
+		return true
+	}
+	return current != math.MaxInt64
+}
+
+func goMemLimitFor(total uint64) (int64, bool) {
+	if total == 0 {
+		return 0, false
+	}
+	return int64(float64(total) * defaultGoMemLimitShare), true
 }
 
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
 	if goMemLimitIsSet(current) {
-		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
+		if current == math.MaxInt64 {
+			logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
+		} else {
+			logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
+		}
 		return
 	}
 
 	total := estimate.TotalMemory() // cgroups-aware
-	if total == 0 {
+	limit, ok := goMemLimitFor(total)
+	if !ok {
 		logger.Info("[mem] GOMEMLIMIT unset and available memory is unknown, leaving the heap unbounded")
 		return
 	}
-
-	limit := int64(float64(total) * defaultGoMemLimitShare)
 	debug.SetMemoryLimit(limit)
 	logger.Info("[mem] GOMEMLIMIT derived from available memory",
 		"available", datasize.ByteSize(total).HR(),
