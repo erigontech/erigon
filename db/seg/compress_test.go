@@ -455,3 +455,21 @@ func TestCompressorCloseReleasesWorkers(t *testing.T) {
 		t.Fatal("Close() returned while pattern workers are still running")
 	}
 }
+
+func TestParseFileCompression(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want FileCompression
+	}{
+		{"none", CompressNone},
+		{"k", CompressKeys},
+		{"v", CompressVals},
+		{"kv", CompressKeys | CompressVals},
+	} {
+		got, err := ParseFileCompression(tc.in)
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "%q", tc.in)
+	}
+	_, err := ParseFileCompression("zstd")
+	require.Error(t, err)
+}

@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -26,8 +27,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -247,12 +252,12 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	blockNum, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -312,7 +317,7 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
 func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -324,8 +329,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
+	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -334,7 +338,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
 func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +361,7 @@ type feeHistoryResult struct {
 }
 
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -401,13 +405,12 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
 func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	header := rawdb.ReadCurrentHeader(overlayTx)
+	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -428,13 +431,12 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
 
 // BaseFee returns the base fee at the current head.
 func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	header := rawdb.ReadCurrentHeader(overlayTx)
+	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil {
 		return nil, nil
 	}
@@ -548,25 +550,171 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 
 type GasPriceOracleBackend struct {
 	db      kv.TemporalRoDB // nil if Fork is not supported
-	tx      kv.TemporalTx
+	tx      kv.TemporalTx   // always a pinned view; carries the request's overlay resolution
 	baseApi *BaseAPI
+
+	parentViewID uint64
+	parentTip    canonicalMarker
+	parentTipErr error
+	forkPrepared bool
 }
 
+// canonicalMarker is one entry of the canonical number-to-hash mapping.
+type canonicalMarker struct {
+	number uint64
+	hash   common.Hash
+}
+
+// NewGasPriceOracleBackend requires a tx already pinned at acquisition (see
+// rpchelper.BeginTemporalRoWithOverlay): resolving the overlay here, after
+// the caller opened the tx, would re-open the torn (tx, overlay) window the
+// pinned acquisition exists to close.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi}
+	if !membatchwithdb.CarriesOverlayView(tx) {
+		panic("NewGasPriceOracleBackend: tx must be pinned via rpchelper.BeginTemporalRoWithOverlay or PinToOverlay")
+	}
+	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi, parentViewID: tx.ViewID()}
+}
+
+// PrepareFork resolves the canonical marker the parent snapshot ends on, which
+// Fork compares a fresh snapshot against. Resolving it lazily keeps the scan —
+// a remote round trip in rpcdaemon mode — off the requests the tip cache answers.
+func (b *GasPriceOracleBackend) PrepareFork(context.Context) error {
+	if b.forkPrepared {
+		return b.parentTipErr
+	}
+	b.forkPrepared = true
+	b.parentTip, b.parentTipErr = tipCanonicalMarker(b.tx)
+	return b.parentTipErr
+}
+
+// tipCanonicalMarker reads the canonical marker the database snapshot ends on,
+// bypassing the overlay: parent and fork share the overlay, so a view read
+// would mask what this identity exists to detect.
+func tipCanonicalMarker(tx kv.TemporalTx) (canonicalMarker, error) {
+	raw := tx
+	if u, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx }); ok {
+		if under := u.UnderlyingTx(); under != nil {
+			raw = under
+		}
+	}
+	it, err := raw.Range(kv.HeaderCanonical, nil, nil, order.Desc, 1)
+	if err != nil {
+		return canonicalMarker{}, err
+	}
+	defer it.Close()
+	if !it.HasNext() {
+		return canonicalMarker{}, nil
+	}
+	k, v, err := it.Next()
+	if err != nil {
+		return canonicalMarker{}, err
+	}
+	if len(k) != 8 || len(v) != length.Hash {
+		return canonicalMarker{}, nil
+	}
+	return canonicalMarker{number: binary.BigEndian.Uint64(k), hash: common.BytesToHash(v)}, nil
+}
+
+func canonicalHashAt(tx kv.Tx, number uint64) (common.Hash, error) {
+	v, err := tx.GetOne(kv.HeaderCanonical, hexutil.EncodeTs(number))
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(v) != length.Hash {
+		return common.Hash{}, nil
+	}
+	return common.BytesToHash(v), nil
+}
+
+// keepsParentIdentities reports whether tx's snapshot still holds the canonical
+// marker the parent's snapshot ended on. A block appended since then keeps it,
+// while a reorg rewrites or truncates it — and rewriting a lower height implies
+// the markers above were unwound first, so the tip alone covers the range.
+func (b *GasPriceOracleBackend) keepsParentIdentities(tx kv.TemporalTx) (bool, error) {
+	if b.parentTip.hash == (common.Hash{}) {
+		return false, nil
+	}
+	hash, err := canonicalHashAt(tx, b.parentTip.number)
+	if err != nil {
+		return false, err
+	}
+	return hash == b.parentTip.hash, nil
 }
 
 func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
 	if b.db == nil {
 		return nil, nil, nil // Fork not supported; caller falls back to sequential
 	}
+	if !b.forkPrepared {
+		return nil, nil, errors.New("GasPriceOracleBackend.Fork: PrepareFork must run on the caller's goroutine first")
+	}
+	if b.parentTipErr != nil {
+		return nil, nil, nil
+	}
 	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
-		return nil, nil, err
+		log.Debug("gas price: fork tx unavailable, serving sequentially", "err", err)
+		return nil, nil, nil
 	}
-	return &GasPriceOracleBackend{db: b.db, tx: tx, baseApi: b.baseApi},
+	// A fresh tx takes its own database snapshot, which can already carry a
+	// reorg the parent never saw: the pin only aligns the overlay layer. Serving
+	// one request from two chains is worse than losing the parallelism, so a
+	// snapshot that disagrees — or that the check cannot read — degrades to
+	// sequential reads on the parent. An identical view id means the same
+	// snapshot, which needs no marker lookup.
+	if tx.ViewID() != b.parentViewID {
+		keeps, err := b.keepsParentIdentities(tx)
+		if err != nil || !keeps {
+			log.Debug("gas price: fork snapshot unusable, serving sequentially", "keepsParentIdentities", keeps, "err", err)
+			tx.Rollback()
+			return nil, nil, nil
+		}
+	}
+	// Reuse the parent's pin (rationale on rpchelper.PinToOverlay).
+	overlay, _ := membatchwithdb.ViewOverlay(b.tx)
+	return &GasPriceOracleBackend{db: b.db, tx: rpchelper.PinToOverlay(tx, overlay), baseApi: b.baseApi, parentViewID: tx.ViewID(), parentTip: b.parentTip, forkPrepared: true},
 		func() { tx.Rollback() },
 		nil
+}
+
+// CanonicalHashes scans the canonical markers of [from, to] on the pinned tx:
+// resolving through the block reader would hit a live service in rpcdaemon
+// mode, un-pinning the fee-history cache key, and a per-height read there is a
+// round trip each. Callers only ask for unfrozen heights, whose markers are
+// always in the db.
+func (b *GasPriceOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	hashes := make([]common.Hash, to-from+1)
+	it, err := b.tx.Range(kv.HeaderCanonical, hexutil.EncodeTs(from), hexutil.EncodeTs(to+1), order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if len(k) != 8 || len(v) != length.Hash {
+			continue
+		}
+		hashes[binary.BigEndian.Uint64(k)-from] = common.BytesToHash(v)
+	}
+	return hashes, nil
+}
+
+// FrozenBlocks returns the boundary at and below which the canonical mapping can
+// no longer change, because unwinding into the snapshots is not allowed.
+func (b *GasPriceOracleBackend) FrozenBlocks() uint64 {
+	return b.baseApi._blockReader.FrozenBlocks()
+}
+
+func (b *GasPriceOracleBackend) HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+	return b.baseApi._blockReader.Header(ctx, b.tx, hash, number)
+}
+
+func (b *GasPriceOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
+	return b.baseApi.blockWithSenders(ctx, b.tx, hash, number)
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
@@ -629,4 +777,8 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
+}
+
+func (b *GasPriceOracleBackend) CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error {
+	return b.baseApi.checkBlockHistoryAvailable(ctx, b.tx, blockNumber)
 }

@@ -409,7 +409,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("undecodable blockAccessList: %v", err)),
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
 			}, nil
 		}
 		hash, err := blockAccessList.Hash()
