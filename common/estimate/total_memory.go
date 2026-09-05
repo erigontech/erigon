@@ -28,6 +28,8 @@ var (
 	totalMemoryCached uint64
 )
 
+var startupGoMemLimit = debug.SetMemoryLimit(-1)
+
 func TotalMemory() uint64 {
 	totalMemoryOnce.Do(func() {
 		var total uint64
@@ -39,8 +41,8 @@ func TotalMemory() uint64 {
 			total = min(total, cgroupsMemLimit)
 		}
 
-		if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
-			total = min(total, uint64(goMemLimit))
+		if startupGoMemLimit > 0 {
+			total = min(total, uint64(startupGoMemLimit))
 		}
 
 		totalMemoryCached = total
