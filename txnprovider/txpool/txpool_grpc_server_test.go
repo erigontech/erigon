@@ -17,13 +17,21 @@
 package txpool
 
 import (
+	"bytes"
 	"context"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -38,6 +46,7 @@ import (
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -295,5 +304,240 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 		t.Fatalf("panic(\"unknown\") triggered")
 	case <-ctx.Done():
 		// Success
+	}
+}
+
+// stalledOnAddStream is an OnAdd subscriber that never finishes a Send, the way
+// a connected client that stops reading exhausts its HTTP/2 flow control.
+type stalledOnAddStream struct {
+	grpc.ServerStream
+	ctx      context.Context
+	entered  chan struct{}
+	enterOne sync.Once
+}
+
+func newStalledOnAddStream(ctx context.Context) *stalledOnAddStream {
+	return &stalledOnAddStream{ctx: ctx, entered: make(chan struct{})}
+}
+
+func (s *stalledOnAddStream) Context() context.Context { return s.ctx }
+
+func (s *stalledOnAddStream) Send(*txpoolproto.OnAddReply) error {
+	s.enterOne.Do(func() { close(s.entered) })
+	<-s.ctx.Done()
+	return s.ctx.Err()
+}
+
+// awaitSubscribed broadcasts until wait returns, since a subscriber only
+// registers once its handler runs on the server.
+func awaitSubscribed(t *testing.T, streams *NewSlotsStreams, wait func()) {
+	t.Helper()
+	probing := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-probing:
+				return
+			case <-ticker.C:
+				streams.Broadcast(&txpoolproto.OnAddReply{}, log.New())
+			}
+		}
+	}()
+	wait()
+	close(probing)
+	<-done
+}
+
+// TestP2PPropagationContinuesWhileOnAddSubscriberStalls drives the real
+// newPendingTxns path in TxPool.Run and asserts that a gRPC OnAdd subscriber
+// stuck in Send does not keep the batch from reaching the p2p sender.
+func TestP2PPropagationContinuesWhileOnAddSubscriberStalls(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	logger := log.New()
+	ctrl := gomock.NewController(t)
+
+	sentToPeers := make(chan *sentryproto.SendMessageToRandomPeersRequest, 16)
+	sentryClient := sentryproto.NewMockSentryClient(ctrl)
+	sentryClient.EXPECT().
+		SendMessageToRandomPeers(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.SendMessageToRandomPeersRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+			select {
+			case sentToPeers <- req:
+			default:
+			}
+			return &sentryproto.SentPeers{}, nil
+		}).AnyTimes()
+	sentryClient.EXPECT().
+		Peers(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&sentryproto.PeersReply{}, nil).AnyTimes()
+
+	stateChanges := remoteproto.NewMockKVClient(ctrl)
+	stateChanges.EXPECT().
+		StateChanges(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, status.Error(codes.Unavailable, "no core node in this test")).AnyTimes()
+
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := mdbxtest.NewTestPoolDB(t)
+	newSlotsStreams := &NewSlotsStreams{}
+	pool, err := New(
+		ctx,
+		make(chan Announcements, 16),
+		poolDB,
+		coreDB,
+		txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig),
+		chain.AllProtocolChanges,
+		nil, // sentry clients for the fetcher: this test only drives the sender
+		stateChanges,
+		func() {},
+		newSlotsStreams,
+		nil,
+		logger,
+		WithFeeCalculator(nil),
+	)
+	require.NoError(t, err)
+	pool.p2pSender = NewSend(ctx, []sentryproto.SentryClient{sentryClient}, logger)
+
+	sender := common.Address{1}
+	account := accounts3.Account{Balance: *uint256.NewInt(common.Ether)}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts3.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		pool.Run(ctx) //nolint:errcheck // returns the cancellation error on teardown
+	}()
+
+	grpcServer := NewGrpcServer(ctx, pool, poolDB, newSlotsStreams, *chain.AllProtocolChanges.ChainID, logger)
+	stalled := newStalledOnAddStream(ctx)
+	go grpcServer.OnAdd(&txpoolproto.OnAddRequest{}, stalled) //nolint:errcheck // ends with ctx
+	awaitSubscribed(t, newSlotsStreams, func() { <-stalled.entered })
+
+	slot := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	slot.IDHash[0] = 1
+	slot.Rlp = []byte{0xc0}
+	slot.Size = uint32(len(slot.Rlp))
+	var slots TxnSlots
+	slots.Append(slot, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	select {
+	case req := <-sentToPeers:
+		require.Equal(t, sentryproto.MessageId_TRANSACTIONS_66, req.Data.Id)
+	case <-time.After(20 * time.Second):
+		t.Fatal("p2p propagation never reached the sentry while an OnAdd subscriber was stalled")
+	}
+
+	cancel()
+	<-runDone
+}
+
+// TestOnAddSubscriberThatStopsReadingOverTCP exercises OnAdd over a real
+// gRPC connection, where a client that stops calling Recv drains its HTTP/2
+// flow-control window and wedges the server-side Send.
+func TestOnAddSubscriberThatStopsReadingOverTCP(t *testing.T) {
+	ctx := t.Context()
+	logger := log.New()
+
+	newSlotsStreams := &NewSlotsStreams{}
+	grpcServer := NewGrpcServer(ctx, nil, nil, newSlotsStreams, *uint256.NewInt(1), logger)
+	srv := grpc.NewServer()
+	txpoolproto.RegisterTxpoolServer(srv, grpcServer)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go srv.Serve(listener) //nolint:errcheck // stopped below
+	t.Cleanup(srv.Stop)
+
+	// Separate connections, so that connection-level flow control on the
+	// stalled client cannot account for anything the healthy one sees.
+	subscribe := func() txpoolproto.Txpool_OnAddClient {
+		conn, err := grpc.NewClient(listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		require.NoError(t, err)
+		t.Cleanup(func() { conn.Close() })
+		stream, err := txpoolproto.NewTxpoolClient(conn).OnAdd(ctx, &txpoolproto.OnAddRequest{})
+		require.NoError(t, err)
+		return stream
+	}
+
+	awaitRegistered := func(stream txpoolproto.Txpool_OnAddClient) {
+		t.Helper()
+		awaitSubscribed(t, newSlotsStreams, func() {
+			_, err := stream.Recv()
+			require.NoError(t, err)
+		})
+	}
+
+	stalled := subscribe()
+	awaitRegistered(stalled)
+	healthy := subscribe()
+	awaitRegistered(healthy)
+
+	// stalled is never read again from here on. healthy keeps reading, so its
+	// own queue stays empty and only the stalled one can hold the broadcaster up.
+	received := make(chan *txpoolproto.OnAddReply, 1024)
+	go func() {
+		defer close(received)
+		for {
+			reply, err := healthy.Recv()
+			if err != nil {
+				return
+			}
+			received <- reply
+		}
+	}()
+
+	const (
+		messages    = 40
+		payloadSize = 256 * 1024
+	)
+	marker := []byte("last")
+	for i := range messages {
+		payload := make([]byte, payloadSize)
+		if i == messages-1 {
+			copy(payload, marker)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			newSlotsStreams.Broadcast(&txpoolproto.OnAddReply{RplTxs: [][]byte{payload}}, logger)
+		}()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("Broadcast %d blocked on the subscriber that stopped reading", i)
+		}
+	}
+
+	timeout := time.After(30 * time.Second)
+	for {
+		select {
+		case reply, ok := <-received:
+			require.True(t, ok, "healthy subscriber's stream ended before the marker message")
+			if len(reply.RplTxs) == 1 && bytes.Equal(reply.RplTxs[0][:len(marker)], marker) {
+				return
+			}
+		case <-timeout:
+			t.Fatal("healthy subscriber never received the marker message")
+		}
 	}
 }
