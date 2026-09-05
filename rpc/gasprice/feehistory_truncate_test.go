@@ -73,7 +73,7 @@ func (b *gapBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]comm
 	return make([]common.Hash, to-from+1), nil
 }
 
-func (b *gapBackend) FrozenBlocks() (uint64, error) { return 0, nil }
+func (b *gapBackend) FrozenBlocks() uint64 { return 0 }
 
 func (b *gapBackend) HeaderByHashNumber(ctx context.Context, _ common.Hash, number uint64) (*types.Header, error) {
 	return b.HeaderByNumber(ctx, rpc.BlockNumber(number))
