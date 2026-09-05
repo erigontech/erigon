@@ -23,31 +23,43 @@ func unsetGoMemLimitEnv(t *testing.T) {
 func TestGoMemLimitInForce(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
 		unsetGoMemLimitEnv(t)
-		require.Equal(t, goMemLimitUnset, goMemLimitInForce(math.MaxInt64))
+		set, _ := goMemLimitInForce(math.MaxInt64)
+		require.False(t, set)
 	})
 	t.Run("empty", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "")
-		require.Equal(t, goMemLimitUnset, goMemLimitInForce(math.MaxInt64))
+		set, _ := goMemLimitInForce(math.MaxInt64)
+		require.False(t, set)
 	})
 	t.Run("off", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "off")
-		require.Equal(t, goMemLimitOff, goMemLimitInForce(math.MaxInt64))
+		set, limit := goMemLimitInForce(math.MaxInt64)
+		require.True(t, set)
+		require.Equal(t, "off", limit)
 	})
 	t.Run("set in env", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "4GiB")
-		require.Equal(t, goMemLimitSet, goMemLimitInForce(4<<30))
+		set, limit := goMemLimitInForce(4 << 30)
+		require.True(t, set)
+		require.NotEqual(t, "off", limit)
 	})
 	t.Run("zero is a real limit", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "0")
-		require.Equal(t, goMemLimitSet, goMemLimitInForce(0))
+		set, limit := goMemLimitInForce(0)
+		require.True(t, set)
+		require.NotEqual(t, "off", limit)
 	})
 	t.Run("max is off in effect", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "9223372036854775807")
-		require.Equal(t, goMemLimitOff, goMemLimitInForce(math.MaxInt64))
+		set, limit := goMemLimitInForce(math.MaxInt64)
+		require.True(t, set)
+		require.Equal(t, "off", limit)
 	})
 	t.Run("set in process", func(t *testing.T) {
 		unsetGoMemLimitEnv(t)
-		require.Equal(t, goMemLimitSet, goMemLimitInForce(3<<30))
+		set, limit := goMemLimitInForce(3 << 30)
+		require.True(t, set)
+		require.NotEqual(t, "off", limit)
 	})
 }
 

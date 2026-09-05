@@ -39,24 +39,16 @@ import (
 // - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
 const defaultGoMemLimitShare = 0.8
 
-type goMemLimitState int
-
-const (
-	goMemLimitUnset goMemLimitState = iota // nobody chose one; derive it
-	goMemLimitOff                          // an operator disabled it
-	goMemLimitSet                          // one is already in force
-)
-
 // The runtime maps unset, "" and "off" alike to math.MaxInt64, so only the
 // environment separates a deliberate "off" from an empty value.
-func goMemLimitInForce(current int64) goMemLimitState {
+func goMemLimitInForce(current int64) (set bool, limit string) {
 	if current != math.MaxInt64 {
-		return goMemLimitSet
+		return true, datasize.ByteSize(uint64(current)).HR()
 	}
 	if v, ok := os.LookupEnv("GOMEMLIMIT"); ok && v != "" {
-		return goMemLimitOff
+		return true, "off"
 	}
-	return goMemLimitUnset
+	return false, ""
 }
 
 func goMemLimitFor(total uint64) (int64, bool) {
@@ -68,12 +60,8 @@ func goMemLimitFor(total uint64) (int64, bool) {
 
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
-	switch goMemLimitInForce(current) {
-	case goMemLimitSet:
-		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
-		return
-	case goMemLimitOff:
-		logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
+	if set, limit := goMemLimitInForce(current); set {
+		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", limit)
 		return
 	}
 
