@@ -314,8 +314,7 @@ func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
 // blocksRetentionCutoff returns the block height below which block-data
 // segments (transactions and receipt-related state) are considered expired
 // under pruneMode:
-//   - finite Distance (full/minimal): head - distance, the EIP-8252-style
-//     window.
+//   - finite Distance (full/minimal): head - distance.
 //   - KeepPostMergeBlocksPruneMode with a chain MergeHeight: the merge height
 //     (chain history-expiry policy — pre-merge data is expired).
 //   - Otherwise (KeepAllBlocksPruneMode, or KeepPostMergeBlocksPruneMode without a

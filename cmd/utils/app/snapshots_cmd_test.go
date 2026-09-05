@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -758,10 +759,10 @@ func TestDUComputeEstimates(t *testing.T) {
 	// - caplin (always kept)
 	//
 	// maxStep=2000, maxBlock=20_000_000
-	// Full mode (DefaultPruneDistance=262_144):
-	//   fullStepPruneDistance = 262_144 * 2000 / 20_000_000 = 26
-	//   state cutoff: step To <= 2000-26 = 1974
-	//   block cutoff: block To <= 20_000_000-262_144 = 19_737_856
+	// Full mode (DefaultPruneDistance=1_100_000):
+	//   fullStepPruneDistance = 1_100_000 * 2000 / 20_000_000 = 110
+	//   state cutoff: step To <= 2000-110 = 1890
+	//   block cutoff: block To <= 20_000_000-1_100_000 = 18_900_000
 	// Minimal mode (MinimalPruneDistance=100_000):
 	//   minimalStepPruneDistance = 100_000 * 2000 / 20_000_000 = 10
 	//   state cutoff: step To <= 2000-10 = 1990
@@ -793,7 +794,7 @@ func TestDUComputeEstimates(t *testing.T) {
 		// New inverted index — kept
 		{Name: "accounts.1500-2000.ef", Size: 2500, Category: duCatInvIdx, IsState: true, From: 1500, To: 2000},
 
-		// Boundary state history (To=1985: 1985 > 1974 full-cutoff, 1985 <= 1990 minimal-cutoff)
+		// Boundary state history (To=1985: 1985 > 1890 full-cutoff, 1985 <= 1990 minimal-cutoff)
 		// — kept by full, pruned by minimal.
 		{Name: "accounts.1900-1985.v", Size: 1234, Category: duCatHistory, IsState: true, From: 1900, To: 1985},
 
@@ -814,7 +815,7 @@ func TestDUComputeEstimates(t *testing.T) {
 		// Old transaction block segment (To=15M below both block cutoffs) — pruned in full/minimal
 		{Name: "0-15000-transactions.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
 
-		// Boundary transaction block segment (To=19_800_000: above full's 19_737_856,
+		// Boundary transaction block segment (To=19_800_000: above full's 18_900_000,
 		// at or below minimal's 19_900_000) — kept by full, pruned by minimal.
 		{Name: "19000-19800-transactions.seg", Size: 5678, Category: duCatBlocks, IsState: false, From: 19_000_000, To: 19_800_000},
 
@@ -849,8 +850,8 @@ func TestDUComputeEstimates(t *testing.T) {
 	require.Equal(t, "full", estimates[1].Mode)
 	require.Equal(t, fullTotal, estimates[1].TotalBytes)
 	require.Equal(t, fullTotal-archiveTotal, estimates[1].Delta)
-	require.Equal(t, "last 262.144", estimates[1].BlocksDesc)
-	require.Equal(t, "last 262.144", estimates[1].HistoryDesc)
+	require.Equal(t, "last 1.100.000", estimates[1].BlocksDesc)
+	require.Equal(t, "last 1.100.000", estimates[1].HistoryDesc)
 
 	// Blocks: archive minus commitHist(800) minus old accessor(500) minus
 	// old history(3000) minus old idx(1500). Keeps everything full prunes via
@@ -860,7 +861,7 @@ func TestDUComputeEstimates(t *testing.T) {
 	require.Equal(t, blocksTotal, estimates[2].TotalBytes)
 	require.Equal(t, blocksTotal-archiveTotal, estimates[2].Delta)
 	require.Equal(t, "all blocks", estimates[2].BlocksDesc)
-	require.Equal(t, "last 262.144", estimates[2].HistoryDesc)
+	require.Equal(t, "last 1.100.000", estimates[2].HistoryDesc)
 
 	// Minimal: full minus boundary state(1234) and boundary tx(5678),
 	// which fall in the gap between full's and minimal's cutoffs.
@@ -892,6 +893,43 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 	require.Equal(t, int64(600), estimates[1].TotalBytes) // full
 	require.Equal(t, int64(600), estimates[2].TotalBytes) // blocks
 	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
+}
+
+func TestDUComputeEstimatesCoversExpandedDefaultWindow(t *testing.T) {
+	const (
+		maxBlock        = uint64(20_000_000)
+		maxStep         = uint64(2_000)
+		previousDefault = uint64(262_144)
+	)
+	currentBlockCutoff := maxBlock - uint64(config3.DefaultPruneDistance)
+	previousBlockCutoff := maxBlock - previousDefault
+	currentStepWindow := uint64(config3.DefaultPruneDistance) * maxStep / maxBlock
+	previousStepWindow := previousDefault * maxStep / maxBlock
+	currentStepCutoff := maxStep - currentStepWindow
+	previousStepCutoff := maxStep - previousStepWindow
+
+	files := []duFileInfo{
+		{
+			Name:     "accounts.expanded-window.v",
+			Size:     20,
+			Category: duCatHistory,
+			IsState:  true,
+			From:     currentStepCutoff,
+			To:       currentStepCutoff + (previousStepCutoff-currentStepCutoff)/2,
+		},
+		{
+			Name:     "expanded-window-transactions.seg",
+			Size:     30,
+			Category: duCatBlocks,
+			From:     currentBlockCutoff,
+			To:       currentBlockCutoff + (previousBlockCutoff-currentBlockCutoff)/2,
+		},
+	}
+
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	require.Equal(t, int64(50), estimates[1].TotalBytes)
+	require.Equal(t, int64(50), estimates[2].TotalBytes)
+	require.Zero(t, estimates[3].TotalBytes)
 }
 
 func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
@@ -927,7 +965,7 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
 			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
 			{Category: duCatHistory, Size: 500, IsState: true, From: 500, To: 2000},
-			{Category: duCatBlocks, IsState: false, From: 0, To: 500000, Size: 200},
+			{Category: duCatBlocks, IsState: false, From: 0, To: 2_000_000, Size: 200},
 		}
 		require.Equal(t, "archive", duDetectNodeType(files))
 	})
@@ -938,7 +976,7 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
 			{Category: duCatCommitHist, Size: 50, IsState: true, From: 0, To: 500},
 			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 500},
-			{Category: duCatBlocks, IsState: false, To: 500000, Size: 200},
+			{Category: duCatBlocks, IsState: false, To: 2_000_000, Size: 200},
 		}
 		require.Equal(t, "archive", duDetectNodeType(files))
 	})
@@ -995,21 +1033,20 @@ func TestDUDetectNodeType(t *testing.T) {
 		// Chain too young for pruning to matter — archive detection uses full's
 		// step distance (the larger one) so any state at step 0 only proves
 		// archive when full would already have pruned.
-		// fullStepPruneDistance = 262144 * 5 / 50000 = 26, maxStep=5 < 26
+		// fullStepPruneDistance = 1_100_000 * 5 / 50_000 = 110, maxStep=5 < 110
 		files := []duFileInfo{
 			{Category: duCatDomains, Size: 100, IsState: true, To: 5},
 			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 5},
 			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
 		}
-		// maxStep=5 <= fullStepPruneDistance=26 → too young for archive classification,
-		// falls through to block-based detection. maxBlock=50000 <
-		// MinimalPruneDistance=100_000 → no full classification → minimal.
+		// The chain is too young for archive classification, so the detector
+		// falls through to its existing minimal-mode default.
 		require.Equal(t, "minimal", duDetectNodeType(files))
 	})
 
 	t.Run("genesis tx in [MinimalPruneDistance, DefaultPruneDistance] band not classified as blocks", func(t *testing.T) {
 		// maxBlock=200_000 sits between MinimalPruneDistance (100_000) and
-		// DefaultPruneDistance (262_144). At this height a full-mode node
+		// DefaultPruneDistance (1_100_000). At this height a full-mode node
 		// still has the genesis tx segment because distance pruning hasn't
 		// kicked in yet — gating "blocks" on MinimalPruneDistance would
 		// misclassify it. With the fullPruneDistance gate the genesis tx is

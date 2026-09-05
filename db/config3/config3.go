@@ -43,16 +43,15 @@ const DefaultReferencesInCommitmentBranches = false
 
 const EnableHistoryV4InTest = true
 
-// DefaultPruneDistance is the retention window used by full and blocks prune
-// modes. The value (2^18 blocks ≈ 36.4 days) matches EIP-8252's
-// REORG_RETENTION_WINDOW, the inactivity-leak-bounded non-finality window
-// across which an EL must be able to reconstruct state to process a reorg
-// without external sync.
-const DefaultPruneDistance = 262_144
+// DefaultPruneDistance is the block and state-history window used by full mode,
+// and the state-history window used by blocks mode. Its block count covers
+// Ethereum mainnet's MIN_EPOCHS_FOR_BLOCK_REQUESTS window at the conservative
+// maximum of one execution block per slot.
+const DefaultPruneDistance = 1_100_000
 
 // MinimalPruneDistance is the retention window used by the minimal prune
 // mode. Smaller than DefaultPruneDistance — minimal nodes deliberately opt
-// out of EIP-8252 compliance in exchange for less disk usage.
+// out of the default retention window in exchange for less disk usage.
 const MinimalPruneDistance = 100_000
 
 // These are network parameters that need to be constant between clients, but
