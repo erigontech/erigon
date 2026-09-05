@@ -135,8 +135,8 @@ func (c *Cursor) next() bool {
 }
 
 func (c *Cursor) resetNoRead(di uint64, g *seg.Reader) error {
-	if c.d >= c.ef.Count() {
-		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
+	if di >= c.ef.Count() {
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, di, c.ef.Count())
 	}
 
 	c.d = di
