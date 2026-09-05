@@ -41,7 +41,7 @@ const defaultGoMemLimitShare = 0.8
 
 // The runtime maps unset, "" and "off" alike to math.MaxInt64, so only the
 // environment separates a deliberate "off" from an empty value.
-func goMemLimitInForce() (set, off bool, limit datasize.ByteSize) {
+func goMemLimitIsSet() (set, off bool, limit datasize.ByteSize) {
 	current := debug.SetMemoryLimit(-1)
 	if current != math.MaxInt64 {
 		return true, false, datasize.ByteSize(uint64(current))
@@ -60,7 +60,7 @@ func goMemLimitFor(total uint64) (int64, bool) {
 }
 
 func SetGoMemLimit(logger log.Logger) {
-	if set, off, limit := goMemLimitInForce(); set {
+	if set, off, limit := goMemLimitIsSet(); set {
 		if off {
 			logger.Info("[mem] GOMEMLIMIT is off, leaving the heap unbounded")
 		} else {
