@@ -21,7 +21,6 @@ require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/OffchainLabs/go-bitfield v0.0.0-20260504143531-5cbb6d0f5f2e
 	github.com/RoaringBitmap/roaring/v2 v2.26.0
-	github.com/alecthomas/kong v1.16.1
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/go-libutp v1.5.1-0.20260817025621-104d95cd4dc1
