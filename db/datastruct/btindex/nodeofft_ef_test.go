@@ -59,7 +59,7 @@ func Test_BtreeIndex_NodeOfftEF_V0_V2(t *testing.T) {
 
 			gr := seg.NewReader(kv.MakeGetter(), compressFlags)
 			for i := range keys {
-				_, v, _, found, err := bt.Get(keys[i], gr)
+				_, v, _, found, err := bt.Get(keys[i], nil, gr)
 				require.NoErrorf(t, err, "i=%d", i)
 				require.Truef(t, found, "key %d not found", i)
 				require.Equalf(t, truth[string(keys[i])], v, "key %d value mismatch", i)
