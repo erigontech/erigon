@@ -38,19 +38,19 @@ import (
 // - External CL (OS-owned)
 const defaultGoMemLimitShare = 0.7
 
-func goMemLimitInForce(current int64) bool {
+func goMemLimitIsSet(current int64) bool {
 	_, fromEnv := os.LookupEnv("GOMEMLIMIT")
 	return fromEnv || current != math.MaxInt64
 }
 
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
-	if goMemLimitInForce(current) {
+	if goMemLimitIsSet(current) {
 		logger.Info("[mem] GOMEMLIMIT already set, leaving it alone", "limit", datasize.ByteSize(uint64(current)).HR())
 		return
 	}
 
-	total := estimate.TotalMemory()
+	total := estimate.TotalMemory() // cgroups-aware
 	if total == 0 {
 		logger.Info("[mem] GOMEMLIMIT unset and available memory is unknown, leaving the heap unbounded")
 		return

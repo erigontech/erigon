@@ -14,13 +14,13 @@ func TestGoMemLimitInForce(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "") // registers the restore; the unset below is the real setup
 		os.Unsetenv("GOMEMLIMIT")
-		require.False(t, goMemLimitInForce(math.MaxInt64))
+		require.False(t, goMemLimitIsSet(math.MaxInt64))
 	})
 	t.Run("off", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "off")
-		require.True(t, goMemLimitInForce(math.MaxInt64))
+		require.True(t, goMemLimitIsSet(math.MaxInt64))
 	})
 	t.Run("set in process", func(t *testing.T) {
-		require.True(t, goMemLimitInForce(3<<30))
+		require.True(t, goMemLimitIsSet(3<<30))
 	})
 }
