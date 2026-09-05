@@ -51,22 +51,10 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 // SetHead rewinds the local chain to the specified block number by unwinding
 // all staged sync stages. This is the core implementation used by debug_setHead.
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
-	// Wait for any in-flight execution to drain BEFORE acquiring the
-	// semaphore. Holding the semaphore during the wait would block
-	// UpdateForkChoice, which is the only path that clears
-	// e.currentContext — a classic deadlock: SetHead waits for
-	// currentContext to clear; FCU can't clear it because SetHead
-	// holds the semaphore it needs. With the wait-then-acquire order,
-	// an in-flight newPayload+FCU cycle completes naturally and we
-	// acquire cleanly.
-	if err := e.waitForQuiescence(ctx); err != nil {
-		return err
-	}
-
-	// Acquire the semaphore. A new newPayload may slip in during the
-	// gap between quiescence detection and acquire — re-check under
-	// the semaphore. With it held, no new payloads/FCUs can start; we
-	// only need to wait for any one in flight to drain.
+	// Acquiring the semaphore is itself the drain: InsertBlocks takes it
+	// and the FCU path releases it, so a successful acquire means no
+	// newPayload+FCU cycle is in flight. What remains afterwards is the
+	// cached SharedDomains, which ensureQuiescent closes.
 	//
 	// The caller's ctx bounds how long we're allowed to wait — the
 	// RPC handler carries its own deadline from the client. A slow
@@ -74,23 +62,17 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// 88 GB sys) legitimately holds the semaphore for longer than a
 	// short arbitrary cap would allow; using ctx directly keeps
 	// caller control without introducing a shorter false-fail cap.
-	for {
-		if err := e.semaphore.Acquire(ctx, 1); err != nil {
-			return fmt.Errorf("execution module is busy: %w", err)
-		}
-		e.lock.RLock()
-		quiescent := e.currentContext == nil
-		e.lock.RUnlock()
-		if quiescent {
-			break
-		}
-		// Lost the race — release so FCU can clear, then wait again.
-		e.semaphore.Release(1)
-		if err := e.waitForQuiescence(ctx); err != nil {
-			return err
-		}
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("execution module is busy: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	// With the semaphore held no InsertBlocks or FCU is in flight, so any
+	// cached SharedDomains is idle and ours to close. Releasing to wait for
+	// the FCU to clear it instead made progress depend on new blocks
+	// arriving.
+	if err := e.ensureQuiescent(ctx); err != nil {
+		return err
+	}
 
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
