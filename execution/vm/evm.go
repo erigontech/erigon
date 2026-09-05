@@ -492,42 +492,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// It is allowed to call precompiles, even via delegatecall
 	switch {
 	case isPrecompile:
-		if sp, ok := p.(StatefulPrecompile); ok {
-			actingAs, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
-			ctx := &PrecompileContext{
-				Self:     addr,
-				ActingAs: actingAs,
-				Caller:   frameCaller,
-				ReadOnly: evm.readOnly || typ == STATICCALL,
-				EVM:      evm,
-
-				value: value,
-			}
-			// Charging through the handle keeps gasUsed.State and
-			// gasUsed.StateSpill in step with gasRemaining, so the accounting
-			// defer and handleFrameRevert below both read the real figures.
-			frameRemaining, frameUsed := gasRemaining, gasUsed
-			pgas := &PrecompileGas{remaining: &frameRemaining, used: &frameUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
-			func() {
-				// Released here, not after the call: a recovered panic out of
-				// RunStateful would otherwise leave a stashed handle live.
-				defer pgas.release()
-				defer func() { gasRemaining, gasUsed = frameRemaining, frameUsed }()
-				defer evm.exitFrame(evm.enterFrame(ctx.ReadOnly))
-				ret, err = sp.RunStateful(input, pgas, ctx)
-			}()
-			if pgas.aborted != nil {
-				ret, err = nil, pgas.aborted
-			}
-			// Frame-level classification compares the bare sentinel, so an
-			// idiomatically wrapped revert would burn the frame's gas and skip
-			// the return-data copy while the receipt still read as reverted.
-			if err != nil && errors.Is(err, ErrExecutionReverted) {
-				err = ErrExecutionReverted
-			}
-		} else {
-			ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
-		}
+		ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
 	case len(code) == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
