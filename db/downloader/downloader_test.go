@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -541,6 +542,18 @@ func (b *logBuffer) String() string {
 	return b.buf.String()
 }
 
+// requireLoggedForName asserts that msg and name appear on the same log line. Asserting them
+// separately cannot fail once any earlier warn has put name in the buffer.
+func requireLoggedForName(t *testing.T, logs *logBuffer, msg, name string) {
+	t.Helper()
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if strings.Contains(line, msg) && strings.Contains(line, name) {
+			return
+		}
+	}
+	require.Failf(t, "log line not found", "no line carries both %q and %q:\n%s", msg, name, logs.String())
+}
+
 func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, path string) {
 	d = newDownloaderTest(t).downloader
 	logs = &logBuffer{}
@@ -564,8 +577,7 @@ func TestInvalidateDataRenamesLocalFile(t *testing.T) {
 
 	require.NoFileExists(path)
 	require.FileExists(path + ".part")
-	require.Contains(logs.String(), "invalidated local snapshot data", "rename must be logged at warn or louder")
-	require.Contains(logs.String(), name)
+	requireLoggedForName(t, logs, "invalidated local snapshot data", name)
 }
 
 // A stale metainfo doesn't rescue the data while the initial download is incomplete.
@@ -599,8 +611,7 @@ func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
 
 			require.FileExists(path)
 			require.NoFileExists(path + ".part")
-			require.Contains(logs.String(), "keeping local snapshot")
-			require.Contains(logs.String(), name)
+			requireLoggedForName(t, logs, "keeping local snapshot", name)
 		})
 	}
 }
@@ -620,8 +631,7 @@ func TestDownloadsLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
 
 	require.FileExists(path, "the client completes in place, so the data must stay where it is")
 	require.NoFileExists(path+".part", "invalidation stays forbidden after the initial download")
-	require.Contains(logs.String(), "local snapshot does not match its own metainfo")
-	require.Contains(logs.String(), name)
+	requireLoggedForName(t, logs, "local snapshot does not match its own metainfo", name)
 }
 
 // Nothing local to protect: the preverified file is still downloaded.
@@ -1262,4 +1272,92 @@ func TestKeptLocalSeedingReportsCancelDuringJoin(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("wait did not return after the caller cancelled")
 	}
+}
+
+// A kept snapshot whose local .torrent cannot be parsed must still be seeded. BuildTorrentIfNeed
+// only checks that the path exists, so a corrupt file suppresses the derivation that the kept data
+// would otherwise supply, and the name never reaches torrentsByName.
+func TestKeptLocalSnapshotWithMalformedMetainfoIsSeeded(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("not bencode"), 0o644))
+	markInitialDownloadComplete(t, d)
+
+	require.NoError(d.testStartSingleDownloadAndWait(t.Context(), snaptype.Hex2InfoHash("aa"), name))
+
+	require.FileExists(path)
+	d.lock.RLock()
+	_, registered := d.torrentsByName[name]
+	d.lock.RUnlock()
+	require.True(registered, "a corrupt .torrent left the kept snapshot unseedable")
+	requireLoggedForName(t, logs, "removed malformed metainfo", name)
+}
+
+// A bencode dict without an "info" key parses cleanly, so only SetInfoBytes rejects it --
+// by then the kept snapshot is registered against an info-less torrent.
+func TestKeptLocalSnapshotWithInfolessMetainfoIsSeeded(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("d8:announce3:abce"), 0o644))
+	markInitialDownloadComplete(t, d)
+
+	require.NoError(d.testStartSingleDownloadAndWait(t.Context(), snaptype.Hex2InfoHash("aa"), name))
+
+	require.FileExists(path)
+	d.lock.RLock()
+	tor, registered := d.torrentsByName[name]
+	d.lock.RUnlock()
+	require.True(registered, "an info-less .torrent left the kept snapshot unseedable")
+	require.NotNil(tor.Info(), "the kept snapshot is registered against an info-less torrent")
+	requireLoggedForName(t, logs, "removed malformed metainfo", name)
+}
+
+// metainfoFilePathForName appends .torrent unconditionally, AtomicTorrentFS.Delete only when it is
+// missing. A snapshot whose own name ends in .torrent made the two resolve to different files, so
+// the repair read the metainfo and deleted the data.
+func TestRemoveMalformedMetainfoKeepsDataForTorrentSuffixedName(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	name := "domain/v2.0-accounts.0-1024.kv.torrent"
+	path := d.filePathForName(name)
+	miPath := d.metainfoFilePathForName(name)
+	require.NoError(os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(os.WriteFile(path, []byte("locally rebuilt"), 0o644))
+	require.NoError(os.WriteFile(miPath, []byte("not bencode"), 0o644))
+
+	require.NoError(d.removeMalformedMetainfo(name))
+
+	require.FileExists(path, "the snapshot data must survive the metainfo repair")
+	require.NoFileExists(miPath, "the malformed metainfo must be the file that goes")
+}
+
+func openFdCount(t *testing.T) int {
+	t.Helper()
+	// Readdirnames, not ReadDir: ReadDir lstats every entry, and an fd closed by a
+	// background goroutine meanwhile fails the whole listing with EBADF, which is not
+	// IsNotExist and so is not skipped.
+	d, err := os.Open("/dev/fd")
+	require.NoError(t, err)
+	defer d.Close()
+	names, err := d.Readdirnames(-1)
+	require.NoError(t, err)
+	return len(names)
+}
+
+func TestVerifyDataFailFastClosesFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /dev/fd on windows")
+	}
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, "a"), bytes.Repeat([]byte{1}, 4096), 0o644))
+	require.NoError(test.downloader.AddNewSeedableFile(t.Context(), "a"))
+
+	const runs = 20
+	require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	before := openFdCount(t)
+	for range runs {
+		require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
+	}
+	require.Less(openFdCount(t)-before, runs/2, "VerifyFileFailFast leaks a file descriptor per verified file")
 }

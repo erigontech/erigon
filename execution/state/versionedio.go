@@ -1272,6 +1272,9 @@ func (s *WriteSet) addrs() map[accounts.Address]struct{} {
 // the self-destruct-vs-field priority iterate these in explicit order (e.g.
 // SelfDestructs before the reviving field writes) rather than relying on a flat
 // stream's element order.
+func (s *WriteSet) Addresses() iter.Seq2[accounts.Address, *VersionedWrite[*accounts.Account]] {
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[*accounts.Account] { return s.address })
+}
 func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
 }

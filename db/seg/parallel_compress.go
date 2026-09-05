@@ -391,10 +391,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var freeList []*CompressionWord                         // written words available for reuse
 	t := time.Now()
 
-	var err error
-
-	var intermediateFile *os.File
-	if intermediateFile, err = dir.CreateTemp(segmentFilePath); err != nil {
+	intermediateFile, err := dir.CreateTemp(segmentFilePath)
+	if err != nil {
 		return fmt.Errorf("create intermediate file: %w", err)
 	}
 	intermediatePath := intermediateFile.Name()
@@ -744,10 +742,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 					uncoveredCount += int(pos) - lastUncovered
 				}
 				lastUncovered = int(pos) + len(patternCode.word)
-				if patternCode != nil {
-					if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
-						return e
-					}
+				if e := hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+					return e
 				}
 			}
 			if int(l) > lastUncovered {
@@ -1135,7 +1131,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 			}
 		}
 
-		superStringsPool.Put(superstring)
+		superStringsPool.Put(superstring) //nolint:staticcheck // slice-header boxing beats an indirection here
 	}
 }
 
@@ -1187,35 +1183,4 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 		return err
 	}
 	return df.Close()
-}
-
-func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
-	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
-	// We only consider values with length > 2, because smaller values are not compressible without going into bits
-	f, err := os.Open(fileName)
-	if err != nil {
-		return err
-	}
-	defer f.Close() //nolint:errcheck
-	r := bufiopool.Reader(f)
-	defer bufiopool.PutReader(r)
-	buf := make([]byte, 4096)
-	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
-		if e != nil {
-			if errors.Is(e, io.EOF) {
-				break
-			}
-			return e
-		}
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		if err := walker(buf[:l]); err != nil {
-			return err
-		}
-	}
-	return nil
 }

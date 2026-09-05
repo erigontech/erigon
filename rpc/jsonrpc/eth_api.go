@@ -255,8 +255,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 // view. The probe never changes the selected transaction.
 func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
-	var blockNotFound rpc.BlockNotFoundErr
-	if !errors.As(err, &blockNotFound) {
+	if _, ok := errors.AsType[rpc.BlockNotFoundErr](err); !ok {
 		return blockNumber, err
 	}
 
@@ -532,10 +531,7 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // point, which tells a legacy archive from chain-history expiry where the stored prune
 // mode carries the same sentinel for both. Only a readable transaction of an early block
 // settles it: expiry keeps pre-merge headers and bodies, and the transaction segment
-// spanning the merge point reaches below it. Block data the search cannot read leaves the
-// question open and is not remembered; a settled answer is availability rather than
-// policy, so it is kept for a short TTL in both directions. One probe answers every
-// caller waiting on it, since each costs several backend reads under an open read tx.
+// spanning the merge point reaches below it.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	for {
 		if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
@@ -750,12 +746,9 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable gates endpoints serving the receipts of a block. They come
-// from the receipt cache where it still covers the block, and otherwise from
-// re-executing it, which reaches only as far back as state history. Enabling the
-// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired
-// on its own --prune.receipts.distance window when one is set, and alongside history
-// otherwise.
+// checkReceiptsAvailable gates endpoints serving the full receipts of a block. Below
+// Byzantium those carry a post state the cache does not store, so the block has to be
+// re-executed and reaches only as far back as state history.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	computed, err := api.postStateCalculated(ctx, tx, block)
 	if err != nil {
@@ -764,6 +757,16 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	if computed {
 		return api.checkPruneHistory(ctx, tx, block)
 	}
+	return api.checkReceiptSourceAvailable(ctx, tx, block)
+}
+
+// checkReceiptSourceAvailable gates on where the receipts come from, whatever fields
+// the caller reads off them: the receipt cache where it still covers the block, and
+// otherwise a re-execution reaching only as far back as state history. Enabling the
+// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired on
+// its own --prune.receipts.distance window when one is set, and alongside history
+// otherwise.
+func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
@@ -778,7 +781,7 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	switch amount := p.ReceiptsAmount(); {
 	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
-	case receiptsRetiredWithHistory(p):
+	case !amount.Enabled():
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
 		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
@@ -787,14 +790,6 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 		}
 		return api.checkPruneHistory(ctx, tx, block)
 	}
-}
-
-// receiptsRetiredWithHistory reports whether the receipt cache is retired at the history
-// cutoff: every retention that is not a window of its own, save an explicit keep-all.
-// This is the rule historyRetireCutoffs applies.
-func receiptsRetiredWithHistory(p *prune.Mode) bool {
-	amount := p.ReceiptsAmount()
-	return amount != prune.KeepAllReceiptsPruneMode && !amount.Enabled()
 }
 
 // postStateCalculated reports whether the receipts of this block carry a post state
@@ -827,10 +822,14 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 // checkLogsAvailable gates a log query on the data it reads: the receipts of the
 // range, which are derived from the block's transactions, plus the log indices when
 // the filter searches them. The indices are retired at the history cutoff whatever
-// the receipt retention is. Every leg is a lower bound, so checking the first block
-// of the range covers all of it.
+// the receipt retention is. Logs are read off a receipt without its post state, so
+// this takes the receipt source rather than the full-receipt gate. Every leg is a
+// lower bound, so checking the first block of the range covers all of it.
 func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	if err := api.checkReceiptSourceAvailable(ctx, tx, block); err != nil {
 		return err
 	}
 	if !usesLogIndex(crit) {
@@ -890,7 +889,7 @@ type APIImpl struct {
 	ethBackend                  rpchelper.ApiBackend
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
-	gasCache                    *GasPriceCache
+	gasCache                    gasprice.Cache
 	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
