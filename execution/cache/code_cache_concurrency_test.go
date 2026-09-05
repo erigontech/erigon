@@ -387,3 +387,60 @@ func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
 	require.Equal(t, gen.lru.Len(), gen.len(), "live generation's counter drifted from its real length")
 	require.NotEqual(t, g.startCap, g.curCap.Load(), "the LRU never grew, so the growth gates were not exercised")
 }
+
+// The grow copy must carry the retiring generation over in Keys() order --
+// oldest first -- because insertion order alone sets the new generation's
+// recency. Reversing the copy or dropping an entry breaks this.
+func TestGrowLRU_GrowCopyPreservesOrder(t *testing.T) {
+	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+	startCap := g.curCap.Load()
+
+	const warmup = genericCacheStartCapacity / 2
+	for i := range uint64(warmup) {
+		g.Put(key(i), i)
+	}
+	for i := uint64(0); i < warmup; i += 3 { // pull recency away from insertion order
+		g.Get(key(i))
+	}
+
+	var oldKeys, oldVals []uint64
+	var trigger uint64
+	grew := false
+	for i := uint64(warmup); i < 8*genericCacheStartCapacity && !grew; i++ {
+		old := g.cur.Load()
+		if g.curCap.Load() < g.maxCap && old.len() >= int(g.curCap.Load()) {
+			oldKeys = old.lru.Keys() // snapshot the generation this put is about to retire
+			oldVals = make([]uint64, len(oldKeys))
+			for j, k := range oldKeys {
+				oldVals[j], _ = old.lru.Peek(k)
+			}
+		}
+		g.Put(key(i), i)
+		if grew = g.curCap.Load() > startCap; grew {
+			trigger = i // this put landed in the new generation, after the copy
+		}
+	}
+	require.True(t, grew, "the fill must have triggered a real grow")
+
+	// Replay the snapshot into the geometry the grow chose.
+	want := g.newShards(g.curCap.Load())
+	for j, k := range oldKeys {
+		want.add(k, oldVals[j])
+	}
+	want.add(key(trigger), trigger)
+
+	got := g.cur.Load()
+	require.Positive(t, want.len())
+	require.Equal(t, want.len(), got.len(), "the grown generation must hold every copied entry")
+	require.Equal(t, want.lru.Keys(), got.lru.Keys(), "the grown generation must keep the pre-grow order")
+	for _, k := range got.lru.Keys() {
+		wantV, ok := want.lru.Peek(k)
+		require.True(t, ok)
+		gotV, ok := got.lru.Peek(k)
+		require.True(t, ok)
+		require.Equal(t, wantV, gotV)
+	}
+}
