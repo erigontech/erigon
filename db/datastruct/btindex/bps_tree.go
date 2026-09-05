@@ -347,7 +347,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	}
 
 	// check cached nodes and narrow roi
-	l, r, _, _ := b.bs(seekKey) // l===r when key is found
+	l, r, klo, khi := b.bs(seekKey) // l===r when key is found
 	if l == r {
 		// l can be Count() when seeking past the last key (insertion point);
 		// Reset then reports out-of-bounds and Seek's contract is (nil, nil).
@@ -363,6 +363,17 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	// }
 	var m uint64
 	var cmp int
+
+	l, r, at, found := b.interpNarrow(g, seekKey, klo, khi, l, r)
+	if found {
+		if !g.HasNext() {
+			return nil, fmt.Errorf("pair %d/%d val not found in %s", at, b.offt.Count(), g.FileName())
+		}
+		cur.d, cur.getter = at, g
+		cur.key = append(cur.key[:0], seekKey...)
+		cur.value, _ = g.Next(cur.value[:0])
+		return cur, nil
+	}
 
 	for l < r {
 		m = (l + r) >> 1
@@ -458,34 +469,9 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 
 	var cmp int
 	var m uint64
-	// Interpolation search narrows the window with position estimates from the
-	// bound keys; after BtInterpBudget probes fall back to binary. The final
-	// small window is handed to the linear scan below either way.
-	if BtInterp && len(klo) > 0 && len(khi) > 0 {
-		probes := uint64(0)
-		var kmArr, kloArr, khiArr [64]byte // stack; spills to heap only for keys > 64B
-		km := kmArr[:0]
-		for l < r && r-l > DefaultBtreeStartSkip {
-			if probes >= BtInterpBudget {
-				break
-			}
-			m = interpMid(key, klo, khi, l, r)
-			probes++
-			off := b.offt.Get(m)
-			g.Reset(off)
-			km, _ = g.Next(km[:0])
-			cmp = bytes.Compare(key, km)
-			switch {
-			case cmp == 0:
-				return true, off, nil
-			case cmp < 0:
-				r = m
-				khi = append(khiArr[:0], km...)
-			default:
-				l = m + 1
-				klo = append(kloArr[:0], km...)
-			}
-		}
+	l, r, m, found := b.interpNarrow(g, key, klo, khi, l, r)
+	if found {
+		return true, b.offt.Get(m), nil
 	}
 	for l < r {
 		m = (l + r) >> 1
@@ -535,6 +521,33 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 		return false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
 	return true, b.offt.Get(l), nil
+}
+
+// Interpolation search narrows the window with position estimates from the
+// bound keys; after BtInterpBudget probes fall back to binary. The final
+// small window is handed to the linear scan below either way.
+func (b *BpsTree) interpNarrow(g *seg.Reader, key, klo, khi []byte, l, r uint64) (nl, nr, at uint64, found bool) {
+	if !BtInterp || len(klo) == 0 || len(khi) == 0 {
+		return l, r, 0, false
+	}
+	var kmArr, kloArr, khiArr [64]byte // stack; spills to heap only for keys > 64B
+	km := kmArr[:0]
+	for probes := uint64(0); l < r && r-l > DefaultBtreeStartSkip && probes < BtInterpBudget; probes++ {
+		m := interpMid(key, klo, khi, l, r)
+		g.Reset(b.offt.Get(m))
+		km, _ = g.Next(km[:0])
+		switch cmp := bytes.Compare(key, km); {
+		case cmp == 0:
+			return l, r, m, true
+		case cmp < 0:
+			r = m
+			khi = append(khiArr[:0], km...)
+		default:
+			l = m + 1
+			klo = append(kloArr[:0], km...)
+		}
+	}
+	return l, r, 0, false
 }
 
 // interpMid estimates the index of searchKey within [l,r) by linear interpolation on
