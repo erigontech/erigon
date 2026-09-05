@@ -190,3 +190,21 @@ func TestLogStatsCountsLevelTokens(t *testing.T) {
 	require.Equal(t, 1, stats["warn_lines"])
 	require.Equal(t, 1, stats["info_lines"])
 }
+
+// torrent.log comes from slog, which spells the key "level" and the value in
+// upper case.
+func TestLogStatsCountsSlogLevels(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "torrent.log")
+	require.NoError(t, os.WriteFile(file, []byte(
+		`{"time":"2026-09-04T08:52:12Z","level":"WARN","msg":"piece failed"}`+"\n"+
+			`{"time":"2026-09-04T08:52:13Z","level":"ERROR","msg":"tracker gone"}`+"\n"+
+			`{"time":"2026-09-04T08:52:14Z","level":"INFO","msg":"seeding"}`+"\n"), 0600))
+
+	stats, err := getLogStats(file)
+	require.NoError(t, err)
+	require.Equal(t, 3, stats["total_lines"])
+	require.Equal(t, 1, stats["error_lines"])
+	require.Equal(t, 1, stats["warn_lines"])
+	require.Equal(t, 1, stats["info_lines"])
+}

@@ -254,7 +254,7 @@ func getLogStats(filename string) (map[string]any, error) {
 	for scanner.Scan() {
 		totalLines++
 		switch logLevel(scanner.Text()) {
-		case "eror", "crit":
+		case "eror", "error", "crit":
 			errorLines++
 		case "warn":
 			warnLines++
@@ -282,8 +282,9 @@ func getLogStats(filename string) (map[string]any, error) {
 }
 
 // logLevel is the level token a log line carries: "[EROR] [time] msg" in the
-// default file format, {"lvl":"eror"} under --log.dir.json. It is empty for a
-// line in neither shape, such as a panic trace. Matching the token rather than
+// default file format, {"lvl":"eror"} under --log.dir.json, {"level":"WARN"} in
+// torrent.log, which the downloader writes through slog. It is empty for a line
+// in none of those shapes, such as a panic trace. Matching the token rather than
 // the whole line keeps an "err=" key on an info line out of the error count.
 func logLevel(line string) string {
 	if rest, ok := strings.CutPrefix(line, "["); ok {
@@ -291,9 +292,11 @@ func logLevel(line string) string {
 			return strings.ToLower(rest[:i])
 		}
 	}
-	if _, rest, ok := strings.Cut(line, `"lvl":"`); ok {
-		if i := strings.IndexByte(rest, '"'); i > 0 {
-			return strings.ToLower(rest[:i])
+	for _, key := range []string{`"lvl":"`, `"level":"`} {
+		if _, rest, ok := strings.Cut(line, key); ok {
+			if i := strings.IndexByte(rest, '"'); i > 0 {
+				return strings.ToLower(rest[:i])
+			}
 		}
 	}
 	return ""

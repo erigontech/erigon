@@ -43,8 +43,14 @@ func GatherMetricsFiltered(pattern string) (map[string]any, error) {
 		metricName := *mf.Name
 
 		// Apply filter if pattern is provided
-		if pattern != "" && !matchPattern(pattern, metricName) {
-			continue
+		if pattern != "" {
+			ok, err := matchPattern(pattern, metricName)
+			if err != nil {
+				return nil, fmt.Errorf("invalid pattern %q: %w", pattern, err)
+			}
+			if !ok {
+				continue
+			}
 		}
 
 		metricType := mf.Type.String()
@@ -150,7 +156,6 @@ func GatherMetricsFiltered(pattern string) (map[string]any, error) {
 
 // matchPattern reports whether a metric name matches a glob pattern. Prometheus
 // names carry no "/", so path.Match's separator handling never applies.
-func matchPattern(pattern, name string) bool {
-	ok, err := path.Match(pattern, name)
-	return err == nil && ok
+func matchPattern(pattern, name string) (bool, error) {
+	return path.Match(pattern, name)
 }
