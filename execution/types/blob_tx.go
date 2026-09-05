@@ -36,7 +36,27 @@ var (
 	ErrNilToFieldTx                = errors.New("txn: field 'To' can not be 'nil'")
 	ErrBlobTxnEmptyBlobs           = errors.New("blob txn must contain at least one blob versioned hash")
 	ErrBlobTxnInvalidVersionedHash = errors.New("blob txn versioned hash has invalid version byte")
+	ErrBlobTxnPreCancun            = errors.New("BlobTx transactions require Cancun")
 )
+
+// ValidateBlobPrerequisites checks the EIP-4844 rules a blob-carrying message must satisfy.
+func ValidateBlobPrerequisites(blobHashes []common.Hash, contractCreation, isCancun bool) error {
+	if !isCancun {
+		return ErrBlobTxnPreCancun
+	}
+	if contractCreation {
+		return ErrNilToFieldTx
+	}
+	if len(blobHashes) == 0 {
+		return ErrBlobTxnEmptyBlobs
+	}
+	for _, h := range blobHashes {
+		if h[0] != kzg.BlobCommitmentVersionKZG {
+			return ErrBlobTxnInvalidVersionedHash
+		}
+	}
+	return nil
+}
 
 type BlobTx struct {
 	DynamicFeeTransaction
@@ -72,22 +92,8 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
-	if !rules.IsCancun {
-		return nil, errors.New("BlobTx transactions require Cancun")
-	}
-	// EIP-4844 transaction validity: a blob txn must specify a recipient (no
-	// contract creation), carry at least one versioned hash, and every hash
-	// must start with the KZG version byte.
-	if stx.To == nil {
-		return nil, ErrNilToFieldTx
-	}
-	if len(stx.BlobVersionedHashes) == 0 {
-		return nil, ErrBlobTxnEmptyBlobs
-	}
-	for _, h := range stx.BlobVersionedHashes {
-		if h[0] != kzg.BlobCommitmentVersionKZG {
-			return nil, ErrBlobTxnInvalidVersionedHash
-		}
+	if err := ValidateBlobPrerequisites(stx.BlobVersionedHashes, stx.To == nil, rules.IsCancun); err != nil {
+		return nil, err
 	}
 	stxTo := accounts.InternAddress(*stx.To)
 	msg := Message{

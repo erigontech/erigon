@@ -901,6 +901,7 @@ func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.Acces
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
 func (m callMsg) IsFree() bool                          { return false }
 func (m callMsg) SetIsFree(_ bool)                      {}
+func (m callMsg) SkipAccessListForkCheck() bool         { return false }
 
 func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }

@@ -178,6 +178,10 @@ type Message interface {
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
 	SetIsFree(bool)
+
+	// SkipAccessListForkCheck marks a message whose AccessList is eth_createAccessList's
+	// own convergence-loop accumulator rather than caller-declared EIP-2930 intent.
+	SkipAccessListForkCheck() bool
 }
 
 // NewTxnExecutor initialises and returns a new transaction executor.
@@ -350,6 +354,17 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			}
 		}
 	}
+
+	// eth_call builds a Message directly, bypassing the per-type AsMessage gates.
+	if st.msg.AccessList() != nil && !rules.IsBerlin && !st.msg.SkipAccessListForkCheck() {
+		return upfrontTxnFees{}, types.ErrAccessListPreBerlin
+	}
+	if st.msg.BlobHashes() != nil {
+		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {
+			return upfrontTxnFees{}, err
+		}
+	}
+
 	// EIP-4844.
 	var maxFeePerBlobGas uint256.Int
 	hasBlobGas := rules.IsCancun && blobGas > 0
