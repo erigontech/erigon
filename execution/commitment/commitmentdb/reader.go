@@ -3,6 +3,7 @@ package commitmentdb
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -20,6 +21,10 @@ type StateReader interface {
 	// workers never touch the main goroutine's lock-free accumulator (a race)
 	// or take the global metrics lock.
 	CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader
+	// BindsWorkerTx reports whether CloneForWorker resolves every read on the tx
+	// it is handed. A reader that keeps its own source instead gives all workers
+	// one transaction, which a concurrent fold has to serialize.
+	BindsWorkerTx() bool
 }
 
 type LatestStateReader struct {
@@ -93,6 +98,55 @@ func (r *LatestStateReader) CloneForWorker(workerCtx context.Context, tx kv.Temp
 	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx)))
 }
 
+func (r *LatestStateReader) BindsWorkerTx() bool { return false }
+
+// syncStateReader lets several fold workers share one reader bound to the
+// caller's snapshot: the tx behind it takes one goroutine at a time, and the
+// bytes it hands back alias a buffer its next read reuses, so the copy is made
+// under the same lock.
+type syncStateReader struct {
+	mu  *sync.Mutex
+	src StateReader
+	buf []byte
+}
+
+var _ StateReader = (*syncStateReader)(nil)
+
+func newSyncStateReader(mu *sync.Mutex, src StateReader) *syncStateReader {
+	return &syncStateReader{mu: mu, src: src}
+}
+
+func (r *syncStateReader) WithHistory() bool { return r.src.WithHistory() }
+
+func (r *syncStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.src.CheckDataAvailable(d, step)
+}
+
+func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	enc, step, err := r.src.Read(d, plainKey, stepSize)
+	if err != nil || enc == nil {
+		return nil, step, err
+	}
+	if r.buf == nil {
+		r.buf = make([]byte, 0, len(enc))
+	}
+	r.buf = append(r.buf[:0], enc...)
+	return r.buf, step, nil
+}
+
+// Clone/CloneForWorker keep the source reader and its lock: the point of this
+// wrapper is that every copy resolves against the one pinned snapshot.
+func (r *syncStateReader) Clone(kv.TemporalTx) StateReader { return newSyncStateReader(r.mu, r.src) }
+func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
+	return newSyncStateReader(r.mu, r.src)
+}
+
+func (r *syncStateReader) BindsWorkerTx() bool { return false }
+
 // HistoryStateReader reads *full* historical state at specified txNum.
 // `limitReadAsOfTxNum` here is used as timestamp for usual GetAsOf.
 type HistoryStateReader struct {
@@ -136,6 +190,10 @@ func (r *HistoryStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx)
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
 
+// BindsWorkerTx: GetAsOf on the worker's own tx resolves at limitReadAsOfTxNum
+// whatever that tx's view is, so a newer view cannot change the answer.
+func (r *HistoryStateReader) BindsWorkerTx() bool { return true }
+
 // FilesOnlyStateReader reads from .kv files only, capped at limitTxNum.
 // On miss (key not present in any frozen .kv file ≤ limitTxNum), returns nil
 // without any fallback. This is the right semantic for integrity checks and
@@ -176,6 +234,8 @@ func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
 func (r *FilesOnlyStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) StateReader {
 	return NewFilesOnlyStateReader(tx, r.limitTxNum)
 }
+
+func (r *FilesOnlyStateReader) BindsWorkerTx() bool { return true }
 
 // SplitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
 // data and account/storage/code data.
@@ -233,6 +293,10 @@ func (r *SplitStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempo
 	return NewCommitmentSplitStateReader(r.commitmentReader.CloneForWorker(workerCtx, tx), r.plainStateReader.CloneForWorker(workerCtx, tx), r.withHistory)
 }
 
+func (r *SplitStateReader) BindsWorkerTx() bool {
+	return r.commitmentReader.BindsWorkerTx() && r.plainStateReader.BindsWorkerTx()
+}
+
 func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) *SplitStateReader {
 	return &SplitStateReader{
 		commitmentReader: commitmentReader,
@@ -276,6 +340,8 @@ func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestRead
 func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
 	return &txLatestReader{tx: r.tx}
 }
+
+func (r *txLatestReader) BindsWorkerTx() bool { return false }
 
 // NewHeadCaptureStateReader composes the dual-tx reader used by minimal-node
 // witness head-capture collapse detection. The CommitmentDomain resolves from
@@ -335,6 +401,10 @@ func (crsr *CommitmentReplayStateReader) CloneForWorker(workerCtx context.Contex
 	}
 }
 
+// BindsWorkerTx: CloneForWorker hands plainStateReader on unchanged, so every
+// clone reads history through the one outer-DB tx.
+func (crsr *CommitmentReplayStateReader) BindsWorkerTx() bool { return false }
+
 // RebuildStateReader creates a StateReader for building commitment from scratch, block-by-block.
 // Commitment is read from SharedDomains' in-memory batch (LatestStateReader) because we are generating
 // it incrementally - prior commitment state lives in the MemBatch, not yet on disk.
@@ -390,3 +460,5 @@ func (r *RebuildStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tem
 		sd:               r.sd,
 	}
 }
+
+func (r *RebuildStateReader) BindsWorkerTx() bool { return true }

@@ -599,7 +599,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			// so concurrent PutBranch calls never race; collectors are drained
 			// after Process and merged into the main writer below.
 			var concurrentFactory commitment.TrieContextFactory
-			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, txNum)
+			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, workerPin, tx, txNum)
 			warmupConfig.CtxFactory = concurrentFactory
 			trie.SetTrieContextFactory(concurrentFactory)
 		default:
@@ -705,6 +705,45 @@ func beginWorkerRo(ctx context.Context, db kv.TemporalRoDB, pin kv.TemporalFiles
 	return db.BeginTemporalRo(ctx)
 }
 
+// callerView is the caller half of the drift check, resolved once per fold.
+// ViewID memoizes inside libmdbx's txn, so asking the shared caller tx from
+// each worker is a write race on that memo.
+type callerView struct {
+	unresolved bool
+	writer     bool
+	viewID     uint64
+}
+
+func resolveCallerView(callerTx kv.TemporalTx) callerView {
+	callerTx = kv.UnderlyingTx(callerTx)
+	if callerTx == nil {
+		return callerView{unresolved: true}
+	}
+	// A write-tx caller holds MDBX's single writer, so nothing can commit under
+	// the fold and a fresh read view cannot move past it.
+	if _, writable := callerTx.(kv.TemporalRwTx); writable {
+		return callerView{writer: true}
+	}
+	return callerView{viewID: callerTx.ViewID()}
+}
+
+// mayDrift reports whether workerTx can resolve DB-resident reads at a snapshot
+// newer than the caller's.
+func (c callerView) mayDrift(workerTx kv.TemporalTx) bool {
+	workerTx = kv.UnderlyingTx(workerTx)
+	if c.unresolved || workerTx == nil {
+		return true
+	}
+	if c.writer {
+		return false
+	}
+	// A write tx's ViewID is the snapshot it will create, not one it reads.
+	if _, workerWritable := workerTx.(kv.TemporalRwTx); workerWritable {
+		return true
+	}
+	return c.viewID != workerTx.ViewID()
+}
+
 func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
@@ -746,15 +785,43 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 // concurrentTrieContextFactory is like warmupTrieContextFactory but blocking, and also creates a per-goroutine
 // etl.Collector for each context so that PutBranch writes are isolated (no shared writer race).
 // Returns the factory and a drain function that collects all created collectors.
-func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.TemporalRoDB, pin kv.TemporalFilesPin, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
+func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx context.Context, db kv.TemporalRoDB, pin kv.TemporalFilesPin, tx kv.TemporalTx, txNum uint64) (commitment.TrieContextFactory, func() []*etl.Collector) {
 	stepSize := sdc.sharedDomains.StepSize()
 	var mu sync.Mutex
 	var collectors []*etl.Collector
 
+	// A custom reader whose clones keep their own source hands every worker the
+	// same transaction; only the worker's own view is per-worker.
+	sharedSource := sdc.stateReader != nil && !sdc.stateReader.BindsWorkerTx()
+	caller := resolveCallerView(tx)
+
+	// Workers that cannot read on their own view fall back to this one reader
+	// over the caller's tx, taken in turns. It is built here and not in the
+	// factory because the factory runs inside each worker goroutine, and
+	// building a reader touches tx: AsStateGetter reads the state version off it.
+	var pinnedMu sync.Mutex
+	var pinnedMetrics *kvmetrics.DomainMetrics
+	var pinned *syncStateReader
+	if sharedSource || (tx != nil && !caller.writer) {
+		pinnedMetrics = kvmetrics.NewDomainMetrics()
+		src := sdc.stateReader
+		if src != nil {
+			src = src.CloneForWorker(kvmetrics.ContextWithMetrics(foldCtx, pinnedMetrics), tx)
+		} else {
+			src = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(pinnedMetrics))
+		}
+		pinned = newSyncStateReader(&pinnedMu, src)
+	}
+	pinnedOnly := pinned != nil && sharedSource
+
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
-		roTx, err := beginWorkerRo(ctx, db, pin) //nolint:gocritic
-		if err != nil {
-			return &errorTrieContext{err: err}, func() {}
+		var roTx kv.TemporalTx
+		if !pinnedOnly {
+			var err error
+			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
+			if err != nil {
+				return &errorTrieContext{err: err}, func() {}
+			}
 		}
 
 		collector := etl.NewCollector("[concurrent_branch]", sdc.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize/16), log.Root()) //nolint:gocritic
@@ -770,20 +837,31 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			putter:         sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
 			traceW:         sdc.traceW,
 		}
-		if sdc.stateReader != nil {
+		if roTx != nil {
+			warmupCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
+		}
+		switch {
+		case pinned != nil && (sharedSource || caller.mayDrift(roTx)):
+			// A read view opened at fold time sits at the then-current head, which
+			// is the caller's snapshot only while no commit can land between them.
+			// Clones share the reader and its lock; only the scratch buffer is
+			// per worker.
+			warmupCtx.stateReader = pinned.CloneForWorker(workerCtx, roTx)
+		case sdc.stateReader != nil:
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
-		} else {
+		default:
 			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
-			roTx.Rollback()
+			if roTx != nil {
+				roTx.Rollback()
+			}
 		}
 		return warmupCtx, cleanup
 	}
@@ -791,6 +869,10 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 	drain := func() []*etl.Collector {
 		mu.Lock()
 		defer mu.Unlock()
+		if pinnedMetrics != nil {
+			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, pinnedMetrics)
+			pinnedMetrics = nil
+		}
 		c := collectors
 		collectors = nil
 		return c

@@ -175,24 +175,10 @@ func (f sdFrontier) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return f.sd.domainVisibleEnd(f.tx, domain)
 }
 
-// cacheGenerationTx unwraps table overlays because their sequence metadata
-// belongs to the overlay, while cache fills read temporal domains from the
-// backing transaction.
-func cacheGenerationTx(tx kv.TemporalTx) kv.TemporalTx {
-	for tx != nil {
-		wrapper, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx })
-		if !ok {
-			return tx
-		}
-		tx = wrapper.UnderlyingTx()
-	}
-	return nil
-}
-
 // cacheFrontierFor binds fill authority to the transaction's durable state
 // version. StateCache admits it only while that version is current.
 func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil {
 		return nil
 	}
@@ -357,7 +343,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	trieCfg := o.trieCfg
 
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil {
 		return nil, errors.New("state version transaction is nil")
 	}

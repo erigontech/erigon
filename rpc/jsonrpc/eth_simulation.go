@@ -998,6 +998,8 @@ func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.Temporal
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
 
+func (r *simulationStateReader) BindsWorkerTx() bool { return true }
+
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
 	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
 }

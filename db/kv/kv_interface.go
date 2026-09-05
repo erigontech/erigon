@@ -505,6 +505,20 @@ type TemporalGetter interface {
 	StepsInFiles(entitySet ...Domain) Step
 }
 
+// UnderlyingTx peels table overlays off tx down to the transaction they are
+// layered on. An overlay owns its own sequence metadata, but snapshot identity
+// and temporal domain reads belong to the tx underneath it.
+func UnderlyingTx(tx TemporalTx) TemporalTx {
+	for tx != nil {
+		wrapper, ok := tx.(interface{ UnderlyingTx() TemporalTx })
+		if !ok {
+			return tx
+		}
+		tx = wrapper.UnderlyingTx()
+	}
+	return nil
+}
+
 type TemporalTx interface {
 	Tx
 	TemporalGetter
