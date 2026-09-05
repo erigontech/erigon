@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -1389,7 +1390,22 @@ func TestBadBlocks(t *testing.T) {
 	require.Len(badBlks, 2)
 	require.Equal(badBlks[0].Hash(), hash4)
 	require.Equal(badBlks[1].Hash(), hash3)
+
+	// a reset that fails mid-load must not leave a half-filled cache installed
+	require.Error(rawdb.ResetBadBlockCache(forEachErrTx{err: errors.New("read failed")}, 4))
+
+	badBlks, err = rawdb.GetLatestBadBlocks(tx)
+	require.NoError(err)
+	require.Len(badBlks, 4)
+	require.Equal(badBlks[0].Hash(), hash4)
 }
+
+type forEachErrTx struct {
+	kv.Tx
+	err error
+}
+
+func (t forEachErrTx) ForEach(string, []byte, func(k, v []byte) error) error { return t.err }
 
 func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {

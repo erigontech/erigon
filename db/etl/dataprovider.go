@@ -204,8 +204,6 @@ func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
 	// Wait first: the async flush assigns p.file from its own goroutine, so
 	// reading it before joining both races and can leak a file created after.
-	// The error itself is already surfaced by mergeSortFiles before any provider
-	// reaches Dispose, and Wait is safe to call again (errgroup caches the result).
 	_ = p.Wait()
 	if p.file == nil {
 		return

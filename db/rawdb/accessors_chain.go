@@ -127,12 +127,19 @@ func ResetBadBlockCache(tx kv.Tx, limit int) error {
 	bheapCache = utils.NewBlockMaxHeap(limit)
 	bheapMu.Unlock()
 	// load the heap
-	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+	if err := tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
 		bheapMu.Lock()
 		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 		bheapMu.Unlock()
 		return nil
-	})
+	}); err != nil {
+		// drop the half-filled heap, otherwise readers see it as loaded and get a truncated list
+		bheapMu.Lock()
+		bheapCache = nil
+		bheapMu.Unlock()
+		return err
+	}
+	return nil
 }
 
 /* latest bad blocks end */

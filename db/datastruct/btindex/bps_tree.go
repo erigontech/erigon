@@ -371,9 +371,9 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		if r-l <= DefaultBtreeStartSkip { // found small range, faster to scan now
 			// m = l
 			if cur.d == 0 {
-				// l stays within [0, offt.Count()) by the binary-search invariant above,
-				// so the only failure resetNoRead can report (an out-of-bounds index) can't occur here.
-				_ = cur.resetNoRead(l, g)
+				if err := cur.resetNoRead(l, g); err != nil {
+					return nil, err
+				}
 			} else {
 				cur.nextNoRead()
 			}
