@@ -61,6 +61,32 @@ func ReceiptAsOf(tx kv.TemporalTx, txNum uint64) (cumGasUsed uint64, cumBlobGasu
 	return
 }
 
+// FirstLogIndexOfTxn reports the block-wide index the first log of the txn at
+// txNum takes, which is how many logs the txns before it in the block emitted.
+// It must not be asked about the first txn of a block: the record before that
+// one belongs to the previous block, and the answer there is 0 by definition.
+func FirstLogIndexOfTxn(tx kv.TemporalTx, txNum uint64) (uint32, error) {
+	// A txn's record holds its own first log index before ReceiptDomain V1_1 and
+	// the count after it from V1_1 on, and GetAsOf(n) reads the record written
+	// before n - so read this txn's record in the first case, the previous txn's
+	// in the second.
+	at := txNum
+	if ReceiptStoresFirstLogIdx(tx) {
+		at = txNum + 1
+	}
+	return logIndexAfterTxAsOf(tx, at)
+}
+
+// logIndexAfterTxAsOf reads only LogIndexAfterTxKey, where ReceiptAsOf would
+// also fetch the two cumulative gas keys its caller does not want.
+func logIndexAfterTxAsOf(tx kv.TemporalTx, txNum uint64) (uint32, error) {
+	v, ok, err := tx.GetAsOf(kv.ReceiptDomain, LogIndexAfterTxKey, txNum)
+	if err != nil || !ok || v == nil {
+		return 0, err
+	}
+	return uint32(uvarint(v)), nil
+}
+
 // ReceiptCacheKey is the single RCacheDomain key; the value is the encoded receipt.
 var ReceiptCacheKey = []byte{0x0}
 
