@@ -271,6 +271,9 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	{name: "blocks_receipts_follow_history", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode}, persistReceipts: true},
 	{name: "blocks_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
 	{name: "minimal_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
+	// A receipts retention that is a sentinel rather than a window: the cache is
+	// retired at the history cutoff, like the follow-history default.
+	{name: "blocks_receipts_sentinel", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepPostMergeBlocksPruneMode}, persistReceipts: true},
 }
 
 // TestPruneModeEndpointGating pins, for every prune mode shape, that block-data
@@ -287,7 +290,7 @@ func TestPruneModeEndpointGating(t *testing.T) {
 	for _, cfg := range pruneGatingConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
 			t.Parallel()
-			require.True(t, cfg.mode.ReceiptsFollowHistory() || cfg.mode.ReceiptsAmount() == prune.KeepAllReceiptsPruneMode,
+			require.False(t, cfg.mode.ReceiptsAmount().Enabled(),
 				"pruneGateFires does not resolve a receipt window of its own; pin that shape in TestReceiptsGateFollowsRetention")
 			apis, chainInfo := setupPruneGating(t, cfg)
 			legs := []struct {
@@ -351,13 +354,19 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 	if chainConfig == nil {
 		chainConfig = chain.TestChainBerlinConfig
 	}
-	m := execmoduletester.New(t,
+	opts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chainConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
 		}),
 		execmoduletester.WithKey(testKey),
-	)
+	}
+	if cfg.persistReceipts {
+		// A disabled domain drops the writes execution makes, so the cache has to
+		// be enabled before the chain runs, not when the prune mode is stored.
+		opts = append(opts, execmoduletester.WithEnableDomain(kv.RCacheDomain))
+	}
+	m := execmoduletester.New(t, opts...)
 
 	signer := types.LatestSignerForChainID(nil)
 	c, err := m.GenerateChain(pruneGatingChainLen, func(i int, block *blockgen.BlockGen) {
@@ -416,12 +425,28 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 	apis.rwDB = m.DB
 	empty := c.Blocks[pruneGatingEmptyBlockIdx]
 	require.Empty(t, empty.Transactions(), "the empty-block leg needs a block without transactions")
+	if cfg.persistReceipts {
+		requirePersistedReceipts(t, m, c.Blocks[pruneGatingOldBlockIdx])
+	}
 	return apis, pruneGatingChain{
 		head:   pruneGatingChainLen,
 		old:    ref(pruneGatingOldBlockIdx),
 		recent: ref(pruneGatingChainLen - 1),
 		empty:  pruneGatingRef{num: empty.NumberU64(), hash: empty.Hash()},
 	}
+}
+
+// requirePersistedReceipts asserts the fixture holds on disk what a receipt retention
+// promises. Without it a cell asserting availability passes by re-execution, which the
+// retention says nothing about, and a regression in the cache path goes unnoticed.
+func requirePersistedReceipts(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	got, err := rawdb.ReadReceiptsCacheV2(tx, block, m.BlockReader.TxnumReader())
+	require.NoError(t, err)
+	require.Len(t, got, len(block.Transactions()))
 }
 
 // dropTransactions removes the transactions of every block in [from, to), leaving the

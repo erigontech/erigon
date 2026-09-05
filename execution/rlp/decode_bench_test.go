@@ -1,4 +1,7 @@
-// Copyright 2026 The Erigon Authors
+// Copyright 2014 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,18 +17,34 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package dbfinality
+package rlp
 
 import (
-	"context"
-
-	"github.com/erigontech/erigon/db/kv"
+	"testing"
 )
 
-// Context defines immutable block boundaries for database retention work.
-type Context interface {
-	PruneToBlockNum() uint64
-	RetireToBlockNum() uint64
-	MaxReorgDepth() uint64
-	ReadyForCollation(ctx context.Context, db kv.RoDB, stepLastTxNum uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error)
+func BenchmarkDecode(b *testing.B) {
+	enc := encodeTestSlice(90000)
+	b.SetBytes(int64(len(enc)))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var s []uint
+		if err := DecodeBytes(enc, &s); err != nil {
+			b.Fatalf("Decode error: %v", err)
+		}
+	}
+}
+
+func BenchmarkDecodeIntSliceReuse(b *testing.B) {
+	enc := encodeTestSlice(100000)
+	b.SetBytes(int64(len(enc)))
+	b.ReportAllocs()
+
+	var s []uint
+	for b.Loop() {
+		if err := DecodeBytes(enc, &s); err != nil {
+			b.Fatalf("Decode error: %v", err)
+		}
+	}
 }
