@@ -47,6 +47,11 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
+	// CheckBlockRewardsAvailable reports whether the transactions of a block and the
+	// gas used GetReceiptsGasUsed reads for them can still be served under the node's
+	// retention.
+	CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error
+
 	// CanonicalHashes returns the canonical hashes of [from, to] on the
 	// backend's view, one entry per height. Heights the view has no canonical
 	// marker for (beyond the head, or pruned) get the zero hash. It resolves

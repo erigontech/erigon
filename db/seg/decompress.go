@@ -974,20 +974,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	}
 
 	bufOffset := len(buf)
-	if len(buf)+int(wordLen) > cap(buf) {
-		// slices.Grow, not make: the loops below write every byte of
-		// buf[bufOffset:bufOffset+wordLen] - patterns first, then the uncovered
-		// gaps - so make's zeroing of a multi-KB word is pure waste.
-		buf = slices.Grow(buf, int(wordLen))
-		buf = buf[:len(buf)+int(wordLen)]
-	} else {
-		// Expand buffer
-		if len(buf)+int(wordLen) < 0 {
-			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
-			return nil, 0
-		}
-		buf = buf[:len(buf)+int(wordLen)]
+	if int(wordLen) < 0 || len(buf)+int(wordLen) < 0 {
+		log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
+		return nil, 0
 	}
+	buf = slices.Grow(buf, int(wordLen))[:len(buf)+int(wordLen)]
 
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
