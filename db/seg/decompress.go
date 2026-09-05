@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -973,18 +974,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	}
 
 	bufOffset := len(buf)
-	if len(buf)+int(wordLen) > cap(buf) {
-		newBuf := make([]byte, len(buf)+int(wordLen))
-		copy(newBuf, buf)
-		buf = newBuf
-	} else {
-		// Expand buffer
-		if len(buf)+int(wordLen) < 0 {
-			log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
-			return nil, 0
-		}
-		buf = buf[:len(buf)+int(wordLen)]
+	if int(wordLen) < 0 || len(buf)+int(wordLen) < 0 {
+		log.Error("can't expand buffer", "filename", g.fName, "pos", savePos, "bufLen", len(buf))
+		return nil, 0
 	}
+	buf = slices.Grow(buf, int(wordLen))[:len(buf)+int(wordLen)]
 
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
