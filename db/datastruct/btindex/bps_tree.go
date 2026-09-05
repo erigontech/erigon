@@ -80,9 +80,9 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, 
 type BpsTree struct {
 	offt *eliasfano32.EliasFano // ef with offsets to key/vals
 
-	// pivot cache: keysBlob holds [keyLen:u16][key] records (mmap-backed on-disk,
-	// heap for WarmUp); nodeOfftEF holds record i's offset (Elias-Fano, the only
-	// per-node heap cost) and di is derived as i*nodeStride.
+	// pivot cache: keysBlob holds the on-disk pivot records (mmap-backed on-disk,
+	// heap for WarmUp); nodeOfftEF holds record i's offset and di is derived as
+	// i*nodeStride. nodeOfft, prefixLo and prefixHi are open-time derived caches.
 	keysBlob   []byte
 	nodeOfftEF *eliasfano32.EliasFano
 	nodeStride uint64
@@ -133,34 +133,21 @@ func (b *BpsTree) buildNodeIndex() {
 	if n == 0 || len(b.keysBlob) == 0 {
 		return
 	}
-	if BtNodeOfft && len(b.keysBlob) <= math.MaxUint32 {
+	if BtNodeOfft && b.nodeOfftEF.Max() <= math.MaxUint32 {
 		offs := make([]uint32, n)
-		pos := 0
 		for i := range n {
-			if pos+2 > len(b.keysBlob) {
-				return
-			}
-			offs[i] = uint32(pos)
-			pos += 2 + int(binary.BigEndian.Uint16(b.keysBlob[pos:]))
+			offs[i] = uint32(b.nodeOfftEF.Get(uint64(i)))
 		}
-		if pos <= len(b.keysBlob) {
-			b.nodeOfft = offs
-		}
+		b.nodeOfft = offs
 	}
-	if !BtPrefixSeed || n > math.MaxUint32 {
+	if !BtPrefixSeed {
 		return
 	}
-	bits := uint(bits.Len(uint(n)))
-	if bits > 16 {
-		bits = 16
-	}
-	if bits < 8 {
-		bits = 8
-	}
-	size := 1 << bits
+	width := min(max(uint(bits.Len(uint(n))), 8), 16)
+	size := 1 << width
 	cnt := make([]uint32, size)
 	for i := range n {
-		cnt[nodePrefix(b.nodeKey(i))>>(16-bits)]++
+		cnt[nodePrefix(b.nodeKey(i))>>(16-width)]++
 	}
 	lo := make([]uint32, size)
 	hi := make([]uint32, size)
@@ -170,7 +157,7 @@ func (b *BpsTree) buildNodeIndex() {
 		run += cnt[p]
 		hi[p] = run
 	}
-	b.prefixLo, b.prefixHi, b.prefixBits = lo, hi, bits
+	b.prefixLo, b.prefixHi, b.prefixBits = lo, hi, width
 }
 
 func (b *BpsTree) nodeDi(i int) uint64 { return uint64(i) * b.nodeStride }
@@ -452,11 +439,13 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 
 	l, r, at, found := b.interpNarrow(g, seekKey, klo, khi, l, r)
 	if found {
+		if err := cur.resetNoRead(at, g); err != nil {
+			return nil, err
+		}
+		cur.key, _ = g.Next(cur.key[:0])
 		if !g.HasNext() {
 			return nil, fmt.Errorf("pair %d/%d val not found in %s", at, b.offt.Count(), g.FileName())
 		}
-		cur.d, cur.getter = at, g
-		cur.key = append(cur.key[:0], seekKey...)
 		cur.value, _ = g.Next(cur.value[:0])
 		return cur, nil
 	}
@@ -610,8 +599,8 @@ func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, 
 }
 
 // Interpolation search narrows the window with position estimates from the
-// bound keys; after BtInterpBudget probes fall back to binary. The final
-// small window is handed to the linear scan below either way.
+// bound keys; after BtInterpBudget probes fall back to binary. at is meaningful
+// only when found; on the not-found return g is left at the last probe.
 func (b *BpsTree) interpNarrow(g *seg.Reader, key, klo, khi []byte, l, r uint64) (nl, nr, at uint64, found bool) {
 	if !BtInterp || len(klo) == 0 || len(khi) == 0 {
 		return l, r, 0, false

@@ -47,16 +47,9 @@ func BenchmarkSeekInterp(b *testing.B) {
 	defer bt.Close()
 	defer kv.Close()
 
-	keys, err := pivotKeysFromKV(kvPath)
-	require.NoError(b, err)
-	require.NotEmpty(b, keys)
-
-	rnd := newRnd(42)
-	hits := make([][]byte, 0, 4096)
-	gaps := make([][]byte, 0, 4096)
-	for i := 0; i < 4096; i++ {
-		k := keys[rnd.IntN(len(keys))]
-		hits = append(hits, k)
+	hits := sampleKeysAcrossRange(b, bt, kv, compress, 4096)
+	gaps := make([][]byte, 0, len(hits))
+	for _, k := range hits {
 		gp := append([]byte(nil), k...)
 		gp[len(gp)-1] ^= 0x01
 		gaps = append(gaps, gp)

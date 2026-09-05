@@ -2,7 +2,6 @@ package btindex
 
 import (
 	"encoding/binary"
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,10 +27,7 @@ func generateSkewedKV(tb testing.TB, tmp string, keyCount int, logger log.Logger
 	val := make([]byte, 8)
 	emitted := 0
 	for contract := 0; emitted < keyCount; contract++ {
-		slots := keyCount / (8 * (contract + 1))
-		if slots < 1 {
-			slots = 1
-		}
+		slots := max(keyCount/(8*(contract+1)), 1)
 		if emitted+slots > keyCount {
 			slots = keyCount - emitted
 		}
@@ -67,7 +63,7 @@ func bucketOccupancy(b *BpsTree) (maxN, medianN, p99, empty int) {
 	counts := make(map[uint32]int)
 	n := b.numNodes()
 	for i := range n {
-		counts[nodePrefix(b.nodeKey(i))]++
+		counts[nodePrefix(b.nodeKey(i))>>(16-b.prefixBits)]++
 	}
 	vals := make([]int, 0, len(counts))
 	for _, c := range counts {
@@ -81,7 +77,7 @@ func bucketOccupancy(b *BpsTree) (maxN, medianN, p99, empty int) {
 		medianN = vals[len(vals)/2]
 		p99 = vals[(len(vals)*99)/100]
 	}
-	return maxN, medianN, p99, (1 << 16) - len(counts)
+	return maxN, medianN, p99, len(b.prefixLo) - len(counts)
 }
 
 func TestSkewedFixtureShape(t *testing.T) {
@@ -106,13 +102,29 @@ func TestSkewedFixtureShape(t *testing.T) {
 			mx, med, p99, empty := bucketOccupancy(bt.bplus)
 			t.Logf("%s: pivots=%d maxBucket=%d p99=%d median=%d emptyBuckets=%d prefixTable=%s nodeOfft=%s",
 				tc.name, bt.bplus.numNodes(), mx, p99, med, empty,
-				datasize.ByteSize(2*(1<<16)*4).HR(),
+				datasize.ByteSize(2*len(bt.bplus.prefixLo)*4).HR(),
 				datasize.ByteSize(uint64(bt.bplus.numNodes())*4).HR())
 			if tc.name == "skewed" {
 				require.Greater(t, mx, med*4, "skewed fixture must be skewed")
 			}
 		})
 	}
+}
+
+func sampleKeysAcrossRange(tb testing.TB, bt *BtIndex, kv *seg.Decompressor, compress seg.FileCompression, n int) [][]byte {
+	tb.Helper()
+	g := seg.NewReader(kv.MakeGetter(), compress)
+	total := bt.KeyCount()
+	require.Greater(tb, total, uint64(0))
+	rnd := newRnd(11)
+	out := make([][]byte, 0, n)
+	for len(out) < n {
+		c := bt.OrdinalLookup(g, uint64(rnd.IntN(int(total))))
+		require.NotNil(tb, c)
+		out = append(out, append([]byte(nil), c.Key()...))
+		c.Close()
+	}
+	return out
 }
 
 func benchArms(b *testing.B, bt *BtIndex, g *seg.Reader, probes [][]byte) {
@@ -175,18 +187,10 @@ func BenchmarkBsArms(b *testing.B) {
 			defer bt.Close()
 			defer kv.Close()
 
-			keys, err := pivotKeysFromKV(kvPath)
-			require.NoError(b, err)
-			rnd := newRnd(11)
-			probes := make([][]byte, 0, 4096)
-			for i := 0; i < 4096; i++ {
-				probes = append(probes, keys[rnd.IntN(len(keys))])
-			}
+			probes := sampleKeysAcrossRange(b, bt, kv, compress, 4096)
 			g := seg.NewReader(kv.MakeGetter(), compress)
 			b.Logf("%s: pivots=%d", tc.name, bt.bplus.numNodes())
 			benchArms(b, bt, g, probes)
 		})
 	}
 }
-
-var _ = fmt.Sprintf
