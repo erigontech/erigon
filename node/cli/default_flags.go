@@ -277,4 +277,5 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ErigondbDomainStepsInFrozenFileFlag,
 	&utils.CommitmentPlainValuesFlag,
+	&utils.SSZQueryLanguageFlag,
 }

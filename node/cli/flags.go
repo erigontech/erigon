@@ -441,6 +441,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		TLSCertfile: cfg.TLSCertFile,
 
 		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
+		SSZQLEnabled:             ctx.Bool(utils.SSZQueryLanguageFlag.Name),
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
 		HttpURL:                  ctx.String(utils.HTTPURLFlag.Name),
