@@ -6,6 +6,7 @@ import (
 	"runtime/debug"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/estimate"
@@ -20,46 +21,57 @@ func unsetGoMemLimitEnv(t *testing.T) {
 	os.Unsetenv("GOMEMLIMIT")
 }
 
+// setProcessGoMemLimit installs a runtime limit for one test and restores it.
+func setProcessGoMemLimit(t *testing.T, limit int64) {
+	t.Helper()
+	prev := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(prev) })
+	debug.SetMemoryLimit(limit)
+}
+
 func TestGoMemLimitInForce(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
 		unsetGoMemLimitEnv(t)
-		set, _ := goMemLimitInForce(math.MaxInt64)
+		setProcessGoMemLimit(t, math.MaxInt64)
+		set, _, _ := goMemLimitInForce()
 		require.False(t, set)
 	})
 	t.Run("empty", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "")
-		set, _ := goMemLimitInForce(math.MaxInt64)
+		setProcessGoMemLimit(t, math.MaxInt64)
+		set, _, _ := goMemLimitInForce()
 		require.False(t, set)
 	})
 	t.Run("off", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "off")
-		set, limit := goMemLimitInForce(math.MaxInt64)
+		setProcessGoMemLimit(t, math.MaxInt64)
+		set, off, _ := goMemLimitInForce()
 		require.True(t, set)
-		require.Equal(t, "off", limit)
+		require.True(t, off)
 	})
 	t.Run("set in env", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "4GiB")
-		set, limit := goMemLimitInForce(4 << 30)
+		setProcessGoMemLimit(t, 4<<30)
+		set, off, limit := goMemLimitInForce()
 		require.True(t, set)
-		require.NotEqual(t, "off", limit)
+		require.False(t, off)
+		require.Equal(t, datasize.ByteSize(4<<30), limit)
 	})
 	t.Run("zero is a real limit", func(t *testing.T) {
 		t.Setenv("GOMEMLIMIT", "0")
-		set, limit := goMemLimitInForce(0)
+		setProcessGoMemLimit(t, 0)
+		set, off, limit := goMemLimitInForce()
 		require.True(t, set)
-		require.NotEqual(t, "off", limit)
-	})
-	t.Run("max is off in effect", func(t *testing.T) {
-		t.Setenv("GOMEMLIMIT", "9223372036854775807")
-		set, limit := goMemLimitInForce(math.MaxInt64)
-		require.True(t, set)
-		require.Equal(t, "off", limit)
+		require.False(t, off)
+		require.Equal(t, datasize.ByteSize(0), limit)
 	})
 	t.Run("set in process", func(t *testing.T) {
 		unsetGoMemLimitEnv(t)
-		set, limit := goMemLimitInForce(3 << 30)
+		setProcessGoMemLimit(t, 3<<30)
+		set, off, limit := goMemLimitInForce()
 		require.True(t, set)
-		require.NotEqual(t, "off", limit)
+		require.False(t, off)
+		require.Equal(t, datasize.ByteSize(3<<30), limit)
 	})
 }
 
