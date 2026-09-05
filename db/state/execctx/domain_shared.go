@@ -1392,11 +1392,6 @@ type getLatestOptions struct {
 	buf      []byte
 }
 
-func (opts getLatestOptions) withBuf(buf []byte) getLatestOptions {
-	opts.buf = buf
-	return opts
-}
-
 func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 	opts.codeHash = codeHash
 	return opts
@@ -1508,10 +1503,11 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
-	// The fill below clones, so a value headed for the cache can be decoded into
-	// the caller's buffer and handed out as the stored copy instead.
 	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
-	if willFill && domain == kv.CodeDomain && len(opts.codeHash) == len(common.Hash{}) {
+	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
+	if fillsCode {
+		// The fill clones, so the value can be decoded into the caller's buffer
+		// and handed out as the stored copy instead.
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
@@ -1529,8 +1525,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
-		if len(opts.codeHash) == len(common.Hash{}) {
-			v = fillView.FillCodeStored(k, v, opts.codeHash, readTxNum)
+		if fillsCode {
+			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
@@ -1670,7 +1666,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash).withBuf(buf))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf})
 	if err != nil {
 		return nil, false, err
 	}

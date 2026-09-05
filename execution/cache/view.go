@@ -277,16 +277,12 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
 }
 
-func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
-	v.fillCodeWithHash(addr, bytes.Clone(code), codeHash, readTxNum)
-}
-
-// FillCodeStored is FillCode that returns the copy it stored, so a caller that
-// decoded into a borrowed buffer can hand out that copy instead of allocating a
-// second one. Entries are immutable, so sharing it is what a cache hit already
-// does. The copy is returned even when the cache declines it, so the caller
-// never aliases the borrowed buffer.
-func (v ReadView) FillCodeStored(addr, code, codeHash []byte, readTxNum uint64) []byte {
+// FillCode stores a copy of code and returns it, so a caller that decoded into
+// a borrowed buffer can hand out that copy instead of allocating a second one.
+// Entries are immutable, so sharing it is what a cache hit already does. The
+// copy is returned even when the cache declines it, so the caller never aliases
+// the borrowed buffer.
+func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte {
 	stored := bytes.Clone(code)
 	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)
 	return stored
