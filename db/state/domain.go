@@ -1874,6 +1874,9 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
+		if opts.OwnedValue() {
+			v = bytes.Clone(v) // db values point into tx pages; a file value is already ours
+		}
 		return v, foundStep, true, nil
 	}
 

@@ -465,7 +465,19 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	ownedValue  bool
 }
+
+// WithOwnedValue asks for a value the caller may keep past the transaction. A
+// plain read returns memory owned by a file mapping or a db page; this makes the
+// read copy it when that is what it would otherwise return. Ask for it only to
+// hand the value to something outliving the tx — a copy no one keeps is waste.
+func (opts GetLatestOptions) WithOwnedValue() GetLatestOptions {
+	opts.ownedValue = true
+	return opts
+}
+
+func (opts GetLatestOptions) OwnedValue() bool { return opts.ownedValue }
 
 func (opts GetLatestOptions) WithMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOptions {
 	opts.metrics, opts.start = metrics, start
