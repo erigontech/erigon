@@ -27,24 +27,22 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// goMemLimitShare leaves the rest of the budget to what GOMEMLIMIT cannot see:
-// MDBX's write buffer, other cgo allocations, and reclaimable page cache.
-const goMemLimitShare = 0.7
+// defaultGoMemLimitShare
+// See: https://go.dev/doc/gc-guide#Suggested_uses
+// Do take advantage of the memory limit
+// For web-apps good rule of thumb: leave 5-10% headroom to account for memory sources the Go runtime is unaware of
+//
+// Erigon has such resources:
+// - mdbx dirty_space (C-owned)
+// - PageCache (OS-owned)
+// - External CL (OS-owned)
+const defaultGoMemLimitShare = 0.7
 
-// goMemLimitInForce reports whether the heap ceiling is already decided. The
-// runtime reports GOMEMLIMIT=off exactly like an unset variable, so only the
-// environment tells that choice apart.
 func goMemLimitInForce(current int64) bool {
 	_, fromEnv := os.LookupEnv("GOMEMLIMIT")
 	return fromEnv || current != math.MaxInt64
 }
 
-// SetGoMemLimit gives the Go heap a ceiling, unless a limit is already in force.
-// Without one, GOGC alone decides when to collect, so a process whose live heap
-// is over half its budget targets a number it is not allowed to reach and is
-// killed before the collection that would have saved it.
-//
-// TotalMemory is the budget: system RAM, or the cgroup limit when that is lower.
 func SetGoMemLimit(logger log.Logger) {
 	current := debug.SetMemoryLimit(-1)
 	if goMemLimitInForce(current) {
@@ -58,10 +56,10 @@ func SetGoMemLimit(logger log.Logger) {
 		return
 	}
 
-	limit := int64(float64(total) * goMemLimitShare)
+	limit := int64(float64(total) * defaultGoMemLimitShare)
 	debug.SetMemoryLimit(limit)
 	logger.Info("[mem] GOMEMLIMIT derived from available memory",
 		"available", datasize.ByteSize(total).HR(),
 		"GOMEMLIMIT", datasize.ByteSize(uint64(limit)).HR(),
-		"share", goMemLimitShare)
+		"share", defaultGoMemLimitShare)
 }
