@@ -746,12 +746,9 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable gates endpoints serving the receipts of a block. They come
-// from the receipt cache where it still covers the block, and otherwise from
-// re-executing it, which reaches only as far back as state history. Enabling the
-// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired
-// on its own --prune.receipts.distance window when one is set, and alongside history
-// otherwise.
+// checkReceiptsAvailable gates endpoints serving the full receipts of a block. Below
+// Byzantium those carry a post state the cache does not store, so the block has to be
+// re-executed and reaches only as far back as state history.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	computed, err := api.postStateCalculated(ctx, tx, block)
 	if err != nil {
@@ -760,6 +757,16 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	if computed {
 		return api.checkPruneHistory(ctx, tx, block)
 	}
+	return api.checkReceiptSourceAvailable(ctx, tx, block)
+}
+
+// checkReceiptSourceAvailable gates on where the receipts come from, whatever fields
+// the caller reads off them: the receipt cache where it still covers the block, and
+// otherwise a re-execution reaching only as far back as state history. Enabling the
+// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired on
+// its own --prune.receipts.distance window when one is set, and alongside history
+// otherwise.
+func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
@@ -815,10 +822,14 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 // checkLogsAvailable gates a log query on the data it reads: the receipts of the
 // range, which are derived from the block's transactions, plus the log indices when
 // the filter searches them. The indices are retired at the history cutoff whatever
-// the receipt retention is. Every leg is a lower bound, so checking the first block
-// of the range covers all of it.
+// the receipt retention is. Logs are read off a receipt without its post state, so
+// this takes the receipt source rather than the full-receipt gate. Every leg is a
+// lower bound, so checking the first block of the range covers all of it.
 func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	if err := api.checkReceiptSourceAvailable(ctx, tx, block); err != nil {
 		return err
 	}
 	if !usesLogIndex(crit) {
