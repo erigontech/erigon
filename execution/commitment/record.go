@@ -267,6 +267,7 @@ func DecodeRecordInto(record []byte, c *cell) (mask uint16, err error) {
 		return 0, malformedRecord("empty record")
 	}
 
+	c.reset()
 	c.CodeHash = empty.CodeHash
 	flags := record[0]
 	if flags&^recordFlagsAll != 0 {
