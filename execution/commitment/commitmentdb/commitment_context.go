@@ -50,6 +50,8 @@ type sd interface {
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
 
+	AddCommitmentTime(d time.Duration)
+
 	// Metrics exposes the per-SD DomainMetrics so callers can read
 	// per-domain (cache, db, file) read counters. Used by the
 	// cache-fp log line to break the aggregate `files=N` count down
@@ -481,6 +483,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	start := time.Now()
 	defer func() {
 		took := time.Since(start)
+		sdc.sharedDomains.AddCommitmentTime(took)
 		var keysPerSec uint64
 		if took > 0 {
 			keysPerSec = uint64(float64(updateCount) / took.Seconds())

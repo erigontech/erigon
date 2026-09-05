@@ -46,6 +46,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.KeepExecutionProofsFlag,
 	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
+	&utils.SlowBlockThresholdFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.ExecBatchedIOFlag,
 	&utils.ExecStateCacheFlag,

@@ -301,6 +301,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopBlockLimit = limit
 	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
+	cfg.Sync.SlowBlockThreshold = ctx.Duration(utils.SlowBlockThresholdFlag.Name)
 
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))

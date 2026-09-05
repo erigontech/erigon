@@ -454,7 +454,7 @@ type (
 type GetLatestMetrics interface {
 	UpdateCacheReads(domain Domain, start time.Time)
 	UpdateDbReads(domain Domain, start time.Time)
-	UpdateStateCacheHit(domain Domain)
+	UpdateStateCacheHit(domain Domain, start time.Time)
 	UpdateStateCacheMiss(domain Domain)
 	UpdateFileReadsUnique(domain Domain, key []byte, start time.Time)
 }

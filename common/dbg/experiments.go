@@ -160,6 +160,9 @@ var (
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
 
+// Startup only: read unsynchronised on every domain read.
+func EnableKVReadLevelledMetrics() { KVReadLevelledMetrics = true }
+
 func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
 	return max(gomaxprocs, 1)
 }

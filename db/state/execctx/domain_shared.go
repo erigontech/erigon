@@ -261,6 +261,9 @@ type SharedDomains struct {
 	discardCommitment bool
 	mem               kv.TemporalMemBatch
 	metrics           kvmetrics.DomainMetrics
+	nonExecMetrics    kvmetrics.DomainMetrics
+
+	commitmentNanos atomic.Int64
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -369,6 +372,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	sd := &SharedDomains{
 		logger:           logger,
 		metrics:          kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+		nonExecMetrics:   kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
 		stepSize:         tx.Debug().StepSize(),
 		baseViewID:       generationTx.ViewID(),
 		baseTxWritable:   baseTxWritable,
@@ -606,9 +610,10 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 	return &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx)}
 }
 
-// MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
-// per-batch sd.metrics (under one lock, for the per-batch log line) and the
-// process-level collector (grouped by source, for Prometheus). For low-frequency
+// MergeMetrics hands a boundary producer's accumulator to three sinks: the
+// per-batch sd.metrics (under one lock, for the per-batch log line), the
+// process-level collector (grouped by source), and, unless the source is exec,
+// sd.nonExecMetrics, subtracted back out of a block's read breakdown. For low-frequency
 // boundary producers (commitment fold, warmup teardown) off the per-tx hot path:
 // the collector send blocks if the buffer is momentarily full (rare, brief, and
 // lossless). Ownership of wm transfers to the collector — the caller must not
@@ -616,6 +621,9 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 // Collector().TrySend, which never blocks and retains on a full buffer).
 func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
+	if dbg.KVReadLevelledMetrics && source != kvmetrics.SourceExec {
+		sd.nonExecMetrics.Merge(wm)
+	}
 	sd.collector.Send(source, wm)
 }
 
@@ -1439,7 +1447,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 		if wm != nil {
 			if ok {
-				wm.UpdateStateCacheHit(domain)
+				wm.UpdateStateCacheHit(domain, start)
 			} else {
 				wm.UpdateStateCacheMiss(domain)
 			}
@@ -1543,10 +1551,10 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 // Returns (size, true, nil) on success and (0, false, nil) only when
 // CodeDomain itself confirms no code.
 func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte, txNum uint64) (int, bool, error) {
-	return sd.getCodeSize(tx, sd.cacheReader(), addr, txNum)
+	return sd.getCodeSize(tx, sd.cacheReader(), addr, txNum, nil)
 }
 
-func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) (int, bool, error) {
+func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, wm kv.GetLatestMetrics) (int, bool, error) {
 	if tx == nil {
 		return 0, false, errors.New("sd.GetCodeSize: unexpected nil tx")
 	}
@@ -1582,7 +1590,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		return size, true, nil
 	}
 
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, wm, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
 	if err != nil {
 		return 0, false, err
 	}
@@ -1624,10 +1632,10 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
 func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
-	return sd.getCode(tx, sd.cacheReader(), addr, txNum)
+	return sd.getCode(tx, sd.cacheReader(), addr, txNum, nil)
 }
 
-func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) ([]byte, bool, error) {
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, wm kv.GetLatestMetrics) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1653,7 +1661,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, wm, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
 	if err != nil {
 		return nil, false, err
 	}
@@ -1758,6 +1766,18 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 
 func (sd *SharedDomains) Metrics() *kvmetrics.DomainMetrics {
 	return &sd.metrics
+}
+
+func (sd *SharedDomains) NonExecMetrics() *kvmetrics.DomainMetrics {
+	return &sd.nonExecMetrics
+}
+
+func (sd *SharedDomains) AddCommitmentTime(d time.Duration) {
+	sd.commitmentNanos.Add(int64(d))
+}
+
+func (sd *SharedDomains) TakeCommitmentTime() time.Duration {
+	return time.Duration(sd.commitmentNanos.Swap(0))
 }
 
 func (sd *SharedDomains) LogMetrics() []any {
