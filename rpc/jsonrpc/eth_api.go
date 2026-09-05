@@ -63,6 +63,8 @@ type EthAPI interface {
 	// Block related (proposed file: ./eth_blocks.go)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error)
 	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx bool) (map[string]any, error)
+	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
+	GetHeaderByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
 

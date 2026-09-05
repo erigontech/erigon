@@ -177,6 +177,49 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 	}
 }
 
+func TestGetHeaderByNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	header, err := api.GetHeaderByNumber(ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae"), header["hash"])
+	assert.NotContains(t, header, "size")
+	assert.NotContains(t, header, "totalDifficulty")
+	assert.NotContains(t, header, "transactions")
+
+	for _, blockNum := range []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber} {
+		header, err = api.GetHeaderByNumber(ctx, blockNum)
+		require.NoError(t, err, "block %d", blockNum)
+		require.NotNil(t, header, "block %d resolves in the test module", blockNum)
+	}
+
+	for _, blockNum := range []rpc.BlockNumber{1_000_000, rpc.PendingBlockNumber} {
+		header, err = api.GetHeaderByNumber(ctx, blockNum)
+		require.NoError(t, err, "block %d", blockNum)
+		require.Nil(t, header, "block %d", blockNum)
+	}
+}
+
+func TestGetHeaderByHash(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	latestHash := common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae")
+	header, err := api.GetHeaderByHash(ctx, latestHash)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, latestHash, header["hash"])
+	assert.NotContains(t, header, "size")
+
+	header, err = api.GetHeaderByHash(ctx, common.HexToHash("0xdeadbeef"))
+	require.NoError(t, err)
+	require.Nil(t, header)
+}
+
 // Gets the latest block number with the latest tag
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
