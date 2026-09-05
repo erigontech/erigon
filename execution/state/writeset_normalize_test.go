@@ -21,6 +21,16 @@ func (r *errAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Acc
 	return nil, errors.New("boom: state read failed")
 }
 
+type storageBaselineReader struct {
+	minimalStateReader
+	storage map[accounts.StorageKey]uint256.Int
+}
+
+func (r *storageBaselineReader) ReadAccountStorage(_ accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	v, ok := r.storage[key]
+	return v, ok, nil
+}
+
 // TestNormalize_PropagatesStateReadError pins that a ReadAccountData failure
 // during account-field completion is returned, not discarded. A swallowed error
 // yields a seemingly-valid partial write set (e.g. missing fields prevent the
@@ -111,6 +121,50 @@ func TestNormalize_SelfDestructDeletesVmAndDomainStorageSlots(t *testing.T) {
 	require.True(t, domainSlotOK, "pre-block (domain) storage slot must be DELETE'd on SD")
 	_, balOK := out.GetBalance(addr)
 	require.False(t, balOK, "pre-8246 self-destruct drops the account's balance write")
+}
+
+func TestNormalize_CreateContractResetsPreviousStorage(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	kVM := accounts.InternKey(common.HexToHash("0x01"))
+	kDomain := accounts.InternKey(common.HexToHash("0x02"))
+	kRewritten := accounts.InternKey(common.HexToHash("0x03"))
+	vm := NewVersionMap(nil)
+	vm.WriteStorage(addr, kVM, Version{TxIndex: 0}, *uint256.NewInt(5), true)
+
+	ver := Version{TxIndex: 1}
+	ws := &WriteSet{}
+	ws.SetCreateContract(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath, Version: ver},
+		Val:         true,
+	})
+	ws.SetStorage(addr, kRewritten, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: kRewritten, Version: ver},
+		Val:         *uint256.NewInt(7),
+	})
+
+	reader := &storageBaselineReader{storage: map[accounts.StorageKey]uint256.Int{
+		kRewritten: *uint256.NewInt(7),
+	}}
+	domainKeys := func(a accounts.Address) ([]accounts.StorageKey, error) {
+		if a == addr {
+			return []accounts.StorageKey{kDomain, kRewritten}, nil
+		}
+		return nil, nil
+	}
+
+	out, err := ws.Normalize(vm, 1, 0, reader, domainKeys, false, false, false)
+	require.NoError(t, err)
+
+	vmSlot, ok := out.GetStorage(addr, kVM)
+	require.True(t, ok)
+	require.True(t, vmSlot.Val.IsZero())
+	domainSlot, ok := out.GetStorage(addr, kDomain)
+	require.True(t, ok)
+	require.True(t, domainSlot.Val.IsZero())
+	rewritten, ok := out.GetStorage(addr, kRewritten)
+	require.True(t, ok)
+	require.Equal(t, uint64(7), rewritten.Val.Uint64())
 }
 
 // EIP-8246 (no-burn SELFDESTRUCT) keeps the post-SD balance so the account can

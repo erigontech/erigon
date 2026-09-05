@@ -21,12 +21,68 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestBlockStateCacheBuffersContractStorageReset(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	domains.SetInMemHistoryReads(true)
+
+	addr := accounts.InternAddress([20]byte{0xc0, 0xff, 0xee})
+	addrVal := addr.Value()
+	oldSlot := accounts.InternKey([32]byte{0x01})
+	newSlot := accounts.InternKey([32]byte{0x02})
+	oldSlotVal := oldSlot.Value()
+	newSlotVal := newSlot.Value()
+	oldComposite := append(append([]byte{}, addrVal[:]...), oldSlotVal[:]...)
+	newComposite := append(append([]byte{}, addrVal[:]...), newSlotVal[:]...)
+
+	account := accounts.NewAccount()
+	account.Balance.SetUint64(7)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&account), 0, nil))
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, oldComposite, []byte{0xaa}, 0, nil))
+
+	cache := NewBlockStateCache()
+	cache.PutCommittedStorage(addr, oldSlot, []byte{0xaa})
+	writes := &WriteSet{}
+	writes.SetCreateContract(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath},
+		Val:         true,
+	})
+	writes.SetNonce(addr, &VersionedWrite[uint64]{
+		WriteHeader: WriteHeader{Address: addr, Path: NoncePath},
+		Val:         1,
+	})
+	writes.SetStorage(addr, newSlot, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: newSlot},
+		Val:         *uint256.NewInt(0xbb),
+	})
+
+	require.NoError(t, writes.Apply(domains, tx, 1, 10, nil, &chain.Rules{}, cache, false))
+
+	cachedOld, ok := cache.GetCurrentStorage(addr, oldSlot)
+	require.True(t, ok)
+	require.Empty(t, cachedOld)
+	beforeFlush, _, err := domains.GetLatest(kv.StorageDomain, tx, oldComposite)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xaa}, beforeFlush)
+
+	require.NoError(t, cache.Flush(domains, tx))
+	afterFlush, _, err := domains.GetLatest(kv.StorageDomain, tx, oldComposite)
+	require.NoError(t, err)
+	require.Empty(t, afterFlush)
+	created, _, err := domains.GetLatest(kv.StorageDomain, tx, newComposite)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xbb}, created)
+}
 
 // TestBlockStateCacheFlushClearsAcrossBlocks reproduces the trie-root race
 // at block 24839762 (EIP-7002 predeploy slots 0x01/0x03).
