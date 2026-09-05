@@ -2054,3 +2054,143 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, inFlightLogIdx, got, "must serve the in-flight block's log index, not the last committed one")
 }
+
+// TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress verifies that a
+// zero-update commitment advances the persisted execution position without
+// changing the state root or serialized trie state.
+func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+
+	const (
+		stepSize = uint64(100)
+		block1   = uint64(1)
+		txNum1   = uint64(10)
+		block2   = uint64(2)
+		txNum2   = uint64(20)
+	)
+
+	db := newTestDb(t, stepSize)
+	ctx := t.Context()
+
+	rwTx1, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx1.Rollback()
+
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, 0, 0))
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, block1, txNum1))
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx1, block2, txNum2))
+
+	domains1, err := execctx.NewSharedDomains(ctx, rwTx1, log.New())
+	require.NoError(t, err)
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0x42
+
+	acc := accounts3.Account{
+		Nonce:       1,
+		Balance:     *uint256.NewInt(12345),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 0,
+	}
+
+	prev, _, err := domains1.GetLatest(
+		kv.AccountsDomain,
+		rwTx1,
+		addr,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, domains1.DomainPut(
+		kv.AccountsDomain,
+		rwTx1,
+		addr,
+		accounts3.SerialiseV3(&acc),
+		txNum1,
+		prev,
+	))
+
+	root1, err := domains1.ComputeCommitment(
+		ctx,
+		rwTx1,
+		true,
+		block1,
+		txNum1,
+		"",
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, root1)
+
+	require.NoError(t, domains1.Flush(ctx, rwTx1))
+	domains1.Close()
+	require.NoError(t, rwTx1.Commit())
+
+	rwTx2, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx2.Rollback()
+
+	state1, _, err := rwTx2.GetLatest(
+		kv.CommitmentDomain,
+		commitmentdb.KeyCommitmentState,
+		kv.GetLatestOptions{},
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(state1), 16)
+
+	storedTx1, storedBlock1 :=
+		commitmentdb.DecodeTxBlockNums(state1)
+
+	require.Equal(t, block1, storedBlock1)
+	require.Equal(t, txNum1, storedTx1)
+
+	// GetLatest may return transaction-backed memory. Preserve the serialized
+	// trie payload before committing and reopening the database transaction.
+	trieState1 := bytes.Clone(state1[16:])
+
+	domains2, err := execctx.NewSharedDomains(
+		ctx,
+		rwTx2,
+		log.New(),
+	)
+	require.NoError(t, err)
+
+	// Deliberately perform NO DomainPut/DomainDel calls here.
+
+	root2, err := domains2.ComputeCommitment(
+		ctx,
+		rwTx2,
+		true,
+		block2,
+		txNum2,
+		"",
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotEmpty(t, root2)
+	require.Equal(t, root1, root2)
+
+	require.NoError(t, domains2.Flush(ctx, rwTx2))
+	domains2.Close()
+	require.NoError(t, rwTx2.Commit())
+
+	rwTx3, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx3.Rollback()
+
+	state2, _, err := rwTx3.GetLatest(
+		kv.CommitmentDomain,
+		commitmentdb.KeyCommitmentState,
+		kv.GetLatestOptions{},
+	)
+	require.NoError(t, err)
+	require.Greater(t, len(state2), 16)
+
+	storedTx2, storedBlock2 :=
+		commitmentdb.DecodeTxBlockNums(state2)
+
+	require.Equal(t, block2, storedBlock2)
+	require.Equal(t, txNum2, storedTx2)
+	require.Equal(t, trieState1, state2[16:])
+}

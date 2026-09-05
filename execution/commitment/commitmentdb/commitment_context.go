@@ -491,13 +491,6 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
 	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
 
-	if updateCount == 0 {
-		rootHash, err = sdc.patriciaTrie.RootHash()
-		return rootHash, err
-	}
-
-	// data accessing functions should be set when domain is opened/shared context updated
-
 	// Per-ComputeCommitment metrics accumulator for the main (root-fold) reads.
 	// The fold is single-goroutine, so this lock-free accumulator is owned
 	// exclusively here; merged into the shared metrics when commitment finishes.
@@ -505,6 +498,22 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	commitMetrics := kvmetrics.NewDomainMetrics()
 	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
 	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
+
+	if updateCount == 0 {
+		rootHash, err = sdc.patriciaTrie.RootHash()
+		if err != nil {
+			return nil, err
+		}
+		if saveState {
+			trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter)
+			if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+				return nil, err
+			}
+		}
+		return rootHash, nil
+	}
+
+	// data accessing functions should be set when domain is opened/shared context updated
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter)
 
