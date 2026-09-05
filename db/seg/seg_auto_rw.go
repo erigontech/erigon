@@ -153,9 +153,11 @@ func (c *Writer) Write(word []byte) (n int, err error) {
 }
 
 func (c *Writer) ReadFrom(r *Reader) error {
-	var v []byte
+	// Never reuse a word as the next read's buffer: for the half of the file
+	// the domain does not compress, Next hands back a slice of the read-only
+	// mapping, and the next compressed read would decode into it.
 	for r.HasNext() {
-		v, _ = r.Next(v[:0])
+		v, _ := r.Next(nil)
 		if _, err := c.Write(v); err != nil {
 			return err
 		}

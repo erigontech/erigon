@@ -1044,7 +1044,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 			g.dataP++
 			g.dataBit = 0
 		}
-		return g.data[g.dataP:g.dataP], g.dataP
+		return g.data[g.dataP:g.dataP:g.dataP], g.dataP
 	}
 	g.nextPos()
 	if g.dataBit > 0 {
@@ -1053,7 +1053,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	}
 	pos := g.dataP
 	g.dataP += wordLen
-	return g.data[pos:g.dataP], g.dataP
+	return g.data[pos:g.dataP:g.dataP], g.dataP
 }
 
 // Skip moves offset to the next word and returns the new offset and the length of the word.
