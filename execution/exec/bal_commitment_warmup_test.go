@@ -183,7 +183,7 @@ func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			var cache *commitment.BranchCache
 			if testCase.cacheAvailable {
-				cache = commitment.NewBranchCache(100)
+				cache = commitment.NewBranchCache(100, false)
 				defer cache.Close()
 				if testCase.cacheHit {
 					cache.Put(key, []byte("cached"), 7, 0)
@@ -212,7 +212,7 @@ func TestBALCommitmentContextUsesAvailableBranchCache(t *testing.T) {
 }
 
 func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
-	cache := commitment.NewBranchCache(100)
+	cache := commitment.NewBranchCache(100, false)
 	defer cache.Close()
 	tx := &commitmentBranchLookupTx{
 		data:  []byte("database"),
@@ -228,4 +228,20 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
 	require.Positive(t, tx.calls)
 	require.True(t, tx.opts.BranchCache())
+}
+
+func TestBALCommitmentContextSkipsLookupsOnEdgeRecords(t *testing.T) {
+	t.Parallel()
+
+	cache := commitment.NewBranchCache(100, true)
+	tx := &commitmentBranchLookupTx{data: []byte{1, 2, 3, 4}}
+	stats := new(balCommitmentCacheStats)
+	c := &balCommitmentContext{tx: tx, cache: cache, cacheStats: stats, edgeRecords: true}
+
+	data, step, err := c.Branch([]byte{0x00, 0xab})
+	require.NoError(t, err)
+	require.Nil(t, data)
+	require.Zero(t, step)
+	require.Zero(t, tx.calls, "a v3 datadir has no row at a legacy compact key")
+	require.Zero(t, stats.hits.Load()+stats.misses.Load())
 }

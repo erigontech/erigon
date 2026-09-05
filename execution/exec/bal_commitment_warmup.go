@@ -59,12 +59,18 @@ func balCommitmentWarmupKeys(bal types.BlockAccessList) [][]byte {
 }
 
 type balCommitmentContext struct {
-	tx         kv.TemporalTx
-	cache      *commitment.BranchCache
-	cacheStats *balCommitmentCacheStats
+	tx          kv.TemporalTx
+	cache       *commitment.BranchCache
+	cacheStats  *balCommitmentCacheStats
+	edgeRecords bool
 }
 
+// Branch addresses a node by its legacy compact key. A v3 datadir stores commitment one record per
+// edge and has no row at that key, so every lookup would miss: end the descent instead of paying it.
 func (c *balCommitmentContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if c.edgeRecords {
+		return nil, 0, nil
+	}
 	if c.cache == nil {
 		return c.tx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 	}
@@ -97,32 +103,9 @@ func (*balCommitmentContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, errors.New("BAL commitment warmup does not read storage")
 }
 
-// balCommitmentUsesEdgeRecords reports whether commitment is stored as v3 edge records. The
-// warmup addresses nodes by their legacy compact key, which no v3 datadir has a row for.
-func balCommitmentUsesEdgeRecords(ctx context.Context, db kv.RoDB) bool {
-	tx, err := db.BeginRo(kv.WithNonBlockingAcquire(ctx)) //nolint:gocritic // Rollback is deferred.
-	if err != nil {
-		return false
-	}
-	defer tx.Rollback()
-	txTemporal, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return false
-	}
-	provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider)
-	if !ok {
-		return false
-	}
-	cache := provider.BranchCache()
-	return cache != nil && cache.EdgeRecords()
-}
-
 func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, workers int) error {
 	keys := balCommitmentWarmupKeys(bal)
 	if len(keys) == 0 || workers <= 0 {
-		return nil
-	}
-	if balCommitmentUsesEdgeRecords(ctx, db) {
 		return nil
 	}
 	workers = min(workers, len(keys))
@@ -148,9 +131,10 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 			cache = provider.BranchCache()
 		}
 		return &balCommitmentContext{
-			tx:         txTemporal,
-			cache:      cache,
-			cacheStats: cacheStats,
+			tx:          txTemporal,
+			cache:       cache,
+			cacheStats:  cacheStats,
+			edgeRecords: cache != nil && cache.EdgeRecords(),
 		}, tx.Rollback
 	}
 
