@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -437,10 +436,9 @@ func TestPreMergeVerdictSearchesPastAnInflatedBound(t *testing.T) {
 	require.True(t, decided)
 }
 
-// TestPreMergeGateServesAnArchiveOffTheCountedBound pins the gate against the shape the
-// count points below: the datadir serves a pre-merge transaction, so rejecting its blocks
-// as expired is the one answer that costs the caller data it has.
-func TestPreMergeGateServesAnArchiveOffTheCountedBound(t *testing.T) {
+// TestPreMergePolicyRecognizesAnArchiveOffTheCountedBound pins the policy against
+// a readable pre-merge transaction that the cumulative count points below.
+func TestPreMergePolicyRecognizesAnArchiveOffTheCountedBound(t *testing.T) {
 	t.Parallel()
 
 	reader := inflatedCountArchive()
@@ -451,43 +449,42 @@ func TestPreMergeGateServesAnArchiveOffTheCountedBound(t *testing.T) {
 
 	api := preMergeGateAPI(reader, probeSparseMergeHeight)
 
-	expiry, _, err := api.blocksFollowChainHistoryExpiry(t.Context(), nil)
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(t.Context(), nil)
 	require.NoError(t, err)
-	require.False(t, expiry, "a count that confirms nothing is not an observation of expiry")
-
-	for block := uint64(1); block < probeSparseMergeHeight; block++ {
-		require.NoError(t, api.checkPruneBlocks(t.Context(), nil, block))
-	}
+	require.False(t, expiry, "a readable pre-merge transaction means the datadir is an archive")
+	require.Nil(t, mergeHeight)
 }
 
-// TestPreMergeGateRefusesExpiredDataItsCountCannotConfirm pins the expiry reading of the
-// shape the count points below: the bodies record transactions and none of them can be
-// read, so the search has to reach the block holding one rather than trust the count.
-func TestPreMergeGateRefusesExpiredDataItsCountCannotConfirm(t *testing.T) {
+// TestPreMergePolicyRecognizesExpiredDataItsCountCannotConfirm pins the expiry
+// decision when bodies record transactions but none of them can be read.
+func TestPreMergePolicyRecognizesExpiredDataItsCountCannotConfirm(t *testing.T) {
 	t.Parallel()
 
 	reader := inflatedCountArchive()
 	reader.unreadable = true
 	api := preMergeGateAPI(reader, probeSparseMergeHeight)
 
-	for block := uint64(1); block < probeSparseMergeHeight; block++ {
-		require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, block), state.PrunedError,
-			"bodies without their transactions are expiry, whatever the count says")
-	}
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(t.Context(), nil)
+	require.NoError(t, err)
+	require.True(t, expiry, "bodies without their transactions mean chain-history expiry")
+	require.NotNil(t, mergeHeight)
+	require.Equal(t, uint64(probeSparseMergeHeight), *mergeHeight)
 }
 
-// TestPreMergeGateLeavesAMissingSearchBodyUnanswered pins that block data the search
-// cannot read leaves the question open: it is not evidence of an archive, and it is not
-// an observation to remember either, so the gate refuses and asks again.
-func TestPreMergeGateLeavesAMissingSearchBodyUnanswered(t *testing.T) {
+// TestPreMergePolicyDoesNotCacheAMissingSearchBody pins the conservative result:
+// the current request follows expiry, but a later request retries the unanswered probe.
+func TestPreMergePolicyDoesNotCacheAMissingSearchBody(t *testing.T) {
 	t.Parallel()
 
 	reader := inflatedCountArchive()
 	reader.missing = map[uint64]bool{6: true}
 	api := preMergeGateAPI(reader, probeSparseMergeHeight)
 
-	require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, 1), state.PrunedError,
-		"a body the search needs and cannot read does not open the gate")
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(t.Context(), nil)
+	require.NoError(t, err)
+	require.True(t, expiry, "a missing body cannot prove that pre-merge transactions are available")
+	require.NotNil(t, mergeHeight)
+	require.Equal(t, uint64(probeSparseMergeHeight), *mergeHeight)
 	require.Nil(t, api._preMergeData.Load(), "a question left open is not an observation")
 }
 

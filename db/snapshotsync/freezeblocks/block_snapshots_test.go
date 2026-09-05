@@ -120,8 +120,12 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}
 	defer tx.view.Close()
+	pinnedGeneration := tx.view.Generation()
 	_, err := snapshots.RetireFilesBelow(snaptype2.Transactions, testMergeLimit+1, nil)
 	require.NoError(t, err)
+	liveView := snapshots.View()
+	defer liveView.Close()
+	require.NotEqual(t, pinnedGeneration, liveView.Generation())
 
 	const blk = testMergeLimit / 2 // inside the retired [0, mergeLimit) segment
 
@@ -133,6 +137,9 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	// ...but a reader using the tx's pinned view still does.
 	_, okTx := blockReader.viewSingleFile(tx, snaptype2.Transactions, blk)
 	require.True(t, okTx, "reader must resolve the retired segment via the tx's pinned view")
+	oldest, err := blockReader.MinimumBlockAvailable(t.Context(), tx)
+	require.NoError(t, err)
+	require.Zero(t, oldest, "the availability floor must come from the same pinned view")
 }
 
 // A tx that pins no view cannot read block files: the reader used to open its

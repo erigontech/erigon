@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -153,6 +154,8 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return nil, fmt.Errorf("canonical hash not found %d", headBlock)
 	}
 
+	// OldestBlock reports effective availability, while RetentionBlocks reports
+	// the configured deletion policy. They can differ while a wider window refills.
 	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
@@ -162,23 +165,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return f
 	}
 
-	// PruneTo returns 0 for both KeepAllBlocksPruneMode (MaxUint64-1, keep all) and
-	// KeepPostMergeBlocksPruneMode (MaxUint64, chain-specific history expiry) because their
-	// distances exceed headBlock. For KeepPostMergeBlocksPruneMode the true oldest is then
-	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
-	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
-	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
-	// MergeHeight set, pre-merge transaction segments are never downloaded, so the oldest
-	// available block is the merge point. The same sentinel also covers a legacy archive
-	// datadir, so the field follows the boundary the gate resolves.
-	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	blocksOldest, err := api.blocksAvailableFrom(ctx, tx, headBlock)
 	if err != nil {
 		return nil, err
 	}
-	if expiry && expiryFrom != nil {
-		blocksOldest = *expiryFrom
+	onDiskOldest, err := api.stateHistoryStartBlock(ctx, tx, headBlock)
+	if err != nil {
+		return nil, err
 	}
+	stateOldest = max(stateOldest, onDiskOldest)
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
@@ -557,6 +553,10 @@ type GasPriceOracleBackend struct {
 	parentTip    canonicalMarker
 	parentTipErr error
 	forkPrepared bool
+
+	blocksFloorOnce sync.Once
+	blocksFloor     uint64
+	blocksFloorErr  error
 }
 
 // canonicalMarker is one entry of the canonical number-to-hash mapping.
@@ -714,6 +714,10 @@ func (b *GasPriceOracleBackend) HeaderByHashNumber(ctx context.Context, hash com
 }
 
 func (b *GasPriceOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
+	available, err := b.isBlockAvailable(ctx, number)
+	if err != nil || !available {
+		return nil, err
+	}
 	return b.baseApi.blockWithSenders(ctx, b.tx, hash, number)
 }
 
@@ -729,7 +733,28 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 }
 
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
+	available, err := b.isBlockAvailable(ctx, number.Uint64())
+	if err != nil || !available {
+		return nil, err
+	}
 	return b.baseApi.blockByNumberWithSenders(ctx, b.baseApi.filters.WithOverlay(b.tx), number.Uint64())
+}
+
+func (b *GasPriceOracleBackend) isBlockAvailable(ctx context.Context, number uint64) (bool, error) {
+	// One backend serves one request through a pinned transaction, so its physical
+	// block floor is stable and needs to be resolved only once.
+	b.blocksFloorOnce.Do(func() {
+		head, err := rpchelper.GetLatestBlockNumber(b.tx)
+		if err != nil {
+			b.blocksFloorErr = err
+			return
+		}
+		b.blocksFloor, b.blocksFloorErr = b.baseApi.blocksAvailableFrom(ctx, b.tx, head)
+	})
+	if b.blocksFloorErr != nil {
+		return false, b.blocksFloorErr
+	}
+	return number >= b.blocksFloor, nil
 }
 
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
