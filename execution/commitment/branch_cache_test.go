@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -510,6 +511,156 @@ func TestBranchCache_StorageRoute_ZeroAlloc(t *testing.T) {
 	}
 }
 
+func TestBranchCache_TailCollisionServesMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefixA := []byte{0x01, 0x02, 0x03, 0x04}
+	prefixB := []byte{0x05, 0x06, 0x07, 0x08}
+	bucket := maphash.Hash(prefixA)
+
+	tail := c.tailForWrite()
+	tail.Add(bucket, &branchCacheEntry{data: []byte("A-data"), epoch: c.coh.Epoch(), verify: maphash.Verify(prefixA)})
+	tail.Add(bucket, &branchCacheEntry{data: []byte("B-data"), epoch: c.coh.Epoch(), verify: maphash.Verify(prefixB)})
+
+	_, _, ok := c.Get(prefixA)
+	require.False(t, ok, "prefixA's bucket is shadowed by colliding prefixB; Get must miss, not serve prefixB's bytes")
+
+	entry, found := tail.Get(bucket)
+	require.True(t, found, "the bucket itself must still hold an entry")
+	require.Equal(t, maphash.Verify(prefixB), entry.verify, "the guard must discriminate, not simply always-miss: the bucket holds prefixB's entry")
+	require.Equal(t, []byte("B-data"), entry.data)
+}
+
+func TestBranchCache_PinnedTrunkCollisionServesMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	mk := func(seed byte) []byte {
+		p := make([]byte, 34)
+		p[0] = 0x00
+		for i := 1; i < len(p); i++ {
+			p[i] = seed
+		}
+		return p
+	}
+	prefixA, prefixB := mk(0xAA), mk(0xBB)
+	prefixB[33] = prefixA[33]
+
+	c.PinEntry(prefixB, []byte("B-account-branch"), 0, 0)
+
+	hashA, ok := ContractHashFromPrefix(prefixA)
+	require.True(t, ok)
+	hashB, ok := ContractHashFromPrefix(prefixB)
+	require.True(t, ok)
+
+	stB, found := c.pinned.Load().Get(hashB[:])
+	require.True(t, found)
+	c.pinnedForWrite().Set(hashA[:], stB)
+
+	_, _, hit := c.Get(prefixA)
+	require.False(t, hit, "a pinned-map collision must not serve account B's branch bytes for account A")
+
+	dataB, _, hitB := c.Get(prefixB)
+	require.True(t, hitB, "the guard must discriminate, not simply always-miss: B still owns the trunk")
+	require.Equal(t, []byte("B-account-branch"), dataB)
+}
+
+func TestBranchCache_PinnedTrunkCollisionDoesNotCorruptOnWrite(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	mk := func(seed byte) []byte {
+		p := make([]byte, 34)
+		p[0] = 0x00
+		for i := 1; i < len(p); i++ {
+			p[i] = seed
+		}
+		return p
+	}
+	prefixA, prefixB := mk(0xAA), mk(0xBB)
+	prefixB[33] = prefixA[33]
+
+	c.PinEntry(prefixB, []byte("B-account-branch"), 0, 0)
+
+	hashA, ok := ContractHashFromPrefix(prefixA)
+	require.True(t, ok)
+	hashB, ok := ContractHashFromPrefix(prefixB)
+	require.True(t, ok)
+
+	stB, found := c.pinned.Load().Get(hashB[:])
+	require.True(t, found)
+	c.pinnedForWrite().Set(hashA[:], stB)
+
+	c.PinEntry(prefixA, []byte("A-account-branch"), 0, 0)
+
+	dataB, _, hitB := c.Get(prefixB)
+	require.True(t, hitB, "B's own pin must survive a colliding write")
+	require.Equal(t, []byte("B-account-branch"), dataB,
+		"a pinned-map collision must not let account A's write land in account B's trunk")
+
+	dataA, _, hitA := c.Get(prefixA)
+	require.True(t, hitA, "A's write must still be readable, from the keyed tail")
+	require.Equal(t, []byte("A-account-branch"), dataA)
+}
+
+func TestBranchCache_DeepTierPrefixMismatchServesMiss(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefix := make([]byte, 33+3)
+	prefix[0] = 0x10 // odd nibble count -> 5 storage nibbles, past d4's max of 4
+	for i := 1; i < len(prefix); i++ {
+		prefix[i] = byte(i * 13)
+	}
+	c.PinEntry(prefix, []byte("real-data"), 0, 0)
+
+	var nibBuf [4]byte
+	st, n, ok := c.storageRoute(prefix, false, &nibBuf)
+	require.True(t, ok)
+	require.Nil(t, st.slot(&nibBuf, n, false), "prefix must overflow into the deep tier for this test to be meaningful")
+
+	entry, found := st.deep.Get(prefix)
+	require.True(t, found)
+	entry.verify = maphash.Verify([]byte("a-different-prefix-entirely"))
+
+	_, _, ok = c.Get(prefix)
+	require.False(t, ok, "deep-tier entry whose stored tag no longer matches must miss, not serve foreign bytes")
+}
+
+func TestBranchCache_DeepTierCollidingWriteKeepsForeignEntry(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefix := make([]byte, 33+3)
+	prefix[0] = 0x10
+	for i := 1; i < len(prefix); i++ {
+		prefix[i] = byte(i * 13)
+	}
+	c.PinEntry(prefix, []byte("foreign-data"), 0, 0)
+
+	var nibBuf [4]byte
+	st, n, ok := c.storageRoute(prefix, false, &nibBuf)
+	require.True(t, ok)
+	require.Nil(t, st.slot(&nibBuf, n, false), "prefix must overflow into the deep tier for this test to be meaningful")
+
+	entry, found := st.deep.Get(prefix)
+	require.True(t, found)
+	foreign := maphash.Verify([]byte("a-different-prefix-entirely"))
+	entry.verify = foreign
+
+	c.Put(prefix, []byte("own-data"), 0, 0)
+
+	after, found := st.deep.Get(prefix)
+	require.True(t, found)
+	require.Equal(t, foreign, after.verify, "a colliding write must not evict the entry that owns the bucket")
+	require.Equal(t, []byte("foreign-data"), after.data)
+
+	data, _, hit := c.Get(prefix)
+	require.True(t, hit, "the colliding write must still be readable, from the keyed tail")
+	require.Equal(t, []byte("own-data"), data)
+}
+
 func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 	for depth := range 9 {
 		total := 64 + depth
@@ -539,4 +690,93 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 			require.Zerof(t, c.PinnedCount(), "depth=%d", depth)
 		})
 	}
+}
+
+func deepStoragePrefix(acct, slot byte) []byte {
+	p := make([]byte, 36)
+	for i := 1; i < 33; i++ {
+		p[i] = acct
+	}
+	p[33], p[34], p[35] = slot, slot, slot
+	return p
+}
+
+func seedDeepBucket(t *testing.T, c *BranchCache, owner, bucketOf []byte, data string) *trunk {
+	t.Helper()
+	c.PinEntry(owner, []byte(data), 0, 0)
+
+	var nibBuf [4]byte
+	st, n, ok := c.storageRoute(owner, false, &nibBuf)
+	require.True(t, ok, "the pinned account must route to a storage trunk")
+	require.Nil(t, st.slot(&nibBuf, n, false), "the prefix must be deep enough to miss every depth slot")
+
+	entry, found := st.deep.Get(owner)
+	require.True(t, found, "the pin must have landed in the deep tier")
+	st.deep.Set(bucketOf, entry)
+	return st
+}
+
+func TestBranchCache_DeepCollisionInvalidateKeepsTheOwner(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefixA, prefixB := deepStoragePrefix(0xAA, 0x01), deepStoragePrefix(0xAA, 0x02)
+	st := seedDeepBucket(t, c, prefixB, prefixA, "B-deep")
+
+	c.Invalidate(prefixA)
+
+	entry, found := st.deep.Get(prefixA)
+	require.True(t, found, "invalidating A must not evict prefixB, which owns the bucket A hashes to")
+	require.Equal(t, maphash.Verify(prefixB), entry.verify)
+	require.Equal(t, []byte("B-deep"), entry.data)
+}
+
+func TestBranchCache_DeepCollisionPinKeepsTheOwner(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefixA, prefixB := deepStoragePrefix(0xAA, 0x01), deepStoragePrefix(0xAA, 0x02)
+	st := seedDeepBucket(t, c, prefixB, prefixA, "B-deep")
+	pinnedBefore := c.PinnedCount()
+
+	c.PinEntry(prefixA, []byte("A-deep"), 0, 0)
+
+	entry, found := st.deep.Get(prefixA)
+	require.True(t, found)
+	require.Equal(t, []byte("B-deep"), entry.data,
+		"a colliding pin must not land in the bucket prefixB owns")
+	require.Equal(t, pinnedBefore, c.PinnedCount(), "a refused deep pin must not be counted as pinned")
+
+	data, _, hit := c.Get(prefixA)
+	require.True(t, hit, "the refused pin must still be readable, from the tail")
+	require.Equal(t, []byte("A-deep"), data)
+}
+
+func TestBranchCache_TailCollisionInvalidateKeepsTheOwner(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefixA := []byte{0x01, 0x02, 0x03, 0x04}
+	prefixB := []byte{0x05, 0x06, 0x07, 0x08}
+	bucket := maphash.Hash(prefixA)
+
+	tail := c.tailForWrite()
+	tail.Add(bucket, &branchCacheEntry{data: []byte("B-data"), epoch: c.coh.Epoch(), verify: maphash.Verify(prefixB)})
+
+	c.Invalidate(prefixA)
+
+	entry, found := tail.Peek(bucket)
+	require.True(t, found, "invalidating A must not evict prefixB, which owns the tail bucket A hashes to")
+	require.Equal(t, []byte("B-data"), entry.data)
+}
+
+func TestBranchCache_DeepEvictionDoesNotAllocate(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	prefix := deepStoragePrefix(0xAA, 0x01)
+	c.PinEntry(prefix, []byte("deep"), 0, 0)
+
+	allocs := testing.AllocsPerRun(1000, func() { c.Invalidate(prefix) })
+	require.Zerof(t, allocs, "the bucket-ownership predicate must stay on the stack: Get invalidates on every stale hit")
 }

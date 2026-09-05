@@ -9,18 +9,25 @@ import (
 )
 
 var seed maphash.Seed
+var verifySeed maphash.Seed
 
 func init() {
 	seed = maphash.MakeSeed()
+	verifySeed = maphash.MakeSeed()
 }
 
 func SetSeed(s uint64) {
 	*(*uint64)(unsafe.Pointer(&seed)) = s
+	*(*uint64)(unsafe.Pointer(&verifySeed)) = s ^ 0x9e3779b97f4a7c15
 }
 
 // Hash computes a uint64 hash for a byte slice using the global seed.
 func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
+}
+
+func Verify(key []byte) uint32 {
+	return uint32(maphash.Bytes(verifySeed, key))
 }
 
 // Map is a concurrent map that uses maphash to hash []byte keys.
@@ -52,17 +59,43 @@ func (m *Map[V]) LoadOrStore(key []byte, value V) (actual V, loaded bool) {
 	return m.m.LoadOrStore(h, value)
 }
 
-// ReplaceIfPresent atomically overwrites an existing key, reporting whether it
-// was there. It never inserts, so external counts need no accounting.
-func (m *Map[V]) ReplaceIfPresent(key []byte, value V) bool {
+// ReplaceIf atomically overwrites an existing key when pred accepts the value
+// found under it, reporting whether it did. It never inserts, so external
+// counts need no accounting.
+func (m *Map[V]) ReplaceIf(key []byte, value V, pred func(V) bool) (replaced bool) {
 	h := Hash(key)
-	_, ok := m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
-		if !loaded {
+	m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if !loaded || !pred(old) {
 			return old, xsync.CancelOp
 		}
+		replaced = true
 		return value, xsync.UpdateOp
 	})
-	return ok
+	return replaced
+}
+
+func (m *Map[V]) DeleteIf(key []byte, pred func(V) bool) (deleted bool) {
+	h := Hash(key)
+	m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if !loaded || !pred(old) {
+			return old, xsync.CancelOp
+		}
+		deleted = true
+		return old, xsync.DeleteOp
+	})
+	return deleted
+}
+
+func (m *Map[V]) StoreUnlessTaken(key []byte, value V, taken func(V) bool) (stored, inserted bool) {
+	h := Hash(key)
+	m.m.Compute(h, func(old V, loaded bool) (V, xsync.ComputeOp) {
+		if loaded && taken(old) {
+			return old, xsync.CancelOp
+		}
+		stored, inserted = true, !loaded
+		return value, xsync.UpdateOp
+	})
+	return stored, inserted
 }
 
 // LoadAndStore stores value and returns the previous one, loaded reporting

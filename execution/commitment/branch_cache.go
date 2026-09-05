@@ -80,10 +80,11 @@ type BranchCache struct {
 }
 
 type branchCacheEntry struct {
-	data  []byte
-	step  uint64 // on-disk file step; 0 = untracked
-	txN   uint64 // write txN, upper bound of validity; 0 = frozen/untracked
-	epoch uint32
+	data   []byte
+	step   uint64 // on-disk file step; 0 = untracked
+	txN    uint64 // write txN, upper bound of validity; 0 = frozen/untracked
+	epoch  uint32
+	verify uint32
 }
 
 // MissCallback runs on the hot read path when lookup misses every tier that
@@ -100,6 +101,7 @@ type trunk struct {
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
 
+	acctHash [32]byte
 	maxDepth uint8
 }
 
@@ -149,8 +151,8 @@ func newAccountTrunk(maxDepth uint8) *trunk {
 	return &trunk{maxDepth: maxDepth}
 }
 
-func newStorageTrunk(maxDepth uint8) *trunk {
-	return &trunk{maxDepth: maxDepth, deep: maphash.NewMap[*branchCacheEntry]()}
+func newStorageTrunk(acctHash [32]byte, maxDepth uint8) *trunk {
+	return &trunk{acctHash: acctHash, maxDepth: maxDepth, deep: maphash.NewMap[*branchCacheEntry]()}
 }
 
 const (
@@ -321,14 +323,17 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 	}
 	packed := acctHash[:]
 	if p != nil {
-		if st, found := p.Get(packed); found {
+		if st, found := p.Get(packed); found && st.acctHash == acctHash {
 			return st, storageNibbles(prefix, nibBuf), true
 		}
 	}
 	if !create {
 		return nil, 0, false
 	}
-	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
+	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(acctHash, c.maxDepth))
+	if st.acctHash != acctHash {
+		return nil, 0, false
+	}
 	return st, storageNibbles(prefix, nibBuf), true
 }
 
@@ -453,8 +458,8 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		var entry *branchCacheEntry
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			entry = slot.Load()
-		} else {
-			entry, _ = st.deep.Get(prefix)
+		} else if e, found := st.deep.Get(prefix); found && e.verify == maphash.Verify(prefix) {
+			entry = e
 		}
 		if entry != nil {
 			c.pinnedHits.Add(1)
@@ -469,7 +474,7 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		return nil, false
 	}
 	entry, ok := tail.Get(maphash.Hash(prefix))
-	if !ok {
+	if !ok || entry.verify != maphash.Verify(prefix) {
 		c.tailMisses.Add(1)
 		c.fireOnMiss(prefix)
 		return nil, false
@@ -497,7 +502,8 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 			}
 			// Get is lock-free; ReplaceIfPresent locks the bucket even on a
 			// miss, and a miss is the common case here.
-		} else if _, present := st.deep.Get(prefix); present && st.deep.ReplaceIfPresent(prefix, entry) {
+		} else if e, present := st.deep.Get(prefix); present && e.verify == entry.verify &&
+			st.deep.ReplaceIf(prefix, entry, func(cur *branchCacheEntry) bool { return cur.verify == entry.verify }) {
 			return
 		}
 	}
@@ -516,7 +522,7 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
+	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch(), verify: maphash.Verify(prefix)}
 	var nibBuf [4]byte
 	st, n, ok := c.storageRoute(prefix, true, &nibBuf)
 	if !ok {
@@ -532,7 +538,12 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		}
 		return
 	}
-	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
+	stored, inserted := st.deep.StoreUnlessTaken(prefix, entry, func(e *branchCacheEntry) bool { return e.verify != entry.verify })
+	if !stored {
+		c.tailForWrite().Add(maphash.Hash(prefix), entry)
+		return
+	}
+	if inserted {
 		c.pinnedEntries.Add(1)
 	}
 }
@@ -572,10 +583,11 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	defer stripe.Unlock()
 
 	c.store(prefix, &branchCacheEntry{
-		data:  dataCopy,
-		step:  step,
-		txN:   txN,
-		epoch: c.coh.Epoch(),
+		data:   dataCopy,
+		step:   step,
+		txN:    txN,
+		epoch:  c.coh.Epoch(),
+		verify: maphash.Verify(prefix),
 	})
 }
 
@@ -594,12 +606,15 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 			if slot.Swap(nil) != nil {
 				c.pinnedEntries.Add(-1)
 			}
-		} else if _, loaded := st.deep.LoadAndDelete(prefix); loaded {
+		} else if st.deep.DeleteIf(prefix, func(e *branchCacheEntry) bool { return e.verify == maphash.Verify(prefix) }) {
 			c.pinnedEntries.Add(-1)
 		}
 	}
 	if tail := c.tail.Load(); tail != nil {
-		tail.Remove(maphash.Hash(prefix))
+		bucket := maphash.Hash(prefix)
+		if e, ok := tail.Peek(bucket); ok && e.verify == maphash.Verify(prefix) {
+			tail.Remove(bucket)
+		}
 	}
 }
 

@@ -65,6 +65,10 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 	return t.cur.Load().Get(key)
 }
 
+func (t *tailLRU) Peek(key uint64) (*branchCacheEntry, bool) {
+	return t.cur.Load().Peek(key)
+}
+
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
 	// Avoid lru.Len() locks once fully grown.
