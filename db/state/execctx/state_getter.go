@@ -24,16 +24,13 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-// maxLentCodeBuf bounds what codeBuf keeps between uses, so one huge value does
-// not pin a large buffer for the getter's lifetime.
-const maxLentCodeBuf = 128 * 1024
+const maxLentCodeBuf = 256 * 1024
 
 type stateGetter struct {
-	sd   *SharedDomains
-	tx   kv.TemporalTx
-	view cache.ReadView
-	m    kv.GetLatestMetrics
-	// One getter serves one worker, like m.
+	sd      *SharedDomains
+	tx      kv.TemporalTx
+	view    cache.ReadView
+	m       kv.GetLatestMetrics
 	codeBuf []byte
 }
 

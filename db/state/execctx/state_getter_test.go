@@ -187,3 +187,46 @@ func TestStateGetterCodeBufDoesNotAliasEarlierResult(t *testing.T) {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
 	}
 }
+
+// A read that does not resolve a codeHash skips the cache copy, so it must not
+// be handed the shared buffer either.
+func TestStateGetterCodeBufNotLentWithoutCodeHash(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	codes := [][]byte{
+		bytes.Repeat([]byte{0xd4}, 1024),
+		bytes.Repeat([]byte{0xe5}, 1024),
+		bytes.Repeat([]byte{0xf6}, 1024),
+	}
+	addrs := make([][]byte, len(codes))
+	tx := codeBufTx{TemporalTx: roTx, code: map[string][]byte{}}
+	for i := range codes {
+		addrs[i] = make([]byte, 20)
+		addrs[i][0] = byte(i + 1)
+		tx.code[string(addrs[i])] = codes[i]
+	}
+
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+
+	// No account records, so codeHashForAddr answers nil for every address.
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+	got := make([][]byte, len(codes))
+	for i, addr := range addrs {
+		var ok bool
+		got[i], ok, err = getter.GetCode(addr, 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+	}
+	for i := range codes {
+		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
+	}
+}
