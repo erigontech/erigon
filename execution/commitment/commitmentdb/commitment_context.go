@@ -802,7 +802,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	var pinnedMu sync.Mutex
 	var pinnedMetrics *kvmetrics.DomainMetrics
 	var pinned *syncStateReader
-	if tx != nil && (sharedSource || !caller.writer) {
+	if sharedSource || (tx != nil && !caller.writer) {
 		pinnedMetrics = kvmetrics.NewDomainMetrics()
 		src := sdc.stateReader
 		if src != nil {
@@ -837,11 +837,13 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			putter:         sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:       stepSize,
 			txNum:          txNum,
 			localCollector: collector,
 			traceW:         sdc.traceW,
+		}
+		if roTx != nil {
+			warmupCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
 		}
 		switch {
 		case pinned != nil && (sharedSource || caller.mayDrift(roTx)):

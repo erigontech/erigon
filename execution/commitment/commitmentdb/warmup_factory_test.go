@@ -137,6 +137,7 @@ func (g *snapshotGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]by
 type snapshotSD struct {
 	sd
 	getters atomic.Int64
+	putDels atomic.Int64
 }
 
 func (*snapshotSD) StepSize() uint64 { return 1 }
@@ -144,7 +145,10 @@ func (s *snapshotSD) AsStateGetter(tx kv.TemporalTx, _ execctxapi.StateGetterOpt
 	s.getters.Add(1)
 	return &snapshotGetter{tx: tx.(*snapshotTx)}
 }
-func (*snapshotSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (s *snapshotSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel {
+	s.putDels.Add(1)
+	return nil
+}
 func (*snapshotSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
 
 // snapshotDB hands every worker its own read view, as a real backend does.
@@ -474,4 +478,71 @@ func TestConcurrentTrieContextResolvesCallerViewOnce(t *testing.T) {
 		require.Equal(t, []byte("caller-snapshot"), encs[i])
 	}
 	require.Equal(t, int64(1), caller.viewCalls.Load(), "workers must not ask the caller tx for its view")
+}
+
+func TestConcurrentTrieContextSerializesSharedReaderWithoutCallerTx(t *testing.T) {
+	t.Parallel()
+	src := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc, _ := newSnapshotSdc(t)
+	reader := &sharedSourceReader{tx: src}
+	sdc.SetStateReader(reader)
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, nil, 0)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	const workers = 8
+	var wg sync.WaitGroup
+	errs := make([]error, workers)
+	vals := make([][]byte, workers)
+	start := make(chan struct{})
+	for i := range workers {
+		wg.Go(func() {
+			trieCtx, cleanup := factory(t.Context())
+			defer cleanup()
+			<-start
+			for range 64 {
+				enc, _, err := trieCtx.Branch([]byte{byte(i)})
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				vals[i] = append(vals[i][:0], enc...)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	require.False(t, reader.overlaps.Load(),
+		"a shared-source reader is serialized by a lock that needs no caller tx, so a nil caller must not drop it")
+	for i := range workers {
+		require.NoError(t, errs[i])
+		require.Equal(t, []byte("caller-snapshot"), vals[i])
+	}
+	require.Zero(t, db.opens.Load(), "a shared-source worker must not open a read view it never reads through")
+}
+
+func TestConcurrentTrieContextSkipsPutterWithoutWorkerTx(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 7, val: []byte("worker-view")}
+	sdc, shared := newSnapshotSdc(t)
+	sdc.SetStateReader(&sharedSourceReader{tx: caller})
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	trieCtx, cleanup := factory(t.Context())
+	defer func() {
+		cleanup()
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	require.Zero(t, shared.putDels.Load(), "a worker with no read tx must not bind a putter to a nil one")
+	require.NoError(t, trieCtx.PutBranch([]byte("prefix"), []byte("data"), nil))
 }
