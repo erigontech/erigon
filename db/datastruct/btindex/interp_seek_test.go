@@ -2,6 +2,7 @@ package btindex
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -83,28 +84,29 @@ func TestSeekInterpEquivBinary(t *testing.T) {
 
 	budgets := []uint64{0, 1, 2, 4, 8, 64}
 
-	t.Run("fixed-len", func(t *testing.T) {
-		compress := seg.CompressKeys
-		kvPath := generateKV(t, t.TempDir(), 20, 10, 50000, log.New(), compress)
-		indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-		buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
+	for _, compress := range []seg.FileCompression{0, seg.CompressKeys, seg.CompressVals, seg.CompressKeys | seg.CompressVals} {
+		t.Run(fmt.Sprintf("fixed-len-compress-%d", compress), func(t *testing.T) {
+			kvPath := generateKV(t, t.TempDir(), 20, 10, 50000, log.New(), compress)
+			indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+			buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
 
-		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
-		require.NoError(t, err)
-		defer bt.Close()
-		defer kv.Close()
+			kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+			require.NoError(t, err)
+			defer bt.Close()
+			defer kv.Close()
 
-		keys, err := pivotKeysFromKV(kvPath)
-		require.NoError(t, err)
-		require.NotEmpty(t, keys)
+			keys, err := pivotKeysFromKV(kvPath)
+			require.NoError(t, err)
+			require.NotEmpty(t, keys)
 
-		g := seg.NewReader(kv.MakeGetter(), compress)
-		hits, misses, past := seekProbes(t, keys)
-		requireSeekEquiv(t, bt, g, budgets, hits, "hit")
-		requireSeekEquiv(t, bt, g, budgets, misses, "miss")
-		requireSeekEquiv(t, bt, g, budgets, past, "past-last")
-		requireSeekEquiv(t, bt, g, budgets, [][]byte{{}, nil}, "empty")
-	})
+			g := seg.NewReader(kv.MakeGetter(), compress)
+			hits, misses, past := seekProbes(t, keys)
+			requireSeekEquiv(t, bt, g, budgets, hits, "hit")
+			requireSeekEquiv(t, bt, g, budgets, misses, "miss")
+			requireSeekEquiv(t, bt, g, budgets, past, "past-last")
+			requireSeekEquiv(t, bt, g, budgets, [][]byte{{}, nil}, "empty")
+		})
+	}
 
 	t.Run("var-len", func(t *testing.T) {
 		compress := seg.CompressKeys
