@@ -248,6 +248,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
 
+			edgeRecords := statecfg.CommitmentEdgeRecords(cf.version)
 			ki := 0
 			var k, v []byte
 			for reader.HasNext() {
@@ -260,7 +261,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !statecfg.CommitmentEdgeRecords(cf.version) {
+				if !edgeRecords {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)

@@ -111,12 +111,6 @@ func TestChildKeyV3(t *testing.T) {
 			if !IsChildKeyForNodeV3(nodeKey, childKey) {
 				t.Fatalf("depth %d nibble %x: %x is not a child of %x", depth, nibble, childKey, nodeKey)
 			}
-			if !IsChildKeyAtDepthV3(childKey, depth) {
-				t.Fatalf("depth %d nibble %x: %x has the wrong child-key length", depth, nibble, childKey)
-			}
-			if got := ChildNibbleV3(childKey); got != byte(nibble) {
-				t.Fatalf("depth %d: ChildNibbleV3(%x) = %x, want %x", depth, childKey, got, nibble)
-			}
 			if want := ChildKeyLenForDepth(depth); len(childKey) != want {
 				t.Fatalf("depth %d: child key length = %d, want %d", depth, len(childKey), want)
 			}
@@ -199,9 +193,6 @@ func TestV3ChildRangeRejectsIntrudingDescendants(t *testing.T) {
 			}
 			if IsChildKeyForNodeV3(nodeKey, intruder) {
 				t.Fatalf("intruding key %x passed the exact direct-child predicate for %x", intruder, nodeKey)
-			}
-			if IsChildKeyAtDepthV3(intruder, len(tt.path)) {
-				t.Fatalf("intruding key %x passed the exact depth predicate", intruder)
 			}
 		})
 	}

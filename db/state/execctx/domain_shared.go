@@ -1368,6 +1368,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 // ReadCommitmentRecords resolves a node's edge records across mem, branch cache, db and files. wm
 // is the caller's read accumulator: v3 never reaches getLatest, so without it every
 // kv_read_count{domain="commitment"} series reads zero on a v3 node.
+// nodeChildKeyBufs backs ReadCommitmentRecords' per-node child key. Worker clones share one
+// *SharedDomains, so the scratch cannot be a field on it.
+var nodeChildKeyBufs = sync.Pool{New: func() any { b := make([]byte, 0, 72); return &b }}
+
 func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte, mask uint16, maskKnown bool, wm kv.GetLatestMetrics) (records [16][]byte, present uint16, step kv.Step, err error) {
 	wanted := mask
 	if maskKnown {
@@ -1393,8 +1397,9 @@ func (sd *SharedDomains) ReadCommitmentRecords(tx kv.TemporalTx, nodeKey []byte,
 		cachedPresent, cachedStep, _ = sd.branchCache.GetNode(nodeKey, wanted, &cached)
 	}
 	// Neither lookup retains the key, so one scratch buffer serves every nibble.
-	childKey := make([]byte, len(nodeKey)+1)
-	copy(childKey, nodeKey)
+	childKeyBuf := nodeChildKeyBufs.Get().(*[]byte)
+	childKey := append(append((*childKeyBuf)[:0], nodeKey...), 0)
+	defer func() { *childKeyBuf = childKey[:0]; nodeChildKeyBufs.Put(childKeyBuf) }()
 	for bitset := wanted; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)

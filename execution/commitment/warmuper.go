@@ -115,6 +115,7 @@ func (w *Warmuper) Start() {
 				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
+			var compactBuf [maxCompactKeyLen]byte
 			for {
 				select {
 				case <-w.ctx.Done():
@@ -123,7 +124,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.warmupKeyInto(trieCtx, item.hashedKey, item.startDepth, &compactBuf)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -142,8 +143,14 @@ func (w *Warmuper) Start() {
 }
 
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
-	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
+	w.warmupKeyInto(trieCtx, hashedKey, startDepth, &compactBuf)
+}
+
+// warmupKeyInto takes the compact-key scratch from the caller: the buffer escapes through the
+// interface call below, so one per worker goroutine costs what one per warmed key used to.
+func (w *Warmuper) warmupKeyInto(trieCtx PatriciaContext, hashedKey []byte, startDepth int, compactBuf *[maxCompactKeyLen]byte) {
+	depth := startDepth
 	// A v3 parent record carries its child's bitmap, so every node below the first can be read
 	// by its exact mask instead of probing all 16 nibbles across every commitment file.
 	recordReader, _ := trieCtx.(BranchRecordReader)
@@ -151,7 +158,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	var mask uint16
 	maskKnown := false
 	if recordReader != nil && recordReader.EdgeRecords() {
-		w.warmupKeyRecords(recordReader, hashedKey, startDepth)
+		w.warmupKeyRecordsInto(recordReader, hashedKey, startDepth, compactBuf)
 		return
 	}
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
@@ -323,8 +330,12 @@ func (w *Warmuper) Close() {
 // warmupKeyRecords is the v3 descent: one record decoded per level, no legacy row built and taken
 // apart, and the child's own bitmap carried into the next read.
 func (w *Warmuper) warmupKeyRecords(reader BranchRecordReader, hashedKey []byte, startDepth int) {
-	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
+	w.warmupKeyRecordsInto(reader, hashedKey, startDepth, &compactBuf)
+}
+
+func (w *Warmuper) warmupKeyRecordsInto(reader BranchRecordReader, hashedKey []byte, startDepth int, compactBuf *[maxCompactKeyLen]byte) {
+	depth := startDepth
 	var mask uint16
 	maskKnown := false
 	for depth <= len(hashedKey) && depth <= w.maxDepth {

@@ -617,10 +617,13 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-func (be *BranchEncoder) edgeRecordFor(afterMap, bit uint16, cell *cellEncodeData) []byte {
+// edgeRecordFor builds the record for one changed child. A delete carries afterMap 0 and no cells
+// at all, so the tombstone has to be decided before cells is indexed.
+func (be *BranchEncoder) edgeRecordFor(afterMap, bit uint16, nibble int, cells *[16]cellEncodeData) []byte {
 	if afterMap&bit == 0 {
 		return make([]byte, 0)
 	}
+	cell := &cells[nibble]
 	if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
 		be.recordScratch = AppendLeafChild(be.recordScratch, cell)
 	} else {
@@ -643,7 +646,7 @@ func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, 
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		key[len(nodeKey)] = 0x80 | byte(nibble)
-		record := be.edgeRecordFor(afterMap, bit, &cells[nibble])
+		record := be.edgeRecordFor(afterMap, bit, nibble, cells)
 		if err := ctx.PutBranch(key, record, nil); err != nil {
 			return err
 		}
@@ -693,7 +696,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
 			key[len(nodeKey)] = 0x80 | byte(nibble)
-			record := be.edgeRecordFor(afterMap, bit, &cells[nibble])
+			record := be.edgeRecordFor(afterMap, bit, nibble, cells)
 			be.deferred = append(be.deferred, getDeferredRecordUpdate(key, record))
 			bitset ^= bit
 		}

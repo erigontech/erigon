@@ -402,3 +402,46 @@ func TestEncodeLeafChildFusedShapesRoundTrip(t *testing.T) {
 		require.Zero(t, decoded.storageAddrLen, "a storage branch has no slot key to record")
 	})
 }
+
+func TestCollectUpdateV3DeleteWritesTombstonesWithoutCells(t *testing.T) {
+	t.Parallel()
+
+	path := []byte{1, 2, 3, 4}
+	prefix := nibbles.HexToCompact(path)
+	touchMap := uint16(1<<3 | 1<<7)
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setEdgeRecords(true)
+
+	require.NoError(t, be.CollectUpdate(ctx, prefix, 0, touchMap, 0, nil, false))
+	require.Len(t, ctx.puts, 2, "each touched child of a deleted branch needs a tombstone")
+	nodeKey := nibbles.EncodeKeyV3(path)
+	for i, nibble := range []byte{3, 7} {
+		require.Equal(t, nibbles.ChildKeyV3(nodeKey, nibble), ctx.puts[i].prefix)
+		require.NotNil(t, ctx.puts[i].data, "a tombstone is empty, never nil")
+		require.Empty(t, ctx.puts[i].data)
+	}
+}
+
+func TestCollectUpdateV3RecordScratchDoesNotLeakBetweenChildren(t *testing.T) {
+	t.Parallel()
+
+	path := []byte{1, 2, 3, 4}
+	prefix := nibbles.HexToCompact(path)
+	var cells [16]cellEncodeData
+	cells[2] = recordTestData("account", []byte{1, 2, 3, 4, 5, 6})
+	cells[5] = recordTestData("branch", nil)
+	cells[5].branchMask = 0x1234
+	mask := uint16(1<<2 | 1<<5)
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setEdgeRecords(true)
+
+	require.NoError(t, be.CollectUpdate(ctx, prefix, mask, mask, mask, &cells, false))
+	require.Len(t, ctx.puts, 2)
+	require.Equal(t, EncodeLeafChild(&cells[2]), ctx.puts[0].data)
+	require.Equal(t, EncodeBranchChild(cells[5].branchMask, &cells[5]), ctx.puts[1].data)
+	require.Greater(t, len(ctx.puts[0].data), len(ctx.puts[1].data))
+}

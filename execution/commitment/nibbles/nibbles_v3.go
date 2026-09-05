@@ -126,22 +126,9 @@ func IsChildKeyV3(key []byte) bool {
 	return err == nil
 }
 
-// ChildNibbleV3 returns the child nibble encoded in a V3 child key.
-func ChildNibbleV3(key []byte) byte {
-	if len(key) == 0 {
-		panic("nibbles v3: empty child key")
-	}
-	return key[len(key)-1] & 0x0f
-}
-
 // ChildKeyLenForDepth returns the V3 child-key length for a node at depth d.
 func ChildKeyLenForDepth(d int) int {
 	return d/2 + 2
-}
-
-// IsChildKeyAtDepthV3 reports whether key has the exact child-key length for depth.
-func IsChildKeyAtDepthV3(key []byte, depth int) bool {
-	return depth >= 0 && depth <= MaxPathNibbles && len(key) == ChildKeyLenForDepth(depth) && IsChildKeyV3(key)
 }
 
 // IsChildKeyForNodeV3 reports whether key is a direct child record of nodeKey.
