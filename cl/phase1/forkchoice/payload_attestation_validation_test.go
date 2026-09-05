@@ -83,6 +83,25 @@ func TestApplyValidatedPayloadAttestationAcceptsOnlyFirstGossipVote(t *testing.T
 	require.Equal(t, int8(1), availability[7])
 }
 
+func TestApplyValidatedPayloadAttestationInvalidatesGloasHeadCache(t *testing.T) {
+	f := &ForkChoiceStore{
+		headHash:          common.HexToHash("0xbeef"),
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	err := f.applyValidatedPayloadAttestation(
+		42,
+		[]int{7},
+		&cltypes.PayloadAttestationData{PayloadPresent: true, BlobDataAvailable: true},
+		common.HexToHash("0x1234"),
+		false,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, f.headHash)
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
 func TestApplyValidatedPayloadAttestationFromBlockOverwritesGossipVote(t *testing.T) {
 	f := &ForkChoiceStore{}
 	root := common.HexToHash("0x1234")

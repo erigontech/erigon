@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -90,6 +91,61 @@ func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
 }
 
+func TestProcessAttestingIndiciesInvalidatesGloasHeadCacheOnlyForNewMessages(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	cachedHead := common.HexToHash("0xbeef")
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.Hash{}, f.headHash, "a new latest message must invalidate the cached head")
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, cachedHead, f.headHash, "an unchanged latest message must preserve the cached head")
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+}
+
+func TestProcessAttestingIndiciesKeepsPreGloasHeadCache(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	f.headHash = common.HexToHash("0xbeef")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.HexToHash("0xbeef"), f.headHash)
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+	latestMessage, found := f.getLatestMessage(1)
+	require.True(t, found)
+	require.Equal(t, attestation.Data.BeaconBlockRoot, latestMessage.Root)
+}
+
 func TestGetHeadPublishesCachedSelection(t *testing.T) {
 	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	manager.OnSelectedHead(common.Hash{0xaa}, 100)
@@ -129,7 +185,7 @@ func TestGetHeadPublishesAnchorFallback(t *testing.T) {
 	require.Equal(t, slot, selectedSlot)
 }
 
-func TestGetHeadPublishesGloasSelection(t *testing.T) {
+func TestResolveHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -165,6 +221,60 @@ func TestGetHeadPublishesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
+	recomputedRoot, recomputedSlot, recomputedStatus, err := store.getHeadGloasWithPayloadStatus()
+	require.NoError(t, err)
+	require.Equal(t, selectedRoot, recomputedRoot)
+	require.Equal(t, selectedSlot, recomputedSlot)
+	expectedStatus, matchesHead := store.ResolveHeadPayloadStatus(root)
+	require.True(t, matchesHead)
+	require.Equal(t, expectedStatus, recomputedStatus)
+
+	store.mu.Lock()
+	store.headHash = common.Hash{}
+	store.headPayloadStatus = cltypes.PayloadStatusPending
+	store.mu.Unlock()
+
+	status, matchesHead := store.ResolveHeadPayloadStatus(root)
+	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
+	require.Equal(t, expectedStatus, status)
+}
+
+func TestResolveHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	manager := synced_data.NewSyncedDataManager(&cfg, true)
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: 10},
+		},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{},
+		currentJustified: checkpoint,
+	}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.syncedDataManager = manager
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+
+	status, matchesHead := store.ResolveHeadPayloadStatus(root)
+
+	require.False(t, matchesHead)
+	require.Equal(t, cltypes.PayloadStatusPending, status)
+	_, _, selected := manager.SelectedHead()
+	require.False(t, selected, "a Gloas-only query must not publish a pre-Gloas head")
+}
+
+func TestHeadPayloadStatusWarningIsRateLimited(t *testing.T) {
+	store := newGloasWeightTreeTestStore()
+	startedAt := time.Unix(100, 0)
+
+	require.True(t, store.shouldLogHeadResolutionFailure(startedAt))
+	require.False(t, store.shouldLogHeadResolutionFailure(startedAt.Add(time.Minute-time.Nanosecond)))
+	require.True(t, store.shouldLogHeadResolutionFailure(startedAt.Add(time.Minute)))
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
@@ -718,4 +828,20 @@ func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
 	require.Equal(t, uint64(13), applyWeightDelta(10, 3, true))
 	require.Equal(t, uint64(7), applyWeightDelta(10, 3, false))
 	require.Zero(t, applyWeightDelta(3, 10, false))
+}
+
+func TestResolveHeadPayloadStatusRequiresMatchingRoot(t *testing.T) {
+	headRoot := common.Hash{0x41}
+	store := &ForkChoiceStore{
+		headHash:          headRoot,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	status, ok := store.ResolveHeadPayloadStatus(headRoot)
+	require.True(t, ok)
+	require.Equal(t, cltypes.PayloadStatusFull, status)
+
+	status, ok = store.ResolveHeadPayloadStatus(common.Hash{0x42})
+	require.False(t, ok)
+	require.Equal(t, cltypes.PayloadStatusPending, status)
 }

@@ -85,19 +85,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex)
 
-	// [IGNORE] compute_epoch_at_slot(preferences.proposal_slot) in range(current_epoch, current_epoch + MIN_SEED_LOOKAHEAD + 1)
-	currentEpoch := s.ethClock.GetCurrentEpoch()
-	proposalEpoch := state.GetEpochAtSlot(s.beaconCfg, proposalSlot)
-	if proposalEpoch < currentEpoch || proposalEpoch > currentEpoch+s.beaconCfg.MinSeedLookahead {
-		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected epoch in [%d, %d]",
-			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+s.beaconCfg.MinSeedLookahead)
-	}
-
-	// [IGNORE] The proposal slot has not already passed (proposal_slot > current_slot)
-	currentSlot := s.ethClock.GetCurrentSlot()
-	if proposalSlot <= currentSlot {
-		return fmt.Errorf("%w: proposal slot %d has already passed (current slot %d)",
-			ErrIgnore, proposalSlot, currentSlot)
+	proposalEpoch, err := ValidateProposerPreferenceSlot(s.ethClock, s.beaconCfg, proposalSlot)
+	if err != nil {
+		return err
 	}
 
 	// [IGNORE] First valid message from this (validator_index, proposal_slot, dependent_root)
@@ -107,8 +97,8 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		dependentRoot:  preferences.DependentRoot,
 	}
 	if s.seenCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d with dependent root %v",
-			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
+		return fmt.Errorf("%w: %w from validator %d for slot %d with dependent root %v",
+			ErrIgnore, ErrProposerPreferenceAlreadySeen, validatorIndex, proposalSlot, preferences.DependentRoot)
 	}
 
 	depState, err := s.forkchoiceStore.GetStateAtBlockRoot(preferences.DependentRoot, false)
@@ -125,10 +115,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 
 	// All checks passed — mark as seen and store in pool
 	s.seenCache.Add(seenKey, struct{}{})
-	s.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-		Slot:          proposalSlot,
-		DependentRoot: preferences.DependentRoot,
-	}, msg)
+	s.epbsPool.AddProposerPreference(msg)
 
 	log.Trace("Processed proposer preferences via gossip",
 		"proposalSlot", proposalSlot,
@@ -137,6 +124,26 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"targetGasLimit", preferences.TargetGasLimit)
 
 	return nil
+}
+
+// ValidateProposerPreferenceSlot checks that the proposal is in the gossip lookahead and has not passed.
+func ValidateProposerPreferenceSlot(
+	clock eth_clock.EthereumClock,
+	cfg *clparams.BeaconChainConfig,
+	proposalSlot uint64,
+) (uint64, error) {
+	currentEpoch := clock.GetCurrentEpoch()
+	proposalEpoch := state.GetEpochAtSlot(cfg, proposalSlot)
+	if proposalEpoch < currentEpoch || proposalEpoch > currentEpoch+cfg.MinSeedLookahead {
+		return 0, fmt.Errorf("%w: proposal slot %d is in epoch %d, expected epoch in [%d, %d]",
+			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+cfg.MinSeedLookahead)
+	}
+	currentSlot := clock.GetCurrentSlot()
+	if proposalSlot <= currentSlot {
+		return 0, fmt.Errorf("%w: proposal slot %d has already passed (current slot %d)",
+			ErrIgnore, proposalSlot, currentSlot)
+	}
+	return proposalEpoch, nil
 }
 
 func (s *proposerPreferencesService) proposerPreferencesValidationState(depState *state.CachingBeaconState, proposalEpoch uint64) (*state.CachingBeaconState, error) {

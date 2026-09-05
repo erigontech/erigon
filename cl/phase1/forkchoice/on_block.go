@@ -87,6 +87,9 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 }
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	// Count before taking the store mutex so queued imports are visible as in progress.
+	f.blocksProcessing.Add(1)
+	defer f.blocksProcessing.Add(-1)
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()

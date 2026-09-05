@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -698,16 +699,22 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
+				// A duplicate is already applied and can be acknowledged. Other ignored
+				// results may be transient, so return them and let the client retry.
+				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) {
+					continue
+				}
 				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 				return
 			}
-		}
-
-		if a.epbsPool != nil {
-			a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-				Slot:          req.Message.ProposalSlot,
-				DependentRoot: req.Message.DependentRoot,
-			}, req)
+		} else if a.epbsPool != nil {
+			if _, err := clservices.ValidateProposerPreferenceSlot(
+				a.ethClock, a.beaconChainCfg, req.Message.ProposalSlot,
+			); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
+			a.epbsPool.AddProposerPreference(req)
 		}
 
 		if a.sentinel != nil {
@@ -815,7 +822,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	// Process through forkchoice so the local node marks the block as FULL.
 	// checkBlobData=false because gossip validation handles it; validatePayload=true
 	// so the EL receives NewPayload for the execution payload.
-	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, false, true); err != nil {
+	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope); err != nil {
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 		} else {
@@ -837,6 +844,12 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+	return a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
 }
 
 // ---- Execution Payload Bid ----

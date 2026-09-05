@@ -85,9 +85,10 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time            atomic.Uint64
-	highestSeen     atomic.Uint64
-	highestSeenRoot atomic.Value // common.Hash
+	time             atomic.Uint64
+	highestSeen      atomic.Uint64
+	highestSeenRoot  atomic.Value // common.Hash
+	blocksProcessing atomic.Int64
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -98,6 +99,7 @@ type ForkChoiceStore struct {
 	headHash                 common.Hash
 	headSlot                 uint64
 	headPayloadStatus        cltypes.PayloadStatus
+	headPayloadStatusLogAt   atomic.Int64
 	genesisTime              uint64
 	genesisValidatorsRoot    common.Hash
 	weights                  map[common.Hash]uint64
@@ -512,6 +514,12 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
+// Blocks parked between network-service retries have not entered OnBlock and are not counted.
+func (f *ForkChoiceStore) BlockProcessing() bool {
+	return f.blocksProcessing.Load() > 0
 }
 
 // HighestSeenRoot returns the block root of the highest seen slot.

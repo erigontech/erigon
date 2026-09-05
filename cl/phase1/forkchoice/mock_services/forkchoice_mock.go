@@ -18,6 +18,7 @@ package mock_services
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -40,21 +41,23 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
-	Ancestors              map[uint64]forkchoice.ForkChoiceNode
-	AnchorSlotVal          uint64
-	AnchorRootVal          common.Hash
-	FinalizedCheckpointVal solid.Checkpoint
-	FinalizedSlotVal       uint64
-	LowestAvailableSlotVal *uint64
-	HeadVal                common.Hash
-	HeadSlotVal            uint64
-	HeadPayloadStatusVal   cltypes.PayloadStatus
-	HighestSeenVal         uint64
-	JustifiedCheckpointVal solid.Checkpoint
-	JustifiedSlotVal       uint64
-	ProposerBoostRootVal   common.Hash
-	SlotVal                uint64
-	TimeVal                uint64
+	Ancestors                    map[uint64]forkchoice.ForkChoiceNode
+	AnchorSlotVal                uint64
+	AnchorRootVal                common.Hash
+	FinalizedCheckpointVal       solid.Checkpoint
+	FinalizedSlotVal             uint64
+	LowestAvailableSlotVal       *uint64
+	HeadVal                      common.Hash
+	HeadSlotVal                  uint64
+	HeadPayloadStatusVal         cltypes.PayloadStatus
+	HeadPayloadStatusInvalidated atomic.Bool
+	HighestSeenVal               uint64
+	BlockProcessingVal           bool
+	JustifiedCheckpointVal       solid.Checkpoint
+	JustifiedSlotVal             uint64
+	ProposerBoostRootVal         common.Hash
+	SlotVal                      uint64
+	TimeVal                      uint64
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
@@ -76,7 +79,10 @@ type ForkChoiceStorageMock struct {
 	Blocks                       map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                    map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	VerifiedPayloads             map[common.Hash]bool
+	OnExecutionPayloadFn         func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnExecutionPayloadErr        error
+	ResolveHeadPayloadStatusFn   func(common.Hash) (cltypes.PayloadStatus, bool)
+	ReadEnvelopeFromDiskFn       func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -87,6 +93,7 @@ type ForkChoiceStorageMock struct {
 	MockPeerDas *mock_services.MockPeerDas
 
 	ShouldExtendPayloadVal bool
+	ShouldBuildOnFullVal   *bool
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -267,11 +274,16 @@ func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) 
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
+	f.HeadPayloadStatusInvalidated.Store(false)
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) BlockProcessing() bool {
+	return f.BlockProcessingVal
 }
 
 func (f *ForkChoiceStorageMock) JustifiedCheckpoint() solid.Checkpoint {
@@ -352,6 +364,9 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	if f.OnExecutionPayloadFn != nil {
+		return f.OnExecutionPayloadFn(ctx, signedEnvelope, checkBlobData, validatePayload)
+	}
 	return f.OnExecutionPayloadErr
 }
 
@@ -451,6 +466,9 @@ func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if f.ReadEnvelopeFromDiskFn != nil {
+		return f.ReadEnvelopeFromDiskFn(blockRoot)
+	}
 	return f.Envelopes[blockRoot], nil
 }
 
@@ -458,15 +476,27 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 	return true
 }
 
-func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
-	return f.HeadPayloadStatusVal
+func (f *ForkChoiceStorageMock) ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	if f.ResolveHeadPayloadStatusFn != nil {
+		return f.ResolveHeadPayloadStatusFn(root)
+	}
+	if f.HeadPayloadStatusInvalidated.Load() {
+		_, _, _ = f.GetHead(nil)
+	}
+	if f.HeadVal != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return f.HeadPayloadStatusVal, true
 }
 
 func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
 	return f.ShouldExtendPayloadVal
 }
 
-func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode) bool {
+func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode, proposalSlot uint64) bool {
+	if f.ShouldBuildOnFullVal != nil {
+		return *f.ShouldBuildOnFullVal
+	}
 	return true
 }
 

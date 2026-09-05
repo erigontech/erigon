@@ -217,6 +217,7 @@ func TestProposerPreferencesServiceDuplicate(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrProposerPreferenceAlreadySeen)
 	require.Contains(t, err.Error(), "already seen proposer preferences")
 }
 

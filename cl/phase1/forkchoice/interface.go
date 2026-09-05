@@ -47,6 +47,7 @@ type ForkChoiceStorageReader interface {
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64
+	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
@@ -87,15 +88,14 @@ type ForkChoiceStorageReader interface {
 	// (b) PeerDAS confirms all custody columns are locally available.
 	// Returns false if the envelope does not exist or blob data is missing.
 	IsBlobDataAvailable(slot uint64, blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] GetHeadPayloadStatus returns the payload status of the current
-	// head node (FULL, EMPTY, or PENDING). Must be called after GetHead.
-	GetHeadPayloadStatus() cltypes.PayloadStatus
+	// [New in Gloas:EIP7732] ResolveHeadPayloadStatus resolves root against the current Gloas head.
+	ResolveHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool)
 	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
 	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
 	ShouldExtendPayload(root common.Hash) bool
 	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
-	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
-	ShouldBuildOnFull(head ForkChoiceNode) bool
+	// the full payload for the given head node at proposalSlot.
+	ShouldBuildOnFull(head ForkChoiceNode, proposalSlot uint64) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)

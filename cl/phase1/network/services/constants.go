@@ -41,6 +41,7 @@ const (
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrBidQueued                       = errors.New("bid queued")
 	ErrAttestationQueued               = errors.New("attestation queued")
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")

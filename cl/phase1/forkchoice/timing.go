@@ -62,7 +62,7 @@ func (f *ForkChoiceStore) getContributionDueMs(epoch uint64) uint64 {
 // Callers should only invoke this for post-GLOAS epochs; the returned value is well-defined
 // regardless, but meaningless pre-GLOAS since PTC duties do not exist before GLOAS.
 func (f *ForkChoiceStore) getPayloadAttestationDueMs(_ uint64) uint64 {
-	return f.beaconCfg.SecondsPerSlot * clparams.PayloadAttestationDueBps / (clparams.BpsFactor / 1000)
+	return f.beaconCfg.PayloadAttestationDueMs()
 }
 
 // shouldApplyProposerBoost returns whether a block arriving at the current store time

@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
@@ -212,32 +211,34 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 // unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
 // reserves the final publication share of the attestation window for processing, signing, and gossip.
 func unpreparedGrabOffset(due time.Duration) time.Duration {
-	return due - due/payloadPublicationDivisor
+	return due - payloadPublicationMargin(due)
 }
 
-// preparedGrabOffset is the earlier collection point available to a builder that was warmed before
-// the slot. The minimum-age check below preserves the build time available on the unprepared path.
+// preparedGrabOffset anchors the earliest collection window for a builder warmed before the slot.
+// Polling starts minPayloadPollingWindow before this offset to tolerate a brief unavailable result.
 func preparedGrabOffset(due time.Duration) time.Duration {
+	return payloadPublicationMargin(due)
+}
+
+func payloadPublicationMargin(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
 
-// preparedPayloadMinimumAge is how long a primed builder must already have been running before
-// production may collect from it early. It is the gap between prepared and unprepared collection
-// offsets, so both paths give the builder the same total build time.
-func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
+// maximumPreparedAdvance caps how much payload preparation may advance collection. Even a builder
+// started far ahead is left running into the slot so it can include recent transactions.
+func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline.
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
+// reserving a publication margin before the attestation deadline. Work completed before production
+// advances the first poll by the same duration, up to the prepared collection point.
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(unpreparedGrabOffset(due))
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
-	if prepared {
-		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
-	}
+	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
+	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
@@ -282,19 +283,18 @@ func payloadAttributes(
 	return attrs
 }
 
-// expectedWithdrawals resolves the withdrawals for the payload being built. Under Gloas the source
-// depends on whether the head's payload was revealed: a FULL head is read from the state copy with
-// that payload applied, an EMPTY one from the expectation the state already cached.
+// expectedWithdrawals resolves the withdrawals for the payload being built. Under Gloas, FULL and
+// pre-fork parents compute them from the supplied state; EMPTY parents use the cached expectation.
 func (a *ApiHandler) expectedWithdrawals(
-	baseState, withParentPayload *state.CachingBeaconState,
+	baseState, computationState *state.CachingBeaconState,
 	stateVersion clparams.StateVersion,
 	targetSlot uint64,
 ) ([]*types.Withdrawal, error) {
 	epoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	if stateVersion.Before(clparams.GloasVersion) || withParentPayload != nil {
+	if stateVersion.Before(clparams.GloasVersion) || computationState != nil {
 		source := baseState
-		if withParentPayload != nil {
-			source = withParentPayload
+		if computationState != nil {
+			source = computationState
 		}
 		clWithdrawals, err := state.GetExpectedWithdrawals(source, epoch)
 		if err != nil {
@@ -576,11 +576,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
-	// Cover the whole request so preparation cannot enter the execution layer while production is
-	// still deriving or collecting the block.
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
-
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
@@ -599,12 +594,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	} else {
 		graffiti = a.defaultGraffiti()
 	}
-
-	tx, err := a.indiciesDB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 
 	targetSlotStr := chi.URLParam(r, "slot")
 	targetSlot, err := strconv.ParseUint(targetSlotStr, 10, 64)
@@ -628,6 +617,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
 
 	start := time.Now()
 
@@ -658,10 +649,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 
 	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
 	baseBlockSlot := baseState.LatestBlockHeader().Slot
-
-	if _, _, err := a.forkchoiceStore.GetHead(nil); err != nil {
-		return nil, err
-	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
@@ -773,10 +760,17 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue(),
 		consensusValue,
 	)
-	// The slot cache must reflect only a complete, successful production result.
+	// The slot cache and preparation marker must reflect only a complete, successful result.
 	if block.Version() >= clparams.GloasVersion {
 		a.updateSelfBuildEnvelopeCache(targetSlot, selfBuildBlockRoot, selfBuildEnvelope)
 	}
+	signingWindow := payloadPublicationMargin(attestationDue(a.beaconChainCfg, block.Version()))
+	completedAt := time.Now()
+	a.payloadPreparationGate.noteProducedBlock(
+		a.ethClock.GetCurrentSlot(), targetSlot,
+		completedAt,
+		producedBlockSigningExpiry(completedAt, a.ethClock.GetSlotTime(targetSlot), signingWindow),
+	)
 
 	return resp, nil
 }
@@ -1110,15 +1104,7 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, nil, err
 	}
-	// get the parent hash of base execution block
-	// [Modified in Gloas:EIP7732] LatestExecutionPayloadHeader is stale in GLOAS;
-	// use GetLatestBlockHash which returns the correct hash from the bid.
-	var parentHash common.Hash
-	if baseState.Version() >= clparams.GloasVersion {
-		parentHash = baseState.GetLatestBlockHash()
-	} else {
-		parentHash = baseState.LatestExecutionPayloadHeader().BlockHash
-	}
+	parentHash := baseState.LatestExecutionPayloadHeader().BlockHash
 	header, err := a.builderClient.GetHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, nil, err
@@ -1135,27 +1121,70 @@ func (a *ApiHandler) getBuilderPayload(
 	if blockValue == nil {
 		return nil, nil, fmt.Errorf("invalid builder block value %q", header.Data.Message.Value)
 	}
-	if ethHeader := header.Data.Message.Header; ethHeader != nil {
-		ethHeader.SetVersion(baseState.Version())
+	message := &header.Data.Message
+	if message.Header == nil {
+		return nil, nil, errors.New("missing execution payload header")
 	}
-	// check kzg commitments
-	if baseState.Version() >= clparams.DenebVersion && header.Data.Message.BlobKzgCommitments != nil {
-		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
-			return nil, nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
+	if message.Header.ParentHash != parentHash {
+		return nil, nil, fmt.Errorf(
+			"builder payload parent hash %s does not match requested parent %s",
+			message.Header.ParentHash,
+			parentHash,
+		)
+	}
+	if message.Header.BlockHash == (common.Hash{}) {
+		return nil, nil, errors.New("builder payload has zero block hash")
+	}
+	// A relay bid must describe the payload requested for this slot. Reject mismatches
+	// before bid selection so production can keep the valid local payload.
+	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+	expectedPrevRandao := baseState.GetRandaoMixes(targetEpoch)
+	if message.Header.PrevRandao != expectedPrevRandao {
+		return nil, nil, fmt.Errorf(
+			"builder payload prev randao %s does not match expected %s",
+			message.Header.PrevRandao,
+			expectedPrevRandao,
+		)
+	}
+	expectedTimestamp := state.ComputeTimestampAtSlot(baseState, targetSlot)
+	if message.Header.Time != expectedTimestamp {
+		return nil, nil, fmt.Errorf(
+			"builder payload timestamp %d does not match expected %d",
+			message.Header.Time,
+			expectedTimestamp,
+		)
+	}
+	if message.BlobKzgCommitments == nil {
+		return nil, nil, errors.New("missing blob KZG commitments")
+	}
+	if baseState.Version() >= clparams.ElectraVersion && message.ExecutionRequests == nil {
+		return nil, nil, errors.New("missing execution requests")
+	}
+	message.Header.SetVersion(baseState.Version())
+	// The response type carries commitments on every fork, and later code copies them
+	// without a version check. Validate each element before applying fork-specific limits.
+	for i := 0; i < message.BlobKzgCommitments.Len(); i++ {
+		c := message.BlobKzgCommitments.Get(i)
+		if c == nil {
+			return nil, nil, errors.New("nil blob kzg commitment")
 		}
-		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
-			c := header.Data.Message.BlobKzgCommitments.Get(i)
-			if c == nil {
-				return nil, nil, errors.New("nil blob kzg commitment")
-			}
-			if len(c) != length.Bytes48 {
-				return nil, nil, errors.New("invalid blob kzg commitment length")
-			}
+		if len(c) != length.Bytes48 {
+			return nil, nil, errors.New("invalid blob kzg commitment length")
 		}
 	}
-	if baseState.Version() >= clparams.ElectraVersion && header.Data.Message.ExecutionRequests != nil {
+	// Blob schedules can change the limit without changing the state version.
+	if baseState.Version() >= clparams.DenebVersion {
+		maxBlobs := a.beaconChainCfg.MaxBlobsPerBlockByVersion(baseState.Version())
+		if baseState.Version() >= clparams.ElectraVersion {
+			maxBlobs = a.beaconChainCfg.GetBlobParameters(targetEpoch).MaxBlobsPerBlock
+		}
+		if uint64(message.BlobKzgCommitments.Len()) > maxBlobs {
+			return nil, nil, fmt.Errorf("too many blob kzg commitments: %d", message.BlobKzgCommitments.Len())
+		}
+	}
+	if baseState.Version() >= clparams.ElectraVersion {
 		// check execution requests
-		r := header.Data.Message.ExecutionRequests
+		r := message.ExecutionRequests
 		if r.Deposits != nil && r.Deposits.Len() > int(a.beaconChainCfg.MaxDepositRequestsPerPayload) {
 			return nil, nil, fmt.Errorf("too many deposit requests: %d", r.Deposits.Len())
 		}
@@ -1197,56 +1226,38 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	// Build execution payload
-	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
-	head := latestExecutionPayload.BlockHash
-	// [GLOAS] In deferred payload processing, the EL head and withdrawal source depend on
-	// the head's payload status (FULL vs EMPTY). When FULL, we copy the state, apply the
-	// parent execution payload, and compute withdrawals from the mutated copy. When EMPTY,
-	// we use the cached payload_expected_withdrawals from state.
-	var gloasWithdrawalsState *state.CachingBeaconState // nil means use baseState for withdrawals
-	if stateVersion >= clparams.GloasVersion {
-		parentBid := baseState.GetLatestExecutionPayloadBid()
-		if parentBid != nil {
-			// Fork boundary: the initial bid created by UpgradeToGloas has
-			// ParentBlockHash == Hash32() (zero) because pre-GLOAS blocks have no
-			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
-			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
-			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
-			switch {
-			case isPreGloasParent:
-				head = parentBid.BlockHash
-			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
-				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
-				head = parentBid.BlockHash
-				// Copy state and apply parent execution payload to compute correct withdrawals
-				stateCopy, err := baseState.Copy()
-				if err != nil {
-					return nil, nil, fmt.Errorf("produceBeaconBody: failed to copy state for FULL payload: %w", err)
-				}
-				envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
-				if err != nil {
-					return nil, nil, fmt.Errorf("produceBeaconBody: failed to read envelope for FULL payload: %w", err)
-				}
-				if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-					return nil, nil, fmt.Errorf("produceBeaconBody: head is FULL but envelope/requests missing for root %x", baseBlockRoot)
-				}
-				stfMachine := &eth2.Impl{}
-				if err := stfMachine.ApplyParentExecutionPayload(stateCopy, envelope.Message.ExecutionRequests); err != nil {
-					return nil, nil, fmt.Errorf("produceBeaconBody: failed to apply parent execution payload: %w", err)
-				}
-				gloasWithdrawalsState = stateCopy
-				// Populate the block body's ParentExecutionRequests so
-				// ProcessParentExecutionPayload can verify the root match
-				// against the parent bid's ExecutionRequestsRoot.
-				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
-			default:
-				head = parentBid.ParentBlockHash
+	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		switch payloadSource.gloasPath {
+		case gloasPayloadPathPending:
+			fields := []any{
+				"slot", targetSlot,
+				"head", baseBlockRoot,
+				"path", payloadSource.gloasPath.String(),
 			}
-		} else {
-			head = baseState.GetLatestBlockHash()
+			if payloadSource.fallbackCause != nil {
+				fields = append(fields, "err", payloadSource.fallbackCause)
+			}
+			a.logger.Warn(
+				"BlockProduction: building on EMPTY Gloas parent",
+				fields...,
+			)
+		case gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
+			a.logger.Info(
+				"BlockProduction: building on EMPTY Gloas parent",
+				"slot", targetSlot,
+				"head", baseBlockRoot,
+				"path", payloadSource.gloasPath.String(),
+			)
 		}
+	}
+	head := payloadSource.head
+	gloasWithdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, payloadSource)
+	if err != nil {
+		return nil, nil, fmt.Errorf("produceBeaconBody: derive withdrawals state: %w", err)
+	}
+	if payloadSource.parentExecutionRequests != nil {
+		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
 	}
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
@@ -1260,23 +1271,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, nil, err
 	}
-	var targetGasLimit *hexutil.Uint64
-	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
-			tgl := hexutil.Uint64(parentBid.GasLimit)
-			targetGasLimit = &tgl
-		}
-		if a.epbsPool != nil {
-			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
-			dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
-			if err != nil {
-				log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-			} else if pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot); ok && pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
-				tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
-				targetGasLimit = &tgl
-			}
-		}
-	}
+	targetGasLimit, _ := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 	var executionPayload *cltypes.Eth1Block
 	// Keep the produced block's value independent from the engine-owned value.
 	executionValue := new(big.Int)
@@ -1327,15 +1322,24 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		prepared := a.preparedPayload.matches(
-			targetSlot, idBytes, time.Now(), preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		warmup, preparedHead, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
+		if preparedIDMismatch {
+			a.logger.Info(
+				"PayloadPreparation: prepared payload ID did not match production",
+				"slot", targetSlot,
+				"preparedHead", preparedHead,
+				"productionHead", blockRoot,
+			)
+		}
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
+			ctx, buildWindow, retryTime,
+			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+			},
 		)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
-		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
-		})
-		if pollErr != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
+		if err != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
 			return
 		}
 		if bundles == nil {
@@ -2064,6 +2068,9 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
 		return err
@@ -2181,7 +2188,11 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	// Acquire before starting the goroutine so preparation cannot enter between publication and
+	// background storage.
+	finishBlockStorage := a.payloadPreparationGate.beginBlockWork()
 	go func() {
+		defer finishBlockStorage()
 		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars); err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
@@ -2196,15 +2207,19 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		"columnSidecars",
 		len(columnsSidecars),
 	)
-	// Broadcast the block and its blobs
+	// Attempt every required gossip item and combine failures. A partial failure must
+	// remain visible to the validator client and keep the produced-block marker active.
+	var publicationErr error
 	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		a.logger.Error("Failed to publish block", "err", err)
+		publicationErr = errors.Join(publicationErr, fmt.Errorf("publish beacon block: %w", err))
 	}
 
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
 			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
 				a.logger.Error("Failed to publish blob sidecar", "err", err)
+				publicationErr = errors.Join(publicationErr, fmt.Errorf("publish blob sidecar %d: %w", idx, err))
 			}
 		}
 	}
@@ -2214,56 +2229,63 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
 				a.logger.Error("Failed to encode column sidecar", "err", err)
+				publicationErr = errors.Join(publicationErr, fmt.Errorf("encode data column sidecar %d: %w", column.Index, err))
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
 			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 				a.logger.Error("Failed to publish data column sidecar", "err", err)
+				publicationErr = errors.Join(publicationErr, fmt.Errorf("publish data column sidecar %d: %w", column.Index, err))
 			}
 		}
 	}
 
-	// [New in Gloas:EIP7732] For self-built blocks, construct and broadcast the
-	// SignedExecutionPayloadEnvelope so the block can transition from PENDING to FULL.
-	// If the validator client provided a signed envelope, use it directly (real BLS signature).
-	// Otherwise fall back to constructing one from the cache (legacy/fallback path).
+	// A validator-signed self-build envelope is required gossip. A cache-derived
+	// envelope only updates local state because its placeholder signature is not gossipable.
 	if blk.Version() >= clparams.GloasVersion {
 		var validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope
 		if len(signedEnvelope) > 0 && signedEnvelope[0] != nil {
 			validatorSignedEnvelope = signedEnvelope[0]
 		}
-		if err := a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope); err != nil {
-			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
+		gossipRequired, err := a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope)
+		if err != nil {
+			a.logger.Error("Failed to handle self-build execution payload envelope", "err", err)
+			if gossipRequired {
+				publicationErr = errors.Join(publicationErr, err)
+			}
 		}
 	}
 
+	if publicationErr != nil {
+		return publicationErr
+	}
+	a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
 	return nil
 }
 
-// broadcastSelfBuildEnvelope constructs and broadcasts a SignedExecutionPayloadEnvelope
-// for a self-built GLOAS block. If the validator client provided a signed envelope
-// (via the block publish request), it is used directly with the real BLS signature.
-// Otherwise, the envelope is reconstructed from the cache as a fallback.
-//
-// The function:
-//  1. Broadcasts the envelope on the execution_payload gossip topic
-//  2. Processes the envelope through forkchoice (OnExecutionPayload) so the local
-//     node transitions the block from PENDING to FULL status
-//
-// [New in Gloas:EIP7732]
-func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock, validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+// broadcastSelfBuildEnvelope processes a locally built Gloas envelope. The bool distinguishes
+// required validator-signed gossip from the local-only fallback, whose bookkeeping errors must
+// not turn an otherwise successful block publication into a failure.
+func (a *ApiHandler) broadcastSelfBuildEnvelope(
+	ctx context.Context,
+	blk *cltypes.SignedBeaconBlock,
+	validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+) (bool, error) {
 	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
-		return nil // no bid in block, nothing to do
+		return false, nil
 	}
 	if bid.Message.BuilderIndex != clparams.BuilderIndexSelfBuild {
-		return nil // not a self-build block; builder will broadcast the envelope
+		return false, nil
 	}
+	gossipRequired := validatorSignedEnvelope != nil &&
+		validatorSignedEnvelope.Message != nil &&
+		validatorSignedEnvelope.Signature != common.Bytes96(bls.InfiniteSignature)
 
 	// Compute the beacon block root
 	blockRoot, err := blk.Block.HashSSZ()
 	if err != nil {
-		return fmt.Errorf("failed to compute block root: %w", err)
+		return gossipRequired, fmt.Errorf("failed to compute block root: %w", err)
 	}
 
 	var signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
@@ -2274,12 +2296,11 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		log.Debug("BlockPublishing: using validator-signed execution payload envelope",
 			"slot", blk.Block.Slot, "blockRoot", blockRoot)
 	} else {
-		// Fallback: reconstruct from cache. This path uses InfiniteSignature and will
-		// fail BLS verification on other nodes — it exists only as a backward-compat
-		// safety net during the transition period.
+		// The cache fallback preserves local FULL processing when the validator did not
+		// return a signed envelope. Its placeholder signature is never gossiped.
 		cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
 		if !ok {
-			return fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
+			return false, fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
 		}
 
 		log.Debug("BlockPublishing: no validator-signed envelope provided, falling back to InfiniteSignature (will fail BLS verification on peers)",
@@ -2305,21 +2326,13 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	// Remove from cache after use (regardless of path taken)
 	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
 
-	// Process through forkchoice so the local node marks the block as FULL.
-	// Use ApplyLocalSelfBuildEnvelope instead of OnExecutionPayload: it skips BLS
-	// signature verification (we produced this envelope locally and may not have the
-	// VC's private key) while still validating the payload with the EL via NewPayload.
-	// Note: this typically returns an error because OnBlock (running in a background
-	// goroutine) has not finished yet — the forkchoice store queues the envelope in
-	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
+	// ApplyLocalSelfBuildEnvelope accepts the placeholder signature used by the local-only
+	// fallback. If the block import is still pending, fork choice queues the envelope.
 	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
 		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
 	}
 
-	// Only broadcast the envelope if it has a real BLS signature.
-	// Envelopes with InfiniteSignature (fallback when the VC doesn't provide a
-	// pre-signed envelope) will fail BLS verification on peers, causing them to
-	// penalize and ban us. Process locally only until the VC supports envelope signing.
+	// Never gossip the placeholder signature: peers reject it and may penalize us.
 	if signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
 		log.Debug("BlockPublishing: skipping gossip of self-build envelope with InfiniteSignature (no valid BLS signature)",
 			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
@@ -2327,19 +2340,18 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		// Broadcast the envelope on the execution_payload gossip topic
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {
-			return fmt.Errorf("failed to encode self-build envelope: %w", err)
+			return true, fmt.Errorf("failed to encode self-build envelope: %w", err)
 		}
 		if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-			a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
-		} else {
-			log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
-				"slot", blk.Block.Slot,
-				"blockRoot", blockRoot,
-				"blockHash", bid.Message.BlockHash)
+			return true, fmt.Errorf("failed to publish self-build execution payload envelope: %w", err)
 		}
+		log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
+			"slot", blk.Block.Slot,
+			"blockRoot", blockRoot,
+			"blockHash", bid.Message.BlockHash)
 	}
 
-	return nil
+	return gossipRequired, nil
 }
 
 func (a *ApiHandler) storeBlockAndBlobs(
@@ -2348,9 +2360,6 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
 ) error {
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
-
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
