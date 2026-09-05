@@ -251,52 +251,6 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	return tx
 }
 
-func BenchmarkDumpStateToTSV(b *testing.B) {
-	const accountCount = 20_000
-	tx := seedManyAccounts(b, accountCount)
-	logger := log.New()
-
-	b.Run("count_only", func(b *testing.B) {
-		for b.Loop() {
-			res, err := dumpStateToTSV(context.Background(), tx, 1, true, 0, nil, io.Discard, logger)
-			require.NoError(b, err)
-			require.Equal(b, uint64(accountCount), res.Matched)
-		}
-	})
-
-	b.Run("decode_no_write", func(b *testing.B) {
-		for b.Loop() {
-			res, err := dumpStateToTSV(context.Background(), tx, 1, true, 0, uint256.NewInt(0), io.Discard, logger)
-			require.NoError(b, err)
-			require.Equal(b, uint64(accountCount), res.Matched)
-		}
-	})
-
-	b.Run("decode_and_write", func(b *testing.B) {
-		for b.Loop() {
-			res, err := dumpStateToTSV(context.Background(), tx, 1, false, 0, nil, io.Discard, logger)
-			require.NoError(b, err)
-			require.Equal(b, uint64(accountCount), res.Matched)
-		}
-	})
-
-	// The codec is built once, as it is for a real dump: a zstd encoder allocates its
-	// window up front, which would otherwise dominate at this payload size.
-	for _, kind := range []string{"gzip", "zstd"} {
-		b.Run("write_"+kind, func(b *testing.B) {
-			comp, err := newCompressor(kind, io.Discard)
-			require.NoError(b, err)
-			defer comp.Close() //nolint:errcheck // benchmark teardown
-
-			for b.Loop() {
-				res, err := dumpStateToTSV(context.Background(), tx, 1, false, 0, nil, comp, logger)
-				require.NoError(b, err)
-				require.Equal(b, uint64(accountCount), res.Matched)
-			}
-		})
-	}
-}
-
 func TestNewCompressor_Unknown(t *testing.T) {
 	t.Parallel()
 

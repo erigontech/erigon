@@ -50,7 +50,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRw
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
 
 	// build files out of db
-	err := agg.BuildFiles(uint64(txCount))
+	err := agg.BuildFiles(db, uint64(txCount), unboundedFinalityCtx)
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -118,8 +118,8 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 	}
 	tb.Cleanup(db.Close)
 
-	agg := testAgg(tb, db, dirs, aggStep, logger)
-	err := agg.OpenFolder()
+	agg := testAgg(tb, dirs, aggStep, logger)
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
@@ -134,8 +134,8 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := testAgg(tb, db, dirs, aggStep, logger)
-	err := agg.OpenFolder()
+	agg := testAgg(tb, dirs, aggStep, logger)
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)
@@ -143,10 +143,10 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	return tdb, agg
 }
 
-func testAgg(tb testing.TB, db kv.RwDB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {
+func testAgg(tb testing.TB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {
 	tb.Helper()
 
-	agg := state.NewTest(dirs).StepSize(aggStep).Logger(logger).MustOpen(tb.Context(), db)
+	agg := state.NewTest(dirs).StepSize(aggStep).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
 	return agg
 }
@@ -239,7 +239,7 @@ func TestAggregator_SqueezeCommitment(t *testing.T) {
 	// Squeeze leaves the rewritten files without accessors, so every production
 	// caller reloads and rebuilds before reading them again.
 	require.NoError(t, agg.ReloadFiles())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 4))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 4))
 
 	rwTx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -376,7 +376,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		//db.Close()
 	}
 
-	agg = testAgg(t, db, agg.Dirs(), agg.StepSize(), log.New())
+	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer db.Close()
@@ -406,7 +406,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 			//t.Logf("removed file %s", filepath.Base(fn))
 		}
 	}
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(db)
 	require.NoError(t, err)
 
 	ctx := t.Context()
@@ -574,15 +574,15 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	agg.Close()
 
 	// Start another aggregator on same datadir
-	anotherAgg := state.NewTest(agg.Dirs()).StepSize(aggStep).Logger(logger).MustOpen(t.Context(), db)
+	anotherAgg := state.NewTest(agg.Dirs()).StepSize(aggStep).Logger(logger).MustOpen(t.Context())
 	defer anotherAgg.Close()
-	require.NoError(t, anotherAgg.OpenFolder())
+	require.NoError(t, anotherAgg.OpenFolder(db))
 
 	db, err = temporal.New(db, anotherAgg, nil) // to set aggregator in the db
 	require.NoError(t, err)
@@ -792,7 +792,7 @@ func TestGenerateCommitmentRebuildData(t *testing.T) {
 
 	// Build files
 	t.Logf("Building files for %d txs...", totalTxs)
-	err = agg.BuildFiles(totalTxs)
+	err = agg.BuildFiles(db, totalTxs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	// Validate

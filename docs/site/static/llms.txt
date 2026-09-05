@@ -4,6 +4,8 @@
 > modularity, and minimal disk footprint. It features an integrated consensus layer
 > (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.
 
+The text of every page listed below is also available as a single file: [llms-full.txt](https://docs.erigon.tech/llms-full.txt). Pages are cleaned for machine reading: MDX components are stripped.
+
 - [Introduction](https://docs.erigon.tech/): Official documentation for Erigon — the efficient, modular Ethereum execution client. Get started, explore the JSON-RPC API, and learn how to run a full or archive node.
 
 ## Get Started
@@ -31,7 +33,7 @@
 - [Caplin](https://docs.erigon.tech/fundamentals/caplin): Erigon's built-in consensus layer — run a full node without an external CL client.
 - [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, and all other chains Erigon can sync.
-- [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Optimism, Arbitrum, and other Layer 2 networks.
+- [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Using Erigon with an Optimism op-node, and the experimental Erigon Nitro client for Arbitrum.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [NAT](https://docs.erigon.tech/fundamentals/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.

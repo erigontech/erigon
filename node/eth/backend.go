@@ -299,6 +299,9 @@ func New(
 	}
 
 	// Assemble the Ethereum object
+	if config.ExperimentalParallelCommitment {
+		statecfg.ExperimentalParallelCommitment = true
+	}
 	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
@@ -325,13 +328,8 @@ func New(
 			return err
 		}
 
-		// Apply config-driven global state for the commitment and trie subsystems.
-		// These globals are read by 80+ call sites; the config fields are the source of truth.
 		if config.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
-		}
-		if config.ExperimentalParallelCommitment {
-			statecfg.ExperimentalParallelCommitment = true
 		}
 
 		if err := stages.UpdateMetrics(tx); err != nil {
@@ -1285,8 +1283,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			Logger(logger).
 			SanityOldNaming().
 			GenSaltIfNeed(createNewSaltFileIfNeeded).
-			WithErigonDBSettings(erigonDBSettings).
-			ReorgBlockDepth(snConfig.MaxReorgDepth)
+			WithErigonDBSettings(erigonDBSettings)
 		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 			v := *snConfig.ErigondbDomainStepsInFrozenFile
 			stepsStr := "Inf"
@@ -1296,18 +1293,18 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
 			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
 		}
-		agg, openErr := aggOpts.Open(ctx, db)
+		agg, openErr := aggOpts.Open(ctx)
 		if openErr != nil {
 			return nil, nil, nil, nil, openErr
 		}
 		agg.SetSnapshotBuildSema(blockSnapBuildSema)
 		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-		if allSegmentsDownloadComplete {
-			_ = agg.OpenFolder()
-		}
 		temporalDb, err = temporal.New(db, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			_ = temporalDb.OpenStateSnapshots(ctx)
 		}
 	}
 

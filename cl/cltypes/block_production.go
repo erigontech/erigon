@@ -38,6 +38,7 @@ type BlindOrExecutionBeaconBlock struct {
 	// Blinded body
 	BlindedBeaconBody *BlindedBeaconBody `json:"-"`
 
+	// ExecutionValue is the execution payload value in Wei.
 	ExecutionValue *big.Int `json:"-"`
 	Cfg            *clparams.BeaconChainConfig
 }
