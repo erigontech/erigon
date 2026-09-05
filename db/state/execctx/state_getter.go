@@ -17,10 +17,16 @@
 package execctx
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 )
+
+// maxLentCodeBuf bounds what codeBuf keeps between uses, so one huge value does
+// not pin a large buffer for the getter's lifetime.
+const maxLentCodeBuf = 128 * 1024
 
 type stateGetter struct {
 	sd   *SharedDomains
@@ -45,9 +51,8 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
-	if n := len(code); n > cap(g.codeBuf) && n <= maxLentCodeBuf {
-		g.codeBuf = make([]byte, 0, n) // grow by allocating; code is not ours to keep
-	}
+	// Grow for next time by allocating: code belongs to the cache, not to us.
+	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
 	return code, ok, err
 }
 

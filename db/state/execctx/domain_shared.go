@@ -1397,10 +1397,6 @@ func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 	return opts
 }
 
-// maxLentCodeBuf bounds what a lent decode buffer keeps between uses, so one
-// huge value does not pin a large buffer for the reader's lifetime.
-const maxLentCodeBuf = 128 * 1024
-
 // getLatest is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
@@ -1506,8 +1502,6 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
 	if fillsCode {
-		// The fill clones, so the value can be decoded into the caller's buffer
-		// and handed out as the stored copy instead.
 		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
