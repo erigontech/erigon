@@ -36,8 +36,8 @@ import (
 // - mdbx dirty_space (C-owned): ~1G
 // - External CL: better don't predict it. Leave it out of estimate.
 // - OOM Killer and SWAP: Erigon recommends to disable SWAP on server and enable OOM-Killer (kill comes at 90%)
-// - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it. So, leaving 30% for PageCache
-const defaultGoMemLimitShare = 0.7
+// - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
+const defaultGoMemLimitShare = 0.8
 
 func goMemLimitIsSet(current int64) bool {
 	_, fromEnv := os.LookupEnv("GOMEMLIMIT")
