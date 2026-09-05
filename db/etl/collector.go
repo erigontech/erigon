@@ -44,7 +44,9 @@ type Allocator struct {
 
 const maxFillHints = 1024
 
-func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
+func NewAllocator(p *sync.Pool) *Allocator {
+	return &Allocator{p: p, fills: map[string]int{}}
+}
 
 func (a *Allocator) lastFill(name string) int {
 	a.mu.Lock()
@@ -55,9 +57,6 @@ func (a *Allocator) lastFill(name string) int {
 func (a *Allocator) rememberFill(name string, n int) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.fills == nil {
-		a.fills = make(map[string]int)
-	}
 	if _, ok := a.fills[name]; !ok && len(a.fills) >= maxFillHints {
 		return
 	}
@@ -312,12 +311,10 @@ func (c *Collector) Close() {
 			c.buf.Reset()
 		}
 	}
-	if c.fill > 0 {
-		if c.allocator != nil {
-			c.allocator.rememberFill(c.logPrefix, c.fill)
-		}
-		c.fill = 0
+	if c.allocator != nil && c.fill > 0 {
+		c.allocator.rememberFill(c.logPrefix, c.fill)
 	}
+	c.fill = 0
 	c.allFlushed = false
 }
 
