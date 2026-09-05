@@ -276,14 +276,22 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 
 	// Call NewPayload to validate execution payload with EL
 	parentBlockRoot := block.Block.ParentRoot
-	payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, beaconBlockRoot, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
+	payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool {
+		return f.forkGraph.HasEnvelope(beaconBlockRoot)
+	}, envelope.Payload, &parentBlockRoot, versionedHashes, executionRequestsList)
 	log.Trace("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 	return payloadStatus, err
 }
 
+// newPayloadWhileYieldingForkChoiceLock validates a payload with the EL on behalf of a
+// caller holding f.mu, releasing the lock for the duration of the call so that OnTick,
+// OnAttestation and fork-choice reads are not blocked behind the EL. alreadyValidated
+// short-circuits the EL call when a concurrent caller validated the same payload while
+// this one waited for admission. Any invariant the caller checked before this call can
+// go stale and must be revalidated after it returns.
 func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	ctx context.Context,
-	beaconBlockRoot common.Hash,
+	alreadyValidated func() bool,
 	payload *cltypes.Eth1Block,
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
@@ -292,7 +300,7 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	f.mu.Unlock()
 	defer f.mu.Lock()
 	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
-		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		if alreadyValidated() {
 			return execution_client.PayloadStatusValidated, nil
 		}
 		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)

@@ -1589,7 +1589,7 @@ func TestValidatePayloadWithELAdmissionCancellationIsNotELBehind(t *testing.T) {
 	cancel()
 
 	f.mu.Lock()
-	status, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, common.Hash{}, nil, nil, nil, nil)
+	status, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool { return false }, nil, nil, nil, nil)
 	f.mu.Unlock()
 
 	require.EqualValues(t, execution_client.PayloadStatusNone, status)

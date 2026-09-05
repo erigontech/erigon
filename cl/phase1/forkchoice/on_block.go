@@ -86,6 +86,50 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+// checkFinalizedDescendant implements the two spec on_block finality assertions:
+// block.slot > finalized_slot, and get_ancestor(store, block.parent_root, finalized_slot)
+// == store.finalized_checkpoint.root. ignore reports the first, which the spec drops
+// silently; a non-nil error reports the second.
+func (f *ForkChoiceStore) checkFinalizedDescendant(finalizedCheckpoint solid.Checkpoint, blockSlot uint64, parentRoot common.Hash) (ignore bool, err error) {
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// After checkpoint sync, the anchor block may sit inside (not at the start of)
+	// the finalized epoch. The fork graph only contains the anchor and its descendants,
+	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
+	// so the descendant check stays within the fork graph's horizon.
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
+	if blockSlot <= finalizedSlot {
+		return true, nil
+	}
+	if ancestorNode := f.Ancestor(parentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
+		return false, ErrNotFinalizedDescendant
+	}
+	return false, nil
+}
+
+// invalidateCachedHead forces the next GetHead to recompute. Call after reacquiring
+// f.mu: a GetHead during the released window caches a head that predates this block.
+func (f *ForkChoiceStore) invalidateCachedHead() {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
+// recheckFinalizedDescendant redoes the entry finality checks against the current
+// checkpoint. Call after reacquiring f.mu and before committing the block: finality can
+// advance while the lock is not held, and nothing further down re-checks it.
+func (f *ForkChoiceStore) recheckFinalizedDescendant(block *cltypes.BeaconBlock) (ignore bool, err error) {
+	return f.checkFinalizedDescendant(f.finalizedCheckpoint.Load().(solid.Checkpoint), block.Slot, block.ParentRoot)
+}
+
+// getBlobsWhileYieldingForkChoiceLock asks the EL for the block's blobs on behalf of a
+// caller holding f.mu, releasing the lock for the duration of the call.
+func (f *ForkChoiceStore) getBlobsWhileYieldingForkChoiceLock(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte, error) {
+	f.mu.Unlock()
+	defer f.mu.Lock()
+	return f.engine.GetBlobs(ctx, versionedHashes, version)
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	unlocked := false
@@ -109,21 +153,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-	// After checkpoint sync, the anchor block may sit inside (not at the start of)
-	// the finalized epoch. The fork graph only contains the anchor and its descendants,
-	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
-	// so the descendant check stays within the fork graph's horizon.
-	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
-		finalizedSlot = anchorSlot
-	}
-	if block.Block.Slot <= finalizedSlot {
-		return nil
-	}
-	// Check block is a descendant of the finalized block at the checkpoint finalized slot
-	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
-		return ErrNotFinalizedDescendant
+	if ignore, err := f.checkFinalizedDescendant(f.finalizedCheckpoint.Load().(solid.Checkpoint), block.Block.Slot, block.Block.ParentRoot); ignore || err != nil {
+		return err
 	}
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
@@ -176,12 +207,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		// Check if EL has blobs
 		elHasBlobs := false
 		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+			blobsWithProof, proofs, err := f.getBlobsWhileYieldingForkChoiceLock(ctx, versionedHashes, block.Version())
 			if err != nil {
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
 			}
 			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+			f.invalidateCachedHead()
+			if ignore, recheckErr := f.recheckFinalizedDescendant(block.Block); ignore || recheckErr != nil {
+				return recheckErr
+			}
 		}
 
 		// Check if blob data is available (skip if blobs are in txpool)
@@ -226,8 +261,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
 				}
 			}
-			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			payloadStatus, err := f.newPayloadWhileYieldingForkChoiceLock(ctx, func() bool {
+				return f.IsPayloadVerified(common.Hash(blockRoot))
+			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+
+			f.invalidateCachedHead()
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
@@ -262,6 +301,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
+			}
+			if ignore, recheckErr := f.recheckFinalizedDescendant(block.Block); ignore || recheckErr != nil {
+				return recheckErr
 			}
 		}
 	}
