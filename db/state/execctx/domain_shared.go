@@ -1511,18 +1511,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// The fill below clones, so a value headed for the cache can be decoded into
 	// the caller's buffer and handed out as the stored copy instead.
 	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
-	viaPool := willFill && domain == kv.CodeDomain && len(opts.codeHash) == len(common.Hash{})
-	if viaPool {
-		pooled := codeDecodeBufPool.Get().(*[]byte)
-		getOpts = getOpts.WithBuf(*pooled)
-		// Grow by allocating, never by adopting v: by now v is the stored copy,
-		// and pooling that would hand a live cache entry to the next reader.
-		defer func() {
-			if n := len(v); n > cap(*pooled) && n <= maxPooledCodeBuf {
-				*pooled = make([]byte, 0, n)
-			}
-			codeDecodeBufPool.Put(pooled)
-		}()
+	if willFill && domain == kv.CodeDomain && len(opts.codeHash) == len(common.Hash{}) {
+		getOpts = getOpts.WithBuf(opts.buf)
 	}
 
 	v, step, err = tx.GetLatest(domain, k, getOpts)
