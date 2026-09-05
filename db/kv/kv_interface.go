@@ -331,23 +331,29 @@ type RwCursorPseudoDupSort struct {
 func (c *RwCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
 	return c.Delete(k1)
 }
+
 func (c *RwCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
 	return c.Next()
 }
+
 func (c *RwCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
 	return nil, nil, nil
 }
+
 func (c *RwCursorPseudoDupSort) FirstDup() ([]byte, error) {
 	_, v, err := c.Current()
 	return v, err
 }
+
 func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
 	_, v, err := c.Current()
 	return v, err
 }
+
 func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return c.DeleteCurrent()
 }
+
 func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
 }
@@ -468,9 +474,8 @@ type GetLatestOptions struct {
 	buf         []byte
 }
 
-// WithBuf lends a buffer to decode a value into. The result may or may not be
-// that buffer, so the caller must treat it as valid only until its own next read
-// with the same buffer — stricter than the end-of-tx lifetime a plain read gives.
+// WithBuf to decode a value into
+// `GetLatest` returning `v` - is not that buffer
 func (opts GetLatestOptions) WithBuf(buf []byte) GetLatestOptions {
 	opts.buf = buf
 	return opts
@@ -699,7 +704,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte) error
-	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
+	// DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
 	// Optimizations:
@@ -774,11 +779,15 @@ type PendingMutations interface {
 	BatchSize() int
 }
 
-type DBVerbosityLvl int8
-type Label string
+type (
+	DBVerbosityLvl int8
+	Label          string
+)
 
-const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
-const dbLabelName = "db"
+const (
+	ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
+	dbLabelName  = "db"
+)
 
 type DBGauges struct { // these gauges are shared by all MDBX instances, but need to be filtered by label
 	DbSize        *metrics.GaugeVec
@@ -850,44 +859,43 @@ func InitSummaries(dbLabel Label) {
 	}
 }
 
-var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
-var MDBXSummaries sync.Map         // dbName => Summaries mapping
-
 var (
-	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
-	/*
-		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
-		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
-		DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
-		DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
-		DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
-
-		DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
-		DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
-		DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
-		DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
-		DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
-		DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
-		DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
-		DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
-		DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
-		DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
-		DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
-		DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
-		DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
-		DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
-		DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
-		DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
-		DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
-	*/
-
-	//DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
-	//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
-	//DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
-	//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
-	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
-	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
+	MDBXGauges    = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
+	MDBXSummaries sync.Map            // dbName => Summaries mapping
 )
+
+var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
+
+/*
+	DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
+	DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
+	DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
+	DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
+	DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
+
+	DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
+	DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
+	DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
+	DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
+	DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
+	DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
+	DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
+	DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
+	DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
+	DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
+	DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
+	DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
+	DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
+	DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
+	DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
+	DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
+	DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
+*/ //DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
+//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
+//DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
+//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
+//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
+//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
@@ -911,10 +919,12 @@ type Closer interface {
 	Close()
 }
 
-type OnFilesChange func(frozenFileNames []string)
-type SnapshotNotifier interface {
-	OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
-}
+type (
+	OnFilesChange    func(frozenFileNames []string)
+	SnapshotNotifier interface {
+		OnFilesChange(onChange OnFilesChange, onDelete OnFilesChange)
+	}
+)
 
 // RetireCutoffs is the txNum below which frozen history files are retired,
 // per domain (PerDomain, falling back to Default for other domains and standalone
