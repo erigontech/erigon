@@ -28,10 +28,6 @@ var (
 	totalMemoryCached uint64
 )
 
-// startupGoMemLimit is the GOMEMLIMIT in force before any Erigon code runs, so
-// only an operator's limit narrows the budget. A limit this process derives
-// from TotalMemory must never fold back into it, and capturing here decides
-// that by init order rather than by which package happens to call first.
 var startupGoMemLimit = debug.SetMemoryLimit(-1)
 
 func TotalMemory() uint64 {
