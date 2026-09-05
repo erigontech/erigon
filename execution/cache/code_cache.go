@@ -17,12 +17,13 @@
 package cache
 
 import (
+	"encoding/binary"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -120,11 +121,19 @@ type codeSizeEntry struct {
 // honor the same (txNum, epoch) lazy-drop as the addr layers. This can re-fetch
 // code shared across deployments when one is unwound (a multiplicity cost), but
 // keeps stale code out of the cache.
+// hashAddr keys the addr-scoped shards. freelru selects a shard from the high
+// bits, so fold the whole address and mix before returning.
+func hashAddr(a common.Address) uint32 {
+	h := binary.LittleEndian.Uint64(a[0:8]) ^ binary.LittleEndian.Uint64(a[8:16]) ^ uint64(binary.LittleEndian.Uint32(a[16:20]))
+	h *= 0x9E3779B97F4A7C15
+	return uint32(h >> 32)
+}
+
 type CodeCache struct {
 	// addrToHash maps a 20-byte Ethereum address to the maphash-derived
 	// codeID for the code at that address. An LRU so fresh-address workloads
 	// evict oldest entries and warm up the working set.
-	addrToHash *lru.Cache[common.Address, versionedAddressID]
+	addrToHash *freelru.ShardedLRU[common.Address, versionedAddressID]
 	hashToCode *growLRU[codeEntry] // codeID(maphash(code)) → code, jump-grow + LRU-evicting
 	codeSize   atomic.Int64        // resident bytes (stat; hard bound is the entry cap)
 
@@ -133,7 +142,7 @@ type CodeCache struct {
 	// for bytes-lookup chaining). Used by SharedDomains.codeHashForAddr to
 	// skip a cold account-domain read when the EVM-known codeHash is
 	// already in cache. An addr → codeHash LRU.
-	addrToCodeHash *lru.Cache[common.Address, addrCodeHashEntry]
+	addrToCodeHash *freelru.ShardedLRU[common.Address, addrCodeHashEntry]
 
 	// codeHashToCode: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
 	// alongside L2 when the caller provides codeHash on Put. Independent
@@ -229,11 +238,11 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// addrEntryBytes (both entries combined). Divide in ByteSize space so the
 	// budget isn't truncated to int before the division.
 	addrEntries := max(int(addrCapacityBytes/datasize.ByteSize(addrEntryBytes)), 1024)
-	addrLRU, err := lru.New[common.Address, versionedAddressID](addrEntries)
+	addrLRU, err := freelru.NewSharded[common.Address, versionedAddressID](uint32(addrEntries), hashAddr)
 	if err != nil {
 		panic(err)
 	}
-	addrCodeHashLRU, err := lru.New[common.Address, addrCodeHashEntry](addrEntries)
+	addrCodeHashLRU, err := freelru.NewSharded[common.Address, addrCodeHashEntry](uint32(addrEntries), hashAddr)
 	if err != nil {
 		panic(err)
 	}
