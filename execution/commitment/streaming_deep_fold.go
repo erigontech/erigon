@@ -68,6 +68,7 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 		if effectiveMask == 0 {
 			return errStorageBaseNotBranch
 		}
+		base.touchMap[0], base.afterMap[0] = effectiveMask, effectiveMask
 		base.branchBefore[0] = true
 		return nil
 	}

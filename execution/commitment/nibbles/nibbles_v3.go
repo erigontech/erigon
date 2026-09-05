@@ -40,12 +40,37 @@ func EncodeKeyV3(nibbles []byte) []byte {
 		}
 	}
 
-	out := make([]byte, n/2+1)
+	return EncodeKeyV3Into(nil, nibbles)
+}
+
+// EncodeKeyV3Into is EncodeKeyV3 writing into dst when it has the capacity.
+func EncodeKeyV3Into(dst, nibbles []byte) []byte {
+	n := len(nibbles)
+	if n > MaxPathNibbles {
+		panic(fmt.Sprintf("nibbles v3: path length %d exceeds MaxPathNibbles=%d", n, MaxPathNibbles))
+	}
+	need := n/2 + 1
+	out := dst
+	if cap(out) < need {
+		out = make([]byte, need)
+	} else {
+		out = out[:need]
+	}
 	for i := 0; i < n/2; i++ {
-		out[i] = nibbles[2*i]<<4 | nibbles[2*i+1]
+		a, b := nibbles[2*i], nibbles[2*i+1]
+		if a > 0x0f || b > 0x0f {
+			panic(fmt.Sprintf("nibbles v3: nibble at index %d is 0x%02x, must be in [0x00, 0x0F]", 2*i, max(a, b)))
+		}
+		out[i] = a<<4 | b
 	}
 	if n&1 == 1 {
-		out[n/2] = 0xf0 | nibbles[n-1]
+		last := nibbles[n-1]
+		if last > 0x0f {
+			panic(fmt.Sprintf("nibbles v3: nibble at index %d is 0x%02x, must be in [0x00, 0x0F]", n-1, last))
+		}
+		out[n/2] = 0xf0 | last
+	} else {
+		out[n/2] = 0
 	}
 	return out
 }

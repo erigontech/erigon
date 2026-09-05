@@ -151,14 +151,31 @@ func decodeRecordsIntoCells(effectiveMask uint16, records [16][]byte, recordsPre
 	return childMasks, childMasksKnown, nil
 }
 
+// growRecord hands back an empty slice with room for n bytes, reusing dst when it already has the
+// capacity. Length is always reset, so a caller's leftover bytes can never prefix a record.
+func growRecord(dst []byte, n int) []byte {
+	if cap(dst) < n {
+		return make([]byte, 0, n)
+	}
+	return dst[:0]
+}
+
 func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {
+	return AppendBranchChild(nil, mask, cell)
+}
+
+func EncodeLeafChild(cell *cellEncodeData) []byte {
+	return AppendLeafChild(nil, cell)
+}
+
+func AppendBranchChild(dst []byte, mask uint16, cell *cellEncodeData) []byte {
 	extLen := recordExtensionLength(cell)
 	flags := recordFlagHash
 	if extLen&1 != 0 {
 		flags |= recordFlagExtensionOdd
 	}
 
-	record := make([]byte, 0, 1+2+length.Hash+(extLen+1)/2)
+	record := growRecord(dst, 1+2+length.Hash+(extLen+1)/2)
 	record = append(record, flags)
 	var encodedMask [2]byte
 	binary.BigEndian.PutUint16(encodedMask[:], mask)
@@ -167,7 +184,7 @@ func EncodeBranchChild(mask uint16, cell *cellEncodeData) []byte {
 	return appendRecordExtension(record, cell, extLen)
 }
 
-func EncodeLeafChild(cell *cellEncodeData) []byte {
+func AppendLeafChild(dst []byte, cell *cellEncodeData) []byte {
 	storageLeaf := cell.accountAddrLen == 0 && cell.storageAddrLen > 0
 	hasStorage := cell.accountAddrLen > 0 && (cell.hashLen > 0 || cell.storageAddrLen > 0 || cell.storageMask != 0)
 	// A hoisted slot is the account's whole storage subtree and has no root of its own: the root is
@@ -210,7 +227,7 @@ func EncodeLeafChild(cell *cellEncodeData) []byte {
 	default:
 		baseLen += length.Addr
 	}
-	record := make([]byte, 0, baseLen+(extLen+1)/2)
+	record := growRecord(dst, baseLen+(extLen+1)/2)
 	record = append(record, flags)
 	if stateHashPresent {
 		record = append(record, cell.stateHash[:]...)
@@ -250,7 +267,6 @@ func DecodeRecordInto(record []byte, c *cell) (mask uint16, err error) {
 		return 0, malformedRecord("empty record")
 	}
 
-	c.reset()
 	c.CodeHash = empty.CodeHash
 	flags := record[0]
 	if flags&^recordFlagsAll != 0 {

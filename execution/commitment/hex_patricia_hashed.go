@@ -1539,13 +1539,20 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 	return data, err
 }
 
-func (hph *HexPatriciaHashed) readBranchAndCheckForFlushingWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+func (hph *HexPatriciaHashed) flushPendingBranchPrefix(prefix []byte) error {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, 0, [16]uint16{}, 0, err
+			return err
 		}
 		be.ClearDeferred()
+	}
+	return nil
+}
+
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushingWithMask(prefix []byte, mask uint16, maskKnown bool) ([]byte, kv.Step, [16]uint16, uint16, error) {
+	if err := hph.flushPendingBranchPrefix(prefix); err != nil {
+		return nil, 0, [16]uint16{}, 0, err
 	}
 	if hph.cfg.EdgeRecords {
 		if reader, ok := hph.ctx.(BranchMaskReader); ok {
@@ -1560,6 +1567,10 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushingWithMask(prefix []byt
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, mask uint16, maskKnown bool) error {
 	key := nibbles.HexToCompactInto(hph.compactKeyBuf[:], hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
+
+	if reader := hph.recordReader(); reader != nil {
+		return hph.unfoldBranchNodeRecords(reader, row, depth, deleted, mask, maskKnown, key)
+	}
 
 	branchData, _, childMasks, childMasksKnown, err := hph.readBranchAndCheckForFlushingWithMask(key, mask, maskKnown)
 	if err != nil {
@@ -1601,6 +1612,50 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	return nil
 }
 
+// unfoldBranchNodeRecords is unfoldBranchNode for a v3 node: the records go straight into the row
+// instead of through a legacy branch row this function would immediately take apart again.
+func (hph *HexPatriciaHashed) unfoldBranchNodeRecords(reader BranchRecordReader, row int, depth int16, deleted bool, mask uint16, maskKnown bool, key []byte) error {
+	if err := hph.flushPendingBranchPrefix(key); err != nil {
+		return err
+	}
+	records, present, _, err := reader.BranchRecords(key, mask, maskKnown)
+	if err != nil {
+		return err
+	}
+	hph.depthsToTxNum[depth] = 0
+	read := 0
+	for bitset := present; bitset != 0; bitset &= bitset - 1 {
+		read += len(records[bits.TrailingZeros16(bitset&-bitset)])
+	}
+	hph.metrics.AddBranchRead(read)
+
+	effectiveMask, err := hph.unfoldRecordsIntoRow(row, depth, records, present)
+	if err != nil {
+		return fmt.Errorf("prefix [%x]: %w", hph.currentKey[:hph.currentKeyLen], err)
+	}
+	if effectiveMask == 0 {
+		if !hph.rootChecked && hph.currentKeyLen == 0 {
+			hph.rootChecked = true
+			return nil
+		}
+		log.Warn("got empty branch data during unfold", "key", traceHex(key), "row", row, "depth", depth, "deleted", deleted)
+		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
+	}
+	if deleted {
+		hph.touchMap[row], hph.afterMap[row] = effectiveMask, 0
+	} else {
+		hph.touchMap[row], hph.afterMap[row] = 0, effectiveMask
+	}
+	if hph.traceW != nil {
+		fmt.Fprintf(hph.traceW, "unfoldBranchNodeRecords prefix '%x', nibbles [%x] depth %d row %d mask %04x\n",
+			key, hph.currentKey[:hph.currentKeyLen], depth, row, effectiveMask)
+	}
+	hph.branchBefore[row] = true
+	hph.depths[hph.activeRows] = depth
+	hph.activeRows++
+	return nil
+}
+
 // decodeBranchIntoRow decodes branch (with the touch/after-map prefix already stripped)
 // into grid[row], records its touch/after maps, and derives hashed keys for present cells
 // at depth. The on-disk read and its flush/metrics handling stay with each caller.
@@ -1611,7 +1666,10 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 	}
 	hph.touchMap[row] = maps.TouchMap
 	hph.afterMap[row] = maps.AfterMap
-	account := hph.enclosingAccountAddr()
+	var account []byte
+	if hph.cfg.EdgeRecords {
+		account = hph.enclosingAccountAddr()
+	}
 	for bitset := maps.Bitmap; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -1633,6 +1691,9 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 }
 
 func (hph *HexPatriciaHashed) enclosingAccountAddr() []byte {
+	if hph.storageAccountSet {
+		return hph.storageAccount[:]
+	}
 	if hph.root.accountAddrLen == length.Addr {
 		return hph.root.accountAddr[:]
 	}
@@ -1645,9 +1706,6 @@ func (hph *HexPatriciaHashed) enclosingAccountAddr() []byte {
 		if ancestor.accountAddrLen == length.Addr {
 			return ancestor.accountAddr[:]
 		}
-	}
-	if hph.storageAccountSet {
-		return hph.storageAccount[:]
 	}
 	return nil
 }
@@ -2916,9 +2974,6 @@ func (hph *HexPatriciaHashed) unfoldRecordsIntoRow(row int, depth int16, records
 	if err != nil {
 		return 0, err
 	}
-	hph.touchMap[row] = effectiveMask
-	hph.afterMap[row] = effectiveMask
-
 	account := hph.enclosingAccountAddr()
 	for bitset := effectiveMask; bitset != 0; {
 		bit := bitset & -bitset

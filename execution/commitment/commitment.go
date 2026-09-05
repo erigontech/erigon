@@ -347,6 +347,8 @@ type BranchEncoder struct {
 	metrics     *Metrics
 	edgeRecords bool
 
+	recordScratch []byte
+
 	deferUpdates       bool
 	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
@@ -615,6 +617,18 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
+func (be *BranchEncoder) edgeRecordFor(afterMap, bit uint16, cell *cellEncodeData) []byte {
+	if afterMap&bit == 0 {
+		return make([]byte, 0)
+	}
+	if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
+		be.recordScratch = AppendLeafChild(be.recordScratch, cell)
+	} else {
+		be.recordScratch = AppendBranchChild(be.recordScratch, cell.branchMask, cell)
+	}
+	return be.recordScratch
+}
+
 func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) error {
 	changed := bitmap | (touchMap &^ afterMap)
 	if changed == 0 {
@@ -622,21 +636,14 @@ func (be *BranchEncoder) collectEdgeRecords(ctx PatriciaContext, prefix []byte, 
 	}
 
 	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(prefix))
+	// PutBranch copies both key and record before it returns, so one scratch of each serves the node.
+	key := make([]byte, len(nodeKey)+1)
+	copy(key, nodeKey)
 	for bitset := changed; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
-		var record []byte
-		if afterMap&bit == 0 {
-			record = make([]byte, 0)
-		} else {
-			cell := &cells[nibble]
-			if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
-				record = EncodeLeafChild(cell)
-			} else {
-				record = EncodeBranchChild(cell.branchMask, cell)
-			}
-		}
+		key[len(nodeKey)] = 0x80 | byte(nibble)
+		record := be.edgeRecordFor(afterMap, bit, &cells[nibble])
 		if err := ctx.PutBranch(key, record, nil); err != nil {
 			return err
 		}
@@ -686,17 +693,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			bit := bitset & -bitset
 			nibble := bits.TrailingZeros16(bit)
 			key[len(nodeKey)] = 0x80 | byte(nibble)
-			var record []byte
-			if afterMap&bit == 0 {
-				record = make([]byte, 0)
-			} else {
-				cell := &cells[nibble]
-				if cell.accountAddrLen > 0 || cell.storageAddrLen > 0 {
-					record = EncodeLeafChild(cell)
-				} else {
-					record = EncodeBranchChild(cell.branchMask, cell)
-				}
-			}
+			record := be.edgeRecordFor(afterMap, bit, &cells[nibble])
 			be.deferred = append(be.deferred, getDeferredRecordUpdate(key, record))
 			bitset ^= bit
 		}

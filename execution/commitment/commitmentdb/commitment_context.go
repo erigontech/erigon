@@ -1084,7 +1084,18 @@ type TrieContext struct {
 	localWrites    map[string][]byte
 	edgeRecords    bool
 
-	branchBuf []byte // reused across Branch calls; see the ownership note on Branch
+	branchBuf   []byte // reused across Branch calls; see the ownership note on Branch
+	hexKeyBuf   []byte
+	nodeKeyBuf  []byte
+	childKeyBuf []byte
+}
+
+// v3NodeKey builds the node key for a compact prefix through this context's scratch buffers.
+// The result is valid until the next call on the same context, which owns one goroutine.
+func (sdc *TrieContext) v3NodeKey(pref []byte) []byte {
+	sdc.hexKeyBuf = nibbles.CompactToHexInto(sdc.hexKeyBuf, pref)
+	sdc.nodeKeyBuf = nibbles.EncodeKeyV3Into(sdc.nodeKeyBuf, sdc.hexKeyBuf)
+	return sdc.nodeKeyBuf
 }
 
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
@@ -1147,7 +1158,7 @@ func (sdc *TrieContext) BranchRecords(pref []byte, mask uint16, maskKnown bool) 
 	if !sdc.edgeRecords {
 		return records, 0, 0, nil
 	}
-	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
+	nodeKey := sdc.v3NodeKey(pref)
 	records, present, step, err = sdc.stateReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
 	if err != nil {
 		return records, 0, 0, err
@@ -1164,7 +1175,7 @@ func (sdc *TrieContext) branchEdge(pref []byte, mask uint16, maskKnown bool) ([]
 	var recordsPresent uint16
 	var recordsStep kv.Step
 	var err error
-	nodeKey := nibbles.EncodeKeyV3(nibbles.CompactToHex(pref))
+	nodeKey := sdc.v3NodeKey(pref)
 	records, recordsPresent, recordsStep, err = sdc.stateReader.ReadCommitmentRecords(nodeKey, mask, maskKnown)
 	if err != nil {
 		return nil, 0, [16]uint16{}, 0, err
@@ -1192,10 +1203,12 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) e
 		if err := sdc.localCollector.Collect(prefix, data); err != nil {
 			return err
 		}
-		if sdc.localWrites == nil {
-			sdc.localWrites = make(map[string][]byte)
+		if sdc.edgeRecords {
+			if sdc.localWrites == nil {
+				sdc.localWrites = make(map[string][]byte)
+			}
+			sdc.localWrites[string(prefix)] = cloneBytesPreserveNil(data)
 		}
-		sdc.localWrites[string(prefix)] = cloneBytesPreserveNil(data)
 		return nil
 	}
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
@@ -1209,12 +1222,14 @@ func (sdc *TrieContext) applyLocalEdgeWrites(nodeKey []byte, mask uint16, maskKn
 	if maskKnown {
 		wanted = mask
 	}
+	sdc.childKeyBuf = append(append(sdc.childKeyBuf[:0], nodeKey...), 0)
+	key := sdc.childKeyBuf
 	for nibble := range 16 {
 		bit := uint16(1) << nibble
 		if wanted&bit == 0 {
 			continue
 		}
-		key := nibbles.ChildKeyV3(nodeKey, byte(nibble))
+		key[len(nodeKey)] = 0x80 | byte(nibble)
 		data, ok := sdc.localWrites[string(key)]
 		if !ok {
 			continue
