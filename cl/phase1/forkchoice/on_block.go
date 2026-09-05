@@ -108,12 +108,17 @@ func (f *ForkChoiceStore) checkFinalizedDescendant(finalizedCheckpoint solid.Che
 	return false, nil
 }
 
-// revalidateAfterForkChoiceLockYield redoes what releasing f.mu can invalidate: a
-// concurrent GetHead may have cached a head computed without this block, and finality
-// may have advanced past it. Every yield site must call this before touching store state.
-func (f *ForkChoiceStore) revalidateAfterForkChoiceLockYield(block *cltypes.BeaconBlock) (ignore bool, err error) {
+// invalidateCachedHead forces the next GetHead to recompute. Call after reacquiring
+// f.mu: a GetHead during the released window caches a head that predates this block.
+func (f *ForkChoiceStore) invalidateCachedHead() {
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
+// recheckFinalizedDescendant redoes the entry finality checks against the current
+// checkpoint. Call after reacquiring f.mu and before committing the block: finality can
+// advance while the lock is not held, and nothing further down re-checks it.
+func (f *ForkChoiceStore) recheckFinalizedDescendant(block *cltypes.BeaconBlock) (ignore bool, err error) {
 	return f.checkFinalizedDescendant(f.finalizedCheckpoint.Load().(solid.Checkpoint), block.Slot, block.ParentRoot)
 }
 
@@ -208,8 +213,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
-			if ignore, err := f.revalidateAfterForkChoiceLockYield(block.Block); ignore || err != nil {
-				return err
+			f.invalidateCachedHead()
+			if ignore, recheckErr := f.recheckFinalizedDescendant(block.Block); ignore || recheckErr != nil {
+				return recheckErr
 			}
 		}
 
@@ -260,9 +266,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 
-			if ignore, err := f.revalidateAfterForkChoiceLockYield(block.Block); ignore || err != nil {
-				return err
-			}
+			f.invalidateCachedHead()
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
@@ -297,6 +301,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
+			}
+			if ignore, recheckErr := f.recheckFinalizedDescendant(block.Block); ignore || recheckErr != nil {
+				return recheckErr
 			}
 		}
 	}

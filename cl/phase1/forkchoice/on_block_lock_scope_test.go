@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -87,6 +88,11 @@ func buildOnBlockLockScopeStore(tb testing.TB, engine execution_client.Execution
 // the returned release channel is closed, so a test can hold OnBlock inside the EL call.
 func blockingEngine(tb testing.TB, times int) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
 	tb.Helper()
+	return blockingEngineReturning(tb, times, execution_client.PayloadStatusValidated, nil)
+}
+
+func blockingEngineReturning(tb testing.TB, times int, status execution_client.PayloadStatus, retErr error) (*execution_client.MockExecutionEngine, chan struct{}, chan struct{}) {
+	tb.Helper()
 	engine := execution_client.NewMockExecutionEngine(gomock.NewController(tb))
 	entered := make(chan struct{}, times)
 	release := make(chan struct{})
@@ -96,7 +102,7 @@ func blockingEngine(tb testing.TB, times int) (*execution_client.MockExecutionEn
 		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
 			entered <- struct{}{}
 			<-release
-			return execution_client.PayloadStatusValidated, nil
+			return status, retErr
 		})
 	return engine, entered, release
 }
@@ -197,7 +203,12 @@ func TestOnBlockRechecksFinalityAfterNewPayload(t *testing.T) {
 // released. run releases the EL and returns OnBlock's error.
 func startOnBlockInsideEL(t *testing.T) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
 	t.Helper()
-	engine, elEntered, releaseEL := blockingEngine(t, 1)
+	return startOnBlockInsideELReturning(t, execution_client.PayloadStatusValidated, nil)
+}
+
+func startOnBlockInsideELReturning(t *testing.T, status execution_client.PayloadStatus, retErr error) (*ForkChoiceStore, *cltypes.SignedBeaconBlock, func() error) {
+	t.Helper()
+	engine, elEntered, releaseEL := blockingEngineReturning(t, 1, status, retErr)
 	store, block := buildOnBlockLockScopeStore(t, engine)
 	onBlockDone := make(chan error, 1)
 	go func() { onBlockDone <- store.OnBlock(context.Background(), block, true, true, false) }()
@@ -315,6 +326,29 @@ func startOnBlockInsideGetBlobs(t *testing.T) (*ForkChoiceStore, *cltypes.Signed
 			return nil
 		}
 	}
+}
+
+// Finality moving during the EL call must not swallow the EL's own verdict: an invalid
+// payload still has to be reported and recorded, it is only the commit that is dropped.
+func TestOnBlockKeepsELVerdictWhenFinalityMovesDuringNewPayload(t *testing.T) {
+	t.Run("invalidated", func(t *testing.T) {
+		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusInvalidated, nil)
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+
+		require.ErrorContains(t, run(), "block is invalid")
+		status, ok := store.executionPayloadStatus.Get(block.Block.Body.ExecutionPayload.BlockHash)
+		require.True(t, ok, "the EL verdict must still be recorded")
+		require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
+		requireBlockNotAdded(t, store, block)
+	})
+
+	t.Run("engine error", func(t *testing.T) {
+		store, block, run := startOnBlockInsideELReturning(t, execution_client.PayloadStatusNone, errors.New("el unavailable"))
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+
+		require.ErrorIs(t, run(), ErrNewPayloadNoStatus)
+		requireBlockNotAdded(t, store, block)
+	})
 }
 
 // A caller that wins admission only after someone else validated the same payload
