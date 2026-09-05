@@ -39,6 +39,8 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # temporary disabled waiting merge of PR erigontech/erigon#23706
+  eth_simulateV1/test_28.json
 )
 
 # Transform the array into a comma-separated string
