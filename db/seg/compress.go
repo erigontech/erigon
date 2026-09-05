@@ -318,16 +318,12 @@ func (c *Compressor) Compress() error {
 	}
 	c.stopWorkers()
 
-	var cf *os.File
-	{
-		var err error
-		cf, err = dir.CreateTemp(c.outputFile)
-		if err != nil {
-			return err
-		}
-		defer dir.RemoveFile(cf.Name()) //nolint:errcheck
-		defer cf.Close()                //nolint:errcheck
+	cf, createErr := dir.CreateTemp(c.outputFile)
+	if createErr != nil {
+		return createErr
 	}
+	defer dir.RemoveFile(cf.Name()) //nolint:errcheck
+	defer cf.Close()                //nolint:errcheck
 	tmpFileName := cf.Name()
 
 	if c.version == FileCompressionFormatV1 {
