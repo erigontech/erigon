@@ -486,6 +486,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}, nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
+			if s.latestBlockBuiltStore != nil {
+				s.latestBlockBuiltStore.MarkRecoveryIneligible(blockHash)
+			}
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
@@ -645,7 +648,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	} else {
 		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
 			locallyBuilt := s.latestBlockBuiltStore != nil &&
-				s.latestBlockBuiltStore.BlockBuiltByHash(blockHash) != nil
+				s.latestBlockBuiltStore.BlockBuiltForRecovery(blockHash) != nil
 			return header == nil &&
 				!locallyBuilt &&
 				s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
@@ -1200,7 +1203,7 @@ func (e *EngineServer) HandleForkChoice(
 	// payload has been built. Recover it through the ordinary new-payload
 	// insertion/validation path before falling back to peer download.
 	if headerNumber == nil && e.latestBlockBuiltStore != nil {
-		if locallyBuilt := e.latestBlockBuiltStore.BlockBuiltByHash(headerHash); locallyBuilt != nil {
+		if locallyBuilt := e.latestBlockBuiltStore.BlockBuiltForRecovery(headerHash); locallyBuilt != nil {
 			e.logger.Debug(fmt.Sprintf("[%s] Fork choice: recovering locally built head", logPrefix),
 				"height", locallyBuilt.NumberU64(), "hash", headerHash)
 

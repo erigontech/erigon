@@ -107,3 +107,45 @@ func TestLatestBlockBuiltRefreshesRecency(t *testing.T) {
 		s.BlockBuilt(),
 	)
 }
+
+func TestLatestBlockBuiltRecoverySuppressionIsBounded(t *testing.T) {
+	t.Parallel()
+
+	s := NewLatestBlockBuiltStore()
+	block := types.NewBlockWithHeader(
+		&types.Header{Time: 1},
+		nil,
+	)
+	s.AddBlockBuilt(block)
+
+	hash := block.Hash()
+
+	// A freshly built payload is eligible for local FCU recovery.
+	assert.Same(t, block, s.BlockBuiltForRecovery(hash))
+
+	// Request-level invalidity must suppress FCU-only local recovery without
+	// discarding the underlying locally built payload.
+	s.MarkRecoveryIneligible(hash)
+
+	assert.Same(t, block, s.BlockBuiltByHash(hash))
+	assert.Nil(t, s.BlockBuiltForRecovery(hash))
+
+	// Suppression is bounded to the same lifetime as the cached payload.
+	// Once this payload is evicted, its request-level suppression state must
+	// disappear with it.
+	for i := 0; i < recentBlockBuiltCapacity; i++ {
+		other := types.NewBlockWithHeader(
+			&types.Header{Time: uint64(i + 2)},
+			nil,
+		)
+		s.AddBlockBuilt(other)
+	}
+
+	assert.Nil(t, s.BlockBuiltByHash(hash))
+	assert.Nil(t, s.BlockBuiltForRecovery(hash))
+
+	// If the same payload is later built again after eviction, it is a fresh
+	// cache entry rather than a permanently poisoned block hash.
+	s.AddBlockBuilt(block)
+	assert.Same(t, block, s.BlockBuiltForRecovery(hash))
+}

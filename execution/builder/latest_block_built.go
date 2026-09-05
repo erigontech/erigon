@@ -26,16 +26,18 @@ import (
 const recentBlockBuiltCapacity = 16
 
 type LatestBlockBuiltStore struct {
-	block  *types.Block
-	blocks map[common.Hash]*types.Block
-	order  []common.Hash
+	block              *types.Block
+	blocks             map[common.Hash]*types.Block
+	order              []common.Hash
+	recoveryIneligible map[common.Hash]struct{}
 
 	lock sync.RWMutex
 }
 
 func NewLatestBlockBuiltStore() *LatestBlockBuiltStore {
 	return &LatestBlockBuiltStore{
-		blocks: make(map[common.Hash]*types.Block),
+		blocks:             make(map[common.Hash]*types.Block),
+		recoveryIneligible: make(map[common.Hash]struct{}),
 	}
 }
 
@@ -53,6 +55,9 @@ func (s *LatestBlockBuiltStore) AddBlockBuilt(block *types.Block) {
 
 	if s.blocks == nil {
 		s.blocks = make(map[common.Hash]*types.Block)
+	}
+	if s.recoveryIneligible == nil {
+		s.recoveryIneligible = make(map[common.Hash]struct{})
 	}
 
 	if _, ok := s.blocks[hash]; ok {
@@ -72,6 +77,7 @@ func (s *LatestBlockBuiltStore) AddBlockBuilt(block *types.Block) {
 		oldest := s.order[0]
 		s.order = s.order[1:]
 		delete(s.blocks, oldest)
+		delete(s.recoveryIneligible, oldest)
 	}
 }
 
@@ -85,4 +91,27 @@ func (s *LatestBlockBuiltStore) BlockBuiltByHash(hash common.Hash) *types.Block 
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	return s.blocks[hash]
+}
+
+func (s *LatestBlockBuiltStore) BlockBuiltForRecovery(hash common.Hash) *types.Block {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	if _, blocked := s.recoveryIneligible[hash]; blocked {
+		return nil
+	}
+	return s.blocks[hash]
+}
+
+func (s *LatestBlockBuiltStore) MarkRecoveryIneligible(hash common.Hash) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if _, ok := s.blocks[hash]; !ok {
+		return
+	}
+	if s.recoveryIneligible == nil {
+		s.recoveryIneligible = make(map[common.Hash]struct{})
+	}
+	s.recoveryIneligible[hash] = struct{}{}
 }
