@@ -60,6 +60,9 @@ const (
 var BtInterp = dbg.EnvBool("BT_INTERP", true)
 var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
 
+var BtNodeOfft = dbg.EnvBool("BT_NODE_OFFT", true)
+var BtPrefixSeed = dbg.EnvBool("BT_PREFIX_SEED", true)
+
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
 
 type Cursor struct {

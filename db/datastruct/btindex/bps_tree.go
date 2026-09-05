@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -64,6 +65,7 @@ var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
 func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, nodeStride uint64) *BpsTree {
 	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfftEF: nodeOfftEF, nodeStride: nodeStride}
+	bt.buildNodeIndex()
 	if envAssertBTKeys {
 		for i := range bt.numNodes() {
 			if cmp := bt.compareKey(kv, bt.nodeKey(i), bt.nodeDi(i)); cmp != 0 {
@@ -84,6 +86,10 @@ type BpsTree struct {
 	keysBlob   []byte
 	nodeOfftEF *eliasfano32.EliasFano
 	nodeStride uint64
+	nodeOfft   []uint32
+	prefixLo   []uint32
+	prefixHi   []uint32
+	prefixBits uint
 
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
@@ -101,9 +107,70 @@ func (b *BpsTree) numNodes() int {
 
 // nodeKey returns pivot i's key without copying (points into keysBlob).
 func (b *BpsTree) nodeKey(i int) []byte {
-	off := b.nodeOfftEF.Get(uint64(i))
+	var off uint64
+	if b.nodeOfft != nil {
+		off = uint64(b.nodeOfft[i])
+	} else {
+		off = b.nodeOfftEF.Get(uint64(i))
+	}
 	l := uint64(binary.BigEndian.Uint16(b.keysBlob[off:]))
 	return b.keysBlob[off+2 : off+2+l]
+}
+
+func nodePrefix(k []byte) uint32 {
+	switch len(k) {
+	case 0:
+		return 0
+	case 1:
+		return uint32(k[0]) << 8
+	default:
+		return uint32(k[0])<<8 | uint32(k[1])
+	}
+}
+
+func (b *BpsTree) buildNodeIndex() {
+	n := b.numNodes()
+	if n == 0 || len(b.keysBlob) == 0 {
+		return
+	}
+	if BtNodeOfft && len(b.keysBlob) <= math.MaxUint32 {
+		offs := make([]uint32, n)
+		pos := 0
+		for i := range n {
+			if pos+2 > len(b.keysBlob) {
+				return
+			}
+			offs[i] = uint32(pos)
+			pos += 2 + int(binary.BigEndian.Uint16(b.keysBlob[pos:]))
+		}
+		if pos <= len(b.keysBlob) {
+			b.nodeOfft = offs
+		}
+	}
+	if !BtPrefixSeed || n > math.MaxUint32 {
+		return
+	}
+	bits := uint(bits.Len(uint(n)))
+	if bits > 16 {
+		bits = 16
+	}
+	if bits < 8 {
+		bits = 8
+	}
+	size := 1 << bits
+	cnt := make([]uint32, size)
+	for i := range n {
+		cnt[nodePrefix(b.nodeKey(i))>>(16-bits)]++
+	}
+	lo := make([]uint32, size)
+	hi := make([]uint32, size)
+	var run uint32
+	for p := range cnt {
+		lo[p] = run
+		run += cnt[p]
+		hi[p] = run
+	}
+	b.prefixLo, b.prefixHi, b.prefixBits = lo, hi, bits
 }
 
 func (b *BpsTree) nodeDi(i int) uint64 { return uint64(i) * b.nodeStride }
@@ -290,6 +357,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 		return err
 	}
 	b.nodeOfftEF = nodeOfftEF
+	b.buildNodeIndex()
 
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
 		"cached", fmt.Sprintf("%d %.2f%%", b.numNodes(), 100*(float64(b.numNodes())/float64(N))),
@@ -303,6 +371,24 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 func (b *BpsTree) bs(x []byte) (dl, dr uint64, klo, khi []byte) {
 	dr = b.offt.Count()
 	l, r := 0, b.numNodes() //nolint
+
+	if b.prefixLo != nil && r > 0 {
+		p := nodePrefix(x) >> (16 - b.prefixBits)
+		bl, br := int(b.prefixLo[p]), int(b.prefixHi[p])
+		if br < r {
+			dr = b.nodeDi(br)
+			khi = b.nodeKey(br)
+		}
+		if bl > 0 {
+			m := bl - 1
+			dl = b.nodeDi(m)
+			if dl < dr {
+				dl++
+			}
+			klo = b.nodeKey(m)
+		}
+		l, r = bl, br
+	}
 
 	for l < r {
 		m := (l + r) >> 1
