@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang-jwt/jwt/v4"
 
 	"github.com/erigontech/erigon/common"
@@ -45,8 +46,12 @@ import (
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
-	contentType             = "application/json"
-	jwtTokenExpiry          = 60 * time.Second
+	// maxBodySizeHint bounds the buffer sized from Content-Length, so a request
+	// that declares a large body and sends none cannot make the server allocate
+	// it up front. A body above this just grows into.
+	maxBodySizeHint = int64(1 * datasize.MB)
+	contentType     = "application/json"
+	jwtTokenExpiry  = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -224,7 +229,45 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 		// it's a post request or whatever, so just process it like normal
 		conn.Reader = io.LimitReader(r.Body, maxRequestContentLength)
 	}
-	return NewCodec(conn)
+	// The body holds one message, so it can be read in one go and checked once.
+	readFrame := func() ([]byte, error) {
+		hint := 0
+		if r.ContentLength > 0 {
+			hint = int(min(r.ContentLength, maxBodySizeHint))
+		}
+		frame, err := readAllBody(conn, hint)
+		if err != nil {
+			return nil, err
+		}
+		if skipJSONSpace(frame, 0) == len(frame) {
+			// An empty body carries no message, which is not an error. The decoder
+			// used to report this as EOF and callers rely on that.
+			return nil, io.EOF
+		}
+		return frame, nil
+	}
+	return newFuncCodec(conn, newJSONEncoder(conn), nil, readFrame)
+}
+
+// readAllBody reads r to the end, sizing the buffer from the hint when there is
+// one so that a large body does not have to be grown into.
+func readAllBody(r io.Reader, hint int) ([]byte, error) {
+	// A byte past the hint, so a body of exactly hint bytes sees EOF without the
+	// buffer doubling right at the end.
+	buf := make([]byte, 0, max(hint+1, 512))
+	for {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
+		}
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return buf, nil
+			}
+			return buf, err
+		}
+	}
 }
 
 // Close does nothing and always returns nil.
