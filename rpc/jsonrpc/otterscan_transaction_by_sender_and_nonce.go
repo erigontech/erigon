@@ -141,6 +141,9 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if txIndex == -1 {
 		txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
 	}
+	if err := api.checkPruneBlocks(ctx, tx, bn); err != nil {
+		return nil, err
+	}
 	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, bn, txIndex)
 	if err != nil {
 		return nil, err

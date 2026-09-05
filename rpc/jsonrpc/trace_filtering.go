@@ -92,7 +92,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -201,9 +201,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	}
 	bn := hexutil.Uint64(blockNum)
 
-	// if we've pruned this history away for this block then just return early
-	// to save any red herring errors
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -372,10 +370,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
-	// if we've pruned this history away for this block then just return early
-	// to save any red herring errors
-
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, fromBlock)
 	if err != nil {
 		return err
 	}
