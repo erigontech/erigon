@@ -212,8 +212,14 @@ func TestModexpBigIntFaster(t *testing.T) {
 		}
 		for _, modLen := range []uint64{1, 32, 33, 40, 63, 64, 65, 96, 127, 128, 129, 192, 256, 1024} {
 			want := modLen >= bound
-			if got := modexpBigIntFaster(c.exp, modLen); got != want {
+			if got := modexpBigIntFaster(c.exp, exp(int(modLen))); got != want {
 				t.Errorf("%s, %d-byte modulus: modexpBigIntFaster = %v, want %v", c.name, modLen, got, want)
+			}
+			// Both backends ignore leading zero modulus bytes, so a wide field
+			// holding a narrow modulus must route on the narrow one.
+			if got := modexpBigIntFaster(c.exp, padded(int(modLen)+256)); got != (8 >= bound) {
+				t.Errorf("%s, 64-bit modulus in a %d-byte field: modexpBigIntFaster = %v, want %v",
+					c.name, modLen+256, got, 8 >= bound)
 			}
 		}
 	}

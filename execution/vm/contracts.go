@@ -575,7 +575,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
-	case modexpBigIntFaster(exp, modLen):
+	case modexpBigIntFaster(exp, mod):
 		baseBig := new(big.Int).SetBytes(base)
 		expBig := new(big.Int).SetBytes(exp)
 		modBig := new(big.Int).SetBytes(mod)
@@ -595,8 +595,13 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 // exceeds one word, so the modulus width at which it overtakes evmone differs
 // sharply either side of that. Both widths are per-target: math/big's inner loop
 // is hand-written assembly, so where it wins depends on the target's assembly.
-func modexpBigIntFaster(exp []byte, modLen uint64) bool {
+//
+// Both operands are measured on their significant bytes: neither backend works
+// on a leading zero, so a narrow value in a wide field costs what its own width
+// costs, and classifying it by the declared field would route it as if wide.
+func modexpBigIntFaster(exp, mod []byte) bool {
 	const wordBytes = bits.UintSize / 8 // a math/big Word, so the bound tracks the platform
+	modLen := uint64(len(bytes.TrimLeft(mod, "\x00")))
 	if modLen < min(modexpBigIntMinModLenWideExp, modexpBigIntMinModLenNarrowExp) {
 		return false // below both bounds, so skip the scan of a up-to-1KB exponent
 	}
