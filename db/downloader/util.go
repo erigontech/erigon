@@ -132,7 +132,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
-		res = append(res, filepath.Join(subDir, name))
+		res = append(res, path.Join(subDir, name)) // torrent names are slash-separated
 	}
 	return res, nil
 }
@@ -151,7 +151,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 	if !filepath.IsLocal(fName) {
 		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)
 	}
-	return fName, nil
+	return filepath.ToSlash(fName), nil // torrent names are slash-separated
 }
 
 func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
@@ -180,7 +180,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
-	// Really need to check this is "slash"-style. I suspect it will do the wrong thing on Windows.
 	info.Name = fName
 
 	return torrentFiles.CreateWithMetaInfo(info, nil)
