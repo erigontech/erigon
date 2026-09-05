@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"math/bits"
 	"math/rand"
 	"testing"
 
@@ -373,6 +374,49 @@ func TestDeepFold_FreshWhaleFoldsParallel(t *testing.T) {
 	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
 	require.Equal(t, seqRoot, parRoot)
 	require.Positive(t, deepFolds, "a fresh whale must take the concurrent deep fold, not the serial demotion")
+}
+
+func TestDeepStorageThresholdFor(t *testing.T) {
+	require.Equal(t, 128, deepStorageThresholdFor(0))
+	require.Equal(t, 128, deepStorageThresholdFor(2_000))
+	require.Equal(t, 128, deepStorageThresholdFor(8_192))
+	require.Equal(t, 156, deepStorageThresholdFor(10_000))
+	require.Equal(t, 7_812, deepStorageThresholdFor(500_000))
+}
+
+func TestDeepFold_BulkRoundKeepsMediumAccountsOnWorker(t *testing.T) {
+	rnd := rand.New(rand.NewSource(20260902))
+	ub := NewUpdateBuilder()
+	for range 100 {
+		addRandomAccount(ub, rnd, 200)
+	}
+	keys, upds := ub.Build()
+
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+	require.Equal(t, seqRoot, parRoot)
+	require.Zero(t, deepFolds, "200-slot accounts in a 20k-key round are no straggler and must stay on their worker")
+}
+
+func TestDeepFold_SmallRoundDetachesStraggler(t *testing.T) {
+	rnd := rand.New(rand.NewSource(20260903))
+	ub := NewUpdateBuilder()
+	addRandomAccount(ub, rnd, 200)
+	k1, u1 := ub.Build()
+	fk, fu := buildMixedCorpus(557, 300)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, keys, upds, nil)
+	require.Equal(t, seqRoot, parRoot)
+	require.Equal(t, uint64(1), deepFolds, "one 200-slot account in a 500-key round is the straggler and must deep-fold")
 }
 
 func TestDeepFold_ExistingWhaleStillDemotes(t *testing.T) {
@@ -928,4 +972,154 @@ func TestKeyArena_ChunkSizedFromRemaining(t *testing.T) {
 		require.Len(t, got, keyLen)
 		require.Equal(t, keyLen, cap(arena.buf))
 	})
+}
+
+func buildStorageOnlyWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
+	rnd := rand.New(rand.NewSource(seed))
+	addr := make([]byte, length.Addr)
+	rnd.Read(addr)
+	a := hex.EncodeToString(addr)
+
+	firstStorageNibble := func(loc []byte) byte {
+		pk := make([]byte, 0, length.Addr+len(loc))
+		pk = append(pk, addr...)
+		pk = append(pk, loc...)
+		return KeyToHexNibbleHash(pk)[64]
+	}
+	genSlot := func(want byte) (string, string) {
+		for {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			if firstStorageNibble(loc) == want {
+				val := make([]byte, 32)
+				rnd.Read(val)
+				return hex.EncodeToString(loc), hex.EncodeToString(val)
+			}
+		}
+	}
+
+	ub1 := NewUpdateBuilder()
+	ub1.Balance(a, 1)
+	for _, n := range wide {
+		for range perNibble1 {
+			l, v := genSlot(n)
+			ub1.Storage(a, l, v)
+		}
+	}
+	k1, u1 = ub1.Build()
+
+	ub2 := NewUpdateBuilder()
+	for _, n := range touch {
+		for range perNibble2 {
+			l, v := genSlot(n)
+			ub2.Storage(a, l, v)
+		}
+	}
+	k2, u2 = ub2.Build()
+	return k1, u1, k2, u2
+}
+
+func FuzzParallelStorageOnlyEquivalence(f *testing.F) {
+	f.Add(int64(20260902), uint16(60), uint16(350), uint8(2))
+	f.Add(int64(0xB2), uint16(20), uint16(140), uint8(3))
+	f.Add(int64(0xC3), uint16(8), uint16(40), uint8(1))
+	f.Add(int64(0xD4), uint16(48), uint16(200), uint8(4))
+
+	f.Fuzz(func(t *testing.T, seed int64, per1, per2 uint16, nibCount uint8) {
+		perNibble1 := int(per1%32) + 1
+		perNibble2 := int(per2%192) + 1
+		nibbleCount := int(nibCount%3) + 2
+		wide := make([]byte, 0, nibbleCount)
+		for i := range nibbleCount {
+			wide = append(wide, byte(i*4))
+		}
+
+		k1, u1, k2, u2 := buildStorageOnlyWhale(seed, wide, wide, perNibble1, perNibble2)
+		for _, u := range u2 {
+			require.Equal(t, StorageUpdate, u.Flags, "batch 2 must carry storage writes only")
+		}
+
+		seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+
+		ms := NewMockState(t)
+		ms.SetConcurrentCommitment(true)
+		_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
+		parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+		require.Equal(t, seqRoot, parRoot)
+		if len(k2) > deepStorageThreshold {
+			require.NotZero(t, deepFolds,
+				"a storage-only round of %d slots over %d nibbles must deep-fold", len(k2), nibbleCount)
+		}
+	})
+}
+
+func TestDeepFold_StorageOnlyWhaleFoldsParallel(t *testing.T) {
+	k1, u1, k2, u2 := buildStorageOnlyWhale(20260902, nibs(3, 7), nibs(3, 7), 60, 350)
+	fk, fu := buildMixedCorpus(557, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+
+	for _, u := range u2 {
+		require.Equal(t, StorageUpdate, u.Flags, "batch 2 must carry storage writes only")
+	}
+
+	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	_, blob, _ := parallelBatchDeepFolds(t, ms, 4, k1, u1, nil)
+	parRoot, _, deepFolds := parallelBatchDeepFolds(t, ms, 4, k2, u2, blob)
+	require.Equal(t, seqRoot, parRoot)
+	require.Equal(t, uint64(1), deepFolds,
+		"an account whose record is not in the round must still deep-fold its storage")
+}
+
+func buildStorageSubtree(t *testing.T, withAccount bool, slots int) *prefixNode {
+	t.Helper()
+	tr := newPrefixTrie()
+	acct := make([]byte, 20)
+	acct[19] = 0xAB
+	addrNibbles := make([]byte, 64)
+	for i := range addrNibbles {
+		addrNibbles[i] = byte(i % 16)
+	}
+	if withAccount {
+		tr.Insert(addrNibbles, acct, nil)
+	}
+	for i := range slots {
+		slot := make([]byte, 64)
+		slot[0] = byte(i % 16)
+		slot[1] = byte((i / 16) % 16)
+		slot[2] = byte((i / 256) % 16)
+		key := append(append([]byte{}, addrNibbles...), slot...)
+		tr.Insert(key, append(append([]byte{}, acct...), byte(i)), nil)
+	}
+	node, depth := tr.root, 0
+	for node != nil && depth < 64 {
+		depth += len(node.ext)
+		if depth >= 64 {
+			break
+		}
+		nib := addrNibbles[depth]
+		if node.bitmap&(1<<nib) == 0 {
+			return nil
+		}
+		idx := bits.OnesCount16(node.bitmap & ((1 << nib) - 1))
+		node = node.children[idx]
+		depth++
+	}
+	require.NotNil(t, node)
+	return node
+}
+
+func TestDeepFold_ThresholdCountsStorageSlotsOnly(t *testing.T) {
+	const threshold = 8
+	for _, slots := range []int{threshold, threshold + 1} {
+		withAcct := buildStorageSubtree(t, true, slots)
+		without := buildStorageSubtree(t, false, slots)
+		require.Equal(t,
+			isDeepStorageSubtree(without, 64, threshold),
+			isDeepStorageSubtree(withAcct, 64, threshold),
+			"%d touched slots must pick the same path whether or not the account record is touched", slots)
+	}
 }

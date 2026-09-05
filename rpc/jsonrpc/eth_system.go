@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -582,38 +583,37 @@ func (b *GasPriceOracleBackend) PrepareFork(context.Context) error {
 	if b.forkPrepared {
 		return b.parentTipErr
 	}
-	b.parentTip, _, b.parentTipErr = edgeCanonicalMarker(b.tx, nil, order.Desc)
 	b.forkPrepared = true
+	b.parentTip, b.parentTipErr = tipCanonicalMarker(b.tx)
 	return b.parentTipErr
 }
 
-// edgeCanonicalMarker reads the canonical marker the database snapshot starts
-// (order.Asc) or ends (order.Desc) on, from key from onwards, bypassing the
-// overlay: parent and fork share the overlay, so a view read would mask what
-// these identities exist to detect.
-func edgeCanonicalMarker(tx kv.TemporalTx, from []byte, asc order.By) (canonicalMarker, bool, error) {
+// tipCanonicalMarker reads the canonical marker the database snapshot ends on,
+// bypassing the overlay: parent and fork share the overlay, so a view read
+// would mask what this identity exists to detect.
+func tipCanonicalMarker(tx kv.TemporalTx) (canonicalMarker, error) {
 	raw := tx
 	if u, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx }); ok {
 		if under := u.UnderlyingTx(); under != nil {
 			raw = under
 		}
 	}
-	it, err := raw.Range(kv.HeaderCanonical, from, nil, asc, 1)
+	it, err := raw.Range(kv.HeaderCanonical, nil, nil, order.Desc, 1)
 	if err != nil {
-		return canonicalMarker{}, false, err
+		return canonicalMarker{}, err
 	}
 	defer it.Close()
 	if !it.HasNext() {
-		return canonicalMarker{}, false, nil
+		return canonicalMarker{}, nil
 	}
 	k, v, err := it.Next()
 	if err != nil {
-		return canonicalMarker{}, false, err
+		return canonicalMarker{}, err
 	}
 	if len(k) != 8 || len(v) != length.Hash {
-		return canonicalMarker{}, false, nil
+		return canonicalMarker{}, nil
 	}
-	return canonicalMarker{number: binary.BigEndian.Uint64(k), hash: common.BytesToHash(v)}, true, nil
+	return canonicalMarker{number: binary.BigEndian.Uint64(k), hash: common.BytesToHash(v)}, nil
 }
 
 func canonicalHashAt(tx kv.Tx, number uint64) (common.Hash, error) {
@@ -650,22 +650,25 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 		return nil, nil, errors.New("GasPriceOracleBackend.Fork: PrepareFork must run on the caller's goroutine first")
 	}
 	if b.parentTipErr != nil {
-		return nil, nil, b.parentTipErr
+		return nil, nil, nil
 	}
 	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
-		return nil, nil, err
+		log.Debug("gas price: fork tx unavailable, serving sequentially", "err", err)
+		return nil, nil, nil
 	}
 	// A fresh tx takes its own database snapshot, which can already carry a
 	// reorg the parent never saw: the pin only aligns the overlay layer. Serving
 	// one request from two chains is worse than losing the parallelism, so a
-	// disagreeing snapshot degrades to sequential reads on the parent. An
-	// identical view id means the same snapshot, which needs no marker lookup.
+	// snapshot that disagrees — or that the check cannot read — degrades to
+	// sequential reads on the parent. An identical view id means the same
+	// snapshot, which needs no marker lookup.
 	if tx.ViewID() != b.parentViewID {
 		keeps, err := b.keepsParentIdentities(tx)
 		if err != nil || !keeps {
+			log.Debug("gas price: fork snapshot unusable, serving sequentially", "keepsParentIdentities", keeps, "err", err)
 			tx.Rollback()
-			return nil, nil, err
+			return nil, nil, nil
 		}
 	}
 	// Reuse the parent's pin (rationale on rpchelper.PinToOverlay).
@@ -700,19 +703,10 @@ func (b *GasPriceOracleBackend) CanonicalHashes(_ context.Context, from, to uint
 	return hashes, nil
 }
 
-// FrozenBlocks returns the boundary below which the canonical mapping can no
-// longer change: those markers were pruned because their range is retired to
-// snapshots, which is also why they cannot be resolved to a hash. Genesis is
-// never pruned, so the scan starts above it. The Snapshots stage progress is
-// not this boundary — it tracks min(Headers, Bodies, Senders, TxLookup), which
-// on a synced node sits at the head and would make reorgable heights
-// number-keyed.
-func (b *GasPriceOracleBackend) FrozenBlocks() (uint64, error) {
-	lowest, ok, err := edgeCanonicalMarker(b.tx, hexutil.EncodeTs(1), order.Asc)
-	if err != nil || !ok || lowest.number == 0 {
-		return 0, err
-	}
-	return lowest.number - 1, nil
+// FrozenBlocks returns the boundary at and below which the canonical mapping can
+// no longer change, because unwinding into the snapshots is not allowed.
+func (b *GasPriceOracleBackend) FrozenBlocks() uint64 {
+	return b.baseApi._blockReader.FrozenBlocks()
 }
 
 func (b *GasPriceOracleBackend) HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
@@ -783,4 +777,8 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
+}
+
+func (b *GasPriceOracleBackend) CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error {
+	return b.baseApi.checkBlockHistoryAvailable(ctx, b.tx, blockNumber)
 }
