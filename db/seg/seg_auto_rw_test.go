@@ -57,9 +57,14 @@ func TestWriterReadFromMixedCompression(t *testing.T) {
 	const pairs = 4096
 	words := make([][]byte, 0, 2*pairs)
 	for i := range pairs {
-		words = append(words,
-			[]byte(fmt.Sprintf("key-%06d", i)),
-			bytes.Repeat([]byte(fmt.Sprintf("value-%06d-", i)), 16))
+		// Alternate long and short values: a value no longer than the key it
+		// follows still fits the key's own slice, so a capacity bound alone
+		// does not stop the decode from landing in the mapping.
+		value := bytes.Repeat([]byte(fmt.Sprintf("value-%06d-", i)), 16)
+		if i%2 == 1 {
+			value = []byte(fmt.Sprintf("v%03d", i%1000))
+		}
+		words = append(words, []byte(fmt.Sprintf("key-%06d", i)), value)
 	}
 
 	src := writeKVFile(t, "src", CompressVals, words)
