@@ -67,10 +67,18 @@ import (
 var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
 var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
 
+type engineBlockDownloader interface {
+	ReportBadHeader(common.Hash, common.Hash, string)
+	IsBadHeader(common.Hash) (bool, common.Hash, string)
+	Status() engine_block_downloader.Status
+	StartDownloading(common.Hash, *types.Block, engine_block_downloader.Trigger) bool
+}
+
 type EngineServer struct {
-	blockDownloader *engine_block_downloader.EngineBlockDownloader
-	config          *chain.Config
-	beaconCfg       atomic.Pointer[clparams.BeaconChainConfig]
+	blockDownloader       engineBlockDownloader
+	latestBlockBuiltStore *builder.LatestBlockBuiltStore
+	config                *chain.Config
+	beaconCfg             atomic.Pointer[clparams.BeaconChainConfig]
 	// Block proposing for proof-of-stake
 	proposing bool
 	// Block consuming for proof-of-stake
@@ -125,6 +133,10 @@ func NewEngineServer(
 	srv.consuming.Store(consuming)
 
 	return srv
+}
+
+func (e *EngineServer) SetLatestBlockBuiltStore(store *builder.LatestBlockBuiltStore) {
+	e.latestBlockBuiltStore = store
 }
 
 func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
@@ -477,6 +489,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}, nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
+			if s.latestBlockBuiltStore != nil {
+				s.latestBlockBuiltStore.MarkRecoveryIneligible(blockHash)
+			}
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
@@ -635,7 +650,11 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}
 	} else {
 		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
-			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
+			locallyBuilt := s.latestBlockBuiltStore != nil &&
+				s.latestBlockBuiltStore.BlockBuiltForRecovery(blockHash) != nil
+			return header == nil &&
+				!locallyBuilt &&
+				s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
@@ -1181,6 +1200,33 @@ func (e *EngineServer) HandleForkChoice(
 	headerNumber, err := e.chainRW.HeaderNumber(ctx, headerHash)
 	if err != nil {
 		return nil, err
+	}
+
+	// A locally built payload may be selected by the CL after a newer competing
+	// payload has been built. Recover it through the ordinary new-payload
+	// insertion/validation path before falling back to peer download.
+	if headerNumber == nil && e.latestBlockBuiltStore != nil {
+		if locallyBuilt := e.latestBlockBuiltStore.BlockBuiltForRecovery(headerHash); locallyBuilt != nil {
+			e.logger.Debug(fmt.Sprintf("[%s] Fork choice: recovering locally built head", logPrefix),
+				"height", locallyBuilt.NumberU64(), "hash", headerHash)
+
+			payloadStatus, recoverErr := e.HandleNewPayload(ctx, logPrefix+"LocalBuilt", locallyBuilt, nil)
+			if recoverErr != nil {
+				return nil, recoverErr
+			}
+			if payloadStatus == nil {
+				return nil, errors.New("locally built payload recovery returned nil status")
+			}
+			switch payloadStatus.Status {
+			case engine_types.InvalidStatus, engine_types.SyncingStatus:
+				return payloadStatus, nil
+			}
+
+			headerNumber, err = e.chainRW.HeaderNumber(ctx, headerHash)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// We do not have header, download.
