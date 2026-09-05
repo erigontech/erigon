@@ -15,12 +15,16 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
@@ -29,7 +33,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 	defer agg.Close()
 
 	temporalDb, err := New(mdbxDb, agg, nil)
@@ -127,7 +131,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 
 		// build files
-		err = agg.BuildFiles(2)
+		err = temporalDb.BuildFiles(2, unboundedFinalityCtx)
 		require.NoError(t, err)
 		rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -230,7 +234,7 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	newDB := func(withBlocks bool) *DB {
 		mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		dirs := datadir.New(t.TempDir())
-		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
 		t.Cleanup(agg.Close)
 
 		var blockSnaps *blocksnapshots.RoSnapshots
@@ -267,7 +271,7 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 
 	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
-	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
 	defer agg.Close()
 	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)
@@ -329,7 +333,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 
 	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
-	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
 	defer agg.Close()
 	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)
@@ -368,7 +372,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 			require.NoError(t, rwTtx.Commit())
 		}()
 	}
-	require.NoError(t, agg.BuildFiles(3))
+	require.NoError(t, temporalDb.BuildFiles(3, unboundedFinalityCtx))
 
 	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -393,7 +397,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 	defer agg.Close()
 	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)

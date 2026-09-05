@@ -26,9 +26,9 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -111,8 +111,13 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 }
 
 // RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
-	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
+	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+	if err != nil {
+		return nil, err
+	}
+	err = pe.sync.RunPrune(ctx, tx, initialCycle, finalityCtx, timeout)
+	return finalityCtx, err
 }
 
 // Commits sd and, if another iteration follows, returns a fresh tx+SD to run it on; (nil,nil,nil) leaves the loop unchanged.
@@ -244,10 +249,13 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
+	var finalityCtx kv.FinalityContext
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
+			var err error
+			finalityCtx, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			return err
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
 			// The spent SD is closed by RunLoop; a fresh one opens for the next cycle.
@@ -256,11 +264,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
-			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
-				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-					agg.BuildFilesInBackground(agg.EndTxNumMinimax() + agg.StepSize())
-				}
-			}
+			pe.db.BuildFilesInBackground(finalityCtx)
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
 			if !hasMore {
 				return nil, nil, nil

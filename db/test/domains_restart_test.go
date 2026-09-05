@@ -169,7 +169,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	domains.Close()
@@ -351,7 +351,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		domains.Close()

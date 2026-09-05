@@ -180,6 +180,7 @@ type PruneState struct {
 	ForwardProgress uint64 // progress of stage forward move
 	PruneProgress   uint64 // progress of stage prune move. after sync cycle it become equal to ForwardProgress by Done() method
 	state           *Sync
+	FinalityCtx     kv.FinalityContext
 
 	CurrentSyncCycle CurrentSyncCycleInfo
 }
