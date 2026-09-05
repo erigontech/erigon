@@ -141,6 +141,7 @@ var (
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
 	UseCodeStore                  = EnvBool("USE_CODE_STORE", false)
+	CodeCacheAdmission            = EnvBool("CODE_CACHE_ADMISSION", false)
 	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead                     = EnvBool("READ_AHEAD", true)
