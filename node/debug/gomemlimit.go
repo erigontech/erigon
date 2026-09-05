@@ -39,8 +39,6 @@ import (
 // - PageCache (OS-owned): Using all free RAM, and Erigon heavily rely on it
 const defaultGoMemLimitShare = 0.8
 
-// The runtime maps unset, "" and "off" alike to math.MaxInt64, so only the
-// environment separates a deliberate "off" from an empty value.
 func goMemLimitIsSet() (set, off bool, limit datasize.ByteSize) {
 	current := debug.SetMemoryLimit(-1)
 	if current != math.MaxInt64 {
