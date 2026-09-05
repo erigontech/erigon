@@ -345,10 +345,16 @@ func historyRetentionCutoff(pruneMode prune.Mode, head uint64) uint64 {
 }
 
 // receiptsSegmentRetentionCutoff picks the download cutoff for a receipt-related
-// segment: rcache history follows state history (so download agrees with rcache
-// retirement in historyRetireCutoffs), log indexes follow block data.
+// segment, matching what historyRetireCutoffs later retires it by: rcache
+// history follows state history, and so do the log indexes, which are plain
+// inverted indexes and take RetireCutoffs.Default. Downloading them on the
+// block window instead would fetch a keep-all node's full history only to
+// delete everything outside the state-history window.
 func receiptsSegmentRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64, name string) uint64 {
-	if pruneMode.ReceiptsFollowHistory() && strings.Contains(name, kv.RCacheDomain.String()) {
+	isLogIndex := strings.Contains(name, kv.LogAddrIdx.String()) ||
+		strings.Contains(name, kv.LogTopicIdx.String())
+	isRcacheHistory := pruneMode.ReceiptsFollowHistory() && strings.Contains(name, kv.RCacheDomain.String())
+	if isLogIndex || isRcacheHistory {
 		return historyRetentionCutoff(pruneMode, head)
 	}
 	return blocksRetentionCutoff(pruneMode, cc, head)
