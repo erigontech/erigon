@@ -38,9 +38,7 @@ import (
 )
 
 var (
-	enabled  = dbg.EnvBool("AUTO_GOMAXPROCS", false)
-	interval = time.Duration(max(1, dbg.EnvInt("AUTO_GOMAXPROCS_SEC", 5))) * time.Second
-	maxRatio = max(1, dbg.EnvInt("AUTO_GOMAXPROCS_MAX_RATIO", 8))
+	enabled = dbg.EnvBool("AUTO_GOMAXPROCS", false)
 	// Device time to overlap per fault, the knob that carries the storage
 	// geometry. Little's law turns the burst fault rate into a queue depth,
 	// but the raw NVMe service time of ~70us undershoots: a burst shorter
@@ -51,9 +49,8 @@ var (
 
 const (
 	samplePeriod = 10 * time.Millisecond
-	// Consecutive windows of lower demand before giving a slot back. Releasing
-	// eagerly would undo the raise that produced the demand and start a cycle.
-	decayPeriods = 3
+	interval     = 5 * time.Second
+	maxRatio     = 8
 )
 
 // Start runs the controller until ctx is done. It is a no-op unless
@@ -75,17 +72,13 @@ func loop(ctx context.Context, base int, logger log.Logger) {
 	rates := make([]float64, 0, int(interval/samplePeriod))
 	prev, _ := majorFaults()
 	prevAt := time.Now()
-	cur, lowFor := base, 0
+	cur := base
 	for {
 		select {
 		case <-ctx.Done():
-			runtime.GOMAXPROCS(base)
 			return
 		case now := <-t.C:
-			n, ok := majorFaults()
-			if !ok {
-				continue
-			}
+			n, _ := majorFaults()
 			if dt := now.Sub(prevAt).Seconds(); dt > 0 {
 				rates = append(rates, float64(n-prev)/dt)
 			}
@@ -93,8 +86,7 @@ func loop(ctx context.Context, base int, logger log.Logger) {
 			if len(rates) < cap(rates) {
 				continue
 			}
-			// burstDepth sorts in place, so the window must be dropped after.
-			cur, lowFor = resize(cur, base, burstDepth(rates), lowFor, logger)
+			cur = resize(cur, base, burstDepth(rates), logger)
 			rates = rates[:0]
 		}
 	}
@@ -103,32 +95,17 @@ func loop(ctx context.Context, base int, logger log.Logger) {
 // burstDepth is the number of faults in flight while a burst is running. The
 // high percentile, not the mean, is what has to fit inside GOMAXPROCS.
 func burstDepth(rates []float64) int {
-	if len(rates) == 0 {
-		return 0
-	}
 	slices.Sort(rates)
 	return int(rates[len(rates)*9/10] * float64(overlapMicros) / 1e6)
 }
 
-// resize moves cur towards the demand implied by depth. Raising GOMAXPROCS
-// raises the fault rate that measured the demand in the first place, so acting
-// on each sample makes the loop ring: only ratchet up, and step down a slot at a
-// time once demand has stayed low for a while.
-func resize(cur, base, depth, lowFor int, logger log.Logger) (int, int) {
+func resize(cur, base, depth int, logger log.Logger) int {
 	want := min(base+depth, base*maxRatio)
-	switch {
-	case want > cur:
-		lowFor = 0
-	case want < cur:
-		lowFor++
-		if lowFor < decayPeriods {
-			return cur, lowFor
-		}
-		lowFor, want = 0, cur-1
-	default: // demand matches the current size, which is not low demand
-		return cur, 0
+	// GOMAXPROCS stops the world, so ignore single-slot jitter.
+	if want >= cur-1 && want <= cur+1 {
+		return cur
 	}
 	runtime.GOMAXPROCS(want)
 	logger.Info("[autoprocs] resized", "from", cur, "to", want, "burstDepth", depth)
-	return want, lowFor
+	return want
 }

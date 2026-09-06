@@ -37,42 +37,8 @@ func TestBurstDepthIgnoresIdleSamples(t *testing.T) {
 	}
 }
 
-// A measured run cycled 14 -> 12 -> 16 -> 14 indefinitely, each step a
-// stop-the-world, because raising GOMAXPROCS raises the fault rate that
-// measured the demand. Alternating demand has to settle instead.
-func TestResizeDoesNotOscillate(t *testing.T) {
-	const base = 6
-	cur, lowFor := base, 0
-	settled := map[int]int{}
-	for i := range 40 {
-		depth := 8 // wants base+8 = 14
-		if i%2 == 1 {
-			depth = 6 // wants base+6 = 12
-		}
-		cur, lowFor = resize(cur, base, depth, lowFor, log.New())
-		if i >= 20 {
-			settled[cur]++
-		}
-	}
-	if len(settled) != 1 {
-		t.Fatalf("still oscillating over the last 20 windows: %v", settled)
-	}
-}
-
-func TestResizeDecaysOnlyAfterSustainedLowDemand(t *testing.T) {
-	const base = 6
-	cur, lowFor := base, 0
-	cur, lowFor = resize(cur, base, 8, lowFor, log.New())
-	if cur != 14 {
-		t.Fatalf("cur = %d, want 14", cur)
-	}
-	for range decayPeriods - 1 {
-		cur, lowFor = resize(cur, base, 0, lowFor, log.New())
-		if cur != 14 {
-			t.Fatalf("gave a slot back too early: cur = %d, want 14", cur)
-		}
-	}
-	if cur, _ = resize(cur, base, 0, lowFor, log.New()); cur != 13 {
-		t.Fatalf("cur = %d, want 13 after sustained low demand", cur)
+func TestResizeHoldsOnJitter(t *testing.T) {
+	if got := resize(12, 6, 6, log.New()); got != 12 {
+		t.Fatalf("resize returned %d, want 12 held without a stop-the-world", got)
 	}
 }

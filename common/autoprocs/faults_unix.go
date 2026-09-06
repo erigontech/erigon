@@ -14,15 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build linux
+//go:build unix
 
 package autoprocs
 
 import "golang.org/x/sys/unix"
 
 // majorFaults is the process-wide major fault count. getrusage is one syscall,
-// which matters because this is sampled at 100Hz. Rusage.Majflt is int32 on
-// 32-bit Linux and int64 elsewhere, hence the conversion.
+// which matters because this is sampled at 100Hz. Rusage.Majflt widens from
+// int32 to int64 depending on platform, hence the conversion.
 func majorFaults() (int64, bool) {
 	var ru unix.Rusage
 	if err := unix.Getrusage(unix.RUSAGE_SELF, &ru); err != nil {
