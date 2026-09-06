@@ -21,17 +21,8 @@ func segInfo(ctx context.Context, cliCtx *cli.Command) error {
 
 	// Compression settings
 	var compression seg.FileCompression
-	switch compress := cliCtx.String("compress"); compress {
-	case "none":
-		compression = seg.CompressNone
-	case "keys":
-		compression = seg.CompressKeys
-	case "values":
-		compression = seg.CompressVals
-	case "all":
-		compression = seg.CompressKeys | seg.CompressVals
-	default:
-		return errors.New("invalid compression type: " + compress)
+	if err := compression.FromString(cliCtx.String("compress")); err != nil {
+		return err
 	}
 
 	// Opens datadir/file

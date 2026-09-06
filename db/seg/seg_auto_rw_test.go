@@ -110,3 +110,18 @@ func TestNextUncompressedCapacityBound(t *testing.T) {
 	}
 	require.False(t, g.HasNext())
 }
+
+func TestFileCompressionFromString(t *testing.T) {
+	for s, want := range map[string]FileCompression{
+		"": CompressNone, "none": CompressNone,
+		"k": CompressKeys, "keys": CompressKeys,
+		"v": CompressVals, "values": CompressVals,
+		"kv": CompressKeys | CompressVals, "all": CompressKeys | CompressVals,
+	} {
+		var c FileCompression
+		require.NoError(t, c.FromString(s), s)
+		require.Equal(t, want, c, s)
+	}
+	var c FileCompression
+	require.Error(t, c.FromString("nope"))
+}
