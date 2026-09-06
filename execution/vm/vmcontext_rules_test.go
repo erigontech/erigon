@@ -19,6 +19,7 @@ package vm_test
 import (
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -42,9 +43,13 @@ func TestGetVMContextHandsOutARulesSnapshot(t *testing.T) {
 }
 
 func TestGetVMContextHandsOutADeepRulesSnapshot(t *testing.T) {
-	cfg := *chain.AllProtocolChanges
-	cfg.DisabledEIPs = []int{170}
-	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, &cfg, vm.Config{})
+	cfg := &chain.Config{
+		ChainID:             uint256.NewInt(1337),
+		HomesteadBlock:      common.NewUint64(0),
+		SpuriousDragonBlock: common.NewUint64(0),
+		DisabledEIPs:        []int{170},
+	}
+	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, cfg, vm.Config{})
 
 	live := evm.ChainRules()
 	require.NotNil(t, live.ChainID, "the fixture must carry a chain id, or the mutation below proves nothing")
