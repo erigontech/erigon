@@ -17,16 +17,21 @@
 package execctx
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
+const maxLentCodeBuf = 256 * 1024
+
 type stateGetter struct {
-	sd   *SharedDomains
-	tx   kv.TemporalTx
-	view cache.ReadView
-	m    kv.GetLatestMetrics
+	sd      *SharedDomains
+	tx      kv.TemporalTx
+	view    cache.ReadView
+	m       kv.GetLatestMetrics
+	codeBuf []byte
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
@@ -41,7 +46,9 @@ func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptio
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return g.sd.getCode(g.tx, g.view, addr, txNum)
+	code, ok, err := g.sd.getCode(g.tx, g.view, addr, txNum, g.codeBuf)
+	g.codeBuf = slices.Grow(g.codeBuf[:0], min(len(code), maxLentCodeBuf))
+	return code, ok, err
 }
 
 func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
