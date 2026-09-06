@@ -49,12 +49,15 @@ func segInfo(ctx context.Context, cliCtx *cli.Command) error {
 	g := seg.MakeGetter()
 	sizes := make([]int, 0, seg.Count())
 	i := 0
-	var w []byte
+	// buf holds only words Next decoded into. A word from NextUncompressed is a
+	// slice of the read-only mapping, and feeding it back would decode into the file.
+	var w, buf []byte
 	compressedKeys := compress == "all" || compress == "keys"
 	compressedValues := compress == "all" || compress == "values"
 	for g.HasNext() {
 		if (i%2 == 0 && compressedKeys) || (i%2 == 1 && compressedValues) {
-			w, _ = g.Next(w[:0])
+			w, _ = g.Next(buf[:0])
+			buf = w
 		} else {
 			w, _ = g.NextUncompressed()
 		}
