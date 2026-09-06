@@ -739,9 +739,14 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
-		// Discard the block overlay — it may contain the bad block's data.
-		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-			e.currentContext.BlockOverlay().Close()
+		// Discard the block overlay — it holds the bad block's data, which
+		// would otherwise be flushed wholesale into the next successful
+		// FCU's overlay. CloseBlockOverlay swaps the atomic to nil; closing
+		// the overlay in place does not, so InsertBlocks finds it non-nil
+		// and keeps appending to it (and MemoryMutation.Close is a no-op on
+		// the memStore data either way).
+		if e.currentContext != nil {
+			e.currentContext.CloseBlockOverlay()
 		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err

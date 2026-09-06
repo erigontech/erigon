@@ -689,11 +689,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			e.logger.Warn("bad forkchoice", "head", headHash, "headBlock", headNum, "hash", blockHash, "hashBlockNum", hashBlockNum)
 		}
-		currentContext.Close()
-		currentContext = nil
-		if e.fcuBackgroundCommit {
-			e.closeModuleContext()
-		}
+		teardownOverlay()
+		// The cycle is dead, so the module's cached context goes with the
+		// local one. Gating this on fcuBackgroundCommit — false by default —
+		// left the field holding the rejected block's data in production,
+		// which the next successful FCU then flushed wholesale into its own
+		// overlay and committed.
+		e.closeModuleContext()
 	} else {
 		status = ExecutionStatusSuccess
 		// Update forks...
