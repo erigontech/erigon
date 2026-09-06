@@ -18,6 +18,8 @@ package requests
 
 import (
 	"fmt"
+
+	"github.com/erigontech/erigon/common"
 )
 
 type EthTxPool struct {
@@ -79,4 +81,30 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 func (req *requestGenerator) txpoolContent() (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
 	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, req.reqID)
+}
+
+// TxpoolPendingHashesFrom returns the hashes the pool holds for address in its
+// pending subpool. A transaction the pool accepted may still sit in queued,
+// where block building will not pick it up, so acceptance alone is not enough
+// to assert that the next block must contain it.
+func (reqGen *requestGenerator) TxpoolPendingHashesFrom(address common.Address) (map[common.Hash]struct{}, error) {
+	var b struct {
+		CommonResponse
+		Result map[string]map[string]struct {
+			Hash common.Hash `json:"hash"`
+		} `json:"result"`
+	}
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x"],"id":%d}`
+	body := fmt.Sprintf(template, Methods.TxpoolContentFrom, address, reqGen.reqID)
+	if res := reqGen.rpcCallJSON(Methods.TxpoolContentFrom, body, &b); res.Err != nil {
+		return nil, fmt.Errorf("failed to fetch txpool content: %w", res.Err)
+	}
+	if b.Error != nil {
+		return nil, fmt.Errorf("txpool_contentFrom rpc failed: %w", b.Error)
+	}
+	hashes := make(map[common.Hash]struct{}, len(b.Result["pending"]))
+	for _, txn := range b.Result["pending"] {
+		hashes[txn.Hash] = struct{}{}
+	}
+	return hashes, nil
 }

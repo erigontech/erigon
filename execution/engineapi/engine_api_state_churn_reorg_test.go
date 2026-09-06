@@ -271,6 +271,7 @@ func applyStateChurnPoke(
 	t.Helper()
 	txn, err := churn.Poke(transactOpts, big.NewInt(seed))
 	require.NoError(t, err)
+	require.NoError(t, eat.TxnInclusionVerifier.WaitForPending(ctx, transactOpts.From, txn.Hash()))
 	block, err := eat.MockCl.BuildCanonicalBlock(ctx)
 	require.NoError(t, err)
 	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
@@ -303,6 +304,7 @@ func churnAndAssert(
 			}
 			return err == nil
 		}, 30*time.Second, 100*time.Millisecond, "poke submission did not settle")
+		require.NoError(t, eat.TxnInclusionVerifier.WaitForPending(ctx, transactOpts.From, txn.Hash()))
 		block, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
 		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))

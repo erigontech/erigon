@@ -140,3 +140,30 @@ type OrderedInclusion struct {
 	TxnHash  common.Hash
 	TxnIndex uint64
 }
+
+// WaitForPending blocks until the pool holds hash in its pending subpool for
+// sender. A transaction the pool accepted can still sit in queued while the
+// pool catches up with a new head, and block building selects only pending, so
+// building immediately after a successful submission can produce a block
+// without it.
+func (v TxnInclusionVerifier) WaitForPending(
+	ctx context.Context,
+	sender common.Address,
+	hash common.Hash,
+) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		pending, err := v.rpcApiClient.TxpoolPendingHashesFrom(sender)
+		if err == nil {
+			if _, ok := pending[hash]; ok {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("txn %s not pending in pool: %w", hash, ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
