@@ -21,14 +21,13 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
-	"syscall"
+	"slices"
 	"time"
 
-	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v3"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	nodecli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/logging"
@@ -48,28 +48,42 @@ import (
 // during auto-discovery.
 var defaultRPCPorts = []uint{8545, 8546, 8547}
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+var (
+	rpcURLFlag = cli.StringFlag{
+		Name:  "rpc.url",
+		Usage: "Erigon JSON-RPC endpoint URL",
+		Value: "http://127.0.0.1:8545",
 	}
-}
+	portFlag = cli.UintFlag{
+		Name:  "port",
+		Usage: "Erigon JSON-RPC port (shorthand for --rpc.url=http://127.0.0.1:{port})",
+	}
+	dataDirFlag = flags.DirectoryFlag{
+		Name:  "datadir",
+		Usage: "Erigon data directory (enables direct DB access mode)",
+	}
+	privAPIFlag = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "Erigon gRPC private API address (used with --datadir)",
+		Value: "127.0.0.1:9090",
+	}
+	transportFlag = cli.StringFlag{
+		Name:  "transport",
+		Usage: "MCP transport: 'stdio' or 'http' ('sse' is a deprecated alias of 'http')",
+		Value: "stdio",
+	}
+	sseAddrFlag = cli.StringFlag{
+		Name:  "sse.addr",
+		Usage: "HTTP listen address (when transport=http)",
+		Value: "127.0.0.1:8553",
+	}
+	logDirFlag = cli.StringFlag{
+		Name:  "log.dir",
+		Usage: "Erigon log directory (overrides datadir-based detection)",
+	}
+)
 
-func run() error {
-	var (
-		rpcURL    string
-		port      uint
-		dataDir   string
-		transport string
-		sseAddr   string
-		logDir    string
-		privAPI   string
-	)
-
-	rootCmd := &cobra.Command{
-		Use:   "mcp",
-		Short: "Standalone MCP server for Erigon",
-		Long: `MCP (Model Context Protocol) server for Erigon.
+const longDescription = `MCP (Model Context Protocol) server for Erigon.
 
 Three connection modes (in priority order):
 
@@ -103,81 +117,87 @@ Examples:
   mcp --datadir /data/erigon --private.api.addr 127.0.0.1:9090
 
   # HTTP transport (streamable HTTP + SSE):
-  mcp --port 8545 --transport http --sse.addr 127.0.0.1:8553`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			logger := debug.SetupCobra(cmd, "mcp")
+  mcp --port 8545 --transport http --sse.addr 127.0.0.1:8553`
 
-			// Determine log directory.
-			if logDir == "" && dataDir != "" {
-				logDir = filepath.Join(dataDir, "logs")
-			}
+func main() {
+	app := nodecli.NewApp("Standalone MCP server for Erigon")
+	app.Name = "mcp"
+	app.UsageText = "mcp [flags]"
+	app.Description = longDescription
+	app.Action = runMCP
+	app.Flags = slices.Concat(
+		[]cli.Flag{&rpcURLFlag, &portFlag, &dataDirFlag, &privAPIFlag, &transportFlag, &sseAddrFlag, &logDirFlag},
+		debug.Flags, utils.MetricFlags, logging.Flags,
+	)
 
-			ctx := cmd.Context()
+	// cancel is owned by ListenSignals; main exits the process, so there is
+	// nothing to release on the way out.
+	ctx, cancel := context.WithCancel(context.Background())
+	go debug.ListenSignals(cancel, log.Root())
 
-			// --- Mode 1: Direct datadir (rpcdaemon-style) ---
-			if dataDir != "" && !cmd.Flags().Changed("rpc.url") && port == 0 {
-				err := runDatadirMode(ctx, logger, dataDir, privAPI, logDir, transport, sseAddr)
-				if err != nil {
-					return fmt.Errorf("datadir mode failed: %w (use --rpc.url to connect via JSON-RPC instead)", err)
-				}
-				return nil
-			}
+	if err := app.Run(ctx, os.Args); err != nil {
+		os.Exit(1) // fallback: NewApp's ExitErrHandler normally prints and exits first
+	}
+}
 
-			// --- Mode 2/3: JSON-RPC proxy ---
-			url := rpcURL
-			switch {
-			case port > 0:
-				url = fmt.Sprintf("http://127.0.0.1:%d", port)
-			case !cmd.Flags().Changed("rpc.url"):
-				// Only probe when the user named no endpoint at all; discovery
-				// must never override an explicit --rpc.url.
-				if discovered := autoDiscover(ctx, logger); discovered != "" {
-					url = discovered
-				}
-			}
-
-			client, err := rpc.Dial(url, logger)
-			if err != nil {
-				return fmt.Errorf("failed to connect to Erigon at %s: %w", url, err)
-			}
-			defer client.Close()
-
-			// Verify connectivity (non-fatal).
-			var blockNum string
-			if err := client.CallContext(ctx, &blockNum, "eth_blockNumber"); err != nil {
-				logger.Warn("[MCP] Could not reach Erigon RPC — starting anyway", "url", url, "err", err)
-			} else {
-				logger.Info("[MCP] Connected to Erigon", "url", url, "block", blockNum)
-			}
-
-			srv := mcpserver.NewErigonMCPServer(client, logDir, false)
-			return serve(ctx, srv, transport, sseAddr, logger)
-		},
+func runMCP(ctx context.Context, cmd *cli.Command) error {
+	// Deferred here, not in a cli After hook: NewApp's ExitErrHandler exits the
+	// process on an Action error before urfave unwinds After, so profiles
+	// started by --pprof.cpuprofile / --trace would never be flushed.
+	logger, _, _, _, err := debug.SetupWithPrefix(ctx, cmd, "mcp", true /* rootLogger */)
+	defer debug.Exit()
+	if err != nil {
+		return err
 	}
 
-	// Register debug, logging, and metric flags required by debug.SetupCobra().
-	// This mirrors what rpcdaemon does in cli.RootCommand().
-	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
+	dataDir := cmd.String(dataDirFlag.Name)
+	transport := cmd.String(transportFlag.Name)
+	sseAddr := cmd.String(sseAddrFlag.Name)
+	port := cmd.Uint(portFlag.Name)
 
-	rootCmd.Flags().StringVar(&rpcURL, "rpc.url", "http://127.0.0.1:8545", "Erigon JSON-RPC endpoint URL")
-	rootCmd.Flags().UintVar(&port, "port", 0, "Erigon JSON-RPC port (shorthand for --rpc.url=http://127.0.0.1:{port})")
-	flags.DirVar(rootCmd.Flags(), &dataDir, "datadir", "", "Erigon data directory (enables direct DB access mode)")
-	rootCmd.Flags().StringVar(&privAPI, "private.api.addr", "127.0.0.1:9090", "Erigon gRPC private API address (used with --datadir)")
-	rootCmd.Flags().StringVar(&transport, "transport", "stdio", "MCP transport: 'stdio' or 'http' ('sse' is a deprecated alias of 'http')")
-	rootCmd.Flags().StringVar(&sseAddr, "sse.addr", "127.0.0.1:8553", "HTTP listen address (when transport=http)")
-	rootCmd.Flags().StringVar(&logDir, "log.dir", "", "Erigon log directory (overrides datadir-based detection)")
+	logDir := cmd.String(logDirFlag.Name)
+	if logDir == "" && dataDir != "" {
+		logDir = filepath.Join(dataDir, "logs")
+	}
 
-	rootCtx, rootCancel := context.WithCancel(context.Background())
-	defer rootCancel()
+	// --- Mode 1: Direct datadir (rpcdaemon-style) ---
+	if dataDir != "" && !cmd.IsSet(rpcURLFlag.Name) && port == 0 {
+		err := runDatadirMode(ctx, logger, dataDir, cmd.String(privAPIFlag.Name), logDir, transport, sseAddr)
+		if err != nil {
+			return fmt.Errorf("datadir mode failed: %w (use --rpc.url to connect via JSON-RPC instead)", err)
+		}
+		return nil
+	}
 
-	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		<-sigCh
-		rootCancel()
-	}()
+	// --- Mode 2/3: JSON-RPC proxy ---
+	url := cmd.String(rpcURLFlag.Name)
+	switch {
+	case port > 0:
+		url = fmt.Sprintf("http://127.0.0.1:%d", port)
+	case !cmd.IsSet(rpcURLFlag.Name):
+		// Only probe when the user named no endpoint at all; discovery
+		// must never override an explicit --rpc.url.
+		if discovered := autoDiscover(ctx, logger); discovered != "" {
+			url = discovered
+		}
+	}
 
-	return rootCmd.ExecuteContext(rootCtx)
+	client, err := rpc.Dial(url, logger)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Erigon at %s: %w", url, err)
+	}
+	defer client.Close()
+
+	// Verify connectivity (non-fatal).
+	var blockNum string
+	if err := client.CallContext(ctx, &blockNum, "eth_blockNumber"); err != nil {
+		logger.Warn("[MCP] Could not reach Erigon RPC — starting anyway", "url", url, "err", err)
+	} else {
+		logger.Info("[MCP] Connected to Erigon", "url", url, "block", blockNum)
+	}
+
+	srv := mcpserver.NewErigonMCPServer(client, logDir, false)
+	return serve(ctx, srv, transport, sseAddr, logger)
 }
 
 // serve starts the MCP server in the chosen transport mode.
@@ -224,12 +244,10 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	ctx, rootCancel := context.WithCancel(ctx)
 	defer rootCancel()
 
-	// Build Dirs from the datadir path. Use Open() (not New()) because MCP is
-	// read-only and must not create directories in the datadir.
-	// This is the root cause of the "salt files missing" error: without cfg.Dirs,
-	// CheckSaltFilesExist receives zero-valued Dirs with empty Snap path, so it
-	// looks for salt-blocks.txt in the current working directory instead of
-	// <datadir>/snapshots/.
+	// Use Open() (not New()) because MCP is read-only and must not create
+	// directories in the datadir. Without cfg.Dirs, CheckSaltFilesExist gets
+	// zero-valued Dirs and looks for salt-blocks.txt in the working directory
+	// instead of <datadir>/snapshots/.
 	dirs := datadir.Open(dataDir)
 
 	cfg := &httpcfg.HttpCfg{
@@ -248,7 +266,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	}
 
 	db, backend, txPool, mining, stateCache, blockReader, engine, ff, err :=
-		cli.RemoteServices(ctx, cfg, logger, rootCancel)
+		rpcdaemoncli.RemoteServices(ctx, cfg, logger, rootCancel)
 	if err != nil {
 		return fmt.Errorf("failed to initialize datadir services: %w", err)
 	}
