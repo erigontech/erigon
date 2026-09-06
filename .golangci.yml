@@ -125,25 +125,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          db/datadir\
-          |db/datadir/reset\
-          |db/datastruct/btindex\
-          |db/datastruct/fusefilter\
-          |db/downloader\
-          |db/downloader/webseeds\
-          |db/etl\
-          |db/kv/kvcache\
-          |db/kv/mdbx\
-          |db/kv/mdbx/mdbxtest\
-          |db/kv/membatchwithdb\
-          |db/rawdb\
-          |db/recsplit\
-          |db/recsplit/eliasfano32\
-          |db/seg\
-          |db/snapshotsync\
-          |db/snapshotsync/freezeblocks\
-          |db/test\
-          |diagnostics/diaglib\
+          diagnostics/diaglib\
           |diagnostics/diskutils\
           |execution/commitment\
           |execution/commitment/trie\
