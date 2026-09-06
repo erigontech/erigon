@@ -35,6 +35,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 
+	"github.com/erigontech/erigon/common/autoprocs"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/fdlimit"
@@ -143,6 +144,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	flags := cmd.Flags()
 
 	logger := logging.SetupLoggerCmd(filePrefix, cmd)
+	autoprocs.Start(cmd.Context(), logger)
 	SetGoMemLimit(logger)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
@@ -244,6 +246,7 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	autoprocs.Start(nodeCtx, logger)
 	SetGoMemLimit(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
@@ -391,9 +394,7 @@ func RaiseFdLimit() {
 	}
 }
 
-var (
-	metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
-)
+var metricsConfigs = []string{metricsEnabledFlag.Name, metricsAddrFlag.Name, metricsPortFlag.Name}
 
 func SetCobraFlagsFromConfigFile(cmd *cobra.Command) error {
 	flags := cmd.Flags()
