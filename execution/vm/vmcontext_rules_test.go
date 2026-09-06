@@ -41,6 +41,26 @@ func TestGetVMContextHandsOutARulesSnapshot(t *testing.T) {
 		"OnTxStart runs before execution, so a tracer holding the VMContext must not be able to clear a live fork flag")
 }
 
+func TestGetVMContextHandsOutADeepRulesSnapshot(t *testing.T) {
+	cfg := *chain.AllProtocolChanges
+	cfg.DisabledEIPs = []int{170}
+	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, &cfg, vm.Config{})
+
+	live := evm.ChainRules()
+	require.NotNil(t, live.ChainID, "the fixture must carry a chain id, or the mutation below proves nothing")
+	require.Equal(t, []int{170}, live.DisabledEIPs, "the fixture must carry a disabled eip, or the mutation below proves nothing")
+	chainID := live.ChainID.Clone()
+
+	env := evm.GetVMContext()
+	env.Rules.ChainID.SetUint64(0xdead)
+	env.Rules.DisabledEIPs[0] = 161
+
+	require.Equal(t, chainID, evm.ChainRules().ChainID,
+		"CHAINID pushes evm.ChainRules().ChainID, so a tracer must not reach it through the snapshot")
+	require.Equal(t, []int{170}, evm.ChainRules().DisabledEIPs,
+		"Rules.IsEIPEnabled gates forks on DisabledEIPs, so the snapshot must not share its backing array")
+}
+
 func TestActivePrecompilesFromContextRebuildsRulesWhenUnset(t *testing.T) {
 	modexp := accounts.InternAddress(common.BytesToAddress([]byte{0x05}))
 

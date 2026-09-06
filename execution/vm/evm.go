@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -884,6 +885,10 @@ func (evm *EVM) IntraBlockState() *state.IntraBlockState {
 // to the tracers.
 func (evm *EVM) GetVMContext() *tracing.VMContext {
 	rules := *evm.chainRules
+	if rules.ChainID != nil {
+		rules.ChainID = rules.ChainID.Clone()
+	}
+	rules.DisabledEIPs = slices.Clone(rules.DisabledEIPs)
 	return &tracing.VMContext{
 		Coinbase:        evm.Context.Coinbase,
 		BlockNumber:     evm.Context.BlockNumber,
