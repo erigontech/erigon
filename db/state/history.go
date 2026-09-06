@@ -653,7 +653,21 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	}
 	defer keysCursor.Close()
 
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
+	// baseTxNum is both the multiencseq encoding base and the start of the
+	// walk: this collation covers exactly [baseTxNum, txTo).
+	//
+	// It must equal the base the reader derives from the file NAME via
+	// parseV4VBaseName/parseV4EFBaseName, so it comes from
+	// historyRetireDestPaths — step_start for a standard aligned retire,
+	// v4 #1's endTxN for a v4 tail. A tail's base sits mid-step, above the
+	// caller's txFrom; [txFrom, baseTxNum) is already in the v4 #1 file, and
+	// encoding it here underflows txNum-baseTxNum.
+	baseTxNum := retireFromTxN
+	if baseTxNum < txFrom || baseTxNum >= txTo {
+		return HistoryCollation{}, fmt.Errorf("%s retire base %d outside collated range [%d, %d)", h.FilenameBase, baseTxNum, txFrom, txTo)
+	}
+
+	binary.BigEndian.PutUint64(txKey[:], baseTxNum)
 	collector := etl.NewCollectorWithAllocator(h.FilenameBase+".collate.hist", h.dirs.Tmp, etl.SmallSortableBuffers, h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 	collector.SortAndFlushInBackground(false)
@@ -693,13 +707,6 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		defer cd.Close()
 	}
 
-	// baseTxNum is the multiencseq encoding base for THIS retire output.
-	// It MUST equal the reader's seq.Reset base — Commit A derives that
-	// from FilesItem.startTxNum which parseV4VBaseName/parseV4EFBaseName
-	// extract from the file NAME. historyRetireDestPaths gives the same
-	// number, so pass it through: step_start for a standard aligned
-	// retire, tail_start (v4 #1's endTxN) for a v4 tail retire.
-	baseTxNum := retireFromTxN
 	var (
 		keyBuf = make([]byte, 0, 256)
 		numBuf = make([]byte, 8)

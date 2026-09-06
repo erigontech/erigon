@@ -51,6 +51,10 @@ import (
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
+	return testDbAndHistoryOfStep(tb, largeValues, 16, logger)
+}
+
+func testDbAndHistoryOfStep(tb testing.TB, largeValues bool, aggregationStep uint64, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
@@ -67,7 +71,6 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.IiCfg.Compression = seg.CompressNone
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
-	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
@@ -2637,4 +2640,58 @@ func TestHistory_vAccessorPathForItem_StepAlignedReturnsStepPath(t *testing.T) {
 	got := h.vAccessorPathForItem(item)
 	require.Contains(t, got, ".3-4.vi",
 		"step-aligned item's .vi must stay at step-form path")
+}
+
+// TestHistoryCollate_V4TailSkipsTxNumsBelowBase pins that a v4-tail
+// collate only encodes txNums at or above its encoding base. The
+// caller passes the step boundary as txFrom, but a v4 tail's base is
+// v4 #1's endTxN — mid-step. Entries in [txFrom, base) belong to the
+// v4 #1 file already on disk; encoding them here underflows
+// txNum-baseTxNum into a ~4.29e9 offset that overruns the EliasFano
+// bit vector, which is sized from the last (small) offset.
+//
+// A key must be touched more than SIMPLE_SEQUENCE_MAX_THRESHOLD times
+// within the step: shorter sequences take multiencseq's simple
+// encoding, which stores the underflowed offset without a bounds
+// check and hides the defect.
+func TestHistoryCollate_V4TailSkipsTxNumsBelowBase(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	db, h := testDbAndHistoryOfStep(t, false, 64, log.New())
+
+	step := kv.Step(1)
+	txFrom, txTo := uint64(step)*h.stepSize, uint64(step+1)*h.stepSize
+	cut := txFrom + 8
+	key := []byte("hot-key-touched-every-txnum")
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	hc := h.beginForTests()
+	defer hc.Close()
+	writer := hc.NewWriter()
+	defer writer.close()
+	for txNum := txFrom; txNum < txTo; txNum++ {
+		require.NoError(t, writer.AddPrevValue(key, txNum, []byte{byte(txNum)}))
+	}
+	require.NoError(t, writer.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+
+	h.dirtyFiles.Set(&FilesItem{startTxNum: txFrom, endTxNum: cut})
+	_, _, base, isV4Tail := h.historyRetireDestPaths(step)
+	require.True(t, isV4Tail)
+	require.Equal(t, cut, base)
+
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	c, err := h.collate(ctx, step, txFrom, txTo, roTx)
+	require.NoError(t, err)
+	defer c.Close()
+
+	require.Equal(t, cut, c.efBaseTxNum,
+		"collation must record the v4-tail base it encoded against")
+	require.Equal(t, int(txTo-cut), c.historyComp.Count(),
+		"v4 tail must collate exactly [base, txTo) — txNums below the base are v4 #1's")
 }
