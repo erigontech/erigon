@@ -30,9 +30,6 @@ import (
 //Reader and Writer - decorators on Getter and Compressor - which
 //can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
-// Maybe in future will add support of io.Reader/Writer interfaces to this decorators
-// Maybe in future will merge decorators into it's parents
-
 type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value

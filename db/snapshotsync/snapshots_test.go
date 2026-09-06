@@ -210,7 +210,7 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
-		s.OpenFolder()
+		require.NoError(s.OpenFolder())
 		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
 		require.Empty(Ranges)
 		// doIndex=false, same rationale as above
@@ -586,7 +586,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.Len(list, 60)
 
 	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
-	dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name()))
+	require.NoError(dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name())))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
 	require.NoError(s.RemoveOverlaps(func(delFiles []string) error {

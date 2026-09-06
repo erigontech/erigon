@@ -642,8 +642,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 		g := dt.reusableReader(i)
 		g.Reset(offset)
 
-		k, _ := g.Next(nil)
-		if !bytes.Equal(filekey, k) { // MPH false-positives protection
+		if g.MatchCmp(filekey) != 0 { // MPH false-positives protection
 			return nil, false, 0, nil
 		}
 		v, _ := g.Next(nil)
