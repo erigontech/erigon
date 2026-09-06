@@ -503,11 +503,26 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
-			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			_, ok := f.GetHeader(currentIteratorRoot)
+			if ok {
+				// dumpSlotFrequency is the sampling rate for states that are
+				// dumped opportunistically; it cannot decide whether a state
+				// exists here. The anchor is the only header-without-block node
+				// and is dumped with forced=true regardless of its slot, so a
+				// walk-back that reaches it must consult the filesystem rather
+				// than infer absence from the slot. Inferring it stranded every
+				// anchor whose slot was not a multiple of the frequency — which
+				// is any finalized checkpoint whose epoch-boundary slot was
+				// missed — and fork choice then failed every slot with no way
+				// back, since the code that refreshes the anchor runs only
+				// after a successful head computation.
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
 					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					return nil, nil
+				}
+				if copyReferencedState == nil {
+					log.Trace("No state on disk for header-only node", "missing", currentIteratorRoot)
 					return nil, nil
 				}
 				continue
