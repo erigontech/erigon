@@ -893,7 +893,9 @@ func (rs *RecSplit) buildOffsetEf() (retErr error) {
 	if err != nil {
 		return fmt.Errorf("mmap offset file: %w", err)
 	}
-	defer mmapHandle1.Unmap()
+	// Discarded, not folded into retErr: an Unmap failure here would trigger the
+	// retErr-triggered cleanup above and discard an offsetEf that finished building correctly.
+	defer func() { _ = mmapHandle1.Unmap() }()
 
 	data := mmapHandle1[:mmapSize]
 	for i := uint64(0); i < rs.keysAdded; i++ {

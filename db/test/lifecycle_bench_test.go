@@ -72,11 +72,11 @@ func newKeyGenerator(rnd *rndGen, nHot, nCold int) *keyGenerator {
 	}
 	for i := range g.hotAddrs {
 		g.hotAddrs[i] = make([]byte, length.Addr)
-		rnd.Read(g.hotAddrs[i])
+		_, _ = rnd.Read(g.hotAddrs[i])
 	}
 	for i := range g.coldAddrs {
 		g.coldAddrs[i] = make([]byte, length.Addr)
-		rnd.Read(g.coldAddrs[i])
+		_, _ = rnd.Read(g.coldAddrs[i])
 	}
 	return g
 }
