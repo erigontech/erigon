@@ -1375,7 +1375,7 @@ func TestBlocksGateReopensWhenOlderBlocksArrive(t *testing.T) {
 	// The verdict is cached for a short TTL, which is what keeps a widening snapshot
 	// set from being read on every request. This test is about the later observation
 	// winning, not about how long the previous one lingers.
-	apis.eth._preMergeDataTTL = 0
+	apis.eth._preMergeData.SetTTL(0)
 
 	gateOnOldBlock := func() error {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)
@@ -1619,7 +1619,7 @@ func TestBlocksGateCachesTheVerdictForAShortWhile(t *testing.T) {
 	dropTransactions(t, apis.rwDB, 1, pruneGatingMergeHeight)
 	require.NoError(t, gateOnOldBlock(), "within the window the remembered verdict answers")
 
-	apis.eth._preMergeDataTTL = 0
+	apis.eth._preMergeData.SetTTL(0)
 	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError, "past the window the datadir is read again")
 }
 
