@@ -158,17 +158,15 @@ jobs:
       #
       # The two retirement paths need different treatment here:
       #
-      #   blocks  the window narrows from 262144 to 100000, a 162144-block move that
-      #           is wider than the 100000-block segment size, so at least one
+      #   blocks  the window narrows from 1100000 to 100000, a 1000000-block move
+      #           that is wider than the 100000-block segment size, so at least one
       #           transactions segment always falls in it. Deterministic, hence
       #           --require-block-retirement.
       #
       #   state   history files span 256 steps (~310000 blocks at mainnet tip
-      #           density), nearly twice the same 162144-block move, so both cutoffs
-      #           usually land inside one file and the mode switch alone retires
-      #           nothing. --distance auto derives a window that puts the cutoff
-      #           between the two newest boundaries instead; a fixed value cannot,
-      #           since the gap is 1, 2, 4 ... steps depending on the merge ladder.
+      #           density), so the mode switch now crosses several file ranges.
+      #           --distance auto still derives a cutoff from the actual file
+      #           boundaries instead of depending on chain density or merge shape.
       - name: Test old file retirement after switching to minimal node
         id: retirement_step
         run: |

@@ -60,6 +60,10 @@ func TestNamedModesKeepAllCommitmentHistory(t *testing.T) {
 	}
 }
 
+func TestFullModeHistoryCoversBlockWindow(t *testing.T) {
+	assert.Equal(t, FullMode.Blocks, FullMode.History)
+}
+
 func TestModeEqualsComparesCommitmentHistory(t *testing.T) {
 	a := Mode{Initialised: true, History: Distance(100), Blocks: Distance(100), CommitmentHistory: Distance(50)}
 	b := a
@@ -89,9 +93,9 @@ func TestModeString_LegacyShapes(t *testing.T) {
 	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	assert.Equal(t, "full(legacy) --prune.distance=100000", legacyFull.String())
 
-	// Pre-EIP-8252 full with the current default history distance (262_144) —
-	// label as plain "full(legacy)" with no override clause.
-	legacyFullCurrentHistory := Mode{Initialised: true, History: Distance(262_144), Blocks: KeepPostMergeBlocksPruneMode}
+	// Pre-EIP-8252 full with the current default history distance — label it as
+	// plain "full(legacy)" with no override clause.
+	legacyFullCurrentHistory := Mode{Initialised: true, History: FullMode.History, Blocks: KeepPostMergeBlocksPruneMode}
 	assert.Equal(t, "full(legacy)", legacyFullCurrentHistory.String())
 
 	// Pre-EIP-8252 blocks mode persisted as {Blocks: KeepAllBlocksPruneMode,
@@ -99,8 +103,7 @@ func TestModeString_LegacyShapes(t *testing.T) {
 	legacyBlocks := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode}
 	assert.Equal(t, "blocks --prune.distance=100000", legacyBlocks.String())
 
-	// Archive with explicit distance overrides (archive_override) stays on the
-	// "archive" base — historical contract preserved.
+	// Archive with explicit distance overrides stays on the "archive" base.
 	archiveOverride := Mode{Initialised: true, History: Distance(400500), Blocks: Distance(100500)}
 	assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", archiveOverride.String())
 }
@@ -506,45 +509,55 @@ func TestEnsureNotChanged_LegacyMinimalNoOp(t *testing.T) {
 	assert.Equal(t, legacy, got, "legacy minimal values must equal current MinimalMode")
 }
 
-func TestEnsureNotChanged_BlocksHistoryBumpRewritesDB(t *testing.T) {
-	// Pre-rescope blocks mode: {KeepAllBlocksPruneMode, Distance(100_000)}.
-	// The new binary's BlocksMode has History=Distance(262_144). The compat
-	// shim should accept the finite→finite History change, return the new mode,
-	// and persist it so the next restart sees no mismatch.
-	_, tx := mdbxtest.NewTestTx(t)
-	legacyBlocks := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode}
-	initStoredMode(t, tx, legacyBlocks)
+func TestEnsureNotChanged_DefaultMigrations(t *testing.T) {
+	previousFull := Mode{
+		Initialised:       true,
+		History:           Distance(262_144),
+		Blocks:            Distance(262_144),
+		CommitmentHistory: KeepAllBlocksPruneMode,
+		Receipts:          KeepAllBlocksPruneMode,
+	}
+	previousBlocks := Mode{
+		Initialised:       true,
+		History:           Distance(262_144),
+		Blocks:            KeepAllBlocksPruneMode,
+		CommitmentHistory: KeepAllBlocksPruneMode,
+		Receipts:          KeepAllBlocksPruneMode,
+	}
+	for _, tc := range []struct {
+		name      string
+		persisted Mode
+		requested Mode
+	}{
+		{
+			name:      "blocks 100k default",
+			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode},
+			requested: BlocksMode,
+		},
+		{
+			name:      "full history-expiry default",
+			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode},
+			requested: FullMode,
+		},
+		{name: "full 262k default", persisted: previousFull, requested: FullMode},
+		{name: "blocks 262k default", persisted: previousBlocks, requested: BlocksMode},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tx := mdbxtest.NewTestTx(t)
+			initStoredMode(t, tx, tc.persisted)
 
-	got, err := EnsureNotChanged(tx, BlocksMode)
-	require.NoError(t, err)
-	assert.Equal(t, BlocksMode, got)
+			got, err := EnsureNotChanged(tx, tc.requested)
+			require.NoError(t, err)
+			assert.Equal(t, tc.requested, got)
 
-	persisted, err := Get(tx)
-	require.NoError(t, err)
-	assert.Equal(t, BlocksMode, persisted, "shim must rewrite the persisted value")
+			persisted, err := Get(tx)
+			require.NoError(t, err)
+			assert.Equal(t, tc.requested, persisted)
+		})
+	}
 }
 
-func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
-	// Pre-rescope full mode: {KeepPostMergeBlocksPruneMode (sentinel), Distance(100_000)}.
-	// New FullMode has Blocks=Distance(262_144). The shim treats this specific
-	// one-way KeepPostMergeBlocksPruneMode→finite transition on Blocks as a
-	// retention-window change so existing full nodes upgrade without operator
-	// intervention. (Frozen .seg files won't actually be deleted until #21306
-	// lands; the config-level transition is still recorded.)
-	_, tx := mdbxtest.NewTestTx(t)
-	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
-	initStoredMode(t, tx, legacyFull)
-
-	got, err := EnsureNotChanged(tx, FullMode)
-	require.NoError(t, err)
-	assert.Equal(t, FullMode, got)
-
-	persisted, err := Get(tx)
-	require.NoError(t, err)
-	assert.Equal(t, FullMode, persisted, "shim must rewrite the persisted value")
-}
-
-func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {
+func TestEnsureNotChanged_BlocksFiniteToHistoryExpiryAccepted(t *testing.T) {
 	// Operator passes --prune.distance.blocks=18446744073709551615 (the
 	// KeepPostMergeBlocksPruneMode magic number) after the auto-upgrade already
 	// rewrote Blocks to a finite distance. The shim accepts this reverse

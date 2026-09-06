@@ -499,7 +499,7 @@ func TestGetMinimumBlocksToDownload_CutoffBelowFrozenBodies(t *testing.T) {
 // pruned, rcache history must follow state history (so download agrees with
 // retirement) while log indexes follow block data; the windows coincide otherwise.
 func TestReceiptsSegmentRetentionCutoff(t *testing.T) {
-	const head = 1_000_000
+	const head = 2_000_000
 	rcacheSeg := "history/v1.0-" + kv.RCacheDomain.String() + ".0-64.v"
 	logIdxSeg := "idx/v1.0-" + kv.LogAddrIdx.String() + ".0-64.ef"
 

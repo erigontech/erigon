@@ -11,9 +11,9 @@ Erigon 3 supports four pruning modes that control how much chain history your no
 
 | **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| <p><a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
+| <p><a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the last 1,100,000 blocks (~5 months at Ethereum mainnet cadence)      | General users, DApp interaction, fastest sync.                                           |
 | [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
-| [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the EIP-8252 window                                | Users needing historical block data for research or indexing.                            |
+| [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the 1,100,000-block window                         | Users needing historical block data for research or indexing.                            |
 | [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
 
 By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
@@ -33,8 +33,8 @@ working within the node's state-history window, just with higher latency.
 `--prune.include-receipts` on its own does **not** extend receipts and logs back to genesis: the receipt cache follows
 the node's state-history window. On an [Archive node](#archive-node) that window is unbounded, so the cache covers the
 whole chain. On a [Full](#full-node), [Minimal](#minimal-node) or [Historical Blocks](#blocks-node) node it is the
-mode's state-history window (262,144 blocks for full and blocks, 100,000 for minimal). To keep the cache in full
-regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
+mode's state-history window (1,100,000 blocks by default for full and blocks, 100,000 for minimal). To keep the cache in
+full regardless of the state-history window, add `--prune.receipts.distance=keep-all`; a finite
 `--prune.receipts.distance=N` keeps it for the latest `N` blocks instead. Either form requires
 `--prune.include-receipts`. Note that this retains the receipt *cache* only — it does not keep the
 log address and topic indexes a filtered `eth_getLogs` needs. See
@@ -60,7 +60,7 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data for the last 1,100,000 blocks. The consensus-layer request window counts slots, with at most one execution block per slot. On Ethereum mainnet, the new distance conservatively covers the `MIN_EPOCHS_FOR_BLOCK_REQUESTS` window of 33,024 epochs (1,056,768 slots) with a 43,232-block margin; missed slots extend the covered time span. Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. The wider window uses more disk as it fills. Fresh syncs also download and process more snapshot history than releases with the previous window, increasing bandwidth, I/O, and sync time. An in-place upgrade does not backfill deleted data. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains.
 
 To keep every post-merge block instead of only the window — pruning pre-merge block data alone — set `--prune.distance.blocks=keep-post-merge`. Decide before the first start: pruning is not reversible, and block data already discarded comes back only by re-syncing.
 
@@ -73,20 +73,20 @@ The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible
 ## Blocks node
 
 The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block
-back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
-blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
+back to genesis — while pruning **state history**. It retains state only within the last 1,100,000 blocks, the same
+state retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
 who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
 paying the disk cost of an archive node's full historical **state**. For full-range **receipts** by block
 (`eth_getBlockReceipts` back to genesis), add
 `--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
-follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
+follows the state-history window (the last 1,100,000 blocks), and without it receipts are re-derived from state history
 within that same window.
 
 `keep-all` does **not** extend filtered `eth_getLogs` back to genesis. It retains the receipt-cache domain only; the
 log address and topic indexes that a filtered query needs are standalone inverted indexes, retired against the general
 state-history cutoff (`AggregatorRoTx.Retire` applies `RetireCutoffs.Default` to them, and only `RCacheDomain` carries
-the `keep-all` override). An address- or topic-filtered `eth_getLogs` can therefore miss matches older than 262,144
-blocks even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
+the `keep-all` override). An address- or topic-filtered `eth_getLogs` is therefore limited to the retained state-history
+window, even with the cache retained. Note that dropping the filters does not merely widen the query — it changes the
 read path: with neither `address` nor `topics` set, `applyFiltersV3` consults no bitmap and falls back to a plain
 `stream.Range` over the retained cache, so an unfiltered range query is unaffected. For those older ranges, either query
 by block with `eth_getBlockReceipts` and filter client-side, or use an [Archive node](#archive-node), whose unbounded
