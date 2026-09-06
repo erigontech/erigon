@@ -35,6 +35,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 
+	"github.com/erigontech/erigon/common/autoprocs"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/fdlimit"
@@ -243,6 +244,7 @@ func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logg
 	RaiseFdLimit()
 
 	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	autoprocs.Start(nodeCtx, logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
 		return logger, tracer, nil, nil, err
