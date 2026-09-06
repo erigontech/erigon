@@ -113,6 +113,11 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		}
 	}
 
+	// Set when the caller asked for `pending` and this node has a pre-executed frontier to serve it
+	// from. Held across the range resolution so the indexed scan can stop at the executed head while
+	// the pre-confirmed block's own logs are appended afterwards.
+	var preconfirmed *rpchelper.Preconfirmed
+
 	if crit.BlockHash != nil {
 		if crit.FromBlock != nil || crit.ToBlock != nil {
 			return nil, &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
@@ -136,6 +141,18 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			return nil, err
 		}
 
+		// Resolve up front whether this is a `pending` query this node can actually serve, because the
+		// answer changes what counts as "into the future" for BOTH ends of the range. A wallet
+		// following the frontier polls with a fromBlock it has already advanced past the canonical
+		// head, so checking only toBlock would refuse exactly the steady state.
+		highest := latest
+		if crit.ToBlock != nil && crit.ToBlock.Int64() == int64(rpc.PendingBlockNumber) {
+			if pre, ok := rpchelper.PreconfirmedView(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber), api.filters); ok {
+				preconfirmed = pre
+				highest = pre.Number
+			}
+		}
+
 		begin = latest
 		if crit.FromBlock != nil {
 			fromBlock := crit.FromBlock.Int64()
@@ -149,7 +166,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 
-			if begin > latest {
+			if begin > highest {
 				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
 			}
 		}
@@ -166,10 +183,27 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				}
 			}
 
+			// `pending` is not a range into the future on a node that pre-executes: that block HAS
+			// executed, its logs are real, and they are simply not in the index a normal lookup reads.
+			// Refusing it here made pre-confirmation unreachable through the standard interface, so
+			// every client that wanted it needed a bespoke RPC — the wrong shape for a thing eth_getLogs
+			// is supposed to answer. The indexed scan stops at the executed head; the pre-confirmed
+			// block's own logs are appended from its receipts below.
 			if end > latest {
-				return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+				if preconfirmed == nil || end > preconfirmed.Number {
+					return nil, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+				}
+				end = latest
 			}
 		}
+	}
+
+	// A caller polling `pending` from a cursor it already advanced past the executed head asks for an
+	// empty canonical range and the pre-confirmed block. That is a coherent question, not a malformed
+	// one — and it is the STEADY STATE for anything following the frontier, so refusing it would make
+	// pending unusable exactly when it is working.
+	if preconfirmed != nil && begin > end {
+		return preconfirmedLogs(preconfirmed, crit)
 	}
 
 	if end < begin {
@@ -208,9 +242,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 
-	rpcLogs := make(types.RPCLogs, len(erigonLogs))
-	for i, log := range erigonLogs {
-		rpcLogs[i] = &types.RPCLog{
+	rpcLogs := make(types.RPCLogs, 0, len(erigonLogs))
+	for _, log := range erigonLogs {
+		rpcLogs = append(rpcLogs, &types.RPCLog{
 			Log: types.Log{
 				Address:     log.Address,
 				Topics:      log.Topics,
@@ -223,10 +257,72 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				Removed:     log.Removed,
 			},
 			BlockTimestamp: log.Timestamp,
+		})
+	}
+
+	if preconfirmed != nil {
+		preLogs, err := preconfirmedLogs(preconfirmed, crit)
+		if err != nil {
+			return nil, err
 		}
+		rpcLogs = append(rpcLogs, preLogs...)
 	}
 
 	return rpcLogs, nil
+}
+
+// preconfirmedLogs returns the matching logs of the PRE-EXECUTED block, in body order.
+//
+// They come off the receipts the execution already produced, so nothing is re-run and nothing is
+// guessed. A caller that asked for `pending` is asking for exactly this: the frontier the node has
+// executed but not yet committed. It is the caller's business that these can still be dropped — the
+// same as any unconfirmed data — which is why they carry the pre-confirmed block's own number and
+// hash rather than being passed off as canonical.
+func preconfirmedLogs(pre *rpchelper.Preconfirmed, crit filters.FilterCriteria) (types.RPCLogs, error) {
+	out := types.RPCLogs{}
+	txs, receipts, ok := pre.Body()
+	if !ok {
+		// Mid-round: the block's output is not coherent to serve yet. Not an error — the caller asked
+		// for what has executed, and right now that is the canonical part alone. Empty, never nil: a
+		// JSON null here is not a log filter result, and every client would have to special-case it.
+		return out, nil
+	}
+
+	all := make(types.Logs, 0, len(receipts))
+	for _, r := range receipts {
+		if r == nil {
+			continue
+		}
+		all = append(all, r.Logs...)
+	}
+
+	addrs := make(map[common.Address]struct{}, len(crit.Addresses))
+	for _, a := range crit.Addresses {
+		addrs[a] = struct{}{}
+	}
+	matched := all.Filter(addrs, crit.Topics, 0)
+
+	out = make(types.RPCLogs, 0, len(matched))
+	for _, lg := range matched {
+		txHash := lg.TxHash
+		if txHash == (common.Hash{}) && int(lg.TxIndex) < len(txs) {
+			txHash = txs[lg.TxIndex].Hash()
+		}
+		out = append(out, &types.RPCLog{
+			Log: types.Log{
+				Address:     lg.Address,
+				Topics:      lg.Topics,
+				Data:        lg.Data,
+				BlockNumber: hexutil.Uint64(pre.Number),
+				TxHash:      txHash,
+				TxIndex:     lg.TxIndex,
+				BlockHash:   pre.Hash,
+				Index:       lg.Index,
+				Removed:     false,
+			},
+		})
+	}
+	return out, nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
