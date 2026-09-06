@@ -743,7 +743,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	}
 
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
-	if s.blockReader.FrozenBlocks() == 0 {
+	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
 		if err != nil {
