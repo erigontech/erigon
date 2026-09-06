@@ -100,7 +100,7 @@ func (e *ExecModule) setHeadModeB(ctx context.Context, tx kv.TemporalRwTx, targe
 		return fmt.Errorf("SetHead mode B: %w", err)
 	}
 
-	if err := e.ensureQuiescent(ctx); err != nil {
+	if err := e.waitForQuiescence(ctx); err != nil {
 		// Quiescence failure: Unwind never ran, nothing was staged,
 		// AbortUnwind is a no-op but called for symmetry.
 		e.unwinder.AbortUnwind()
@@ -217,25 +217,36 @@ func (e *ExecModule) quiesceRetireIfPastTarget(targetBlock uint64) error {
 	return nil
 }
 
-// ensureQuiescent clears the cached SharedDomains so mode B's DB reset
-// cannot clash with a live pointer.
+// waitForQuiescence blocks until no SharedDomains is in flight or the
+// bounded timeout expires. Mode B's precondition: no execution stage
+// holds a live SharedDomains pointer that would clash with the DB
+// reset.
 //
-// It closes rather than waits. InsertBlocks caches its SharedDomains in
-// e.currentContext and reuses it across calls, so the field stays set
-// while the module is idle — it does not mean a stage is running. Only
-// the FCU path clears it, so waiting made SetHead's precondition "another
-// block must arrive and be forkchoice'd", which a quiet chain never
-// satisfies.
-//
-// Closing here is safe because SetHead holds e.semaphore, the outer lock:
-// InsertBlocks acquires it and the FCU path releases it, so neither can be
-// in flight, and an idle cached context has no user. Read views already
-// handed out stay valid — their memStore backing makes Rollback a no-op on
-// the data, which is why the FCU path closes it on every success too.
-func (e *ExecModule) ensureQuiescent(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// The caller already holds e.semaphore (acquired at SetHead entry),
+// which serializes new SharedDomains creation by InsertBlocks /
+// UpdateForkChoice. Any currentContext that survives the semaphore
+// acquire is a stage that hasn't yet released; this method polls
+// e.currentContext until it clears.
+func (e *ExecModule) waitForQuiescence(ctx context.Context) error {
+	waitCtx, cancel := context.WithTimeout(ctx, modeBQuiescenceTimeout)
+	defer cancel()
+
+	for {
+		e.lock.RLock()
+		quiescent := e.currentContext == nil
+		e.lock.RUnlock()
+		if quiescent {
+			return nil
+		}
+
+		select {
+		case <-time.After(modeBQuiescencePoll):
+			// poll again
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("execution did not become quiescent within %s (currentContext is still set)", modeBQuiescenceTimeout)
+		}
 	}
-	e.closeModuleContext()
-	return nil
 }
