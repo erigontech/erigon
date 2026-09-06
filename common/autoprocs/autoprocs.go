@@ -51,6 +51,9 @@ const (
 	samplePeriod = 10 * time.Millisecond
 	interval     = 5 * time.Second
 	maxRatio     = 8
+	// Consecutive windows of lower demand before giving a slot back. Releasing
+	// eagerly would undo the raise that produced the demand and start a cycle.
+	decayPeriods = 3
 )
 
 // Start runs the controller until ctx is done. It is a no-op unless
@@ -72,7 +75,7 @@ func loop(ctx context.Context, base int, logger log.Logger) {
 	rates := make([]float64, 0, int(interval/samplePeriod))
 	prev, _ := majorFaults()
 	prevAt := time.Now()
-	cur := base
+	cur, lowFor := base, 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -86,7 +89,7 @@ func loop(ctx context.Context, base int, logger log.Logger) {
 			if len(rates) < cap(rates) {
 				continue
 			}
-			cur = resize(cur, base, burstDepth(rates), logger)
+			cur, lowFor = resize(cur, base, burstDepth(rates), lowFor, logger)
 			rates = rates[:0]
 		}
 	}
@@ -99,13 +102,25 @@ func burstDepth(rates []float64) int {
 	return int(rates[len(rates)*9/10] * float64(overlapMicros) / 1e6)
 }
 
-func resize(cur, base, depth int, logger log.Logger) int {
+// resize moves cur towards the demand implied by depth. Raising GOMAXPROCS
+// raises the fault rate that measured the demand in the first place, so acting
+// on each sample makes the loop ring: only ratchet up, and step down a slot at a
+// time once demand has stayed low for a while.
+func resize(cur, base, depth, lowFor int, logger log.Logger) (int, int) {
 	want := min(base+depth, base*maxRatio)
-	// GOMAXPROCS stops the world, so ignore single-slot jitter.
-	if want >= cur-1 && want <= cur+1 {
-		return cur
+	switch {
+	case want > cur:
+		lowFor = 0
+	case want < cur:
+		lowFor++
+		if lowFor < decayPeriods {
+			return cur, lowFor
+		}
+		lowFor, want = 0, cur-1
+	default: // demand matches the current size, which is not low demand
+		return cur, 0
 	}
 	runtime.GOMAXPROCS(want)
 	logger.Info("[autoprocs] resized", "from", cur, "to", want, "burstDepth", depth)
-	return want
+	return want, lowFor
 }
