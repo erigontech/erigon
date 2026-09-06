@@ -68,10 +68,11 @@ func Start(ctx context.Context, logger log.Logger) {
 		logger.Info("[autoprocs] unsupported on this platform")
 		return
 	}
-	go loop(ctx, runtime.GOMAXPROCS(0), logger)
+	go loop(ctx, logger)
 }
 
-func loop(ctx context.Context, base int, logger log.Logger) {
+func loop(ctx context.Context, logger log.Logger) {
+	base := runtime.GOMAXPROCS(0)
 	t := time.NewTicker(samplePeriod)
 	defer t.Stop()
 	rates := make([]float64, 0, int(interval/samplePeriod))
