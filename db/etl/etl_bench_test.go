@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -526,5 +527,30 @@ func BenchmarkSortableBufferWrite(b *testing.B) {
 			}
 			buf.Reset()
 		})
+	}
+}
+
+func BenchmarkCollectorRefillFromEmptyPool(b *testing.B) {
+	const entries = 300_000
+	allocator := NewAllocator(&sync.Pool{New: func() any { return NewSortableBuffer(etlSmallBufRAM) }})
+	tmpdir := b.TempDir()
+	key := make([]byte, 40)
+	val := make([]byte, 24)
+	b.ReportAllocs()
+	for b.Loop() {
+		b.StopTimer()
+		purgePool()
+		b.StartTimer()
+		c := NewCollectorWithAllocator(b.Name(), tmpdir, allocator, log.New())
+		for i := range entries {
+			binary.BigEndian.PutUint32(key[36:], uint32(i))
+			if err := c.Collect(key, val); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := c.Load(nil, "", discardLoad, TransformArgs{}); err != nil {
+			b.Fatal(err)
+		}
+		c.Close()
 	}
 }

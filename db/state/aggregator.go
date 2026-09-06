@@ -180,7 +180,7 @@ type HasAgg interface {
 // GetStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
 // and existing indices have salt in metadata.
-func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (salt *uint32, err error) {
+func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (salt *uint32, _ error) {
 	baseDir := dirs.Snap
 	saltExists, err := dir.FileExist(filepath.Join(baseDir, "salt.txt"))
 	if err != nil {
