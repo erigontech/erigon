@@ -337,6 +337,35 @@ inventory_drift_names() {
     fi
 }
 
+# erigon_alive matches on process name, not command line: pgrep -f also
+# matches any shell whose arguments happen to quote the pattern. It cannot
+# tell this soak's node from another erigon on the box, so it only makes
+# the common case fail fast — the caller's hard timeout is the guarantee.
+erigon_alive() {
+    pgrep -x erigon >/dev/null 2>&1
+}
+
+# capture_diag snapshots erigon state and writes an abort row. The shared
+# log is overwritten by the next fresh sync, so post-mortem cannot wait.
+# Args: iter, phase, kind (CSV note suffix), reason (printed).
+capture_diag() {
+    local iter=$1 phase=$2 kind=$3 reason=$4
+    local diag="$OUT.abort-${kind}.iter${iter}-${phase}.diag"
+    echo "iter $iter $phase: ABORT — $reason"
+    {
+        echo "=== abort:${kind} at $(date -Iseconds) iter=$iter phase=$phase ==="
+        echo "reason: $reason"
+        echo "--- pgrep erigon ---"
+        pgrep -af "build/bin/erigon" 2>&1 || true
+        echo "--- last 200 lines of erigon log ($LOG) ---"
+        tail -n 200 "$LOG" 2>&1 || true
+        echo "--- panic markers in full log ---"
+        grep -nE "panic:|fatal error:|Killed|OOM" "$LOG" 2>&1 | tail -n 40 || true
+    } > "$diag" 2>&1
+    echo "  captured post-mortem: $diag"
+    echo "$iter,$phase,,,,0,0,abort:${kind}+diag=$(basename "$diag")" >> "$OUT"
+}
+
 # scenario_test: run one setHead test and write a CSV row. Args:
 #   $1 phase label — mode-A/B/C/D taxonomy:
 #      mode_a  target in retained changeset (no unwind)
@@ -361,23 +390,7 @@ scenario_test() {
     pre_head_hex=$(eth_block_number)
     if [[ "$pre_head_hex" == "null" || -z "$pre_head_hex" ]]; then
         echo "iter $iter $phase: ABORT — eth_blockNumber returned null"
-        # Snapshot erigon state so post-mortem doesn't need to race the
-        # next fresh-sync overwrite of the shared log. F3-class (2026-07-28
-        # cycle-1 iter 41): 40 clean iters then a null head — likely
-        # correlated with a background panic. Capture what we can while
-        # the process may still be up.
-        local diag="$OUT.abort-no-head.iter${iter}-${phase}.diag"
-        {
-            echo "=== abort:no-head at $(date -Iseconds) iter=$iter phase=$phase ==="
-            echo "--- pgrep erigon ---"
-            pgrep -af "build/bin/erigon" 2>&1 || true
-            echo "--- last 200 lines of erigon log ($LOG) ---"
-            tail -n 200 "$LOG" 2>&1 || true
-            echo "--- panic markers in full log ---"
-            grep -nE "panic:|fatal error:|Killed|OOM" "$LOG" 2>&1 | tail -n 40 || true
-        } > "$diag" 2>&1
-        echo "  captured post-mortem: $diag"
-        echo "$iter,$phase,,,,0,0,abort:no-head+diag=$(basename "$diag")" >> "$OUT"
+        capture_diag "$iter" "$phase" "no-head" "eth_blockNumber returned null"
         PHASE_RC=1
         OVERALL_RC=1
         return
@@ -432,6 +445,20 @@ scenario_test() {
         sleep 5
         post_head_hex=$(eth_block_number)
         if [[ "$post_head_hex" == "null" || -z "$post_head_hex" ]]; then
+            # A crashed erigon answers no RPC, so this branch would poll
+            # forever — the hard timeout below is unreachable from here.
+            if ! erigon_alive; then
+                capture_diag "$iter" "$phase" "dead-node" \
+                    "erigon process gone while polling for recovery"
+                PHASE_RC=1
+                OVERALL_RC=1
+                return
+            fi
+            if [[ $(( $(date +%s) - start_ts )) -gt $((recovery_timeout * 2)) ]]; then
+                echo "  HARD TIMEOUT — RPC unanswered for $(( $(date +%s) - start_ts ))s while the process is up"
+                post_head=0
+                break
+            fi
             continue
         fi
         post_head=$(hex_to_dec "$post_head_hex")
