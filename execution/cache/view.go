@@ -224,19 +224,28 @@ func (v ReadView) GetCodeByAddressHash(addr []byte) ([]byte, bool) {
 	return code, true
 }
 
-func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64) {
+// codeFillBounds resolves the two frontier bounds a code fill is admitted
+// against: the code entry is addr-keyed, so it derives from the account and an
+// account deletion must reject it too.
+func (v ReadView) codeFillBounds() (codeEnd, accountsEnd uint64, ok bool) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
-		return
+		return 0, 0, false
 	}
-	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.CodeDomain)
+	if codeEnd, ok = v.frontier.DomainVisibleEnd(kv.CodeDomain); !ok {
+		return 0, 0, false
+	}
+	if accountsEnd, ok = v.frontier.DomainVisibleEnd(kv.AccountsDomain); !ok {
+		return 0, 0, false
+	}
+	return codeEnd, accountsEnd, true
+}
+
+func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64) {
+	codeEnd, accountsEnd, ok := v.codeFillBounds()
 	if !ok {
 		return
 	}
-	accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
-	if !ok {
-		return
-	}
-	v.c.fillCodeWithHashIfFresh(addr, code, codeHash, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
+	v.c.fillCodeWithHashIfFresh(addr, code, codeHash, readTxNum, codeEnd, accountsEnd, v.readViewEpoch)
 }
 
 // CanFill reports whether this view carries an accepted frontier, i.e. Fill and
@@ -278,7 +287,14 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 }
 
 func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) {
-	v.fillCodeWithHash(addr, bytes.Clone(code), codeHash, readTxNum)
+	// Copy only once a fill is possible: contract code reaches tens of KB.
+	// Bounds are resolved here rather than via fillCodeWithHash so an admitted
+	// fill still reads each frontier once.
+	codeEnd, accountsEnd, ok := v.codeFillBounds()
+	if !ok {
+		return
+	}
+	v.c.fillCodeWithHashIfFresh(addr, bytes.Clone(code), codeHash, readTxNum, codeEnd, accountsEnd, v.readViewEpoch)
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account

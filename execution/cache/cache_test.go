@@ -1640,3 +1640,29 @@ func TestPublishDerivesMalformedCodeHash(t *testing.T) {
 	_, ok = c.View(nil).GetCodeByHash(short)
 	require.False(t, ok, "the short hash must not key the entry")
 }
+
+// TestStateCache_FillCodeSkipsCopyWhenNotAdmitted pins that a view which
+// cannot fill does not copy the contract first. Code values reach tens of KB,
+// so a discarded copy is the entire cost of the call on that path.
+func TestStateCache_FillCodeSkipsCopyWhenNotAdmitted(t *testing.T) {
+	addr, code, codeHash := make([]byte, 20), make([]byte, 32*1024), make([]byte, 32)
+	noExactEnd := FrontierFunc(func(kv.Domain) (uint64, bool) { return 0, false })
+	// Exact for code, not for accounts: reaches the second bound check.
+	noAccountsEnd := FrontierFunc(func(d kv.Domain) (uint64, bool) { return 1, d == kv.CodeDomain })
+
+	for _, tc := range []struct {
+		name string
+		view ReadView
+	}{
+		{"fills disabled", ReadView{c: &StateCache{disableFills: true}, frontier: frontierAt(1)}},
+		{"no exact code bound", ReadView{c: &StateCache{}, frontier: noExactEnd}},
+		{"no exact accounts bound", ReadView{c: &StateCache{}, frontier: noAccountsEnd}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			allocs := testing.AllocsPerRun(100, func() {
+				tc.view.FillCode(addr, code, codeHash, 1)
+			})
+			require.Zero(t, allocs, "FillCode copied code on a view that cannot fill")
+		})
+	}
+}
