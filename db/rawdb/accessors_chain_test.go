@@ -1464,6 +1464,55 @@ func TestGetLatestBadBlocksConcurrentWithFailingReset(t *testing.T) {
 	wg.Wait()
 }
 
+// TestGetLatestBadBlocksConcurrentWithTruncateCanonicalHash pins that reading the bad-block
+// cache holds the same lock TruncateCanonicalHash uses to push into it in place, so SortedValues
+// never iterates the heap's backing slice while a concurrent truncate is mutating it.
+func TestGetLatestBadBlocksConcurrentWithTruncateCanonicalHash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	// Not t.Parallel(): see TestGetLatestBadBlocksConcurrentWithFailingReset.
+	m := execmoduletester.New(t)
+
+	const numCanonical = 50
+	setupTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer setupTx.Rollback()
+	for i := uint64(1); i <= numCanonical; i++ {
+		require.NoError(t, rawdb.WriteCanonicalHash(setupTx, common.Hash{byte(i)}, i))
+	}
+	require.NoError(t, rawdb.ResetBadBlockCache(setupTx, 100))
+	require.NoError(t, setupTx.Commit())
+
+	const iterations = 100
+	var wg sync.WaitGroup
+	for range iterations {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			roTx, err := m.DB.BeginRo(m.Ctx)
+			if err != nil {
+				return
+			}
+			defer roTx.Rollback()
+			_, err = rawdb.GetLatestBadBlocks(roTx)
+			assert.NoError(t, err)
+		}()
+		go func() {
+			defer wg.Done()
+			// Never committed, so the same numCanonical rows are still there for
+			// the next goroutine's truncate to push into the live heap again.
+			rwTx, err := m.DB.BeginRw(m.Ctx)
+			if err != nil {
+				return
+			}
+			defer rwTx.Rollback()
+			assert.NoError(t, rawdb.TruncateCanonicalHash(rwTx, 1, true))
+		}()
+	}
+	wg.Wait()
+}
+
 func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))

@@ -110,7 +110,12 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 		return nil, err
 	}
 
+	// cache is not immutable once published: TruncateCanonicalHash pushes into the
+	// live bheapCache under bheapMu.Lock(), so SortedValues' iteration over the
+	// heap's slice needs the same lock held to avoid racing that mutation.
+	bheapMu.RLock()
 	blockIds := cache.SortedValues()
+	bheapMu.RUnlock()
 	blocks := make([]*types.Block, len(blockIds))
 	for i, blockId := range blockIds {
 		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
