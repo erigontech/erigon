@@ -469,11 +469,7 @@ func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEn
 	if cfg.IsByzantium(blockNum) {
 		return false
 	}
-	if commitmentHistoryEnabled {
-		return true
-	}
-	frozen, observed := blockReader.FrozenBlocksObserved()
-	return observed && frozen == 0
+	return commitmentHistoryEnabled || blockReader.FrozenBlocks() == 0
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {

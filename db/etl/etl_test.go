@@ -1085,7 +1085,7 @@ func TestVmtouchMmap(t *testing.T) {
 		cmd := exec.Command("vmtouch", "-v", fname) //nolint:noctx
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		cmd.Run()
 	}
 
 	vmtouch("BEFORE first Next()")
@@ -1099,19 +1099,19 @@ func TestVmtouchMmap(t *testing.T) {
 
 	// Read 25%
 	for range n/4 - 1 {
-		_, _, _ = provider.Next()
+		provider.Next()
 	}
 	vmtouch("AFTER 25%")
 
 	// Read to 50%
 	for range n / 4 {
-		_, _, _ = provider.Next()
+		provider.Next()
 	}
 	vmtouch("AFTER 50%")
 
 	// Read to 75%
 	for range n / 4 {
-		_, _, _ = provider.Next()
+		provider.Next()
 	}
 	vmtouch("AFTER 75%")
 

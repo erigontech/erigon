@@ -71,9 +71,7 @@ func (r *probeBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Ge
 }
 
 func newProbeAPI(reader dbservices.FullBlockReader) *BaseAPI {
-	api := &BaseAPI{_blockReader: reader}
-	api._preMergeData.SetTTL(time.Minute)
-	return api
+	return &BaseAPI{_blockReader: reader, _preMergeDataTTL: time.Minute}
 }
 
 type probeResult struct {
@@ -490,8 +488,7 @@ func TestPreMergeGateLeavesAMissingSearchBodyUnanswered(t *testing.T) {
 
 	require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, 1), state.PrunedError,
 		"a body the search needs and cannot read does not open the gate")
-	_, observed, _ := api._preMergeData.Load()
-	require.False(t, observed, "a question left open is not an observation")
+	require.Nil(t, api._preMergeData.Load(), "a question left open is not an observation")
 }
 
 // TestPreMergeSearchStopsAtItsReadBudget pins that a search walking past its budget

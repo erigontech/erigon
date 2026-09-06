@@ -246,7 +246,7 @@ func ApplyMigrations(dirs Dirs) error { //nolint
 	if !locked {
 		return nil
 	}
-	defer func() { panicif.Err(lock.Unlock()) }()
+	defer lock.Unlock()
 
 	// add your migration here
 

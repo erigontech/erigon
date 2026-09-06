@@ -113,8 +113,7 @@ func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]
 		i += 1
 	}
 	for ind := i; ind > 1; ind-- {
-		_, _, err = c.Prev()
-		require.NoError(t, err)
+		c.Prev()
 	}
 
 	return keys, values

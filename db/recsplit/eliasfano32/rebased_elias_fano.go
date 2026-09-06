@@ -92,7 +92,7 @@ func (it *RebasedIterWrapper) Seek(v uint64) {
 		it.it.Seek(0)
 		if it.reverse {
 			// force exhaustion as we are seeking before the first elem
-			_, _ = it.it.Next()
+			it.it.Next()
 		}
 		return
 	}

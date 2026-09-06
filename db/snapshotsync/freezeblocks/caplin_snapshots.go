@@ -320,9 +320,7 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 			}
 		}
 		if commitmentsCount == 0 {
-			if err := sn.AddWord(nil); err != nil {
-				return err
-			}
+			sn.AddWord(nil)
 			continue
 		}
 		sidecars, found, err := storage.ReadBlobSidecars(ctx, i, blockRoot)
