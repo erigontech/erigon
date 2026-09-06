@@ -215,25 +215,12 @@ func TestConcurrentTrieContextKeepsWorkerTxOnSameSnapshot(t *testing.T) {
 	require.Equal(t, []byte("worker-view"), enc)
 }
 
-// Workers sharing the caller's tx must not touch it concurrently, and the bytes
-// one worker gets back must survive another worker's next read.
-func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
-	t.Parallel()
-	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
-	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
-	sdc, _ := newSnapshotSdc(t)
-
-	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
-	defer func() {
-		for _, c := range drain() {
-			c.Close()
-		}
-	}()
-
+func foldConcurrently(t *testing.T, factory commitment.TrieContextFactory) (vals [][]byte, errs []error) {
+	t.Helper()
 	const workers = 8
 	var wg sync.WaitGroup
-	errs := make([]error, workers)
-	vals := make([][]byte, workers)
+	errs = make([]error, workers)
+	vals = make([][]byte, workers)
 	start := make(chan struct{})
 	for i := range workers {
 		wg.Go(func() {
@@ -252,8 +239,27 @@ func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
 	}
 	close(start)
 	wg.Wait()
+	return vals, errs
+}
 
-	for i := range workers {
+// Workers sharing the caller's tx must not touch it concurrently, and the bytes
+// one worker gets back must survive another worker's next read.
+func TestConcurrentTrieContextsShareCallerTxSerially(t *testing.T) {
+	t.Parallel()
+	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc, _ := newSnapshotSdc(t)
+
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	vals, errs := foldConcurrently(t, factory)
+
+	for i := range vals {
 		require.NoError(t, errs[i])
 		require.Equal(t, []byte("caller-snapshot"), vals[i])
 	}
@@ -339,31 +345,10 @@ func TestConcurrentTrieContextSerializesSharedCustomReader(t *testing.T) {
 		}
 	}()
 
-	const workers = 8
-	var wg sync.WaitGroup
-	errs := make([]error, workers)
-	vals := make([][]byte, workers)
-	start := make(chan struct{})
-	for i := range workers {
-		wg.Go(func() {
-			trieCtx, cleanup := factory(t.Context())
-			defer cleanup()
-			<-start
-			for range 64 {
-				enc, _, err := trieCtx.Branch([]byte{byte(i)})
-				if err != nil {
-					errs[i] = err
-					return
-				}
-				vals[i] = append(vals[i][:0], enc...)
-			}
-		})
-	}
-	close(start)
-	wg.Wait()
+	vals, errs := foldConcurrently(t, factory)
 
 	require.False(t, reader.overlaps.Load(), "workers must not read the shared custom reader concurrently")
-	for i := range workers {
+	for i := range vals {
 		require.NoError(t, errs[i])
 		require.Equal(t, []byte("caller-snapshot"), vals[i])
 	}
@@ -473,7 +458,7 @@ func TestConcurrentTrieContextResolvesCallerViewOnce(t *testing.T) {
 		c.Close()
 	}
 
-	for i := range workers {
+	for i := range encs {
 		require.NoError(t, errs[i])
 		require.Equal(t, []byte("caller-snapshot"), encs[i])
 	}
@@ -495,32 +480,11 @@ func TestConcurrentTrieContextSerializesSharedReaderWithoutCallerTx(t *testing.T
 		}
 	}()
 
-	const workers = 8
-	var wg sync.WaitGroup
-	errs := make([]error, workers)
-	vals := make([][]byte, workers)
-	start := make(chan struct{})
-	for i := range workers {
-		wg.Go(func() {
-			trieCtx, cleanup := factory(t.Context())
-			defer cleanup()
-			<-start
-			for range 64 {
-				enc, _, err := trieCtx.Branch([]byte{byte(i)})
-				if err != nil {
-					errs[i] = err
-					return
-				}
-				vals[i] = append(vals[i][:0], enc...)
-			}
-		})
-	}
-	close(start)
-	wg.Wait()
+	vals, errs := foldConcurrently(t, factory)
 
 	require.False(t, reader.overlaps.Load(),
 		"a shared-source reader is serialized by a lock that needs no caller tx, so a nil caller must not drop it")
-	for i := range workers {
+	for i := range vals {
 		require.NoError(t, errs[i])
 		require.Equal(t, []byte("caller-snapshot"), vals[i])
 	}

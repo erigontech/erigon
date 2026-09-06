@@ -812,11 +812,10 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 		}
 		pinned = newSyncStateReader(&pinnedMu, src)
 	}
-	pinnedOnly := pinned != nil && sharedSource
 
 	factory := func(ctx context.Context) (commitment.PatriciaContext, func()) {
 		var roTx kv.TemporalTx
-		if !pinnedOnly {
+		if !sharedSource {
 			var err error
 			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
 			if err != nil {
@@ -846,7 +845,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 			warmupCtx.putter = sdc.sharedDomains.AsPutDel(roTx)
 		}
 		switch {
-		case pinned != nil && (sharedSource || caller.mayDrift(roTx)):
+		case pinned != nil && caller.mayDrift(roTx):
 			// A read view opened at fold time sits at the then-current head, which
 			// is the caller's snapshot only while no commit can land between them.
 			// Clones share the reader and its lock; only the scratch buffer is

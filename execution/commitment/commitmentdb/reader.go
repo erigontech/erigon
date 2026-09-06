@@ -131,9 +131,6 @@ func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([
 	if err != nil || enc == nil {
 		return nil, step, err
 	}
-	if r.buf == nil {
-		r.buf = make([]byte, 0, len(enc))
-	}
 	r.buf = append(r.buf[:0], enc...)
 	return r.buf, step, nil
 }
