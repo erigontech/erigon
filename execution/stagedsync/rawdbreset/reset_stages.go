@@ -317,17 +317,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 			// for now easier just store them in db
 			var td uint256.Int
-			// TD is a running sum, so it is only valid while the walk is
-			// contiguous. ForEachHeader iterates every visible segment in
-			// order without checking for holes, and the visible set can be
-			// non-contiguous while files are still arriving. Past a hole
-			// every sum is short by the skipped difficulties, and a
-			// watermark past it would strand the hole from the incremental
-			// pass. Stop seeding TD at the first discontinuity;
-			// ExtendTDFromSnapshots resumes there once the range is visible.
-			var nextTDBlock uint64
 			var walkFirst, walkLast, walkCount uint64
-			tdContiguous := true
 			blockNumBytes := make([]byte, 8)
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
@@ -336,16 +326,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				}
 				walkLast = blockNum
 				walkCount++
-				if tdContiguous && blockNum != nextTDBlock {
-					tdContiguous = false
-					logger.Warn(fmt.Sprintf("[%s] header coverage break at %d (expected %d) — TD seeded up to %d, resuming there once contiguous",
-						logPrefix, blockNum, nextTDBlock, tdSeededTo))
-				}
-				if tdContiguous {
-					if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
-						return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
-					}
-					nextTDBlock = blockNum + 1
+				if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
+					return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
 				}
 				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
 				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
@@ -359,12 +341,10 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				// not found" (live-caught on hoodi --prune.mode=minimal at
 				// depth 154k). TD is 32 bytes/block — ~100 MB per 3M-block
 				// chain — cheap next to the snapshots themselves.
-				if tdContiguous {
-					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
-						return err
-					}
-					tdSeededTo = blockNum
+				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+					return err
 				}
+				tdSeededTo = blockNum
 
 				// Canonical hash still gated by pruneMarkerBlockThreshold: the
 				// stale-sidechain-pointer bug this guard was added for is
@@ -391,8 +371,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}); err != nil {
 				return err
 			}
-			logger.Info(fmt.Sprintf("[%s] TD seed: walked %d headers [%d..%d] contiguous=%v seededTo=%d frozen=%d",
-				logPrefix, walkCount, walkFirst, walkLast, tdContiguous, tdSeededTo, blocksAvailable))
+			logger.Info(fmt.Sprintf("[%s] TD seed: walked %d headers [%d..%d] seededTo=%d frozen=%d",
+				logPrefix, walkCount, walkFirst, walkLast, tdSeededTo, blocksAvailable))
 
 			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return err
