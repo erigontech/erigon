@@ -44,6 +44,8 @@ var (
 	// but the raw NVMe service time of ~70us undershoots: a burst shorter
 	// than one sample is averaged down inside its window, and demand measured
 	// under the current cap cannot show what a larger cap would absorb.
+	// Too small only under-raises, so slower storage degrades toward off; too
+	// large over-raises, which costs throughput on CPU-bound work.
 	overlapMicros = max(1, dbg.EnvInt("AUTO_GOMAXPROCS_OVERLAP_US", 280))
 )
 
@@ -89,7 +91,13 @@ func loop(ctx context.Context, base int, logger log.Logger) {
 			if len(rates) < cap(rates) {
 				continue
 			}
-			cur, lowFor = resize(cur, base, burstDepth(rates), lowFor, logger)
+			want, low := nextSize(cur, base, burstDepth(rates), lowFor)
+			lowFor = low
+			if want != cur {
+				runtime.GOMAXPROCS(want)
+				logger.Info("[autoprocs] resized", "from", cur, "to", want)
+				cur = want
+			}
 			rates = rates[:0]
 		}
 	}
@@ -102,25 +110,21 @@ func burstDepth(rates []float64) int {
 	return int(rates[len(rates)*9/10] * float64(overlapMicros) / 1e6)
 }
 
-// resize moves cur towards the demand implied by depth. Raising GOMAXPROCS
+// nextSize moves cur towards the demand implied by depth. Raising GOMAXPROCS
 // raises the fault rate that measured the demand in the first place, so acting
 // on each sample makes the loop ring: only ratchet up, and step down a slot at a
 // time once demand has stayed low for a while.
-func resize(cur, base, depth, lowFor int, logger log.Logger) (int, int) {
+func nextSize(cur, base, depth, lowFor int) (int, int) {
 	want := min(base+depth, base*maxRatio)
 	switch {
 	case want > cur:
-		lowFor = 0
+		return want, 0
 	case want < cur:
-		lowFor++
-		if lowFor < decayPeriods {
-			return cur, lowFor
+		if lowFor+1 < decayPeriods {
+			return cur, lowFor + 1
 		}
-		lowFor, want = 0, cur-1
+		return cur - 1, 0
 	default: // demand matches the current size, which is not low demand
 		return cur, 0
 	}
-	runtime.GOMAXPROCS(want)
-	logger.Info("[autoprocs] resized", "from", cur, "to", want, "burstDepth", depth)
-	return want, lowFor
 }

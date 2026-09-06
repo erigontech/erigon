@@ -16,11 +16,7 @@
 
 package autoprocs
 
-import (
-	"testing"
-
-	"github.com/erigontech/erigon/common/log/v3"
-)
+import "testing"
 
 func TestBurstDepthIgnoresIdleSamples(t *testing.T) {
 	// A burst covering a tenth of the window still has to fit in GOMAXPROCS,
@@ -49,7 +45,7 @@ func TestResizeDoesNotOscillate(t *testing.T) {
 		if i%2 == 1 {
 			depth = 6 // wants base+6 = 12
 		}
-		cur, lowFor = resize(cur, base, depth, lowFor, log.New())
+		cur, lowFor = nextSize(cur, base, depth, lowFor)
 		if i >= 20 {
 			settled[cur]++
 		}
@@ -62,17 +58,17 @@ func TestResizeDoesNotOscillate(t *testing.T) {
 func TestResizeDecaysOnlyAfterSustainedLowDemand(t *testing.T) {
 	const base = 6
 	cur, lowFor := base, 0
-	cur, lowFor = resize(cur, base, 8, lowFor, log.New())
+	cur, lowFor = nextSize(cur, base, 8, lowFor)
 	if cur != 14 {
 		t.Fatalf("cur = %d, want 14", cur)
 	}
 	for range decayPeriods - 1 {
-		cur, lowFor = resize(cur, base, 0, lowFor, log.New())
+		cur, lowFor = nextSize(cur, base, 0, lowFor)
 		if cur != 14 {
 			t.Fatalf("gave a slot back too early: cur = %d, want 14", cur)
 		}
 	}
-	if cur, _ = resize(cur, base, 0, lowFor, log.New()); cur != 13 {
+	if cur, _ = nextSize(cur, base, 0, lowFor); cur != 13 {
 		t.Fatalf("cur = %d, want 13 after sustained low demand", cur)
 	}
 }
