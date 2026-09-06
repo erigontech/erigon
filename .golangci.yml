@@ -104,10 +104,10 @@ linters:
       enable:
         - nilness
         - unusedwrite
+        - shadow
       disable:
         - deepequalerrors
         - fieldalignment
-        - shadow
         - unsafeptr
   exclusions:
     generated: lax
@@ -120,6 +120,40 @@ linters:
       - linters:
           - modernize
         path: _grpc\.pb\.go
+      # shadow runs under db/ only for now; the rest of the tree is not swept yet.
+      - linters:
+          - govet
+        text: "^shadow:"
+        path-except: "^db/"
+      # Bootstrap exclusion: baseline shadow findings, migrated one package per
+      # PR. Remove a package from the list once it's clean.
+      - linters:
+          - govet
+        text: "^shadow:"
+        path: "^(\
+          db/datastruct/btindex\
+          |db/datastruct/fusefilter\
+          |db/downloader\
+          |db/integrity\
+          |db/kv/backup\
+          |db/kv/kvcache\
+          |db/kv/mdbx\
+          |db/kv/membatchwithdb\
+          |db/kv/prune\
+          |db/kv/rawdbv3\
+          |db/kv/remotedbserver\
+          |db/kv/temporal\
+          |db/rawdb\
+          |db/recsplit\
+          |db/recsplit/eliasfano32\
+          |db/snapshotsync\
+          |db/snapshotsync/freezeblocks\
+          |db/snaptype\
+          |db/state\
+          |db/state/execctx\
+          |db/state/stats\
+          |db/test\
+          )/[^/]+\\.go$"
       # Bootstrap exclusion for #22538: baseline errcheck findings, migrated
       # one package per PR. Remove a package's alternative once it's clean.
       - linters:

@@ -193,8 +193,7 @@ func TestFileDataProviders(t *testing.T) {
 
 	collector := NewCollector(t.Name(), "", NewSortableBuffer(1), logger)
 
-	err := extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger)
-	require.NoError(t, err)
+	require.NoError(t, extractBucketIntoFiles("logPrefix", tx, sourceBucket, nil, nil, collector, testExtractToMapFunc, nil, nil, logger))
 
 	assert.Len(t, collector.dataProviders, 10)
 
@@ -212,7 +211,7 @@ func TestFileDataProviders(t *testing.T) {
 	for _, p := range collector.dataProviders {
 		fp, ok := p.(*fileDataProvider)
 		assert.True(t, ok)
-		_, err = os.Stat(fp.file.Name())
+		_, err := os.Stat(fp.file.Name())
 		assert.True(t, os.IsNotExist(err))
 	}
 }
