@@ -133,7 +133,7 @@ func TestLatestBlockBuiltRecoverySuppressionIsBounded(t *testing.T) {
 	// Suppression is bounded to the same lifetime as the cached payload.
 	// Once this payload is evicted, its request-level suppression state must
 	// disappear with it.
-	for i := 0; i < recentBlockBuiltCapacity; i++ {
+	for i := range recentBlockBuiltCapacity {
 		other := types.NewBlockWithHeader(
 			&types.Header{Time: uint64(i + 2)},
 			nil,
