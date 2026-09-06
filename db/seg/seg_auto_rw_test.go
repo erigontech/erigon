@@ -29,10 +29,10 @@ import (
 
 // writeKVFile builds a key/value seg file under the given compression and
 // returns its path.
-func writeKVFile(t *testing.T, name string, compression FileCompression, words [][]byte) string {
+func writeKVFile(t *testing.T, compression FileCompression, words [][]byte) string {
 	t.Helper()
 	tmpDir := t.TempDir()
-	file := filepath.Join(tmpDir, name)
+	file := filepath.Join(tmpDir, "src")
 	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer c.Close()
@@ -67,7 +67,7 @@ func TestWriterReadFromMixedCompression(t *testing.T) {
 		words = append(words, []byte(fmt.Sprintf("key-%06d", i)), value)
 	}
 
-	src := writeKVFile(t, "src", CompressVals, words)
+	src := writeKVFile(t, CompressVals, words)
 	srcDecomp, err := NewDecompressor(src)
 	require.NoError(t, err)
 	defer srcDecomp.Close()
@@ -90,6 +90,23 @@ func TestWriterReadFromMixedCompression(t *testing.T) {
 		require.True(t, g.HasNext(), "word %d missing", i)
 		got, _ := g.Next(nil)
 		require.Equal(t, want, got, "word %d", i)
+	}
+	require.False(t, g.HasNext())
+}
+
+// TestNextUncompressedCapacityBound pins the capacity contract: a returned word
+// must not let the caller append into the read-only mapping. Empty words go
+// through a separate return path, so cover both.
+func TestNextUncompressedCapacityBound(t *testing.T) {
+	words := [][]byte{[]byte("key-0"), {}, []byte("key-1"), []byte("value-1")}
+	d, err := NewDecompressor(writeKVFile(t, CompressNone, words))
+	require.NoError(t, err)
+	defer d.Close()
+
+	g := d.MakeGetter()
+	for i := range words {
+		w, _ := g.NextUncompressed()
+		require.Equal(t, len(w), cap(w), "word %d: cap must not run past the word", i)
 	}
 	require.False(t, g.HasNext())
 }
