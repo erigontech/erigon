@@ -38,7 +38,7 @@ func pivotKeysFromKV(dataPath string) ([][]byte, error) {
 		if len(listing) > 100000 {
 			break
 		}
-		key, _ := getter.Next(key[:0])
+		key, _ = getter.Next(key[:0])
 		listing = append(listing, bytes.Clone(key))
 		getter.Skip()
 	}
@@ -95,20 +95,18 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	writer := seg.NewWriter(comp, compressFlags)
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		_, err = writer.Write(k)
-		require.NoError(tb, err)
-		_, err = writer.Write(v)
-		require.NoError(tb, err)
-		return nil
+		if _, err := writer.Write(k); err != nil {
+			return err
+		}
+		_, err := writer.Write(v)
+		return err
 	}
 
-	err = collector.Load(nil, "", loader, etl.TransformArgs{})
-	require.NoError(tb, err)
+	require.NoError(tb, collector.Load(nil, "", loader, etl.TransformArgs{}))
 
 	collector.Close()
 
-	err = comp.Compress()
-	require.NoError(tb, err)
+	require.NoError(tb, comp.Compress())
 	comp.Close()
 
 	decomp, err := seg.NewDecompressor(dataPath)

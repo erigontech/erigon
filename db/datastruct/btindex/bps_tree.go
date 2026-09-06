@@ -413,7 +413,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, _ error) {
 // Get: returns for exact given key, value and offset in file where key starts
 // If given key is nil, returns first key
 // If no exact match found, returns nil values
-func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
+func (b *BpsTree) Get(g *seg.Reader, key []byte) ([]byte, bool, uint64, error) {
 	if len(key) == 0 && b.offt.Count() > 0 {
 		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
@@ -421,15 +421,15 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 		return v0, true, 0, nil
 	}
-	ok, offset, err = b.seekExact(g, key)
+	ok, offset, err := b.seekExact(g, key)
 	if err != nil || !ok {
 		return nil, false, 0, err
 	}
-	v, _ = g.Next(nil)
+	v, _ := g.Next(nil)
 	return v, true, offset, nil
 }
 
-func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err error) {
+func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (int, bool, error) {
 	if len(key) == 0 && b.offt.Count() > 0 {
 		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
@@ -437,11 +437,11 @@ func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err 
 		}
 		return len(v0), true, nil
 	}
-	ok, _, err = b.seekExact(g, key)
+	ok, _, err := b.seekExact(g, key)
 	if err != nil || !ok {
 		return 0, false, err
 	}
-	_, size = g.Skip()
+	_, size := g.Skip()
 	return size, true, nil
 }
 
