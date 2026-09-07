@@ -410,7 +410,7 @@ func (rw *Worker) Run() (err error) {
 		// Skipped entirely when read metrics are off.
 		if dbg.KVReadLevelledMetrics && rw.rs != nil {
 			doms := rw.rs.Domains()
-			doms.LogMergeMetrics(rw.readMetrics)
+			doms.MergeExecMetrics(rw.readMetrics)
 			rw.collectorAcc.Merge(rw.readMetrics)
 			rw.readMetrics.Reset()
 			if c := doms.Collector(); c != nil && c.TrySend(kvmetrics.SourceExec, rw.collectorAcc) {
@@ -421,7 +421,7 @@ func (rw *Worker) Run() (err error) {
 	// Worker is done: flush whatever the collector buffer was too full to take
 	// during the run. Blocking is fine here (off the hot path, at teardown), and
 	// it must not be lost. Only the collector — the per-task log merges already
-	// folded this data into sd.metrics via LogMergeMetrics.
+	// folded this data into sd.metrics via MergeExecMetrics.
 	if dbg.KVReadLevelledMetrics && rw.rs != nil {
 		if c := rw.rs.Domains().Collector(); c != nil {
 			c.Send(kvmetrics.SourceExec, rw.collectorAcc)

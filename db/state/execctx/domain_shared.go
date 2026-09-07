@@ -617,7 +617,7 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 // boundary producers (commitment fold, warmup teardown) off the per-tx hot path:
 // the collector send blocks if the buffer is momentarily full (rare, brief, and
 // lossless). Ownership of wm transfers to the collector — the caller must not
-// touch wm again. The exec hot path does NOT use this (see LogMergeMetrics +
+// touch wm again. The exec hot path does NOT use this (see MergeExecMetrics +
 // Collector().TrySend, which never blocks and retains on a full buffer).
 func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
@@ -627,11 +627,13 @@ func (sd *SharedDomains) MergeMetrics(source kvmetrics.Source, wm *kvmetrics.Dom
 	sd.collector.Send(source, wm)
 }
 
-// LogMergeMetrics folds wm into the per-batch sd.metrics aggregate only (the log
+// MergeExecMetrics folds wm into the per-batch sd.metrics aggregate only (the log
 // line), without touching the collector. The exec hot path calls this each task
 // for the log, and feeds the collector separately via a retained accumulator so
 // a full collector buffer can never block or drop. wm is read, not retained.
-func (sd *SharedDomains) LogMergeMetrics(wm *kvmetrics.DomainMetrics) {
+// Exec-only by contract: a non-exec producer must use MergeMetrics, or its reads
+// land in the total without landing in nonExecMetrics and are billed to execution.
+func (sd *SharedDomains) MergeExecMetrics(wm *kvmetrics.DomainMetrics) {
 	sd.metrics.Merge(wm)
 }
 
