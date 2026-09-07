@@ -739,7 +739,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			w, err := pagedidx.NewWriter(filename, 1, 1, 1, 1)
 			require.NoError(t, err)
 			w.NoFsync()
-			w.AddGroup(1)
+			w.AddRun(1)
 			w.AddPage(0)
 			require.NoError(t, w.Build())
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {

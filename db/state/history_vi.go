@@ -27,9 +27,10 @@ import (
 // HistoryValueIndex resolves a history value's offset in the .v file.
 //
 // buildVI writes .v by walking .ef in key order and each key's txNums in order,
-// so a value's position is (key ordinal in .ef, rank of its txNum) - which is
-// what pagedidx addresses. That needs the .efi built with Enums, and the .ef
-// and .v step ranges to line up.
+// so one key owns a run of consecutive values and a value's position is
+// (key number in .ef, rank of its txNum in that key's list) - a pagedidx run
+// and item. That needs the .efi built with Enums, and the .ef and .v step
+// ranges to line up.
 //
 // v1 files instead hold a perfect hash over txNum+key. They are still read as
 // they are: rpcdaemon and other read-only consumers cannot rebuild accessors,

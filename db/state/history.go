@@ -281,7 +281,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		keyBuf, _ = iiReader.Next(keyBuf[:0])
 		valBuf, _ = iiReader.Next(valBuf[:0])
 
-		w.AddGroup(multiencseq.Count(efBaseTxNum, valBuf))
+		w.AddRun(multiencseq.Count(efBaseTxNum, valBuf))
 
 		seq.Reset(efBaseTxNum, valBuf)
 		it.Reset(&seq, 0)

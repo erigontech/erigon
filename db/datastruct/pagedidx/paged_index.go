@@ -14,19 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package pagedidx indexes values that grow along a known order and repeat in
-// runs, without storing one entry per item.
+// Package pagedidx maps a position to a value without storing one entry per
+// item.
 //
-// It fits data laid out as consecutive groups of items - group 0's items, then
-// group 1's, and so on - where the value being indexed never decreases along
-// that order and only changes once per page of items. Both of those hold for a
-// file written in a single pass: the value is an offset into it, and a page is
-// however many items share a record.
+// It fits data written in a single pass as consecutive runs of items - run 0's
+// items, then run 1's, and so on - where the value being indexed never
+// decreases along that order and only changes once per page of items. For a
+// file that means: the value is an offset into it, and a page is however many
+// items share a record.
 //
-// Two Elias-Fano sequences replace the per-item table: one holds the number of
-// items before each group, the other one value per page. A file with 8 billion
-// items and 64 items per page keeps 125 million values instead of 8 billion,
-// and Elias-Fano then encodes those in the bits their gaps need.
+// Two Elias-Fano sequences replace the per-item table:
+//
+//	starts[r] = items before run r     -> ordinal = starts[r] + item
+//	pages[p]  = value of page p        -> value   = pages[ordinal / pageSize]
+//
+// starts counts items, pages holds the values themselves, and the two have
+// different lengths. Paging drops the stored count by pageSize, and Elias-Fano
+// then encodes what is left in the bits its gaps need: 8 billion items at 64
+// per page keep 125 million values.
 package pagedidx
 
 import (
@@ -45,12 +50,12 @@ const version = 1
 // header: version, page size, item count
 const headerLen = 1 + 8 + 8
 
-// Index resolves an item's value from its (group, member) position.
+// Index resolves an item's value from its (run, item) position.
 type Index struct {
 	f         *os.File
 	m         mmap.Ro
-	groups    *eliasfano32.EliasFano
-	values    *eliasfano32.EliasFano
+	starts    *eliasfano32.EliasFano
+	pages     *eliasfano32.EliasFano
 	pageSize  uint64
 	itemCount uint64
 }
@@ -89,57 +94,57 @@ func Open(path string) (*Index, error) {
 		return nil, fmt.Errorf("%s: paged index page size is 0", path)
 	}
 	if fi.Size() > headerLen {
-		groups, n := eliasfano32.ReadEliasFano(m[headerLen:])
-		idx.groups = groups
-		idx.values, _ = eliasfano32.ReadEliasFano(m[headerLen+n:])
+		starts, n := eliasfano32.ReadEliasFano(m[headerLen:])
+		idx.starts = starts
+		idx.pages, _ = eliasfano32.ReadEliasFano(m[headerLen+n:])
 	}
 	return idx, nil
 }
 
-// Get returns the value of a group's member, and false when that position is
-// not in the index. Callers pair this index with a separate file that supplies
-// the position, so an out-of-range one means the two do not belong together.
-func (i *Index) Get(group, member uint64) (uint64, bool) {
-	if i.values == nil || group >= i.groups.Count() {
+// Get returns the value of a run's item, and false when the index holds no such
+// position. Callers take the position from a separate file, so out-of-range
+// means the two files do not belong together.
+func (i *Index) Get(run, item uint64) (uint64, bool) {
+	if i.pages == nil || run >= i.starts.Count() {
 		return 0, false
 	}
-	page := (i.groups.Get(group) + member) / i.pageSize
-	if page >= i.values.Count() {
+	page := (i.starts.Get(run) + item) / i.pageSize
+	if page >= i.pages.Count() {
 		return 0, false
 	}
-	return i.values.Get(page), true
+	return i.pages.Get(page), true
 }
 
-// Group returns the group owning the item at ordinal, and false when the index
-// holds no such item. Empty groups own nothing, so the search looks for the
-// first group starting after the ordinal and steps back one.
-func (i *Index) Group(ordinal uint64) (uint64, bool) {
-	if i.groups == nil || ordinal >= i.itemCount {
+// Run returns the run owning the item at ordinal, and false when the index
+// holds no such item. An empty run owns nothing, so the search looks for the
+// first run starting after the ordinal and steps back one.
+func (i *Index) Run(ordinal uint64) (uint64, bool) {
+	if i.starts == nil || ordinal >= i.itemCount {
 		return 0, false
 	}
-	last := i.groups.Count() - 1
-	if ordinal >= i.groups.Get(last) {
+	last := i.starts.Count() - 1
+	if ordinal >= i.starts.Get(last) {
 		return last, true
 	}
-	_, pos, _ := i.groups.Seek(ordinal + 1)
+	_, pos, _ := i.starts.Seek(ordinal + 1)
 	return pos - 1, true
 }
 
 // Page returns the page holding value, and false when value falls before the
 // first page.
 func (i *Index) Page(value uint64) (uint64, bool) {
-	if i.values == nil || value < i.values.Get(0) {
+	if i.pages == nil || value < i.pages.Get(0) {
 		return 0, false
 	}
-	last := i.values.Count() - 1
-	if value >= i.values.Get(last) {
+	last := i.pages.Count() - 1
+	if value >= i.pages.Get(last) {
 		return last, true
 	}
-	_, pos, _ := i.values.Seek(value + 1)
+	_, pos, _ := i.pages.Seek(value + 1)
 	return pos - 1, true
 }
 
-func (i *Index) Empty() bool { return i == nil || i.values == nil }
+func (i *Index) Empty() bool { return i == nil || i.pages == nil }
 
 func (i *Index) Close() {
 	if i == nil {
@@ -148,7 +153,7 @@ func (i *Index) Close() {
 	if i.m != nil {
 		_ = i.m.Unmap()
 		i.m = nil
-		i.groups, i.values = nil, nil
+		i.starts, i.pages = nil, nil
 	}
 	if i.f != nil {
 		_ = i.f.Close()
@@ -156,12 +161,12 @@ func (i *Index) Close() {
 	}
 }
 
-// Writer builds an Index. AddGroup is called once per group in order, AddPage
+// Writer builds an Index. AddRun is called once per run in order, AddPage
 // once per page in order; the two may be interleaved.
 type Writer struct {
 	path      string
-	groups    *eliasfano32.EliasFano
-	values    *eliasfano32.EliasFano
+	starts    *eliasfano32.EliasFano
+	pages     *eliasfano32.EliasFano
 	items     uint64
 	pageSize  uint64
 	itemCount uint64
@@ -170,35 +175,35 @@ type Writer struct {
 
 // NewWriter sizes the two sequences up front, which is all Elias-Fano needs.
 // maxValue only has to be an upper bound.
-func NewWriter(path string, pageSize, groupCount, itemCount, maxValue uint64) (*Writer, error) {
+func NewWriter(path string, pageSize, runCount, itemCount, maxValue uint64) (*Writer, error) {
 	if pageSize == 0 {
 		return nil, fmt.Errorf("%s: paged index page size is 0", path)
 	}
 	w := &Writer{path: path, pageSize: pageSize, itemCount: itemCount}
-	if groupCount == 0 || itemCount == 0 { // nothing to address: header only
+	if runCount == 0 || itemCount == 0 { // nothing to address: header only
 		return w, nil
 	}
 	pages := (itemCount + pageSize - 1) / pageSize
-	w.groups = eliasfano32.NewEliasFano(groupCount, itemCount)
-	w.values = eliasfano32.NewEliasFano(pages, max(maxValue, 1))
+	w.starts = eliasfano32.NewEliasFano(runCount, itemCount)
+	w.pages = eliasfano32.NewEliasFano(pages, max(maxValue, 1))
 	return w, nil
 }
 
 func (w *Writer) NoFsync() { w.noFsync = true }
 
-// AddGroup records a group holding the given number of items.
-func (w *Writer) AddGroup(items uint64) {
-	w.groups.AddOffset(w.items)
+// AddRun records a run holding the given number of items.
+func (w *Writer) AddRun(items uint64) {
+	w.starts.AddOffset(w.items)
 	w.items += items
 }
 
 // AddPage records the value shared by the next page of items.
-func (w *Writer) AddPage(value uint64) { w.values.AddOffset(value) }
+func (w *Writer) AddPage(value uint64) { w.pages.AddOffset(value) }
 
 func (w *Writer) Build() error {
-	if w.values != nil {
-		w.groups.Build()
-		w.values.Build()
+	if w.pages != nil {
+		w.starts.Build()
+		w.pages.Build()
 	}
 
 	f, err := dir.CreateTemp(w.path)
@@ -216,11 +221,11 @@ func (w *Writer) Build() error {
 	if _, err := bw.Write(header[:]); err != nil {
 		return err
 	}
-	if w.values != nil {
-		if err := w.groups.Write(bw); err != nil {
+	if w.pages != nil {
+		if err := w.starts.Write(bw); err != nil {
 			return err
 		}
-		if err := w.values.Write(bw); err != nil {
+		if err := w.pages.Write(bw); err != nil {
 			return err
 		}
 	}

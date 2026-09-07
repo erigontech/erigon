@@ -40,7 +40,7 @@ func TestHistoryValueIndexV2(t *testing.T) {
 	require.NoError(t, err)
 	w.NoFsync()
 	for _, n := range valuesPerKey {
-		w.AddGroup(n)
+		w.AddRun(n)
 	}
 	for _, off := range offsets {
 		w.AddPage(off)
