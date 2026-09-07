@@ -233,37 +233,10 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, ui
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {
-	sc.registerNewSendersFrom(newTxns, logger)
-	return nil
-}
-
-// registerNewSendersFrom assigns sender ids and reports the ones it had to
-// allocate, so a caller whose txns may all be rejected can hand them back to
-// forgetUnusedSenders.
-func (sc *sendersBatch) registerNewSendersFrom(newTxns *TxnSlots, logger log.Logger) (allocated []uint64) {
 	for i, txn := range newTxns.Txns {
-		before := sc.senderID
 		txn.SenderID, txn.Traced = sc.getOrCreateID(newTxns.Senders.AddressAt(i), logger)
-		if sc.senderID != before {
-			allocated = append(allocated, txn.SenderID)
-		}
 	}
-	return allocated
-}
-
-// forgetUnusedSenders drops the ids from allocated that never made it into a
-// sub-pool. Validation rejects a txn before it becomes a metaTxn, so it never
-// reaches p.deletedTxns and the flush-time eviction never sees it.
-func (sc *sendersBatch) forgetUnusedSenders(allocated []uint64, inUse func(uint64) bool) {
-	for _, id := range allocated {
-		if inUse(id) {
-			continue
-		}
-		if addr, ok := sc.senderID2Addr[id]; ok {
-			delete(sc.senderID2Addr, id)
-			delete(sc.senderIDs, addr)
-		}
-	}
+	return nil
 }
 
 func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
