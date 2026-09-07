@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestFeeHistory(t *testing.T) {
@@ -80,13 +81,13 @@ func TestFeeHistory(t *testing.T) {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
 
-			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 			tx, err := m.DB.BeginTemporalRo(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()
-			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(m.DB, tx, baseApi), config, cache, gasprice.NewFeeHistoryCache(), log.New())
+			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(m.DB, rpchelper.PinToOverlay(tx, nil), baseApi), config, cache, gasprice.NewFeeHistoryCache(), log.New())
 
 			first, reward, baseFee, ratio, blobBaseFee, blobBaseFeeRatio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 

@@ -45,7 +45,9 @@ func TestPostAndDecode_AttesterDuties(t *testing.T) {
 		// Return duties wrapped in standard Beacon API response.
 		resp := map[string]any{"data": expectedDuties}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -72,7 +74,9 @@ func TestGet_AttesterDuties_Fails(t *testing.T) {
 			return
 		}
 		resp := map[string]any{"data": []any{}}
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

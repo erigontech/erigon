@@ -74,6 +74,12 @@ type selfBuildPayload struct {
 	ExecutionRequests *cltypes.ExecutionRequests
 }
 
+type selfBuildEnvelopeStore interface {
+	Add(uint64, *cltypes.ExecutionPayloadEnvelope) bool
+	Get(uint64) (*cltypes.ExecutionPayloadEnvelope, bool)
+	Remove(uint64) bool
+}
+
 type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
@@ -119,7 +125,7 @@ type ApiHandler struct {
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
-	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
+	committeeSub                       committee_subscription.CommitteeSubscribe
 	attestationProducer                attestation_producer.AttestationDataProducer
 	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
 	aggregatePool                      aggregation.AggregationPool
@@ -152,7 +158,8 @@ type ApiHandler struct {
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
-	selfBuildEnvelopes *lru.Cache[uint64, *cltypes.ExecutionPayloadEnvelope]
+	selfBuildEnvelopeUpdatesMu sync.Mutex
+	selfBuildEnvelopes         selfBuildEnvelopeStore
 }
 
 func NewApiHandler(
@@ -177,7 +184,7 @@ func NewApiHandler(
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
-	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
+	committeeSub committee_subscription.CommitteeSubscribe,
 	aggregatePool aggregation.AggregationPool,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionAndProofs services.SyncContributionService,

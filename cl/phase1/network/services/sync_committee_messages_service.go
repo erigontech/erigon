@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -147,12 +148,16 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
 				// ImmediateVerification is sequential so using the headState directly is safe
 				if msg.ImmediateVerification {
-					s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
+					if err := s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage); err != nil {
+						log.Debug("failed to add sync committee message to pool", "err", err)
+					}
 				} else {
 					// ImmediateVerification=false is parallel so using the headState directly is unsafe
-					s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+					if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 						return s.syncContributionPool.AddSyncCommitteeMessage(headState, *subnet, msg.SyncCommitteeMessage)
-					})
+					}); err != nil {
+						log.Debug("failed to add sync committee message to pool", "err", err)
+					}
 				}
 			},
 		}

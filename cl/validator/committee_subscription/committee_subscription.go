@@ -92,7 +92,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	)
 
 	if c.syncedData.Syncing() {
-		return errors.New("head state not available")
+		return synced_data.ErrNotSynced
 	}
 
 	log.Trace("Add attestation subscription", "slot", slot, "committeeIndex", cIndex, "isAggregator", p.IsAggregator, "validatorIndex", p.ValidatorIndex)

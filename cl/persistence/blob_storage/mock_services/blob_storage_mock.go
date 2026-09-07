@@ -121,40 +121,40 @@ func (c *MockBlobStorageKzgCommitmentsCountCall) DoAndReturn(f func(context.Cont
 	return c
 }
 
-// Prune mocks base method.
-func (m *MockBlobStorage) Prune() error {
+// PruneBelow mocks base method.
+func (m *MockBlobStorage) PruneBelow(slot uint64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Prune")
+	ret := m.ctrl.Call(m, "PruneBelow", slot)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// Prune indicates an expected call of Prune.
-func (mr *MockBlobStorageMockRecorder) Prune() *MockBlobStoragePruneCall {
+// PruneBelow indicates an expected call of PruneBelow.
+func (mr *MockBlobStorageMockRecorder) PruneBelow(slot any) *MockBlobStoragePruneBelowCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockBlobStorage)(nil).Prune))
-	return &MockBlobStoragePruneCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneBelow", reflect.TypeOf((*MockBlobStorage)(nil).PruneBelow), slot)
+	return &MockBlobStoragePruneBelowCall{Call: call}
 }
 
-// MockBlobStoragePruneCall wrap *gomock.Call
-type MockBlobStoragePruneCall struct {
+// MockBlobStoragePruneBelowCall wrap *gomock.Call
+type MockBlobStoragePruneBelowCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBlobStoragePruneCall) Return(arg0 error) *MockBlobStoragePruneCall {
+func (c *MockBlobStoragePruneBelowCall) Return(arg0 error) *MockBlobStoragePruneBelowCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBlobStoragePruneCall) Do(f func() error) *MockBlobStoragePruneCall {
+func (c *MockBlobStoragePruneBelowCall) Do(f func(uint64) error) *MockBlobStoragePruneBelowCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBlobStoragePruneCall) DoAndReturn(f func() error) *MockBlobStoragePruneCall {
+func (c *MockBlobStoragePruneBelowCall) DoAndReturn(f func(uint64) error) *MockBlobStoragePruneBelowCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

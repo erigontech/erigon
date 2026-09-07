@@ -273,7 +273,7 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 		requestSent.Store(false)
 		return
 	}
-	if blocks == nil || len(blocks) == 0 {
+	if len(blocks) == 0 {
 		b.rpc.BanPeer(peerId)
 		requestSent.Store(false)
 		return
@@ -610,7 +610,9 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			continue
 		}
 		for i := *newSlot + 1; i < *slot; i++ {
-			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
+			if err := tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i)); err != nil {
+				return err
+			}
 		}
 	}
 

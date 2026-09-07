@@ -134,20 +134,16 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
-// Polling method for a previously created filter
-// returns an array of logs which have occurred since the last poll.
-func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log, error) {
+func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex)); !ok || ft != rpchelper.FilterTypeLogs {
+	criteria, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
+	if !ok {
 		return nil, rpc.ErrFilterNotFound
 	}
-	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
-		return logs, nil
-	}
-	return []*types.Log{}, nil
+	return api.GetLogs(ctx, criteria)
 }
 
 // subscribeRPC runs the shared subscription skeleton: subscription creation and a
@@ -252,14 +248,14 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *types.Log, func(), error) {
+		func() (<-chan *types.RPCLog, func(), error) {
 			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			if err != nil {
 				return nil, nil, err
 			}
 			return logs, func() { api.filters.UnsubscribeLogs(id) }, nil
 		},
-		func(emit func(payload any), h *types.Log) {
+		func(emit func(payload any), h *types.RPCLog) {
 			if h != nil {
 				emit(h)
 			}

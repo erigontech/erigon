@@ -17,13 +17,18 @@
 package state
 
 import (
+	"fmt"
+	"sync"
 	"testing"
+
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 // A reorg unwind restores domain values from the diffset, so a domain missing
@@ -43,5 +48,108 @@ func TestGetDiffsetCoversAllDomains(t *testing.T) {
 	require.True(t, ok)
 	for d := range kv.DomainLen {
 		require.NotEmpty(t, diffs[d], "domain %s missing from GetDiffset", d)
+	}
+}
+
+// Pins the locking contract of the per-domain latestStateLocks: readers and
+// writers of different domains run concurrently while Unwind takes every
+// lock. Meaningful under -race; also checks unwind correctness afterwards.
+func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
+	t.Parallel()
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for d := range sd.domains {
+		sd.domains[d] = map[string][]dataWithTxNum{}
+	}
+
+	const keysPerDomain = 200
+	const cutoff = uint64(keysPerDomain / 2)
+	var wg sync.WaitGroup
+	for d := range kv.DomainLen {
+		domain := kv.Domain(d)
+		wg.Go(func() {
+			for i := range keysPerDomain {
+				key := fmt.Sprintf("%s-%03d", domain, i)
+				sd.putLatest(domain, key, []byte(key), uint64(i))
+			}
+		})
+		wg.Go(func() {
+			for i := range keysPerDomain {
+				key := fmt.Sprintf("%s-%03d", domain, i)
+				if v, _, ok := sd.GetLatest(domain, []byte(key)); ok && string(v) != key {
+					t.Errorf("domain %s key %s: got %q", domain, key, v)
+				}
+				sd.HasPrefixInRAM(domain, []byte(key))
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 50 {
+			sd.Unwind(cutoff, nil)
+		}
+	})
+	wg.Wait()
+
+	sd.Unwind(cutoff, nil)
+	for d := range kv.DomainLen {
+		domain := kv.Domain(d)
+		for i := range keysPerDomain {
+			key := fmt.Sprintf("%s-%03d", domain, i)
+			_, _, ok := sd.GetLatest(domain, []byte(key))
+			require.Equal(t, uint64(i) < cutoff, ok, "domain %s key %s", domain, key)
+		}
+	}
+}
+
+// Commit borrows the batch's value buffers instead of copying, which is only
+// sound while a later write to the same key leaves the earlier bytes alone.
+func TestPutLatest_NeverRewritesValuesInPlace(t *testing.T) {
+	t.Parallel()
+
+	// inMemHistoryReads picks which arm a later txNum takes: append, or overwrite
+	// the slot in place. Both must leave the earlier bytes alone.
+	for _, inMemHistoryReads := range []bool{true, false} {
+		t.Run(fmt.Sprintf("inMemHistoryReads=%v", inMemHistoryReads), func(t *testing.T) {
+			t.Parallel()
+
+			sd := &TemporalMemBatch{
+				stepSize:          16,
+				storage:           btree2.NewMap[string, []dataWithTxNum](128),
+				metrics:           &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+				inMemHistoryReads: inMemHistoryReads,
+			}
+			for d := range sd.domains {
+				sd.domains[d] = map[string][]dataWithTxNum{}
+			}
+
+			// Each case is the FIRST write after the borrow, so the slot still holds
+			// the borrowed buffer when the arm runs. A shorter value fits that buffer,
+			// which is what an arm recycling it would overwrite.
+			for _, next := range []struct {
+				name  string
+				val   string
+				txNum uint64
+			}{
+				{"same txNum", "second", 1},
+				{"later txNum", "third", 2},
+			} {
+				for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+					key := "k-" + domain.String() + "-" + next.name
+					first := []byte("first-and-long-enough-to-be-reused")
+					sd.putLatest(domain, key, first, 1)
+					borrowed, _, ok := sd.GetLatest(domain, []byte(key))
+					require.True(t, ok)
+					require.Equal(t, first, borrowed)
+
+					sd.putLatest(domain, key, []byte(next.val), next.txNum)
+
+					require.Equal(t, first, borrowed,
+						"%s/%s: a borrowed value must survive a later write to its key", domain, next.name)
+				}
+			}
+		})
 	}
 }

@@ -420,12 +420,13 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 }
 
 // Loads pre-state and flushes it to db + branch cache; for callers needing pre-state to outlive the call.
-func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, db kv.TemporalRoDB, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, err
 	}
 	defer sd.Close()
+	sd.EnableParaTrieDB(db)
 	statedb, err := MakePreStateInto(rules, sd, tx, alloc, blockNr)
 	if err != nil {
 		return nil, err

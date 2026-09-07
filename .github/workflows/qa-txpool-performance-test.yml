@@ -34,9 +34,6 @@ jobs:
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}-${{ matrix.commitment_mode }}"
-      # Toggle statecfg.ExperimentalParallelCommitment from CI without code
-      # changes. envLookup in common/dbg/dbg_env.go auto-prepends ERIGON_, so
-      # this maps to the COMMITMENT_PARALLEL flag read in db/state/statecfg.
       ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
@@ -427,7 +424,7 @@ jobs:
           fi
 
       - name: Clean test results
-        uses: gacts/run-and-post-run@v1.4.4
+        uses: gacts/run-and-post-run@v1.4.5
         if: always()
         with:
           post: |

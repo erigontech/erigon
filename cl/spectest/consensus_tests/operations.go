@@ -566,9 +566,8 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 		ExecutionValid bool `yaml:"execution_valid"`
 	}
 	execMeta.ExecutionValid = true // default to true if file doesn't exist
-	if metaErr := spectest.ReadMeta(root, "execution.yaml", &execMeta); metaErr != nil {
-		// file may not exist (e.g. GLOAS tests use signed_envelope); ignore
-	}
+	// file may not exist (e.g. GLOAS tests use signed_envelope); ignore
+	_ = spectest.ReadMeta(root, "execution.yaml", &execMeta)
 
 	if c.Version() >= clparams.GloasVersion {
 		// [New in Gloas:EIP7732] execution_payload tests use signed_envelope.ssz_snappy

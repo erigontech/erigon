@@ -198,7 +198,7 @@ func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []s
 }
 
 func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if ii.Disable {
+	if !ii.Enabled {
 		return nil, nil
 	}
 	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
@@ -321,7 +321,7 @@ func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
-	return iit.newWriter(iit.ii.dirs.Tmp, false)
+	return iit.newWriter(iit.ii.dirs.Tmp, !iit.ii.Enabled)
 }
 
 type InvertedIndexBufferedWriter struct {
@@ -562,8 +562,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 		g := iit.statelessGetter(i)
 		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(k, key) {
+		if g.MatchCmp(key) != 0 { // MPH false-positives protection
 			continue
 		}
 		encodedSeq, _ := g.Next(nil)

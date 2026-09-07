@@ -85,7 +85,8 @@ type storageEnumerator interface {
 // asOfStateReader. Subsequent writes overwrite the local copy. At block boundary,
 // the accumulated state is fed to the trie's Updates buffer.
 type calcState struct {
-	accounts map[accounts.Address]*calcAccountState
+	accounts      map[accounts.Address]*calcAccountState
+	dirtyAccounts []accounts.Address
 	// storageState holds the accumulated value for each slot
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	// storageDirty tracks which slots were modified in the current block
@@ -165,6 +166,14 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 	return acc
 }
 
+func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
+	if acc.dirty {
+		return
+	}
+	acc.dirty = true
+	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+}
+
 // ApplyWrites folds a tx's typed write collections into the local state.
 //
 // Self-destruct is applied before the field writes so the priority is explicit
@@ -180,7 +189,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if vw.Val {
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
-			acc.dirty = true
+			cs.markDirty(addr, acc)
 			cs.deleteStorageSubtree(addr)
 		}
 	}
@@ -190,7 +199,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Balances() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Balance = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, !acc.Balance.IsZero()) {
 			acc.Deleted = false
 		}
@@ -198,7 +207,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Nonces() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Nonce = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, acc.Nonce != 0) {
 			acc.Deleted = false
 		}
@@ -206,7 +215,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.CodeHashes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Value()
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Value() != empty.CodeHash) {
 			acc.Deleted = false
 		}
@@ -214,7 +223,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Codes() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
 			acc.Deleted = false
 		}
@@ -222,7 +231,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.Incarnations() {
 		acc := cs.ensureAccount(addr, writes)
 		acc.Incarnation = vw.Val
-		acc.dirty = true
+		cs.markDirty(addr, acc)
 	}
 	for addr, inner := range writes.Storages() {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
@@ -300,7 +309,8 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 	// EIP-161: a touched account whose merged block-end state is empty is
 	// removed from the trie. The BAL carries no deletion marker, so reconstruct
 	// it here, gated exactly as the incremental path (Normalize).
-	for _, ac := range blockAccessList {
+	for i := range blockAccessList {
+		ac := &blockAccessList[i]
 		acc := cs.accounts[ac.Address]
 		if acc == nil || !acc.dirty || acc.Deleted {
 			continue
@@ -318,10 +328,8 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
-	for addr, acc := range cs.accounts {
-		if !acc.dirty {
-			continue
-		}
+	for _, addr := range cs.dirtyAccounts {
+		acc := cs.accounts[addr]
 		address := addr.Value()
 		key := string(address[:])
 
@@ -382,9 +390,10 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 // accumulated state values. Called after commitment computation to
 // prepare for the next block.
 func (cs *calcState) ResetBlockFlags() {
-	for _, acc := range cs.accounts {
-		acc.dirty = false
+	for _, addr := range cs.dirtyAccounts {
+		cs.accounts[addr].dirty = false
 	}
+	cs.dirtyAccounts = cs.dirtyAccounts[:0]
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}

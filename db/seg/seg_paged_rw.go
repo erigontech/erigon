@@ -76,12 +76,6 @@ type Page struct {
 	compressionBuf []byte
 }
 
-func FromBytes(buf []byte, compressionEnabled bool) *Page {
-	r := &Page{}
-	r.Reset(buf, compressionEnabled)
-	return r
-}
-
 func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	var err error
 	r.compressionBuf, v, err = compress.DecodeZstdIfNeed(r.compressionBuf[:0], v, compressionEnabled)
@@ -99,6 +93,15 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	}
 	return
 }
+
+// clear rewinds the page without dropping compressionBuf, which the next page
+// decodes into. limit=0 keeps HasNext false until a page is actually read.
+func (r *Page) clear() {
+	r.i, r.limit = 0, 0
+	r.kOffset, r.vOffset = 0, 0
+	r.kLens, r.vLens, r.data = nil, nil, nil
+}
+
 func (r *Page) HasNext() bool { return r.limit > r.i }
 func (r *Page) Next() (k, v []byte) {
 	kLen := be.Uint32(r.kLens[r.i*4:])
@@ -137,7 +140,7 @@ type pageResult struct {
 }
 
 type PagedReader struct {
-	file         ReaderI
+	file         *Reader
 	isCompressed bool
 	pageSize     int
 	page         *Page
@@ -145,7 +148,7 @@ type PagedReader struct {
 	currentPageOffset, nextPageOffset uint64
 }
 
-func NewPagedReader(r ReaderI, pageSize int, snappy bool) *PagedReader {
+func NewPagedReader(r *Reader, pageSize int, snappy bool) *PagedReader {
 	if pageSize == 0 {
 		pageSize = 1
 	}
@@ -164,7 +167,7 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.file.Reset(offset)
 	g.currentPageOffset = offset
 	g.nextPageOffset = offset
-	g.page = &Page{} // TODO: optimize
+	g.page.clear()
 	if g.file.HasNext() {
 		g.NextPage()
 	}

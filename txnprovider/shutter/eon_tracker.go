@@ -191,8 +191,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	return nil
 }
 
-func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, error) {
-	var err error
+func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (_ Eon, _ bool, err error) {
 	var cached bool
 	startTime := time.Now()
 	defer func() {

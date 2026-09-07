@@ -181,6 +181,22 @@ func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Ho
 	return ok
 }
 
+// mergeChildStateGas takes over the child's state-gas spill, then absorbs state
+// gas the child left in the reservoir, up to the spill available in this frame.
+func (c *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
+	c.stateGasSpill += childSpill
+	misplaced := min(c.stateGas, c.stateGasSpill)
+	if misplaced == 0 {
+		return
+	}
+	c.stateGas -= misplaced
+	before := c.gas
+	c.refillStateGas(misplaced) // capped by the spill, so LIFO returns all to gas_left
+	if tracer != nil && tracer.OnGasChange != nil {
+		tracer.OnGasChange(before, c.gas, tracing.GasChangeCallStateGasReturned)
+	}
+}
+
 func (c *CallContext) refillStateGas(amount uint64) {
 	remaining := c.Gas()
 	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
@@ -312,14 +328,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 		jt = &amsterdamInstructionSet
 	case chainRules.IsOsaka:
 		jt = &osakaInstructionSet
-	case chainRules.IsBhilai:
-		jt = &bhilaiInstructionSet
 	case chainRules.IsPrague:
 		jt = &pragueInstructionSet
 	case chainRules.IsCancun:
 		jt = &cancunInstructionSet
-	case chainRules.IsNapoli:
-		jt = &napoliInstructionSet
 	case chainRules.IsShanghai:
 		jt = &shanghaiInstructionSet
 	case chainRules.IsLondon:

@@ -59,7 +59,9 @@ func getTestCommitteesMessages(n int) (privateKeys [][]byte, messages []cltypes.
 		c := currCommittee.GetCommittee()
 		c[i] = common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
 		currCommittee.SetCommittee(c)
-		s.SetCurrentSyncCommittee(currCommittee)
+		if err := s.SetCurrentSyncCommittee(currCommittee); err != nil {
+			panic(err)
+		}
 	}
 	return
 }

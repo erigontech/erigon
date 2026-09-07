@@ -65,6 +65,41 @@ linters:
           rules: rules.go
         underef:
           skipRecvDeref: true
+    modernize:
+      # newexpr wants //go:fix inline on common.NewUint64 (391 call sites) — its own PR.
+      disable:
+        - newexpr
+    staticcheck:
+      # The only place staticcheck checks are turned off. A text: exclusion runs
+      # the check and drops its output, which is how the SA/S1 gap this list
+      # replaces went unnoticed. SA1019 waits on 42 deprecations; the rest are
+      # golangci's own default-off ST plus the ST/QF we find too noisy.
+      checks:
+        - all
+        - -SA1019
+        - -QF1001
+        - -QF1002
+        - -QF1003
+        - -QF1006
+        - -QF1007
+        - -QF1008
+        - -QF1010
+        - -QF1011
+        - -QF1012
+        - -ST1000
+        - -ST1003
+        - -ST1005
+        - -ST1008
+        - -ST1012
+        - -ST1016
+        - -ST1017
+        - -ST1019
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -ST1023
+        - -ST1029
+        - -ST5011
     govet:
       enable:
         - nilness
@@ -90,74 +125,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cl/aggregation\
-          |cl/antiquary\
-          |cl/beacon/beaconhttp\
-          |cl/beacon/handler\
-          |cl/cltypes\
-          |cl/cltypes/solid\
-          |cl/das\
-          |cl/merkle_tree\
-          |cl/p2p\
-          |cl/persistence/blob_storage\
-          |cl/persistence/state\
-          |cl/persistence/state/historical_states_reader\
-          |cl/phase1/core/state\
-          |cl/phase1/core/state/raw\
-          |cl/phase1/core/state/shuffling\
-          |cl/phase1/execution_client/block_collector\
-          |cl/phase1/forkchoice\
-          |cl/phase1/forkchoice/fork_graph\
-          |cl/phase1/network\
-          |cl/phase1/network/gossip\
-          |cl/phase1/network/services\
-          |cl/phase1/stages\
-          |cl/rpc\
-          |cl/sentinel\
-          |cl/sentinel/communication/ssz_snappy\
-          |cl/sentinel/handlers\
-          |cl/sentinel/httpreqresp\
-          |cl/sentinel/service\
-          |cl/spectest/consensus_tests\
-          |cl/transition/impl/eth2\
-          |cl/transition/impl/eth2/statechange\
-          |cl/utils/bls\
-          |cl/validator/devvalidator\
-          |cmd/capcli\
-          |cmd/caplin/caplin1\
-          |cmd/evm\
-          |cmd/evm/internal/t8ntool\
-          |cmd/integration/commands\
-          |cmd/rlpdump\
-          |cmd/rpcdaemon/cli\
-          |cmd/rpcdaemon/health\
-          |cmd/utils/app\
-          |cmd/utils/cmdtest\
-          |common\
-          |common/crypto\
-          |common/crypto/blake2b\
-          |common/iouring\
-          |common/log/v3\
-          |common/mmap\
-          |db/datadir\
-          |db/datadir/reset\
-          |db/datastruct/btindex\
-          |db/datastruct/fusefilter\
-          |db/downloader\
-          |db/downloader/webseeds\
-          |db/etl\
-          |db/kv/kvcache\
-          |db/kv/mdbx\
-          |db/kv/mdbx/mdbxtest\
-          |db/kv/membatchwithdb\
-          |db/rawdb\
-          |db/recsplit\
-          |db/recsplit/eliasfano32\
-          |db/seg\
-          |db/snapshotsync\
-          |db/snapshotsync/freezeblocks\
-          |db/test\
-          |diagnostics/diaglib\
+          diagnostics/diaglib\
           |diagnostics/diskutils\
           |execution/commitment\
           |execution/commitment/trie\
@@ -193,18 +161,12 @@ linters:
           |p2p/rlpx\
           |p2p/sentry\
           |p2p/sentry/libsentry\
-          |plugins/auth\
-          |polygon/bor\
-          |polygon/tests\
           |rpc\
           |rpc/jsonrpc\
           |rpc/rpchelper\
           |txnprovider/txpool\
           |txnprovider/txpool/tests\
           )/[^/]+\\.go$"
-      - linters:
-          - staticcheck
-        text: ST1019|ST1029|ST5011|QF1003|SA1019|QF1008|S1021|QF1001|SA6005|S1002|QF1002|QF1012|QF1006|ST1005|SA5011|ST1023|ST1012|QF1011|S1019|S1000|S1000|S1009|ST1008|S1016|S1016|ST1017|SA4009|QF1007|SA6002|QF1010|SA9003|SA4006|SA4010
       - linters:
           - gosec
           - perfsprint
