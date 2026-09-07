@@ -629,7 +629,8 @@ func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
 
 // TestExecCommandsExposeParallelCommitment pins the flag on every integration
 // command that computes commitment. Without it the flag is unknown on stage_exec,
-// so integration can only ever run the sequential trie.
+// so integration is stuck on whatever COMMITMENT_PARALLEL selected and cannot
+// switch tries.
 func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -642,7 +643,7 @@ func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotNil(t, tc.cmd.Flags().Lookup(utils.ExperimentalParallelCommitmentFlag.Name),
-				"command cannot select the parallel trie")
+				"command cannot select the commitment trie")
 		})
 	}
 }

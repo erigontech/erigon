@@ -1129,7 +1129,7 @@ var (
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
 		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
-		Value: true,
+		Value: statecfg.DefaultParallelCommitment,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",

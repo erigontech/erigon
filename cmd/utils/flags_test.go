@@ -359,7 +359,9 @@ func TestSetParallelCommitment(t *testing.T) {
 	orig := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = orig })
 
-	require.True(t, ExperimentalParallelCommitmentFlag.Value, "parallel commitment must be on by default")
+	require.True(t, statecfg.DefaultParallelCommitment, "parallel commitment must be on by default")
+	require.Equal(t, statecfg.DefaultParallelCommitment, ExperimentalParallelCommitmentFlag.Value,
+		"advertised flag default drifted from the effective default")
 
 	run := func(seed bool, args ...string) ethconfig.Config {
 		statecfg.ExperimentalParallelCommitment = seed
