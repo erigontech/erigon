@@ -24,12 +24,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func buildEthCfg(t *testing.T, args []string) ethconfig.Config {
 	t.Helper()
+
+	prevReadMetrics := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
 
 	var result ethconfig.Config
 	app := &cli.Command{}
