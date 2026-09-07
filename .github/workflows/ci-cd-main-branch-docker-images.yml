@@ -5,7 +5,7 @@ env:
   APPLICATION: "erigon"
   APP_REPO: "erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
-  BUILDER_IMAGE: "golang:1.26-trixie"
+  BUILDER_IMAGE: "golang:1.27-trixie"
   LABEL_DESCRIPTION: "[docker image built on the last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:

@@ -1389,6 +1389,7 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 
 type getLatestOptions struct {
 	codeHash []byte
+	buf      []byte
 }
 
 func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
@@ -1498,13 +1499,19 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
+	willFill := maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
+	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
+	if fillsCode {
+		getOpts = getOpts.WithBuf(opts.buf)
+	}
+
 	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
-	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
+	if willFill {
 		readTxNum := step.LastTxNum(sd.StepSize())
 		fillView := view
 		if fillView.NeedsFrontier() {
@@ -1512,8 +1519,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			// amortized by the backing read. Stale views do not request a retry.
 			fillView = fillView.WithFrontier(sd.cacheFrontierFor(tx))
 		}
-		if len(opts.codeHash) == len(common.Hash{}) {
-			fillView.FillCode(k, v, opts.codeHash, readTxNum)
+		if fillsCode {
+			v = fillView.FillCode(k, v, opts.codeHash, readTxNum)
 		} else {
 			fillView.Fill(domain, k, v, readTxNum)
 		}
@@ -1624,10 +1631,10 @@ func (sd *SharedDomains) getLatestValSize(domain kv.Domain, tx kv.TemporalTx, k 
 // the write. Setters therefore resolve prevVal through GetLatest, which is
 // addr-keyed (domain-faithful); only getters use this codeHash shortcut.
 func (sd *SharedDomains) GetCode(tx kv.TemporalTx, addr []byte, txNum uint64) ([]byte, bool, error) {
-	return sd.getCode(tx, sd.cacheReader(), addr, txNum)
+	return sd.getCode(tx, sd.cacheReader(), addr, txNum, nil)
 }
 
-func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) ([]byte, bool, error) {
+func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64, buf []byte) ([]byte, bool, error) {
 	if tx == nil {
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
@@ -1653,7 +1660,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{}.withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, kv.NoStepBound, view, getLatestOptions{codeHash: codeHash, buf: buf})
 	if err != nil {
 		return nil, false, err
 	}
