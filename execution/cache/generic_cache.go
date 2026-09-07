@@ -68,10 +68,9 @@ func elemBytesFor[T any]() int64 {
 	return int64(unsafe.Sizeof(e)) + 4
 }
 
-// slotChargeBytes is a slot at freelru's best table ratio, 5/4. It seeds the
-// ceiling search and nothing else: a capacity off that ratio costs more, up to
-// 5/2, so this is a lower bound on the real charge and the search starts above
-// the answer. Every reservation charges the exact table through tableSlots.
+// slotChargeBytes is a slot at freelru's best table ratio, 5/4, so it is a lower
+// bound: a capacity off that ratio costs up to 5/2. It seeds the ceiling search
+// only; every reservation charges the exact table through tableSlots.
 func slotChargeBytes(elemBytes int64) int64 { return elemBytes*5/4 + 1 }
 
 // tableSlots is the array length freelru allocates for a capacity. It sizes both
@@ -114,14 +113,10 @@ func budgetedSlots(capacityBytes datasize.ByteSize, payloadBytes uint32, elemByt
 	return perShardCap * shards, shards
 }
 
-// fitCeiling is the largest capacity up to ceiling whose exact cost is inside
-// the budget. estimate only seeds the search: dividing a budget by the per-slot
-// charge carries neither the per-shard structs nor the gap between a capacity's
-// table and the 5/4 ratio it is charged at, both of which scale with the shard
-// count, so the quotient alone can buy a generation larger than itself and can
-// also fall short of one. cost is non-decreasing in capacity -- the payload term
-// grows with it and the table it rounds up to never shrinks -- so the answer is
-// the boundary a binary search converges on.
+// fitCeiling is the largest capacity up to ceiling whose exact cost is inside the
+// budget. estimate only seeds the search and may sit on either side of the answer.
+// cost must be non-decreasing in capacity, as both callers' are: the payload term
+// grows with it and the table it rounds up to never shrinks.
 func fitCeiling(estimate, ceiling uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
 	if cost(1) > int64(budget) {
 		return 1

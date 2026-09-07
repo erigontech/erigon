@@ -628,8 +628,8 @@ func TestGenericCache_PayloadEstimateExcludesEntryBookkeeping(t *testing.T) {
 
 // The ceiling is the largest capacity that fits, not the largest one whose table
 // sits on freelru's 5/4 boundary. One boundary per power-of-two band, so rounding
-// to it strands most of a band: 39% of the code cache's budget, 17% of the
-// account cache's, and it never comes back -- the ceiling only ever descends.
+// to it strands most of a band: 39% of the code cache's ceiling, 17% of the
+// account cache's.
 func TestCeilingLeavesNoAffordableSlot(t *testing.T) {
 	t.Parallel()
 
