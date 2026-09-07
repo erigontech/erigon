@@ -23,17 +23,14 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -91,80 +88,16 @@ func pbinCodeAccounts(code []byte, holders ...int) []pbinCodeAccount {
 	return accts
 }
 
-// pbinCodeForwardRun writes the fixture accounts, their code and a few storage
-// slots for txNums [0, toTx), saving the commitment at every step boundary.
-func pbinCodeForwardRun(t *testing.T, db kv.TemporalRwDB, stepSize, toTx uint64, accts []pbinCodeAccount) map[uint64][]byte {
-	t.Helper()
-	rwTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-
-	sd := pbinM1ABinSharedDomains(t, rwTx)
-	defer sd.Close()
-
-	roots := make(map[uint64][]byte)
-	for txNum := range toTx {
-		for i, a := range accts {
-			acc := accounts.Account{
-				Nonce:    txNum + 1,
-				Balance:  *uint256.NewInt(txNum*1_000 + uint64(i)),
-				CodeHash: accounts.EmptyCodeHash,
-			}
-			if len(a.code) > 0 {
-				acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(a.code))
-				if txNum == 0 {
-					require.NoError(t, sd.DomainPut(kv.CodeDomain, rwTx, a.addr, a.code, txNum, nil))
-				}
-			}
-			prev, _, err := sd.GetLatest(kv.AccountsDomain, rwTx, a.addr)
-			require.NoError(t, err)
-			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, a.addr, accounts.SerialiseV3(&acc), txNum, prev))
-
-			for j := range pbinCodeSlots {
-				sk := pbinM1ASlotKey(a.addr, j)
-				val := []byte{byte(txNum + 1), byte(i + 1), byte(j + 1)}
-				prev, _, err := sd.GetLatest(kv.StorageDomain, rwTx, sk)
-				require.NoError(t, err)
-				require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, sk, val, txNum, prev))
-			}
-		}
-		if (txNum+1)%stepSize == 0 {
-			root, err := sd.ComputeCommitment(t.Context(), rwTx, true, 0, txNum, "pbin-code", nil)
-			require.NoError(t, err)
-			require.NotEmpty(t, root)
-			roots[txNum] = bytes.Clone(root)
-		}
-	}
-	require.NoError(t, sd.Flush(t.Context(), rwTx))
-	require.NoError(t, rwTx.Commit())
-	return roots
-}
-
-// pbinCodeCollatedTxNum is pbinM1ACollatedTxNum plus the code domain, which the
-// rebuild reads at the same boundary to chunk an account's code.
-func pbinCodeCollatedTxNum(t *testing.T, db kv.TemporalRwDB) uint64 {
-	t.Helper()
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	at := state.AggTx(tx)
-	accTxNum := at.TxNumsInFiles(kv.AccountsDomain)
-	require.Equal(t, accTxNum, at.TxNumsInFiles(kv.StorageDomain))
-	require.Equal(t, accTxNum, at.TxNumsInFiles(kv.CodeDomain),
-		"the rebuild reads accounts, storage and code at one boundary")
-	return accTxNum
-}
-
 // pbinCodeRebuild runs the fixture forward, collates it into domain files, wipes
 // the commitment and rebuilds it from those files. It returns the forward root at
 // the collated boundary and the rebuilt one.
 func pbinCodeRebuild(t *testing.T, accts []pbinCodeAccount, txCount uint64) (kv.TemporalRwDB, []byte, []byte, *state.RebuildReport) {
 	t.Helper()
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinCodeStepSize)
-	stepRoots := pbinCodeForwardRun(t, db, pbinCodeStepSize, txCount, accts)
+	stepRoots, _ := pbinForwardRun(t, db, pbinCodeStepSize, 0, txCount, accts, pbinCodeSlots)
 	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
-	collatedTxNum := pbinCodeCollatedTxNum(t, db)
+	collatedTxNum := pbinCollatedTxNum(t, db, kv.StorageDomain, kv.CodeDomain)
 	require.Positive(t, collatedTxNum, "collation must produce domain files to rebuild from")
 	wantRoot := stepRoots[collatedTxNum-1]
 	require.NotEmpty(t, wantRoot, "the collated boundary must be one the forward run computed a root at")
@@ -335,10 +268,10 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 
 	db, agg, dirs := pbinM1ANewDatadir(t, stepSize)
 	agg.PresetOfflineMerge() // 128 one-step collations, so build them the way the offline tool does
-	stepRoots := pbinCodeForwardRun(t, db, stepSize, txCount, accts)
+	stepRoots, _ := pbinForwardRun(t, db, stepSize, 0, txCount, accts, pbinCodeSlots)
 	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
-	collatedTxNum := pbinCodeCollatedTxNum(t, db)
+	collatedTxNum := pbinCollatedTxNum(t, db, kv.StorageDomain, kv.CodeDomain)
 	wantRoot := stepRoots[collatedTxNum-1]
 	require.NotEmpty(t, wantRoot, "the collated boundary must be one the forward run computed a root at")
 

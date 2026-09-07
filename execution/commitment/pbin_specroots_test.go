@@ -2,6 +2,8 @@ package commitment
 
 import (
 	"encoding/hex"
+	"encoding/json"
+	"os"
 	"sort"
 	"testing"
 
@@ -90,4 +92,54 @@ func TestPBinOracleMatchesSpecSequenceRoots(t *testing.T) {
 		}
 	}
 	t.Logf("replayed %d reference roots across %d sequences", checked, len(v.Sequences))
+}
+
+// Vectors exported from the EIP-8297 reference implementation in
+// ethereum/execution-specs (branch projects/binary-trie), which hashes with
+// BLAKE3. Comparisons against them either involve no hash (BASIC_DATA packing)
+// or replay derivation under BLAKE3 through the injectable seam.
+type pbinSpecVectors struct {
+	Meta      map[string]string `json:"meta"`
+	BasicData []struct {
+		CodeSize uint64 `json:"code_size"`
+		Nonce    uint64 `json:"nonce"`
+		Balance  string `json:"balance"`
+		Value    string `json:"value"`
+	} `json:"basic_data_vectors"`
+	Trie      []pbinSpecTrieVector `json:"trie_vectors"`
+	Sequences []struct {
+		Seed int `json:"seed"`
+		Ops  []struct {
+			Op    string `json:"op"`
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"ops"`
+		RootsAfter []string `json:"roots_after"`
+	} `json:"sequence_vectors"`
+}
+
+type pbinSpecTrieVector struct {
+	Name    string `json:"name"`
+	Entries []struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	} `json:"entries"`
+	Root string `json:"root"`
+}
+
+func pbinLoadSpecVectors(t *testing.T) pbinSpecVectors {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/eip8297_vectors.json")
+	require.NoError(t, err)
+	var v pbinSpecVectors
+	require.NoError(t, json.Unmarshal(raw, &v))
+	require.Equal(t, "blake3", v.Meta["hasher"], "vectors require their generation hash")
+	return v
+}
+
+func pbinMustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s[2:])
+	require.NoError(t, err)
+	return b
 }

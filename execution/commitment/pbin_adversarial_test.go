@@ -79,29 +79,6 @@ func TestPBinDelegationRepointedInOneBatch(t *testing.T) {
 	require.NotEqual(t, asCode.oracleRoot(t), root, "no code-hash leaf may appear for a delegated account")
 }
 
-func TestPBinZeroChunkAloneInItsGroup(t *testing.T) {
-	t.Parallel()
-
-	addr := pbinOracleAddr(103)
-	code := append(pbinTestCode(pbinStemSubtreeWidth*pbinChunkDataLen), make([]byte, pbinChunkDataLen)...)
-	chunks := pbinChunkifyCode(code)
-	require.Len(t, chunks, pbinStemSubtreeWidth+1)
-	require.Equal(t, [pbinValueLength]byte{}, chunks[pbinStemSubtreeWidth],
-		"the sole chunk of group 1 must be all-zero, PUSHDATA count included")
-
-	corpus := new(pbinTestCorpus).accountWithCodeBytes(addr, 1, 5, code)
-	_, root := corpus.process(t)
-	require.Equal(t, corpus.oracleRoot(t), root,
-		"a zero chunk alone in its tree_index group leaves the group with no leaf at all")
-
-	withLeaf := append(corpus.entries(t), pbinOracleEntry{
-		key:   pbinTreeKeyCodeChunk(keccak.Sum256(code), pbinStemSubtreeWidth),
-		value: make([]byte, pbinValueLength),
-	})
-	wrong := pbinOracleRoot(withLeaf)
-	require.NotEqual(t, wrong[:], root, "materializing the zero chunk as a leaf must change the root")
-}
-
 func TestPBinSharedCodeOutlivesOneHolder(t *testing.T) {
 	t.Parallel()
 

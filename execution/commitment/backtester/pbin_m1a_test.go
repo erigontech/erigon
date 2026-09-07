@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -130,7 +131,15 @@ func pbinM1ABinSharedDomains(t *testing.T, tx kv.TemporalTx) *execctx.SharedDoma
 // Writes accounts and storage for txNums [fromTx, toTx), saving the commitment
 // state at every step boundary. Returns the root at each boundary keyed by the
 // boundary txNum, plus the last root.
-func pbinM1AForwardRun(t *testing.T, db kv.TemporalRwDB, stepSize, fromTx, toTx uint64) (map[uint64][]byte, []byte) {
+func pbinM1AFixture() []pbinCodeAccount {
+	accts := make([]pbinCodeAccount, pbinM1AAccounts)
+	for i := range accts {
+		accts[i] = pbinCodeAccount{addr: pbinM1AAddr(i)}
+	}
+	return accts
+}
+
+func pbinForwardRun(t *testing.T, db kv.TemporalRwDB, stepSize, fromTx, toTx uint64, accts []pbinCodeAccount, slots int) (map[uint64][]byte, []byte) {
 	t.Helper()
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -142,18 +151,24 @@ func pbinM1AForwardRun(t *testing.T, db kv.TemporalRwDB, stepSize, fromTx, toTx 
 	roots := make(map[uint64][]byte)
 	var last []byte
 	for txNum := fromTx; txNum < toTx; txNum++ {
-		for i := range pbinM1AAccounts {
-			addr := pbinM1AAddr(i)
+		for i, a := range accts {
+			addr := a.addr
 			acc := accounts.Account{
 				Nonce:    txNum + 1,
 				Balance:  *uint256.NewInt(txNum*1_000 + uint64(i)),
 				CodeHash: accounts.EmptyCodeHash,
 			}
+			if len(a.code) > 0 {
+				acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(a.code))
+				if txNum == fromTx {
+					require.NoError(t, sd.DomainPut(kv.CodeDomain, rwTx, addr, a.code, txNum, nil))
+				}
+			}
 			prev, _, err := sd.GetLatest(kv.AccountsDomain, rwTx, addr)
 			require.NoError(t, err)
 			require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&acc), txNum, prev))
 
-			for j := range pbinM1ASlots {
+			for j := range slots {
 				sk := pbinM1ASlotKey(addr, j)
 				val := []byte{byte(txNum + 1), byte(i + 1), byte(j + 1)}
 				prev, _, err := sd.GetLatest(kv.StorageDomain, rwTx, sk)
@@ -217,15 +232,17 @@ func pbinM1ARestoredRoot(t *testing.T, db kv.TemporalRwDB) []byte {
 // The first txNum not yet in the account and storage files. Collation always
 // leaves the newest step in the db, so a files-only rebuild reproduces the root
 // as of this boundary, not the last one the forward run computed.
-func pbinM1ACollatedTxNum(t *testing.T, db kv.TemporalRwDB) uint64 {
+func pbinCollatedTxNum(t *testing.T, db kv.TemporalRwDB, domains ...kv.Domain) uint64 {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	at := state.AggTx(tx)
 	accTxNum := at.TxNumsInFiles(kv.AccountsDomain)
-	require.Equal(t, accTxNum, at.TxNumsInFiles(kv.StorageDomain),
-		"the rebuild reads both domains at one boundary")
+	for _, d := range domains {
+		require.Equal(t, accTxNum, at.TxNumsInFiles(d),
+			"the rebuild reads its domains at one boundary")
+	}
 	return accTxNum
 }
 
@@ -312,13 +329,13 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 	txCount := 4 * pbinM1AStepSize
 
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
-	stepRoots, forwardRoot := pbinM1AForwardRun(t, db, pbinM1AStepSize, 0, txCount)
+	stepRoots, forwardRoot := pbinForwardRun(t, db, pbinM1AStepSize, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
 	require.NoError(t, agg.BuildFiles(txCount, unboundedFinalityCtx))
 
 	require.Equal(t, forwardRoot, pbinM1ARecomputeRoot(t, db),
 		"a full-touch recompute over the same datadir must reproduce the forward root")
 
-	collatedTxNum := pbinM1ACollatedTxNum(t, db)
+	collatedTxNum := pbinCollatedTxNum(t, db, kv.StorageDomain)
 	require.Positive(t, collatedTxNum, "collation must produce account and storage files to rebuild from")
 	wantRoot := stepRoots[collatedTxNum-1]
 	require.NotEmpty(t, wantRoot, "the collated boundary must be one the forward run computed a root at")
@@ -345,17 +362,17 @@ func TestPBinM1ARestartResumesToSameRoot(t *testing.T) {
 	half := 2 * pbinM1AStepSize
 
 	uninterrupted, _, _ := pbinM1ANewDatadir(t, pbinM1AStepSize)
-	_, wantRoot := pbinM1AForwardRun(t, uninterrupted, pbinM1AStepSize, 0, 2*half)
+	_, wantRoot := pbinForwardRun(t, uninterrupted, pbinM1AStepSize, 0, 2*half, pbinM1AFixture(), pbinM1ASlots)
 
 	restarted, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
-	_, firstRoot := pbinM1AForwardRun(t, restarted, pbinM1AStepSize, 0, half)
+	_, firstRoot := pbinForwardRun(t, restarted, pbinM1AStepSize, 0, half, pbinM1AFixture(), pbinM1ASlots)
 	require.NotEqual(t, wantRoot, firstRoot, "the two halves must not write identical state")
 
 	restarted, _ = pbinM1AReopen(t, restarted, agg, dirs, pbinM1AStepSize)
 	require.Equal(t, firstRoot, pbinM1ARestoredRoot(t, restarted),
 		"a restart must restore the saved root before folding anything")
 
-	_, resumedRoot := pbinM1AForwardRun(t, restarted, pbinM1AStepSize, half, 2*half)
+	_, resumedRoot := pbinForwardRun(t, restarted, pbinM1AStepSize, half, 2*half, pbinM1AFixture(), pbinM1ASlots)
 	require.Equal(t, wantRoot, resumedRoot, "a restart mid-run must resume to the uninterrupted root")
 }
 
@@ -364,7 +381,7 @@ func TestPBinM1ABranchRecordsSurviveCollationAndMerge(t *testing.T) {
 	txCount := 4 * pbinM1AStepSize
 
 	db, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
-	pbinM1AForwardRun(t, db, pbinM1AStepSize, 0, txCount)
+	pbinForwardRun(t, db, pbinM1AStepSize, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
 
 	inDB := pbinM1ABranchRecords(t, db)
 	require.NotEmpty(t, inDB)

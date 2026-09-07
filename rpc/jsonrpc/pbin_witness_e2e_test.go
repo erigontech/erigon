@@ -360,3 +360,21 @@ func TestPBinExecutionWitnessCreateCollisionOnZoneStorage(t *testing.T) {
 	result := pbinWitnessOf(t, pbinWitnessAPI(t, m), 1)
 	requirePBinWitnessVerifies(t, c, result, 1)
 }
+
+// pbinLeafKeyOf returns the tree key of a leaf preimage, or nil for a branch.
+func pbinLeafKeyOf(node []byte) []byte {
+	if len(node) == 0 || node[0] != 0x00 {
+		return nil
+	}
+	return node[1 : len(node)-32]
+}
+
+// isCodeChunkKey reports whether a tree key names a code chunk: every chunk
+// lives in the code zone, content-addressed by code hash.
+func isCodeChunkKey(key []byte) bool {
+	return len(key) > 0 && key[0] == 0x01
+}
+
+// pbinDelegationSubIndex is the EIP's DELEGATION_LEAF_KEY, unexported by package
+// commitment. It stands where CODE_HASH does for a 7702-delegated account.
+const pbinDelegationSubIndex = 2

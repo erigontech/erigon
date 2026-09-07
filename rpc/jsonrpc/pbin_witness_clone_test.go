@@ -9,17 +9,13 @@ package jsonrpc
 
 import (
 	"fmt"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -36,21 +32,7 @@ const (
 // distinct ones of the same size, then calls each group in one block.
 func pbinCloneChain(t *testing.T) (*pbinWitnessChain, uint64, uint64) {
 	t.Helper()
-	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	require.NoError(t, err)
-	bankAddress := crypto.PubkeyToAddress(bankKey.PublicKey)
-	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
-	require.True(t, ok)
-
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
-	m := execmoduletester.New(t,
-		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config:   chainConfig,
-			Alloc:    types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
-			GasLimit: 60_000_000,
-		}),
-		execmoduletester.WithKey(bankKey))
+	m, bankKey, bankAddress := fundedBankGenesisWithGasLimit(t, chain.TestChainBerlinConfig, 60_000_000)
 
 	signer := types.LatestSignerForChainID(nil)
 	gasPrice := uint256.NewInt(1_000_000_000)

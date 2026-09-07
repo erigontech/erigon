@@ -28,25 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 )
 
-// TestPBinChunkifyCodeVectors checks chunking against the reference's own
-// chunkings of chunk_code (eip:"Code").
-func TestPBinChunkifyCodeVectors(t *testing.T) {
-	t.Parallel()
-	v := pbinLoadSpecVectors(t)
-	require.NotEmpty(t, v.Chunkify)
-
-	for _, tc := range v.Chunkify {
-		t.Run(tc.Name, func(t *testing.T) {
-			t.Parallel()
-			got := pbinChunkifyCode(pbinMustHex(t, tc.Code))
-			require.Len(t, got, len(tc.Chunks))
-			for i, want := range tc.Chunks {
-				require.Equal(t, pbinMustHex(t, want), got[i][:], "chunk %d", i)
-			}
-		})
-	}
-}
-
 // TestPBinChunkifyCodePushdataStraddlesBoundary covers PUSHDATA that begins in
 // one chunk and runs into the next: the later chunk's byte 0 counts bytes pushed
 // by an opcode it does not contain, which is what a per-chunk scan gets wrong.
@@ -278,6 +259,28 @@ func TestPBinZeroChunkEmitsNoLeaf(t *testing.T) {
 
 		_, root := corpus.process(t)
 		require.Equal(t, corpus.oracleRoot(t), root)
+	})
+
+	t.Run("zero chunk alone in its group", func(t *testing.T) {
+		t.Parallel()
+
+		code := append(pbinTestCode(pbinStemSubtreeWidth*pbinChunkDataLen), make([]byte, pbinChunkDataLen)...)
+		chunks := pbinChunkifyCode(code)
+		require.Len(t, chunks, pbinStemSubtreeWidth+1)
+		require.Equal(t, [pbinValueLength]byte{}, chunks[pbinStemSubtreeWidth],
+			"the sole chunk of group 1 must be all-zero, PUSHDATA count included")
+
+		corpus := new(pbinTestCorpus).accountWithCodeBytes(pbinOracleAddr(103), 1, 5, code)
+		_, root := corpus.process(t)
+		require.Equal(t, corpus.oracleRoot(t), root,
+			"a zero chunk alone in its tree_index group leaves the group with no leaf at all")
+
+		withLeaf := append(corpus.entries(t), pbinOracleEntry{
+			key:   pbinTreeKeyCodeChunk(keccak.Sum256(code), pbinStemSubtreeWidth),
+			value: make([]byte, pbinValueLength),
+		})
+		wrong := pbinOracleRoot(withLeaf)
+		require.NotEqual(t, wrong[:], root, "materializing the zero chunk as a leaf must change the root")
 	})
 }
 

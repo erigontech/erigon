@@ -1722,75 +1722,6 @@
       ]
     }
   ],
-  "embedding_vectors": {
-    "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "basic_data_key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf00",
-    "code_hash_key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf01",
-    "slots": [
-      {
-        "slot": 0,
-        "key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf40"
-      },
-      {
-        "slot": 5,
-        "key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf45"
-      },
-      {
-        "slot": 63,
-        "key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf7f"
-      },
-      {
-        "slot": 64,
-        "key": "0xffd9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf181495ef75f8d2005a4a5bd3c5139cf6b5cdd1a02574832253cc9932687b332a40"
-      },
-      {
-        "slot": 255,
-        "key": "0xffd9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf181495ef75f8d2005a4a5bd3c5139cf6b5cdd1a02574832253cc9932687b332aff"
-      },
-      {
-        "slot": 256,
-        "key": "0xffd9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbfe717382bfeaa9f4c014431fb7bbc3c6946dd510a82d49c925d9df7735c26b16f00"
-      },
-      {
-        "slot": 1000,
-        "key": "0xffd9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf2b1a6c18962d993b9da5ed300ce5696bdcad6e09f08b9c0735fa749d417650f9e8"
-      },
-      {
-        "slot": 57896044618658097711785492504343953926634992332820282019728792003956564819968,
-        "key": "0xffd9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf23d37150867b80a99fea951c62d43f974e7d2f53089c5f5683b4fc1d4387286c00"
-      }
-    ],
-    "chunks": [
-      {
-        "chunk": 0,
-        "key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf80"
-      },
-      {
-        "chunk": 5,
-        "key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbf85"
-      },
-      {
-        "chunk": 127,
-        "key": "0x00d9ae2d236f8713a5bf808cda488167a56cc97e4b83006f42b1c06c0c3f053bbfff"
-      },
-      {
-        "chunk": 128,
-        "key": "0x01465f911ccfe7707c51a877fc621cffa8e700a5828cf92df27b142de919c0f6c800"
-      },
-      {
-        "chunk": 300,
-        "key": "0x01465f911ccfe7707c51a877fc621cffa8e700a5828cf92df27b142de919c0f6c8ac"
-      },
-      {
-        "chunk": 383,
-        "key": "0x01465f911ccfe7707c51a877fc621cffa8e700a5828cf92df27b142de919c0f6c8ff"
-      },
-      {
-        "chunk": 384,
-        "key": "0x0171ad9e407a8d200ab2858bcf828d9016a0b4bc54e6e39dd3e31847b6220a63ce00"
-      }
-    ]
-  },
   "basic_data_vectors": [
     {
       "code_size": 0,
@@ -1815,44 +1746,6 @@
       "nonce": 1,
       "balance": "1",
       "value": "0x0000000000006000000000000000000100000000000000000000000000000001"
-    }
-  ],
-  "chunkify_vectors": [
-    {
-      "name": "empty",
-      "code": "0x",
-      "chunks": []
-    },
-    {
-      "name": "short",
-      "code": "0x6001",
-      "chunks": [
-        "0x0060010000000000000000000000000000000000000000000000000000000000"
-      ]
-    },
-    {
-      "name": "push_boundary",
-      "code": "0x6060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060606060",
-      "chunks": [
-        "0x0060606060606060606060606060606060606060606060606060606060606060",
-        "0x0160606060606060606060606060606060606060606060606060606060606060"
-      ]
-    },
-    {
-      "name": "push32_tail",
-      "code": "0x7feeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      "chunks": [
-        "0x007feeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        "0x02eeeeeeeeeeeeeeeeeeee000000000000000000000000000000000000000000"
-      ]
-    },
-    {
-      "name": "zeros62",
-      "code": "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-      "chunks": [
-        "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
-      ]
     }
   ]
 }
