@@ -1895,11 +1895,10 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 	}
 }
 
-func setParallelCommitment(ctx *cli.Command, cfg *ethconfig.Config) {
+func setParallelCommitment(ctx *cli.Command) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
 		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
 	}
-	cfg.ExperimentalParallelCommitment = statecfg.ExperimentalParallelCommitment
 }
 
 // RpcGasCap reads the rpc.gascap flag; the accessor must match its registered UintFlag type.
@@ -2001,7 +2000,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
-	setParallelCommitment(ctx, cfg)
+	setParallelCommitment(ctx)
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
@@ -2042,7 +2041,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		warmupWorkers := dbg.BALCommitmentWarmupReaders()
 		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
 		parallelCommitmentReaders := 0
-		if cfg.ExperimentalParallelCommitment || statecfg.ExperimentalParallelCommitment {
+		if statecfg.ExperimentalParallelCommitment {
 			parallelCommitmentReaders = commitment.ParallelCommitmentReadTxs()
 		}
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers); int64(c) < limit {

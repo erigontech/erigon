@@ -363,32 +363,24 @@ func TestSetParallelCommitment(t *testing.T) {
 	require.Equal(t, statecfg.DefaultParallelCommitment, ExperimentalParallelCommitmentFlag.Value,
 		"advertised flag default drifted from the effective default")
 
-	run := func(seed bool, args ...string) ethconfig.Config {
+	run := func(seed bool, args ...string) bool {
 		statecfg.ExperimentalParallelCommitment = seed
 		flag := ExperimentalParallelCommitmentFlag
-		var cfg ethconfig.Config
 		app := &cli.Command{
 			Flags: []cli.Flag{&flag},
 			Action: func(_ context.Context, cmd *cli.Command) error {
-				setParallelCommitment(cmd, &cfg)
+				setParallelCommitment(cmd)
 				return nil
 			},
 		}
 		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
-		return cfg
+		return statecfg.ExperimentalParallelCommitment
 	}
 
 	for _, seed := range []bool{true, false} {
-		cfg := run(seed)
-		require.Equal(t, seed, statecfg.ExperimentalParallelCommitment, "unset flag must leave ERIGON_COMMITMENT_PARALLEL in charge")
-		require.Equal(t, seed, cfg.ExperimentalParallelCommitment)
-
-		cfg = run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=false")
-		require.False(t, statecfg.ExperimentalParallelCommitment, "explicit =false must select the sequential trie")
-		require.False(t, cfg.ExperimentalParallelCommitment)
-
-		cfg = run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true")
-		require.True(t, statecfg.ExperimentalParallelCommitment)
-		require.True(t, cfg.ExperimentalParallelCommitment)
+		require.Equal(t, seed, run(seed), "unset flag must leave ERIGON_COMMITMENT_PARALLEL in charge")
+		require.False(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=false"),
+			"explicit =false must select the sequential trie")
+		require.True(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true"))
 	}
 }
