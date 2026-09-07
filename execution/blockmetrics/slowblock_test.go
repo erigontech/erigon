@@ -184,16 +184,14 @@ func TestStateReadIsInsideExecution(t *testing.T) {
 
 	assert.Equal(t, 5*time.Millisecond, rec.StateRead())
 	assert.Equal(t, 15*time.Millisecond, rec.Total(), "reads are already inside execution; adding them double-counts")
-	assert.True(t, rec.StateReadValid())
 }
 
-func TestStateReadOmittedWhenItExceedsExecution(t *testing.T) {
+func TestStateReadSurvivesExceedingExecution(t *testing.T) {
 	t.Parallel()
 
 	rec := sampleRecord()
 	rec.Execution = 10 * time.Millisecond
 	rec.Accounts = DomainCounts{ReadTime: 90 * time.Millisecond}
-	require.False(t, rec.StateReadValid())
 
 	logger, h := captureLogger()
 	Emit(logger, 0, rec)
@@ -202,11 +200,12 @@ func TestStateReadOmittedWhenItExceedsExecution(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal([]byte(h.msgs[0]), &got))
 	timing := got["timing"].(map[string]any)
-	require.NotContains(t, timing, "state_read_ms",
-		"a per-worker sum larger than the wall-clock execution is not a share of it; the spec's total arithmetic would not hold")
+	require.Equal(t, float64(90), timing["state_read_ms"],
+		"parallel execution sums workers past the wall clock every time; a required field that vanishes then is blank timing, which is the bug this emitter exists to fix")
 	assert.Equal(t,
 		timing["execution_ms"].(float64)+timing["state_hash_ms"].(float64)+timing["commit_ms"].(float64),
-		timing["total_ms"].(float64))
+		timing["total_ms"].(float64),
+		"state_read_ms is a share of execution_ms, never an addend, so the total holds whatever it reads")
 }
 
 func TestDiffCountsStateCacheHitsAsReads(t *testing.T) {
@@ -306,34 +305,68 @@ func TestExecOnlyClampsInsteadOfGoingNegative(t *testing.T) {
 	assert.Zero(t, got.ReadTime)
 }
 
-// The console rendering is a cross-client contract, like the field names.
-var harnessPattern = regexp.MustCompile(
-	`^\[(?:TRACE|DBUG|INFO|WARN|EROR|CRIT)\] \[[^\]]+\] (\{.+\})\s*$`)
+// The envelope is a cross-client contract, like the field names. Both patterns
+// are ethpandaops/benchmarkoor pkg/blocklog/erigon.go, byte for byte.
+var (
+	ansiPattern    = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	consolePattern = regexp.MustCompile(
+		`^\[?(?:TRACE|DBUG|INFO|WARN|EROR|CRIT)\s*\]?\s*\[[^\]]+\]\s+(\{.+\})\s*$`)
+)
 
-func TestEmittedLineMatchesTheHarnessContract(t *testing.T) {
+func consolePayload(t *testing.T, line string) string {
+	t.Helper()
+	m := consolePattern.FindStringSubmatch(ansiPattern.ReplaceAllString(line, ""))
+	require.Len(t, m, 2, "console line does not match the consumer's parser: %q", line)
+	return m[1]
+}
+
+func jsonPayload(t *testing.T, line string) string {
+	t.Helper()
+	var envelope struct {
+		Msg string `json:"msg"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(line), &envelope))
+	require.NotEmpty(t, envelope.Msg, "the record must arrive escaped in the envelope's msg: %q", line)
+	return envelope.Msg
+}
+
+func TestEmittedLineSurvivesEveryLogFormat(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
-	logger := log.New()
-	logger.SetHandler(log.StreamHandler(&buf, log.TerminalFormatNoColor()))
-	Emit(logger, 0, sampleRecord())
+	for _, tc := range []struct {
+		name    string
+		format  log.Format
+		extract func(*testing.T, string) string
+	}{
+		{"console, no tty", log.TerminalFormatNoColor(), consolePayload},
+		{"console on a tty", log.TerminalFormat(), consolePayload},
+		{"--log.console.json", log.JsonFormat(), jsonPayload},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	line := buf.String()
-	require.Equal(t, 1, strings.Count(line, "\n"), "the record must occupy a single line")
+			var buf bytes.Buffer
+			logger := log.New()
+			logger.SetHandler(log.StreamHandler(&buf, tc.format))
+			Emit(logger, 0, sampleRecord())
 
-	m := harnessPattern.FindStringSubmatch(strings.TrimSuffix(line, "\n"))
-	require.Len(t, m, 2, "console line does not match the parser contract: %q", line)
+			line := buf.String()
+			require.Equal(t, 1, strings.Count(line, "\n"), "the record must occupy a single line")
 
-	var probe struct {
-		Msg   string `json:"msg"`
-		Block struct {
-			Hash string `json:"hash"`
-		} `json:"block"`
+			var probe struct {
+				Level string `json:"level"`
+				Msg   string `json:"msg"`
+				Block struct {
+					Hash string `json:"hash"`
+				} `json:"block"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(tc.extract(t, strings.TrimSuffix(line, "\n"))), &probe))
+
+			assert.Equal(t, "warn", probe.Level)
+			assert.Equal(t, "Slow block", probe.Msg)
+			assert.NotEmpty(t, probe.Block.Hash)
+		})
 	}
-	require.NoError(t, json.Unmarshal([]byte(m[1]), &probe))
-
-	assert.Equal(t, "Slow block", probe.Msg)
-	assert.NotEmpty(t, probe.Block.Hash)
 }
 
 func TestEmitRoundsRatesToTwoDecimals(t *testing.T) {

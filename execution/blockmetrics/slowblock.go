@@ -17,6 +17,24 @@
 // Package blockmetrics emits per-block execution metrics as JSON. The field
 // names are a cross-client contract — renaming one breaks every consumer.
 // Spec: https://ethresear.ch/t/a-small-step-towards-data-driven-protocol-decisions-unified-slowblock-metrics-across-clients/23907
+//
+// The payload is never a standalone line. It is the Msg of an erigon log
+// record, so the envelope follows the operator's log config: a consumer strips
+// ANSI, then takes either the console payload ("[WARN] [t] {…}" off a TTY,
+// "WARN[t] {…}" on one) or the msg field under --log.console.json /
+// --log.dir.json, where the record arrives escaped inside it.
+// TestEmittedLineSurvivesEveryLogFormat pins all three. The payload carries
+// level and msg anyway because the spec requires both and pins their values.
+//
+// Rounding follows the spec's presentation and nothing else: mgas_per_sec to
+// two decimals because the spec says two, hit_rate to two to match besu, and
+// every *_ms as its measured nanoseconds expressed in milliseconds. The spec
+// types the durations int64; erigon validates a block in well under a
+// millisecond, where an integer would report 0.
+//
+// total_ms is execution_ms + state_hash_ms + commit_ms — the identity the
+// spec's own reference record balances on — not wall clock. Everything before
+// the Execution stage (headers, bodies, sender recovery) sits outside it.
 package blockmetrics
 
 import (
@@ -47,11 +65,11 @@ type blockInfo struct {
 }
 
 type timing struct {
-	ExecutionMs float64  `json:"execution_ms"`
-	StateReadMs *float64 `json:"state_read_ms,omitempty"`
-	StateHashMs float64  `json:"state_hash_ms"`
-	CommitMs    float64  `json:"commit_ms"`
-	TotalMs     float64  `json:"total_ms"`
+	ExecutionMs float64 `json:"execution_ms"`
+	StateReadMs float64 `json:"state_read_ms"`
+	StateHashMs float64 `json:"state_hash_ms"`
+	CommitMs    float64 `json:"commit_ms"`
+	TotalMs     float64 `json:"total_ms"`
 }
 
 type throughput struct {
@@ -101,15 +119,11 @@ type Record struct {
 	CountersValid bool
 }
 
-// A share of Execution, so Total does not add it. Under parallel execution it is
-// a sum over concurrent workers against a wall-clock Execution, so it can exceed
-// it; StateReadValid reports whether it still is a share.
+// A share of Execution, so Total does not add it. Under parallel execution it
+// sums concurrent workers against a wall-clock Execution and can exceed it; the
+// spec requires the field, so it is emitted either way.
 func (r *Record) StateRead() time.Duration {
 	return r.Accounts.ReadTime + r.Storage.ReadTime + r.Code.ReadTime
-}
-
-func (r *Record) StateReadValid() bool {
-	return r.StateRead() <= r.Execution
 }
 
 func (r *Record) Total() time.Duration {
@@ -154,16 +168,12 @@ func Emit(logger log.Logger, threshold time.Duration, r *Record) {
 		},
 		Timing: timing{
 			ExecutionMs: ms(r.Execution),
+			StateReadMs: ms(r.StateRead()),
 			StateHashMs: ms(r.StateHash),
 			CommitMs:    ms(r.Commit),
 			TotalMs:     ms(r.Total()),
 		},
 		Throughput: throughput{MgasPerSec: r.mgasPerSec()},
-	}
-
-	if r.StateReadValid() {
-		stateRead := ms(r.StateRead())
-		entry.Timing.StateReadMs = &stateRead
 	}
 
 	if r.CountersValid {
