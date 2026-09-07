@@ -378,7 +378,7 @@ func TestSetParallelCommitment(t *testing.T) {
 	}
 
 	for _, seed := range []bool{true, false} {
-		require.Equal(t, seed, run(seed), "unset flag must leave ERIGON_COMMITMENT_PARALLEL in charge")
+		require.Equal(t, seed, run(seed), "unset flag must leave COMMITMENT_PARALLEL in charge")
 		require.False(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=false"),
 			"explicit =false must select the sequential trie")
 		require.True(t, run(seed, "--"+ExperimentalParallelCommitmentFlag.Name+"=true"))

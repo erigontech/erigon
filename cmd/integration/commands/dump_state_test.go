@@ -629,7 +629,7 @@ func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
 
 // TestExecCommandsExposeParallelCommitment pins the flag on every integration
 // command that computes commitment. Without it the flag is unknown on stage_exec,
-// so integration is stuck on whatever ERIGON_COMMITMENT_PARALLEL selected and
+// so integration is stuck on whatever COMMITMENT_PARALLEL selected and
 // cannot switch tries.
 func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	for _, tc := range []struct {
@@ -661,7 +661,7 @@ func TestWithExperimentalCommitmentResolution(t *testing.T) {
 
 	for _, seed := range []bool{true, false} {
 		require.Equal(t, seed, resolve(seed),
-			"integration overrode ERIGON_COMMITMENT_PARALLEL with the flag default")
+			"integration overrode COMMITMENT_PARALLEL with the flag default")
 		require.True(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=true"))
 		require.False(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=false"))
 	}

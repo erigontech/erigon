@@ -196,13 +196,9 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 	return version.V2_2
 }
 
-const (
-	DefaultParallelCommitment = true
-	// Spelled with the prefix so envLookup does not also accept COMMITMENT_PARALLEL.
-	parallelCommitmentEnvVar = "ERIGON_COMMITMENT_PARALLEL"
-)
+const DefaultParallelCommitment = true
 
-var ExperimentalParallelCommitment = dbg.EnvBool(parallelCommitmentEnvVar, DefaultParallelCommitment)
+var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{

@@ -268,7 +268,7 @@ substitution of the as-of reader is validated at runtime by the block-root check
 
 | parameter | default | effect |
 | --- | --- | --- |
-| `--experimental.parallel-commitment` | on | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`); `=false`, or `ERIGON_COMMITMENT_PARALLEL=false`, selects `VariantHexPatriciaTrie` |
+| `--experimental.parallel-commitment` | on | selects `VariantParallelHexPatricia` (`execctx.PickTrieVariant`); `=false`, or `COMMITMENT_PARALLEL=false`, selects `VariantHexPatriciaTrie` |
 | `--experimental.streaming-commitment` | off | selects `VariantStreamingHexPatricia` (`StreamingCommitter`); takes precedence over `--experimental.parallel-commitment` |
 | `deepStorageThreshold` | 1000 | compile-time const (not a runtime flag): per-account touched-storage-key count above which the storage subtree folds concurrently (§4.1.1); mitigates the whale bottleneck of §11 |
 | `numWorkers` | `runtime.NumCPU()` | worker-pool size and errgroup limit; override via `SetNumWorkers` |
