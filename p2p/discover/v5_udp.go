@@ -771,8 +771,16 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 		return err
 	}
 	if fromNode != nil {
-		// Handshake succeeded, add to table.
-		t.tab.addInboundNode(fromNode)
+		// Handshake succeeded, add to table. The record is self-signed and its
+		// endpoint is not tied to the packet source, so it gets the same relay
+		// check as a record learned from a NODES response.
+		if err := netutil.CheckRelayAddr(fromAddr.Addr(), fromNode.IPAddr()); err != nil {
+			if t.trace {
+				t.log.Trace("[p2p] Rejected discv5 handshake record", "id", fromID, "addr", fromAddr, "record", fromNode.IPAddr(), "err", err)
+			}
+		} else {
+			t.tab.addInboundNode(fromNode)
+		}
 	}
 	if t.trace && packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.

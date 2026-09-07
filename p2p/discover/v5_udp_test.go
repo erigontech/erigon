@@ -36,6 +36,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -276,6 +277,37 @@ func TestUDPv5_handshakeRepeatChallenge(t *testing.T) {
 	test.waitPacketOut(func(p *v5wire.Whoareyou, addr netip.AddrPort, authTag v5wire.Nonce) {
 		check(p, authTag, nonce1)
 	})
+}
+
+// A handshake record is self-signed by the sender and its endpoint is never
+// checked against the packet source, so a peer must not be able to plant an
+// arbitrary address in the routing table.
+func TestUDPv5_handshakeNodeRelayAddr(t *testing.T) {
+	t.Parallel()
+	test := newUDPV5Test(t)
+	defer test.close()
+
+	remotekey, _ := crypto.GenerateKey()
+	db, _ := enode.OpenDB("")
+	defer db.Close()
+	ln := enode.NewLocalNode(db, remotekey)
+	ln.SetStaticIP(net.ParseIP("169.254.169.254"))
+	ln.SetFallbackUDP(30303)
+	planted := ln.Node()
+
+	test.udp.codec.(*testCodec).handshakeNode = planted
+	senderkey, _ := crypto.GenerateKey()
+	publicAddr := netip.MustParseAddrPort("1.2.3.4:30303")
+	test.packetInFrom(senderkey, publicAddr, &v5wire.Unknown{Nonce: v5wire.Nonce{1}})
+	test.waitPacketOut(func(*v5wire.Whoareyou, netip.AddrPort, v5wire.Nonce) {})
+
+	for _, bucket := range test.table.Nodes() {
+		for _, n := range bucket {
+			if n.Node.ID() == planted.ID() {
+				t.Fatalf("node with unrelated address %v was added to the table", planted.IPAddr())
+			}
+		}
+	}
 }
 
 // This test checks that incoming FINDNODE calls are handled correctly.
@@ -950,6 +982,8 @@ type testCodec struct {
 	ctr  uint64
 
 	sentChallenges map[enode.ID]*v5wire.Whoareyou
+	// handshakeNode, when set, is returned as the node a handshake packet carried.
+	handshakeNode *enode.Node
 }
 
 type testCodecFrame struct {
@@ -997,7 +1031,7 @@ func (c *testCodec) Decode(input []byte, addr netip.AddrPort) (enode.ID, *enode.
 	if err != nil {
 		return enode.ID{}, nil, nil, err
 	}
-	return frame.NodeID, nil, p, nil
+	return frame.NodeID, c.handshakeNode, p, nil
 }
 
 func (c *testCodec) SessionNode(id enode.ID, addr netip.AddrPort) *enode.Node {
