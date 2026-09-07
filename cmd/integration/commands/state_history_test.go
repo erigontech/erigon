@@ -34,7 +34,7 @@ func TestHistDupScan(t *testing.T) {
 		for _, e := range entries {
 			s.observe([]byte(e[0]), []byte(e[1]))
 		}
-		s.finish()
+		s.closeKey()
 	}
 
 	t.Run("mixed", func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestStepToTxNum_SaturatesInsteadOfWrapping(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestDumpBounds_UnboundedWhenOutOfIntRange(t *testing.T) {
+func TestDumpBounds_SaturatesOutOfIntRange(t *testing.T) {
 	t.Parallel()
 
 	from, to := dumpBounds(10, math.MaxUint64)

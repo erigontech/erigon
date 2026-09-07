@@ -146,7 +146,7 @@ var printCmd = &cobra.Command{
 			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		dumpFrom, dumpTo, err := stepDumpBounds(settings.StepSize)
+		_, _, dumpFrom, dumpTo, err := stepBounds(settings.StepSize)
 		if err != nil {
 			logger.Error("Invalid step range", "error", err)
 			return
@@ -199,7 +199,7 @@ var distributionCmd = &cobra.Command{
 			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		dumpFrom, dumpTo, err := stepDumpBounds(settings.StepSize)
+		_, _, dumpFrom, dumpTo, err := stepBounds(settings.StepSize)
 		if err != nil {
 			logger.Error("Invalid step range", "error", err)
 			return
@@ -320,16 +320,6 @@ func (s *histDupScan) closeKey() {
 	}
 }
 
-func (s *histDupScan) finish() { s.closeKey() }
-
-func historyDomainNames() []string {
-	names := make([]string, 0, kv.DomainLen)
-	for d := range kv.DomainLen {
-		names = append(names, d.String())
-	}
-	return names
-}
-
 // errHistoryNotInFiles marks a domain whose history has not been collated into
 // files yet. HistoryDump reads frozen .ef/.v only, so that domain's DB-resident
 // history is not covered and the run must not report it as clean.
@@ -346,18 +336,17 @@ func historyOff(cfg statecfg.HistCfg) bool {
 	return cfg.HistoryDisabled || !cfg.IiCfg.Enabled
 }
 
-// stepDumpBounds resolves the --from/--to step flags to HistoryDump's arguments.
-func stepDumpBounds(stepSize uint64) (int, int, error) {
-	fromTxNum, err := stepToTxNum(fromStep, stepSize)
-	if err != nil {
-		return 0, 0, err
+// stepBounds resolves the --from/--to step flags to exact txNum bounds plus the
+// coarse int pre-filter HistoryDump takes.
+func stepBounds(stepSize uint64) (fromTxNum, toTxNum uint64, dumpFrom, dumpTo int, err error) {
+	if fromTxNum, err = stepToTxNum(fromStep, stepSize); err != nil {
+		return
 	}
-	toTxNum, err := stepToTxNum(toStep, stepSize)
-	if err != nil {
-		return 0, 0, err
+	if toTxNum, err = stepToTxNum(toStep, stepSize); err != nil {
+		return
 	}
-	from, to := dumpBounds(fromTxNum, toTxNum)
-	return from, to, nil
+	dumpFrom, dumpTo = dumpBounds(fromTxNum, toTxNum)
+	return
 }
 
 // dumpBounds converts txNum bounds to HistoryDump's int arguments. A bound too
@@ -366,12 +355,11 @@ func stepDumpBounds(stepSize uint64) (int, int, error) {
 // dump every entry where the caller asked for none. HistoryDump filters whole
 // files only, so these are a coarse pre-filter; the exact bound is per entry.
 func dumpBounds(fromTxNum, toTxNum uint64) (int, int) {
-	maxInt := uint64(^uint(0) >> 1)
 	from, to := math.MaxInt, -1
-	if fromTxNum <= maxInt {
+	if fromTxNum <= math.MaxInt {
 		from = int(fromTxNum)
 	}
-	if toTxNum <= maxInt {
+	if toTxNum <= math.MaxInt {
 		to = int(toTxNum)
 	}
 	return from, to
@@ -410,16 +398,13 @@ func (s *histDupSorter) scan(ctx context.Context, sampleLimit int) (*histDupScan
 	scan := &histDupScan{sampleLimit: sampleLimit}
 	// bucket "" with a nil tx: ETL is a sort scratch-pad here, and that pair
 	// also keeps an empty value (a deletion marker) from being dropped.
-	if err := s.collector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+	if err := s.collector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		scan.observe(k[keyLenPrefix:len(k)-8], v)
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
 	}
-	scan.finish()
+	scan.closeKey()
 	return scan, nil
 }
 
@@ -441,15 +426,10 @@ func scanDomainDuplicates(ctx context.Context, dirs datadir.Dirs, name string, l
 		return nil, errHistoryNotInFiles
 	}
 
-	fromTxNum, err := stepToTxNum(fromStep, settings.StepSize)
+	fromTxNum, toTxNum, dumpFrom, dumpTo, err := stepBounds(settings.StepSize)
 	if err != nil {
 		return nil, err
 	}
-	toTxNum, err := stepToTxNum(toStep, settings.StepSize)
-	if err != nil {
-		return nil, err
-	}
-	dumpFrom, dumpTo := dumpBounds(fromTxNum, toTxNum)
 
 	sorter := newHistDupSorter(name+" history duplicates", dirs.Tmp, logger)
 	defer sorter.Close()
@@ -493,7 +473,10 @@ var duplicatesCmd = &cobra.Command{
 			}
 		}()
 
-		names := historyDomainNames()
+		names := make([]string, 0, kv.DomainLen)
+		for d := range kv.DomainLen {
+			names = append(names, d.String())
+		}
 		if historyDomain != "" {
 			if _, err := kv.String2Domain(historyDomain); err != nil {
 				return fmt.Errorf("--domain: %w", err)
