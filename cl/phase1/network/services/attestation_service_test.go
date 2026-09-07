@@ -411,6 +411,56 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenC
 	t.Require().NoError(err)
 }
 
+// An attestation that is dropped before its signature is checked must not
+// consume the per-validator seen slot, otherwise anyone can name a real
+// committee member and censor that validator's genuine attestation for the
+// rest of the epoch at no cost.
+func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+		return [32]byte{}, nil
+	}
+	blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	t.mockForkChoice.HighestSeenVal = mockSlot
+
+	// The forged copy names the same validator but a block this node has not seen,
+	// so validation stops before any signature work.
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: true,
+	})
+	t.Require().Error(err)
+	t.Require().Contains(err.Error(), "block not seen")
+
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		attData.BeaconBlockRoot: {},
+	}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		mockEpoch * mockSlotsPerEpoch:                 {Root: attData.Target.Root},
+		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
+
+	// The validator's genuine attestation must still be accepted.
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: true,
+	})
+	time.Sleep(time.Millisecond * 60)
+	t.Require().NoError(err)
+}
+
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
 	beyondNextEpochSlot := mockSlot + 2*mockSlotsPerEpoch
 	beyondNextEpoch := mockEpoch + 2

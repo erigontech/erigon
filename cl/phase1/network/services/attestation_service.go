@@ -156,6 +156,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
 
 	var err error
+	var markValidatorSeen func()
 	if clVersion >= clparams.ElectraVersion {
 		if att.SingleAttestation == nil {
 			return errors.New("single attestation is empty")
@@ -294,7 +295,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if ok && epochLastTime == targetEpoch {
 			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
-		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
+		// The entry is claimed in F, once the signature has been verified: a
+		// message dropped before that must not consume the validator's slot.
+		markValidatorSeen = func() { s.validatorAttestationSeen.Add(vIndex, targetEpoch) }
 
 		// [REJECT] The signature of attestation is valid.
 		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
@@ -353,6 +356,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
+			if markValidatorSeen != nil {
+				markValidatorSeen()
+			}
 			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
 				return
 			} else if err != nil {
