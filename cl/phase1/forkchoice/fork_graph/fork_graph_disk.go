@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -90,10 +91,14 @@ func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
 	// Alternate beacon states
-	fs        afero.Fs
-	blocks    sync.Map // set of blocks (block root -> block)
-	headers   sync.Map // set of headers
-	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
+	fs      afero.Fs
+	blocks  sync.Map // set of blocks (block root -> block)
+	headers sync.Map // set of headers
+	// badBlocks maps an invalid block root to the slot it was seen at, so Prune
+	// can drop it. Roots marked without a slot are stored as slotUnknown: a peer
+	// can replay below-anchor blocks, which never reach f.blocks and so are not
+	// covered by the block-keyed pruning below.
+	badBlocks sync.Map // common.Hash -> uint64 slot
 
 	// current state data — dual-protected. AddChainSegment is the sole writer
 	// and runs under the outer forkchoice f.mu, so reads taken under f.mu are
@@ -225,7 +230,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
 		log.Debug("block below anchor slot", "slot", block.Slot, "hash", common.Hash(blockRoot))
-		f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
+		f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 		return nil, BelowAnchor, nil
 	}
 
@@ -303,7 +308,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			// Add block to list of invalid blocks
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
-			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
+			f.badBlocks.Store(common.Hash(blockRoot), block.Slot)
 			f.currentStateMu.Lock()
 			f.currentState = nil
 			f.currentStateBlockRoot = common.Hash{}
@@ -556,7 +561,11 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Che
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot common.Hash) {
-	f.badBlocks.Store(blockRoot, struct{}{})
+	slot := uint64(slotUnknown)
+	if header, ok := f.GetHeader(blockRoot); ok {
+		slot = header.Slot
+	}
+	f.badBlocks.Store(blockRoot, slot)
 }
 
 func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
@@ -564,7 +573,16 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
+// slotUnknown marks a bad block whose slot is not known, so no prune drops it.
+const slotUnknown = math.MaxUint64
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
+	f.badBlocks.Range(func(key, value any) bool {
+		if value.(uint64) < pruneSlot {
+			f.badBlocks.Delete(key)
+		}
+		return true
+	})
 	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
 	f.blocks.Range(func(key, value any) bool {
