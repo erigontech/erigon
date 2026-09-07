@@ -65,7 +65,9 @@ func TestGroupedLookup(t *testing.T) {
 	var ordinal uint64
 	for group, n := range itemsPerGroup {
 		for member := range n {
-			require.Equal(t, values[ordinal/pageSize], idx.Get(uint64(group), member), "group %d member %d", group, member)
+			v, ok := idx.Get(uint64(group), member)
+			require.True(t, ok, "group %d member %d", group, member)
+			require.Equal(t, values[ordinal/pageSize], v, "group %d member %d", group, member)
 			ordinal++
 		}
 	}
@@ -74,7 +76,18 @@ func TestGroupedLookup(t *testing.T) {
 
 func TestSingleItem(t *testing.T) {
 	idx := build(t, "one", 64, []uint64{1}, []uint64{0})
-	require.Equal(t, uint64(0), idx.Get(0, 0))
+	v, ok := idx.Get(0, 0)
+	require.True(t, ok)
+	require.Equal(t, uint64(0), v)
+}
+
+// A position from a file that does not belong to this index must not panic.
+func TestOutOfRange(t *testing.T) {
+	idx := build(t, "oob", 2, []uint64{3, 1}, []uint64{0, 37})
+	_, ok := idx.Get(99, 0)
+	require.False(t, ok, "group past the end")
+	_, ok = idx.Get(0, 1<<40)
+	require.False(t, ok, "member past the end")
 }
 
 func TestEmpty(t *testing.T) {
@@ -88,6 +101,8 @@ func TestEmpty(t *testing.T) {
 	require.NoError(t, err)
 	defer idx.Close()
 	require.True(t, idx.Empty())
+	_, ok := idx.Get(0, 0)
+	require.False(t, ok)
 }
 
 func TestPageSizeZeroRejected(t *testing.T) {

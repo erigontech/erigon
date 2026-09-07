@@ -53,6 +53,7 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 	return ii.dirtyFiles.EndTxNumMax()
 }
+
 func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.SnapshotsDisabled {
 		return math.MaxUint64
@@ -90,6 +91,7 @@ func (r DomainRanges) any() bool { return r.values.needMerge || r.history.any() 
 func (ht *HistoryRoTx) FirstStepNotInFiles() kv.Step {
 	return kv.Step(ht.files.EndTxNum() / ht.stepSize)
 }
+
 func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 	return kv.Step(iit.files.EndTxNum() / iit.stepSize)
 }
@@ -264,6 +266,7 @@ func (r HistoryRanges) String(aggStep uint64) string {
 	}
 	return str.String()
 }
+
 func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
 }
@@ -604,7 +607,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var comp *seg.Compressor
 	var decomp *seg.Decompressor
 	var err error
-	var closeItem = true
+	closeItem := true
 	defer func() {
 		if closeItem {
 			if comp != nil {
@@ -754,7 +757,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	if !r.any() {
 		return nil, nil, nil
 	}
-	var closeIndex = true
+	closeIndex := true
 	defer func() {
 		if closeIndex {
 			if indexIn != nil {
@@ -773,7 +776,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit
 		var vi *HistoryValueIndex
-		var closeItem = true
+		closeItem := true
 		defer func() {
 			if closeItem {
 				if comp != nil {
@@ -947,7 +950,7 @@ func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) {
 
 func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
-	//TODO: handle collision
+	// TODO: handle collision
 	if historyIn != nil {
 		h.dirtyFiles.Set(historyIn)
 	}

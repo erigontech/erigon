@@ -65,10 +65,7 @@ func (i *HistoryValueIndex) Lookup(keyOrdinal, rank, txNum uint64, key []byte) (
 		binary.BigEndian.PutUint64(txNumKey[:], txNum)
 		return i.reader.Lookup2(txNumKey[:], key)
 	}
-	if i.paged.Empty() {
-		return 0, false
-	}
-	return i.paged.Get(keyOrdinal, rank), true
+	return i.paged.Get(keyOrdinal, rank)
 }
 
 func (i *HistoryValueIndex) Empty() bool {

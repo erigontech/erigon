@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 )
 
-const version = 2
+const version = 1
 
 // header: version, page size
 const headerLen = 1 + 8
@@ -94,9 +94,18 @@ func Open(path string) (*Index, error) {
 	return idx, nil
 }
 
-// Get returns the value of a group's member.
-func (i *Index) Get(group, member uint64) uint64 {
-	return i.values.Get((i.groups.Get(group) + member) / i.pageSize)
+// Get returns the value of a group's member, and false when that position is
+// not in the index. Callers pair this index with a separate file that supplies
+// the position, so an out-of-range one means the two do not belong together.
+func (i *Index) Get(group, member uint64) (uint64, bool) {
+	if i.values == nil || group >= i.groups.Count() {
+		return 0, false
+	}
+	page := (i.groups.Get(group) + member) / i.pageSize
+	if page >= i.values.Count() {
+		return 0, false
+	}
+	return i.values.Get(page), true
 }
 
 func (i *Index) Empty() bool { return i == nil || i.values == nil }
