@@ -24,41 +24,35 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
+var domains = [...]kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
+
 type Sample struct {
-	accounts kvmetrics.DomainIOMetrics
-	storage  kvmetrics.DomainIOMetrics
-	code     kvmetrics.DomainIOMetrics
-
-	nonExecAccounts kvmetrics.DomainIOMetrics
-	nonExecStorage  kvmetrics.DomainIOMetrics
-	nonExecCode     kvmetrics.DomainIOMetrics
-
-	taken bool
+	total   [len(domains)]kvmetrics.DomainIOMetrics
+	nonExec [len(domains)]kvmetrics.DomainIOMetrics
+	taken   bool
 }
 
-func Take(dm, nonExec *kvmetrics.DomainMetrics) Sample {
+func Take(dm, nonExecMetrics *kvmetrics.DomainMetrics) Sample {
 	if dm == nil || !dbg.KVReadLevelledMetrics {
 		return Sample{}
 	}
-	return Sample{
-		accounts:        dm.SnapshotDomain(kv.AccountsDomain),
-		storage:         dm.SnapshotDomain(kv.StorageDomain),
-		code:            dm.SnapshotDomain(kv.CodeDomain),
-		nonExecAccounts: nonExec.SnapshotDomain(kv.AccountsDomain),
-		nonExecStorage:  nonExec.SnapshotDomain(kv.StorageDomain),
-		nonExecCode:     nonExec.SnapshotDomain(kv.CodeDomain),
-		taken:           true,
+	s := Sample{taken: true}
+	for i, domain := range domains {
+		s.total[i] = dm.SnapshotDomain(domain)
+		s.nonExec[i] = nonExecMetrics.SnapshotDomain(domain)
 	}
+	return s
 }
 
 func (s Sample) Since(before Sample) (accounts, storage, code DomainCounts, ok bool) {
 	if !s.taken || !before.taken {
 		return
 	}
-	return execOnly(diff(before.accounts, s.accounts), diff(before.nonExecAccounts, s.nonExecAccounts)),
-		execOnly(diff(before.storage, s.storage), diff(before.nonExecStorage, s.nonExecStorage)),
-		execOnly(diff(before.code, s.code), diff(before.nonExecCode, s.nonExecCode)),
-		true
+	var out [len(domains)]DomainCounts
+	for i := range domains {
+		out[i] = execOnly(diff(before.total[i], s.total[i]), diff(before.nonExec[i], s.nonExec[i]))
+	}
+	return out[0], out[1], out[2], true
 }
 
 func execOnly(total, nonExec DomainCounts) DomainCounts {

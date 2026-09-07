@@ -18,6 +18,7 @@ package execmodule_test
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"math/big"
 	"strings"
@@ -28,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -80,7 +82,9 @@ func (c *jsonLogCollector) records(t *testing.T) []map[string]any {
 	return out
 }
 
-func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
+func newMetricsTester(t *testing.T, opts ...execmoduletester.Option) (*execmoduletester.ExecModuleTester, *ecdsa.PrivateKey, common.Address) {
+	t.Helper()
+
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
@@ -91,28 +95,35 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
+	opts = append([]execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	}, opts...)
+	return execmoduletester.New(t, opts...), privKey, senderAddr
+}
+
+func sendTo(t *testing.T, m *execmoduletester.ExecModuleTester, privKey *ecdsa.PrivateKey, to common.Address, value uint64) func(int, *blockgen.BlockGen) {
+	return func(i int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(value), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil), privKey,
+		)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	}
+}
+
+func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	prevReadMetrics := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
 	dbg.KVReadLevelledMetrics = false
 
-	m := execmoduletester.New(t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithSlowBlockThreshold(0),
-	)
+	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 
 	// New installs a root handler at LvlError, replacing any earlier collector.
 	collector := installCollector(t)
 
-	chainResult, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
-		tx, err := types.SignTx(
-			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-			*types.LatestSignerForChainID(nil),
-			privKey,
-		)
-		require.NoError(t, err)
-		b.AddTx(tx)
-	})
+	chainResult, err := m.GenerateChain(2, sendTo(t, m, privKey, senderAddr, 1_000))
 	require.NoError(t, err)
 
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
@@ -155,18 +166,12 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 }
 
 func TestSlowBlockThresholdRestoresReadMetrics(t *testing.T) {
-	privKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-
 	prevReadMetrics := dbg.KVReadLevelledMetrics
 	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
 	dbg.KVReadLevelledMetrics = false
 
 	t.Run("threshold set", func(t *testing.T) {
-		execmoduletester.New(t,
-			execmoduletester.WithKey(privKey),
-			execmoduletester.WithSlowBlockThreshold(0),
-		)
+		newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 		require.True(t, dbg.KVReadLevelledMetrics,
 			"the threshold must bring the counters with it, or state_reads silently vanishes")
 	})
@@ -176,28 +181,10 @@ func TestSlowBlockThresholdRestoresReadMetrics(t *testing.T) {
 }
 
 func TestSlowBlockMetricsSilentByDefault(t *testing.T) {
-	privKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-
-	genesis := &types.Genesis{
-		Config: chain.AllProtocolChanges,
-		Alloc: types.GenesisAlloc{
-			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
-		},
-	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
+	m, privKey, senderAddr := newMetricsTester(t)
 	collector := installCollector(t)
 
-	chainResult, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
-		tx, err := types.SignTx(
-			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-			*types.LatestSignerForChainID(nil),
-			privKey,
-		)
-		require.NoError(t, err)
-		b.AddTx(tx)
-	})
+	chainResult, err := m.GenerateChain(1, sendTo(t, m, privKey, senderAddr, 1_000))
 	require.NoError(t, err)
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
 
@@ -205,31 +192,9 @@ func TestSlowBlockMetricsSilentByDefault(t *testing.T) {
 }
 
 func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
-	privKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-
-	genesis := &types.Genesis{
-		Config: chain.AllProtocolChanges,
-		Alloc: types.GenesisAlloc{
-			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
-		},
-	}
-	m := execmoduletester.New(t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithSlowBlockThreshold(0),
-	)
-
+	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 	send := func(value uint64) func(int, *blockgen.BlockGen) {
-		return func(i int, b *blockgen.BlockGen) {
-			txn, err := types.SignTx(
-				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(value), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-				*types.LatestSignerForChainID(nil), privKey,
-			)
-			require.NoError(t, err)
-			b.AddTx(txn)
-		}
+		return sendTo(t, m, privKey, senderAddr, value)
 	}
 
 	canonical, err := m.GenerateChain(1, send(1_000))
@@ -257,31 +222,9 @@ func TestSlowBlockMetricsSkipReorgForkchoice(t *testing.T) {
 }
 
 func TestSlowBlockMetricsSkipMultiBlockForkValidation(t *testing.T) {
-	privKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-
-	genesis := &types.Genesis{
-		Config: chain.AllProtocolChanges,
-		Alloc: types.GenesisAlloc{
-			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
-		},
-	}
-	m := execmoduletester.New(t,
-		execmoduletester.WithGenesisSpec(genesis),
-		execmoduletester.WithKey(privKey),
-		execmoduletester.WithSlowBlockThreshold(0),
-	)
-
+	m, privKey, senderAddr := newMetricsTester(t, execmoduletester.WithSlowBlockThreshold(0))
 	send := func(value uint64) func(int, *blockgen.BlockGen) {
-		return func(i int, b *blockgen.BlockGen) {
-			txn, err := types.SignTx(
-				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(value), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-				*types.LatestSignerForChainID(nil), privKey,
-			)
-			require.NoError(t, err)
-			b.AddTx(txn)
-		}
+		return sendTo(t, m, privKey, senderAddr, value)
 	}
 
 	canonical, err := m.GenerateChain(1, send(1_000))
