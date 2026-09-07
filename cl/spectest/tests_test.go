@@ -17,7 +17,9 @@
 package spectest
 
 import (
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +31,18 @@ import (
 )
 
 var mainnetDir = filepath.Join("..", "..", "test-fixtures-cache", "cl_mainnet", "tests")
+
+type devnet9FixtureFS struct{ fs.FS }
+
+func (f devnet9FixtureFS) Open(name string) (fs.File, error) {
+	switch path.Dir(name) {
+	case "mainnet/gloas/operations/parent_execution_payload/pyspec_tests/process_parent_execution_payload__settle_previous_epoch",
+		"mainnet/gloas/operations/parent_execution_payload/pyspec_tests/process_parent_execution_payload__older_than_previous_epoch":
+		return os.DirFS("testdata/devnet9").Open(name)
+	default:
+		return f.FS.Open(name)
+	}
+}
 
 func Test(t *testing.T) {
 	// Skip when run as part of the broader test-all sweep; the dedicated
@@ -42,5 +56,5 @@ func Test(t *testing.T) {
 		caplinConfig := clparams.CaplinConfig{}
 		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
 	}
-	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS(mainnetDir))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, devnet9FixtureFS{os.DirFS(mainnetDir)})
 }
