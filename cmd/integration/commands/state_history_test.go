@@ -166,3 +166,27 @@ func TestDumpBounds_UnboundedWhenOutOfIntRange(t *testing.T) {
 	require.Equal(t, 0, from)
 	require.Equal(t, 100, to)
 }
+
+// Commitment branch keys are nibble prefixes, so one key is often a prefix of
+// another. Concatenating key||txNum then lets the longer key's own bytes sort
+// between two entries of the shorter one, splitting its run.
+func TestHistDupSorter_PrefixKeysStayGrouped(t *testing.T) {
+	t.Parallel()
+
+	short := []byte{0x01}
+	// Chosen so that short||txNum places it between short@1 and short@3.
+	long := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02}
+
+	sorter := newHistDupSorter(t.Name(), t.TempDir(), log.New())
+	t.Cleanup(sorter.Close)
+	require.NoError(t, sorter.add(short, 1, []byte("v1")))
+	require.NoError(t, sorter.add(long, 2, []byte("v1")))
+	require.NoError(t, sorter.add(short, 3, []byte("v1")))
+
+	scan, err := sorter.scan(t.Context(), 10)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), scan.Entries)
+	require.Equal(t, uint64(2), scan.DistinctKeys)
+	require.Equal(t, uint64(1), scan.DupPairs, "the longer key must not split the shorter key's run")
+	require.Equal(t, [][]byte{short}, scan.SampleKeys)
+}

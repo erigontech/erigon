@@ -361,7 +361,6 @@ func dumpBounds(fromTxNum, toTxNum uint64) (int, int) {
 // mean the previous entry chain-wide rather than within one file.
 type histDupSorter struct {
 	collector *etl.Collector
-	txNumBuf  [8]byte
 }
 
 func newHistDupSorter(logPrefix, tmpdir string, logger log.Logger) *histDupSorter {
@@ -370,9 +369,17 @@ func newHistDupSorter(logPrefix, tmpdir string, logger log.Logger) *histDupSorte
 
 func (s *histDupSorter) Close() { s.collector.Close() }
 
+// keyLenPrefix is the fixed-width length that keeps entries of one key
+// contiguous once sorted. Plain key||txNum does not: where one key is a prefix
+// of another - commitment's nibble prefixes always are - the longer key's own
+// bytes can sort between two entries of the shorter one and split its run.
+const keyLenPrefix = 4
+
 func (s *histDupSorter) add(key []byte, txNum uint64, val []byte) error {
-	binary.BigEndian.PutUint64(s.txNumBuf[:], txNum)
-	return s.collector.Collect(append(bytes.Clone(key), s.txNumBuf[:]...), val)
+	buf := make([]byte, keyLenPrefix, keyLenPrefix+len(key)+8)
+	binary.BigEndian.PutUint32(buf, uint32(len(key)))
+	buf = append(buf, key...)
+	return s.collector.Collect(binary.BigEndian.AppendUint64(buf, txNum), val)
 }
 
 func (s *histDupSorter) scan(ctx context.Context, sampleLimit int) (*histDupScan, error) {
@@ -383,7 +390,7 @@ func (s *histDupSorter) scan(ctx context.Context, sampleLimit int) (*histDupScan
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		scan.observe(k[:len(k)-8], v)
+		scan.observe(k[keyLenPrefix:len(k)-8], v)
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return nil, err
