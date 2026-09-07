@@ -466,7 +466,11 @@ var duplicatesCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("opening datadir: %w", err)
 		}
-		defer l.Unlock()
+		defer func() {
+			if err := l.Unlock(); err != nil {
+				logger.Error("failed to unlock datadir", "err", err)
+			}
+		}()
 
 		names := historyDomainNames()
 		if historyDomain != "" {
