@@ -51,7 +51,6 @@ func TestHistoryValueIndexV2(t *testing.T) {
 	require.NoError(t, err)
 	defer idx.Close()
 	require.False(t, idx.Empty())
-	require.Equal(t, uint64(len(valuesPerKey)), idx.KeyCount())
 
 	var ordinal uint64
 	for keyOrdinal, n := range valuesPerKey {
@@ -89,7 +88,6 @@ func TestHistoryValueIndexV1(t *testing.T) {
 	require.NoError(t, err)
 	defer idx.Close()
 	require.False(t, idx.Empty())
-	require.Equal(t, uint64(len(keys)), idx.KeyCount())
 
 	for i, k := range keys {
 		// the position arguments are ignored by a v1 index

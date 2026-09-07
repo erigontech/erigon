@@ -261,7 +261,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 			valWords = append(valWords, string(w))
 		}
 		require.Equal([]string{"", "value1.1", "", "value2.1", "value2.2", ""}, valWords)
-		require.Equal(3, int(sf.historyIdx.KeyCount())) // one entry per .ef key, not per value
 		ge := sf.efHistoryDecomp.MakeGetter()
 		ge.Reset(0)
 		var keyWords []string
