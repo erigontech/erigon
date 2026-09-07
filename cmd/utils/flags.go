@@ -1123,9 +1123,6 @@ var (
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
-	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
-	// (ModeParallel) for commitment computation. Default on; pass =false to fall
-	// back to the sequential HexPatriciaHashed trie.
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
 		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",

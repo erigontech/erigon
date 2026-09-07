@@ -44,9 +44,6 @@ jobs:
           - serial
           - parallel
     env:
-      # Toggle statecfg.ExperimentalParallelCommitment from CI without code
-      # changes. db/state/statecfg reads this name directly; the unprefixed
-      # COMMITMENT_PARALLEL is deliberately not accepted.
       ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:

@@ -34,9 +34,6 @@ jobs:
     env:
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ENCLAVE_NAME: "kurtosis-run-${{ github.run_id }}-${{ matrix.commitment_mode }}"
-      # Toggle statecfg.ExperimentalParallelCommitment from CI without code
-      # changes. db/state/statecfg reads this name directly; the unprefixed
-      # COMMITMENT_PARALLEL is deliberately not accepted.
       ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
 
     steps:
