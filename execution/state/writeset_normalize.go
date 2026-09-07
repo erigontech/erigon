@@ -17,9 +17,13 @@
 package state
 
 import (
+	"sync/atomic"
+	"time"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -501,6 +505,37 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	return filtered, nil
 }
 
+// SD_WALK_STATS reports what the self-destruct cascade's committed-slot walk
+// costs: it seeks the .bt index of every storage .kv file, and runs on the
+// serialized apply thread.
+var sdWalkStats = dbg.EnvBool("SD_WALK_STATS", false)
+
+var (
+	sdWalkCalls atomic.Int64
+	sdWalkNanos atomic.Int64
+	sdWalkKeys  atomic.Int64
+	sdWalkEmpty atomic.Int64
+)
+
+func recordSDWalk(start time.Time, keys int) {
+	if !sdWalkStats {
+		return
+	}
+	sdWalkNanos.Add(int64(time.Since(start)))
+	sdWalkKeys.Add(int64(keys))
+	if keys == 0 {
+		sdWalkEmpty.Add(1)
+	}
+	n := sdWalkCalls.Add(1)
+	if n%5000 != 0 {
+		return
+	}
+	ms := float64(sdWalkNanos.Load()) / 1e6
+	log.Info("[sd-walk]", "calls", n, "total_ms", int64(ms),
+		"avg_us", int64(ms*1000/float64(n)),
+		"empty_pct", 100*sdWalkEmpty.Load()/n, "keys", sdWalkKeys.Load())
+}
+
 // StorageKeysFn enumerates the storage slots committed for an address. Normalize
 // takes one rather than the domains directly so a test can inject a fixed set.
 type StorageKeysFn func(addr accounts.Address) ([]accounts.StorageKey, error)
@@ -528,6 +563,8 @@ func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr
 	}
 	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
 	var keys []accounts.StorageKey
+	walkStart := time.Now()
+	defer func() { recordSDWalk(walkStart, len(keys)) }()
 	if err := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
 		if len(k) >= addrLen+hashLen {
 			keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
