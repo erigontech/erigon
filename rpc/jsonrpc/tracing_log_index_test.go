@@ -241,16 +241,19 @@ func TestCallTracerWithLogIndexOfSingleTransaction(t *testing.T) {
 	}
 }
 
-// TestCallTracerWithLogIndexPerBundle pins that each bundle of
-// debug_traceCallMany numbers its logs from zero: a bundle is a block of its
-// own, so the count does not carry over from the bundle before it.
+// TestCallTracerWithLogIndexPerBundle pins both halves of the numbering
+// debug_traceCallMany gives its bundles: the calls inside one bundle share the
+// count, and the next bundle is a block of its own and starts over.
 func TestCallTracerWithLogIndexPerBundle(t *testing.T) {
 	m, _ := createLogIndexTestModule(t)
 	api := newDebugApiForTest(m)
 
 	gas := hexutil.Uint64(200000)
 	call := ethapi.CallArgs{From: &m.Address, To: &emitTwoAddr, Gas: &gas}
-	bundles := []Bundle{{Transactions: []ethapi.CallArgs{call}}, {Transactions: []ethapi.CallArgs{call}}}
+	bundles := []Bundle{
+		{Transactions: []ethapi.CallArgs{call, call}},
+		{Transactions: []ethapi.CallArgs{call}},
+	}
 
 	txIndex := -1
 	stateCtx := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}
@@ -262,10 +265,14 @@ func TestCallTracerWithLogIndexPerBundle(t *testing.T) {
 
 	var traces [][]traceFrame
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
-	require.Len(t, traces, len(bundles))
+	require.Len(t, traces, 2)
+	require.Len(t, traces[0], 2)
+	require.Len(t, traces[1], 1)
 
-	for i, bundle := range traces {
-		require.Len(t, bundle, 1)
-		require.Equal(t, wantByTxn[0].want, emittedLogs(bundle[0]), "bundle %d", i)
-	}
+	require.Equal(t, wantByTxn[0].want, emittedLogs(traces[0][0]), "bundle 0, call 0")
+	require.Equal(t, []traceLog{
+		{Address: emitTwoAddr, Index: 2, Position: 0},
+		{Address: emitTwoAddr, Index: 3, Position: 0},
+	}, emittedLogs(traces[0][1]), "bundle 0, call 1")
+	require.Equal(t, wantByTxn[0].want, emittedLogs(traces[1][0]), "bundle 1, call 0")
 }
