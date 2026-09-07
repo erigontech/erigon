@@ -35,9 +35,9 @@ const (
 type FeatureFlag uint8
 
 const (
-	PageLevelCompressionEnabled    FeatureFlag = 0b1
-	WordLevelKeyCompressionEnabled FeatureFlag = 0b10
-	WordLevelValCompressionEnabled FeatureFlag = 0b100
+	PageLevelCompressionEnabled    FeatureFlag = 1 << iota // 0b001
+	WordLevelKeyCompressionEnabled                         // 0b010
+	WordLevelValCompressionEnabled                         // 0b100
 )
 
 type FeatureFlagBitmask uint8
@@ -67,33 +67,6 @@ func ParseFileCompression(s string) (FileCompression, error) {
 
 func (c FileCompression) Has(flag FileCompression) bool {
 	return c&flag != 0
-}
-
-func (c FileCompression) String() string {
-	if c.Has(CompressKeys) && c.Has(CompressVals) {
-		return "keys+vals"
-	}
-	if c.Has(CompressKeys) {
-		return "keys"
-	}
-	if c.Has(CompressVals) {
-		return "vals"
-	}
-	return "none"
-}
-
-type ReaderI interface {
-	Next(buf []byte) ([]byte, uint64)
-	Size() int
-	Count() int
-	Reset(offset uint64)
-	HasNext() bool
-	Skip() (uint64, int)
-	FileName() string
-	BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool)
-	GetMetadata() []byte
-	MadvNormal() MadvDisabler
-	DisableReadAhead()
 }
 
 type MadvDisabler interface {

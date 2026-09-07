@@ -344,6 +344,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 	oldestBlock := lastBlock + 1 - uint64(blocks)
 
+	// The reward percentiles are computed from each block's transactions and the gas
+	// their receipts report; the other series come from headers alone. Availability is
+	// a lower bound, so the oldest block of the range decides for all of it.
+	if len(rewardPercentiles) != 0 {
+		if err := oracle.backend.CheckBlockRewardsAvailable(ctx, oldestBlock); err != nil {
+			return common.Big0, nil, nil, nil, nil, nil, err
+		}
+	}
+
 	// percentileKey is the binary-encoded percentile slice used as part of the cache key.
 	percentileKey := encodePercentiles(rewardPercentiles)
 
