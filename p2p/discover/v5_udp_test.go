@@ -36,7 +36,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -287,27 +286,39 @@ func TestUDPv5_handshakeNodeRelayAddr(t *testing.T) {
 	test := newUDPV5Test(t)
 	defer test.close()
 
-	remotekey, _ := crypto.GenerateKey()
-	db, _ := enode.OpenDB("")
-	defer db.Close()
-	ln := enode.NewLocalNode(db, remotekey)
-	ln.SetStaticIP(net.ParseIP("169.254.169.254"))
-	ln.SetFallbackUDP(30303)
-	planted := ln.Node()
-
-	test.udp.codec.(*testCodec).handshakeNode = planted
-	senderkey, _ := crypto.GenerateKey()
 	publicAddr := netip.MustParseAddrPort("1.2.3.4:30303")
-	test.packetInFrom(senderkey, publicAddr, &v5wire.Unknown{Nonce: v5wire.Nonce{1}})
-	test.waitPacketOut(func(*v5wire.Whoareyou, netip.AddrPort, v5wire.Nonce) {})
+	planted := test.getNode(newkey(), netip.MustParseAddrPort("169.254.169.254:30303")).Node()
+	allowed := test.getNode(newkey(), netip.MustParseAddrPort("5.6.7.8:30303")).Node()
 
-	for _, bucket := range test.table.Nodes() {
+	for _, tc := range []struct {
+		name   string
+		node   *enode.Node
+		inTabl bool
+	}{
+		{"unrelated link-local address", planted, false},
+		{"public address", allowed, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			test.udp.codec.(*testCodec).handshakeNode = tc.node
+			test.packetInFrom(newkey(), publicAddr, &v5wire.Unknown{Nonce: v5wire.Nonce{1}})
+			test.waitPacketOut(func(*v5wire.Whoareyou, netip.AddrPort, v5wire.Nonce) {})
+
+			if inTable(test.table, tc.node.ID()) != tc.inTabl {
+				t.Fatalf("node %v in table = %v, want %v", tc.node.IPAddr(), !tc.inTabl, tc.inTabl)
+			}
+		})
+	}
+}
+
+func inTable(tab *Table, id enode.ID) bool {
+	for _, bucket := range tab.Nodes() {
 		for _, n := range bucket {
-			if n.Node.ID() == planted.ID() {
-				t.Fatalf("node with unrelated address %v was added to the table", planted.IPAddr())
+			if n.Node.ID() == id {
+				return true
 			}
 		}
 	}
+	return false
 }
 
 // This test checks that incoming FINDNODE calls are handled correctly.
