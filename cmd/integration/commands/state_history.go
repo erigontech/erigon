@@ -273,9 +273,10 @@ var distributionCmd = &cobra.Command{
 }
 
 // histDupScan counts, per domain, how many history entries repeat the previous
-// value for the same key. HistoryDump yields entries grouped by key and ordered
-// by txNum, so a consecutive equal value is a redundant row (an as-of read
-// collapses it away). Pure and stateless w.r.t. storage — fed one entry at a time.
+// value for the same key: a consecutive equal value is a redundant row, since an
+// as-of read collapses it away. It is fed one entry at a time and requires its
+// caller to deliver them grouped by key and ordered by txNum — see histDupSorter,
+// which is what establishes that order.
 type histDupScan struct {
 	sampleLimit int
 
@@ -334,6 +335,17 @@ func historyDomainNames() []string {
 // history is not covered and the run must not report it as clean.
 var errHistoryNotInFiles = errors.New("history not collated into files yet, so it was not scanned")
 
+// errHistoryDisabled marks a domain the schema writes no history for at all -
+// commitment and rcache, unless the node enabled them. Nothing is missing, so
+// it is not a gap in the scan.
+var errHistoryDisabled = errors.New("history disabled for this domain")
+
+// historyOff reports whether the schema writes no history for a domain at all:
+// commitment carries its own flag, rcache instead has no inverted index.
+func historyOff(cfg statecfg.HistCfg) bool {
+	return cfg.HistoryDisabled || !cfg.IiCfg.Enabled
+}
+
 // stepDumpBounds resolves the --from/--to step flags to HistoryDump's arguments.
 func stepDumpBounds(stepSize uint64) (int, int, error) {
 	fromTxNum, err := stepToTxNum(fromStep, stepSize)
@@ -363,12 +375,13 @@ func dumpBounds(fromTxNum, toTxNum uint64) (int, int) {
 	return from, to
 }
 
-// histDupSorter replays entries sorted by key||txNum. HistoryDump walks files
-// outer and keys inner, so the same key reappears once per .ef file with every
-// other key in between; sorting is what makes "the previous entry for this key"
-// mean the previous entry chain-wide rather than within one file.
+// histDupSorter replays entries grouped by key and ordered by txNum. HistoryDump
+// walks files outer and keys inner, so the same key reappears once per .ef file
+// with every other key in between; sorting is what makes "the previous entry for
+// this key" mean the previous entry chain-wide rather than within one file.
 type histDupSorter struct {
 	collector *etl.Collector
+	keyBuf    []byte
 }
 
 func newHistDupSorter(logPrefix, tmpdir string, logger log.Logger) *histDupSorter {
@@ -384,10 +397,11 @@ func (s *histDupSorter) Close() { s.collector.Close() }
 const keyLenPrefix = 4
 
 func (s *histDupSorter) add(key []byte, txNum uint64, val []byte) error {
-	buf := make([]byte, keyLenPrefix, keyLenPrefix+len(key)+8)
-	binary.BigEndian.PutUint32(buf, uint32(len(key)))
-	buf = append(buf, key...)
-	return s.collector.Collect(binary.BigEndian.AppendUint64(buf, txNum), val)
+	// Collect copies what it is handed, so one scratch buffer serves every entry.
+	s.keyBuf = binary.BigEndian.AppendUint32(s.keyBuf[:0], uint32(len(key)))
+	s.keyBuf = append(s.keyBuf, key...)
+	s.keyBuf = binary.BigEndian.AppendUint64(s.keyBuf, txNum)
+	return s.collector.Collect(s.keyBuf, val)
 }
 
 func (s *histDupSorter) scan(ctx context.Context, sampleLimit int) (*histDupScan, error) {
@@ -417,6 +431,11 @@ func scanDomainDuplicates(ctx context.Context, dirs datadir.Dirs, name string, l
 	roTx := history.BeginFilesRoForDebug()
 	defer roTx.Close()
 	if len(roTx.Files()) == 0 {
+		// Only meaningful with no files: a datadir built with the history enabled
+		// has them regardless of what this standalone binary's schema says.
+		if historyOff(history.HistCfg) {
+			return nil, errHistoryDisabled
+		}
 		return nil, errHistoryNotInFiles
 	}
 
@@ -485,6 +504,9 @@ var duplicatesCmd = &cobra.Command{
 		for _, name := range names {
 			scan, err := scanDomainDuplicates(ctx, dirs, name, logger)
 			switch {
+			case errors.Is(err, errHistoryDisabled):
+				fmt.Printf("domain=%-11s %s\n", name, err)
+				continue
 			case errors.Is(err, errHistoryNotInFiles):
 				fmt.Printf("domain=%-11s %s\n", name, err)
 				unscanned = append(unscanned, name)
@@ -508,14 +530,21 @@ var duplicatesCmd = &cobra.Command{
 				}
 			}
 		}
-		if len(withDup) > 0 {
-			fmt.Printf("domains with duplicate history values: %v\n", withDup)
-			return nil
-		}
-		if len(unscanned) > 0 {
-			return fmt.Errorf("scan incomplete: %v have history only in the DB", unscanned)
-		}
-		fmt.Println("no consecutive duplicate history values found")
-		return nil
+		return duplicatesVerdict(withDup, unscanned)
 	},
+}
+
+// duplicatesVerdict prints the closing summary and returns the run's error. An
+// unscanned domain outranks a duplicate finding: a report that skipped a domain
+// must not exit 0 just because another domain had something to report.
+func duplicatesVerdict(withDup, unscanned []string) error {
+	if len(withDup) > 0 {
+		fmt.Printf("domains with duplicate history values: %v\n", withDup)
+	} else if len(unscanned) == 0 {
+		fmt.Println("no consecutive duplicate history values found")
+	}
+	if len(unscanned) > 0 {
+		return fmt.Errorf("scan incomplete: %v have history only in the DB", unscanned)
+	}
+	return nil
 }

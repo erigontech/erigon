@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestHistDupScan(t *testing.T) {
@@ -189,4 +191,27 @@ func TestHistDupSorter_PrefixKeysStayGrouped(t *testing.T) {
 	require.Equal(t, uint64(2), scan.DistinctKeys)
 	require.Equal(t, uint64(1), scan.DupPairs, "the longer key must not split the shorter key's run")
 	require.Equal(t, [][]byte{short}, scan.SampleKeys)
+}
+
+// A domain that was never scanned must fail the run even when another domain
+// already reported duplicates, or a skipped domain reads as a complete answer.
+func TestDuplicatesVerdict_UnscannedOutranksDuplicates(t *testing.T) {
+	t.Parallel()
+
+	require.Error(t, duplicatesVerdict(nil, []string{"accounts"}))
+	require.Error(t, duplicatesVerdict([]string{"rcache"}, []string{"accounts"}))
+	require.NoError(t, duplicatesVerdict([]string{"rcache"}, nil))
+	require.NoError(t, duplicatesVerdict(nil, nil))
+}
+
+// commitment and rcache write no history by default, so a healthy datadir has
+// no files for them and that is not a gap in the scan. The two switch it off by
+// different flags, which is what historyOff has to cover.
+func TestHistoryOffMatchesTheDefaultSchema(t *testing.T) {
+	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.RCacheDomain} {
+		require.True(t, historyOff(statecfg.Schema.GetDomainCfg(d).Hist), "%s writes no history by default", d)
+	}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain} {
+		require.False(t, historyOff(statecfg.Schema.GetDomainCfg(d).Hist), "%s does write history, it must still be scanned", d)
+	}
 }
