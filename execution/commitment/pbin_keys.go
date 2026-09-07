@@ -61,14 +61,14 @@ func pbinZoneKeyLength(zone byte) (int, bool) {
 	}
 }
 
-// pbinAddr32 widens a legacy address to the spec's Address32 (eip:"Tree embedding").
-func pbinAddr32(addr []byte) [32]byte {
-	if len(addr) > 32 {
-		panic(fmt.Sprintf("pbin: address of %d bytes exceeds 32", len(addr)))
+// pbinRightAlign32 widens a legacy address or storage slot to the spec's Address32 (eip:"Tree embedding").
+func pbinRightAlign32(b []byte) [32]byte {
+	if len(b) > 32 {
+		panic(fmt.Sprintf("pbin: key component of %d bytes exceeds 32", len(b)))
 	}
-	var a32 [32]byte
-	copy(a32[32-len(addr):], addr)
-	return a32
+	var out [32]byte
+	copy(out[32-len(b):], b)
+	return out
 }
 
 // pbinTreeKey assembles zone || treePosition || subIndex. The length assert is
@@ -201,7 +201,7 @@ func (c *pbinDigestCache) groupDigest(addr32, slot32 *[32]byte) *[32]byte {
 }
 
 func (c *pbinDigestCache) accountKey(addr []byte, subIndex byte) []byte {
-	addr32 := pbinAddr32(addr)
+	addr32 := pbinRightAlign32(addr)
 	return pbinTreeKey(pbinAccountZone, c.stemDigest(&addr32)[:], subIndex)
 }
 
@@ -209,12 +209,12 @@ func (c *pbinDigestCache) accountKey(addr []byte, subIndex byte) []byte {
 // account owns, both fixed by its address. Removing an account is removing these
 // two subtrees (eip:"Zero values and deletion").
 func (c *pbinDigestCache) accountHeaderStem(addr []byte) []byte {
-	addr32 := pbinAddr32(addr)
+	addr32 := pbinRightAlign32(addr)
 	return append([]byte{pbinAccountZone}, c.stemDigest(&addr32)[:]...)
 }
 
 func (c *pbinDigestCache) accountStoragePrefix(addr []byte) []byte {
-	addr32 := pbinAddr32(addr)
+	addr32 := pbinRightAlign32(addr)
 	return append([]byte{pbinStorageZone}, c.stemDigest(&addr32)[:]...)
 }
 
@@ -233,8 +233,8 @@ func (c *pbinDigestCache) codeChunkKey(codeHash common.Hash, chunkID int) []byte
 }
 
 func (c *pbinDigestCache) storageKey(addr, slot []byte) []byte {
-	addr32 := pbinAddr32(addr)
-	slot32 := pbinSlot32(slot)
+	addr32 := pbinRightAlign32(addr)
+	slot32 := pbinRightAlign32(slot)
 	if pbinSlotInHeader(&slot32) {
 		return pbinTreeKey(pbinAccountZone, c.stemDigest(&addr32)[:], pbinHeaderStorageOffset+slot32[31])
 	}
@@ -255,20 +255,6 @@ func (c *pbinDigestCache) treeKey(plainKey []byte) []byte {
 	}
 }
 
-func pbinSlot32(slot []byte) [32]byte {
-	if len(slot) > 32 {
-		panic(fmt.Sprintf("pbin: storage slot of %d bytes exceeds 32", len(slot)))
-	}
-	var s32 [32]byte
-	copy(s32[32-len(slot):], slot)
-	return s32
-}
-
 func pbinSlotInHeader(slot *[32]byte) bool {
-	for _, b := range slot[:31] {
-		if b != 0 {
-			return false
-		}
-	}
-	return slot[31] < pbinHeaderStorageSlots
+	return [31]byte(slot[:31]) == [31]byte{} && slot[31] < pbinHeaderStorageSlots
 }

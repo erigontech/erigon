@@ -511,11 +511,9 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 		return pph.unfoldBranchNode(row, upDepth+1, touched && !present)
 	}
 
-	consumed, err := pbinUnfoldConsumed(u, &upCell.prefix)
-	if err != nil {
-		return err
-	}
+	consumed := upCell.prefix.bitLen
 	if u.action == pbinUnfoldSplit {
+		consumed = u.matched + 1
 		pph.counters.splitsInsidePrefix++
 	}
 	bit := upCell.prefix.bit(consumed - 1)
@@ -535,23 +533,6 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	g.depths[row] = upDepth + consumed
 	g.activeRows++
 	return nil
-}
-
-// pbinUnfoldConsumed is how many of the cell's prefix bits this unfold takes:
-// all of them when the probe key matched, one past the divergence when it did
-// not — that extra bit is what the new row branches on.
-func pbinUnfoldConsumed(u pbinUnfolding, prefix *pbinBitpath) (int16, error) {
-	switch u.action {
-	case pbinUnfoldDescend:
-		return prefix.bitLen, nil
-	case pbinUnfoldSplit:
-		if u.matched >= prefix.bitLen {
-			return 0, fmt.Errorf("pbin: %d matched bits of a %d-bit prefix is not a split", u.matched, prefix.bitLen)
-		}
-		return u.matched + 1, nil
-	default:
-		return 0, fmt.Errorf("pbin: unfold action %d consumes no prefix bits", u.action)
-	}
 }
 
 // unfoldBranchNode loads the record at the current descent key into a row. The

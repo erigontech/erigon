@@ -122,7 +122,7 @@ func TestPBinConformanceEmbedding(t *testing.T) {
 	keys := pbinDigestCache{sum: pbinBlake3Hash}
 
 	require.Equal(t, e.Address32, "0x"+hex.EncodeToString(func() []byte {
-		a := pbinAddr32(addr)
+		a := pbinRightAlign32(addr)
 		return a[:]
 	}()))
 

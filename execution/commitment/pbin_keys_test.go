@@ -184,7 +184,7 @@ func TestPBinAddr32Padding(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314")
-	a32 := pbinAddr32(addr)
+	a32 := pbinRightAlign32(addr)
 	require.Equal(t, make([]byte, 12), a32[:12])
 	require.Equal(t, addr, a32[12:])
 

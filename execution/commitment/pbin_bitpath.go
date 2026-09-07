@@ -199,15 +199,8 @@ func pbinDecodeBitPath(buf []byte) (pbinBitpath, error) {
 	if bitLen > pbinMaxPathBits {
 		return p, fmt.Errorf("pbin: bit path of %d bits exceeds %d", bitLen, pbinMaxPathBits)
 	}
-	for i, b := range packed {
-		p.w[i/8] |= uint64(b) << (56 - 8*uint(i%8))
-	}
-	p.bitLen = int16(bitLen)
-
-	masked := p
-	masked.maskTail()
-	if masked.w != p.w {
+	if used := bitLen % 8; used != 0 && packed[len(packed)-1]&(0xFF>>used) != 0 {
 		return pbinBitpath{}, errPBinNonCanonicalPad
 	}
-	return p, nil
+	return pbinPathFromBits(packed, int16(bitLen)), nil
 }

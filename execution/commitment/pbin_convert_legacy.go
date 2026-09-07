@@ -293,16 +293,9 @@ func (c *PBinRecordConverter) ConvertState(blob []byte) ([]byte, error) {
 	if len(blob) == 0 {
 		return nil, nil
 	}
-	if len(blob) < 4 || blob[0] != pbinStateMarker {
-		return nil, fmt.Errorf("%w: not a legacy pbin blob", errPBinStateBlob)
-	}
-	flags := blob[1]
-	if flags&^byte(pbinStateFlagsAll) != 0 {
-		return nil, fmt.Errorf("%w: unknown flags %08b", errPBinStateBlob, flags)
-	}
-	rootLen := int(binary.BigEndian.Uint16(blob[2:4]))
-	if len(blob) != 4+rootLen {
-		return nil, fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(blob))
+	flags, rootLen, err := pbinSplitLegacyStateBlob(blob)
+	if err != nil {
+		return nil, err
 	}
 
 	out := []byte{pbinStateMarker, pbinRecordFormat, flags, 0, 0}
@@ -326,16 +319,9 @@ func (c *PBinRecordConverter) ConvertState(blob []byte) ([]byte, error) {
 // LegacyStateRoot hashes the root cell in a pre-version state blob without
 // restoring it into an engine that only accepts the current format.
 func (c *PBinRecordConverter) LegacyStateRoot(blob []byte) ([]byte, error) {
-	if len(blob) < 4 || blob[0] != pbinStateMarker {
-		return nil, fmt.Errorf("%w: not a legacy pbin blob", errPBinStateBlob)
-	}
-	flags := blob[1]
-	if flags&^byte(pbinStateFlagsAll) != 0 {
-		return nil, fmt.Errorf("%w: unknown flags %08b", errPBinStateBlob, flags)
-	}
-	rootLen := int(binary.BigEndian.Uint16(blob[2:4]))
-	if len(blob) != 4+rootLen {
-		return nil, fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(blob))
+	_, rootLen, err := pbinSplitLegacyStateBlob(blob)
+	if err != nil {
+		return nil, err
 	}
 
 	var root pbinCell
@@ -392,6 +378,21 @@ func (c *PBinRecordConverter) CurrentStateRoot(blob []byte) ([]byte, error) {
 		return nil, fmt.Errorf("pbin state root: %w", err)
 	}
 	return hash[:], nil
+}
+
+func pbinSplitLegacyStateBlob(blob []byte) (byte, int, error) {
+	if len(blob) < 4 || blob[0] != pbinStateMarker {
+		return 0, 0, fmt.Errorf("%w: not a legacy pbin blob", errPBinStateBlob)
+	}
+	flags := blob[1]
+	if flags&^byte(pbinStateFlagsAll) != 0 {
+		return 0, 0, fmt.Errorf("%w: unknown flags %08b", errPBinStateBlob, flags)
+	}
+	rootLen := int(binary.BigEndian.Uint16(blob[2:4]))
+	if len(blob) != 4+rootLen {
+		return 0, 0, fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(blob))
+	}
+	return flags, rootLen, nil
 }
 
 func pbinLegacyDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint16, err error) {
