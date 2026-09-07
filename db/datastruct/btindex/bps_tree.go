@@ -63,9 +63,9 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfftEF *eliasfano32.EliasFano, nodeStride uint64) *BpsTree {
-	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfftEF: nodeOfftEF, nodeStride: nodeStride}
-	bt.buildNodeIndex()
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, m uint64, dataLookup dataLookupFunc, keysBlob []byte, nodeOfft []uint32, nodeStride uint64) *BpsTree {
+	bt := &BpsTree{M: m, offt: offt, dataLookupFunc: dataLookup, keysBlob: keysBlob, nodeOfft: nodeOfft, nodeStride: nodeStride}
+	bt.buildPrefixIndex()
 	if envAssertBTKeys {
 		for i := range bt.numNodes() {
 			if cmp := bt.compareKey(kv, bt.nodeKey(i), bt.nodeDi(i)); cmp != 0 {
@@ -81,10 +81,9 @@ type BpsTree struct {
 	offt *eliasfano32.EliasFano // ef with offsets to key/vals
 
 	// pivot cache: keysBlob holds the on-disk pivot records (mmap-backed on-disk,
-	// heap for WarmUp); nodeOfftEF holds record i's offset and di is derived as
-	// i*nodeStride. nodeOfft and prefixLo are open-time derived caches.
+	// heap for WarmUp); nodeOfft holds record i's offset and di is derived as
+	// i*nodeStride. prefixLo is an open-time derived CSR bucket table.
 	keysBlob   []byte
-	nodeOfftEF *eliasfano32.EliasFano
 	nodeStride uint64
 	nodeOfft   []uint32
 	prefixLo   []uint32
@@ -97,21 +96,11 @@ type BpsTree struct {
 	cursorGetter   cursorGetter
 }
 
-func (b *BpsTree) numNodes() int {
-	if b.nodeOfftEF == nil {
-		return 0
-	}
-	return int(b.nodeOfftEF.Count())
-}
+func (b *BpsTree) numNodes() int { return len(b.nodeOfft) }
 
 // nodeKey returns pivot i's key without copying (points into keysBlob).
 func (b *BpsTree) nodeKey(i int) []byte {
-	var off uint64
-	if b.nodeOfft != nil {
-		off = uint64(b.nodeOfft[i])
-	} else {
-		off = b.nodeOfftEF.Get(uint64(i))
-	}
+	off := uint64(b.nodeOfft[i])
 	l := uint64(binary.BigEndian.Uint16(b.keysBlob[off:]))
 	return b.keysBlob[off+2 : off+2+l]
 }
@@ -127,19 +116,9 @@ func nodePrefix(k []byte) uint32 {
 	}
 }
 
-func (b *BpsTree) buildNodeIndex() {
-	n := b.numNodes()
-	if n == 0 || len(b.keysBlob) == 0 {
-		return
-	}
-	if BtNodeOfft && b.nodeOfftEF.Max() <= math.MaxUint32 {
-		offs := make([]uint32, n)
-		for i := range n {
-			offs[i] = uint32(b.nodeOfftEF.Get(uint64(i)))
-		}
-		b.nodeOfft = offs
-	}
-	if !BtPrefixSeed {
+func (b *BpsTree) buildPrefixIndex() {
+	n := len(b.nodeOfft)
+	if n == 0 || len(b.keysBlob) == 0 || !BtPrefixSeed {
 		return
 	}
 	width := min(max(uint(bits.Len(uint(n))), 8), 16)
@@ -218,41 +197,39 @@ func (n Node) Encode(w io.Writer, headerBuf []byte) error {
 	return err
 }
 
-// decodeNodes builds an Elias-Fano index of the byte offsets of count
-// length-prefixed key records within data (no count prefix on disk — the caller
-// derives count). di is not stored; node i has di = i*M, recomputed on read.
-func decodeNodes(data []byte, count uint64) (nodeOfftEF *eliasfano32.EliasFano, end int, err error) {
+// decodeNodes returns the byte offset of each of the count length-prefixed key
+// records within data (no count prefix on disk — the caller derives count). di
+// is not stored; node i has di = i*M, recomputed on read.
+func decodeNodes(data []byte, count uint64) (nodeOfft []uint32, end int, err error) {
 	if count > uint64(len(data))/2 { // each node is at least 2 bytes (keyLen)
 		return nil, 0, fmt.Errorf("corrupt index: node count %d exceeds data size", count)
 	}
 	if count == 0 {
 		return nil, 0, nil
 	}
-	pos, lastOff := 0, 0
+	offs, pos := make([]uint32, count), 0
 	for ni := range int(count) {
 		if len(data)-pos < 2 {
 			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
-		lastOff = pos
+		if uint64(pos) > math.MaxUint32 {
+			return nil, 0, fmt.Errorf("decode node %d: offset %d over the %d-byte node section limit", ni, pos, uint64(math.MaxUint32))
+		}
+		offs[ni] = uint32(pos)
 		pos += 2 + int(binary.BigEndian.Uint16(data[pos:pos+2]))
 		if pos > len(data) {
 			return nil, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
 	}
-	nodeOfftEF = eliasfano32.NewEliasFano(count, uint64(lastOff))
-	for p := 0; p < pos; p += 2 + int(binary.BigEndian.Uint16(data[p:p+2])) {
-		nodeOfftEF.AddOffset(uint64(p))
-	}
-	nodeOfftEF.Build()
-	return nodeOfftEF, pos, nil
+	return offs, pos, nil
 }
 
-// decodeListNodesV0 builds an Elias-Fano index of the legacy node list
+// decodeListNodesV0 returns the byte offsets of the legacy node list
 // ([di:u64][keyLen:u16][key] per node); each offset points past the on-disk di,
 // at the keyLen prefix. di is derived as i*stride; stride comes from the stored
 // di, validated to be the arithmetic progression 0,stride,2*stride,... so a
 // wrong open-time M or a corrupt file is rejected rather than mis-derived.
-func decodeListNodesV0(data []byte) (nodeOfftEF *eliasfano32.EliasFano, stride uint64, end int, err error) {
+func decodeListNodesV0(data []byte) (nodeOfft []uint32, stride uint64, end int, err error) {
 	if len(data) < 8 {
 		return nil, 0, 0, fmt.Errorf("truncated index: need 8 bytes for node count, got %d", len(data))
 	}
@@ -263,7 +240,7 @@ func decodeListNodesV0(data []byte) (nodeOfftEF *eliasfano32.EliasFano, stride u
 	if count == 0 {
 		return nil, 0, 8, nil
 	}
-	pos, lastOff := 8, 0
+	offs, pos := make([]uint32, count), 8
 	for ni := range int(count) {
 		if len(data)-pos < 10 {
 			return nil, 0, 0, fmt.Errorf("decode node %d: short buffer", ni)
@@ -284,18 +261,16 @@ func decodeListNodesV0(data []byte) (nodeOfftEF *eliasfano32.EliasFano, stride u
 				return nil, 0, 0, fmt.Errorf("corrupt v0 index: node %d di=%d, want %d", ni, di, uint64(ni)*stride)
 			}
 		}
-		lastOff = pos + 8 // skip on-disk di; offset points at the keyLen prefix
+		if uint64(pos+8) > math.MaxUint32 {
+			return nil, 0, 0, fmt.Errorf("decode node %d: offset %d over the %d-byte node section limit", ni, pos+8, uint64(math.MaxUint32))
+		}
+		offs[ni] = uint32(pos + 8) // skip on-disk di; offset points at the keyLen prefix
 		pos += 10 + int(binary.BigEndian.Uint16(data[pos+8:pos+10]))
 		if pos > len(data) {
 			return nil, 0, 0, fmt.Errorf("decode node %d: short buffer", ni)
 		}
 	}
-	nodeOfftEF = eliasfano32.NewEliasFano(count, uint64(lastOff))
-	for p := 8; p < pos; p += 10 + int(binary.BigEndian.Uint16(data[p+8:p+10])) {
-		nodeOfftEF.AddOffset(uint64(p + 8))
-	}
-	nodeOfftEF.Build()
-	return nodeOfftEF, stride, pos, nil
+	return offs, stride, pos, nil
 }
 
 func (b *BpsTree) WarmUp(kv *seg.Reader) error {
@@ -332,12 +307,12 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 		blob = append(blob, key...)
 	}
 	b.keysBlob = blob
-	nodeOfftEF, _, err := decodeNodes(blob, nodeCount)
+	nodeOfft, _, err := decodeNodes(blob, nodeCount)
 	if err != nil {
 		return err
 	}
-	b.nodeOfftEF = nodeOfftEF
-	b.buildNodeIndex()
+	b.nodeOfft = nodeOfft
+	b.buildPrefixIndex()
 
 	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
 		"cached", fmt.Sprintf("%d %.2f%%", b.numNodes(), 100*(float64(b.numNodes())/float64(N))),
@@ -685,6 +660,7 @@ func (b *BpsTree) Distances() (map[int]int, error) {
 
 func (b *BpsTree) Close() {
 	b.keysBlob = nil
-	b.nodeOfftEF = nil
+	b.nodeOfft = nil
+	b.prefixLo = nil
 	b.offt = nil
 }

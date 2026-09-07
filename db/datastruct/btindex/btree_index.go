@@ -60,7 +60,6 @@ const (
 var BtInterp = dbg.EnvBool("BT_INTERP", true)
 var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
 
-var BtNodeOfft = dbg.EnvBool("BT_NODE_OFFT", true)
 var BtPrefixSeed = dbg.EnvBool("BT_PREFIX_SEED", true)
 
 var ErrBtIndexLookupBounds = errors.New("BtIndex: lookup di bounds error")
@@ -138,8 +137,8 @@ func (c *Cursor) next() bool {
 }
 
 func (c *Cursor) resetNoRead(di uint64, g *seg.Reader) error {
-	if c.d >= c.ef.Count() {
-		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, c.d, c.ef.Count())
+	if di >= c.ef.Count() {
+		return fmt.Errorf("%w %d/%d", ErrBtIndexLookupBounds, di, c.ef.Count())
 	}
 
 	c.d = di
@@ -516,7 +515,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 	defer func() { _ = mmap.MadviseRandom(idx.m) }()
 	idx.data = idx.m[:idx.size]
 
-	var nodeOfftEF *eliasfano32.EliasFano
+	var nodeOfft []uint32
 	var keysBlob []byte
 	var nodeStride uint64
 	m := DefaultBtreeMLegacy // newer format ("use footer") carry m in the file itself
@@ -526,7 +525,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		idx.ef, pos = eliasfano32.ReadEliasFano(idx.data)
 		if len(idx.data[pos:]) > 0 {
 			keysBlob = idx.data[pos:]
-			if nodeOfftEF, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
+			if nodeOfft, nodeStride, _, err = decodeListNodesV0(keysBlob); err != nil {
 				return nil, err
 			}
 			if nodeStride == 0 { // <2 nodes: only di=0 exists, stride is irrelevant
@@ -557,7 +556,7 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		keysBlob = idx.data[1:]
 		nodeStride = m
 		var nodesEnd int
-		if nodeOfftEF, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
+		if nodeOfft, nodesEnd, err = decodeNodes(keysBlob, nodesCount); err != nil {
 			return nil, err
 		}
 		if footer.Meta.EfOffset != uint64(alignUp(1+nodesEnd, btEFAlign)) { // cross-check ef_offset against the decoded nodes
@@ -578,10 +577,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 
 	defer kvGetter.MadvNormal().DisableReadAhead()
 
-	if nodeOfftEF == nil {
+	if nodeOfft == nil {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, m, idx.dataLookup)
 	} else {
-		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, m, idx.dataLookup, keysBlob, nodeOfftEF, nodeStride)
+		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, m, idx.dataLookup, keysBlob, nodeOfft, nodeStride)
 	}
 	idx.bplus.cursorGetter = idx.newCursor
 

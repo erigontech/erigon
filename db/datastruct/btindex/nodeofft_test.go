@@ -18,9 +18,9 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 )
 
-// The pivot offsets are stored Elias-Fano-encoded (nodeOfftEF). Decoding and
+// The pivot offsets are decoded at open time into nodeOfft. Decoding and
 // lookups must be correct for both the v0 (legacy list) and v2 (footer) layouts.
-func Test_BtreeIndex_NodeOfftEF_V0_V2(t *testing.T) {
+func Test_BtreeIndex_NodeOfft_V0_V2(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
 	logger := log.New()
@@ -55,7 +55,7 @@ func Test_BtreeIndex_NodeOfftEF_V0_V2(t *testing.T) {
 			require.NoError(t, err)
 			defer bt.Close()
 			defer kv.Close()
-			require.NotNil(t, bt.bplus.nodeOfftEF, "pivot offsets must be Elias-Fano-encoded")
+			require.NotEmpty(t, bt.bplus.nodeOfft, "pivot offsets must be decoded at open time")
 
 			gr := seg.NewReader(kv.MakeGetter(), compressFlags)
 			for i := range keys {

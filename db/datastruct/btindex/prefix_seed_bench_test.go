@@ -3,7 +3,6 @@ package btindex
 import (
 	"encoding/binary"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
@@ -59,57 +58,6 @@ func generateSkewedKV(tb testing.TB, tmp string, keyCount int, logger log.Logger
 	return dataPath
 }
 
-func bucketOccupancy(b *BpsTree) (maxN, medianN int) {
-	counts := make(map[uint32]int)
-	n := b.numNodes()
-	for i := range n {
-		counts[nodePrefix(b.nodeKey(i))>>(16-b.prefixBits)]++
-	}
-	vals := make([]int, 0, len(counts))
-	for _, c := range counts {
-		vals = append(vals, c)
-		if c > maxN {
-			maxN = c
-		}
-	}
-	sort.Ints(vals)
-	if len(vals) > 0 {
-		medianN = vals[len(vals)/2]
-	}
-	return maxN, medianN
-}
-
-func TestSkewedFixtureShape(t *testing.T) {
-	const keyCount = 200000
-	compress := seg.CompressKeys
-	for _, tc := range []struct {
-		name  string
-		build func() string
-	}{
-		{"uniform", func() string { return generateKV(t, t.TempDir(), 52, 8, keyCount, log.New(), compress) }},
-		{"skewed", func() string { return generateSkewedKV(t, t.TempDir(), keyCount, log.New(), compress) }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			kvPath := tc.build()
-			indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-			buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
-			kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
-			require.NoError(t, err)
-			defer bt.Close()
-			defer kv.Close()
-
-			mx, med := bucketOccupancy(bt.bplus)
-			t.Logf("%s: pivots=%d maxBucket=%d median=%d prefixTable=%s nodeOfft=%s",
-				tc.name, bt.bplus.numNodes(), mx, med,
-				datasize.ByteSize(len(bt.bplus.prefixLo)*4).HR(),
-				datasize.ByteSize(uint64(bt.bplus.numNodes())*4).HR())
-			if tc.name == "skewed" {
-				require.Greater(t, mx, med*4, "skewed fixture must be skewed")
-			}
-		})
-	}
-}
-
 func sampleKeysAcrossRange(tb testing.TB, bt *BtIndex, kv *seg.Decompressor, compress seg.FileCompression, n int) [][]byte {
 	tb.Helper()
 	g := seg.NewReader(kv.MakeGetter(), compress)
@@ -128,21 +76,17 @@ func sampleKeysAcrossRange(tb testing.TB, bt *BtIndex, kv *seg.Decompressor, com
 
 func benchArms(b *testing.B, bt *BtIndex, g *seg.Reader, probes [][]byte) {
 	t := bt.bplus
-	saveLo, saveOfft := t.prefixLo, t.nodeOfft
-	defer func() { t.prefixLo, t.nodeOfft = saveLo, saveOfft }()
+	saveLo := t.prefixLo
+	defer func() { t.prefixLo = saveLo }()
 
 	for _, arm := range []struct {
-		name       string
-		seed, offt bool
-	}{{"base", false, false}, {"seed", true, false}, {"offt", false, true}, {"seed+offt", true, true}} {
+		name string
+		seed bool
+	}{{"base", false}, {"seed", true}} {
 		b.Run(arm.name, func(b *testing.B) {
 			t.prefixLo = nil
-			t.nodeOfft = nil
 			if arm.seed {
 				t.prefixLo = saveLo
-			}
-			if arm.offt {
-				t.nodeOfft = saveOfft
 			}
 			b.Run("bs", func(b *testing.B) {
 				b.ReportAllocs()

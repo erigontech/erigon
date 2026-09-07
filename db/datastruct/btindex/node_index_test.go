@@ -1,17 +1,17 @@
 package btindex
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 )
 
-func TestNodeOfftMatchesEliasFano(t *testing.T) {
+func TestNodeOfftPointsAtPivotKeys(t *testing.T) {
 	for _, compress := range []seg.FileCompression{0, seg.CompressKeys} {
 		kvPath := generateVarLenKV(t, t.TempDir(), 20000, log.New(), compress)
 		indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
@@ -20,10 +20,10 @@ func TestNodeOfftMatchesEliasFano(t *testing.T) {
 		require.NoError(t, err)
 
 		b := bt.bplus
-		require.NotNil(t, b.nodeOfft)
-		require.Equal(t, b.numNodes(), len(b.nodeOfft))
+		require.NotEmpty(t, b.nodeOfft)
+		g := seg.NewReader(kv.MakeGetter(), compress)
 		for i := range b.numNodes() {
-			require.Equalf(t, b.nodeOfftEF.Get(uint64(i)), uint64(b.nodeOfft[i]), "offset %d", i)
+			require.Zerof(t, b.compareKey(g, b.nodeKey(i), b.nodeDi(i)), "pivot %d", i)
 		}
 		bt.Close()
 		kv.Close()
@@ -58,31 +58,30 @@ func TestSeekExactHitSurvivesPooledCursor(t *testing.T) {
 	}
 }
 
-func TestBuildNodeIndexIgnoresBlobLayout(t *testing.T) {
+func TestDecodeListNodesV0SkipsStoredDi(t *testing.T) {
 	keys := [][]byte{{0x01, 0x02}, {0x03, 0x04, 0x05}, {0x07}, {0x09, 0x0a}}
+	const stride = uint64(32)
 
 	var blob []byte
-	offs := make([]uint64, 0, len(keys))
-	blob = append(blob, make([]byte, 8)...)
-	for _, k := range keys {
-		blob = append(blob, make([]byte, 8)...)
-		offs = append(offs, uint64(len(blob)))
+	var u8 [8]byte
+	binary.BigEndian.PutUint64(u8[:], uint64(len(keys)))
+	blob = append(blob, u8[:]...)
+	for i, k := range keys {
+		binary.BigEndian.PutUint64(u8[:], uint64(i)*stride)
+		blob = append(blob, u8[:]...)
 		blob = append(blob, byte(len(k)>>8), byte(len(k)))
 		blob = append(blob, k...)
 	}
 
-	ef := eliasfano32.NewEliasFano(uint64(len(offs)), offs[len(offs)-1])
-	for _, o := range offs {
-		ef.AddOffset(o)
-	}
-	ef.Build()
+	offs, gotStride, end, err := decodeListNodesV0(blob)
+	require.NoError(t, err)
+	require.Equal(t, stride, gotStride)
+	require.Len(t, offs, len(keys))
+	require.Equal(t, len(blob), end)
 
-	b := &BpsTree{keysBlob: blob, nodeOfftEF: ef, nodeStride: 1, offt: ef}
-	b.buildNodeIndex()
-
-	require.NotNil(t, b.nodeOfft)
-	for i := range b.numNodes() {
-		require.Equalf(t, offs[i], uint64(b.nodeOfft[i]), "offset %d", i)
+	b := &BpsTree{keysBlob: blob, nodeOfft: offs, nodeStride: stride}
+	for i := range keys {
 		require.Equalf(t, keys[i], b.nodeKey(i), "nodeKey(%d)", i)
+		require.Equalf(t, uint64(i)*stride, b.nodeDi(i), "nodeDi(%d)", i)
 	}
 }

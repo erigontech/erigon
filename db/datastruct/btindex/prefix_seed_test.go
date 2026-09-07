@@ -16,14 +16,11 @@ type bsResult struct {
 	klo, khi []byte
 }
 
-func bsWith(b *BpsTree, seed, offt bool, x []byte) bsResult {
-	saveLo, saveOfft := b.prefixLo, b.nodeOfft
-	defer func() { b.prefixLo, b.nodeOfft = saveLo, saveOfft }()
+func bsWith(b *BpsTree, seed bool, x []byte) bsResult {
+	saveLo := b.prefixLo
+	defer func() { b.prefixLo = saveLo }()
 	if !seed {
 		b.prefixLo = nil
-	}
-	if !offt {
-		b.nodeOfft = nil
 	}
 	dl, dr, klo, khi := b.bs(x)
 	return bsResult{dl: dl, dr: dr, klo: append([]byte(nil), klo...), khi: append([]byte(nil), khi...)}
@@ -68,13 +65,13 @@ func probeSet(t *testing.T, kvPath string) [][]byte {
 func seekSnapshot(t *testing.T, bt *BtIndex, g *seg.Reader, x []byte) string {
 	t.Helper()
 	c, err := bt.bplus.Seek(g, x)
-	defer c.Close()
 	if err != nil {
 		return "err:" + err.Error()
 	}
 	if c == nil {
 		return "nil"
 	}
+	defer c.Close()
 	return fmt.Sprintf("%d|%x|%x", c.Di(), c.Key(), c.Value())
 }
 
@@ -100,28 +97,23 @@ func TestPrefixSeedMatchesFullBinarySearch(t *testing.T) {
 			defer done()
 
 			for i, x := range probeSet(t, kvPath) {
-				base := bsWith(bt.bplus, false, false, x)
-				for _, arm := range []struct {
-					name       string
-					seed, offt bool
-				}{{"seed", true, false}, {"offt", false, true}, {"seed+offt", true, true}} {
-					got := bsWith(bt.bplus, arm.seed, arm.offt, x)
-					require.Equalf(t, base.dl, got.dl, "%s probe %d (%x): dl", arm.name, i, x)
-					require.Equalf(t, base.dr, got.dr, "%s probe %d (%x): dr", arm.name, i, x)
-					require.Equalf(t, base.klo, got.klo, "%s probe %d (%x): klo", arm.name, i, x)
-					require.Equalf(t, base.khi, got.khi, "%s probe %d (%x): khi", arm.name, i, x)
-				}
+				base := bsWith(bt.bplus, false, x)
+				got := bsWith(bt.bplus, true, x)
+				require.Equalf(t, base.dl, got.dl, "probe %d (%x): dl", i, x)
+				require.Equalf(t, base.dr, got.dr, "probe %d (%x): dr", i, x)
+				require.Equalf(t, base.klo, got.klo, "probe %d (%x): klo", i, x)
+				require.Equalf(t, base.khi, got.khi, "probe %d (%x): khi", i, x)
 
 				wantV, wantOK, wantOff, err := bt.bplus.Get(g, x)
 				require.NoError(t, err)
 				wantSeek := seekSnapshot(t, bt, g, x)
 
-				saveLo, saveOfft := bt.bplus.prefixLo, bt.bplus.nodeOfft
-				bt.bplus.prefixLo, bt.bplus.nodeOfft = nil, nil
+				saveLo := bt.bplus.prefixLo
+				bt.bplus.prefixLo = nil
 				gotV, gotOK, gotOff, err := bt.bplus.Get(g, x)
 				require.NoError(t, err)
 				gotSeek := seekSnapshot(t, bt, g, x)
-				bt.bplus.prefixLo, bt.bplus.nodeOfft = saveLo, saveOfft
+				bt.bplus.prefixLo = saveLo
 
 				require.Equalf(t, gotOK, wantOK, "probe %d (%x): Get ok", i, x)
 				require.Equalf(t, gotV, wantV, "probe %d (%x): Get value", i, x)
