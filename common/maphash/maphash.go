@@ -23,7 +23,10 @@ func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
 
-// Map is a concurrent map that uses maphash to hash []byte keys.
+// Map is a concurrent map that uses maphash to hash []byte keys. Only the
+// 64-bit hash of the key is stored, so Get returns the value under a
+// colliding key instead of a miss, and the original byte-key is not
+// recoverable.
 type Map[V any] struct {
 	m *xsync.Map[uint64, V]
 }
@@ -101,7 +104,6 @@ func (m *Map[V]) Clear() {
 // unspecified. Return false from fn to stop early. Concurrent
 // modification during Range is permitted by the underlying xsync.Map.
 //
-// The original byte-key is not recoverable — Set hashes-and-discards.
 // Pair with DeleteByHash to evict entries discovered via Range.
 func (m *Map[V]) Range(fn func(hash uint64, v V) bool) {
 	m.m.Range(func(key uint64, value V) bool {
@@ -117,6 +119,8 @@ func (m *Map[V]) DeleteByHash(hash uint64) {
 
 // NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
 // Use this when you don't need concurrent access for better performance.
+// Only the 64-bit hash of the key is stored, so Get returns the value under
+// a colliding key instead of a miss.
 type NonConcurrentMap[V any] struct {
 	m map[uint64]V
 }
