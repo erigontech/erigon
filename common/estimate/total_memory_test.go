@@ -20,3 +20,20 @@ func TestTotalMemoryIgnoresLimitInstalledAfterStartup(t *testing.T) {
 	require.Greater(t, TotalMemory(), uint64(tiny),
 		"a limit installed after startup must not shrink the memory budget")
 }
+
+func TestMemoryBound(t *testing.T) {
+	const gb = uint64(1 << 30)
+	for _, tc := range []struct {
+		name   string
+		bounds []uint64
+		want   uint64
+	}{
+		{"tightest wins", []uint64{8 * gb, 4 * gb, 6 * gb}, 4 * gb},
+		{"failed probe is not a bound", []uint64{0, 4 * gb, 0}, 4 * gb},
+		{"every probe failed", []uint64{0, 0, 0}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, memoryBound(tc.bounds...))
+		})
+	}
+}
