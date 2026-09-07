@@ -18,13 +18,18 @@ package freezeblocks
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -43,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // createTestSegmentFile creates a minimal snapshot segment file for testing
@@ -582,9 +588,7 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	defer rwTx.Rollback()
 
 	bodiesInTxView := func() int {
-		view, release := blockReader.view(rwTx)
-		defer release()
-		return len(view.Bodies())
+		return len(blockReader.view(rwTx).Bodies())
 	}
 	require.Equal(t, 0, bodiesInTxView())
 
@@ -602,4 +606,332 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	// Fix: reopening the tx's underlying-files view exposes the bodies.
 	rwTx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
 	require.Positive(t, bodiesInTxView())
+}
+
+// frozenBlocksBackendClient stubs the one call under test; every other method of the
+// embedded interface stays nil and panics if reached.
+type frozenBlocksBackendClient struct {
+	remoteproto.ETHBACKENDClient
+	reply *remoteproto.FrozenBlocksReply
+	err   error
+}
+
+func (c frozenBlocksBackendClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	return c.reply, c.err
+}
+
+// TestRemoteBlockReaderFrozenBlocks pins that the remote reader answers FrozenBlocks
+// through the backend instead of panicking: the receipt gates and eth_capabilities
+// reach it on a remote rpcdaemon. The signature leaves no way to surface an error, so
+// a failed call reports zero, the conservative answer for every caller.
+func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
+	t.Parallel()
+
+	reader := NewRemoteBlockReader(frozenBlocksBackendClient{reply: &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}})
+	require.NotPanics(t, func() {
+		require.Equal(t, uint64(42), reader.FrozenBlocks())
+	})
+
+	failing := NewRemoteBlockReader(frozenBlocksBackendClient{err: errors.New("backend down")})
+	require.NotPanics(t, func() {
+		require.Zero(t, failing.FrozenBlocks())
+	})
+}
+
+type countingFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	err   error
+	calls atomic.Int64
+}
+
+func (c *countingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	c.calls.Add(1)
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+}
+
+type stalledFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+}
+
+func (c stalledFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestRemoteBlockReaderFrozenBlocksCachesValue pins that the getter does not perform a
+// live RPC on every call: receipt and capability handlers reach it while holding read
+// transactions, so repeated calls within the TTL must be answered from the cache, and a
+// stale one must be answered before the refresh it triggers.
+func TestRemoteBlockReaderFrozenBlocksCachesValue(t *testing.T) {
+	t.Parallel()
+
+	client := &countingFrozenBlocksClient{}
+	reader := NewRemoteBlockReader(client)
+
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	require.EqualValues(t, 1, client.calls.Load())
+
+	reader.frozenBlocks.SetTTL(0)
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	require.Eventually(t, func() bool { return client.calls.Load() == 2 },
+		time.Second, 10*time.Millisecond, "a stale value is refreshed behind the caller")
+}
+
+// TestRemoteBlockReaderFrozenBlocksStalledBackend pins that a connected but
+// unresponsive backend cannot hold the caller forever: the internal context bounds the
+// call and the getter falls back to the last known value (zero before any success).
+func TestRemoteBlockReaderFrozenBlocksStalledBackend(t *testing.T) {
+	t.Parallel()
+
+	reader := NewRemoteBlockReader(stalledFrozenBlocksClient{})
+	reader.frozenBlocksTimeout = 50 * time.Millisecond
+
+	done := make(chan uint64, 1)
+	go func() { done <- reader.FrozenBlocks() }()
+	select {
+	case v := <-done:
+		require.Zero(t, v)
+	case <-time.After(2 * time.Second):
+		t.Fatal("FrozenBlocks did not return with a stalled backend")
+	}
+}
+
+// recoveringFrozenBlocksClient fails its first call and answers every later one.
+type recoveringFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	calls atomic.Int64
+}
+
+func (c *recoveringFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	if c.calls.Add(1) == 1 {
+		return nil, errors.New("backend down")
+	}
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+}
+
+// TestRemoteBlockReaderFrozenBlocksRetriesAfterFailure pins that a failed fetch is not
+// remembered as an observation: it reports that nothing was observed, and once its
+// attempt is no longer fresh the backend is asked again.
+func TestRemoteBlockReaderFrozenBlocksRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	reader := NewRemoteBlockReader(&recoveringFrozenBlocksClient{})
+	reader.frozenBlocks.SetTTL(0)
+
+	value, observed := reader.FrozenBlocksObserved()
+	require.Zero(t, value)
+	require.False(t, observed, "callers read zero as \"no snapshots\", which a failed fetch did not say")
+
+	value, observed = reader.FrozenBlocksObserved()
+	require.Equal(t, uint64(42), value)
+	require.True(t, observed)
+}
+
+// TestRemoteBlockReaderFrozenBlocksSuppressesRepeatFetchesAfterFailure pins that a
+// backend that is down costs one attempt per TTL rather than one per caller.
+func TestRemoteBlockReaderFrozenBlocksSuppressesRepeatFetchesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	client := &countingFrozenBlocksClient{err: errors.New("backend down")}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocks.SetTTL(time.Hour)
+
+	for range 8 {
+		require.Zero(t, reader.FrozenBlocks())
+	}
+	require.EqualValues(t, 1, client.calls.Load(),
+		"a recent failed attempt stands in for the ones that would follow it")
+}
+
+// blockingFrozenBlocksClient reports when a call arrives and holds it until released.
+type blockingFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int64
+}
+
+func (c *blockingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	c.calls.Add(1)
+	c.entered <- struct{}{}
+	select {
+	case <-c.release:
+		return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// refreshingFrozenBlocksClient answers the first call at once and holds every later one,
+// which is what a refresh behind an initialized value looks like.
+type refreshingFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int64
+}
+
+func (c *refreshingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	if c.calls.Add(1) == 1 {
+		return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+	}
+	c.entered <- struct{}{}
+	select {
+	case <-c.release:
+		return &remoteproto.FrozenBlocksReply{FrozenBlocks: 43}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestRemoteBlockReaderFrozenBlocksWaitsForTheFirstFetch pins that a caller arriving
+// during the first fetch is given its result rather than the zero value. Before any
+// answer there is no observation to serve, and zero is not a neutral stand-in: it reads
+// as "no snapshots" and sends pre-Byzantium receipts down a re-execution that a node
+// with pruned state history cannot perform.
+func TestRemoteBlockReaderFrozenBlocksWaitsForTheFirstFetch(t *testing.T) {
+	t.Parallel()
+
+	const waiters = 8
+	client := &blockingFrozenBlocksClient{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocksTimeout = 10 * time.Second
+
+	fetching := make(chan uint64, 1)
+	go func() { fetching <- reader.FrozenBlocks() }()
+	<-client.entered
+
+	waiting := make(chan uint64, waiters)
+	for range waiters {
+		go func() { waiting <- reader.FrozenBlocks() }()
+	}
+	select {
+	case value := <-waiting:
+		close(client.release)
+		t.Fatalf("a caller was served %d before any fetch had answered", value)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(client.release)
+
+	require.Equal(t, uint64(42), <-fetching)
+	for range waiters {
+		require.Equal(t, uint64(42), <-waiting, "the first result answers every caller waiting for it")
+	}
+	require.EqualValues(t, 1, client.calls.Load(), "a waiting caller must not issue its own fetch")
+}
+
+// TestRemoteBlockReaderFrozenBlocksServesCacheWhileRefreshing pins that once a value has
+// been observed no caller waits for the next one: a slow backend delays only the refresh
+// running behind them. FrozenBlocks sits on every receipt request, so holding callers
+// behind the refresh turns one slow backend into a stall of the whole handler pool.
+func TestRemoteBlockReaderFrozenBlocksServesCacheWhileRefreshing(t *testing.T) {
+	t.Parallel()
+
+	client := &refreshingFrozenBlocksClient{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocksTimeout = 10 * time.Second
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+
+	reader.frozenBlocks.SetTTL(0)
+	require.Equal(t, uint64(42), reader.FrozenBlocks(), "the caller that finds the value stale does not wait for the refresh")
+	<-client.entered
+
+	require.Equal(t, uint64(42), reader.FrozenBlocks(), "the observed value answers while the refresh runs")
+	require.EqualValues(t, 2, client.calls.Load(), "the refresh in flight is not duplicated")
+
+	close(client.release)
+	require.Eventually(t, func() bool { return reader.FrozenBlocks() == 43 },
+		2*time.Second, 10*time.Millisecond, "the refreshed value replaces the one served")
+}
+
+// failingFirstFrozenBlocksClient reports when a call arrives, holds it, and fails it.
+type failingFirstFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	entered chan int64
+	release chan struct{}
+	calls   atomic.Int64
+}
+
+func (c *failingFirstFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	c.entered <- c.calls.Add(1)
+	<-c.release
+	return nil, errors.New("backend down")
+}
+
+// TestRemoteBlockReaderFrozenBlocksSharesTheFirstFailedFetch pins that callers arriving
+// while the first fetch is in flight share it: when it fails they all report that nothing
+// was observed, and none of them spends a timeout of its own on a backend that is down.
+func TestRemoteBlockReaderFrozenBlocksSharesTheFirstFailedFetch(t *testing.T) {
+	t.Parallel()
+
+	const waiters = 8
+	client := &failingFirstFrozenBlocksClient{
+		entered: make(chan int64, waiters+1),
+		release: make(chan struct{}),
+	}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocks.SetTTL(time.Hour)
+
+	results := make(chan uint64, waiters+1)
+	go func() { results <- reader.FrozenBlocks() }()
+	require.EqualValues(t, 1, <-client.entered)
+
+	for range waiters {
+		go func() { results <- reader.FrozenBlocks() }()
+	}
+	select {
+	case value := <-results:
+		close(client.release)
+		t.Fatalf("a caller was served %d while the first fetch was still in flight", value)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(client.release)
+
+	for range waiters + 1 {
+		require.Zero(t, <-results, "a failed first fetch leaves nothing to report")
+	}
+	require.EqualValues(t, 1, client.calls.Load(), "one attempt, not one per caller")
+}
+
+// stalledCountingFrozenBlocksClient never answers and reports when a call arrives.
+type stalledCountingFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	entered chan struct{}
+	calls   atomic.Int64
+}
+
+func (c *stalledCountingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	c.calls.Add(1)
+	c.entered <- struct{}{}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout pins that a stalled backend
+// costs each caller a single timeout: a caller reaches the backend at most once, so one
+// that waited on an in-flight fetch cannot then spend a fresh timeout of its own. This
+// getter takes no context and is reached with a read transaction open, so stacking a
+// wait and a fetch of its own would double what a stalled backend costs the handler pool.
+func TestRemoteBlockReaderFrozenBlocksBoundsTheWaitToOneTimeout(t *testing.T) {
+	t.Parallel()
+
+	const timeout = 400 * time.Millisecond
+	client := &stalledCountingFrozenBlocksClient{entered: make(chan struct{}, 4)}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocksTimeout = timeout
+
+	first := make(chan uint64, 1)
+	go func() { first <- reader.FrozenBlocks() }()
+	<-client.entered
+
+	waiting := make(chan uint64, 1)
+	go func() { waiting <- reader.FrozenBlocks() }()
+
+	require.Zero(t, <-waiting, "a stalled backend leaves nothing to report")
+	require.LessOrEqual(t, client.calls.Load(), int64(2), "each caller reaches the backend once, so no caller spends more than its own timeout")
+	require.Zero(t, <-first)
 }

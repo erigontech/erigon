@@ -625,8 +625,10 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	// main encodes this via its resident stateObject; on the noMaterialize path the
 	// self-destruct has already cleared the versioned nonce/code-hash/balance cells,
 	// so recognize the own-tx SelfDestruct write directly. Cross-tx destructs are
-	// handled above by versionedAccountBase returning nil.
-	if sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey) {
+	// handled above by versionedAccountBase returning nil. Only a true write counts:
+	// createObject records SelfDestructPath=false for every account it materializes,
+	// which says "created", not "destroyed".
+	if sd, ok := sdb.versionedWriteSelfDestruct(addr); ok && sd {
 		return false, nil
 	}
 

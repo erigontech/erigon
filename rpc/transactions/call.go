@@ -197,6 +197,24 @@ func (r *ReusableCaller) Close() {
 	}
 }
 
+func (r *ReusableCaller) Message() *types.Message { return r.message }
+
+// InitialState builds a fresh state with the request's overrides applied, the
+// state every call runs against. The precompiles come with it because a
+// MovePrecompileTo override changes them. The caller must Close the state.
+func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
+	ibs := state.New(r.stateReader)
+	if r.stateOverrides == nil {
+		return ibs, nil, nil
+	}
+	precompiles := vm.ActivePrecompiledContracts(r.rules)
+	if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
+		ibs.Close()
+		return nil, nil, err
+	}
+	return ibs, precompiles, nil
+}
+
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
@@ -216,13 +234,11 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := protocol.NewEVMTxContext(r.message)
-	ibs := state.New(r.stateReader)
+	ibs, precompiles, err := r.InitialState()
+	if err != nil {
+		return nil, err
+	}
 	if r.stateOverrides != nil {
-		precompiles := vm.ActivePrecompiledContracts(r.rules)
-		if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
-			ibs.Close()
-			return nil, err
-		}
 		r.evm.SetPrecompiles(precompiles)
 	}
 	if prev := r.evm.IntraBlockState(); prev != nil {

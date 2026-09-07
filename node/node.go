@@ -45,8 +45,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -304,6 +306,13 @@ func execWorkerCount(config *nodecfg.Config) int {
 	return cmp.Or(config.ExecWorkerCount, dbg.Exec3Workers)
 }
 
+func parallelCommitmentReaders() int {
+	if !statecfg.ExperimentalParallelCommitment {
+		return 0
+	}
+	return commitment.ParallelCommitmentReadTxs()
+}
+
 func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, name string, readonly bool, logger log.Logger) (kv.RwDB, error) {
 	switch label {
 	case dbcfg.ChainDB:
@@ -328,7 +337,13 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(config.Http.DBReadConcurrency, execWorkerCount(config)))
+		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
+			config.Http.DBReadConcurrency,
+			execWorkerCount(config),
+			parallelCommitmentReaders(),
+			dbg.BALCommitmentWarmupReaders(),
+			dbg.ReadAheadWorkerReaders(),
+		))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).

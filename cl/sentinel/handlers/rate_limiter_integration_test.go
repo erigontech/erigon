@@ -75,8 +75,9 @@ func TestPingRateLimit(t *testing.T) {
 		}()
 		require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
 
-		_, err = stream.Write(nil)
+		err = ssz_snappy.EncodeAndWrite(stream, &cltypes.Ping{Id: 1})
 		require.NoError(t, err)
+		require.NoError(t, stream.CloseWrite())
 
 		firstByte := make([]byte, 1)
 		_, err = stream.Read(firstByte)

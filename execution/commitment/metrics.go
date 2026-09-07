@@ -42,6 +42,9 @@ type Metrics struct {
 	loadDepths               [10]uint64
 	unfolds                  atomic.Uint64
 	folds                    atomic.Uint64
+	roundKeys                atomic.Uint64
+	branchReadBytes          atomic.Uint64
+	branchWriteBytes         atomic.Uint64
 	spentUnfolding           atomic.Int64
 	spentFolding             atomic.Int64
 	spentProcessing          atomic.Int64
@@ -51,28 +54,35 @@ type Metrics struct {
 }
 
 type MetricValues struct {
-	mu              *sync.RWMutex
-	Accounts        map[string]*AccountStats
-	Branches        map[string]*BranchStats
-	Updates         uint64
-	AddressKeys     uint64
-	StorageKeys     uint64
-	LoadBranch      uint64
-	LoadAccount     uint64
-	LoadStorage     uint64
-	CacheBranch     uint64
-	CacheAccount    uint64
-	CacheStorage    uint64
-	MissBranch      uint64
-	MissAccount     uint64
-	MissStorage     uint64
-	UpdateBranch    uint64
-	LoadDepths      [10]uint64
-	Unfolds         uint64
-	Folds           uint64
-	SpentUnfolding  time.Duration
-	SpentFolding    time.Duration
-	SpentProcessing time.Duration
+	mu           *sync.RWMutex
+	Accounts     map[string]*AccountStats
+	Branches     map[string]*BranchStats
+	Updates      uint64
+	AddressKeys  uint64
+	StorageKeys  uint64
+	LoadBranch   uint64
+	LoadAccount  uint64
+	LoadStorage  uint64
+	CacheBranch  uint64
+	CacheAccount uint64
+	CacheStorage uint64
+	MissBranch   uint64
+	MissAccount  uint64
+	MissStorage  uint64
+	UpdateBranch uint64
+	LoadDepths   [10]uint64
+	Unfolds      uint64
+	Folds        uint64
+	// RoundKeys is the distinct key count of one round — Process resets the
+	// counters on both engines, so nothing here spans rounds. AddressKeys and
+	// StorageKeys count cell traversals instead, which the parallel engine
+	// inflates by re-walking subtrees on mount+replay.
+	RoundKeys        uint64
+	BranchReadBytes  uint64
+	BranchWriteBytes uint64
+	SpentUnfolding   time.Duration
+	SpentFolding     time.Duration
+	SpentProcessing  time.Duration
 }
 
 func (m MetricValues) RLock() {
@@ -126,28 +136,31 @@ func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
 
 func (m *Metrics) AsValues() MetricValues {
 	return MetricValues{
-		mu:              &m.Accounts.m,
-		Accounts:        m.Accounts.AccountStats,
-		Branches:        m.Branches.BranchStats,
-		Updates:         m.updates.Load(),
-		AddressKeys:     m.addressKeys.Load(),
-		StorageKeys:     m.storageKeys.Load(),
-		LoadBranch:      m.loadBranch.Load(),
-		LoadAccount:     m.loadAccount.Load(),
-		LoadStorage:     m.loadStorage.Load(),
-		CacheBranch:     m.cacheBranch.Load(),
-		CacheAccount:    m.cacheAccount.Load(),
-		CacheStorage:    m.cacheStorage.Load(),
-		MissBranch:      m.missBranch.Load(),
-		MissAccount:     m.missAccount.Load(),
-		MissStorage:     m.missStorage.Load(),
-		UpdateBranch:    m.updateBranch.Load(),
-		LoadDepths:      m.loadDepths,
-		Unfolds:         m.unfolds.Load(),
-		Folds:           m.folds.Load(),
-		SpentUnfolding:  time.Duration(m.spentUnfolding.Load()),
-		SpentFolding:    time.Duration(m.spentFolding.Load()),
-		SpentProcessing: time.Duration(m.spentProcessing.Load()),
+		mu:               &m.Accounts.m,
+		Accounts:         m.Accounts.AccountStats,
+		Branches:         m.Branches.BranchStats,
+		Updates:          m.updates.Load(),
+		AddressKeys:      m.addressKeys.Load(),
+		StorageKeys:      m.storageKeys.Load(),
+		LoadBranch:       m.loadBranch.Load(),
+		LoadAccount:      m.loadAccount.Load(),
+		LoadStorage:      m.loadStorage.Load(),
+		CacheBranch:      m.cacheBranch.Load(),
+		CacheAccount:     m.cacheAccount.Load(),
+		CacheStorage:     m.cacheStorage.Load(),
+		MissBranch:       m.missBranch.Load(),
+		MissAccount:      m.missAccount.Load(),
+		MissStorage:      m.missStorage.Load(),
+		UpdateBranch:     m.updateBranch.Load(),
+		LoadDepths:       m.loadDepths,
+		Unfolds:          m.unfolds.Load(),
+		Folds:            m.folds.Load(),
+		RoundKeys:        m.roundKeys.Load(),
+		BranchReadBytes:  m.branchReadBytes.Load(),
+		BranchWriteBytes: m.branchWriteBytes.Load(),
+		SpentUnfolding:   time.Duration(m.spentUnfolding.Load()),
+		SpentFolding:     time.Duration(m.spentFolding.Load()),
+		SpentProcessing:  time.Duration(m.spentProcessing.Load()),
 	}
 }
 
@@ -314,6 +327,9 @@ func (m *Metrics) Reset() {
 	m.cacheStorage.Store(0)
 	m.unfolds.Store(0)
 	m.folds.Store(0)
+	m.roundKeys.Store(0)
+	m.branchReadBytes.Store(0)
+	m.branchWriteBytes.Store(0)
 	m.spentUnfolding.Store(0)
 	m.spentFolding.Store(0)
 	m.spentProcessing.Store(0)
@@ -416,6 +432,17 @@ func (m *Metrics) StartFolding(plainKey []byte) func() {
 	return nil
 }
 
+// AddBranchRead records one branch read of n bytes.
+func (m *Metrics) AddBranchRead(n int) { m.branchReadBytes.Add(uint64(n)) }
+
+// AddBranchWrite records one branch write of n bytes.
+func (m *Metrics) AddBranchWrite(n int) { m.branchWriteBytes.Add(uint64(n)) }
+
+// AddRoundKeys records the distinct-key count of one finished round. Not
+// merged between tries: the engine that ran the round owns this number, while
+// each worker only sees its own subtree.
+func (m *Metrics) AddRoundKeys(n uint64) { m.roundKeys.Add(n) }
+
 // Merge folds src's counters into m. The parallel trie gives every mount
 // worker its own Metrics — an atomic add on a shared line in the fold loop
 // would cost more than the counter is worth — and merges once per round.
@@ -437,6 +464,8 @@ func (m *Metrics) Merge(src *Metrics) {
 	m.updateBranch.Add(src.updateBranch.Load())
 	m.unfolds.Add(src.unfolds.Load())
 	m.folds.Add(src.folds.Load())
+	m.branchReadBytes.Add(src.branchReadBytes.Load())
+	m.branchWriteBytes.Add(src.branchWriteBytes.Load())
 	m.spentUnfolding.Add(src.spentUnfolding.Load())
 	m.spentFolding.Add(src.spentFolding.Load())
 	m.spentProcessing.Add(src.spentProcessing.Load())

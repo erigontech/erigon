@@ -18,6 +18,8 @@ package backup
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -154,4 +157,146 @@ func TestClearTablesMultiChunkWriteMap(t *testing.T) {
 		return ClearTables(t.Context(), db, tx, testTable)
 	}))
 	require.Zero(t, tableCount(t, db))
+}
+
+const dupTestTable = "TD"
+
+func mdbxFileSize(t *testing.T, dbDir string) int64 {
+	t.Helper()
+	st, err := os.Stat(filepath.Join(dbDir, "mdbx.dat"))
+	require.NoError(t, err)
+	return st.Size()
+}
+
+// TestCompactInPlace pins the swap: compaction must leave the db openable at the
+// same path with every row intact — including tables the label's schema doesn't
+// name — and must give back the pages the deletes freed.
+func TestCompactInPlace(t *testing.T) {
+	const (
+		rows    = 20_000
+		deleted = 18_000
+		batch   = 2_000
+		dups    = 3 // >1, so a lost DupSort flag can't be copied into a plain table
+	)
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	require.NoError(t, os.MkdirAll(dbDir, 0755))
+
+	open := func() kv.RwDB {
+		return mdbx.New(dbcfg.ChainDB, log.New()).Path(dbDir).
+			WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+				return kv.TableCfg{testTable: {}, dupTestTable: {Flags: kv.DupSort}}
+			}).
+			GrowthStep(4 * datasize.MB).MapSize(1 * datasize.GB).WriteMap(true).MustOpen()
+	}
+
+	db := open()
+	val := make([]byte, 1024)
+	for from := 0; from < rows; from += batch {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			c, err := tx.RwCursor(testTable)
+			require.NoError(t, err)
+			defer c.Close()
+			d, err := tx.RwCursorDupSort(dupTestTable)
+			require.NoError(t, err)
+			defer d.Close()
+			for i := from; i < from+batch; i++ {
+				require.NoError(t, c.Append(u64Key(uint64(i)), val))
+				for j := range dups {
+					require.NoError(t, d.AppendDup(u64Key(uint64(i)), u64Key(uint64(i*dups+j))))
+				}
+			}
+			return nil
+		}))
+	}
+	for from := 0; from < deleted; from += batch {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			for i := from; i < from+batch; i++ {
+				require.NoError(t, tx.Delete(testTable, u64Key(uint64(i))))
+				require.NoError(t, tx.Delete(dupTestTable, u64Key(uint64(i))))
+			}
+			return nil
+		}))
+	}
+	db.Close()
+
+	dataFile := filepath.Join(dbDir, dataFileName)
+	require.NoError(t, os.Chmod(dataFile, 0600))
+	beforeStat, err := os.Stat(dataFile)
+	require.NoError(t, err)
+
+	before := mdbxFileSize(t, dbDir)
+	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
+	require.Less(t, mdbxFileSize(t, dbDir), before)
+
+	afterStat, err := os.Stat(dataFile)
+	require.NoError(t, err)
+	require.Equal(t, beforeStat.Mode().Perm(), afterStat.Mode().Perm())
+
+	db = open()
+	defer db.Close()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		n, err := tx.Count(testTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64(rows-deleted), n)
+
+		nd, err := tx.Count(dupTestTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64((rows-deleted)*dups), nd)
+
+		v, err := tx.GetOne(testTable, u64Key(deleted))
+		require.NoError(t, err)
+		require.Len(t, v, len(val))
+
+		d, err := tx.CursorDupSort(dupTestTable)
+		require.NoError(t, err)
+		defer d.Close()
+		_, _, err = d.SeekExact(u64Key(deleted))
+		require.NoError(t, err)
+		nDups, err := d.CountDuplicates()
+		require.NoError(t, err)
+		require.Equal(t, uint64(dups), nDups)
+		for j := range dups {
+			got, err := d.SeekBothRange(u64Key(deleted), u64Key(uint64(deleted*dups+j)))
+			require.NoError(t, err)
+			require.Equal(t, u64Key(uint64(deleted*dups+j)), got)
+		}
+		return nil
+	}))
+}
+
+// TestDatadirDBs pins the three rules of the datadir scan: a db is found by its
+// mdbx.dat, the label comes from the root it sits under, and the walk reaches
+// caplin/blobs/chaindata.
+func TestDatadirDBs(t *testing.T) {
+	root := t.TempDir()
+	mkDB := func(parts ...string) string {
+		p := filepath.Join(append([]string{root}, parts...)...)
+		require.NoError(t, os.MkdirAll(p, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(p, dataFileName), nil, 0644))
+		return p
+	}
+	chaindata := mkDB("chaindata")
+	txpool := mkDB("txpool")
+	nodes := mkDB("nodes", "eth68")
+	blobs := mkDB("caplin", "blobs", "chaindata")
+	indexing := mkDB("caplin", "indexing")
+
+	// A staging dir lives inside a db whose own mdbx.dat stops the walk above it.
+	mkDB("chaindata", compactDirName)
+
+	found, err := datadirDBs(datadir.Open(root))
+	require.NoError(t, err)
+
+	got := map[string]kv.Label{}
+	for _, db := range found {
+		got[db.path] = db.label
+	}
+	require.Len(t, found, len(got), "a db must be reported once")
+	require.Equal(t, map[string]kv.Label{
+		chaindata: dbcfg.ChainDB,
+		txpool:    dbcfg.TxPoolDB,
+		nodes:     dbcfg.SentryDB,
+		blobs:     dbcfg.CaplinDB,
+		indexing:  dbcfg.CaplinDB,
+	}, got)
 }

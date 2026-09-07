@@ -163,7 +163,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	sharedDomains, err := newSnapshotCommitmentDomains(ctx, tx, api.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -743,7 +743,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	}
 
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
-	if s.blockReader.FrozenBlocks() == 0 {
+	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
 		if err != nil {

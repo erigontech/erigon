@@ -328,27 +328,3 @@ func assertPresentStrict(t *testing.T, wt *trie.Trie, plainKey []byte) {
 func storageKey(account, slot []byte) []byte {
 	return append(bytes.Clone(account), slot...)
 }
-
-func benchWitnessTrie(b *testing.B) (*HexPatriciaHashed, [][]byte) {
-	b.Helper()
-	ms := NewMockState(b)
-	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	hph.SetTraceWriter(nil)
-	accounts := buildWitnessCorpus(b, ms, hph, 128, 4)
-	return hph, accounts[:16]
-}
-
-func BenchmarkWitnesses(b *testing.B) {
-	ctx := context.Background()
-	hph, targets := benchWitnessTrie(b)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
-		for _, a := range targets {
-			toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
-		}
-		_, _, _, err := hph.Witnesses(ctx, toWitness, false, "")
-		toWitness.Close()
-		require.NoError(b, err)
-	}
-}

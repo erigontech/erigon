@@ -117,22 +117,22 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
-func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	var context *execctx.SharedDomains
+func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	var sd *execctx.SharedDomains
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
+		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
 	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
-		context = c.publishedSD()
+	if sd == nil && c.publishedSD != nil {
+		sd = c.publishedSD()
 	}
 
 	var view *CacheView
-	if context != nil {
-		view = &CacheView{context: context, getter: context.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
+	if sd != nil {
+		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
@@ -230,10 +230,23 @@ type ExecModule struct {
 	codeStore   *cache.CodeStore
 	readAheader *exec.BlockReadAheader
 
+	stateTransitionObserver StateTransitionObserver
+
 	stopNode func() error
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
+
+// ExecModuleOption configures execution-module construction.
+type ExecModuleOption func(*ExecModule)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOption {
+	return func(module *ExecModule) {
+		module.stateTransitionObserver = observer
+	}
+}
 
 func NewExecModule(
 	ctx context.Context,
@@ -254,6 +267,7 @@ func NewExecModule(
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
+	opts ...ExecModuleOption,
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
@@ -287,6 +301,9 @@ func NewExecModule(
 		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
+	for _, opt := range opts {
+		opt(em)
+	}
 
 	// Wire the process-global state cache into the read-ahead so its
 	// prefetches populate the same hashmap that SharedDomains.GetLatest
@@ -301,13 +318,20 @@ func NewExecModule(
 	return em
 }
 
-// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
-// Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
+// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes or
+// ctx ends.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// Drain waits without a local timeout for serialized execution work to finish.
+// Callers must stop producers first because backing resources are unsafe to
+// close while execution still holds a transaction.
+func (e *ExecModule) Drain() {
+	e.WaitIdle(context.Background())
 }
 
 // newDomainStateCache is the module's one construction site of the domain

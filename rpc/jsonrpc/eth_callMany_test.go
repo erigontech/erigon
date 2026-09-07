@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -85,7 +84,7 @@ func TestCallManyEmptyBundles(t *testing.T) {
 		require.EqualError(t, err, "empty bundles", name)
 
 		var buf bytes.Buffer
-		stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		stream := jsonstream.New(&buf)
 		err = debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, stream)
 		require.EqualError(t, err, "empty bundles", name)
 	}
@@ -285,11 +284,11 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 	config := &tracersConfig.TraceConfig{Tracer: &tracerName}
 
 	w := &countingWriter{}
-	stream := jsonstream.Wrap(jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096))
+	stream := jsonstream.New(w)
 	require.NoError(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
 	require.GreaterOrEqual(t, w.writes, len(calls), "each traced call must reach the transport as it is produced")
 
 	failing := &countingWriter{failAt: 2}
-	stream = jsonstream.Wrap(jsoniter.NewStream(jsoniter.ConfigDefault, failing, 4096))
+	stream = jsonstream.New(failing)
 	require.Error(t, debugApi.TraceCallMany(context.Background(), bundles, stateCtx, config, stream))
 }

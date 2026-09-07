@@ -130,17 +130,7 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) (
 	res := make([]types.Log, len(rpcLogs))
 
 	for i, log := range rpcLogs {
-		res[i] = types.Log{
-			Address:     log.Address,
-			Topics:      log.Topics,
-			Data:        log.Data,
-			BlockNumber: log.BlockNumber,
-			TxHash:      log.TxHash,
-			TxIndex:     log.TxIndex,
-			BlockHash:   log.BlockHash,
-			Index:       log.Index,
-			Removed:     log.Removed,
-		}
+		res[i] = log.Log
 	}
 
 	return res, nil

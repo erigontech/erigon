@@ -47,6 +47,13 @@ const (
 	FullExitRequestAmount = 0
 )
 
+// ErrInvalidExecutionPayloadBid marks a deterministic execution payload bid validation failure.
+var ErrInvalidExecutionPayloadBid = errors.New("invalid execution payload bid")
+
+func invalidExecutionPayloadBid(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrInvalidExecutionPayloadBid, fmt.Sprintf(format, args...))
+}
+
 func (imp *impl) FullValidate() bool {
 	return imp.FullValidation
 }
@@ -516,7 +523,7 @@ func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersS
 func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	signedBid := block.GetBody().GetSignedExecutionPayloadBid()
 	if signedBid == nil || signedBid.Message == nil {
-		return errors.New("processExecutionPayloadBid: signed bid or bid message is nil")
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: signed bid or bid message is nil")
 	}
 	bid := signedBid.Message
 	builderIndex := bid.BuilderIndex
@@ -525,26 +532,26 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 	// For self-builds, amount must be zero regardless of withdrawal credential prefix
 	if builderIndex == clparams.BuilderIndexSelfBuild {
 		if amount != 0 {
-			return errors.New("processExecutionPayloadBid: self-build bid must have zero value")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: self-build bid must have zero value")
 		}
 		if signedBid.Signature != common.Bytes96(bls.InfiniteSignature) {
-			return errors.New("processExecutionPayloadBid: self-build bid must have infinite signature")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: self-build bid must have infinite signature")
 		}
 	} else {
 		// Verify that the builder is active
 		if !state.IsActiveBuilder(s, builderIndex) {
-			return errors.New("processExecutionPayloadBid: builder is not active")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: builder is not active")
 		}
 		builders := s.GetBuilders()
 		if builders == nil || int(builderIndex) >= builders.Len() || builders.Get(int(builderIndex)) == nil {
-			return errors.New("processExecutionPayloadBid: invalid builder index")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: invalid builder index")
 		}
 		if builders.Get(int(builderIndex)).Version != s.BeaconConfig().PayloadBuilderVersion {
-			return errors.New("processExecutionPayloadBid: builder is not a payload builder")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: builder is not a payload builder")
 		}
 		// Verify that the builder has funds to cover the bid
 		if !state.CanBuilderCoverBid(s, builderIndex, amount) {
-			return errors.New("processExecutionPayloadBid: builder cannot cover bid")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: builder cannot cover bid")
 		}
 		// Verify that the bid signature is valid
 		valid, err := verifyExecutionPayloadBidSignature(s, signedBid)
@@ -552,14 +559,14 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %w", err)
 		}
 		if !valid {
-			return errors.New("processExecutionPayloadBid: invalid bid signature")
+			return invalidExecutionPayloadBid("processExecutionPayloadBid: invalid bid signature")
 		}
 	}
 
 	// Verify commitments are under limit
 	epoch := state.Epoch(s)
 	if bid.BlobKzgCommitments.Len() > int(s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock) {
-		return fmt.Errorf(
+		return invalidExecutionPayloadBid(
 			"processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
 			bid.BlobKzgCommitments.Len(),
 			s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock,
@@ -567,10 +574,10 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 	}
 
 	if bid.Slot != s.Slot() {
-		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match state slot %d", bid.Slot, s.Slot())
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: bid slot %d does not match state slot %d", bid.Slot, s.Slot())
 	}
 	if s.Slot() <= s.BeaconConfig().GenesisSlot {
-		return errors.New("processExecutionPayloadBid: bid at genesis slot")
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: bid at genesis slot")
 	}
 	parentBid := s.GetLatestExecutionPayloadBid()
 	if parentBid == nil {
@@ -578,17 +585,17 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 	}
 	// Verify that the bid is for the right parent block
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
-		return errors.New("processExecutionPayloadBid: parent block hash mismatch")
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: parent block hash mismatch")
 	}
 	parentBlockRoot, err := s.GetBlockRootAtSlot(s.Slot() - 1)
 	if err != nil {
 		return fmt.Errorf("processExecutionPayloadBid: failed to get parent block root: %w", err)
 	}
 	if bid.ParentBlockRoot != parentBlockRoot {
-		return errors.New("processExecutionPayloadBid: parent block root mismatch")
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: parent block root mismatch")
 	}
 	if bid.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
-		return errors.New("processExecutionPayloadBid: prev randao mismatch")
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: prev randao mismatch")
 	}
 
 	// Record the pending payment if there is some payment

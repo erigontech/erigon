@@ -67,7 +67,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	tb.Cleanup(func() { dir.RemoveAll(dirname) })
+	tb.Cleanup(func() { _ = dir.RemoveAll(dirname) })
 	db := New(tb, dirname, label)
 	tb.Cleanup(func() { db.Close() })
 	return db

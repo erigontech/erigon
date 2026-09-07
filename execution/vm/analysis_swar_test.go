@@ -101,15 +101,3 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 		}
 	}
 }
-
-// BenchmarkJumpdestAnalysisJumpdest24k mirrors the EIP-2780
-// unique_code_jumpdest receiver: 24KiB of JUMPDEST with no PUSH data.
-func BenchmarkJumpdestAnalysisJumpdest24k(b *testing.B) {
-	code := make([]byte, 24576)
-	for i := range code {
-		code[i] = 0x5b
-	}
-	for b.Loop() {
-		codeBitmap(code)
-	}
-}

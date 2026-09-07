@@ -43,14 +43,19 @@ const (
 type StackStream struct {
 	stream *jsoniter.Stream
 	stack  []stackItem
+	// out is the stream's own writer, kept because jsoniter does not expose it.
+	// Nil means the caller reads the response back out of Buffer instead.
+	out io.Writer
 }
 
-// NewStackStream creates a new StackStream with the given jsoniter.Stream
-// The stack is pre-allocated with a capacity of InitialStackSize
-func NewStackStream(stream *jsoniter.Stream) *StackStream {
+// newStackStream creates a new StackStream writing to out. Building the
+// jsoniter.Stream here rather than taking one is what pins jsoniter's
+// IndentionStep at zero.
+func newStackStream(out io.Writer, bufSize int) *StackStream {
 	return &StackStream{
-		stream: stream,
+		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
 		stack:  make([]stackItem, 0, InitialStackSize),
+		out:    out,
 	}
 }
 
@@ -62,16 +67,42 @@ func (s *StackStream) Buffer() []byte {
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
+	s.out = out
 	// jsoniter latches the error on the stream, so a reused one would fail every
 	// later Flush without draining.
 	s.stream.Error = nil
 	s.stack = s.stack[:0]
 }
 
-// WriteRawBytes writes already-encoded JSON held as bytes.
+// WriteRawBytes writes already-encoded JSON held as bytes. A payload at or above
+// FlushThreshold goes straight to the writer. Such a response commits the HTTP
+// status either way, since flushIfFull drains the buffer the moment this returns.
 func (s *StackStream) WriteRawBytes(content []byte) {
+	if s.out != nil && len(content) >= FlushThreshold {
+		s.writeThrough(content)
+		s.popCommaOrField()
+		return
+	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 	s.popCommaOrField()
+}
+
+// writeThrough drains what is buffered and hands content to the writer. The
+// empty-buffer check only skips a pointless zero-length Write; content is large
+// by the time we get here, so it is written either way.
+func (s *StackStream) writeThrough(content []byte) {
+	if len(s.stream.Buffer()) > 0 && s.stream.Flush() != nil {
+		// Same as flushIfFull: jsoniter latches the error, so these bytes can never
+		// reach the client and holding them only pins memory.
+		s.stream.SetBuffer(s.stream.Buffer()[:0])
+		return
+	}
+	if s.stream.Error != nil {
+		return
+	}
+	if _, err := s.out.Write(content); err != nil {
+		s.stream.Error = err
+	}
 }
 
 // WriteRaw writes raw content to the stream
@@ -178,7 +209,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 
 // WriteString writes a string value to the stream
 func (s *StackStream) WriteString(val string) {
-	s.stream.WriteString(val)
+	writeStringFast(s.stream, val)
 	s.popCommaOrField()
 }
 
@@ -218,7 +249,7 @@ func (s *StackStream) WriteMore() {
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) {
-	s.stream.WriteObjectField(fieldName)
+	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
 }
@@ -294,8 +325,8 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 		case ItemComma:
 			if i > 0 && s.stack[i-1] == ItemObject {
 				// a trailing comma inside an object needs a placeholder field to stay valid
-				s.stream.WriteObjectField("")
-				s.stream.WriteString("")
+				writeObjectFieldFast(s.stream, "")
+				writeStringFast(s.stream, "")
 			} else {
 				s.stream.WriteNil()
 			}

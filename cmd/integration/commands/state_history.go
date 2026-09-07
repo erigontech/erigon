@@ -135,7 +135,11 @@ var printCmd = &cobra.Command{
 			logger.Error("Opening Datadir", "error", err)
 			return
 		}
-		defer l.Unlock()
+		defer func() {
+			if err := l.Unlock(); err != nil {
+				logger.Error("failed to unlock datadir", "err", err)
+			}
+		}()
 
 		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {
@@ -184,7 +188,11 @@ var distributionCmd = &cobra.Command{
 			logger.Error("Opening Datadir", "error", err)
 			return
 		}
-		defer l.Unlock()
+		defer func() {
+			if err := l.Unlock(); err != nil {
+				logger.Error("failed to unlock datadir", "err", err)
+			}
+		}()
 
 		history, settings, err := openHistory(cmd.Context(), dirs, historyDomain, toStep, logger)
 		if err != nil {

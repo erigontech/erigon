@@ -183,6 +183,15 @@ func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) 
 	return nil
 }
 
+// ClearSnapshotDownloadPin drops the download-completion pin from the sync
+// state; see Notifications.ClearSnapshotDownloadPin.
+func (h *Hook) ClearSnapshotDownloadPin() bool {
+	if h == nil || h.notifications == nil {
+		return false
+	}
+	return h.notifications.ClearSnapshotDownloadPin()
+}
+
 // NotifySyncState publishes the sync status on the event bus if it changed;
 // dedup and ordering live in Notifications.PublishSyncState.
 func (h *Hook) NotifySyncState(tx kv.Tx) {
@@ -192,6 +201,20 @@ func (h *Hook) NotifySyncState(tx kv.Tx) {
 	if err := h.notifications.PublishSyncState(tx, h.frozenBlocksReader.FrozenBlocks()); err != nil {
 		h.logger.Warn("[hook] sync state notification skipped", "err", err)
 	}
+}
+
+func (h *Hook) NotifyStateRetirementStart(started bool) {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil {
+		return
+	}
+	h.notifications.Events.OnStateRetirementStart(started)
+}
+
+func (h *Hook) NotifyStateRetirementDone() {
+	if h == nil || h.notifications == nil || h.notifications.Events == nil {
+		return
+	}
+	h.notifications.Events.OnStateRetirementDone()
 }
 
 func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {

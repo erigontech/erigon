@@ -251,7 +251,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if !ok {
 				return b.HeaderNoCopy(), rwTx, nil
 			}
-			resetCommitmentGauges(ctx)
 			se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
 			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
 			se.logger.Info(

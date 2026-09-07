@@ -941,11 +941,11 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	// The cache is keyed by (slot, parentBlockHash, parentBlockRoot), so we iterate all keys
 	// and find the highest-value bid matching the requested slot+builder.
 	var bestBid *cltypes.SignedExecutionPayloadBid
-	for _, key := range a.epbsPool.HighestBids.Keys() {
+	for _, key := range a.epbsPool.HighestBidKeys() {
 		if key.Slot != slot {
 			continue
 		}
-		bid, ok := a.epbsPool.HighestBids.Get(key)
+		bid, ok := a.epbsPool.GetHighestBid(key)
 		if !ok || bid == nil || bid.Message == nil {
 			continue
 		}

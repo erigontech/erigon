@@ -20,7 +20,7 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/pbnjay/memory"
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 var (
@@ -30,17 +30,20 @@ var (
 
 func TotalMemory() uint64 {
 	totalMemoryOnce.Do(func() {
-		mem := memory.TotalMemory()
+		var total uint64
+		if vm, err := mem.VirtualMemory(); err == nil {
+			total = vm.Total
+		}
 
 		if cgroupsMemLimit, err := cgroupsMemoryLimit(); (err == nil) && (cgroupsMemLimit > 0) {
-			mem = min(mem, cgroupsMemLimit)
+			total = min(total, cgroupsMemLimit)
 		}
 
 		if goMemLimit := debug.SetMemoryLimit(-1); goMemLimit > 0 {
-			mem = min(mem, uint64(goMemLimit))
+			total = min(total, uint64(goMemLimit))
 		}
 
-		totalMemoryCached = mem
+		totalMemoryCached = total
 	})
 	return totalMemoryCached
 }
